@@ -219,6 +219,7 @@ impl Engine {
         let periodic_unknowns = num_nodes
             .checked_add(circuit.voltage_sources.len())
             .and_then(|count| count.checked_add(circuit.inductors.len()))
+            .and_then(|count| count.checked_add(circuit.resistor_branches.len()))
             .ok_or_else(|| {
                 SimulationError::Circuit(
                     "PAC periodic node and branch count overflows this platform".to_string(),
@@ -280,7 +281,7 @@ impl Engine {
         // Use one canonical exact-MNA solver for both the large-signal
         // operating point and its periodic small-signal linearization. The
         // authored source spectra must be registered before the canonical
-        // V/L branch map so its voltage-source descriptors retain the same
+        // V/L/R branch map so its voltage-source descriptors retain the same
         // large-signal constraints Newton solves. Keeping one registry also
         // makes branch identity drift between the producer and consumer
         // structurally impossible.

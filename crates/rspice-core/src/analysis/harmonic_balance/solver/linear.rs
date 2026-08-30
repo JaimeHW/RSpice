@@ -34,6 +34,7 @@ impl HbSolver {
             num_harmonics,
             num_branches: 0,
             g_matrix: Vec::new(),
+            periodic_g_matrix: Vec::new(),
             c_matrix: Vec::new(),
             l_matrix: Vec::new(),
             voltage_source_branches: Vec::new(),
@@ -60,6 +61,7 @@ impl HbSolver {
             num_harmonics: 1,
             num_branches: 0,
             g_matrix: Vec::new(),
+            periodic_g_matrix: Vec::new(),
             c_matrix: Vec::new(),
             l_matrix: Vec::new(),
             voltage_source_branches: Vec::new(),
@@ -99,7 +101,21 @@ impl HbSolver {
     /// This is a low-level method that adds a single Y-matrix entry.
     /// For a resistor between two nodes, use `add_resistor` instead.
     pub fn add_conductance(&mut self, node_i: usize, node_j: usize, g: Value) {
-        self.g_matrix.push((node_i, node_j, g));
+        self.add_conductance_with_small_signal(node_i, node_j, g, g);
+    }
+
+    /// Add one static conductance entry with distinct large-signal and
+    /// periodic small-signal values.
+    pub(crate) fn add_conductance_with_small_signal(
+        &mut self,
+        node_i: usize,
+        node_j: usize,
+        conductance: Value,
+        small_signal_conductance: Value,
+    ) {
+        self.g_matrix.push((node_i, node_j, conductance));
+        self.periodic_g_matrix
+            .push((node_i, node_j, small_signal_conductance));
     }
 
     /// Add a resistor between two nodes with full MNA stamping
@@ -118,11 +134,11 @@ impl HbSolver {
         let g = 1.0 / r;
 
         // Full MNA stamp
-        self.g_matrix.push((node_i, node_i, g));
+        self.add_conductance(node_i, node_i, g);
         if node_j < self.num_nodes {
-            self.g_matrix.push((node_j, node_j, g));
-            self.g_matrix.push((node_i, node_j, -g));
-            self.g_matrix.push((node_j, node_i, -g));
+            self.add_conductance(node_j, node_j, g);
+            self.add_conductance(node_i, node_j, -g);
+            self.add_conductance(node_j, node_i, -g);
         }
     }
 
@@ -410,6 +426,40 @@ impl HbSolver {
         )
     }
 
+    /// Add an exact finite branch-form resistor for large-signal HB and its
+    /// periodic small-signal systems.
+    pub(crate) fn try_add_periodic_resistor_branch(
+        &mut self,
+        node_pos: usize,
+        node_neg: usize,
+        resistance: Value,
+        small_signal_resistance: Value,
+        branch_ordinal: usize,
+        name: &str,
+    ) -> Result<(), HbError> {
+        self.validate_periodic_mna_branch_identity(node_pos, node_neg, branch_ordinal, name)?;
+        if !resistance.is_finite() {
+            return Err(HbError::InvalidCircuit(format!(
+                "periodic resistor branch '{name}' must have finite resistance"
+            )));
+        }
+        if !small_signal_resistance.is_finite() {
+            return Err(HbError::InvalidCircuit(format!(
+                "periodic resistor branch '{name}' must have finite small-signal resistance"
+            )));
+        }
+        self.try_push_periodic_mna_branch(
+            ExactMnaBranch::Resistor {
+                branch_ordinal,
+                node_pos,
+                node_neg,
+                resistance,
+                small_signal_resistance,
+            },
+            name,
+        )
+    }
+
     /// Register a voltage constraint only in the periodic small-signal MNA
     /// system, without adding a zero-valued source to the large-signal
     /// operating-point source spectrum.
@@ -565,8 +615,23 @@ impl HbSolver {
                 )));
             }
         }
+        if self.periodic_g_matrix.len() != self.g_matrix.len()
+            || self
+                .periodic_g_matrix
+                .iter()
+                .zip(&self.g_matrix)
+                .any(|(periodic, large_signal)| {
+                    periodic.0 != large_signal.0 || periodic.1 != large_signal.1
+                })
+        {
+            return Err(HbError::InvalidCircuit(
+                "linear HB large-signal and periodic conductance topology is misaligned"
+                    .to_string(),
+            ));
+        }
         for (kind, entries) in [
             ("conductance", &self.g_matrix),
+            ("periodic small-signal conductance", &self.periodic_g_matrix),
             ("capacitance", &self.c_matrix),
             ("legacy inductance", &self.l_matrix),
         ] {
@@ -711,7 +776,7 @@ impl HbSolver {
                     "exact linear MNA branch ordinal {expected_ordinal} has a non-canonical name"
                 )));
             }
-            let (branch_ordinal, node_pos, node_neg) = match branch {
+            let (branch_ordinal, node_pos, node_neg, is_ideal_constraint) = match branch {
                 ExactMnaBranch::VoltageSource {
                     branch_ordinal,
                     node_pos,
@@ -758,7 +823,7 @@ impl HbSolver {
                             "exact linear MNA voltage source '{name}' is registered more than once"
                         )));
                     }
-                    (*branch_ordinal, *node_pos, *node_neg)
+                    (*branch_ordinal, *node_pos, *node_neg, true)
                 }
                 ExactMnaBranch::Inductor {
                     branch_ordinal,
@@ -780,7 +845,21 @@ impl HbSolver {
                             )));
                         }
                     }
-                    (*branch_ordinal, *node_pos, *node_neg)
+                    (*branch_ordinal, *node_pos, *node_neg, true)
+                }
+                ExactMnaBranch::Resistor {
+                    branch_ordinal,
+                    node_pos,
+                    node_neg,
+                    resistance,
+                    small_signal_resistance,
+                } => {
+                    if !resistance.is_finite() || !small_signal_resistance.is_finite() {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "exact linear MNA resistor '{name}' must have finite DC and small-signal resistances"
+                        )));
+                    }
+                    (*branch_ordinal, *node_pos, *node_neg, *resistance == 0.0)
                 }
             };
             if branch_ordinal != expected_ordinal {
@@ -794,19 +873,21 @@ impl HbSolver {
                     self.num_nodes
                 )));
             }
-            let root_pos = graph_root(&mut graph_parents, node_pos);
-            let root_neg = graph_root(&mut graph_parents, node_neg);
-            if root_pos == root_neg {
-                return Err(HbError::InvalidCircuit(format!(
-                    "exact HB MNA has a singular or inconsistent conflicting ideal branch loop at '{name}'"
-                )));
-            }
-            if graph_ranks[root_pos] < graph_ranks[root_neg] {
-                graph_parents[root_pos] = root_neg;
-            } else {
-                graph_parents[root_neg] = root_pos;
-                if graph_ranks[root_pos] == graph_ranks[root_neg] {
-                    graph_ranks[root_pos] = graph_ranks[root_pos].saturating_add(1);
+            if is_ideal_constraint {
+                let root_pos = graph_root(&mut graph_parents, node_pos);
+                let root_neg = graph_root(&mut graph_parents, node_neg);
+                if root_pos == root_neg {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "exact HB MNA has a singular or inconsistent conflicting ideal branch loop at '{name}'"
+                    )));
+                }
+                if graph_ranks[root_pos] < graph_ranks[root_neg] {
+                    graph_parents[root_pos] = root_neg;
+                } else {
+                    graph_parents[root_neg] = root_pos;
+                    if graph_ranks[root_pos] == graph_ranks[root_neg] {
+                        graph_ranks[root_pos] = graph_ranks[root_pos].saturating_add(1);
+                    }
                 }
             }
         }
@@ -1045,6 +1126,9 @@ impl HbSolver {
                     }
                     | ExactMnaBranch::Inductor {
                         node_pos, node_neg, ..
+                    }
+                    | ExactMnaBranch::Resistor {
+                        node_pos, node_neg, ..
                     } => (*node_pos, *node_neg),
                 };
                 for (k, &current) in currents.iter().enumerate() {
@@ -1085,6 +1169,9 @@ impl HbSolver {
                     }
                     | ExactMnaBranch::Inductor {
                         node_pos, node_neg, ..
+                    }
+                    | ExactMnaBranch::Resistor {
+                        node_pos, node_neg, ..
                     } => (*node_pos, *node_neg),
                 };
                 for k in 0..h {
@@ -1115,6 +1202,14 @@ impl HbSolver {
                             let constitutive_voltage =
                                 Complex64::new(0.0, (k as Value) * omega0 * *inductance)
                                     * branch_currents[branch_index][k];
+                            (
+                                constitutive_voltage - voltage_drop,
+                                constitutive_voltage.norm(),
+                            )
+                        }
+                        ExactMnaBranch::Resistor { resistance, .. } => {
+                            let constitutive_voltage =
+                                *resistance * branch_currents[branch_index][k];
                             (
                                 constitutive_voltage - voltage_drop,
                                 constitutive_voltage.norm(),
@@ -1237,6 +1332,9 @@ impl HbSolver {
                         }
                         | ExactMnaBranch::Inductor {
                             node_pos, node_neg, ..
+                        }
+                        | ExactMnaBranch::Resistor {
+                            node_pos, node_neg, ..
                         } => (*node_pos, *node_neg),
                     };
                     if node_pos > 0 {
@@ -1261,6 +1359,9 @@ impl HbSolver {
                         }
                         ExactMnaBranch::Inductor { inductance, .. } => {
                             y_matrix[row][row] -= Complex64::new(0.0, omega_k * *inductance);
+                        }
+                        ExactMnaBranch::Resistor { resistance, .. } => {
+                            y_matrix[row][row] -= *resistance;
                         }
                     }
                 }

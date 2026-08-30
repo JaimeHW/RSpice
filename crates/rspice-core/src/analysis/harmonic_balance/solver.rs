@@ -696,6 +696,17 @@ pub(crate) enum ExactMnaBranch {
         node_neg: usize,
         inductance: Value,
     },
+    /// Exact `Vpos - Vneg - R*I = 0` resistor branch equation. This avoids a
+    /// reciprocal conductance and therefore remains representable for every
+    /// finite resistance that the circuit builder routes to branch form,
+    /// including the exact-zero ideal constraint.
+    Resistor {
+        branch_ordinal: usize,
+        node_pos: usize,
+        node_neg: usize,
+        resistance: Value,
+        small_signal_resistance: Value,
+    },
 }
 
 impl VoltageSourceBranch {
@@ -757,12 +768,18 @@ pub struct HbSolver {
     /// Number of harmonics (including DC)
     num_harmonics: usize,
 
-    /// Number of branch currents (for MNA voltage sources)
+    /// Number of branch currents in the canonical exact-MNA registry.
     num_branches: usize,
 
     /// Conductance matrix for each node combination
     /// Stored as sparse: (row, col) -> G
     g_matrix: Vec<(usize, usize, Value)>,
+
+    /// Static conductance operator for PAC/PNoise linearization. Ordinary
+    /// conductances are inserted identically into both matrices; resistors
+    /// with an authored `AC=` override retain their DC conductance above and
+    /// their small-signal conductance here.
+    periodic_g_matrix: Vec<(usize, usize, Value)>,
 
     /// Capacitance matrix for each node combination
     /// Stored as sparse: (row, col) -> C

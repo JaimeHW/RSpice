@@ -427,6 +427,19 @@ pub struct ResistorBranches {
     /// probe, aligned with `names` and retained without a reciprocal
     /// round-trip through the electrical branch value.
     pub reported_resistances: Vec<Value>,
+    /// Per-instance thermal-noise temperature offsets in kelvin. These are
+    /// aligned exactly with `names`; authored `TEMP` is retained separately
+    /// in `absolute_noise_temperatures` so extreme ambient temperatures do
+    /// not destroy the authored value through subtract-then-add rounding.
+    pub(crate) noise_temperature_offsets: Vec<Value>,
+    /// Authored absolute thermal-noise temperatures, or `None` for ambient
+    /// plus `noise_temperature_offsets`.
+    pub(crate) absolute_noise_temperatures: Vec<Option<Value>>,
+    /// Per-instance `NOISY`/`NOISE` switch. The deterministic default is on.
+    pub(crate) noisy: Vec<bool>,
+    /// Resolved resistor flicker metadata `(coefficient, AF, EF)`, with model
+    /// multiplicity and effective noise area already folded into coefficient.
+    pub(crate) flicker: Vec<Option<(Value, Value, Value)>>,
     /// Pre-baked CSC indices: [br->np, np->br, br->nn, nn->br, br->br].
     csc_indices: Vec<[Option<CscIndex>; 5]>,
 }
@@ -473,7 +486,62 @@ impl ResistorBranches {
         self.resistances.push(resistance);
         self.small_signal_resistances.push(small_signal_resistance);
         self.reported_resistances.push(reported_resistance);
+        self.noise_temperature_offsets.push(0.0);
+        self.absolute_noise_temperatures.push(None);
+        self.noisy.push(true);
+        self.flicker.push(None);
         self.csc_indices.push([None; 5]);
+    }
+
+    /// Set ambient-relative `DTEMP` for the newest branch-form resistor.
+    pub(crate) fn set_last_noise_temperature_offset(&mut self, offset_kelvin: Value) {
+        if let Some(slot) = self.noise_temperature_offsets.last_mut() {
+            *slot = offset_kelvin;
+        }
+        if let Some(slot) = self.absolute_noise_temperatures.last_mut() {
+            *slot = None;
+        }
+    }
+
+    /// Retain authored absolute `TEMP` for the newest branch-form resistor.
+    pub(crate) fn set_last_absolute_noise_temperature(&mut self, temperature: Value) {
+        if let Some(slot) = self.noise_temperature_offsets.last_mut() {
+            *slot = 0.0;
+        }
+        if let Some(slot) = self.absolute_noise_temperatures.last_mut() {
+            *slot = Some(temperature);
+        }
+    }
+
+    /// Set the noise enable for the newest branch-form resistor.
+    pub(crate) fn set_last_noisy(&mut self, noisy: bool) {
+        if let Some(slot) = self.noisy.last_mut() {
+            *slot = noisy;
+        }
+    }
+
+    /// Set resolved flicker metadata for the newest branch-form resistor.
+    pub(crate) fn set_last_flicker_noise(&mut self, coefficient: Value, af: Value, ef: Value) {
+        if let Some(slot) = self.flicker.last_mut() {
+            *slot = Some((coefficient, af, ef));
+        }
+    }
+
+    /// Resolve the physical source temperature without a lossy round trip.
+    #[inline]
+    pub(crate) fn noise_temperature(&self, index: usize, ambient: Value) -> Value {
+        self.absolute_noise_temperatures
+            .get(index)
+            .copied()
+            .flatten()
+            .unwrap_or_else(|| {
+                ambient
+                    + self
+                        .noise_temperature_offsets
+                        .get(index)
+                        .copied()
+                        .unwrap_or(0.0)
+            })
     }
 
     pub fn len(&self) -> usize {

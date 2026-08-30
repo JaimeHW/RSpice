@@ -84,6 +84,24 @@ fn unsupported_device_colored_noise(circuit: &CircuitData) -> Vec<String> {
             ));
         }
     }
+    for (index, flicker) in circuit.resistor_branches.flicker.iter().enumerate() {
+        if !circuit.resistor_branches.noisy[index] {
+            continue;
+        }
+        if let Some((coefficient, af, ef)) = flicker
+            && *coefficient != 0.0
+        {
+            let name = circuit
+                .resistor_branches
+                .names
+                .get(index)
+                .map(String::as_str)
+                .unwrap_or("<unnamed branch-form resistor>");
+            unsupported.push(format!(
+                "branch-form resistor '{name}' cyclostationary flicker noise (coefficient={coefficient}, AF={af}, EF={ef})"
+            ));
+        }
+    }
     for diode in &circuit.diodes.devices {
         if diode.kf != 0.0 {
             unsupported.push(format!(
@@ -116,6 +134,10 @@ fn validate_resistor_noise_metadata(circuit: &CircuitData) -> Result<(), Simulat
     for (label, actual) in [
         ("stamps", circuit.resistors.stamps.len()),
         ("conductances", circuit.resistors.conductances.len()),
+        (
+            "small-signal conductances",
+            circuit.resistors.small_signal_conductances.len(),
+        ),
         (
             "noise-temperature offsets",
             circuit.resistors.noise_temperature_offsets.len(),
@@ -155,6 +177,16 @@ fn validate_resistor_noise_metadata(circuit: &CircuitData) -> Result<(), Simulat
             "reported resistances",
             circuit.resistor_branches.reported_resistances.len(),
         ),
+        (
+            "noise-temperature offsets",
+            circuit.resistor_branches.noise_temperature_offsets.len(),
+        ),
+        (
+            "absolute noise temperatures",
+            circuit.resistor_branches.absolute_noise_temperatures.len(),
+        ),
+        ("NOISY controls", circuit.resistor_branches.noisy.len()),
+        ("flicker controls", circuit.resistor_branches.flicker.len()),
     ] {
         if actual != branch_count {
             return Err(SimulationError::Circuit(format!(
@@ -163,33 +195,6 @@ fn validate_resistor_noise_metadata(circuit: &CircuitData) -> Result<(), Simulat
         }
     }
     Ok(())
-}
-
-fn reject_unrepresented_branch_resistor_noise(
-    circuit: &CircuitData,
-) -> Result<(), SimulationError> {
-    if circuit.resistor_branches.is_empty() {
-        return Ok(());
-    }
-    let details = circuit
-        .resistor_branches
-        .names
-        .iter()
-        .zip(&circuit.resistor_branches.resistances)
-        // An exact zero resistance has exactly zero thermal voltage noise,
-        // and a parallel current source cannot perturb the voltage across an
-        // ideal short. Finite nonzero branch-form resistors need their lost
-        // authored metadata before an exact source catalog can be built.
-        .filter(|(_, resistance)| **resistance != 0.0)
-        .map(|(name, resistance)| format!("'{name}' (R={resistance})"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    if details.is_empty() {
-        return Ok(());
-    }
-    Err(SimulationError::Circuit(format!(
-        "pnoise cannot catalog branch-form resistor noise exactly for {details}: branch-form resistor storage does not retain the authored NOISY/TEMP/DTEMP/flicker metadata, so the analysis refuses to assume source semantics"
-    )))
 }
 
 fn checked_scaled_positive_product(
@@ -228,6 +233,41 @@ fn checked_scaled_positive_product(
         )));
     }
     Ok(ScaledPositive { mantissa, exponent })
+}
+
+fn checked_scaled_positive_ratio(
+    factors: &[Value],
+    divisor: Value,
+    quantity: &str,
+) -> Result<ScaledPositive, SimulationError> {
+    if !divisor.is_finite() || divisor <= 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "{quantity} has invalid positive divisor {divisor}"
+        )));
+    }
+    let divisor_exponent = libm::ilogb(divisor);
+    let divisor_mantissa = libm::scalbn(divisor, -divisor_exponent);
+    if !divisor_mantissa.is_finite() || divisor_mantissa <= 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "{quantity} normalized divisor is invalid ({divisor_mantissa})"
+        )));
+    }
+    let mut normalized_factors = Vec::new();
+    normalized_factors
+        .try_reserve_exact(factors.len().saturating_add(1))
+        .map_err(|error| {
+            SimulationError::Circuit(format!("{quantity} factor allocation failed: {error}"))
+        })?;
+    normalized_factors.extend_from_slice(factors);
+    normalized_factors.push(1.0 / divisor_mantissa);
+    let mut scaled = checked_scaled_positive_product(&normalized_factors, quantity)?;
+    scaled.exponent = scaled
+        .exponent
+        .checked_sub(divisor_exponent)
+        .ok_or_else(|| {
+            SimulationError::Circuit(format!("{quantity} exponent exceeds this platform"))
+        })?;
+    Ok(scaled)
 }
 
 fn checked_pnoise_total(
@@ -560,7 +600,6 @@ impl Engine {
 
         let circuit = self.build_circuit_with_abort(netlist, abort)?;
         validate_resistor_noise_metadata(&circuit)?;
-        reject_unrepresented_branch_resistor_noise(&circuit)?;
         let num_nodes = circuit.num_nodes();
         if num_nodes == 0 {
             return Err(SimulationError::Circuit("Circuit has no nodes".to_string()));
@@ -568,6 +607,7 @@ impl Engine {
         let periodic_unknowns = num_nodes
             .checked_add(circuit.voltage_sources.len())
             .and_then(|count| count.checked_add(circuit.inductors.len()))
+            .and_then(|count| count.checked_add(circuit.resistor_branches.len()))
             .ok_or_else(|| {
                 SimulationError::Circuit(
                     "pnoise periodic node and branch count overflows this platform".to_string(),
@@ -621,7 +661,7 @@ impl Engine {
         let node_names = self.hb_build_node_names(&circuit, num_nodes);
         solver.set_node_names(node_names.clone());
 
-        // One exact canonical V/L MNA registry owns both the periodic
+        // One exact canonical V/L/R MNA registry owns both the periodic
         // operating point and every subsequent adjoint/forward linearization.
         // Register authored voltage-source spectra first so the canonical
         // descriptors carry the same large-signal constraints Newton solves.
@@ -754,7 +794,7 @@ impl Engine {
             if !circuit.resistors.noisy[i] {
                 continue;
             }
-            let g = circuit.resistors.conductances[i];
+            let g = circuit.resistors.small_signal_conductance(i);
             if !g.is_finite() || g < 0.0 {
                 return Err(SimulationError::Circuit(format!(
                     "pnoise resistor '{}' has invalid conductance {g}",
@@ -786,6 +826,49 @@ impl Engine {
                 name: format!("{name} thermal"),
                 node_pos: Self::hb_node_to_solver_index(np, num_nodes),
                 node_neg: Self::hb_node_to_solver_index(nn, num_nodes),
+                psd: vec![Complex64::new(thermal_density.mantissa, 0.0)],
+                binary_scale_exponent: thermal_density.exponent,
+                flicker: None,
+            });
+        }
+
+        for i in 0..circuit.resistor_branches.len() {
+            if !circuit.resistor_branches.noisy[i] {
+                continue;
+            }
+            let name = &circuit.resistor_branches.names[i];
+            let resistance = circuit.resistor_branches.small_signal_resistances[i];
+            if !resistance.is_finite() || resistance < 0.0 {
+                return Err(SimulationError::Circuit(format!(
+                    "pnoise branch-form resistor '{name}' has invalid noise resistance {resistance}"
+                )));
+            }
+            // An exact ideal short has zero Thevenin noise voltage, and a
+            // parallel Norton source cannot perturb its constrained terminals.
+            if resistance == 0.0 {
+                continue;
+            }
+            let source_temperature = circuit.resistor_branches.noise_temperature(i, temperature);
+            if !source_temperature.is_finite() || source_temperature <= 0.0 {
+                return Err(SimulationError::Circuit(format!(
+                    "pnoise branch-form resistor '{name}' absolute noise temperature must be finite and positive, got {source_temperature} K"
+                )));
+            }
+            let thermal_density = checked_scaled_positive_ratio(
+                &[4.0, k_b, source_temperature],
+                resistance,
+                &format!("pnoise branch-form resistor '{name}' thermal-noise density"),
+            )?;
+            sources.push(PeriodicNoiseSource {
+                name: format!("{name} thermal"),
+                node_pos: Self::hb_node_to_solver_index(
+                    circuit.resistor_branches.node_pos[i],
+                    num_nodes,
+                ),
+                node_neg: Self::hb_node_to_solver_index(
+                    circuit.resistor_branches.node_neg[i],
+                    num_nodes,
+                ),
                 psd: vec![Complex64::new(thermal_density.mantissa, 0.0)],
                 binary_scale_exponent: thermal_density.exponent,
                 flicker: None,
@@ -994,6 +1077,51 @@ impl Engine {
 #[cfg(test)]
 mod publication_tests {
     use super::*;
+
+    #[test]
+    fn driven_pnoise_rejects_every_misaligned_branch_resistor_noise_vector() {
+        let mut base = crate::CircuitData::new();
+        let out = base.get_or_create_node("out");
+        let branch = base.allocate_branch_named("RAuth");
+        base.resistor_branches.add_with_reported(
+            "RAuth".to_string(),
+            out,
+            0,
+            branch,
+            0.6,
+            1.2,
+            0.6,
+        );
+        for label in [
+            "noise-temperature offsets",
+            "absolute noise temperatures",
+            "NOISY controls",
+            "flicker controls",
+        ] {
+            let mut circuit = base.clone();
+            match label {
+                "noise-temperature offsets" => {
+                    circuit.resistor_branches.noise_temperature_offsets.clear();
+                }
+                "absolute noise temperatures" => {
+                    circuit
+                        .resistor_branches
+                        .absolute_noise_temperatures
+                        .clear();
+                }
+                "NOISY controls" => circuit.resistor_branches.noisy.clear(),
+                "flicker controls" => circuit.resistor_branches.flicker.clear(),
+                _ => unreachable!(),
+            }
+            let error = validate_resistor_noise_metadata(&circuit).unwrap_err();
+            let message = error.to_string();
+            assert!(
+                message.contains("branch-form resistor metadata is misaligned")
+                    && message.contains(label),
+                "unexpected {label} alignment diagnostic: {message}"
+            );
+        }
+    }
 
     #[test]
     fn driven_pnoise_selects_the_complete_dialect_constant_pair() {

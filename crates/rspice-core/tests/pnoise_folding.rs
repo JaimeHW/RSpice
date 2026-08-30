@@ -201,26 +201,28 @@ fn pnoise_rejects_active_device_colored_controls_but_accepts_exact_zero() {
 }
 
 #[test]
-fn pnoise_names_and_rejects_unrepresented_finite_branch_form_resistor_noise() {
+fn pnoise_names_and_models_finite_branch_form_resistor_noise() {
     let netlist = Netlist::parse(
         "near-zero branch resistor pnoise\n\
          v1 in 0 1\n\
-         Rtiny in out 1e-15 TEMP=50 DTEMP=10 NOISY=1\n\
+         Rtiny in out 0.6 TEMP=50 DTEMP=10 NOISY=1\n\
          rload out 0 1k\n\
-         .options device zeroresistancetol=1e-12\n\
+         .options device zeroresistancetol=1\n\
          .end\n",
     )
     .expect("near-zero branch-resistor deck parses");
-    let error = Engine::new(SimulationConfig::default())
+    let result = Engine::new(SimulationConfig::default())
         .run_pnoise(&netlist, 1.0e6, &[1.0e4], "out", None, None, 0)
-        .expect_err("finite branch-form resistor noise must not be silently omitted");
-    let message = error.to_string();
+        .expect("finite branch-form resistor noise is represented exactly");
     assert!(
-        message.to_ascii_lowercase().contains("rtiny")
-            && message.contains("R=0.000000000000001")
-            && message.contains("does not retain the authored")
-            && message.contains("NOISY/TEMP/DTEMP/flicker"),
-        "branch-form noise limitation must be exact and diagnosable: {message}"
+        result
+            .contributors
+            .iter()
+            .any(|(name, values)| name.eq_ignore_ascii_case("Rtiny thermal")
+                && values[0].is_finite()
+                && values[0] >= 0.0),
+        "branch-form thermal contributor must preserve its authored identity: {:?}",
+        result.contributors
     );
 }
 

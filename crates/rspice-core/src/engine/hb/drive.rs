@@ -832,7 +832,8 @@ impl Engine {
         let represented_branches = circuit
             .voltage_sources
             .len()
-            .checked_add(circuit.inductors.len());
+            .checked_add(circuit.inductors.len())
+            .and_then(|count| count.checked_add(circuit.resistor_branches.len()));
         if represented_branches != Some(circuit.num_branches()) {
             kinds.push("unrepresented MNA branch families");
         }

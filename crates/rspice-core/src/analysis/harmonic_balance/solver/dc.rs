@@ -251,6 +251,9 @@ impl HbSolver {
                 g_dc[node_neg - 1][row] -= 1.0;
                 g_dc[row][node_neg - 1] -= 1.0;
             }
+            if let ExactMnaBranch::Resistor { resistance, .. } = branch {
+                g_dc[row][row] -= *resistance;
+            }
             rhs[row] = self.dc_branch_source(branch, 1.0)?;
         }
 
@@ -461,9 +464,15 @@ impl HbSolver {
             let (node_pos, node_neg) = Self::dc_branch_terminals(branch);
             let voltage =
                 Self::dc_node_voltage(&v_dc, node_pos) - Self::dc_node_voltage(&v_dc, node_neg);
-            let source = self.dc_branch_source(branch, source_scale)?;
-            state.mna_branch_residual[branch_index][0] = Complex64::new(source - voltage, 0.0);
-            state.mna_branch_residual_scale[branch_index][0] = source
+            let constitutive_voltage = match branch {
+                ExactMnaBranch::Resistor { resistance, .. } => {
+                    state.mna_branch_currents[branch_index][0].re * *resistance
+                }
+                _ => self.dc_branch_source(branch, source_scale)?,
+            };
+            state.mna_branch_residual[branch_index][0] =
+                Complex64::new(constitutive_voltage - voltage, 0.0);
+            state.mna_branch_residual_scale[branch_index][0] = constitutive_voltage
                 .abs()
                 .max(Self::dc_node_voltage(&v_dc, node_pos).abs())
                 .max(Self::dc_node_voltage(&v_dc, node_neg).abs());
@@ -578,6 +587,9 @@ impl HbSolver {
             if node_neg > 0 {
                 jacobian[node_neg - 1][branch_coordinate] += 1.0;
                 jacobian[branch_coordinate][node_neg - 1] += 1.0;
+            }
+            if let ExactMnaBranch::Resistor { resistance, .. } = branch {
+                jacobian[branch_coordinate][branch_coordinate] += *resistance;
             }
         }
 
@@ -761,6 +773,20 @@ impl HbSolver {
                     }
                     (*branch_ordinal, *node_pos, *node_neg)
                 }
+                ExactMnaBranch::Resistor {
+                    branch_ordinal,
+                    node_pos,
+                    node_neg,
+                    resistance,
+                    small_signal_resistance,
+                } => {
+                    if !resistance.is_finite() || !small_signal_resistance.is_finite() {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "HB DC resistor branch '{name}' has non-finite DC or small-signal resistance"
+                        )));
+                    }
+                    (*branch_ordinal, *node_pos, *node_neg)
+                }
             };
             if branch_ordinal != expected_ordinal
                 || node_pos > self.num_nodes
@@ -891,6 +917,7 @@ impl HbSolver {
                 ));
             }
             ExactMnaBranch::Inductor { .. } => 0.0,
+            ExactMnaBranch::Resistor { .. } => 0.0,
         };
         if !source.is_finite() {
             return Err(HbError::InvalidCircuit(
@@ -906,6 +933,9 @@ impl HbSolver {
                 node_pos, node_neg, ..
             }
             | ExactMnaBranch::Inductor {
+                node_pos, node_neg, ..
+            }
+            | ExactMnaBranch::Resistor {
                 node_pos, node_neg, ..
             } => (*node_pos, *node_neg),
         }

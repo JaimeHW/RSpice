@@ -644,19 +644,25 @@ impl PeriodicConversionOperator<'_> {
                     "{context} MNA branch ordinal exceeds this platform"
                 ))
             })?;
-            let (branch_ordinal, node_pos, node_neg, inductance) = match branch {
+            let (branch_ordinal, node_pos, node_neg) = match branch {
                 ExactMnaBranch::VoltageSource {
                     branch_ordinal,
                     node_pos,
                     node_neg,
                     ..
-                } => (*branch_ordinal, *node_pos, *node_neg, None),
+                } => (*branch_ordinal, *node_pos, *node_neg),
                 ExactMnaBranch::Inductor {
                     branch_ordinal,
                     node_pos,
                     node_neg,
-                    inductance,
-                } => (*branch_ordinal, *node_pos, *node_neg, Some(*inductance)),
+                    ..
+                } => (*branch_ordinal, *node_pos, *node_neg),
+                ExactMnaBranch::Resistor {
+                    branch_ordinal,
+                    node_pos,
+                    node_neg,
+                    ..
+                } => (*branch_ordinal, *node_pos, *node_neg),
             };
             if branch_ordinal != expected_ordinal {
                 return Err(HbError::InvalidCircuit(format!(
@@ -674,21 +680,31 @@ impl PeriodicConversionOperator<'_> {
                     "{context} MNA branch #{branch_index} has identical terminals"
                 )));
             }
-            if let Some(inductance) = inductance {
-                if !inductance.is_finite() || inductance == 0.0 {
+            if let ExactMnaBranch::Inductor { inductance, .. } = branch {
+                if !inductance.is_finite() || *inductance == 0.0 {
                     return Err(HbError::InvalidCircuit(format!(
                         "{context} inductor branch #{branch_index} must have finite nonzero inductance"
                     )));
                 }
                 for sideband_index in 0..self.num_sidebands {
                     let omega = self.omega(sideband_index);
-                    if !finite_product_is_representable(omega, inductance) {
+                    if !finite_product_is_representable(omega, *inductance) {
                         return Err(HbError::InvalidCircuit(format!(
                             "{context} inductor branch #{branch_index} has a non-representable impedance at sideband {}",
                             i64::from(self.sideband_min) + sideband_index as i64
                         )));
                     }
                 }
+            }
+            if let ExactMnaBranch::Resistor {
+                small_signal_resistance,
+                ..
+            } = branch
+                && !small_signal_resistance.is_finite()
+            {
+                return Err(HbError::InvalidCircuit(format!(
+                    "{context} resistor branch #{branch_index} has non-finite small-signal resistance"
+                )));
             }
         }
         for (kind, spectra) in [
@@ -788,6 +804,9 @@ impl PeriodicConversionOperator<'_> {
                 }
                 | ExactMnaBranch::Inductor {
                     node_pos, node_neg, ..
+                }
+                | ExactMnaBranch::Resistor {
+                    node_pos, node_neg, ..
                 } => (*node_pos, *node_neg),
             };
             for k_idx in 0..s {
@@ -815,6 +834,17 @@ impl PeriodicConversionOperator<'_> {
                         branch_coordinate,
                         branch_coordinate,
                         Complex64::new(0.0, -self.omega(k_idx) * *inductance),
+                    );
+                }
+                if let ExactMnaBranch::Resistor {
+                    small_signal_resistance,
+                    ..
+                } = branch
+                {
+                    visitor(
+                        branch_coordinate,
+                        branch_coordinate,
+                        Complex64::new(-*small_signal_resistance, 0.0),
                     );
                 }
             }
@@ -957,6 +987,9 @@ impl PeriodicConversionOperator<'_> {
                 }
                 | ExactMnaBranch::Inductor {
                     node_pos, node_neg, ..
+                }
+                | ExactMnaBranch::Resistor {
+                    node_pos, node_neg, ..
                 } => (*node_pos, *node_neg),
             };
             if node_pos > 0 {
@@ -971,6 +1004,13 @@ impl PeriodicConversionOperator<'_> {
             }
             if let ExactMnaBranch::Inductor { inductance, .. } = branch {
                 block[row * n + row] -= jw * *inductance;
+            }
+            if let ExactMnaBranch::Resistor {
+                small_signal_resistance,
+                ..
+            } = branch
+            {
+                block[row * n + row] -= *small_signal_resistance;
             }
         }
         if transpose {
@@ -1662,7 +1702,7 @@ impl HbSolver {
             sideband_min,
             offset_hz,
             fundamental_hz: self.config.fundamental_freq,
-            g_matrix: &self.g_matrix,
+            g_matrix: &self.periodic_g_matrix,
             c_matrix: &self.c_matrix,
             l_matrix: &self.l_matrix,
             mna_branches: &self.periodic_mna_branches,
@@ -1814,7 +1854,7 @@ impl HbSolver {
             sideband_min,
             offset_hz,
             fundamental_hz: self.config.fundamental_freq,
-            g_matrix: &self.g_matrix,
+            g_matrix: &self.periodic_g_matrix,
             c_matrix: &self.c_matrix,
             l_matrix: &self.l_matrix,
             mna_branches: &self.periodic_mna_branches,
@@ -2232,7 +2272,7 @@ impl HbSolver {
             sideband_min,
             offset_hz,
             fundamental_hz: self.config.fundamental_freq,
-            g_matrix: &self.g_matrix,
+            g_matrix: &self.periodic_g_matrix,
             c_matrix: &self.c_matrix,
             l_matrix: &self.l_matrix,
             mna_branches: &self.periodic_mna_branches,

@@ -491,6 +491,75 @@ impl Engine {
         Ok(Some(resistance))
     }
 
+    fn validate_resistor_noise_storage(circuit: &CircuitData) -> Result<(), SimulationError> {
+        let count = circuit.resistors.len();
+        for (label, actual) in [
+            ("stamps", circuit.resistors.stamps.len()),
+            ("conductances", circuit.resistors.conductances.len()),
+            (
+                "small-signal conductances",
+                circuit.resistors.small_signal_conductances.len(),
+            ),
+            (
+                "noise-temperature offsets",
+                circuit.resistors.noise_temperature_offsets.len(),
+            ),
+            ("NOISY controls", circuit.resistors.noisy.len()),
+            ("flicker controls", circuit.resistors.flicker.len()),
+        ] {
+            if actual != count {
+                return Err(SimulationError::Circuit(format!(
+                    "noise resistor metadata is misaligned: {count} names but {actual} {label}"
+                )));
+            }
+        }
+        let absolute_count = circuit.resistor_absolute_noise_temperature_count();
+        if absolute_count > count {
+            return Err(SimulationError::Circuit(format!(
+                "noise resistor metadata is misaligned: {count} names but {absolute_count} absolute noise temperatures"
+            )));
+        }
+
+        let count = circuit.resistor_branches.len();
+        for (label, actual) in [
+            ("positive nodes", circuit.resistor_branches.node_pos.len()),
+            ("negative nodes", circuit.resistor_branches.node_neg.len()),
+            (
+                "branch indices",
+                circuit.resistor_branches.branch_indices.len(),
+            ),
+            (
+                "DC resistances",
+                circuit.resistor_branches.resistances.len(),
+            ),
+            (
+                "small-signal resistances",
+                circuit.resistor_branches.small_signal_resistances.len(),
+            ),
+            (
+                "reported resistances",
+                circuit.resistor_branches.reported_resistances.len(),
+            ),
+            (
+                "noise-temperature offsets",
+                circuit.resistor_branches.noise_temperature_offsets.len(),
+            ),
+            (
+                "absolute noise temperatures",
+                circuit.resistor_branches.absolute_noise_temperatures.len(),
+            ),
+            ("NOISY controls", circuit.resistor_branches.noisy.len()),
+            ("flicker controls", circuit.resistor_branches.flicker.len()),
+        ] {
+            if actual != count {
+                return Err(SimulationError::Circuit(format!(
+                    "noise branch-form resistor metadata is misaligned: {count} names but {actual} {label}"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// Require a computed parameter that is mathematically positive in the
     /// caller's active branch to remain positive and finite after evaluation.
     fn checked_positive_noise_parameter(
@@ -1390,6 +1459,7 @@ impl Engine {
         circuit: &CircuitData,
         dc_solution: &[Value],
     ) -> Result<CollectedNoiseSources, SimulationError> {
+        Self::validate_resistor_noise_storage(circuit)?;
         let mut noise_sources = Vec::new();
         let mut correlated_noise_sources = Vec::new();
         let mut absolute_temperatures = HashMap::new();
@@ -1875,6 +1945,79 @@ impl Engine {
                         .with_identity(
                             crate::analysis::NoiseSourceIdentity::mechanism(device, "FN"),
                         ),
+                    );
+                }
+            }
+        }
+
+        // Finite branch-form resistors use the exact same Norton noise model
+        // as nodal resistors. Their DC current is an explicit MNA unknown, so
+        // model-card flicker is evaluated from that retained branch solution
+        // without reconstructing current through a reciprocal conductance.
+        for i in 0..circuit.resistor_branches.len() {
+            if !circuit.resistor_branches.noisy[i] {
+                continue;
+            }
+            let name = &circuit.resistor_branches.names[i];
+            let resistance = circuit.resistor_branches.small_signal_resistances[i];
+            if !resistance.is_finite() || resistance < 0.0 {
+                return Err(SimulationError::Circuit(format!(
+                    "Noise source '{name}' branch-form resistance must be finite and nonnegative, got {resistance:e} ohm"
+                )));
+            }
+            // An ideal zero-ohm branch has zero Thevenin voltage-noise power;
+            // a parallel Norton source only circulates through the constraint
+            // and cannot perturb any terminal voltage, so it is omitted.
+            if resistance == 0.0 {
+                continue;
+            }
+            let np = circuit.resistor_branches.node_pos[i];
+            let nn = circuit.resistor_branches.node_neg[i];
+            let mut source = NoiseSource::thermal(name.clone(), np, nn, resistance);
+            let source_temperature = circuit.resistor_branches.noise_temperature(i, 0.0);
+            if let Some(temperature) = circuit.resistor_branches.absolute_noise_temperatures[i] {
+                absolute_temperatures.insert(source.identity.clone(), temperature);
+            } else {
+                source.temperature_offset = source_temperature;
+            }
+            noise_sources.push(source);
+
+            if let Some((coefficient, af, ef)) = circuit.resistor_branches.flicker[i]
+                && coefficient != 0.0
+            {
+                let branch_ordinal = circuit.resistor_branches.branch_indices[i];
+                let matrix_index = circuit
+                    .num_nodes()
+                    .checked_add(branch_ordinal)
+                    .and_then(|index| index.checked_sub(1))
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "Noise source '{name}:FN' has invalid branch ordinal {branch_ordinal}"
+                        ))
+                    })?;
+                let current = *dc_solution.get(matrix_index).ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "Noise source '{name}:FN' requires branch-current solution index {matrix_index}, but the operating point has {} values",
+                        dc_solution.len()
+                    ))
+                })?;
+                if !current.is_finite() {
+                    return Err(SimulationError::Circuit(format!(
+                        "Noise source '{name}:FN' branch current is non-finite ({current:e})"
+                    )));
+                }
+                if current != 0.0 {
+                    noise_sources.push(
+                        NoiseSource::flicker_with_frequency_exponent(
+                            name.clone(),
+                            np,
+                            nn,
+                            coefficient,
+                            af,
+                            ef,
+                            current,
+                        )
+                        .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(name, "FN")),
                     );
                 }
             }
@@ -3429,6 +3572,57 @@ impl Engine {
 mod tests {
     use super::super::super::Engine;
     use crate::Netlist;
+
+    #[test]
+    fn ordinary_noise_rejects_every_misaligned_branch_resistor_noise_vector() {
+        let mut base = crate::CircuitData::new();
+        let out = base.get_or_create_node("out");
+        let branch = base.allocate_branch_named("RAuth");
+        base.resistor_branches.add_with_reported(
+            "RAuth".to_string(),
+            out,
+            0,
+            branch,
+            0.6,
+            1.2,
+            0.6,
+        );
+        for label in [
+            "noise-temperature offsets",
+            "absolute noise temperatures",
+            "NOISY controls",
+            "flicker controls",
+        ] {
+            let mut circuit = base.clone();
+            match label {
+                "noise-temperature offsets" => {
+                    circuit.resistor_branches.noise_temperature_offsets.clear();
+                }
+                "absolute noise temperatures" => {
+                    circuit
+                        .resistor_branches
+                        .absolute_noise_temperatures
+                        .clear();
+                }
+                "NOISY controls" => circuit.resistor_branches.noisy.clear(),
+                "flicker controls" => circuit.resistor_branches.flicker.clear(),
+                _ => unreachable!(),
+            }
+            let error = match Engine::try_collect_noise_sources(
+                &circuit,
+                &vec![0.0; circuit.matrix_size()],
+            ) {
+                Ok(_) => panic!("misaligned {label} unexpectedly passed validation"),
+                Err(error) => error,
+            };
+            let message = error.to_string();
+            assert!(
+                message.contains("branch-form resistor metadata is misaligned")
+                    && message.contains(label),
+                "unexpected {label} alignment diagnostic: {message}"
+            );
+        }
+    }
 
     fn xyce_frequency_resistor_netlist(body: &str) -> Netlist {
         Netlist::parse_with_options(

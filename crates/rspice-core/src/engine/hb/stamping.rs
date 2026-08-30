@@ -4,6 +4,7 @@ use super::*;
 enum PeriodicMnaRegistration {
     VoltageSource(usize),
     Inductor(usize),
+    Resistor(usize),
 }
 
 impl Engine {
@@ -190,9 +191,9 @@ impl Engine {
             let np = circuit.resistors.stamps[i].pp.row;
             let nn = circuit.resistors.stamps[i].nn.row;
             let g = circuit.resistors.conductances[i];
+            let small_signal_g = circuit.resistors.small_signal_conductance(i);
 
-            // Stamp conductance matrix
-            self.hb_stamp_admittance(solver, np, nn, g, true);
+            self.hb_stamp_conductance_pair(solver, np, nn, g, small_signal_g);
         }
         if circuit.global_shunt_conductance != 0.0 {
             for node in 1..=circuit.num_nodes() {
@@ -206,6 +207,36 @@ impl Engine {
                     );
                 }
             }
+        }
+    }
+
+    fn hb_stamp_conductance_pair(
+        &self,
+        solver: &mut HbSolver,
+        np: usize,
+        nn: usize,
+        conductance: Value,
+        small_signal_conductance: Value,
+    ) {
+        let mut stamp = |row: usize, column: usize, sign: Value| {
+            solver.add_conductance_with_small_signal(
+                row,
+                column,
+                sign * conductance,
+                sign * small_signal_conductance,
+            );
+        };
+        if np > 0 && nn > 0 {
+            let i = np - 1;
+            let j = nn - 1;
+            stamp(i, i, 1.0);
+            stamp(i, j, -1.0);
+            stamp(j, i, -1.0);
+            stamp(j, j, 1.0);
+        } else if np > 0 {
+            stamp(np - 1, np - 1, 1.0);
+        } else if nn > 0 {
+            stamp(nn - 1, nn - 1, 1.0);
         }
     }
 
@@ -228,12 +259,13 @@ impl Engine {
     /// Register every supported exact HB MNA branch in the circuit's
     /// canonical one-based branch order.
     ///
-    /// Linear HB, PAC, and PNoise support independent voltage-source and
-    /// uncoupled-inductor branch equations. If authored voltage-source spectra
-    /// were registered first, the exact descriptors retain them for the
-    /// large-signal solve; otherwise they describe zero-valued small-signal
-    /// constraints. The caller rejects other branch families before this
-    /// boundary, and this routine independently proves a complete unique map.
+    /// Linear HB, PAC, and PNoise support independent voltage-source,
+    /// uncoupled-inductor, and branch-form resistor equations. If authored
+    /// voltage-source spectra were registered first, the exact descriptors
+    /// retain them for the large-signal solve; otherwise they describe
+    /// zero-valued small-signal constraints. The caller rejects other branch
+    /// families before this boundary, and this routine independently proves a
+    /// complete unique map.
     pub(in crate::engine::hb) fn hb_stamp_periodic_mna_branches(
         &self,
         circuit: &CircuitData,
@@ -244,6 +276,7 @@ impl Engine {
             .voltage_sources
             .len()
             .checked_add(circuit.inductors.len())
+            .and_then(|count| count.checked_add(circuit.resistor_branches.len()))
             .ok_or_else(|| {
                 SimulationError::Circuit(
                     "periodic MNA supported-branch count overflows this platform".to_string(),
@@ -251,7 +284,7 @@ impl Engine {
             })?;
         if represented_count != branch_count {
             return Err(SimulationError::Circuit(format!(
-                "periodic MNA supports {represented_count} voltage-source/inductor branches, but the circuit declares {branch_count} canonical branches"
+                "periodic MNA supports {represented_count} voltage-source/inductor/resistor branches, but the circuit declares {branch_count} canonical branches"
             )));
         }
 
@@ -360,6 +393,56 @@ impl Engine {
             }
         }
 
+        for resistor_index in 0..circuit.resistor_branches.len() {
+            let name = circuit
+                .resistor_branches
+                .names
+                .get(resistor_index)
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "periodic MNA branch-form resistor storage is missing name row {resistor_index}"
+                    ))
+                })?;
+            circuit
+                .resistor_branches
+                .node_pos
+                .get(resistor_index)
+                .zip(circuit.resistor_branches.node_neg.get(resistor_index))
+                .zip(circuit.resistor_branches.resistances.get(resistor_index))
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "periodic MNA branch-form resistor '{name}' has incomplete terminal/value storage"
+                    ))
+                })?;
+            let branch_ordinal = *circuit
+                .resistor_branches
+                .branch_indices
+                .get(resistor_index)
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "periodic MNA branch-form resistor '{name}' is missing its canonical branch ordinal"
+                    ))
+                })?;
+            let slot_index = branch_ordinal.checked_sub(1).ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "periodic MNA branch-form resistor '{name}' has invalid branch ordinal 0"
+                ))
+            })?;
+            let slot = registrations.get_mut(slot_index).ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "periodic MNA branch-form resistor '{name}' has branch ordinal {branch_ordinal}, outside 1..={branch_count}"
+                ))
+            })?;
+            if slot
+                .replace(PeriodicMnaRegistration::Resistor(resistor_index))
+                .is_some()
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "periodic MNA branch ordinal {branch_ordinal} is assigned more than once"
+                )));
+            }
+        }
+
         for (slot_index, registration) in registrations.into_iter().enumerate() {
             let branch_ordinal = slot_index.checked_add(1).ok_or_else(|| {
                 SimulationError::Circuit(
@@ -400,6 +483,23 @@ impl Engine {
                         .map_err(|error| {
                             SimulationError::Circuit(format!(
                                 "periodic MNA inductor registration failed: {error}"
+                            ))
+                        })?;
+                }
+                PeriodicMnaRegistration::Resistor(resistor_index) => {
+                    let name = &circuit.resistor_branches.names[resistor_index];
+                    solver
+                        .try_add_periodic_resistor_branch(
+                            circuit.resistor_branches.node_pos[resistor_index],
+                            circuit.resistor_branches.node_neg[resistor_index],
+                            circuit.resistor_branches.resistances[resistor_index],
+                            circuit.resistor_branches.small_signal_resistances[resistor_index],
+                            branch_ordinal,
+                            name,
+                        )
+                        .map_err(|error| {
+                            SimulationError::Circuit(format!(
+                                "periodic MNA branch-form resistor registration failed: {error}"
                             ))
                         })?;
                 }

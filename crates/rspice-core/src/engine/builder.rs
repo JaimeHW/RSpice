@@ -2642,6 +2642,31 @@ fn add_generated_xspice_auto_bridge_resistor(
             small_signal_resistance,
             resolved.reported_resistance,
         );
+        if let Some(temp) = instance_param(instance_params, &["TEMP"]) {
+            let temp_k = crate::constants::celsius_to_kelvin(temp);
+            circuit
+                .resistor_branches
+                .set_last_absolute_noise_temperature(temp_k + resolved.tnom_celsius);
+        } else if let Some(noise_dtemp) = instance_param(instance_params, &["DTEMP"])
+            && noise_dtemp != 0.0
+        {
+            circuit
+                .resistor_branches
+                .set_last_noise_temperature_offset(noise_dtemp);
+        }
+        if let Some(noisy) = instance_param(instance_params, &["NOISY", "NOISE"]) {
+            circuit.resistor_branches.set_last_noisy(noisy != 0.0);
+        }
+        if let Some((coefficient, af, ef)) = resolve_resistor_flicker_noise(
+            generated,
+            model.as_deref(),
+            instance_params,
+            temperature,
+        )? {
+            circuit
+                .resistor_branches
+                .set_last_flicker_noise(coefficient, af, ef);
+        }
     } else {
         circuit.resistors.add_with_small_signal_and_reported(
             element.name.clone(),
@@ -2651,6 +2676,27 @@ fn add_generated_xspice_auto_bridge_resistor(
             small_signal_resistance,
             resolved.reported_resistance,
         );
+        if let Some(temp) = instance_param(instance_params, &["TEMP"]) {
+            let temp_k = crate::constants::celsius_to_kelvin(temp);
+            circuit.set_last_resistor_absolute_noise_temperature(temp_k + resolved.tnom_celsius);
+        } else if let Some(noise_dtemp) = instance_param(instance_params, &["DTEMP"])
+            && noise_dtemp != 0.0
+        {
+            circuit.set_last_resistor_noise_temperature_offset(noise_dtemp);
+        }
+        if let Some(noisy) = instance_param(instance_params, &["NOISY", "NOISE"]) {
+            circuit.resistors.set_last_noisy(noisy != 0.0);
+        }
+        if let Some((coefficient, af, ef)) = resolve_resistor_flicker_noise(
+            generated,
+            model.as_deref(),
+            instance_params,
+            temperature,
+        )? {
+            circuit
+                .resistors
+                .set_last_flicker_noise(coefficient, af, ef);
+        }
     }
     Ok(())
 }
@@ -3466,6 +3512,61 @@ mod tests {
         assert_eq!(
             circuit.resistors.reported_resistances[0].to_bits(),
             8.0_f64.to_bits()
+        );
+    }
+
+    #[test]
+    fn generated_auto_bridge_resistor_noise_metadata_matches_branch_and_nodal_storage() {
+        let build = |zero_resistance_tolerance: Value| {
+            let generated = Netlist::parse(&format!(
+                "generated bridge resistor noise metadata\n\
+                 RAUTO bridge 0 0.6 RMOD AC=1.2 TEMP=37 DTEMP=999 NOISY=0\n\
+                 .model RMOD R (KF=2e-12 AF=1.3 EF=0.8 TNOM=27)\n\
+                 .options device zeroresistancetol={zero_resistance_tolerance}\n\
+                 .end\n"
+            ))
+            .expect("generated bridge resistor deck parses");
+            let element = generated
+                .elements
+                .iter()
+                .find(|element| element.name.eq_ignore_ascii_case("RAUTO"))
+                .expect("generated resistor exists");
+            let mut circuit = CircuitData::new();
+            add_generated_xspice_auto_bridge_resistor(
+                &mut circuit,
+                &generated,
+                element,
+                crate::constants::TEMP_REFERENCE,
+                SpiceDialect::Xyce,
+            )
+            .expect("generated resistor is added to the auto-bridge subcircuit");
+            circuit
+        };
+
+        let nodal = build(0.0);
+        let branch = build(1.0);
+        assert_eq!(nodal.resistors.len(), 1);
+        assert_eq!(branch.resistor_branches.len(), 1);
+        assert_eq!(
+            nodal
+                .resistors
+                .small_signal_conductance(0)
+                .recip()
+                .to_bits(),
+            branch.resistor_branches.small_signal_resistances[0].to_bits()
+        );
+        assert_eq!(
+            nodal.resistor_absolute_noise_temperature(0),
+            branch.resistor_branches.absolute_noise_temperatures[0]
+        );
+        assert_eq!(
+            nodal.resistors.noise_temperature_offsets[0].to_bits(),
+            branch.resistor_branches.noise_temperature_offsets[0].to_bits()
+        );
+        assert_eq!(nodal.resistors.noisy[0], branch.resistor_branches.noisy[0]);
+        assert_eq!(
+            nodal.resistors.flicker[0],
+            branch.resistor_branches.flicker[0]
         );
     }
 
@@ -5424,6 +5525,34 @@ impl Engine {
                             small_signal_resistance,
                             resolved.reported_resistance,
                         );
+                        if let Some(temp) = instance_param(instance_params, &["TEMP"]) {
+                            let temp_k = crate::constants::celsius_to_kelvin(temp);
+                            circuit
+                                .resistor_branches
+                                .set_last_absolute_noise_temperature(
+                                    temp_k + resolved.tnom_celsius,
+                                );
+                        } else if let Some(noise_dtemp) =
+                            instance_param(instance_params, &["DTEMP"])
+                            && noise_dtemp != 0.0
+                        {
+                            circuit
+                                .resistor_branches
+                                .set_last_noise_temperature_offset(noise_dtemp);
+                        }
+                        if let Some(noisy) = instance_param(instance_params, &["NOISY", "NOISE"]) {
+                            circuit.resistor_branches.set_last_noisy(noisy != 0.0);
+                        }
+                        if let Some((coefficient, af, ef)) = resolve_resistor_flicker_noise(
+                            netlist,
+                            model.as_deref(),
+                            instance_params,
+                            self.config.temperature,
+                        )? {
+                            circuit
+                                .resistor_branches
+                                .set_last_flicker_noise(coefficient, af, ef);
+                        }
                         continue;
                     }
                     circuit.resistors.add_with_small_signal_and_reported(

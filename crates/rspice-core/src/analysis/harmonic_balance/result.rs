@@ -295,8 +295,9 @@ pub struct HbResult {
     /// Multi-tone info (if applicable)
     pub tones: Vec<String>,
 
-    /// Current spectra retained from the canonical ideal voltage-source and
-    /// inductor MNA branch unknowns solved by linear or nonlinear HB.
+    /// Current spectra retained from the canonical ideal voltage-source,
+    /// inductor, and branch-form resistor MNA unknowns solved by linear or
+    /// nonlinear HB.
     pub mna_branch_currents: Vec<SpectralBranchCurrent>,
 
     /// Named linear reactive spectra. Capacitor current is evaluated from its
