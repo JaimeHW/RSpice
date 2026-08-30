@@ -20,7 +20,7 @@ use rspice_veriloga::semantic::{AnalyzedContribution, AnalyzedModule, AnalyzedPo
 use rspice_veriloga::source::Span;
 use rspice_veriloga::types::ValueType;
 use rspice_veriloga::{
-    Lexer, ParameterScope, Parser, SemanticAnalyzer, SourceMap, VerilogACompiler,
+    CompilerOptions, Lexer, ParameterScope, Parser, SemanticAnalyzer, SourceMap, VerilogACompiler,
 };
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -872,8 +872,15 @@ impl TempSourceDir {
 
     fn write_file(&self, name: &str, contents: &str) -> std::path::PathBuf {
         let path = self.path.join(name);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("create fixture parent directory");
+        }
         std::fs::write(&path, contents).expect("write fixture");
         path
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
     }
 }
 
@@ -941,7 +948,11 @@ fn compiler_can_emit_file_canonical_ir_with_metadata() {
         .path()
         .canonicalize()
         .expect("canonical fixture path");
-    let canonical_path_text = canonical_path.display().to_string();
+    let logical_path = canonical_path
+        .file_name()
+        .expect("fixture file name")
+        .to_string_lossy()
+        .into_owned();
 
     let compiled = VerilogACompiler::default()
         .compile_file_canonical_ir_with_metadata(fixture.path(), None)
@@ -951,17 +962,14 @@ fn compiler_can_emit_file_canonical_ir_with_metadata() {
     assert_eq!(compiled.dependencies, vec![canonical_path]);
     assert_eq!(
         compiled.artifact.metadata.source_package.as_str(),
-        canonical_path_text
+        logical_path
     );
-    assert_eq!(
-        compiled.artifact.hir.source_package.as_str(),
-        canonical_path_text
-    );
+    assert_eq!(compiled.artifact.hir.source_package.as_str(), logical_path);
     assert!(
         compiled
             .artifact
             .dump_text()
-            .contains(&format!("source_package={canonical_path_text}"))
+            .contains(&format!("source_package={logical_path}"))
     );
 }
 
@@ -972,7 +980,11 @@ fn compiler_can_emit_file_runtime_artifacts_with_metadata() {
         .path()
         .canonicalize()
         .expect("canonical fixture path");
-    let canonical_path_text = canonical_path.display().to_string();
+    let logical_path = canonical_path
+        .file_name()
+        .expect("fixture file name")
+        .to_string_lossy()
+        .into_owned();
 
     let compiled = VerilogACompiler::default()
         .compile_file_runtime_with_metadata(fixture.path(), None)
@@ -988,7 +1000,7 @@ fn compiler_can_emit_file_runtime_artifacts_with_metadata() {
     assert_eq!(compiled.dependencies, vec![canonical_path]);
     assert_eq!(
         compiled.canonical_ir.metadata.source_package.as_str(),
-        canonical_path_text
+        logical_path
     );
     assert!(compiled.canonical_ir.validate().is_ok());
 }
@@ -998,7 +1010,7 @@ fn file_canonical_ir_metadata_uses_root_path_when_include_sorts_first() {
     let fixture = TempSourceDir::new();
     let include_path = fixture.write_file("aaa_include.va", "`define ROOT_GAIN 1.0\n");
     let root_path = fixture.write_file(
-        "zzz_root.va",
+        "models/zzz_root.va",
         r#"
 `include "aaa_include.va"
 module root_with_include(p, n);
@@ -1010,9 +1022,10 @@ endmodule
     );
     let canonical_include_path = include_path.canonicalize().expect("canonical include path");
     let canonical_root_path = root_path.canonicalize().expect("canonical root path");
-    let canonical_root_path_text = canonical_root_path.display().to_string();
+    let mut options = CompilerOptions::default();
+    options.include_paths.push(fixture.path().to_path_buf());
 
-    let compiled = VerilogACompiler::default()
+    let compiled = VerilogACompiler::new(options)
         .compile_file_canonical_ir_with_metadata(&root_path, None)
         .expect("compile canonical IR from file");
 
@@ -1022,13 +1035,72 @@ endmodule
     );
     assert_eq!(
         compiled.artifact.metadata.source_package.as_str(),
-        canonical_root_path_text
+        "models/zzz_root.va"
     );
     assert_eq!(
         compiled.artifact.hir.source_package.as_str(),
-        canonical_root_path_text
+        "models/zzz_root.va"
     );
     assert!(compiled.artifact.validate().is_ok());
+}
+
+#[test]
+fn file_canonical_ir_is_identical_across_physical_package_roots() {
+    let first_root = TempSourceDir::new();
+    let second_root = TempSourceDir::new();
+    let include_source = "`define ROOT_GAIN 2.0\n";
+    let root_source = r#"
+`include "includes/gain.va"
+module relocated_root(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ `ROOT_GAIN * V(p, n);
+endmodule
+"#;
+
+    first_root.write_file("models/includes/gain.va", include_source);
+    second_root.write_file("models/includes/gain.va", include_source);
+    let first_source = first_root.write_file("models/root.va", root_source);
+    let second_source = second_root.write_file("models/root.va", root_source);
+
+    let mut first_options = CompilerOptions::default();
+    first_options
+        .include_paths
+        .push(first_root.path().to_path_buf());
+    let mut second_options = CompilerOptions::default();
+    second_options
+        .include_paths
+        .push(second_root.path().to_path_buf());
+
+    let first = VerilogACompiler::new(first_options)
+        .compile_file_canonical_ir_with_metadata(&first_source, None)
+        .expect("compile first relocated package");
+    let second = VerilogACompiler::new(second_options)
+        .compile_file_canonical_ir_with_metadata(&second_source, None)
+        .expect("compile second relocated package");
+
+    assert_ne!(first.dependencies, second.dependencies);
+    assert_eq!(first.artifact.metadata.source_package, "models/root.va");
+    assert_eq!(first.artifact, second.artifact);
+    assert_eq!(first.artifact.dump_text(), second.artifact.dump_text());
+}
+
+#[test]
+fn standalone_file_canonical_ir_is_independent_of_parent_directory() {
+    let first_root = TempSourceDir::new();
+    let second_root = TempSourceDir::new();
+    let first_source = first_root.write_file("standalone.va", tiny_resistor_source());
+    let second_source = second_root.write_file("standalone.va", tiny_resistor_source());
+
+    let first = VerilogACompiler::default()
+        .compile_file_canonical_ir_with_metadata(&first_source, None)
+        .expect("compile first standalone file");
+    let second = VerilogACompiler::default()
+        .compile_file_canonical_ir_with_metadata(&second_source, None)
+        .expect("compile second standalone file");
+
+    assert_eq!(first.artifact.metadata.source_package, "standalone.va");
+    assert_eq!(first.artifact, second.artifact);
 }
 
 #[test]

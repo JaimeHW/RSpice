@@ -354,6 +354,34 @@ impl VerilogACompiler {
         pp
     }
 
+    /// Return the portable logical identity stored in file-backed canonical
+    /// artifacts.
+    ///
+    /// Physical paths remain available through the file API's dependency list
+    /// and are still used while compiling for diagnostics. Artifact identity,
+    /// however, must not depend on the checkout or temporary directory that
+    /// contains a model. The first configured include root containing the root
+    /// source file defines its logical package root. Standalone files fall back
+    /// to their file name because no caller-supplied package root exists.
+    fn logical_file_source_package(&self, canonical_source_path: &std::path::Path) -> String {
+        for include_root in &self.options.include_paths {
+            let canonical_include_root = include_root
+                .canonicalize()
+                .unwrap_or_else(|_| include_root.to_path_buf());
+            if let Ok(relative_path) = canonical_source_path.strip_prefix(canonical_include_root)
+                && !relative_path.as_os_str().is_empty()
+            {
+                return relative_path.to_string_lossy().replace('\\', "/");
+            }
+        }
+
+        canonical_source_path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "<file>".to_string())
+    }
+
     /// Compile Verilog-A source code to a device model
     ///
     /// The source is preprocessed first, so `include/`define/`ifdef work
@@ -1212,11 +1240,17 @@ impl VerilogACompiler {
         }
 
         // Keep canonical IR metadata aligned with the root file, not the
-        // lexicographic dependency order used by the preprocessor.
-        let source_package = source_package_path.display().to_string();
-        let artifact = self.compile_canonical_ir_preprocessed_with_metadata_measured(
+        // lexicographic dependency order used by the preprocessor. The
+        // absolute path remains diagnostic-only so moving an otherwise
+        // identical source package does not change the canonical artifact.
+        let diagnostic_source = source_package_path.display().to_string();
+        let source_package = self.logical_file_source_package(&source_package_path);
+        let analyzed =
+            self.analyze_preprocessed(&diagnostic_source, &preprocessed, &mut measurements)?;
+        let artifact = self.build_canonical_ir_artifact(
             &source_package,
             &preprocessed,
+            &analyzed,
             module_name,
             &mut measurements,
         )?;
@@ -1281,9 +1315,10 @@ impl VerilogACompiler {
             );
         }
 
-        let source_package = source_package_path.display().to_string();
+        let diagnostic_source = source_package_path.display().to_string();
+        let source_package = self.logical_file_source_package(&source_package_path);
         let analyzed =
-            self.analyze_preprocessed(&source_package, &preprocessed, &mut measurements)?;
+            self.analyze_preprocessed(&diagnostic_source, &preprocessed, &mut measurements)?;
         let executable = self.select_executable_module(&analyzed, module_name)?;
         let source_digest = canonical_ir::StableDigest::from_text(&preprocessed).as_hex();
         measurements.checkpoint(PipelinePhase::BytecodeGeneration)?;

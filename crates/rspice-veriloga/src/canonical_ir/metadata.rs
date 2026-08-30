@@ -43,6 +43,12 @@ impl StableDigest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CanonicalMetadata {
     pub schema_version: u32,
+    /// Stable logical identity of the root source document.
+    ///
+    /// File-backed compilation stores a portable path relative to the first
+    /// configured include root containing the file, or just the file name for
+    /// a standalone source. Physical paths remain file-API dependency and
+    /// diagnostic data and are intentionally excluded from canonical identity.
     pub source_package: SmolStr,
     pub source_digest: SmolStr,
     pub compiler_version: SmolStr,
