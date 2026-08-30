@@ -422,6 +422,7 @@ impl<'a> Vm<'a> {
                     0.0
                 };
                 self.context.state_derivatives[*idx] = derivative;
+                self.context.state_older_candidate[*idx] = prev_value;
                 self.context.state_candidate_valid[*idx] = INTEGRATION_CANDIDATE_VALID;
                 self.stack.push(derivative);
             }
@@ -459,6 +460,7 @@ impl<'a> Vm<'a> {
                 };
                 self.context.state_values[*idx] = new_integral;
                 self.context.state_derivatives[*idx] = current_value;
+                self.context.state_older_candidate[*idx] = prev_integral;
                 self.context.state_candidate_valid[*idx] = INTEGRATION_CANDIDATE_VALID;
 
                 self.stack.push(new_integral);
@@ -502,16 +504,22 @@ impl<'a> Vm<'a> {
                     ic
                 };
 
-                // Fold into [offset, offset + modulus)
-                let wrapped = if modulus > 0.0 {
-                    let phase = (raw - offset).rem_euclid(modulus);
-                    offset + phase
-                } else {
-                    raw
-                };
+                let (wrapped, rebase) = super::idtmod_wrapped_candidate(raw, modulus, offset)
+                    .map_err(|detail| {
+                        VmError::InvalidNumericResult(format!(
+                            "idtmod state {idx} {detail}: raw={raw}, modulus={modulus}, offset={offset}"
+                        ))
+                    })?;
+                let older_candidate = prev - rebase;
+                if !older_candidate.is_finite() {
+                    return Err(VmError::InvalidNumericResult(format!(
+                        "idtmod state {idx} common-branch older history is not finite: previous={prev}, translation={rebase}"
+                    )));
+                }
 
                 self.context.state_values[*idx] = wrapped;
                 self.context.state_derivatives[*idx] = current_value;
+                self.context.state_older_candidate[*idx] = older_candidate;
                 self.context.state_candidate_valid[*idx] = INTEGRATION_CANDIDATE_VALID;
 
                 self.stack.push(wrapped);

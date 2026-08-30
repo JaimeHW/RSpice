@@ -233,6 +233,43 @@ mod runtime_checkpoint_codec_tests {
                 .contains("slew filters declares 2 entries")
         );
     }
+
+    #[test]
+    fn legacy_v2_payload_is_fully_validated_without_migrating_idtmod_history() {
+        let checkpoint = checkpoint_with_slew_entries();
+        let mut words = checkpoint.to_words();
+        words[0] = 2;
+
+        VerilogADeviceCheckpoint::validate_legacy_v2_words(&words)
+            .expect("complete legacy common-format payload validates");
+        assert!(
+            VerilogADeviceCheckpoint::from_words(
+                checkpoint.instance_name,
+                checkpoint.model_name,
+                checkpoint.source_digest,
+                checkpoint.shape_identity,
+                &words,
+            )
+            .expect_err("the current decoder must not reinterpret legacy idtmod history")
+            .contains("unsupported runtime Verilog-A state version 2")
+        );
+
+        let mut malformed_boolean = words.clone();
+        malformed_boolean[1] = 2;
+        assert!(
+            VerilogADeviceCheckpoint::validate_legacy_v2_words(&malformed_boolean)
+                .expect_err("legacy v2 boolean tags remain strict")
+                .contains("previous discontinuity boolean tag 2 is invalid")
+        );
+
+        let mut trailing = words;
+        trailing.push(0);
+        assert!(
+            VerilogADeviceCheckpoint::validate_legacy_v2_words(&trailing)
+                .expect_err("legacy v2 trailing words must fail closed")
+                .contains("trailing words")
+        );
+    }
 }
 
 #[cfg(feature = "native")]
@@ -640,7 +677,7 @@ pub struct VerilogADevice {
     prev_discontinuity: bool,
 }
 
-pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 2;
+pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 3;
 
 /// Versioned accepted runtime state for one compiled Verilog-A instance.
 /// Compiled programs, topology, and solver caches are intentionally absent.
@@ -738,15 +775,33 @@ impl VerilogADeviceCheckpoint {
         shape_identity: SmolStr,
         words: &[u64],
     ) -> Result<Self, String> {
+        Self::from_words_with_expected_version(
+            instance_name,
+            model_name,
+            source_digest,
+            shape_identity,
+            words,
+            RUNTIME_CHECKPOINT_STATE_VERSION,
+        )
+    }
+
+    fn from_words_with_expected_version(
+        instance_name: SmolStr,
+        model_name: SmolStr,
+        source_digest: SmolStr,
+        shape_identity: SmolStr,
+        words: &[u64],
+        expected_version: u32,
+    ) -> Result<Self, String> {
         use crate::laplace::LaplaceCheckpoint;
         use crate::vm::{CrossCheckpoint, DelayCheckpoint, SlewCheckpoint, TransitionCheckpoint};
         use crate::zfilter::ZiCheckpoint;
 
         let mut decoder = CheckpointWordDecoder::new(words);
         let state_version = decoder.u32("state version")?;
-        if state_version != RUNTIME_CHECKPOINT_STATE_VERSION {
+        if state_version != expected_version {
             return Err(format!(
-                "unsupported runtime Verilog-A state version {state_version}"
+                "unsupported runtime Verilog-A state version {state_version}; expected version {expected_version}"
             ));
         }
         let prev_discontinuity = decoder.boolean("previous discontinuity")?;
@@ -954,6 +1009,24 @@ impl VerilogADeviceCheckpoint {
         }
         decoder.optional_float("timer event bound")?;
         decoder.finish()
+    }
+
+    /// Validate and consume a complete legacy version-2 runtime payload.
+    ///
+    /// Version 2 serialized `idtmod` accepted lanes without recording whether
+    /// the older lane shared the previous lane's modulo branch. Its word shape
+    /// otherwise matches the current payload, so decode it strictly but never
+    /// expose the result as restart-authoritative version-3 state.
+    pub fn validate_legacy_v2_words(words: &[u64]) -> Result<(), String> {
+        Self::from_words_with_expected_version(
+            SmolStr::new_inline("legacy"),
+            SmolStr::new_inline("legacy"),
+            SmolStr::new_inline("legacy"),
+            SmolStr::new_inline("legacy"),
+            words,
+            2,
+        )
+        .map(drop)
     }
 
     pub fn retained_value_count(&self) -> usize {
@@ -2273,6 +2346,25 @@ impl VerilogADevice {
                 coefficients.derivative_scale
             )));
         }
+        if coefficients.active {
+            let scale = coefficients
+                .derivative_scale
+                .abs()
+                .max(coefficients.previous_value_scale.abs())
+                .max(coefficients.older_value_scale.abs());
+            let normalized_error = (coefficients.previous_value_scale / scale
+                + coefficients.older_value_scale / scale
+                - coefficients.derivative_scale / scale)
+                .abs();
+            if normalized_error > 64.0 * f64::EPSILON {
+                return Err(VmError::InvalidRuntimeConfiguration(format!(
+                    "integration value-history scales must sum to the derivative scale: previous {} + older {} != derivative {}",
+                    coefficients.previous_value_scale,
+                    coefficients.older_value_scale,
+                    coefficients.derivative_scale
+                )));
+            }
+        }
         if !coefficients.active && scales.iter().any(|value| *value != 0.0) {
             return Err(VmError::InvalidRuntimeConfiguration(
                 "inactive integration coefficients must have zero scales".to_string(),
@@ -3559,6 +3651,12 @@ impl VerilogADevice {
                 context.state_candidate_valid.as_mut_ptr()
             },
             state_candidate_valid_len: context.state_candidate_valid.len(),
+            state_older_candidate: if context.state_older_candidate.is_empty() {
+                std::ptr::null_mut()
+            } else {
+                context.state_older_candidate.as_mut_ptr()
+            },
+            state_older_candidate_len: context.state_older_candidate.len(),
         }
     }
 
@@ -3899,6 +3997,11 @@ impl VerilogADevice {
             "integration candidate-valid storage",
             required.state_candidate_valid,
             context.state_candidate_valid.len(),
+        )?;
+        Self::validate_native_runtime_storage_len(
+            "integration older-candidate storage",
+            required.state_older_candidate,
+            context.state_older_candidate.len(),
         )?;
         Self::validate_native_runtime_storage_len(
             "lookup-table storage",

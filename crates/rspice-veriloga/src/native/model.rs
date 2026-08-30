@@ -105,6 +105,7 @@ pub(crate) struct NativeRequiredStorage {
     pub state_values_prev: usize,
     pub state_initialized: usize,
     pub state_candidate_valid: usize,
+    pub state_older_candidate: usize,
     pub lookup_tables: usize,
     pub laplace_filters: usize,
     pub zi_filters: usize,
@@ -191,6 +192,7 @@ impl NativeRequiredStorage {
             state_values_prev: state_values,
             state_initialized: state_values,
             state_candidate_valid: state_values,
+            state_older_candidate: state_values,
             lookup_tables: model.lookup_tables.len(),
             laplace_filters: model.laplace_filters.len(),
             zi_filters: model.zi_filters.len(),
@@ -1820,6 +1822,8 @@ mod tests {
             runtime_status: Default::default(),
             state_candidate_valid: std::ptr::null_mut(),
             state_candidate_valid_len: 0,
+            state_older_candidate: std::ptr::null_mut(),
+            state_older_candidate_len: 0,
         }
     }
 }

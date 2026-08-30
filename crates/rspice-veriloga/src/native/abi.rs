@@ -17,6 +17,7 @@ use std::cell::UnsafeCell;
 use crate::array_index::{checked_array_slot, checked_rounded_i64};
 use crate::integer_runtime::{IntegerBinaryOperation, integer_binary, real_to_integer};
 use crate::timing_contract::{NormalizedSlewRates, normalize_slew_rates};
+use crate::vm::idtmod_wrapped_candidate;
 
 const INTEGER_DESCRIPTOR_KIND_MASK: usize = 0xff;
 const INTEGER_DESCRIPTOR_PAYLOAD_SHIFT: u32 = 32;
@@ -270,6 +271,11 @@ pub struct EvalContext {
     pub state_candidate_valid: *mut u8,
     /// Length of `state_candidate_valid`.
     pub state_candidate_valid_len: usize,
+    /// Per-state older-history lane proposed by the current integration
+    /// evaluation and consumed only when the owning VM accepts the point.
+    pub state_older_candidate: *mut f64,
+    /// Length of `state_older_candidate`.
+    pub state_older_candidate_len: usize,
 }
 
 impl EvalContext {
@@ -333,6 +339,8 @@ impl EvalContext {
             runtime_status: Default::default(),
             state_candidate_valid: std::ptr::null_mut(),
             state_candidate_valid_len: 0,
+            state_older_candidate: std::ptr::null_mut(),
+            state_older_candidate_len: 0,
         }
     }
 
@@ -677,12 +685,7 @@ pub unsafe extern "C" fn rspice_table_derivative_native(
 /// External helper function for idtmod wrapping.
 #[unsafe(export_name = "rspice_idtmod_wrap")]
 pub extern "C" fn rspice_idtmod_wrap(raw: f64, modulus: f64, offset: f64) -> f64 {
-    if modulus > 0.0 {
-        let phase = (raw - offset).rem_euclid(modulus);
-        offset + phase
-    } else {
-        raw
-    }
+    idtmod_wrapped_candidate(raw, modulus, offset).map_or(f64::NAN, |(wrapped, _)| wrapped)
 }
 
 /// External helper function for limited exponential.
@@ -1270,6 +1273,7 @@ unsafe fn native_state_storage_is_valid(ctx: &EvalContext, state_id: usize) -> b
         && state_id < ctx.state_derivatives_prev_len
         && state_id < ctx.state_initialized_len
         && state_id < ctx.state_candidate_valid_len
+        && state_id < ctx.state_older_candidate_len
         && !ctx.state_values.is_null()
         && !ctx.state_prev.is_null()
         && !ctx.state_older.is_null()
@@ -1277,6 +1281,7 @@ unsafe fn native_state_storage_is_valid(ctx: &EvalContext, state_id: usize) -> b
         && !ctx.state_derivatives_prev.is_null()
         && !ctx.state_initialized.is_null()
         && !ctx.state_candidate_valid.is_null()
+        && !ctx.state_older_candidate.is_null()
 }
 
 /// Native companion evaluation for `ddt`.
@@ -1306,7 +1311,6 @@ pub unsafe extern "C" fn rspice_ddt_state_native(
             "has invalid state storage",
         );
     }
-
     let value = unsafe { *operands };
     let initialized = unsafe { *ctx.state_initialized.add(state_id) != 0 };
     let previous = if initialized {
@@ -1335,6 +1339,7 @@ pub unsafe extern "C" fn rspice_ddt_state_native(
     unsafe {
         *ctx.state_values.add(state_id) = value;
         *ctx.state_derivatives.add(state_id) = derivative;
+        *ctx.state_older_candidate.add(state_id) = previous;
         *ctx.state_candidate_valid.add(state_id) = 1;
     }
     derivative
@@ -1418,14 +1423,31 @@ unsafe fn rspice_integral_state_native(
     } else {
         initial_condition
     };
-    let value = if wrapped {
-        rspice_idtmod_wrap(raw, operands[2], operands[3])
+    let (value, wrap_translation) = if wrapped {
+        match idtmod_wrapped_candidate(raw, operands[2], operands[3]) {
+            Ok(candidate) => candidate,
+            Err(detail) => {
+                let detail = format!(
+                    "{detail}: raw={raw}, modulus={}, offset={}",
+                    operands[2], operands[3]
+                );
+                return invalid_native_integration_context(ctx, operator, state_id, &detail);
+            }
+        }
     } else {
-        raw
+        (raw, 0.0)
     };
+    let older_candidate = previous - wrap_translation;
+    if !older_candidate.is_finite() {
+        let detail = format!(
+            "common-branch older history is not finite: previous={previous}, translation={wrap_translation}"
+        );
+        return invalid_native_integration_context(ctx, operator, state_id, &detail);
+    }
     unsafe {
         *ctx.state_values.add(state_id) = value;
         *ctx.state_derivatives.add(state_id) = input;
+        *ctx.state_older_candidate.add(state_id) = older_candidate;
         *ctx.state_candidate_valid.add(state_id) = 1;
     }
     value
@@ -2198,12 +2220,14 @@ mod tests {
         assert_eq!(offset_of!(EvalContext, runtime_status), 424);
         assert_eq!(offset_of!(EvalContext, state_candidate_valid), 456);
         assert_eq!(offset_of!(EvalContext, state_candidate_valid_len), 464);
+        assert_eq!(offset_of!(EvalContext, state_older_candidate), 472);
+        assert_eq!(offset_of!(EvalContext, state_older_candidate_len), 480);
         assert_eq!(offset_of!(NativeRuntimeStatus, failed), 0);
         assert_eq!(
             NativeRuntimeStatus::failed_offset(),
             offset_of!(NativeRuntimeStatus, failed)
         );
-        assert_eq!(size_of::<EvalContext>(), 472);
+        assert_eq!(size_of::<EvalContext>(), 488);
         assert_eq!(align_of::<EvalContext>(), 8);
     }
 
@@ -2216,6 +2240,7 @@ mod tests {
             "derivatives",
             "previous derivatives",
             "candidate status",
+            "older candidate",
         ] {
             let previous = [0.0];
             let older = [0.0];
@@ -2224,6 +2249,7 @@ mod tests {
             let mut derivatives = [0.0];
             let mut initialized = [0_u8];
             let mut candidate_valid = [0_u8];
+            let mut older_candidate = [0.0];
             let mut ctx = empty_eval_context();
             ctx.state_prev = previous.as_ptr();
             ctx.state_prev_len = previous.len();
@@ -2239,11 +2265,14 @@ mod tests {
             ctx.state_initialized_len = initialized.len();
             ctx.state_candidate_valid = candidate_valid.as_mut_ptr();
             ctx.state_candidate_valid_len = candidate_valid.len();
+            ctx.state_older_candidate = older_candidate.as_mut_ptr();
+            ctx.state_older_candidate_len = older_candidate.len();
             match missing {
                 "older" => ctx.state_older_len = 0,
                 "derivatives" => ctx.state_derivatives_len = 0,
                 "previous derivatives" => ctx.state_derivatives_prev_len = 0,
                 "candidate status" => ctx.state_candidate_valid_len = 0,
+                "older candidate" => ctx.state_older_candidate_len = 0,
                 _ => unreachable!(),
             }
             ctx.clear_runtime_error();
@@ -2270,6 +2299,7 @@ mod tests {
         let mut derivatives = [0.0];
         let mut initialized = [0_u8];
         let mut candidate_valid = [0_u8];
+        let mut older_candidate = [0.0];
         let mut ctx = empty_eval_context();
         ctx.state_prev = previous.as_ptr();
         ctx.state_prev_len = previous.len();
@@ -2285,6 +2315,8 @@ mod tests {
         ctx.state_initialized_len = initialized.len();
         ctx.state_candidate_valid = candidate_valid.as_mut_ptr();
         ctx.state_candidate_valid_len = candidate_valid.len();
+        ctx.state_older_candidate = older_candidate.as_mut_ptr();
+        ctx.state_older_candidate_len = older_candidate.len();
         ctx.integration_active = 1;
         ctx.integration_derivative_scale = 1.0;
         ctx.integration_previous_value_scale = 1.0;
@@ -2296,6 +2328,7 @@ mod tests {
         );
         assert_eq!(initialized[0], 0, "accepted state must remain untouched");
         assert_eq!(candidate_valid[0], 1);
+        assert_eq!(older_candidate[0].to_bits(), 10.0_f64.to_bits());
 
         candidate_valid[0] = 0;
         let rejected_retry = [3.0, 20.0];
@@ -2305,6 +2338,7 @@ mod tests {
         );
         assert_eq!(initialized[0], 0);
         assert_eq!(candidate_valid[0], 1);
+        assert_eq!(older_candidate[0].to_bits(), 20.0_f64.to_bits());
         assert!(ctx.take_runtime_error().is_none());
     }
 
@@ -2587,6 +2621,8 @@ mod tests {
             runtime_status: Default::default(),
             state_candidate_valid: std::ptr::null_mut(),
             state_candidate_valid_len: 0,
+            state_older_candidate: std::ptr::null_mut(),
+            state_older_candidate_len: 0,
         };
 
         assert_eq!(

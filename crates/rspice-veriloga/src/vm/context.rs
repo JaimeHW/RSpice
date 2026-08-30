@@ -135,6 +135,52 @@ impl Default for IntegrationCoefficients {
     }
 }
 
+/// Fold one finite circular-integrator candidate into its representable
+/// interval and return the common translation that must be applied to its
+/// accepted history. The translation is deliberately separate from the
+/// visible result: multistep formulas are invariant only when every history
+/// lane is moved by the same amount.
+pub(crate) fn idtmod_wrapped_candidate(
+    raw: f64,
+    modulus: f64,
+    offset: f64,
+) -> Result<(f64, f64), &'static str> {
+    if !raw.is_finite() {
+        return Err("integral candidate must be finite");
+    }
+    if !modulus.is_finite() || modulus <= 0.0 {
+        return Err("modulus must be finite and greater than zero");
+    }
+    if !offset.is_finite() {
+        return Err("offset must be finite");
+    }
+    let upper = offset + modulus;
+    if !upper.is_finite() || upper <= offset {
+        return Err("offset and modulus must form a finite, nonempty interval");
+    }
+
+    // Avoid turning two valid finite operands into infinity when their direct
+    // subtraction overflows. Reducing each operand first is algebraically
+    // equivalent modulo `modulus` and keeps the fallback finite.
+    let delta = raw - offset;
+    let phase = if delta.is_finite() {
+        delta.rem_euclid(modulus)
+    } else {
+        (raw.rem_euclid(modulus) - offset.rem_euclid(modulus)).rem_euclid(modulus)
+    };
+    let mut wrapped = offset + phase;
+    if wrapped >= upper {
+        // Addition can round a phase infinitesimally below the modulus to the
+        // exclusive upper endpoint. That point is the lower endpoint.
+        wrapped = offset;
+    }
+    let rebase = raw - wrapped;
+    if !wrapped.is_finite() || !rebase.is_finite() {
+        return Err("wrapped value or history translation is not finite");
+    }
+    Ok((wrapped, rebase))
+}
+
 /// Controls whether named Verilog-A limiter functions participate in an
 /// evaluation.
 ///
@@ -211,6 +257,12 @@ pub struct VmContext {
     /// and two a known integration slot with no current candidate. This state
     /// is runtime-only and is never serialized.
     pub(crate) state_candidate_valid: Vec<u8>,
+    /// Exact older-history lane proposed by the current integration-state
+    /// evaluation. This is transactional Newton state: `ddt` and `idt` use the
+    /// logical previous value (including startup seeding), while `idtmod` uses
+    /// that value translated onto the wrapped candidate's common branch.
+    /// Runtime-only; accepted history lanes are serialized by checkpoints.
+    pub(crate) state_older_candidate: Vec<f64>,
     /// Current timestep (delta t) for transient analysis
     pub timestep: f64,
     /// Companion coefficients selected by the transient solver.
@@ -288,6 +340,7 @@ impl Default for VmContext {
             state_derivatives_prev: Vec::new(),
             state_initialized: Vec::new(),
             state_candidate_valid: Vec::new(),
+            state_older_candidate: Vec::new(),
             timestep: 0.0,
             integration: IntegrationCoefficients::inactive(),
             lookup_tables: Vec::new(),
@@ -333,6 +386,7 @@ impl VmContext {
             state_derivatives_prev: Vec::new(),
             state_initialized: Vec::new(),
             state_candidate_valid: Vec::new(),
+            state_older_candidate: Vec::new(),
             timestep: 0.0,
             integration: IntegrationCoefficients::inactive(),
             lookup_tables: Vec::new(),
@@ -376,6 +430,7 @@ impl VmContext {
             state_derivatives_prev: Vec::new(),
             state_initialized: Vec::new(),
             state_candidate_valid: Vec::new(),
+            state_older_candidate: Vec::new(),
             timestep: 0.0,
             integration: IntegrationCoefficients::inactive(),
             lookup_tables: Vec::new(),
@@ -419,6 +474,7 @@ impl VmContext {
             state_derivatives_prev: vec![0.0; num_states],
             state_initialized: vec![false; num_states],
             state_candidate_valid: vec![0; num_states],
+            state_older_candidate: vec![0.0; num_states],
             timestep: 0.0,
             integration: IntegrationCoefficients::inactive(),
             lookup_tables: Vec::new(),
@@ -465,6 +521,7 @@ impl VmContext {
             || self.state_derivatives_prev.len() != state_count
             || self.state_initialized.len() != state_count
             || self.state_candidate_valid.len() != state_count
+            || self.state_older_candidate.len() != state_count
         {
             return Err(invalid(
                 "candidate integration-state storage shape is inconsistent".into(),
@@ -493,7 +550,8 @@ impl VmContext {
         for index in 0..state_count {
             if self.state_candidate_valid[index] == INTEGRATION_CANDIDATE_VALID
                 && (!self.state_values[index].is_finite()
-                    || !self.state_derivatives[index].is_finite())
+                    || !self.state_derivatives[index].is_finite()
+                    || !self.state_older_candidate[index].is_finite())
             {
                 return Err(invalid(format!(
                     "candidate integration state {index} contains a non-finite value"
@@ -555,16 +613,18 @@ impl VmContext {
                 INTEGRATION_CANDIDATE_IDLE => {
                     self.state_values[index] = self.state_values_prev[index];
                     self.state_derivatives[index] = self.state_derivatives_prev[index];
+                    self.state_older_candidate[index] = 0.0;
                     continue;
                 }
                 INTEGRATION_CANDIDATE_VALID => {}
                 _ => unreachable!("validated integration candidate status"),
             }
-            self.state_values_older[index] = self.state_values_prev[index];
+            self.state_values_older[index] = self.state_older_candidate[index];
             self.state_values_prev[index] = self.state_values[index];
             self.state_derivatives_prev[index] = self.state_derivatives[index];
             self.state_initialized[index] = true;
             self.state_candidate_valid[index] = INTEGRATION_CANDIDATE_IDLE;
+            self.state_older_candidate[index] = 0.0;
         }
         for buffer in &mut self.delay_buffers {
             buffer.commit();
@@ -588,7 +648,9 @@ impl VmContext {
 
     pub(crate) fn accepted_checkpoint(&self) -> Result<VmAcceptedCheckpoint, VmError> {
         let invalid = |message: String| VmError::InvalidNumericResult(message);
-        if self.state_candidate_valid.len() != self.state_values.len() {
+        if self.state_candidate_valid.len() != self.state_values.len()
+            || self.state_older_candidate.len() != self.state_values.len()
+        {
             return Err(invalid(
                 "integration candidate-valid storage shape is inconsistent".into(),
             ));
@@ -608,6 +670,11 @@ impl VmContext {
         {
             return Err(invalid(
                 "integration state has an in-flight Newton candidate".into(),
+            ));
+        }
+        if self.state_older_candidate.iter().any(|value| *value != 0.0) {
+            return Err(invalid(
+                "integration state has an unapplied older-history candidate".into(),
             ));
         }
         for (index, state) in self.delay_buffers.iter().enumerate() {
@@ -818,6 +885,7 @@ impl VmContext {
         self.state_initialized
             .clone_from(&checkpoint.state_initialized);
         self.state_candidate_valid.fill(0);
+        self.state_older_candidate.fill(0.0);
         for (target, state) in self.delay_buffers.iter_mut().zip(&checkpoint.delay_buffers) {
             target.restore_checkpoint(state);
         }
@@ -879,6 +947,7 @@ impl VmContext {
         self.state_derivatives_prev.fill(0.0);
         self.state_initialized.fill(false);
         self.state_candidate_valid.fill(0);
+        self.state_older_candidate.fill(0.0);
         self.timestep = 0.0;
         self.integration = IntegrationCoefficients::inactive();
 
@@ -916,10 +985,15 @@ impl VmContext {
     /// device evaluation. Only candidates recreated by the final Newton pass
     /// may be committed when the point is accepted.
     pub(crate) fn begin_stateful_evaluation(&mut self) {
-        for status in &mut self.state_candidate_valid {
+        for (status, older_candidate) in self
+            .state_candidate_valid
+            .iter_mut()
+            .zip(&mut self.state_older_candidate)
+        {
             if *status == INTEGRATION_CANDIDATE_VALID {
                 *status = INTEGRATION_CANDIDATE_IDLE;
             }
+            *older_candidate = 0.0;
         }
         for buffer in &mut self.delay_buffers {
             buffer.begin_evaluation();
@@ -997,6 +1071,7 @@ impl VmContext {
                             self.state_derivatives[index] = self.state_derivatives_prev[index];
                         }
                         self.state_candidate_valid[index] = INTEGRATION_CANDIDATE_IDLE;
+                        self.state_older_candidate[index] = 0.0;
                     }
                     _ => {}
                 }
@@ -1012,6 +1087,7 @@ impl VmContext {
                     self.state_candidate_valid[index] = INTEGRATION_CANDIDATE_IDLE;
                     self.state_values[index] = self.state_values_prev[index];
                     self.state_derivatives[index] = self.state_derivatives_prev[index];
+                    self.state_older_candidate[index] = 0.0;
                 }
             }
         }
@@ -1045,6 +1121,7 @@ impl VmContext {
         self.state_derivatives_prev.resize(count, 0.0);
         self.state_initialized.resize(count, false);
         self.state_candidate_valid.resize(count, 0);
+        self.state_older_candidate.resize(count, 0.0);
     }
 
     /// Allocate delay buffers used by `absdelay(...)`.
@@ -1249,7 +1326,9 @@ impl VmContext {
 
 #[cfg(test)]
 mod tests {
-    use super::{IntegrationCoefficients, VerilogAEvaluationMode, VmContext};
+    use super::{
+        IntegrationCoefficients, VerilogAEvaluationMode, VmContext, idtmod_wrapped_candidate,
+    };
     use crate::laplace::StateSpaceFilter;
     use crate::timing_contract::SlewRateMagnitudes;
     use crate::zfilter::ZiFilter;
@@ -1312,6 +1391,7 @@ mod tests {
         context.state_derivatives_prev = vec![19.0, 20.0];
         context.state_initialized = vec![true, true];
         context.state_candidate_valid = vec![1, 2];
+        context.state_older_candidate = vec![1.0, -2.0];
         context.currents = vec![21.0];
         context.set_branch_current(0, 1, 22.0);
         context.request_timer_event(2.0);
@@ -1373,6 +1453,7 @@ mod tests {
         assert_eq!(context.state_derivatives_prev, vec![0.0, 0.0]);
         assert_eq!(context.state_initialized, vec![false, false]);
         assert_eq!(context.state_candidate_valid, vec![0, 0]);
+        assert_eq!(context.state_older_candidate, vec![0.0, 0.0]);
         assert_eq!(context.timestep, 0.0);
         assert_eq!(context.integration, IntegrationCoefficients::inactive());
         assert!(context.currents.is_empty());
@@ -1424,6 +1505,41 @@ mod tests {
         );
         assert_eq!(reset.zi_filters[0].accepted_time, None);
         assert_eq!(reset.timer_event_bound, None);
+    }
+
+    #[test]
+    fn idtmod_wrap_returns_a_finite_common_branch_translation() {
+        let (wrapped, rebase) = idtmod_wrapped_candidate(1.2, 1.0, 0.0).unwrap();
+        assert!((wrapped - 0.2).abs() <= f64::EPSILON);
+        assert_eq!(rebase.to_bits(), 1.0_f64.to_bits());
+
+        let raw = f64::MAX;
+        let offset = -f64::MAX / 2.0;
+        let (wrapped, rebase) = idtmod_wrapped_candidate(raw, f64::MAX, offset)
+            .expect("finite operands remain reducible when raw-offset overflows");
+        assert_eq!(wrapped.to_bits(), 0.0_f64.to_bits());
+        assert_eq!(rebase.to_bits(), raw.to_bits());
+    }
+
+    #[test]
+    fn idtmod_wrap_rejects_invalid_or_unrepresentable_intervals() {
+        for modulus in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert!(
+                idtmod_wrapped_candidate(0.0, modulus, 0.0)
+                    .unwrap_err()
+                    .contains("modulus")
+            );
+        }
+        assert!(
+            idtmod_wrapped_candidate(0.0, 1.0, f64::NAN)
+                .unwrap_err()
+                .contains("offset")
+        );
+        assert!(
+            idtmod_wrapped_candidate(f64::MAX, 1.0, f64::MAX)
+                .unwrap_err()
+                .contains("interval")
+        );
     }
 
     #[test]

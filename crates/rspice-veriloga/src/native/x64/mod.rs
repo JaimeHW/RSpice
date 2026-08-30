@@ -5521,6 +5521,12 @@ endmodule
                 context.state_candidate_valid.as_mut_ptr()
             },
             state_candidate_valid_len: context.state_candidate_valid.len(),
+            state_older_candidate: if context.state_older_candidate.is_empty() {
+                std::ptr::null_mut()
+            } else {
+                context.state_older_candidate.as_mut_ptr()
+            },
+            state_older_candidate_len: context.state_older_candidate.len(),
         }
     }
 
@@ -5851,6 +5857,8 @@ endmodule
             runtime_status: Default::default(),
             state_candidate_valid: std::ptr::null_mut(),
             state_candidate_valid_len: 0,
+            state_older_candidate: std::ptr::null_mut(),
+            state_older_candidate_len: 0,
         }
     }
 }

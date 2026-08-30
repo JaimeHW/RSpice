@@ -9,6 +9,7 @@ mod error;
 mod executor;
 mod filters;
 
+pub(crate) use context::idtmod_wrapped_candidate;
 pub use context::{
     CURRENT_PAIR_GROUND, IntegrationCoefficients, VerilogAEvaluationMode, VmAcceptedCheckpoint,
     VmContext, terminal_pair_current_endpoints, terminal_pair_current_index,

@@ -5363,6 +5363,7 @@ mod tests {
         let mut state_derivatives = [0.0_f64; 2];
         let previous_derivatives = [0.0_f64; 2];
         let mut state_initialized = [1_u8; 2];
+        let mut state_older_candidate = [0.0_f64; 2];
         let mut ctx = eval_context(&[], &[], &[], &[]);
         ctx.timestep = 0.25;
         ctx.state_prev = previous_state.as_ptr();
@@ -5378,6 +5379,8 @@ mod tests {
         ctx.state_initialized_len = state_initialized.len();
         ctx.state_candidate_valid = state_initialized.as_mut_ptr();
         ctx.state_candidate_valid_len = state_initialized.len();
+        ctx.state_older_candidate = state_older_candidate.as_mut_ptr();
+        ctx.state_older_candidate_len = state_older_candidate.len();
         ctx.state_values_len = state_values.len();
         set_backward_euler(&mut ctx, 0.25);
 
@@ -5387,6 +5390,7 @@ mod tests {
             (state_values[1] - 0.4).abs() < 1.0e-12,
             "state: {state_values:?}"
         );
+        assert!((state_older_candidate[1] + 0.1).abs() < 1.0e-12);
     }
 
     #[test]
@@ -8216,6 +8220,7 @@ mod tests {
         let mut state_derivatives = [0.0_f64; 2];
         let previous_derivatives = [0.0_f64; 2];
         let mut state_initialized = [1_u8; 2];
+        let mut state_older_candidate = [0.0_f64; 2];
         let mut ctx = eval_context(&[], &[], &[], &[]);
         ctx.timestep = 0.25;
         ctx.state_prev = previous_state.as_ptr();
@@ -8231,6 +8236,8 @@ mod tests {
         ctx.state_initialized_len = state_initialized.len();
         ctx.state_candidate_valid = state_initialized.as_mut_ptr();
         ctx.state_candidate_valid_len = state_initialized.len();
+        ctx.state_older_candidate = state_older_candidate.as_mut_ptr();
+        ctx.state_older_candidate_len = state_older_candidate.len();
         ctx.state_values_len = state_values.len();
         ctx.integration_derivative_scale = 4.0;
         ctx.integration_previous_value_scale = 4.0;
@@ -8319,6 +8326,7 @@ mod tests {
         let mut state_derivatives = [0.0_f64; 2];
         let previous_derivatives = [0.0_f64; 2];
         let mut state_initialized = [1_u8; 2];
+        let mut state_older_candidate = [0.0_f64; 2];
         let mut ctx = eval_context(&[], &[], &[], &[]);
         set_backward_euler(&mut ctx, 0.25);
         ctx.state_prev = previous_state.as_ptr();
@@ -8334,6 +8342,8 @@ mod tests {
         ctx.state_initialized_len = state_initialized.len();
         ctx.state_candidate_valid = state_initialized.as_mut_ptr();
         ctx.state_candidate_valid_len = state_initialized.len();
+        ctx.state_older_candidate = state_older_candidate.as_mut_ptr();
+        ctx.state_older_candidate_len = state_older_candidate.len();
         ctx.state_values_len = state_values.len();
 
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 2.0_f64.to_bits());
@@ -8422,7 +8432,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_value_leaf_computes_idtmod_state_and_records_wrapped_integral() {
+    fn generated_value_leaf_computes_idtmod_state_and_records_common_branch_history() {
         let program = native_program(
             EntryKind::StampValue,
             vec![
@@ -8447,6 +8457,7 @@ mod tests {
         let mut state_derivatives = [0.0_f64; 2];
         let previous_derivatives = [0.0_f64; 2];
         let mut state_initialized = [1_u8; 2];
+        let mut state_older_candidate = [0.0_f64; 2];
         let mut ctx = eval_context(&[], &[], &[], &[]);
         set_backward_euler(&mut ctx, 0.25);
         ctx.state_prev = previous_state.as_ptr();
@@ -8462,6 +8473,8 @@ mod tests {
         ctx.state_initialized_len = state_initialized.len();
         ctx.state_candidate_valid = state_initialized.as_mut_ptr();
         ctx.state_candidate_valid_len = state_initialized.len();
+        ctx.state_older_candidate = state_older_candidate.as_mut_ptr();
+        ctx.state_older_candidate_len = state_older_candidate.len();
         ctx.state_values_len = state_values.len();
 
         let value = f(&ctx, vars.as_ptr());
@@ -8470,23 +8483,30 @@ mod tests {
             (state_values[1] - 0.4).abs() < 1.0e-12,
             "state: {state_values:?}"
         );
+        assert!((state_older_candidate[1] + 0.1).abs() < 1.0e-12);
 
         state_values[1] = f64::NAN;
+        state_older_candidate[1] = f64::NAN;
         set_backward_euler(&mut ctx, 0.0);
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.5_f64.to_bits());
         assert_eq!(state_values[1].to_bits(), 0.5_f64.to_bits());
+        assert_eq!(state_older_candidate[1].to_bits(), 0.9_f64.to_bits());
 
         state_values[1] = f64::NAN;
+        state_older_candidate[1] = f64::NAN;
         set_backward_euler(&mut ctx, 1.0e-20);
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.5_f64.to_bits());
         assert_eq!(state_values[1].to_bits(), 0.5_f64.to_bits());
+        assert_eq!(state_older_candidate[1].to_bits(), 0.9_f64.to_bits());
 
         state_values[1] = f64::NAN;
+        state_older_candidate[1] = f64::NAN;
         set_backward_euler(&mut ctx, f64::NAN);
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.5_f64.to_bits());
         assert_eq!(state_values[1].to_bits(), 0.5_f64.to_bits());
+        assert_eq!(state_older_candidate[1].to_bits(), 0.9_f64.to_bits());
 
-        let unwrapped_program = native_program(
+        let invalid_modulus_program = native_program(
             EntryKind::StampValue,
             vec![
                 Instruction::PushVariable(0),
@@ -8497,29 +8517,43 @@ mod tests {
             ],
             0,
         );
-        let unwrapped_bytes =
-            compile_value_function(&unwrapped_program).expect("compile idtmod unwrapped leaf");
-        let unwrapped_memory =
-            ExecutableMemory::allocate(&unwrapped_bytes).expect("allocate idtmod unwrapped leaf");
-        let unwrapped_entry = unwrapped_memory
+        let invalid_modulus_bytes = compile_value_function(&invalid_modulus_program)
+            .expect("compile invalid-modulus idtmod leaf");
+        let invalid_modulus_memory = ExecutableMemory::allocate(&invalid_modulus_bytes)
+            .expect("allocate invalid-modulus idtmod leaf");
+        let invalid_modulus_entry = invalid_modulus_memory
             .ptr_at(0)
-            .expect("entry point inside unwrapped image");
-        let unwrapped: extern "C" fn(*const EvalContext, *const f64) -> f64 =
-            unsafe { std::mem::transmute(unwrapped_entry) };
+            .expect("entry point inside invalid-modulus image");
+        let invalid_modulus: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(invalid_modulus_entry) };
 
-        state_values[1] = f64::NAN;
+        state_values[1] = 7.0;
+        state_older_candidate[1] = 8.0;
         set_backward_euler(&mut ctx, 0.25);
         ctx.state_prev = previous_state.as_ptr();
-        let unwrapped_value = unwrapped(&ctx, vars.as_ptr());
-        assert!(
-            (unwrapped_value - 1.4).abs() < 1.0e-12,
-            "unwrapped value: {unwrapped_value}"
+        ctx.clear_runtime_error();
+        assert_eq!(
+            invalid_modulus(&ctx, vars.as_ptr()).to_bits(),
+            0.0_f64.to_bits()
         );
-        assert!(
-            (state_values[1] - 1.4).abs() < 1.0e-12,
-            "unwrapped state: {state_values:?}"
-        );
+        let error = ctx
+            .take_runtime_error()
+            .expect("nonpositive idtmod modulus must hard-fail");
+        assert!(error.contains("modulus must be finite and greater than zero"));
+        assert_eq!(state_values[1].to_bits(), 7.0_f64.to_bits());
+        assert_eq!(state_older_candidate[1].to_bits(), 8.0_f64.to_bits());
 
+        ctx.state_older_candidate = std::ptr::null_mut();
+        ctx.state_older_candidate_len = 0;
+        ctx.clear_runtime_error();
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
+        let error = ctx
+            .take_runtime_error()
+            .expect("missing integration older-candidate storage must hard-fail");
+        assert_missing_state_storage_error(&error);
+
+        ctx.state_older_candidate = state_older_candidate.as_mut_ptr();
+        ctx.state_older_candidate_len = state_older_candidate.len();
         ctx.state_values = std::ptr::null_mut();
         set_backward_euler(&mut ctx, 0.0);
         ctx.clear_runtime_error();
@@ -8573,6 +8607,7 @@ mod tests {
         let mut state_derivatives = [0.0_f64; 2];
         let previous_derivatives = [0.0_f64; 2];
         let mut state_initialized = [1_u8; 2];
+        let mut state_older_candidate = [0.0_f64; 2];
         let mut ctx = eval_context(&[], &[], &[], &[]);
         set_backward_euler(&mut ctx, 0.25);
         ctx.state_prev = previous_state.as_ptr();
@@ -8588,6 +8623,8 @@ mod tests {
         ctx.state_initialized_len = state_initialized.len();
         ctx.state_candidate_valid = state_initialized.as_mut_ptr();
         ctx.state_candidate_valid_len = state_initialized.len();
+        ctx.state_older_candidate = state_older_candidate.as_mut_ptr();
+        ctx.state_older_candidate_len = state_older_candidate.len();
         ctx.state_values_len = state_values.len();
 
         assert_eq!(
@@ -8615,6 +8652,7 @@ mod tests {
             let mut state_derivatives = [0.0_f64; 2];
             let previous_derivatives = [0.0_f64; 2];
             let mut state_initialized = [1_u8; 2];
+            let mut state_older_candidate = [0.0_f64; 2];
             let mut ctx = eval_context(&[], &[], &[], &[]);
             ctx.timestep = 0.25;
             ctx.state_prev = previous_state.as_ptr();
@@ -8630,6 +8668,8 @@ mod tests {
             ctx.state_initialized_len = state_initialized.len();
             ctx.state_candidate_valid = state_initialized.as_mut_ptr();
             ctx.state_candidate_valid_len = state_initialized.len();
+            ctx.state_older_candidate = state_older_candidate.as_mut_ptr();
+            ctx.state_older_candidate_len = state_older_candidate.len();
             ctx.state_values_len = state_values.len();
             ctx.integration_derivative_scale = 4.0;
             ctx.integration_previous_value_scale = 4.0;
@@ -8754,6 +8794,7 @@ mod tests {
         let mut state_derivatives = [0.0_f64; 2];
         let previous_derivatives = [0.0_f64; 2];
         let mut state_initialized = [1_u8; 2];
+        let mut state_older_candidate = [0.0_f64; 2];
         let mut ctx = eval_context(&[], &[], &[], &[]);
         set_backward_euler(&mut ctx, 0.25);
         ctx.state_prev = previous_state.as_ptr();
@@ -8769,6 +8810,8 @@ mod tests {
         ctx.state_initialized_len = state_initialized.len();
         ctx.state_candidate_valid = state_initialized.as_mut_ptr();
         ctx.state_candidate_valid_len = state_initialized.len();
+        ctx.state_older_candidate = state_older_candidate.as_mut_ptr();
+        ctx.state_older_candidate_len = state_older_candidate.len();
         ctx.state_values_len = state_values.len();
 
         let value = f(&ctx, vars.as_ptr());
@@ -8777,11 +8820,14 @@ mod tests {
             (state_values[1] - 0.4).abs() < 1.0e-12,
             "state: {state_values:?}"
         );
+        assert!((state_older_candidate[1] + 0.1).abs() < 1.0e-12);
 
         state_values[1] = f64::NAN;
+        state_older_candidate[1] = f64::NAN;
         set_backward_euler(&mut ctx, 0.0);
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 10.5_f64.to_bits());
         assert_eq!(state_values[1].to_bits(), 0.5_f64.to_bits());
+        assert_eq!(state_older_candidate[1].to_bits(), 0.9_f64.to_bits());
     }
 
     #[test]
@@ -12450,6 +12496,7 @@ mod tests {
         let mut state_derivatives = [0.0_f64, 0.0_f64];
         let previous_derivatives = [0.0_f64, 0.0_f64];
         let mut state_initialized = [1_u8, 1_u8];
+        let mut state_older_candidate = [0.0_f64, 0.0_f64];
         let mut state_ctx = eval_context(&[], &[], &[], &[]);
         set_backward_euler(&mut state_ctx, 0.25);
         state_ctx.state_prev = previous_state.as_ptr();
@@ -12466,6 +12513,8 @@ mod tests {
         state_ctx.state_initialized_len = state_initialized.len();
         state_ctx.state_candidate_valid = state_initialized.as_mut_ptr();
         state_ctx.state_candidate_valid_len = state_initialized.len();
+        state_ctx.state_older_candidate = state_older_candidate.as_mut_ptr();
+        state_ctx.state_older_candidate_len = state_older_candidate.len();
         run_native_value_microbench(
             "stateful_ddt",
             native_program(
@@ -12854,6 +12903,8 @@ mod tests {
             runtime_status: Default::default(),
             state_candidate_valid: std::ptr::null_mut(),
             state_candidate_valid_len: 0,
+            state_older_candidate: std::ptr::null_mut(),
+            state_older_candidate_len: 0,
         }
     }
 

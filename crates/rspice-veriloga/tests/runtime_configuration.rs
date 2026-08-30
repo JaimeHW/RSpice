@@ -135,6 +135,20 @@ fn companion_coefficients_are_validated_before_installation() {
             .expect_err("nonfinite companion scale must fail"),
         "finite",
     );
+
+    let nonaffine = IntegrationCoefficients {
+        active: true,
+        derivative_scale: 3.0,
+        previous_value_scale: 4.0,
+        older_value_scale: 0.0,
+        previous_derivative_scale: 0.0,
+    };
+    assert_configuration_error(
+        device
+            .try_set_integration_coefficients(nonaffine)
+            .expect_err("nonaffine history scales must fail"),
+        "must sum to the derivative scale",
+    );
 }
 
 #[test]

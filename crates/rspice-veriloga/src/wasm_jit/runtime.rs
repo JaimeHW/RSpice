@@ -444,6 +444,7 @@ fn require_integration_state(
         context.state_derivatives_prev.len(),
         context.state_initialized.len(),
         context.state_candidate_valid.len(),
+        context.state_older_candidate.len(),
     ]
     .into_iter()
     .all(|len| index < len);
@@ -1145,6 +1146,7 @@ mod tests {
         assert_eq!(first.to_bits(), 12.0_f64.to_bits());
         assert!(!session.context().state_initialized[0]);
         assert_eq!(session.context().state_candidate_valid[0], 1);
+        assert_eq!(session.context().state_older_candidate[0], 10.0);
 
         session.context_mut().begin_stateful_evaluation();
         let replacement = evaluate_helper_with_session(
@@ -1160,6 +1162,143 @@ mod tests {
         assert_eq!(replacement.to_bits(), 23.0_f64.to_bits());
         assert!(!session.context().state_initialized[0]);
         assert_eq!(session.context().state_candidate_valid[0], 1);
+        assert_eq!(session.context().state_older_candidate[0], 20.0);
+    }
+
+    #[test]
+    fn integration_helpers_preserve_direct_start_history_for_gear2() {
+        let mut context = VmContext::with_states(0, 3);
+        context.integration = IntegrationCoefficients::backward_euler(0.5);
+        let mut session = WasmJitRuntimeSession::new(context);
+
+        let ddt = evaluate_helper_with_session(
+            440,
+            0,
+            0,
+            0,
+            [2.0, 0.0, 0.0, 0.0, 0.0],
+            &[],
+            Some(&mut session),
+        )
+        .expect("evaluate direct-start ddt");
+        let idt = evaluate_helper_with_session(
+            442,
+            1,
+            0,
+            0,
+            [1.0, 0.5, 0.0, 0.0, 0.0],
+            &[],
+            Some(&mut session),
+        )
+        .expect("evaluate direct-start idt");
+        let idtmod = evaluate_helper_with_session(
+            444,
+            2,
+            0,
+            0,
+            [1.0, 0.5, 1.0, 0.0, 0.0],
+            &[],
+            Some(&mut session),
+        )
+        .expect("evaluate direct-start idtmod");
+        assert_eq!([ddt, idt, idtmod], [0.0, 1.0, 0.0]);
+        session
+            .context_mut()
+            .advance_state()
+            .expect("accept direct-start integration history");
+        assert_eq!(session.context().state_values_older, vec![2.0, 0.5, -0.5]);
+
+        session.context_mut().begin_stateful_evaluation();
+        session.context_mut().integration = IntegrationCoefficients {
+            active: true,
+            derivative_scale: 3.0,
+            previous_value_scale: 4.0,
+            older_value_scale: -1.0,
+            previous_derivative_scale: 0.0,
+        };
+        let ddt = evaluate_helper_with_session(
+            440,
+            0,
+            0,
+            0,
+            [3.0, 0.0, 0.0, 0.0, 0.0],
+            &[],
+            Some(&mut session),
+        )
+        .expect("evaluate Gear-2 ddt");
+        let idt = evaluate_helper_with_session(
+            442,
+            1,
+            0,
+            0,
+            [1.0, 0.5, 0.0, 0.0, 0.0],
+            &[],
+            Some(&mut session),
+        )
+        .expect("evaluate Gear-2 idt");
+        let idtmod = evaluate_helper_with_session(
+            444,
+            2,
+            0,
+            0,
+            [1.0, 0.5, 1.0, 0.0, 0.0],
+            &[],
+            Some(&mut session),
+        )
+        .expect("evaluate Gear-2 idtmod");
+        assert!((ddt - 3.0).abs() <= f64::EPSILON);
+        assert!((idt - 1.5).abs() <= f64::EPSILON);
+        assert!((idtmod - 0.5).abs() <= f64::EPSILON);
+    }
+
+    #[test]
+    fn idtmod_helper_preserves_common_branch_history_and_validation() {
+        let mut context = VmContext::with_states(0, 1);
+        context.state_values_prev[0] = 0.6;
+        context.state_values_older[0] = 0.0;
+        context.state_derivatives_prev[0] = 1.0;
+        context.state_initialized[0] = true;
+        context.integration = IntegrationCoefficients::backward_euler(0.6);
+        let mut session = WasmJitRuntimeSession::new(context);
+
+        let wrapped = evaluate_helper_with_session(
+            444,
+            0,
+            0,
+            0,
+            [1.0, 0.0, 1.0, 0.0, 0.0],
+            &[],
+            Some(&mut session),
+        )
+        .expect("evaluate wrapped browser candidate");
+        assert!((wrapped - 0.2).abs() <= 1.0e-15);
+        assert_eq!(
+            session.context().state_older_candidate[0].to_bits(),
+            (-0.4_f64).to_bits()
+        );
+        session
+            .context_mut()
+            .advance_state()
+            .expect("accept common-branch browser history");
+        assert!((session.context().state_values_prev[0] - 0.2).abs() <= 1.0e-15);
+        assert!((session.context().state_values_older[0] + 0.4).abs() <= 1.0e-15);
+
+        session.context_mut().begin_stateful_evaluation();
+        assert_eq!(
+            evaluate_helper_with_session(
+                444,
+                0,
+                0,
+                0,
+                [1.0, 0.0, 0.0, 0.0, 0.0],
+                &[],
+                Some(&mut session),
+            ),
+            Err(HelperError::StatefulRuntimeFailed)
+        );
+        assert!(session.take_error().is_some_and(|error| {
+            error.contains("modulus must be finite and greater than zero")
+        }));
     }
 
     #[test]
