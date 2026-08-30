@@ -78,6 +78,7 @@
     clippy::unnecessary_unwrap
 )]
 
+mod array_index;
 pub mod ast;
 pub mod canonical_ir;
 pub mod codegen;

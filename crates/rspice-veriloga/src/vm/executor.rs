@@ -10,6 +10,7 @@
 //! backend produce is expected to agree with it numerically.
 
 use super::{VmContext, VmError};
+use crate::array_index::{ArrayIndexError, checked_array_slot, saturated_array_upper};
 use crate::codegen::{BytecodeProgram, Instruction};
 
 fn limited_exp(value: f64) -> f64 {
@@ -145,16 +146,25 @@ impl<'a> Vm<'a> {
     /// Resolve a runtime array index (declared-bounds space) to a variable
     /// slot of the contiguous element run at `base`
     pub fn array_slot(raw: f64, base: usize, len: usize, lower: i64) -> Result<usize, VmError> {
-        let index = raw.round() as i64;
-        let offset = index - lower;
-        if offset < 0 || offset >= len as i64 {
-            return Err(VmError::IndexOutOfBounds {
+        checked_array_slot(raw, base, len, lower).map_err(|error| match error {
+            ArrayIndexError::NonFinite { raw } => VmError::InvalidNumericResult(format!(
+                "runtime array index must be finite, got {raw}"
+            )),
+            ArrayIndexError::RoundedOutOfRange { raw } => VmError::InvalidNumericResult(format!(
+                "runtime array index {raw} rounds outside the signed 64-bit index range"
+            )),
+            ArrayIndexError::OutOfBounds { index } => VmError::IndexOutOfBounds {
                 index,
                 lower,
-                upper: lower + len as i64 - 1,
-            });
-        }
-        Ok(base + offset as usize)
+                upper: saturated_array_upper(lower, len),
+            },
+            ArrayIndexError::Empty => {
+                VmError::InvalidInstruction("zero-length dynamic variable range")
+            }
+            ArrayIndexError::SlotOverflow => {
+                VmError::InvalidInstruction("dynamic variable slot arithmetic overflow")
+            }
+        })
     }
 
     /// Execute a single instruction.
@@ -1102,6 +1112,31 @@ mod tests {
             matches!(err, VmError::InvalidInstruction(_)),
             "expected invalid instruction error, got {err:?}"
         );
+    }
+
+    #[test]
+    fn dynamic_array_index_rejects_nonfinite_and_unrepresentable_values() {
+        for raw in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let error = Vm::array_slot(raw, 0, 1, 0)
+                .expect_err("non-finite array indices must fail closed");
+            assert!(matches!(error, VmError::InvalidNumericResult(_)));
+        }
+
+        let error = Vm::array_slot(9_223_372_036_854_775_808.0, 0, 1, 0)
+            .expect_err("unrepresentable rounded array indices must fail closed");
+        assert!(matches!(error, VmError::InvalidNumericResult(_)));
+    }
+
+    #[test]
+    fn dynamic_array_index_rejects_malformed_layout_arithmetic() {
+        assert!(matches!(
+            Vm::array_slot(0.0, 0, 0, 0),
+            Err(VmError::InvalidInstruction(_))
+        ));
+        assert!(matches!(
+            Vm::array_slot(1.0, usize::MAX, 2, 0),
+            Err(VmError::InvalidInstruction(_))
+        ));
     }
 
     #[test]

@@ -14,6 +14,8 @@
 
 use std::cell::UnsafeCell;
 
+use crate::array_index::{checked_array_slot, checked_rounded_i64};
+
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NativeRuntimeErrorKind {
@@ -1768,7 +1770,7 @@ pub extern "C" fn rspice_native_dynamic_variable_error(
     let message = if len == 0 {
         "native dynamic variable access has zero-length storage; no interpreter fallback".into()
     } else if let Ok(len_i64) = i64::try_from(len) {
-        if let Some(index) = rounded_i64_without_saturation(raw_index) {
+        if let Ok(index) = checked_rounded_i64(raw_index) {
             let offset = index.checked_sub(lower);
             if offset.is_some_and(|offset| offset >= 0 && offset < len_i64) {
                 "native dynamic variable access missing variable storage; no interpreter fallback"
@@ -1787,34 +1789,8 @@ pub extern "C" fn rspice_native_dynamic_variable_error(
 }
 
 fn dynamic_variable_offset(raw_index: f64, len_i64: i64, lower: i64) -> Option<usize> {
-    let Some(index) = rounded_i64_without_saturation(raw_index) else {
-        return None;
-    };
-
-    let Some(offset) = index.checked_sub(lower) else {
-        return None;
-    };
-
-    if offset < 0 || offset >= len_i64 {
-        return None;
-    }
-
-    usize::try_from(offset).ok()
-}
-
-fn rounded_i64_without_saturation(value: f64) -> Option<i64> {
-    const I64_MAX_EXCLUSIVE_AS_F64: f64 = 9_223_372_036_854_775_808.0;
-
-    if !value.is_finite() {
-        return None;
-    }
-
-    let rounded = value.round();
-    if rounded < i64::MIN as f64 || rounded >= I64_MAX_EXCLUSIVE_AS_F64 {
-        return None;
-    }
-
-    Some(rounded as i64)
+    let len = usize::try_from(len_i64).ok()?;
+    checked_array_slot(raw_index, 0, len, lower).ok()
 }
 
 fn dynamic_variable_bounds_error(

@@ -968,10 +968,12 @@ mod tests {
     #[test]
     fn helper_fails_closed_for_bounds_shifts_and_uninstalled_state() {
         let variables = [1.0];
-        assert_eq!(
-            evaluate_helper(1, 0, 1, 0, [2.0, 0.0, 0.0, 0.0, 0.0], &variables),
-            Err(HelperError::InvalidDynamicIndex)
-        );
+        for raw_index in [2.0, f64::NAN, f64::INFINITY, 1.0e300] {
+            assert_eq!(
+                evaluate_helper(1, 0, 1, 0, [raw_index, 0.0, 0.0, 0.0, 0.0], &variables,),
+                Err(HelperError::InvalidDynamicIndex)
+            );
+        }
         assert_eq!(
             evaluate_helper(301, 0, 0, 0, [1.0, 64.0, 0.0, 0.0, 0.0], &variables),
             Err(HelperError::InvalidIntegerShift)

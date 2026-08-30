@@ -857,6 +857,8 @@ impl VerilogADevice {
         nodes: &[usize],
         canonical_artifact: Option<&CanonicalIrArtifact>,
     ) -> Result<Self, VmError> {
+        Self::validate_compiled_assignment_layout(model.num_variables, &model.assignment_steps)?;
+
         #[cfg(all(
             not(feature = "native"),
             not(all(feature = "wasm-jit", target_arch = "wasm32"))
@@ -952,6 +954,59 @@ impl VerilogADevice {
         device.rebuild_matrix_indices();
         device.try_resolve_parameter_defaults()?;
         Ok(device)
+    }
+
+    fn validate_compiled_assignment_layout(
+        num_variables: usize,
+        assignment_steps: &[crate::codegen::AssignmentStep],
+    ) -> Result<(), VmError> {
+        const MAX_COMPILED_ASSIGNMENT_STEPS: usize = 4_194_304;
+
+        let mut pending = vec![assignment_steps];
+        let mut visited = 0_usize;
+        while let Some(steps) = pending.pop() {
+            for step in steps {
+                visited = visited.checked_add(1).ok_or_else(|| {
+                    VmError::InvalidModel("assignment-step count overflow".into())
+                })?;
+                if visited > MAX_COMPILED_ASSIGNMENT_STEPS {
+                    return Err(VmError::InvalidModel(format!(
+                        "assignment-step count exceeds safety limit {MAX_COMPILED_ASSIGNMENT_STEPS}"
+                    )));
+                }
+
+                match step {
+                    crate::codegen::AssignmentStep::Assign(assignment) => {
+                        if assignment.var_index >= num_variables {
+                            return Err(VmError::InvalidModel(format!(
+                                "assignment target variable {} is outside declared variable storage length {num_variables}",
+                                assignment.var_index
+                            )));
+                        }
+                    }
+                    crate::codegen::AssignmentStep::AssignIndexed { base, len, .. } => {
+                        if *len == 0 {
+                            return Err(VmError::InvalidModel(
+                                "indexed assignment declares a zero-length variable range".into(),
+                            ));
+                        }
+                        let end = base.checked_add(*len).ok_or_else(|| {
+                            VmError::InvalidModel(
+                                "indexed assignment variable range overflows address space".into(),
+                            )
+                        })?;
+                        if end > num_variables {
+                            return Err(VmError::InvalidModel(format!(
+                                "indexed assignment variable range [{base}:{end}) exceeds declared variable storage length {num_variables}"
+                            )));
+                        }
+                    }
+                    crate::codegen::AssignmentStep::Loop { body, .. } => pending.push(body),
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Preallocate interpreter runtime state vectors from bytecode instruction IDs.
@@ -3835,10 +3890,13 @@ impl VerilogADevice {
         for step in steps {
             match step {
                 crate::codegen::AssignmentStep::Assign(assignment) => {
-                    let value = vm.execute(&assignment.program)?;
-                    if assignment.var_index < vm.context.variables.len() {
-                        vm.context.variables[assignment.var_index] = value;
+                    if assignment.var_index >= vm.context.variables.len() {
+                        return Err(VmError::InvalidInstruction(
+                            "assignment target variable is outside runtime storage",
+                        ));
                     }
+                    let value = vm.execute(&assignment.program)?;
+                    vm.context.variables[assignment.var_index] = value;
                 }
                 crate::codegen::AssignmentStep::AssignIndexed {
                     base,
@@ -3851,10 +3909,13 @@ impl VerilogADevice {
                         .execute(index)
                         .and_then(|raw| Vm::array_slot(raw, *base, *len, *lower));
                     let slot = slot?;
-                    let value = vm.execute(value)?;
-                    if slot < vm.context.variables.len() {
-                        vm.context.variables[slot] = value;
+                    if slot >= vm.context.variables.len() {
+                        return Err(VmError::InvalidInstruction(
+                            "indexed assignment target is outside runtime storage",
+                        ));
                     }
+                    let value = vm.execute(value)?;
+                    vm.context.variables[slot] = value;
                 }
                 crate::codegen::AssignmentStep::Loop { condition, body } => {
                     let mut iterations = 0usize;
@@ -5052,6 +5113,88 @@ impl DeviceBuilder {
 // ============================================================================
 // Tests
 // ============================================================================
+
+#[cfg(all(
+    test,
+    not(feature = "native"),
+    not(all(feature = "wasm-jit", target_arch = "wasm32"))
+))]
+mod bytecode_assignment_integrity_tests {
+    use super::VerilogADevice;
+    use crate::codegen::{AssignmentProgram, AssignmentStep, BytecodeProgram, Instruction};
+    use crate::vm::{Vm, VmContext, VmError};
+
+    #[test]
+    fn scalar_assignment_outside_runtime_storage_fails_closed() {
+        let mut context = VmContext::default();
+        context.variables = vec![7.0];
+        let mut vm = Vm::new(&mut context);
+        let steps = [AssignmentStep::Assign(AssignmentProgram {
+            var_index: 1,
+            program: BytecodeProgram {
+                instructions: vec![Instruction::PushParam(999)],
+            },
+        })];
+
+        let error = VerilogADevice::execute_assignment_steps(&mut vm, &steps)
+            .expect_err("malformed scalar assignment targets must not disappear");
+        assert!(matches!(&error, VmError::InvalidInstruction(_)));
+        assert!(error.to_string().contains("assignment target variable"));
+        assert_eq!(vm.context.variables, vec![7.0]);
+    }
+
+    #[test]
+    fn indexed_assignment_outside_runtime_storage_fails_closed() {
+        let mut context = VmContext::default();
+        context.variables = vec![7.0];
+        let mut vm = Vm::new(&mut context);
+        let steps = [AssignmentStep::AssignIndexed {
+            base: 1,
+            len: 1,
+            lower: 0,
+            index: BytecodeProgram {
+                instructions: vec![Instruction::PushConst(0.0)],
+            },
+            value: BytecodeProgram {
+                instructions: vec![Instruction::PushParam(999)],
+            },
+        }];
+
+        let error = VerilogADevice::execute_assignment_steps(&mut vm, &steps)
+            .expect_err("malformed indexed assignment targets must not disappear");
+        assert!(matches!(&error, VmError::InvalidInstruction(_)));
+        assert!(error.to_string().contains("indexed assignment target"));
+        assert_eq!(vm.context.variables, vec![7.0]);
+    }
+
+    #[test]
+    fn compiled_assignment_layout_rejects_corrupt_scalar_and_indexed_targets() {
+        let scalar = [AssignmentStep::Assign(AssignmentProgram {
+            var_index: 1,
+            program: BytecodeProgram {
+                instructions: vec![Instruction::PushConst(9.0)],
+            },
+        })];
+        let error = VerilogADevice::validate_compiled_assignment_layout(1, &scalar)
+            .expect_err("out-of-range scalar target must fail model validation");
+        assert!(matches!(error, VmError::InvalidModel(_)));
+
+        let indexed = [AssignmentStep::AssignIndexed {
+            base: usize::MAX,
+            len: 2,
+            lower: 0,
+            index: BytecodeProgram {
+                instructions: vec![Instruction::PushConst(0.0)],
+            },
+            value: BytecodeProgram {
+                instructions: vec![Instruction::PushConst(9.0)],
+            },
+        }];
+        let error = VerilogADevice::validate_compiled_assignment_layout(1, &indexed)
+            .expect_err("overflowing indexed target must fail model validation");
+        assert!(matches!(error, VmError::InvalidModel(_)));
+    }
+}
 
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {

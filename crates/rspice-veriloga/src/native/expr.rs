@@ -12,6 +12,7 @@
 #![allow(dead_code)]
 
 use super::{JitError, JitResult};
+use crate::array_index::checked_array_slot;
 use crate::canonical_ir::{
     EquationId, ExprId, HirAnalogOperator, HirCrossDirection, HirExprKind, HirLaplaceKind,
     HirLimiterArgument, MirEquationKind, MirModel, NodeId,
@@ -9436,29 +9437,7 @@ pub(crate) fn constant_dynamic_variable_slot(
     len: usize,
     lower: i64,
 ) -> Option<usize> {
-    if !raw_index.is_finite() {
-        return None;
-    }
-
-    let index = rounded_i64_without_saturation(raw_index)?;
-    let offset = index.checked_sub(lower)?;
-    let offset = usize::try_from(offset).ok()?;
-    if offset >= len {
-        return None;
-    }
-
-    base.checked_add(offset)
-}
-
-fn rounded_i64_without_saturation(value: f64) -> Option<i64> {
-    const I64_MAX_EXCLUSIVE_AS_F64: f64 = 9_223_372_036_854_775_808.0;
-
-    let rounded = value.round();
-    if rounded < i64::MIN as f64 || rounded >= I64_MAX_EXCLUSIVE_AS_F64 {
-        return None;
-    }
-
-    Some(rounded as i64)
+    checked_array_slot(raw_index, base, len, lower).ok()
 }
 
 fn is_independent_value_push(op: &NativeOp) -> bool {

@@ -16,6 +16,8 @@ pub enum VmError {
     WasmJit(String),
     /// Invalid model or instance parameter value.
     ParameterValue(String),
+    /// Structurally invalid or corrupted compiled-model artifact.
+    InvalidModel(String),
     /// A model expression produced NaN or infinity at a solver boundary.
     InvalidNumericResult(String),
     /// Invalid simulator-to-device runtime configuration.
@@ -36,6 +38,7 @@ impl std::fmt::Display for VmError {
             VmError::NativeJit(msg) => write!(f, "native JIT error: {}", msg),
             VmError::WasmJit(msg) => write!(f, "browser WASM JIT error: {msg}"),
             VmError::ParameterValue(msg) => write!(f, "parameter value error: {msg}"),
+            VmError::InvalidModel(msg) => write!(f, "invalid compiled model: {msg}"),
             VmError::InvalidNumericResult(msg) => write!(f, "invalid numeric result: {msg}"),
             VmError::InvalidRuntimeConfiguration(msg) => {
                 write!(f, "invalid runtime configuration: {msg}")
@@ -68,5 +71,14 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("native JIT"));
         assert!(msg.contains("no interpreter fallback"));
+    }
+
+    #[test]
+    fn invalid_model_error_identifies_compiled_artifact_failure() {
+        let err = VmError::InvalidModel("assignment range overflow".into());
+        assert_eq!(
+            err.to_string(),
+            "invalid compiled model: assignment range overflow"
+        );
     }
 }
