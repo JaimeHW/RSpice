@@ -1999,19 +1999,52 @@ impl<'a> ExprConverter<'a> {
             AnalogOperator::IdtMod {
                 expr,
                 ic,
-                modulus: _,
-                offset: _,
-                abstol: _,
+                modulus,
+                offset,
+                abstol,
                 ..
             } => {
-                // idtmod is similar to idt for basic cases
+                if let Some(abstol) = abstol {
+                    return Err(CodeGenError::with_span(
+                        CodeGenErrorKind::UnsupportedFeature(
+                            "idtmod abstol argument cannot be represented by the legacy runtime"
+                                .into(),
+                        ),
+                        abstol.span(),
+                    )
+                    .into());
+                }
+                if modulus.is_none()
+                    && let Some(offset) = offset
+                {
+                    return Err(CodeGenError::with_span(
+                        CodeGenErrorKind::InvalidExpression(
+                            "idtmod offset argument requires a modulus argument".into(),
+                        ),
+                        offset.span(),
+                    )
+                    .into());
+                }
+
                 let inner = self.convert(expr)?;
                 let ic_expr = ic
                     .as_ref()
                     .map(|e| self.convert(e))
                     .transpose()?
                     .map(Box::new);
-                Ok(IrExpr::Idt(Box::new(inner), ic_expr))
+                match modulus {
+                    Some(modulus) => Ok(IrExpr::IdtMod {
+                        expr: Box::new(inner),
+                        ic: ic_expr,
+                        modulus: Box::new(self.convert(modulus)?),
+                        offset: offset
+                            .as_ref()
+                            .map(|value| self.convert(value))
+                            .transpose()?
+                            .map(Box::new),
+                    }),
+                    None => Ok(IrExpr::Idt(Box::new(inner), ic_expr)),
+                }
             }
             // KNOWN DEFECT: this returns `expr` itself rather than its partial
             // derivative with respect to `probe`, so any model relying on
@@ -2460,7 +2493,8 @@ mod tests {
         ArrayLiteralExpr, BinaryExpr, CallExpr, ConditionalExpr, LaplaceKind, NumberLit,
         ReplicationExpr, ZiKind,
     };
-    use crate::source::Span;
+    use crate::error::CompileError;
+    use crate::source::{SourceId, Span};
 
     fn number(value: f64) -> Expression {
         Expression::Number(NumberLit {
@@ -2506,6 +2540,98 @@ mod tests {
             assignment_pattern: true,
             span: Span::dummy(),
         })
+    }
+
+    #[test]
+    fn public_idtmod_ast_preserves_wrapping_operands() {
+        let context = empty_context();
+        let converter = ExprConverter::new(&context);
+        let expression = Expression::AnalogOperator(AnalogOperator::IdtMod {
+            expr: Box::new(number(1.25)),
+            ic: Some(Box::new(number(2.5))),
+            modulus: Some(Box::new(number(3.75))),
+            offset: Some(Box::new(number(-4.0))),
+            abstol: None,
+            span: Span::dummy(),
+        });
+
+        let IrExpr::IdtMod {
+            expr,
+            ic: Some(ic),
+            modulus,
+            offset: Some(offset),
+        } = converter
+            .convert(&expression)
+            .expect("public IdtMod AST must retain modulo integration")
+        else {
+            panic!("public IdtMod AST was not lowered to IrExpr::IdtMod");
+        };
+        assert!(matches!(*expr, IrExpr::Const(value) if value == 1.25));
+        assert!(matches!(*ic, IrExpr::Const(value) if value == 2.5));
+        assert!(matches!(*modulus, IrExpr::Const(value) if value == 3.75));
+        assert!(matches!(*offset, IrExpr::Const(value) if value == -4.0));
+    }
+
+    #[test]
+    fn public_idtmod_ast_rejects_unrepresentable_arguments_at_their_spans() {
+        let source = SourceId::new(17);
+        let value_at = |value, start| {
+            Expression::Number(NumberLit {
+                value,
+                raw: value.to_string().into(),
+                span: Span::new(source, start, start + 1),
+            })
+        };
+        let context = empty_context();
+        let converter = ExprConverter::new(&context);
+
+        let abstol_span = Span::new(source, 40, 44);
+        let abstol = Expression::AnalogOperator(AnalogOperator::IdtMod {
+            expr: Box::new(number(1.0)),
+            ic: None,
+            modulus: Some(Box::new(number(2.0))),
+            offset: None,
+            abstol: Some(Box::new(Expression::Number(NumberLit {
+                value: 1.0e-12,
+                raw: "1e-12".into(),
+                span: abstol_span,
+            }))),
+            span: Span::new(source, 0, 45),
+        });
+        let error = converter
+            .convert(&abstol)
+            .expect_err("legacy IdtMod IR cannot represent abstol");
+        let CompileError::CodeGen(error) = error else {
+            panic!("expected code-generation diagnostic");
+        };
+        assert_eq!(error.span, Some(abstol_span));
+        assert!(matches!(
+            error.kind,
+            CodeGenErrorKind::UnsupportedFeature(ref detail)
+                if detail.contains("idtmod abstol argument")
+        ));
+
+        let offset_span = Span::new(source, 70, 71);
+        let offset_without_modulus = Expression::AnalogOperator(AnalogOperator::IdtMod {
+            expr: Box::new(number(1.0)),
+            ic: None,
+            modulus: None,
+            offset: Some(Box::new(value_at(-1.0, offset_span.start))),
+            abstol: None,
+            span: Span::new(source, 50, 72),
+        });
+        let error = converter
+            .convert(&offset_without_modulus)
+            .expect_err("IdtMod offset without modulus is not representable");
+        let CompileError::CodeGen(error) = error else {
+            panic!("expected code-generation diagnostic");
+        };
+        assert_eq!(error.span, Some(offset_span));
+        assert!(matches!(
+            error.kind,
+            CodeGenErrorKind::InvalidExpression(ref detail)
+                if detail.contains("offset argument requires a modulus")
+        ));
     }
 
     #[test]
