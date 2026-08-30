@@ -20,6 +20,14 @@ pub(super) enum ReactiveHistorySeed {
     SolvedBias,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum AcceptedJunctionHistoryRestart {
+    /// Preserve the authoritative accepted generation at a physical breakpoint.
+    Preserve,
+    /// Recompute current state from the accepted solution during livelock recovery.
+    Reinitialize,
+}
+
 #[derive(Clone, Copy)]
 pub(super) enum MosfetCompanionBiasSource {
     /// Derive both gate and evaluated branches from the supplied solution.
@@ -128,18 +136,21 @@ impl Engine {
         }
     }
 
-    /// Breakpoint-style integration restart after a floor-dt livelock.
+    /// Breakpoint-style integration epoch restart.
     ///
-    /// Re-seeds every reactive history from the accepted solution exactly
-    /// like transient startup (flat capacitor/inductor history, zeroed
-    /// capacitor current, maxstep-seeded dt chains) so the truncation
-    /// estimators stop differencing the poisoned floor-dt trail. The
-    /// transmission-line delay buffers are deliberately left alone — they
-    /// hold genuine propagating state, not integrator history.
+    /// Re-seeds every reactive history like transient startup (flat history,
+    /// zeroed companion derivatives, maxstep-seeded dt chains) so truncation
+    /// estimators stop differencing the previous integration epoch. A physical
+    /// breakpoint preserves the accepted BJT/diode generation because its
+    /// limited and reduced state cannot be reconstructed exactly from the
+    /// external solution; livelock recovery deliberately recomputes it to
+    /// discard poisoned history. Transmission-line delay buffers are left
+    /// alone because they hold genuine propagating state.
     pub(super) fn reseed_reactive_histories_for_restart(
         circuit: &mut crate::circuit::CircuitData,
         solution: &[Value],
         hinted_max_step: Value,
+        accepted_junction_history_restart: AcceptedJunctionHistoryRestart,
         bjt_history: &mut BjtTransientHistory,
         jfet_history: &mut JfetTransientHistory,
         diode_history: &mut DiodeTransientHistory,
@@ -179,15 +190,26 @@ impl Engine {
         // A restart re-seeds from a solution the run already accepted, which is
         // a real bias every device must follow; the t=0 `IC=` vectors are spent.
         let seed = ReactiveHistorySeed::SolvedBias;
-        *bjt_history = Self::initialize_bjt_history(circuit, solution, seed);
-        bjt_history.accepted_dt_prev = hinted_max_step;
-        bjt_history.accepted_dt_prev_prev = hinted_max_step;
+        match accepted_junction_history_restart {
+            AcceptedJunctionHistoryRestart::Preserve => {
+                Self::flatten_bjt_and_diode_histories_for_order_one_restart(
+                    bjt_history,
+                    diode_history,
+                    hinted_max_step,
+                );
+            }
+            AcceptedJunctionHistoryRestart::Reinitialize => {
+                *bjt_history = Self::initialize_bjt_history(circuit, solution, seed);
+                bjt_history.accepted_dt_prev = hinted_max_step;
+                bjt_history.accepted_dt_prev_prev = hinted_max_step;
+                *diode_history = Self::initialize_diode_history(circuit, solution, seed);
+                diode_history.accepted_dt_prev = hinted_max_step;
+                diode_history.accepted_dt_prev_prev = hinted_max_step;
+            }
+        }
         *jfet_history = Self::initialize_jfet_history(circuit, solution, seed);
         jfet_history.accepted_dt_prev = hinted_max_step;
         jfet_history.accepted_dt_prev_prev = hinted_max_step;
-        *diode_history = Self::initialize_diode_history(circuit, solution, seed);
-        diode_history.accepted_dt_prev = hinted_max_step;
-        diode_history.accepted_dt_prev_prev = hinted_max_step;
         *mosfet_history = Self::initialize_mosfet_history(circuit, solution, seed);
         mosfet_history.accepted_dt_prev = hinted_max_step;
         mosfet_history.accepted_dt_prev_prev = hinted_max_step;
@@ -204,6 +226,59 @@ impl Engine {
         *ekv26_history = Self::initialize_ekv26_history(circuit, solution);
         ekv26_history.accepted_dt_prev = hinted_max_step;
         ekv26_history.accepted_dt_prev_prev = hinted_max_step;
+    }
+
+    /// Starts a new order-one integration epoch without re-evaluating accepted
+    /// nonlinear device state from the node solution.
+    ///
+    /// BJT charge reduction can carry internal voltages and limited junction
+    /// biases which are not recoverable bit-for-bit from the external solution.
+    /// Keep that accepted generation authoritative, flatten every older
+    /// generation onto it, and discard only derivative history. Diode charge is
+    /// handled the same way so a breakpoint cannot perturb an accepted limited
+    /// junction bias by recomputing it.
+    #[inline]
+    pub(super) fn flatten_bjt_and_diode_histories_for_order_one_restart(
+        bjt_history: &mut BjtTransientHistory,
+        diode_history: &mut DiodeTransientHistory,
+        accepted_dt_seed: Value,
+    ) {
+        bjt_history.vbe_prev_prev.clone_from(&bjt_history.vbe_prev);
+        bjt_history.vbc_prev_prev.clone_from(&bjt_history.vbc_prev);
+        bjt_history.vcs_prev_prev.clone_from(&bjt_history.vcs_prev);
+        bjt_history.ibe_prev.fill(0.0);
+        bjt_history.ibc_prev.fill(0.0);
+        bjt_history.ics_prev.fill(0.0);
+        bjt_history
+            .charge_q_prev_prev
+            .clone_from(&bjt_history.charge_q_prev);
+        bjt_history
+            .charge_q_prev_prev_prev
+            .clone_from(&bjt_history.charge_q_prev);
+        bjt_history
+            .charge_cq_prev
+            .fill([0.0; BJT_DYNAMIC_CHARGE_COUNT]);
+        bjt_history
+            .dynamic_internal_prev_prev
+            .clone_from(&bjt_history.dynamic_internal_prev);
+        bjt_history
+            .dynamic_linear_prev_prev
+            .clone_from(&bjt_history.dynamic_linear_prev);
+        bjt_history.accepted_dt_prev = accepted_dt_seed;
+        bjt_history.accepted_dt_prev_prev = accepted_dt_seed;
+
+        diode_history
+            .vd_prev_prev
+            .clone_from(&diode_history.vd_prev);
+        diode_history
+            .qd_prev_prev
+            .clone_from(&diode_history.qd_prev);
+        diode_history
+            .qd_prev_prev_prev
+            .clone_from(&diode_history.qd_prev);
+        diode_history.cqd_prev.fill(0.0);
+        diode_history.accepted_dt_prev = accepted_dt_seed;
+        diode_history.accepted_dt_prev_prev = accepted_dt_seed;
     }
 
     #[inline]
@@ -1674,6 +1749,116 @@ pub(super) type MosfetGateCompanionCharges = [(Value, Value); 3];
 mod tests {
     use super::*;
     use crate::Netlist;
+
+    #[test]
+    fn order_one_restart_flattens_bjt_history_around_exact_accepted_state() {
+        let accepted_charge: [Value; BJT_DYNAMIC_CHARGE_COUNT] =
+            std::array::from_fn(|idx| 10.0 + idx as Value);
+        let accepted_internal: [Value; BJT_INTERNAL_STATE_DIM] =
+            std::array::from_fn(|idx| 20.0 + idx as Value);
+        let accepted_terminal: [Value; BJT_EXTERNAL_STATE_DIM] =
+            std::array::from_fn(|idx| 30.0 + idx as Value);
+        let accepted_linear = VbicPredictorLinearBranchState {
+            vrcx: 41.0,
+            vrci: 42.0,
+            vrbx: 43.0,
+            vrbi: 44.0,
+            vre: 45.0,
+            vrbp: 46.0,
+            vrs: 47.0,
+        };
+        let mut bjt_history = BjtTransientHistory {
+            vbe_prev: vec![1.0],
+            vbe_prev_prev: vec![-1.0],
+            ibe_prev: vec![101.0],
+            vbc_prev: vec![2.0],
+            vbc_prev_prev: vec![-2.0],
+            ibc_prev: vec![102.0],
+            vcs_prev: vec![3.0],
+            vcs_prev_prev: vec![-3.0],
+            ics_prev: vec![103.0],
+            charge_q_prev: vec![accepted_charge],
+            charge_q_prev_prev: vec![[-4.0; BJT_DYNAMIC_CHARGE_COUNT]],
+            charge_q_prev_prev_prev: vec![[-5.0; BJT_DYNAMIC_CHARGE_COUNT]],
+            charge_cq_prev: vec![[104.0; BJT_DYNAMIC_CHARGE_COUNT]],
+            accepted_terminal_currents: vec![Some(accepted_terminal)],
+            dynamic_internal_prev: vec![accepted_internal],
+            dynamic_internal_prev_prev: vec![[-6.0; BJT_INTERNAL_STATE_DIM]],
+            dynamic_linear_prev: vec![accepted_linear],
+            dynamic_linear_prev_prev: vec![VbicPredictorLinearBranchState::default()],
+            accepted_dt_prev: 105.0,
+            accepted_dt_prev_prev: 106.0,
+        };
+
+        Engine::flatten_bjt_and_diode_histories_for_order_one_restart(
+            &mut bjt_history,
+            &mut DiodeTransientHistory::default(),
+            0.0,
+        );
+
+        assert_eq!(bjt_history.vbe_prev, vec![1.0]);
+        assert_eq!(bjt_history.vbe_prev_prev, bjt_history.vbe_prev);
+        assert_eq!(bjt_history.vbc_prev, vec![2.0]);
+        assert_eq!(bjt_history.vbc_prev_prev, bjt_history.vbc_prev);
+        assert_eq!(bjt_history.vcs_prev, vec![3.0]);
+        assert_eq!(bjt_history.vcs_prev_prev, bjt_history.vcs_prev);
+        assert_eq!(bjt_history.ibe_prev, vec![0.0]);
+        assert_eq!(bjt_history.ibc_prev, vec![0.0]);
+        assert_eq!(bjt_history.ics_prev, vec![0.0]);
+        assert_eq!(bjt_history.charge_q_prev, vec![accepted_charge]);
+        assert_eq!(bjt_history.charge_q_prev_prev, bjt_history.charge_q_prev);
+        assert_eq!(
+            bjt_history.charge_q_prev_prev_prev,
+            bjt_history.charge_q_prev
+        );
+        assert_eq!(
+            bjt_history.charge_cq_prev,
+            vec![[0.0; BJT_DYNAMIC_CHARGE_COUNT]]
+        );
+        assert_eq!(
+            bjt_history.accepted_terminal_currents,
+            vec![Some(accepted_terminal)]
+        );
+        assert_eq!(bjt_history.dynamic_internal_prev, vec![accepted_internal]);
+        assert_eq!(
+            bjt_history.dynamic_internal_prev_prev,
+            bjt_history.dynamic_internal_prev
+        );
+        assert_eq!(bjt_history.dynamic_linear_prev[0].vrcx, 41.0);
+        assert_eq!(bjt_history.dynamic_linear_prev_prev[0].vrcx, 41.0);
+        assert_eq!(bjt_history.dynamic_linear_prev_prev[0].vrs, 47.0);
+        assert_eq!(bjt_history.accepted_dt_prev, 0.0);
+        assert_eq!(bjt_history.accepted_dt_prev_prev, 0.0);
+    }
+
+    #[test]
+    fn order_one_restart_flattens_diode_history_around_exact_accepted_state() {
+        let mut diode_history = DiodeTransientHistory {
+            vd_prev: vec![1.25],
+            vd_prev_prev: vec![-1.0],
+            qd_prev: vec![2.5],
+            qd_prev_prev: vec![-2.0],
+            qd_prev_prev_prev: vec![-3.0],
+            cqd_prev: vec![99.0],
+            accepted_dt_prev: 3.0,
+            accepted_dt_prev_prev: 4.0,
+        };
+
+        Engine::flatten_bjt_and_diode_histories_for_order_one_restart(
+            &mut BjtTransientHistory::default(),
+            &mut diode_history,
+            0.125,
+        );
+
+        assert_eq!(diode_history.vd_prev, vec![1.25]);
+        assert_eq!(diode_history.vd_prev_prev, diode_history.vd_prev);
+        assert_eq!(diode_history.qd_prev, vec![2.5]);
+        assert_eq!(diode_history.qd_prev_prev, diode_history.qd_prev);
+        assert_eq!(diode_history.qd_prev_prev_prev, diode_history.qd_prev);
+        assert_eq!(diode_history.cqd_prev, vec![0.0]);
+        assert_eq!(diode_history.accepted_dt_prev, 0.125);
+        assert_eq!(diode_history.accepted_dt_prev_prev, 0.125);
+    }
 
     #[test]
     fn pvdmos_companion_slots_follow_polarity_normalized_charge_voltages() {

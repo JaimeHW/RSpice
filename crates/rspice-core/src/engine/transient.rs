@@ -304,7 +304,8 @@ mod startup;
 mod state;
 mod xyce_dae;
 pub(self) use state::{
-    MosfetCompanionBranchTerms, MosfetGateCompanionCharges, ReactiveHistorySeed,
+    AcceptedJunctionHistoryRestart, MosfetCompanionBranchTerms, MosfetGateCompanionCharges,
+    ReactiveHistorySeed,
 };
 mod state_advanced_mos;
 mod state_commit;
@@ -3567,10 +3568,12 @@ impl Engine {
             &mut scheduled_checkpoints,
         )?;
 
-        // A checkpoint intentionally does not serialize nonlinear charge histories
-        // or their accepted timestep chain. Mark that chain unknown on resume so
-        // every variable-step companion fails safe until one real interval has
-        // been accepted. Fresh startup retains ngspice's maxstep seed.
+        // Version-18 checkpoints restore accepted native diode/BJT limiter,
+        // evaluation, and charge-snapshot state before the order-one reactive
+        // histories below are reconstructed. The accepted timestep chain is
+        // deliberately not continued across the seam, so every variable-step
+        // companion fails safe until one real interval has been accepted.
+        // Fresh startup retains ngspice's maxstep seed.
         let accepted_dt_seed = if resume.is_some() {
             0.0
         } else {
@@ -3808,6 +3811,7 @@ impl Engine {
                         &mut circuit,
                         &solution,
                         0.0,
+                        AcceptedJunctionHistoryRestart::Preserve,
                         &mut bjt_history,
                         &mut jfet_history,
                         &mut diode_history,
@@ -3876,6 +3880,7 @@ impl Engine {
                         &mut circuit,
                         &solution,
                         hinted_max_step,
+                        AcceptedJunctionHistoryRestart::Reinitialize,
                         &mut bjt_history,
                         &mut jfet_history,
                         &mut diode_history,
