@@ -14059,18 +14059,22 @@ endmodule
                 &BytecodeProgram { instructions },
                 limits(0, 0),
             )
-            .expect("invalid bitwise operand remains representable for fail-closed runtime handling");
+            .expect(
+                "invalid bitwise operand remains representable for fail-closed runtime handling",
+            );
 
             assert_eq!(lowered.max_stack_depth(), 2);
-            assert!(matches!(
-                lowered.ops(),
-                [NativeOp::LoadTemperature, NativeOp::Const(value), NativeOp::IntegerBinary(_)]
-                    if !value.is_finite()
-            ) || matches!(
-                lowered.ops(),
-                [NativeOp::Const(value), NativeOp::LoadTemperature, NativeOp::IntegerBinary(_)]
-                    if !value.is_finite()
-            ));
+            assert!(
+                matches!(
+                    lowered.ops(),
+                    [NativeOp::LoadTemperature, NativeOp::Const(value), NativeOp::IntegerBinary(_)]
+                        if !value.is_finite()
+                ) || matches!(
+                    lowered.ops(),
+                    [NativeOp::Const(value), NativeOp::LoadTemperature, NativeOp::IntegerBinary(_)]
+                        if !value.is_finite()
+                )
+            );
         }
     }
 

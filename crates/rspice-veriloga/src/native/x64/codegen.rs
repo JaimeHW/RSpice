@@ -34,15 +34,14 @@ use crate::native::abi::{
     rspice_integer_operation_native, rspice_laplace_step_native, rspice_last_crossing_state_native,
     rspice_limexp, rspice_limited_exp, rspice_limiter_previous_native, rspice_limiter_store_native,
     rspice_log, rspice_log10, rspice_mod, rspice_native_current_probe_error,
-    rspice_native_dynamic_variable_error,
-    rspice_native_limit_state_bounds_error, rspice_native_limit_state_initialized_error,
-    rspice_native_limit_state_values_bounds_error, rspice_native_limit_state_values_error,
-    rspice_native_loop_limit_error, rspice_native_non_finite_contribution_error,
-    rspice_native_param_given_error, rspice_native_port_connected_error,
-    rspice_native_prior_current_error, rspice_pow, rspice_sin, rspice_sinh,
-    rspice_slew_state_native, rspice_table_derivative_native, rspice_table_lookup_native,
-    rspice_tan, rspice_tanh, rspice_timer_state_native, rspice_transition_state_native,
-    rspice_zi_derivative_native, rspice_zi_step_native,
+    rspice_native_dynamic_variable_error, rspice_native_limit_state_bounds_error,
+    rspice_native_limit_state_initialized_error, rspice_native_limit_state_values_bounds_error,
+    rspice_native_limit_state_values_error, rspice_native_loop_limit_error,
+    rspice_native_non_finite_contribution_error, rspice_native_param_given_error,
+    rspice_native_port_connected_error, rspice_native_prior_current_error, rspice_pow, rspice_sin,
+    rspice_sinh, rspice_slew_state_native, rspice_table_derivative_native,
+    rspice_table_lookup_native, rspice_tan, rspice_tanh, rspice_timer_state_native,
+    rspice_transition_state_native, rspice_zi_derivative_native, rspice_zi_step_native,
 };
 pub(crate) use crate::native::assignment::NativeAssignment;
 use crate::native::assignment::shareable_batch_ranges;
@@ -10013,7 +10012,8 @@ mod tests {
             ),
         ];
 
-        for (name, instruction, expected_op, left, right, integer_expected, expected_count) in cases {
+        for (name, instruction, expected_op, left, right, integer_expected, expected_count) in cases
+        {
             let program = native_program(
                 EntryKind::StampValue,
                 vec![
@@ -10107,7 +10107,11 @@ mod tests {
                 expected.to_bits(),
                 "{name}: zero-count shift must still perform checked Verilog-AMS conversion"
             );
-            assert_eq!(ctx.take_runtime_error().is_some(), !left.is_finite(), "{name}");
+            assert_eq!(
+                ctx.take_runtime_error().is_some(),
+                !left.is_finite(),
+                "{name}"
+            );
         }
     }
 

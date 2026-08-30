@@ -2297,10 +2297,8 @@ impl HirLowerer {
                         lowered.push(self.lower_invalid_replication(replication.span));
                         continue;
                     }
-                    let body = self.lower_array_literal_elements_at_depth(
-                        &replication.elements,
-                        depth + 1,
-                    );
+                    let body = self
+                        .lower_array_literal_elements_at_depth(&replication.elements, depth + 1);
                     let Some(additional) = count.checked_mul(body.len()) else {
                         lowered.push(self.lower_invalid_replication(replication.span));
                         continue;

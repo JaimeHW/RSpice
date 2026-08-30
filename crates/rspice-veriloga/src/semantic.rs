@@ -6384,10 +6384,9 @@ impl SemanticAnalyzer {
                     },
                     UnaryOp::Pos => v,
                     UnaryOp::Not => ConstantValue::Integer(i64::from(!v.is_truthy())),
-                    UnaryOp::BitNot => ConstantValue::Integer(i64::from(!i32::try_from(
-                        Self::constant_integer(v)?,
-                    )
-                    .ok()?)),
+                    UnaryOp::BitNot => ConstantValue::Integer(i64::from(
+                        !i32::try_from(Self::constant_integer(v)?).ok()?,
+                    )),
                 })
             }
             Expression::Binary(b) => {

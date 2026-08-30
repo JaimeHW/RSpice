@@ -158,7 +158,10 @@ fn bitwise_and_shift_operators_reject_real_operands() {
         };
         assert_eq!(error.span.start, expected_offset as u32, "{expression}");
         let message = error.to_string();
-        assert!(message.contains("expected integer"), "{expression}: {message}");
+        assert!(
+            message.contains("expected integer"),
+            "{expression}: {message}"
+        );
         assert!(
             message.contains("found real") || message.contains("found nature_access"),
             "{expression}: {message}"
@@ -243,7 +246,10 @@ fn filter_replication_counts_and_operand_budgets_fail_before_allocation() {
     for (count, expected) in [
         ("2.0", "integer constant expression"),
         ("-1", "must be non-negative"),
-        ("4611686018427387904", "replication element count overflows u64"),
+        (
+            "4611686018427387904",
+            "replication element count overflows u64",
+        ),
         ("1021", "supported safety limit is 1020"),
     ] {
         let source = module_src(&format!(
@@ -726,7 +732,10 @@ fn parameter_array_zero_and_unsafe_replication_counts_are_diagnostic() {
     for (count, expected) in [
         ("2.0", "integer constant expression"),
         ("-1", "must be non-negative"),
-        ("4611686018427387904", "replication element count overflows u64"),
+        (
+            "4611686018427387904",
+            "replication element count overflows u64",
+        ),
         ("1048577", "supported safety limit is 1048576"),
     ] {
         let error = analyze(&module_src(&format!(
