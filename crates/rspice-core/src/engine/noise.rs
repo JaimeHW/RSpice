@@ -102,14 +102,108 @@ impl Engine {
         frequency: Value,
         temperature: Value,
     ) -> Result<Value, SimulationError> {
-        source
+        let density = source
             .try_spectral_density(frequency, temperature)
             .map_err(|error| {
                 SimulationError::Circuit(format!(
                     "Noise source '{}' failed at {frequency} Hz: {error}",
                     Self::noise_source_label(&source.identity)
                 ))
-            })
+            })?;
+
+        // The primitive laws are strictly positive for strictly positive
+        // physical inputs.  A zero result in that state is floating-point
+        // underflow, not an inactive mechanism.  Treating it as zero would
+        // silently delete authored noise just as surely as an explicit
+        // magnitude cutoff did.
+        let should_be_positive = match source.noise_type {
+            crate::analysis::noise::NoiseSourceType::Thermal
+            | crate::analysis::noise::NoiseSourceType::Shot
+            | crate::analysis::noise::NoiseSourceType::White => source.parameter > 0.0,
+            crate::analysis::noise::NoiseSourceType::Flicker => {
+                frequency > 0.0 && source.parameter > 0.0 && source.current != 0.0
+            }
+            crate::analysis::noise::NoiseSourceType::Burst => {
+                source.parameter > 0.0 && source.current != 0.0
+            }
+            crate::analysis::noise::NoiseSourceType::Bsim4Flicker
+            | crate::analysis::noise::NoiseSourceType::Bsim3Flicker => {
+                frequency > 0.0 && source.current != 0.0
+            }
+            crate::analysis::noise::NoiseSourceType::Table
+            | crate::analysis::noise::NoiseSourceType::Bsim4CorrelatedThermal => false,
+        };
+        if density == 0.0 && should_be_positive {
+            return Err(SimulationError::Circuit(format!(
+                "Noise source '{}' underflowed to zero at {frequency} Hz",
+                Self::noise_source_label(&source.identity)
+            )));
+        }
+        Ok(density)
+    }
+
+    /// Multiply two physical scale factors without allowing overflow or
+    /// underflow to turn an active noise mechanism into invalid/zero state.
+    fn checked_noise_product(
+        label: &str,
+        lhs: Value,
+        rhs: Value,
+    ) -> Result<Value, SimulationError> {
+        if !lhs.is_finite() || !rhs.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "Noise source '{label}' has non-finite scale factors ({lhs:e}, {rhs:e})"
+            )));
+        }
+        let product = lhs * rhs;
+        if !product.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "Noise source '{label}' scale overflowed ({lhs:e} * {rhs:e})"
+            )));
+        }
+        if product == 0.0 && lhs != 0.0 && rhs != 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "Noise source '{label}' scale underflowed ({lhs:e} * {rhs:e})"
+            )));
+        }
+        Ok(product)
+    }
+
+    /// Convert a physical conductance into the resistance representation used
+    /// by `NoiseSource::thermal`. Exact zero means the mechanism is absent;
+    /// every positive finite and representable conductance is retained.
+    fn noise_resistance_from_conductance(
+        label: &str,
+        conductance: Value,
+    ) -> Result<Option<Value>, SimulationError> {
+        if !conductance.is_finite() || conductance < 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "Noise source '{label}' conductance must be finite and nonnegative, got {conductance:e} S"
+            )));
+        }
+        if conductance == 0.0 {
+            return Ok(None);
+        }
+        let resistance = 1.0 / conductance;
+        if !resistance.is_finite() || resistance <= 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "Noise source '{label}' resistance is not representable for conductance {conductance:e} S"
+            )));
+        }
+        Ok(Some(resistance))
+    }
+
+    /// Require a computed parameter that is mathematically positive in the
+    /// caller's active branch to remain positive and finite after evaluation.
+    fn checked_positive_noise_parameter(
+        label: &str,
+        parameter: Value,
+    ) -> Result<Value, SimulationError> {
+        if !parameter.is_finite() || parameter <= 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "Noise source '{label}' positive parameter is not representable, got {parameter:e}"
+            )));
+        }
+        Ok(parameter)
     }
 
     /// Select the evaluation temperature for an elementary source. An
@@ -439,15 +533,21 @@ impl Engine {
 
     fn collect_bsim3v3_noise_sources(
         device: &crate::device::mosfet::bsim3v3::Bsim3v3Device,
-    ) -> Vec<NoiseSource> {
+    ) -> Result<Vec<NoiseSource>, SimulationError> {
         let mut sources = Vec::new();
         let (op, bias) = device.noise_operating_point();
         let core = &device.core;
         let model = &core.model;
         let size = &core.size;
-        let mult = device.multiplier.max(0.0);
-        if mult <= 0.0 {
-            return sources;
+        let mult = device.multiplier;
+        if !mult.is_finite() || mult < 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "Noise source '{}:ID' has invalid multiplicity {mult:e}",
+                device.name
+            )));
+        }
+        if mult == 0.0 {
+            return Ok(sources);
         }
         let charged_op = if matches!(model.noi_mod, 2 | 4) {
             Some(device.noise_operating_point_with_charge().0)
@@ -480,15 +580,17 @@ impl Engine {
         };
 
         if let Some(conductance) = channel_thermal_conductance
-            && conductance.is_finite()
-            && conductance > 1e-30
+            && let Some(resistance) = Self::noise_resistance_from_conductance(
+                &format!("{}:ID", device.name),
+                conductance,
+            )?
         {
             sources.push(
                 NoiseSource::thermal(
                     format!("{}:id", device.name),
                     device.node_drain,
                     device.node_source,
-                    1.0 / conductance,
+                    resistance,
                 )
                 .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
                     &device.name,
@@ -500,13 +602,17 @@ impl Engine {
         match model.noi_mod {
             1 | 4 | 5 => {
                 let denom = size.leff * size.leff * model.cox;
-                if model.kf > 0.0 && denom > 0.0 && op.cd.abs() > 1e-18 {
+                if model.kf > 0.0 && denom > 0.0 && op.cd != 0.0 {
+                    let coefficient = Self::checked_positive_noise_parameter(
+                        &format!("{}:FN", device.name),
+                        mult * model.kf / denom,
+                    )?;
                     sources.push(
                         NoiseSource::flicker_with_frequency_exponent(
                             format!("{}:flicker", device.name),
                             device.node_drain,
                             device.node_source,
-                            mult * model.kf / denom,
+                            coefficient,
                             model.af,
                             model.ef,
                             op.cd,
@@ -519,7 +625,10 @@ impl Engine {
             }
             2 | 3 | 6 => {
                 let leff_noise = size.leff - 2.0 * model.lintnoi;
-                if leff_noise > 0.0 && op.cd.abs() > 1e-18 {
+                let trap_noise_enabled = model.oxide_trap_density_a != 0.0
+                    || model.oxide_trap_density_b != 0.0
+                    || model.oxide_trap_density_c != 0.0;
+                if leff_noise > 0.0 && op.cd != 0.0 && trap_noise_enabled {
                     sources.push(
                         NoiseSource::bsim3_flicker(
                             format!("{}:flicker", device.name),
@@ -556,7 +665,7 @@ impl Engine {
             _ => {}
         }
 
-        sources
+        Ok(sources)
     }
 
     /// BSIM4 exports fourteen elementary mechanisms across one card, and every
@@ -573,7 +682,7 @@ impl Engine {
     /// sibling, so they keep b4noi.c's own names.
     fn collect_bsim4v8_noise_sources(
         device: &crate::device::mosfet::bsim4v8::Bsim4v8Device,
-    ) -> (Vec<NoiseSource>, Vec<CorrelatedNoisePair>) {
+    ) -> Result<(Vec<NoiseSource>, Vec<CorrelatedNoisePair>), SimulationError> {
         let mut sources = Vec::new();
         let mut correlated_sources = Vec::new();
         let (op, bias) = device.noise_operating_point();
@@ -581,32 +690,38 @@ impl Engine {
         let model = &core.model;
         let size = &core.size;
         let inst = &core.inst;
-        let mult = device.multiplier.max(0.0);
-        if mult <= 0.0 {
-            return (sources, correlated_sources);
+        let mult = device.multiplier;
+        if !mult.is_finite() || mult < 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "Noise source '{}:ID' has invalid multiplicity {mult:e}",
+                device.name
+            )));
+        }
+        if mult == 0.0 {
+            return Ok((sources, correlated_sources));
         }
 
         if model.rbody_mod != 0 {
-            let mut push_rbody =
-                |mechanism: &str, node_pos: usize, node_neg: usize, conductance: Value| {
-                    let effective_g = conductance * mult;
-                    if effective_g.is_finite() && effective_g > 1.0e-30 {
-                        sources.push(
-                            NoiseSource::thermal(
-                                device.name.clone(),
-                                node_pos,
-                                node_neg,
-                                1.0 / effective_g,
-                            )
-                            .with_identity(
-                                crate::analysis::NoiseSourceIdentity::mechanism(
-                                    &device.name,
-                                    mechanism,
-                                ),
-                            ),
-                        );
-                    }
-                };
+            let mut push_rbody = |mechanism: &str,
+                                  node_pos: usize,
+                                  node_neg: usize,
+                                  conductance: Value|
+             -> Result<(), SimulationError> {
+                let label = format!("{}:{mechanism}", device.name);
+                let effective_g = Self::checked_noise_product(&label, conductance, mult)?;
+                if let Some(resistance) =
+                    Self::noise_resistance_from_conductance(&label, effective_g)?
+                {
+                    sources.push(
+                        NoiseSource::thermal(device.name.clone(), node_pos, node_neg, resistance)
+                            .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
+                                &device.name,
+                                mechanism,
+                            )),
+                    );
+                }
+                Ok(())
+            };
 
             if inst.body_resistance_mode == 3 || inst.body_resistance_mode == 5 {
                 push_rbody(
@@ -614,48 +729,60 @@ impl Engine {
                     device.node_bulk,
                     device.node_source_body,
                     inst.body_prime_source_conductance,
-                );
+                )?;
                 push_rbody(
                     "RBPD",
                     device.node_bulk,
                     device.node_drain_body,
                     inst.body_prime_drain_conductance,
-                );
+                )?;
             }
             push_rbody(
                 "RBPB",
                 device.node_bulk,
                 device.node_bulk_external,
                 inst.body_prime_bulk_conductance,
-            );
+            )?;
             if inst.body_resistance_mode == 5 {
                 push_rbody(
                     "RBSB",
                     device.node_bulk_external,
                     device.node_source_body,
                     inst.body_source_bulk_conductance,
-                );
+                )?;
                 push_rbody(
                     "RBDB",
                     device.node_bulk_external,
                     device.node_drain_body,
                     inst.body_drain_bulk_conductance,
-                );
+                )?;
             }
         }
 
-        if model.rgate_mod == 2 && op.gcrg.is_finite() && op.gcrg > 1.0e-30 {
+        if model.rgate_mod == 2 && op.gcrg != 0.0 {
             // b4noi.c: for RGATEMOD=2 the electrode gate resistance noise is
             // attenuated by the bias-dependent channel gate-resistance branch.
+            if !op.gcrg.is_finite() || op.gcrg < 0.0 {
+                return Err(SimulationError::Circuit(format!(
+                    "Noise source '{}:RG' has invalid channel gate conductance {:e} S",
+                    device.name, op.gcrg
+                )));
+            }
             let t0 = 1.0 + inst.gate_conductance / op.gcrg;
-            let effective_g = inst.gate_conductance * mult / (t0 * t0);
-            if effective_g.is_finite() && effective_g > 1.0e-30 {
+            let label = format!("{}:RG", device.name);
+            let numerator = Self::checked_noise_product(&label, inst.gate_conductance, mult)?;
+            let effective_g = numerator / (t0 * t0);
+            if numerator != 0.0 {
+                Self::checked_positive_noise_parameter(&label, effective_g)?;
+            }
+            if let Some(resistance) = Self::noise_resistance_from_conductance(&label, effective_g)?
+            {
                 sources.push(
                     NoiseSource::thermal(
                         device.name.clone(),
                         device.node_gate,
                         device.node_gate_external,
-                        1.0 / effective_g,
+                        resistance,
                     )
                     .with_identity(
                         crate::analysis::NoiseSourceIdentity::mechanism(&device.name, "RG"),
@@ -701,15 +828,17 @@ impl Engine {
         };
 
         if let Some(conductance) = channel_thermal_conductance
-            && conductance.is_finite()
-            && conductance > 1e-30
+            && let Some(resistance) = Self::noise_resistance_from_conductance(
+                &format!("{}:ID", device.name),
+                conductance,
+            )?
         {
             sources.push(
                 NoiseSource::thermal(
                     device.name.clone(),
                     device.node_drain,
                     device.node_source,
-                    1.0 / conductance,
+                    resistance,
                 )
                 .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
                     &device.name,
@@ -771,13 +900,16 @@ impl Engine {
                         if gamma_gd0.is_finite() && gamma_gd0 > 0.0 {
                             let ctnoi_sq = ctnoi * ctnoi;
                             let uncorrelated_g = gamma_gd0 * (1.0 - ctnoi_sq) * mult;
-                            if uncorrelated_g.is_finite() && uncorrelated_g > 1.0e-30 {
+                            if let Some(resistance) = Self::noise_resistance_from_conductance(
+                                &format!("{}:ID", device.name),
+                                uncorrelated_g,
+                            )? {
                                 sources.push(
                                     NoiseSource::thermal(
                                         device.name.clone(),
                                         device.node_drain,
                                         device.node_source,
-                                        1.0 / uncorrelated_g,
+                                        resistance,
                                     )
                                     .with_identity(
                                         crate::analysis::NoiseSourceIdentity::mechanism(
@@ -833,13 +965,17 @@ impl Engine {
             0 => {
                 let coxe = model.coxe();
                 let denom = size.leff * size.leff * coxe;
-                if model.kf > 0.0 && denom > 0.0 && op.cd.abs() > 1e-18 {
+                if model.kf > 0.0 && denom > 0.0 && op.cd != 0.0 {
+                    let coefficient = Self::checked_positive_noise_parameter(
+                        &format!("{}:FN", device.name),
+                        mult * model.kf / denom,
+                    )?;
                     sources.push(
                         NoiseSource::flicker_with_frequency_exponent(
                             device.name.clone(),
                             device.node_drain,
                             device.node_source,
-                            mult * model.kf / denom,
+                            coefficient,
                             model.af,
                             model.ef,
                             op.cd,
@@ -852,7 +988,10 @@ impl Engine {
             }
             1 => {
                 let leff_noise = size.leff - 2.0 * model.lintnoi;
-                if leff_noise > 0.0 && op.cd.abs() > 1e-18 {
+                let trap_noise_enabled = model.oxide_trap_density_a != 0.0
+                    || model.oxide_trap_density_b != 0.0
+                    || model.oxide_trap_density_c != 0.0;
+                if leff_noise > 0.0 && op.cd != 0.0 && trap_noise_enabled {
                     sources.push(
                         NoiseSource::bsim4_flicker(
                             device.name.clone(),
@@ -896,13 +1035,15 @@ impl Engine {
         } else {
             (op.igs + op.igcd, op.igd + op.igcs)
         };
-        if igs_current.abs() > 1e-18 {
+        if igs_current != 0.0 {
+            let current =
+                Self::checked_noise_product(&format!("{}:IGS", device.name), mult, igs_current)?;
             sources.push(
                 NoiseSource::shot(
                     device.name.clone(),
                     device.node_gate,
                     device.node_source,
-                    mult * igs_current,
+                    current,
                 )
                 .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
                     &device.name,
@@ -910,13 +1051,15 @@ impl Engine {
                 )),
             );
         }
-        if igd_current.abs() > 1e-18 {
+        if igd_current != 0.0 {
+            let current =
+                Self::checked_noise_product(&format!("{}:IGD", device.name), mult, igd_current)?;
             sources.push(
                 NoiseSource::shot(
                     device.name.clone(),
                     device.node_gate,
                     device.node_drain,
-                    mult * igd_current,
+                    current,
                 )
                 .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
                     &device.name,
@@ -924,13 +1067,15 @@ impl Engine {
                 )),
             );
         }
-        if op.igb.abs() > 1e-18 {
+        if op.igb != 0.0 {
+            let current =
+                Self::checked_noise_product(&format!("{}:IGB", device.name), mult, op.igb)?;
             sources.push(
                 NoiseSource::shot(
                     device.name.clone(),
                     device.node_gate,
                     device.node_bulk,
-                    mult * op.igb,
+                    current,
                 )
                 .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
                     &device.name,
@@ -939,7 +1084,7 @@ impl Engine {
             );
         }
 
-        (sources, correlated_sources)
+        Ok((sources, correlated_sources))
     }
 
     #[cfg(test)]
@@ -1001,11 +1146,11 @@ impl Engine {
         }
 
         for bsim3 in &circuit.bsim3v3.devices {
-            noise_sources.extend(Self::collect_bsim3v3_noise_sources(bsim3));
+            noise_sources.extend(Self::collect_bsim3v3_noise_sources(bsim3)?);
         }
 
         for bsim4 in &circuit.bsim4v8.devices {
-            let (bsim4_sources, bsim4_correlated) = Self::collect_bsim4v8_noise_sources(bsim4);
+            let (bsim4_sources, bsim4_correlated) = Self::collect_bsim4v8_noise_sources(bsim4)?;
             noise_sources.extend(bsim4_sources);
             correlated_noise_sources.extend(bsim4_correlated);
 
@@ -1041,27 +1186,51 @@ impl Engine {
                         }
                     }
 
-                    let mult = bsim4.multiplier.max(0.0);
-                    if drain_g > 0.0 && drain_g.is_finite() && mult > 0.0 {
+                    let mult = bsim4.multiplier;
+                    if !mult.is_finite() || mult < 0.0 {
+                        return Err(SimulationError::Circuit(format!(
+                            "Noise source '{}:RD' has invalid multiplicity {mult:e}",
+                            bsim4.name
+                        )));
+                    }
+                    if drain_g != 0.0 && mult != 0.0 {
+                        let label = format!("{}:RD", bsim4.name);
+                        let effective_g = Self::checked_noise_product(&label, drain_g, mult)?;
+                        let resistance =
+                            Self::noise_resistance_from_conductance(&label, effective_g)?
+                                .ok_or_else(|| {
+                                    SimulationError::Circuit(format!(
+                                        "Noise source '{label}' unexpectedly has zero conductance"
+                                    ))
+                                })?;
                         noise_sources.push(
                             NoiseSource::thermal(
                                 bsim4.name.clone(),
                                 bsim4.node_drain,
                                 bsim4.node_drain_external,
-                                1.0 / (drain_g * mult),
+                                resistance,
                             )
                             .with_identity(
                                 crate::analysis::NoiseSourceIdentity::mechanism(&bsim4.name, "RD"),
                             ),
                         );
                     }
-                    if source_g > 0.0 && source_g.is_finite() && mult > 0.0 {
+                    if source_g != 0.0 && mult != 0.0 {
+                        let label = format!("{}:RS", bsim4.name);
+                        let effective_g = Self::checked_noise_product(&label, source_g, mult)?;
+                        let resistance =
+                            Self::noise_resistance_from_conductance(&label, effective_g)?
+                                .ok_or_else(|| {
+                                    SimulationError::Circuit(format!(
+                                        "Noise source '{label}' unexpectedly has zero conductance"
+                                    ))
+                                })?;
                         noise_sources.push(
                             NoiseSource::thermal(
                                 bsim4.name.clone(),
                                 bsim4.node_source,
                                 bsim4.node_source_external,
-                                1.0 / (source_g * mult),
+                                resistance,
                             )
                             .with_identity(
                                 crate::analysis::NoiseSourceIdentity::mechanism(&bsim4.name, "RS"),
@@ -1102,14 +1271,30 @@ impl Engine {
                     } else {
                         inst.source_conductance
                     };
-                    let mult = bsim4.multiplier.max(0.0);
-                    if drain_g > 0.0 && mult > 0.0 {
-                        bsim4_series_noise_conductances
-                            .insert(format!("{}.__rd", bsim4.name), drain_g * mult);
+                    let mult = bsim4.multiplier;
+                    if !mult.is_finite() || mult < 0.0 {
+                        return Err(SimulationError::Circuit(format!(
+                            "Noise source '{}:RD' has invalid multiplicity {mult:e}",
+                            bsim4.name
+                        )));
                     }
-                    if source_g > 0.0 && mult > 0.0 {
+                    if drain_g != 0.0 && mult != 0.0 {
+                        let effective_g = Self::checked_noise_product(
+                            &format!("{}:RD", bsim4.name),
+                            drain_g,
+                            mult,
+                        )?;
                         bsim4_series_noise_conductances
-                            .insert(format!("{}.__rs", bsim4.name), source_g * mult);
+                            .insert(format!("{}.__rd", bsim4.name), effective_g);
+                    }
+                    if source_g != 0.0 && mult != 0.0 {
+                        let effective_g = Self::checked_noise_product(
+                            &format!("{}:RS", bsim4.name),
+                            source_g,
+                            mult,
+                        )?;
+                        bsim4_series_noise_conductances
+                            .insert(format!("{}.__rs", bsim4.name), effective_g);
                     }
                 }
             }
@@ -1348,18 +1533,14 @@ impl Engine {
                 .get(&name)
                 .copied()
                 .unwrap_or_else(|| circuit.resistors.small_signal_conductance(i));
-            let resistance = if conductance.abs() > 0.0 {
-                1.0 / conductance
-            } else {
-                f64::INFINITY
-            };
             // A large but finite physical resistance still has a representable
             // Johnson-Nyquist density.  Reject only states that cannot describe
             // a positive finite resistance; an arbitrary magnitude cutoff
             // silently deletes real noise from high-impedance circuits.
-            if resistance <= 0.0 || !resistance.is_finite() {
+            let Some(resistance) = Self::noise_resistance_from_conductance(&name, conductance)?
+            else {
                 continue;
-            }
+            };
 
             let owner = device_series_noise_owners.get(&name.to_ascii_lowercase());
             let mut source =
@@ -1373,7 +1554,9 @@ impl Engine {
             }
             noise_sources.push(source);
 
-            if let Some(&Some((coefficient, af, ef))) = circuit.resistors.flicker.get(i) {
+            if let Some(&Some((coefficient, af, ef))) = circuit.resistors.flicker.get(i)
+                && coefficient != 0.0
+            {
                 let v_pos = Self::noise_node_voltage(dc_solution, stamp.pp.row);
                 let v_neg = Self::noise_node_voltage(dc_solution, stamp.nn.row);
                 let current = circuit
@@ -1383,7 +1566,7 @@ impl Engine {
                     .copied()
                     .unwrap_or(0.0)
                     * (v_pos - v_neg);
-                if current.abs() > 1e-18 {
+                if current != 0.0 {
                     // The flicker source belongs to whichever device owns the
                     // thermal stamp beside it, under the resistive family's FN.
                     // Naming it `r1:flicker` made it a device of its own, so a
@@ -1419,7 +1602,7 @@ impl Engine {
             let vd = Self::noise_node_voltage(dc_solution, diode.node_anode)
                 - Self::noise_node_voltage(dc_solution, diode.node_cathode);
             let id = diode.current(vd);
-            if id.abs() > 1e-15 {
+            if id != 0.0 {
                 noise_sources.push(
                     NoiseSource::shot(diode.name.clone(), diode.node_anode, diode.node_cathode, id)
                         .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
@@ -1429,15 +1612,25 @@ impl Engine {
                 );
             }
             if let Some((kf, af)) = diode.flicker_noise_coefficients()
-                && id.abs() > 1e-15
+                && id != 0.0
             {
-                let m = diode.multiplicity.max(1.0);
+                let m = diode.multiplicity;
+                if !m.is_finite() || m <= 0.0 {
+                    return Err(SimulationError::Circuit(format!(
+                        "Noise source '{}:FN' has invalid multiplicity {m:e}",
+                        diode.name
+                    )));
+                }
+                let coefficient = Self::checked_positive_noise_parameter(
+                    &format!("{}:FN", diode.name),
+                    kf * m.powf(1.0 - af),
+                )?;
                 noise_sources.push(
                     NoiseSource::flicker_with_frequency_exponent(
                         diode.name.clone(),
                         diode.node_anode,
                         diode.node_cathode,
-                        kf * m.powf(1.0 - af),
+                        coefficient,
                         af,
                         1.0,
                         id.abs(),
@@ -1466,22 +1659,21 @@ impl Engine {
                 // it leaves the whole-device query nothing to sum over even
                 // where some spelling of it would have resolved.
                 for (mechanism, node_pos, node_neg, conductance) in model.thermal {
-                    if conductance.is_finite() && conductance > 1e-30 {
-                        let mut source = NoiseSource::thermal(
-                            bjt.name.clone(),
-                            node_pos,
-                            node_neg,
-                            1.0 / conductance,
-                        )
-                        .with_identity(
-                            crate::analysis::NoiseSourceIdentity::mechanism(&bjt.name, mechanism),
-                        );
+                    let label = format!("{}:{mechanism}", bjt.name);
+                    if let Some(resistance) =
+                        Self::noise_resistance_from_conductance(&label, conductance)?
+                    {
+                        let mut source =
+                            NoiseSource::thermal(bjt.name.clone(), node_pos, node_neg, resistance)
+                                .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
+                                    &bjt.name, mechanism,
+                                ));
                         source.temperature_offset = bjt.noise_temperature_offset;
                         noise_sources.push(source);
                     }
                 }
                 for (mechanism, node_pos, node_neg, current) in model.shot {
-                    if current.abs() > 1e-18 {
+                    if current != 0.0 {
                         noise_sources.push(
                             NoiseSource::shot(bjt.name.clone(), node_pos, node_neg, current)
                                 .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
@@ -1491,10 +1683,19 @@ impl Engine {
                     }
                 }
                 if let Some((kfn, afn, bfn)) = bjt.vbic_flicker_noise_coefficients() {
-                    let m = bjt.m.max(1.0);
-                    let coefficient = kfn * m.powf(1.0 - afn);
+                    let m = bjt.m;
+                    if !m.is_finite() || m <= 0.0 {
+                        return Err(SimulationError::Circuit(format!(
+                            "Noise source '{}:FN' has invalid multiplicity {m:e}",
+                            bjt.name
+                        )));
+                    }
+                    let coefficient = Self::checked_positive_noise_parameter(
+                        &format!("{}:FN", bjt.name),
+                        kfn * m.powf(1.0 - afn),
+                    )?;
                     let (bi, ei, ibe) = model.flicker_ibe;
-                    if ibe.abs() > 1e-18 {
+                    if ibe != 0.0 {
                         noise_sources.push(
                             NoiseSource::flicker_with_frequency_exponent(
                                 bjt.name.clone(),
@@ -1511,7 +1712,7 @@ impl Engine {
                         );
                     }
                     let (bx, bp, ibep) = model.flicker_ibep;
-                    if ibep.abs() > 1e-18 {
+                    if ibep != 0.0 {
                         noise_sources.push(
                             NoiseSource::flicker_with_frequency_exponent(
                                 bjt.name.clone(),
@@ -1534,7 +1735,7 @@ impl Engine {
             }
 
             let (ic, ib, _) = bjt.noise_branch_currents();
-            if ic > 1e-18 {
+            if ic != 0.0 {
                 noise_sources.push(
                     NoiseSource::shot(
                         format!("{}:IC", bjt.name),
@@ -1547,7 +1748,7 @@ impl Engine {
                     ),
                 );
             }
-            if ib > 1e-18 {
+            if ib != 0.0 {
                 noise_sources.push(
                     NoiseSource::shot(
                         format!("{}:IB", bjt.name),
@@ -1562,7 +1763,7 @@ impl Engine {
             }
             if let Some((kf, af, ef)) = bjt.flicker_noise_coefficients() {
                 let (_, ib, _) = bjt.operating_point_currents();
-                if ib.abs() > 1e-18 {
+                if ib != 0.0 {
                     noise_sources.push(
                         NoiseSource::flicker_with_frequency_exponent(
                             format!("{}:flicker", bjt.name),
@@ -1589,8 +1790,15 @@ impl Engine {
         for mos in &circuit.mosfets.devices {
             let gm = mos.transconductance();
             let gamma = mos.channel_thermal_noise_gamma();
-            if gm > 1e-18 && gamma > 0.0 {
-                let resistance = 1.0 / (gamma * gm).max(1e-30);
+            if gm != 0.0 && gamma != 0.0 {
+                let label = format!("{}:ID", mos.name);
+                let conductance = Self::checked_noise_product(&label, gamma, gm)?;
+                let resistance = Self::noise_resistance_from_conductance(&label, conductance)?
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "Noise source '{label}' unexpectedly has zero conductance"
+                        ))
+                    })?;
                 let mut source = NoiseSource::thermal(
                     mos.name.clone(),
                     mos.node_drain,
@@ -1611,9 +1819,10 @@ impl Engine {
             // gm²-based density is bias-dependent through the coefficient
             // rather than the current term).
             if let Some((coefficient, current, af, ef)) = mos.flicker_noise_source_terms()
-                && coefficient > 0.0
-                && current.abs() > 1e-18
+                && coefficient != 0.0
+                && current != 0.0
             {
+                Self::checked_positive_noise_parameter(&format!("{}:FN", mos.name), coefficient)?;
                 noise_sources.push(
                     NoiseSource::flicker_with_frequency_exponent(
                         mos.name.clone(),
@@ -1645,8 +1854,15 @@ impl Engine {
             let vgd = vg - vd;
             let temp = jfet.analysis_temperature();
             let (ids, gm, _) = jfet.calculate(vgs, vds, temp);
-            if gm.abs() > 1e-18 {
-                let resistance = 1.0 / ((2.0 / 3.0) * gm.abs()).max(1e-30);
+            if gm != 0.0 {
+                let label = format!("{}:ID", jfet.name);
+                let conductance = Self::checked_noise_product(&label, 2.0 / 3.0, gm.abs())?;
+                let resistance = Self::noise_resistance_from_conductance(&label, conductance)?
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "Noise source '{label}' unexpectedly has zero conductance"
+                        ))
+                    })?;
                 let mut source =
                     NoiseSource::thermal(jfet.name.clone(), jfet.drain, jfet.source, resistance)
                         .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
@@ -1660,7 +1876,7 @@ impl Engine {
             }
 
             let (igs, igd) = jfet.gate_current(vgs, vgd, temp);
-            if igs.abs() > 1e-18 {
+            if igs != 0.0 {
                 noise_sources.push(
                     NoiseSource::shot(jfet.name.clone(), jfet.gate, jfet.source, igs)
                         .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
@@ -1668,7 +1884,7 @@ impl Engine {
                         )),
                 );
             }
-            if igd.abs() > 1e-18 {
+            if igd != 0.0 {
                 noise_sources.push(
                     NoiseSource::shot(jfet.name.clone(), jfet.gate, jfet.drain, igd).with_identity(
                         crate::analysis::NoiseSourceIdentity::mechanism(&jfet.name, "IGD"),
@@ -1682,15 +1898,25 @@ impl Engine {
             // recombine into KF·m^(1−AF) on the folded current — exact at
             // AF=1, which is why the bare coefficient never showed.
             if let Some((kf, af, ef)) = jfet.flicker_noise_coefficients()
-                && ids.abs() > 1e-18
+                && ids != 0.0
             {
-                let m = jfet.m.max(1e-12);
+                let m = jfet.m;
+                if !m.is_finite() || m <= 0.0 {
+                    return Err(SimulationError::Circuit(format!(
+                        "Noise source '{}:FN' has invalid multiplicity {m:e}",
+                        jfet.name
+                    )));
+                }
+                let coefficient = Self::checked_positive_noise_parameter(
+                    &format!("{}:FN", jfet.name),
+                    kf * m.powf(1.0 - af),
+                )?;
                 noise_sources.push(
                     NoiseSource::flicker_with_frequency_exponent(
                         jfet.name.clone(),
                         jfet.drain,
                         jfet.source,
-                        kf * m.powf(1.0 - af),
+                        coefficient,
                         af,
                         ef,
                         ids,
@@ -2898,6 +3124,167 @@ mod tests {
         )
     }
 
+    fn collected_noise_sources_for_deck(deck: &str) -> Vec<crate::analysis::NoiseSource> {
+        let netlist = Netlist::parse(deck).expect("noise catalog fixture parses");
+        // Keep solver conditioning out of the deliberately sub-attoampere
+        // device operating points. Numerical GMIN is not physical noise.
+        let mut config = crate::engine::SimulationConfig::default();
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let engine = Engine::new(config).resolved_for_netlist(&netlist);
+        let mut circuit = engine
+            .build_circuit(&netlist)
+            .expect("noise catalog fixture builds");
+        let mut matrix = engine
+            .build_matrix(&circuit)
+            .expect("noise catalog matrix builds");
+        circuit.link_indices(&matrix);
+        let solution = engine
+            .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
+            .expect("noise catalog operating point converges");
+        if circuit.has_nonlinear_devices() {
+            circuit.update_nonlinear(&solution);
+        }
+        Engine::try_collect_noise_sources(&circuit, &solution)
+            .expect("noise catalog collects")
+            .elementary
+    }
+
+    fn mechanism<'a>(
+        sources: &'a [crate::analysis::NoiseSource],
+        device: &str,
+        mechanism: &str,
+    ) -> Option<&'a crate::analysis::NoiseSource> {
+        sources.iter().find(|source| {
+            source.identity.device.eq_ignore_ascii_case(device)
+                && source
+                    .identity
+                    .mechanism
+                    .as_deref()
+                    .is_some_and(|actual| actual.eq_ignore_ascii_case(mechanism))
+        })
+    }
+
+    #[test]
+    fn sub_threshold_semiconductor_noise_sources_remain_in_the_catalog() {
+        let sources = collected_noise_sources_for_deck(
+            "Sub-threshold physical noise must not be cutoff\n\
+             VDIO ad 0 1m\n\
+             D1 ad 0 DM\n\
+             VBC c 0 1m\n\
+             VBB b 0 1m\n\
+             Q1 c b 0 QN\n\
+             VMD md 0 100m\n\
+             VMG mg 0 100m\n\
+             M1 md mg 0 0 MN W=1 L=1\n\
+             VJD jd 0 100m\n\
+             VJG jg 0 0\n\
+             J1 jd jg 0 JN\n\
+             .MODEL DM D IS=1e-20 KF=1e-12 AF=1\n\
+             .MODEL QN NPN LEVEL=1 IS=1e-20 BF=100 KF=1e-12 AF=1\n\
+             .MODEL MN NMOS LEVEL=1 VTO=0 KP=1e-20 KF=1e-12 NLEV=0\n\
+             .MODEL JN NJF VTO=-2 BETA=1e-20 IS=1e-30 KF=1e-12 AF=1\n\
+             .OPTIONS GMIN=0\n\
+             .END\n",
+        );
+
+        let diode = mechanism(&sources, "D1", "ID").expect("sub-1e-15 diode shot source");
+        assert!(diode.parameter > 0.0 && diode.parameter < 1.0e-15);
+        let bjt = mechanism(&sources, "Q1", "IC").expect("sub-1e-18 BJT shot source");
+        assert!(
+            bjt.parameter > 0.0 && bjt.parameter < 1.0e-18,
+            "BJT shot current is {:e} A",
+            bjt.parameter
+        );
+
+        let mos = mechanism(&sources, "M1", "ID").expect("sub-1e-18 MOS channel source");
+        let mos_conductance = 1.0 / mos.parameter;
+        assert!(mos_conductance > 0.0 && mos_conductance < 1.0e-18);
+        let jfet = mechanism(&sources, "J1", "ID").expect("sub-1e-18 JFET channel source");
+        let jfet_conductance = 1.0 / jfet.parameter;
+        assert!(jfet_conductance > 0.0 && jfet_conductance < 1.0e-18);
+
+        for source in [diode, bjt, mos, jfet] {
+            assert!(
+                Engine::evaluated_noise_density(source, 1.0e3, 300.15)
+                    .expect("sub-threshold PSD remains representable")
+                    > 0.0
+            );
+        }
+    }
+
+    #[test]
+    fn exact_zero_semiconductor_mechanisms_remain_absent() {
+        let sources = collected_noise_sources_for_deck(
+            "Exact zero is inactive, not a numerical floor\n\
+             VDIO ad 0 0\n\
+             D1 ad 0 DM\n\
+             VBC c 0 0\n\
+             VBB b 0 0\n\
+             Q1 c b 0 QN\n\
+             VMD md 0 0\n\
+             VMG mg 0 0\n\
+             M1 md mg 0 0 MN W=1 L=1\n\
+             VJD jd 0 0\n\
+             VJG jg 0 0\n\
+             J1 jd jg 0 JN\n\
+             .MODEL DM D IS=1e-20 KF=1e-12 AF=1\n\
+             .MODEL QN NPN LEVEL=1 IS=1e-20 BF=100 KF=1e-12 AF=1\n\
+             .MODEL MN NMOS LEVEL=1 VTO=0 KP=1e-20 KF=1e-12 NLEV=0\n\
+             .MODEL JN NJF VTO=-2 BETA=1e-20 IS=1e-30 KF=1e-12 AF=1\n\
+             .OPTIONS GMIN=0\n\
+             .END\n",
+        );
+
+        for (device, mechanisms) in [
+            ("D1", &["ID", "FN"][..]),
+            ("Q1", &["IC", "IB", "FN"][..]),
+            ("M1", &["ID", "FN"][..]),
+            ("J1", &["ID", "IGS", "IGD", "FN"][..]),
+        ] {
+            for mechanism_name in mechanisms {
+                assert!(
+                    mechanism(&sources, device, mechanism_name).is_none(),
+                    "exact-zero {device}:{mechanism_name} must be absent"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn sub_threshold_resistor_flicker_survives_and_exact_zero_is_absent() {
+        let active = collected_noise_sources_for_deck(
+            "Tiny resistor flicker current\n\
+             V1 n 0 1e-16\n\
+             R1 n 0 RM L=1 W=1\n\
+             .MODEL RM R RSH=1k KF=1e-12 AF=1\n\
+             .END\n",
+        );
+        let flicker = mechanism(&active, "R1", "FN").expect("sub-1e-18 resistor flicker");
+        assert!(flicker.current.abs() > 0.0 && flicker.current.abs() < 1.0e-18);
+        assert!(
+            Engine::evaluated_noise_density(flicker, 1.0e3, 300.15)
+                .expect("tiny resistor flicker evaluates")
+                > 0.0
+        );
+
+        let inactive = collected_noise_sources_for_deck(
+            "Zero resistor flicker current\n\
+             V1 n 0 0\n\
+             R1 n 0 RM L=1 W=1\n\
+             .MODEL RM R RSH=1k KF=1e-12 AF=1\n\
+             .END\n",
+        );
+        assert!(mechanism(&inactive, "R1", "FN").is_none());
+        assert!(
+            inactive.iter().any(|source| {
+                source.identity.device.eq_ignore_ascii_case("R1")
+                    && source.noise_type == crate::analysis::noise::NoiseSourceType::Thermal
+            }),
+            "zero flicker bias must not disable the resistor's thermal noise"
+        );
+    }
+
     #[test]
     fn rshunt_noise_is_one_independent_norton_source_per_electrical_node() {
         let mut circuit = crate::CircuitData::new();
@@ -3050,6 +3437,16 @@ mod tests {
         assert!(
             error.to_string().contains("M1:CORL"),
             "the failing correlated mechanism must be diagnosable: {error}"
+        );
+
+        let underflow =
+            crate::analysis::NoiseSource::shot("D1".to_string(), 1, 0, f64::MIN_POSITIVE)
+                .with_identity(crate::analysis::NoiseSourceIdentity::mechanism("D1", "ID"));
+        let error = Engine::evaluated_noise_density(&underflow, 1.0e3, 300.15)
+            .expect_err("a positive physical source must not underflow into inactivity");
+        assert!(
+            error.to_string().contains("underflowed to zero"),
+            "underflow must be explicit and diagnosable: {error}"
         );
     }
 
@@ -4467,6 +4864,77 @@ Q1 C B 0 QN
              {models}\n\n\
              .END\n"
         )
+    }
+
+    #[test]
+    fn exact_disabled_bsim_physical_flicker_is_omitted_at_collection() {
+        let bsim3 =
+            collected_noise_sources_for_deck(&bsim3_noise_deck("NOIMOD=2 NOIA=0 NOIB=0 NOIC=0"));
+        assert!(
+            bsim3.iter().all(|source| {
+                source.noise_type != crate::analysis::noise::NoiseSourceType::Bsim3Flicker
+            }),
+            "zero BSIM3 trap densities must disable physical flicker exactly"
+        );
+
+        let bsim4 = collected_noise_sources_for_deck(&bsim4_noise_deck(
+            "FNOIMOD=1 TNOIMOD=0 NOIA=0 NOIB=0 NOIC=0",
+        ));
+        assert!(
+            bsim4.iter().all(|source| {
+                source.noise_type != crate::analysis::noise::NoiseSourceType::Bsim4Flicker
+            }),
+            "zero BSIM4 trap densities must disable physical flicker exactly"
+        );
+    }
+
+    #[test]
+    fn active_bsim_physical_flicker_underflow_fails_closed() {
+        let mut bsim3 = collected_noise_sources_for_deck(&bsim3_noise_deck("NOIMOD=2"))
+            .into_iter()
+            .find(|source| {
+                source.noise_type == crate::analysis::noise::NoiseSourceType::Bsim3Flicker
+            })
+            .expect("active BSIM3 physical flicker source");
+        let bsim3_model = std::sync::Arc::make_mut(
+            bsim3
+                .bsim3_flicker
+                .as_mut()
+                .expect("BSIM3 source carries its physical model"),
+        );
+        bsim3_model.oxide_trap_density_a = f64::MIN_POSITIVE;
+        bsim3_model.oxide_trap_density_b = 0.0;
+        bsim3_model.oxide_trap_density_c = 0.0;
+        assert_eq!(bsim3.spectral_density(1.0e3, 300.15), 0.0);
+        assert!(
+            Engine::evaluated_noise_density(&bsim3, 1.0e3, 300.15)
+                .expect_err("active BSIM3 PSD underflow must fail")
+                .to_string()
+                .contains("underflowed to zero")
+        );
+
+        let mut bsim4 = collected_noise_sources_for_deck(&bsim4_noise_deck("FNOIMOD=1 TNOIMOD=0"))
+            .into_iter()
+            .find(|source| {
+                source.noise_type == crate::analysis::noise::NoiseSourceType::Bsim4Flicker
+            })
+            .expect("active BSIM4 physical flicker source");
+        let bsim4_model = std::sync::Arc::make_mut(
+            bsim4
+                .bsim4_flicker
+                .as_mut()
+                .expect("BSIM4 source carries its physical model"),
+        );
+        bsim4_model.oxide_trap_density_a = f64::MIN_POSITIVE;
+        bsim4_model.oxide_trap_density_b = 0.0;
+        bsim4_model.oxide_trap_density_c = 0.0;
+        assert_eq!(bsim4.spectral_density(1.0e3, 300.15), 0.0);
+        assert!(
+            Engine::evaluated_noise_density(&bsim4, 1.0e3, 300.15)
+                .expect_err("active BSIM4 PSD underflow must fail")
+                .to_string()
+                .contains("underflowed to zero")
+        );
     }
 
     #[test]
