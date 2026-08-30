@@ -138,6 +138,10 @@ pub enum PortDirection {
 pub struct ParameterDecl {
     /// Parameter type (real, integer, string)
     pub param_type: ParamType,
+    /// Whether the source wrote an explicit parameter type. Scalar parameters
+    /// retain the language default when this is false; parameter arrays require
+    /// an explicit element type so later storage lowering cannot guess it.
+    pub type_is_explicit: bool,
     /// Parameter name
     pub name: SmolStr,
     /// Fixed declaration dimensions. These are retained even on compiler
@@ -760,6 +764,9 @@ pub struct ArrayAccessExpr {
 #[derive(Debug, Clone)]
 pub struct ArrayLiteralExpr {
     pub elements: Vec<Expression>,
+    /// True for the Verilog-AMS assignment-pattern opener `'{`; false for an
+    /// ordinary concatenation `{`. These constructs are not interchangeable.
+    pub assignment_pattern: bool,
     pub span: Span,
 }
 

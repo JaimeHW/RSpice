@@ -308,6 +308,304 @@ fn parameter_default_composites_may_reference_only_earlier_parameters() {
 }
 
 #[test]
+fn parameter_array_metadata_preserves_dynamic_multidimensional_bounds() {
+    let module = analyze_one(&module_src(
+        r#"
+            parameter integer seed = 2;
+            parameter integer count = seed;
+            parameter real taps[count:0][1:count] = '{
+                '{1.0, 2.0}, '{3.0, 4.0}, '{5.0, 6.0}
+            };
+            parameter integer codes[2:0] = '{2, 1, 0};
+            analog I(p, n) <+ V(p, n);
+            "#,
+    ));
+
+    let taps = module
+        .parameters
+        .iter()
+        .find(|parameter| parameter.name == "taps")
+        .expect("parameter array retained");
+    assert!(taps.is_public);
+    assert_eq!(taps.param_type, ParamType::Real);
+    assert_eq!(taps.value_type, ValueType::Real);
+    assert_eq!(taps.dimensions.len(), 2);
+    assert!(matches!(
+        taps.dimensions[0].left,
+        Expression::Identifier(ref identifier) if identifier.name == "count"
+    ));
+    assert!(matches!(
+        taps.dimensions[0].right,
+        Expression::Number(ref number) if number.value == 0.0
+    ));
+    assert!(matches!(
+        taps.dimensions[1].left,
+        Expression::Number(ref number) if number.value == 1.0
+    ));
+    assert!(matches!(
+        taps.dimensions[1].right,
+        Expression::Identifier(ref identifier) if identifier.name == "count"
+    ));
+    assert!(
+        taps.default.is_none(),
+        "arrays have no folded scalar default"
+    );
+    assert!(matches!(
+        taps.default_expr,
+        Some(Expression::ArrayLiteral(_))
+    ));
+
+    let codes = module
+        .parameters
+        .iter()
+        .find(|parameter| parameter.name == "codes")
+        .expect("integer parameter array retained");
+    assert_eq!(codes.param_type, ParamType::Integer);
+    assert_eq!(codes.value_type, ValueType::Integer);
+    assert_eq!(codes.dimensions.len(), 1);
+    assert!(matches!(
+        codes.dimensions[0].left,
+        Expression::Number(ref number) if number.value == 2.0
+    ));
+    assert!(matches!(
+        codes.dimensions[0].right,
+        Expression::Number(ref number) if number.value == 0.0
+    ));
+}
+
+#[test]
+fn parameter_arrays_require_explicit_numeric_type_and_default() {
+    for (declaration, expected) in [
+        (
+            "parameter taps[0:1] = '{1.0, 2.0};",
+            "requires an explicit integer or real element type",
+        ),
+        (
+            "parameter real taps[0:1];",
+            "parameter array 'taps' requires a default value",
+        ),
+        (
+            "parameter string taps[0:1] = '{\"a\", \"b\"};",
+            "string parameter array 'taps' is not supported",
+        ),
+        (
+            "parameter real taps[0:1] = 1.0;",
+            "expected constant assignment pattern",
+        ),
+        (
+            "parameter real taps[0:1] = {1.0, 2.0};",
+            "concatenation opened with '{'",
+        ),
+    ] {
+        let error = analyze(&module_src(&format!(
+            "{declaration}\nanalog I(p, n) <+ V(p, n);"
+        )))
+        .expect_err("invalid parameter-array declaration must fail")
+        .to_string();
+        assert!(error.contains(expected), "unexpected diagnostic: {error}");
+    }
+}
+
+#[test]
+fn parameter_array_defaults_require_exact_rectangular_shape_when_bounds_resolve() {
+    for (declaration, expected) in [
+        (
+            "parameter real taps[0:1] = '{1.0};",
+            "dimension 1 has 1 elements",
+        ),
+        (
+            "parameter real taps[0:1][1:0] = '{'{1.0, 2.0}, 3.0};",
+            "contains a scalar before the final dimension",
+        ),
+        (
+            "parameter real taps[0:0] = '{'{1.0}};",
+            "contains an unexpected nested pattern",
+        ),
+    ] {
+        let error = analyze(&module_src(&format!(
+            "{declaration}\nanalog I(p, n) <+ V(p, n);"
+        )))
+        .expect_err("malformed parameter-array shape must fail")
+        .to_string();
+        assert!(error.contains(expected), "unexpected diagnostic: {error}");
+    }
+}
+
+#[test]
+fn parameter_array_shape_uses_transitive_declared_defaults() {
+    let error = analyze(&module_src(
+        r#"
+            parameter integer seed = 2;
+            parameter integer count = seed;
+            parameter real taps[count:0] = '{1.0, 2.0};
+            analog I(p, n) <+ V(p, n);
+            "#,
+    ))
+    .expect_err("declared default chain implies three elements")
+    .to_string();
+    assert!(error.contains("dimension 1 has 2 elements"), "{error}");
+}
+
+#[test]
+fn parameter_array_bound_shifts_and_storage_limits_fail_closed() {
+    for (bound, expected) in [
+        ("1 << -1", "does not resolve to a valid integer"),
+        ("1 << 64", "does not resolve to a valid integer"),
+        ("1 << 1.0e100", "does not resolve to a valid integer"),
+        ("0:1048576", "supported safety limit is 1048576"),
+    ] {
+        let range = if bound.contains(':') {
+            bound.to_string()
+        } else {
+            format!("{bound}:0")
+        };
+        let error = analyze(&module_src(&format!(
+            "parameter real taps[{range}] = '{{1.0}};\nanalog I(p, n) <+ V(p, n);"
+        )))
+        .expect_err("unsafe parameter-array shape must fail")
+        .to_string();
+        assert!(error.contains(expected), "unexpected diagnostic: {error}");
+    }
+
+    let dimensions = "[0:0]".repeat(MAX_PARAMETER_ARRAY_RANK + 1);
+    let error = analyze(&module_src(&format!(
+        "parameter real taps{dimensions} = '{{1.0}};\nanalog I(p, n) <+ V(p, n);"
+    )))
+    .expect_err("excessive rank must fail")
+    .to_string();
+    assert!(error.contains("supported safety limit is 16"), "{error}");
+}
+
+#[test]
+fn integer_parameter_array_elements_obey_scalar_integer_contract() {
+    for (declarations, expected) in [
+        (
+            "parameter integer codes[0:0] = '{0.5};",
+            "expected 32-bit integer array element",
+        ),
+        (
+            "parameter integer codes[0:0] = '{2147483648};",
+            "expected 32-bit integer array element",
+        ),
+        (
+            "parameter real half = 0.5; parameter integer codes[0:0] = '{half};",
+            "expected 32-bit integer array element",
+        ),
+    ] {
+        let error = analyze(&module_src(&format!(
+            "{declarations}\nanalog I(p, n) <+ V(p, n);"
+        )))
+        .expect_err("invalid integer array element must fail")
+        .to_string();
+        assert!(error.contains(expected), "unexpected diagnostic: {error}");
+    }
+}
+
+#[test]
+fn parameter_array_uses_do_not_acquire_scalar_semantics() {
+    for (expression, expected) in [
+        (
+            "taps * V(p, n)",
+            "parameter array 'taps' cannot be used as a scalar expression",
+        ),
+        (
+            "taps[0] * V(p, n)",
+            "indexed access to parameter array 'taps'",
+        ),
+    ] {
+        let error = analyze(&module_src(&format!(
+            "parameter real taps[0:0] = '{{1.0}};\nanalog I(p, n) <+ {expression};"
+        )))
+        .expect_err("parameter array use must remain fail-closed")
+        .to_string();
+        assert!(error.contains(expected), "unexpected diagnostic: {error}");
+    }
+}
+
+#[test]
+fn model_parameter_array_shape_cannot_read_instance_only_storage() {
+    let error = analyze(&module_src(
+        r#"
+            (* type = "instance" *) parameter integer width = 1;
+            parameter real taps[0:width-1] = '{1.0};
+            analog I(p, n) <+ V(p, n);
+            "#,
+    ))
+    .expect_err("shared model shape cannot depend on instance-only storage")
+    .to_string();
+    assert!(
+        error.contains("cannot have dimensions that depend on an instance parameter"),
+        "{error}"
+    );
+}
+
+#[test]
+fn parameter_array_constraints_fail_closed_precisely() {
+    let error = analyze(&module_src(
+        r#"
+            parameter real taps[0:1] = '{1.0, 2.0} from [0:2] exclude 1.5;
+            analog I(p, n) <+ V(p, n);
+            "#,
+    ))
+    .expect_err("array-valued constraints are not implemented")
+    .to_string();
+    assert!(
+        error.contains("parameter array 'taps' may not use from/exclude constraints"),
+        "unexpected diagnostic: {error}"
+    );
+}
+
+#[test]
+fn parameter_array_bounds_reject_invalid_parameter_dependencies() {
+    for (declarations, expected) in [
+        (
+            "parameter real taps[taps:1] = '{1.0};",
+            "references parameter 'taps' itself",
+        ),
+        (
+            "parameter real taps[later:1] = '{1.0}; parameter integer later = 1;",
+            "references later parameter 'later'",
+        ),
+        (
+            "parameter real first[0:1] = '{1.0, 2.0}; parameter real second[first:1] = '{1.0};",
+            "references parameter array 'first'",
+        ),
+        (
+            "parameter real taps[missing:1] = '{1.0};",
+            "references unknown identifier 'missing'",
+        ),
+        (
+            "parameter string label = \"x\"; parameter real taps[label:1] = '{1.0};",
+            "string parameter 'label'",
+        ),
+    ] {
+        let error = analyze(&module_src(&format!(
+            "{declarations}\nanalog I(p, n) <+ V(p, n);"
+        )))
+        .expect_err("invalid parameter-array dependency must fail")
+        .to_string();
+        assert!(error.contains(expected), "unexpected diagnostic: {error}");
+    }
+}
+
+#[test]
+fn parameter_array_bounds_reject_nonnumeric_nonfinite_and_nonintegral_values() {
+    for (bound, expected) in [
+        ("\"x\"", "expected numeric constant expression"),
+        ("V(p, n)", "reads non-constant branch access"),
+        ("1.0 / 0.0", "resolves to non-finite value"),
+        ("0.25 + 0.5", "resolves to non-integral value"),
+    ] {
+        let error = analyze(&module_src(&format!(
+            "parameter real taps[{bound}:1] = '{{1.0}};\nanalog I(p, n) <+ V(p, n);"
+        )))
+        .expect_err("invalid parameter-array bound must fail")
+        .to_string();
+        assert!(error.contains(expected), "unexpected diagnostic: {error}");
+    }
+}
+
+#[test]
 fn parameter_default_forward_reference_through_param_given_alias_is_rejected() {
     let error = analyze(&module_src(
         r#"

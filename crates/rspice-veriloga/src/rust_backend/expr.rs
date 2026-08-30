@@ -1187,7 +1187,7 @@ fn expression_children(kind: &HirExprKind) -> Vec<ExprId> {
         HirExprKind::ArrayAccess { index, .. } => {
             children.push(*index);
         }
-        HirExprKind::ArrayLiteral { elements } => {
+        HirExprKind::ArrayLiteral { elements, .. } => {
             children.extend(elements.iter().copied());
         }
         HirExprKind::AnalogOperator { op } => push_analog_operator_children(op, &mut children),

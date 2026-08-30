@@ -97,6 +97,31 @@ pub(crate) fn generate_device_measured(
     options: &RustTranspileOptions,
     measurements: &mut MetricsRecorder,
 ) -> Result<GeneratedRustDevice, RustBackendError> {
+    artifact.validate().map_err(|diagnostics| {
+        RustBackendError::internal(
+            artifact.metadata.source_package.as_str(),
+            artifact.hir.module_name.as_str(),
+            diagnostics
+                .first()
+                .map(|diagnostic| diagnostic.message.clone())
+                .unwrap_or_else(|| "canonical artifact validation failed".to_string()),
+        )
+    })?;
+    if let Some(parameter) = artifact
+        .hir
+        .parameters
+        .iter()
+        .find(|parameter| !parameter.dimensions.is_empty())
+    {
+        return Err(RustBackendError::unsupported(
+            artifact.metadata.source_package.as_str(),
+            artifact.hir.module_name.as_str(),
+            format!(
+                "parameter array '{}' requires the array-valued generated-runtime ABI",
+                parameter.name
+            ),
+        ));
+    }
     let plan = ModelPlan::build(artifact, measurements)?;
 
     let names = RustDeviceNames::new(

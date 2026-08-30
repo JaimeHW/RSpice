@@ -329,7 +329,7 @@ fn extract_expression(
                 }
                 "noise_table" | "noise_table_log" if !args.is_empty() => {
                     let operands = match &hir.expressions[usize::from(args[0])].kind {
-                        HirExprKind::ArrayLiteral { elements } => {
+                        HirExprKind::ArrayLiteral { elements, .. } => {
                             elements.iter().map(|id| expr_ref(hir, *id)).collect()
                         }
                         _ => vec![expr_ref(hir, args[0])],
@@ -690,7 +690,9 @@ pub(super) fn contains_noise(hir: &HirModel, root: ExprId) -> bool {
             } => stack.extend([*condition, *then_expr, *else_expr]),
             HirExprKind::Call { args, .. }
             | HirExprKind::SystemFunction { args, .. }
-            | HirExprKind::ArrayLiteral { elements: args } => stack.extend(args.iter().copied()),
+            | HirExprKind::ArrayLiteral { elements: args, .. } => {
+                stack.extend(args.iter().copied())
+            }
             HirExprKind::ArrayAccess { index, .. } => stack.push(*index),
             HirExprKind::AnalogOperator { op } => push_analog_children(op, &mut stack),
             HirExprKind::Laplace { expr, .. } => stack.push(*expr),

@@ -10,10 +10,11 @@ use rspice_veriloga::canonical_ir::{
     PortId, SourceId, StateId, VariableId,
 };
 use rspice_veriloga::canonical_ir::{
-    CanonicalIrArtifact, CanonicalMetadata, CanonicalNoiseSourceKind, CompilerPhase,
-    DiagnosticSeverity, HirAnalogOperator, HirContributionKind, HirExprKind, HirExprRef,
-    HirLaplaceKind, HirLimiterArgument, HirLoop, HirModel, HirStatement, IrDiagnostic,
-    MirAnalysisDomain, MirEquationKind, MirModel, MirStateSlot, SourceSpanRef, StableDigest,
+    CanonicalIrArtifact, CanonicalMetadata, CanonicalNoiseSourceKind, CanonicalValueType,
+    CompilerPhase, DiagnosticSeverity, HirAnalogOperator, HirContributionKind, HirExprKind,
+    HirExprRef, HirExpression, HirLaplaceKind, HirLimiterArgument, HirLoop, HirModel,
+    HirParamRange, HirStatement, IrDiagnostic, MirAnalysisDomain, MirEquationKind, MirModel,
+    MirStateSlot, SourceSpanRef, StableDigest,
 };
 use rspice_veriloga::semantic::{AnalyzedContribution, AnalyzedModule, AnalyzedPort, SymbolTable};
 use rspice_veriloga::source::Span;
@@ -565,6 +566,92 @@ endmodule
 "#
 }
 
+fn parameter_array_source() -> &'static str {
+    r#"
+module parameter_array_metadata(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer width = 2;
+    parameter real coefficients[0:width-1][width:1]
+        = '{'{1.0, 2.0}, '{3.0, 4.0}};
+    analog I(p, n) <+ 0.0;
+endmodule
+"#
+}
+
+fn integer_parameter_array_source() -> &'static str {
+    r#"
+module integer_parameter_array_metadata(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer codes[0:1] = '{1, 2};
+    analog I(p, n) <+ 0.0;
+endmodule
+"#
+}
+
+fn assert_matching_parameter_array_tamper_rejected(
+    source: &str,
+    parameter_index: usize,
+    expected: &str,
+    mutate: impl FnOnce(&mut HirModel, &mut MirModel),
+) {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(source)
+        .expect("valid parameter-array canonical IR");
+    let CanonicalIrArtifact {
+        metadata,
+        mut hir,
+        mut mir,
+        ..
+    } = artifact;
+    mutate(&mut hir, &mut mir);
+
+    assert_eq!(
+        hir.parameters[parameter_index].dimensions, mir.parameters[parameter_index].dimensions,
+        "test mutation must keep HIR/MIR array dimensions identical"
+    );
+    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir)
+        .expect_err("matching malformed HIR/MIR must fail before artifact sealing");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains(expected)),
+        "expected diagnostic containing {expected:?}, got {diagnostics:#?}"
+    );
+}
+
+fn install_deep_shared_parameter_array_bound(hir: &mut HirModel, mir: &mut MirModel, depth: usize) {
+    let mut previous = hir.parameters[0]
+        .default_expr
+        .as_ref()
+        .expect("scalar width default expression")
+        .id;
+    let span = hir.parameters[1].dimensions[0].left.span;
+    for _ in 0..depth {
+        let id = ExprId::from(hir.expressions.len());
+        hir.expressions.push(HirExpression {
+            id,
+            kind: HirExprKind::Binary {
+                op: "Add".into(),
+                left: previous,
+                right: previous,
+            },
+            span,
+        });
+        previous = id;
+    }
+
+    mir.expressions = hir.expressions.clone();
+    let hostile_bound = HirExprRef {
+        id: previous,
+        kind: "binary".into(),
+        span,
+    };
+    hir.parameters[1].dimensions[0].left = hostile_bound.clone();
+    mir.parameters[1].dimensions[0].left = hostile_bound;
+}
+
 fn multi_module_source() -> &'static str {
     r#"
 module first_res(p, n);
@@ -978,7 +1065,7 @@ fn metadata_digest_is_stable_and_hex_encoded() {
     assert_ne!(digest, StableDigest::from_text("module other; endmodule"));
 
     let metadata = CanonicalMetadata::for_source("fixture", "module tiny; endmodule");
-    assert_eq!(metadata.schema_version, 8);
+    assert_eq!(metadata.schema_version, 9);
     assert_eq!(metadata.source_package.as_str(), "fixture");
     assert_eq!(metadata.source_digest.as_str(), digest.as_hex());
 }
@@ -1065,6 +1152,407 @@ endmodule
 }
 
 #[test]
+fn canonical_ir_preserves_multidimensional_parameter_bounds_and_direction() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(parameter_array_source())
+        .expect("parameter-array canonical IR");
+    let parameter = &artifact.hir.parameters[1];
+
+    assert_eq!(parameter.name.as_str(), "coefficients");
+    assert_eq!(parameter.dimensions.len(), 2);
+    assert_eq!(artifact.mir.parameters[1].dimensions, parameter.dimensions);
+    assert!(parameter.default.is_none());
+    assert!(parameter.default_expr.is_some());
+
+    let first = &parameter.dimensions[0];
+    let second = &parameter.dimensions[1];
+    assert!(matches!(
+        &artifact.hir.expressions[usize::from(first.left.id)].kind,
+        HirExprKind::Number { value, .. } if *value == 0.0
+    ));
+    assert!(matches!(
+        &artifact.hir.expressions[usize::from(second.right.id)].kind,
+        HirExprKind::Number { value, .. } if *value == 1.0
+    ));
+    assert!(matches!(
+        &artifact.hir.expressions[usize::from(second.left.id)].kind,
+        HirExprKind::Identifier { name } if name == "width"
+    ));
+    assert!(artifact.validate().is_ok());
+    assert!(artifact.dump_text().contains("dimensions=list:2:"));
+}
+
+#[test]
+fn executable_and_generated_rust_backends_reject_parameter_arrays_until_abi_support() {
+    let compiler = VerilogACompiler::default();
+    let artifact = compiler
+        .compile_canonical_ir(parameter_array_source())
+        .expect("parameter-array canonical IR");
+
+    let compile_error = compiler
+        .compile(parameter_array_source())
+        .expect_err("bytecode execution must fail closed");
+    assert!(compile_error.to_string().contains(
+        "represented in canonical HIR/MIR, but executable array storage and atomic instance overrides are not implemented"
+    ));
+
+    let rust_error = rspice_veriloga::rust_backend::RustTranspiler::default()
+        .transpile(&artifact)
+        .expect_err("generated Rust must fail closed");
+    assert!(rust_error.is_unsupported());
+    assert!(
+        rust_error
+            .message
+            .contains("parameter array 'coefficients'")
+    );
+}
+
+#[test]
+fn canonical_parameter_array_contract_rejects_matching_default_and_metadata_tampering() {
+    assert_matching_parameter_array_tamper_rejected(
+        parameter_array_source(),
+        1,
+        "must not carry a folded scalar default",
+        |hir, mir| {
+            hir.parameters[1].default = Some(1.0);
+            mir.parameters[1].default = Some(1.0);
+        },
+    );
+
+    assert_matching_parameter_array_tamper_rejected(
+        parameter_array_source(),
+        1,
+        "requires a constant assignment-pattern default",
+        |hir, mir| {
+            hir.parameters[1].default_expr = None;
+            mir.parameters[1].default_expr = None;
+        },
+    );
+
+    assert_matching_parameter_array_tamper_rejected(
+        parameter_array_source(),
+        1,
+        "must have real or integer elements",
+        |hir, mir| {
+            hir.parameters[1].value_type = CanonicalValueType::String;
+            mir.parameters[1].value_type = CanonicalValueType::String;
+        },
+    );
+
+    let scalar_range = HirParamRange {
+        min: Some(0.0),
+        max: Some(1.0),
+        min_parameter: None,
+        max_parameter: None,
+        min_expression: None,
+        max_expression: None,
+        min_exclusive: false,
+        max_exclusive: false,
+        exclude: Vec::new(),
+        exclude_parameters: Vec::new(),
+        exclude_expressions: Vec::new(),
+    };
+    assert_matching_parameter_array_tamper_rejected(
+        parameter_array_source(),
+        1,
+        "may not carry scalar range metadata",
+        move |hir, mir| {
+            hir.parameters[1].range = Some(scalar_range.clone());
+            mir.parameters[1].range = Some(scalar_range);
+        },
+    );
+}
+
+#[test]
+fn canonical_parameter_array_contract_rejects_matching_expression_and_shape_tampering() {
+    assert_matching_parameter_array_tamper_rejected(
+        parameter_array_source(),
+        1,
+        "default must be an assignment pattern",
+        |hir, mir| {
+            let hir_default = hir.parameters[1]
+                .default_expr
+                .as_ref()
+                .expect("array default")
+                .id;
+            let mir_default = mir.parameters[1]
+                .default_expr
+                .as_ref()
+                .expect("array default")
+                .id;
+            let HirExprKind::ArrayLiteral {
+                assignment_pattern, ..
+            } = &mut hir.expressions[usize::from(hir_default)].kind
+            else {
+                panic!("expected HIR assignment pattern");
+            };
+            *assignment_pattern = false;
+            let HirExprKind::ArrayLiteral {
+                assignment_pattern, ..
+            } = &mut mir.expressions[usize::from(mir_default)].kind
+            else {
+                panic!("expected MIR assignment pattern");
+            };
+            *assignment_pattern = false;
+        },
+    );
+
+    assert_matching_parameter_array_tamper_rejected(
+        parameter_array_source(),
+        1,
+        "does not resolve to a finite signed 64-bit integer",
+        |hir, mir| {
+            let hir_bound = hir.parameters[1].dimensions[0].left.id;
+            let mir_bound = mir.parameters[1].dimensions[0].left.id;
+            let HirExprKind::Number { value, .. } =
+                &mut hir.expressions[usize::from(hir_bound)].kind
+            else {
+                panic!("expected numeric HIR bound");
+            };
+            *value = 0.5;
+            let HirExprKind::Number { value, .. } =
+                &mut mir.expressions[usize::from(mir_bound)].kind
+            else {
+                panic!("expected numeric MIR bound");
+            };
+            *value = 0.5;
+        },
+    );
+
+    assert_matching_parameter_array_tamper_rejected(
+        parameter_array_source(),
+        1,
+        "dimension 1 has 1 elements; expected 2",
+        |hir, mir| {
+            let hir_default = hir.parameters[1]
+                .default_expr
+                .as_ref()
+                .expect("array default")
+                .id;
+            let mir_default = mir.parameters[1]
+                .default_expr
+                .as_ref()
+                .expect("array default")
+                .id;
+            let HirExprKind::ArrayLiteral { elements, .. } =
+                &mut hir.expressions[usize::from(hir_default)].kind
+            else {
+                panic!("expected HIR assignment pattern");
+            };
+            elements.pop();
+            let HirExprKind::ArrayLiteral { elements, .. } =
+                &mut mir.expressions[usize::from(mir_default)].kind
+            else {
+                panic!("expected MIR assignment pattern");
+            };
+            elements.pop();
+        },
+    );
+}
+
+#[test]
+fn canonical_parameter_array_safety_rejects_deep_shared_constant_dag_with_bounded_diagnostic() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(parameter_array_source())
+        .expect("valid parameter-array canonical IR");
+    let CanonicalIrArtifact {
+        metadata,
+        mut hir,
+        mut mir,
+        ..
+    } = artifact;
+    install_deep_shared_parameter_array_bound(&mut hir, &mut mir, 130);
+
+    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir)
+        .expect_err("over-deep shared constant DAG must fail closed");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("constant expression depth exceeds the safety limit of 128")
+        }),
+        "unexpected diagnostics: {diagnostics:#?}"
+    );
+}
+
+#[test]
+fn canonical_parameter_array_safety_rejects_contradictory_folded_scalar_default() {
+    assert_matching_parameter_array_tamper_rejected(
+        parameter_array_source(),
+        0,
+        "scalar parameter 'width' folded default 3 contradicts its default expression value 2",
+        |hir, mir| {
+            hir.parameters[0].default = Some(3.0);
+            mir.parameters[0].default = Some(3.0);
+        },
+    );
+}
+
+#[test]
+fn canonical_parameter_array_contract_rejects_fractional_integer_elements() {
+    assert_matching_parameter_array_tamper_rejected(
+        integer_parameter_array_source(),
+        0,
+        "invalid Integer element value 1.5",
+        |hir, mir| {
+            let hir_default = hir.parameters[0]
+                .default_expr
+                .as_ref()
+                .expect("integer array default")
+                .id;
+            let mir_default = mir.parameters[0]
+                .default_expr
+                .as_ref()
+                .expect("integer array default")
+                .id;
+            let HirExprKind::ArrayLiteral {
+                elements: hir_elements,
+                ..
+            } = &hir.expressions[usize::from(hir_default)].kind
+            else {
+                panic!("expected HIR assignment pattern");
+            };
+            let hir_element = hir_elements[0];
+            let HirExprKind::ArrayLiteral {
+                elements: mir_elements,
+                ..
+            } = &mir.expressions[usize::from(mir_default)].kind
+            else {
+                panic!("expected MIR assignment pattern");
+            };
+            let mir_element = mir_elements[0];
+            let HirExprKind::Number { value, .. } =
+                &mut hir.expressions[usize::from(hir_element)].kind
+            else {
+                panic!("expected numeric HIR element");
+            };
+            *value = 1.5;
+            let HirExprKind::Number { value, .. } =
+                &mut mir.expressions[usize::from(mir_element)].kind
+            else {
+                panic!("expected numeric MIR element");
+            };
+            *value = 1.5;
+        },
+    );
+}
+
+#[test]
+fn standalone_hir_validation_rejects_stale_schema() {
+    let (_, mut hir, _) = lower_tiny_resistor_parts();
+    hir.schema_version -= 1;
+
+    let diagnostics = hir
+        .validate()
+        .expect_err("standalone HIR must enforce the canonical schema boundary");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("unsupported HIR schema version")),
+        "unexpected diagnostics: {diagnostics:#?}"
+    );
+}
+
+#[test]
+#[cfg(feature = "wasm-jit")]
+fn shared_wasm_plan_gate_rejects_parameter_arrays_before_scalar_model_lowering() {
+    let compiler = VerilogACompiler::default();
+    let artifact = compiler
+        .compile_canonical_ir(parameter_array_source())
+        .expect("valid parameter-array canonical IR");
+    let mut scalar_model = compiler
+        .compile(
+            r#"
+module parameter_array_metadata(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer width = 2;
+    parameter real coefficients = width + 0.0;
+    analog I(p, n) <+ 0.0;
+endmodule
+"#,
+        )
+        .expect("scalar model used to probe executable gate");
+    scalar_model.source_digest = artifact.metadata.source_digest.clone();
+
+    let qualification_error =
+        rspice_veriloga::wasm_jit::qualify_model_plan(&scalar_model, &artifact)
+            .expect_err("wasm qualification must reject parameter arrays");
+    assert!(
+        qualification_error
+            .to_string()
+            .contains("array-valued executable ABI"),
+        "unexpected qualification error: {qualification_error}"
+    );
+
+    let emission_error =
+        rspice_veriloga::wasm_jit::compile_model_value_module(&scalar_model, &artifact)
+            .expect_err("wasm emission must reject parameter arrays");
+    assert!(
+        emission_error
+            .to_string()
+            .contains("array-valued executable ABI"),
+        "unexpected emission error: {emission_error}"
+    );
+}
+
+#[test]
+fn hierarchy_rewrites_parameter_array_bounds_in_child_scope_and_overrides_in_parent_scope() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir_module(
+            r#"
+module parameter_array_child(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer width = 2;
+    parameter real taps[width:1] = '{1.0, 2.0};
+    analog I(p, n) <+ 0.0;
+endmodule
+
+module parameter_array_parent(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer selected_width = 3;
+    parameter_array_child #(
+        .width(selected_width),
+        .taps('{1.0, 2.0, 3.0})
+    ) child(p, n);
+endmodule
+"#,
+            Some("parameter_array_parent"),
+        )
+        .expect("hierarchical parameter-array canonical IR");
+
+    let taps = artifact
+        .hir
+        .parameters
+        .iter()
+        .find(|parameter| parameter.name.ends_with("_taps"))
+        .expect("flattened child array parameter");
+    let width = artifact
+        .hir
+        .parameters
+        .iter()
+        .find(|parameter| !parameter.is_public && parameter.name.ends_with("_width"))
+        .expect("flattened child width parameter");
+    let bound = &artifact.hir.expressions[usize::from(taps.dimensions[0].left.id)].kind;
+    assert!(matches!(
+        bound,
+        HirExprKind::Identifier { name } if name == &width.name
+    ));
+    let width_override = width.default_expr.as_ref().expect("child width override");
+    assert!(matches!(
+        &artifact.hir.expressions[usize::from(width_override.id)].kind,
+        HirExprKind::Identifier { name } if name == "selected_width"
+    ));
+    let taps_override = taps.default_expr.as_ref().expect("child array override");
+    assert!(matches!(
+        &artifact.hir.expressions[usize::from(taps_override.id)].kind,
+        HirExprKind::ArrayLiteral { .. }
+    ));
+}
+
+#[test]
 fn canonical_ir_preserves_computed_parameter_ranges() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(
@@ -1134,7 +1622,7 @@ fn artifact_dump_is_deterministic_and_contains_phase_summaries() {
 
     assert_eq!(first, second);
     assert!(first.contains("canonical-veriloga-ir"));
-    assert!(first.contains("schema_version=8"));
+    assert!(first.contains("schema_version=9"));
     assert!(first.contains("source_package=fixture"));
     assert!(first.contains("source_digest="));
     assert!(first.contains("compiler_version="));
@@ -1280,6 +1768,63 @@ fn artifact_validation_rejects_metadata_feature_flag_mismatch() {
 }
 
 #[test]
+fn artifact_validation_rejects_unknown_schema_even_when_hir_matches() {
+    let (mut metadata, mut hir, mir) = lower_tiny_resistor_parts();
+    metadata.schema_version += 1;
+    hir.schema_version = metadata.schema_version;
+
+    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir)
+        .expect_err("an unsupported schema must fail closed");
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.phase == CompilerPhase::Artifact
+            && diagnostic
+                .message
+                .contains("unsupported canonical IR schema_version")
+    }));
+}
+
+#[test]
+fn canonical_parameter_array_safety_stale_schema_short_circuits_hostile_children() {
+    for (stale_hir, expected) in [
+        (false, "unsupported canonical IR schema_version"),
+        (true, "unsupported HIR schema_version"),
+    ] {
+        let artifact = VerilogACompiler::default()
+            .compile_canonical_ir(parameter_array_source())
+            .expect("valid parameter-array canonical IR");
+        let CanonicalIrArtifact {
+            mut metadata,
+            mut hir,
+            mut mir,
+            noise_sources,
+            ..
+        } = artifact;
+        install_deep_shared_parameter_array_bound(&mut hir, &mut mir, 130);
+        if stale_hir {
+            hir.schema_version += 1;
+        } else {
+            metadata.schema_version += 1;
+        }
+
+        let diagnostics =
+            CanonicalIrArtifact::from_parts_with_noise_plan(metadata, hir, mir, noise_sources)
+                .expect_err("stale schema must fail before hostile child traversal");
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "unexpected diagnostics: {diagnostics:#?}"
+        );
+        assert_eq!(diagnostics[0].phase, CompilerPhase::Artifact);
+        assert!(
+            diagnostics[0].message.contains(expected),
+            "unexpected diagnostic: {diagnostics:#?}"
+        );
+        assert!(!diagnostics[0].message.contains("constant expression depth"));
+    }
+}
+
+#[test]
 fn artifact_validation_rejects_hir_mir_parameter_mismatch() {
     let (metadata, hir, mut mir) = lower_tiny_resistor_parts();
     mir.parameters[0].name = "conductance".into();
@@ -1290,6 +1835,46 @@ fn artifact_validation_rejects_hir_mir_parameter_mismatch() {
     assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic.phase == CompilerPhase::Artifact && diagnostic.message.contains("parameter 0")
     }));
+}
+
+#[test]
+fn artifact_validation_rejects_hir_mir_parameter_dimension_mismatch() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(parameter_array_source())
+        .expect("parameter-array canonical IR");
+    let mut mir = artifact.mir.clone();
+    mir.parameters[1].dimensions[0].span.end += 1;
+
+    let diagnostics =
+        CanonicalIrArtifact::from_parts(artifact.metadata.clone(), artifact.hir.clone(), mir)
+            .expect_err("HIR/MIR parameter dimensions must match");
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.phase == CompilerPhase::Artifact && diagnostic.message.contains("parameter 1")
+    }));
+}
+
+#[test]
+fn parameter_dimension_direction_changes_canonical_digest() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(parameter_array_source())
+        .expect("parameter-array canonical IR");
+    let mut hir = artifact.hir.clone();
+    let mut mir = artifact.mir.clone();
+    {
+        let dimension = &mut hir.parameters[1].dimensions[0];
+        std::mem::swap(&mut dimension.left, &mut dimension.right);
+    }
+    {
+        let dimension = &mut mir.parameters[1].dimensions[0];
+        std::mem::swap(&mut dimension.left, &mut dimension.right);
+    }
+
+    let reversed = CanonicalIrArtifact::from_parts(artifact.metadata.clone(), hir, mir)
+        .expect("reversed direction remains structurally valid");
+
+    assert_ne!(artifact.hir_digest, reversed.hir_digest);
+    assert_ne!(artifact.mir_digest, reversed.mir_digest);
 }
 
 #[test]
@@ -1534,6 +2119,27 @@ fn mir_validation_rejects_parameter_default_expr_out_of_range() {
     default_expr.id = ExprId::from(mir.expressions.len());
 
     assert_mir_validation_message(&mir, "parameter 'r' default id ExprId");
+}
+
+#[test]
+fn hir_and_mir_validation_reject_parameter_dimension_refs_out_of_range() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(parameter_array_source())
+        .expect("parameter-array canonical IR");
+    let mut hir = artifact.hir;
+    hir.parameters[1].dimensions[0].left.id = ExprId::from(hir.expressions.len());
+    let hir_diagnostics = hir
+        .validate()
+        .expect_err("invalid HIR parameter dimension reference");
+    assert!(hir_diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("parameter 'coefficients' dimension 0 left bound")
+    }));
+
+    let mut mir = artifact.mir;
+    mir.parameters[1].dimensions[1].right.id = ExprId::from(mir.expressions.len());
+    assert_mir_validation_message(&mir, "parameter 'coefficients' dimension 1 right bound");
 }
 
 #[test]

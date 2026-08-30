@@ -626,14 +626,14 @@ impl<'a> Parser<'a> {
         self.advance(); // consume 'parameter' or 'localparam'
 
         // Optional type
-        let param_type = if self.match_token(TokenKind::Real) {
-            ParamType::Real
+        let (param_type, type_is_explicit) = if self.match_token(TokenKind::Real) {
+            (ParamType::Real, true)
         } else if self.match_token(TokenKind::Integer) {
-            ParamType::Integer
+            (ParamType::Integer, true)
         } else if self.match_token(TokenKind::String) {
-            ParamType::String
+            (ParamType::String, true)
         } else {
-            ParamType::Real // default
+            (ParamType::Real, false) // language default for scalar parameters
         };
 
         // Pull desc/units out of any preceding attribute instance
@@ -696,6 +696,7 @@ impl<'a> Parser<'a> {
 
             decls.push(ParameterDecl {
                 param_type,
+                type_is_explicit,
                 name: name.into(),
                 dimensions,
                 default,
@@ -2122,8 +2123,9 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::RParen)?;
                 Ok(expr)
             }
-            TokenKind::LBrace => {
-                // Array/concatenation literal: {expr, expr, ...}
+            TokenKind::LBrace | TokenKind::AssignmentPatternStart => {
+                let assignment_pattern = self.check(TokenKind::AssignmentPatternStart);
+                // Concatenation or assignment pattern: {expr, ...} / '{expr, ...}
                 self.advance();
                 let mut elements = Vec::new();
                 if !self.check(TokenKind::RBrace) {
@@ -2137,6 +2139,7 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::RBrace)?;
                 Ok(Expression::ArrayLiteral(ArrayLiteralExpr {
                     elements,
+                    assignment_pattern,
                     span: start.extend(self.previous_span()),
                 }))
             }
@@ -2561,6 +2564,64 @@ mod tests {
         assert!(m.parameters[0].range.is_none());
         assert_eq!(m.parameters[1].name.as_str(), "b");
         assert!(m.parameters[1].range.is_some());
+    }
+
+    #[test]
+    fn parameter_array_declarations_preserve_explicit_type_and_ordered_dimensions() {
+        let m = parse_module(
+            r#"module a(p);
+                inout p;
+                electrical p;
+                parameter count = 2;
+                parameter real taps[count:0][1:count] = '{'{1.0, 2.0}, '{3.0, 4.0}};
+            endmodule"#,
+        );
+
+        assert!(!m.parameters[0].type_is_explicit);
+        assert!(m.parameters[1].type_is_explicit);
+        assert_eq!(m.parameters[1].param_type, ParamType::Real);
+        assert_eq!(m.parameters[1].dimensions.len(), 2);
+        assert!(matches!(
+            m.parameters[1].dimensions[0].start,
+            Expression::Identifier(ref identifier) if identifier.name == "count"
+        ));
+        assert!(matches!(
+            m.parameters[1].dimensions[0].end,
+            Expression::Number(ref number) if number.value == 0.0
+        ));
+        assert!(matches!(
+            m.parameters[1].dimensions[1].start,
+            Expression::Number(ref number) if number.value == 1.0
+        ));
+        assert!(matches!(
+            m.parameters[1].dimensions[1].end,
+            Expression::Identifier(ref identifier) if identifier.name == "count"
+        ));
+        assert!(matches!(
+            m.parameters[1].default,
+            Some(Expression::ArrayLiteral(ref literal)) if literal.assignment_pattern
+        ));
+    }
+
+    #[test]
+    fn assignment_patterns_remain_distinct_from_concatenations() {
+        let m = parse_module(
+            r#"module a(p);
+                inout p;
+                electrical p;
+                parameter real pattern[0:0] = '{1.0};
+                parameter real concatenation[0:0] = {1.0};
+            endmodule"#,
+        );
+
+        assert!(matches!(
+            m.parameters[0].default,
+            Some(Expression::ArrayLiteral(ref literal)) if literal.assignment_pattern
+        ));
+        assert!(matches!(
+            m.parameters[1].default,
+            Some(Expression::ArrayLiteral(ref literal)) if !literal.assignment_pattern
+        ));
     }
 
     #[test]

@@ -24,8 +24,9 @@ use crate::semantic::{AnalyzedModule, AnalyzedRegion, AnalyzedStatement, Paramet
 use crate::types::{ParameterRange, ValueType};
 
 use super::{
-    ArrayId, BranchId, CanonicalMetadata, CompilerPhase, ContributionId, ExprId, IrDiagnostic,
-    IrValidationResult, ModuleId, NodeId, ParamId, PortId, SourceSpanRef, VariableId,
+    ArrayId, BranchId, CANONICAL_IR_SCHEMA_VERSION, CanonicalMetadata, CompilerPhase,
+    ContributionId, ExprId, IrDiagnostic, IrValidationResult, ModuleId, NodeId, ParamId, PortId,
+    SourceSpanRef, VariableId,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -290,6 +291,8 @@ pub enum HirExprKind {
     },
     ArrayLiteral {
         elements: Vec<ExprId>,
+        #[serde(default)]
+        assignment_pattern: bool,
     },
     AnalogOperator {
         op: HirAnalogOperator,
@@ -332,10 +335,24 @@ pub struct HirParameter {
     #[serde(default)]
     pub also_model: bool,
     pub value_type: CanonicalValueType,
+    /// Ordered unpacked declaration dimensions. Empty means scalar. Bounds
+    /// remain expressions because an earlier scalar parameter override may
+    /// change an array's shape during instance elaboration.
+    #[serde(default)]
+    pub dimensions: Vec<HirParameterDimension>,
     pub default: Option<f64>,
     pub default_expr: Option<HirExprRef>,
     pub range: Option<HirParamRange>,
     pub aliases: Vec<SmolStr>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HirParameterDimension {
+    /// Declared left bound; direction is intentionally not normalized.
+    pub left: HirExprRef,
+    /// Declared right bound; direction is intentionally not normalized.
+    pub right: HirExprRef,
+    pub span: SourceSpanRef,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -481,19 +498,21 @@ impl HirModel {
             .parameters
             .iter()
             .enumerate()
-            .map(|(index, parameter)| HirParameter {
-                id: ParamId::from(index),
-                name: parameter.name.clone(),
-                is_public: parameter.is_public,
-                scope: parameter.scope,
-                also_model: parameter.also_model,
-                value_type: CanonicalValueType::from(parameter.value_type),
-                default: parameter.default,
-                default_expr: parameter
+            .map(|(index, parameter)| {
+                let dimensions = parameter
+                    .dimensions
+                    .iter()
+                    .map(|dimension| HirParameterDimension {
+                        left: lowerer.lower_expr(&dimension.left),
+                        right: lowerer.lower_expr(&dimension.right),
+                        span: SourceSpanRef::from(dimension.span),
+                    })
+                    .collect();
+                let default_expr = parameter
                     .default_expr
                     .as_ref()
-                    .map(|expr| lowerer.lower_expr(expr)),
-                range: parameter.range.as_ref().map(|range| {
+                    .map(|expr| lowerer.lower_expr(expr));
+                let range = parameter.range.as_ref().map(|range| {
                     let mut lowered = HirParamRange::from_range(range);
                     lowered.min_expression = range
                         .min_expression
@@ -509,8 +528,20 @@ impl HirModel {
                         .map(|expression| lowerer.lower_expr(expression))
                         .collect();
                     lowered
-                }),
-                aliases: Vec::new(),
+                });
+                HirParameter {
+                    id: ParamId::from(index),
+                    name: parameter.name.clone(),
+                    is_public: parameter.is_public,
+                    scope: parameter.scope,
+                    also_model: parameter.also_model,
+                    value_type: CanonicalValueType::from(parameter.value_type),
+                    dimensions,
+                    default: parameter.default,
+                    default_expr,
+                    range,
+                    aliases: Vec::new(),
+                }
             })
             .collect();
 
@@ -634,6 +665,16 @@ impl HirModel {
     }
 
     pub fn validate(&self) -> IrValidationResult {
+        if self.schema_version != CANONICAL_IR_SCHEMA_VERSION {
+            return Err(vec![IrDiagnostic::global_error(
+                CompilerPhase::HirValidation,
+                format!(
+                    "unsupported HIR schema version {}; expected {}",
+                    self.schema_version, CANONICAL_IR_SCHEMA_VERSION
+                ),
+            )]);
+        }
+
         let mut diagnostics = Vec::new();
 
         if self.module_name.is_empty() {
@@ -671,6 +712,11 @@ impl HirModel {
         self.validate_arrays(&mut diagnostics);
         self.validate_parameter_aliases(&mut diagnostics);
         self.validate_parameter_expression_refs(&mut diagnostics);
+        diagnostics.extend(super::parameter_array::validate_parameter_array_contract(
+            CompilerPhase::HirValidation,
+            &self.parameters,
+            &self.expressions,
+        ));
         self.validate_branches(&mut diagnostics);
         self.validate_contributions(&mut diagnostics);
         self.validate_statements(&mut diagnostics, &self.statements);
@@ -766,7 +812,7 @@ impl HirModel {
             HirExprKind::ArrayAccess { index, .. } => {
                 self.validate_expression_child(diagnostics, expression, "index", *index);
             }
-            HirExprKind::ArrayLiteral { elements } => {
+            HirExprKind::ArrayLiteral { elements, .. } => {
                 self.validate_expression_child_list(diagnostics, expression, "element", elements);
             }
             HirExprKind::AnalogOperator { op } => {
@@ -1088,7 +1134,7 @@ impl HirModel {
                 .get(usize::from(id))
                 .map(|child| match &child.kind {
                     HirExprKind::NullArgument => 0,
-                    HirExprKind::ArrayLiteral { elements } => elements.len(),
+                    HirExprKind::ArrayLiteral { elements, .. } => elements.len(),
                     _ => 1,
                 })
         };
@@ -1249,6 +1295,24 @@ impl HirModel {
 
     fn validate_parameter_expression_refs(&self, diagnostics: &mut Vec<IrDiagnostic>) {
         for parameter in &self.parameters {
+            for (dimension_index, dimension) in parameter.dimensions.iter().enumerate() {
+                self.validate_expr_ref(
+                    diagnostics,
+                    &format!(
+                        "parameter '{}' dimension {} left bound",
+                        parameter.name, dimension_index
+                    ),
+                    &dimension.left,
+                );
+                self.validate_expr_ref(
+                    diagnostics,
+                    &format!(
+                        "parameter '{}' dimension {} right bound",
+                        parameter.name, dimension_index
+                    ),
+                    &dimension.right,
+                );
+            }
             if let Some(default_expr) = &parameter.default_expr {
                 self.validate_expr_ref(
                     diagnostics,
@@ -1989,6 +2053,7 @@ impl HirLowerer {
             },
             Expression::ArrayLiteral(array) => HirExprKind::ArrayLiteral {
                 elements: self.lower_expr_ids(&array.elements),
+                assignment_pattern: array.assignment_pattern,
             },
             Expression::AnalogOperator(operator) => self.lower_analog_operator(operator),
             Expression::NoiseSource(source) => self.lower_noise_source(source),

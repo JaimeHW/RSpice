@@ -530,6 +530,22 @@ impl DeviceIR {
     pub fn from_analyzed(module: &AnalyzedModule) -> crate::error::CompileResult<Self> {
         use crate::expr_converter::{ConversionContext, ExprConverter};
 
+        if let Some(parameter) = module
+            .parameters
+            .iter()
+            .find(|parameter| !parameter.dimensions.is_empty())
+        {
+            return Err(crate::error::CompileError::Semantic(
+                crate::error::SemanticError::new(
+                    crate::error::SemanticErrorKind::UnsupportedFeature(format!(
+                        "parameter array '{}' is represented in canonical HIR/MIR, but executable array storage and atomic instance overrides are not implemented",
+                        parameter.name
+                    )),
+                    parameter.dimensions[0].span,
+                ),
+            ));
+        }
+
         let mut ir = DeviceIR {
             name: module.name.clone(),
             terminals: Vec::new(),

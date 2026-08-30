@@ -1103,7 +1103,7 @@ fn collect_canonical_parameter_default_references(
             }
         }
         HirExprKind::ArrayAccess { index, .. } => visit(*index)?,
-        HirExprKind::ArrayLiteral { elements } => {
+        HirExprKind::ArrayLiteral { elements, .. } => {
             for element in elements {
                 visit(*element)?;
             }

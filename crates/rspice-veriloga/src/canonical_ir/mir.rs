@@ -16,7 +16,7 @@ use crate::semantic::ParameterScope;
 
 use super::hir::{
     CanonicalValueType, HirAnalogOperator, HirContributionKind, HirExprKind, HirExprRef,
-    HirExpression, HirModel, HirParamRange,
+    HirExpression, HirModel, HirParamRange, HirParameterDimension,
 };
 use super::{
     BranchId, BranchUnknownId, CompilerPhase, ContributionId, EquationId, ExprId, IrDiagnostic,
@@ -56,6 +56,8 @@ pub struct MirParameterSlot {
     #[serde(default)]
     pub also_model: bool,
     pub value_type: CanonicalValueType,
+    #[serde(default)]
+    pub dimensions: Vec<HirParameterDimension>,
     pub default: Option<f64>,
     pub default_expr: Option<HirExprRef>,
     pub range: Option<HirParamRange>,
@@ -159,6 +161,7 @@ impl MirModel {
                 scope: parameter.scope,
                 also_model: parameter.also_model,
                 value_type: parameter.value_type,
+                dimensions: parameter.dimensions.clone(),
                 default: parameter.default,
                 default_expr: parameter.default_expr.clone(),
                 range: parameter.range.clone(),
@@ -277,6 +280,11 @@ impl MirModel {
         validate_value_symbols(&mut diagnostics, &self.value_symbols);
         validate_parameter_names_and_aliases(&mut diagnostics, &self.parameters);
         validate_parameter_default_exprs(&mut diagnostics, &self.parameters, &self.expressions);
+        diagnostics.extend(super::parameter_array::validate_parameter_array_contract(
+            CompilerPhase::MirValidation,
+            &self.parameters,
+            &self.expressions,
+        ));
         validate_state_slot_owners(&mut diagnostics, &self.state_slots, self.equations.len());
         validate_equations(
             &mut diagnostics,
@@ -940,7 +948,7 @@ fn validate_expressions(
             HirExprKind::ArrayAccess { index, .. } => {
                 validate_expression_child(diagnostics, expressions, expression, "index", *index);
             }
-            HirExprKind::ArrayLiteral { elements } => {
+            HirExprKind::ArrayLiteral { elements, .. } => {
                 validate_expression_child_list(
                     diagnostics,
                     expressions,
@@ -1168,7 +1176,7 @@ fn validate_zi_call_budget(
             .get(usize::from(id))
             .map(|child| match &child.kind {
                 HirExprKind::NullArgument => 0,
-                HirExprKind::ArrayLiteral { elements } => elements.len(),
+                HirExprKind::ArrayLiteral { elements, .. } => elements.len(),
                 _ => 1,
             })
     };
@@ -1586,6 +1594,26 @@ fn validate_parameter_default_exprs(
     expressions: &[HirExpression],
 ) {
     for parameter in parameters {
+        for (dimension_index, dimension) in parameter.dimensions.iter().enumerate() {
+            validate_expr_ref(
+                diagnostics,
+                &format!(
+                    "parameter '{}' dimension {} left bound",
+                    parameter.name, dimension_index
+                ),
+                &dimension.left,
+                expressions,
+            );
+            validate_expr_ref(
+                diagnostics,
+                &format!(
+                    "parameter '{}' dimension {} right bound",
+                    parameter.name, dimension_index
+                ),
+                &dimension.right,
+                expressions,
+            );
+        }
         if let Some(default_expr) = &parameter.default_expr {
             validate_expr_ref(
                 diagnostics,

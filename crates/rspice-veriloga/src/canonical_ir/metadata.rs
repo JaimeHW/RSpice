@@ -10,6 +10,13 @@
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
+/// Canonical HIR/MIR wire-format version emitted and accepted by this build.
+///
+/// This is a hard compatibility boundary: caches and external backends must
+/// never deserialize a structurally different artifact merely because its HIR
+/// and metadata happen to repeat the same stale version number.
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 9;
+
 /// Stable deterministic digest for canonical IR metadata.
 ///
 /// This uses a fixed 64-bit FNV-1a-style hash to make metadata reproducible
@@ -45,7 +52,7 @@ pub struct CanonicalMetadata {
 impl CanonicalMetadata {
     pub fn for_source(source_package: impl Into<SmolStr>, source_text: &str) -> Self {
         Self {
-            schema_version: 8,
+            schema_version: CANONICAL_IR_SCHEMA_VERSION,
             source_package: source_package.into(),
             source_digest: StableDigest::from_text(source_text).as_hex().into(),
             compiler_version: env!("CARGO_PKG_VERSION").into(),

@@ -29,6 +29,7 @@ pub mod ids;
 pub mod metadata;
 pub mod mir;
 pub mod noise;
+mod parameter_array;
 pub mod schedule;
 
 pub use ad::{AdFunction, AdSeed, differentiate};
@@ -50,14 +51,14 @@ pub use hir::{
     CanonicalValueType, HirAnalogOperator, HirArray, HirAssignment, HirBranch, HirContribution,
     HirContributionKind, HirCrossDirection, HirExprKind, HirExprRef, HirExpression,
     HirInternalNode, HirLaplaceKind, HirLimiterArgument, HirLoop, HirModel, HirParamRange,
-    HirParameter, HirPort, HirStatement, HirVariable, HirZiKind,
+    HirParameter, HirParameterDimension, HirPort, HirStatement, HirVariable, HirZiKind,
 };
 pub use ids::{
     ArrayId, BlockId, BranchId, BranchUnknownId, ContributionId, DisciplineId, EquationId, ExprId,
     ModuleId, NodeId, NoiseSourceId, ParamId, PortId, RegionId, ScheduleId, ShapeId, SourceId,
     StateId, SymbolId, ValueId, VariableId,
 };
-pub use metadata::{CanonicalMetadata, StableDigest};
+pub use metadata::{CANONICAL_IR_SCHEMA_VERSION, CanonicalMetadata, StableDigest};
 pub use mir::{
     MirAnalysisDomain, MirBranch, MirBranchRef, MirBranchUnknown, MirEquation, MirEquationKind,
     MirModel, MirNode, MirParameterSlot, MirStateSlot,

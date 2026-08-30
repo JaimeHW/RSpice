@@ -13,9 +13,11 @@ use crate::error::{CompileError, CompileResult, SemanticError, SemanticErrorKind
 use crate::source::Span;
 use crate::types::{FunctionRegistry, ParameterRange as TypedParameterRange, ValueType};
 use smol_str::SmolStr;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 const RSPICE_LIMITED_EXP_INTRINSIC: &str = "__rspice_limited_exp";
+pub(crate) const MAX_PARAMETER_ARRAY_RANK: usize = 16;
+pub(crate) const MAX_PARAMETER_ARRAY_ELEMENTS: u64 = 1_048_576;
 
 /// Diagnostic code for a system task that parses and is then discarded.
 const NO_EFFECT_SYSTEM_TASK_CODE: &str = "VA-SEM-NO-EFFECT-SYSTEM-TASK";
@@ -77,6 +79,9 @@ pub struct SemanticAnalyzer {
     current_default_transition: f64,
     /// Array variables of the module under analysis (name -> layout)
     arrays: HashMap<SmolStr, AnalyzedArray>,
+    /// Public parameter-array declarations. Until element lowering is wired
+    /// through every backend, these names must never acquire scalar semantics.
+    parameter_arrays: HashSet<SmolStr>,
     /// Hidden system-task variables ($bound_step, $discontinuity)
     /// registered on first use
     task_vars: HashMap<SmolStr, usize>,
@@ -122,6 +127,7 @@ impl SemanticAnalyzer {
             dynamic_analog_operator_guard_depth: 0,
             current_default_transition: Self::SIMULATOR_DEFAULT_TRANSITION,
             arrays: HashMap::new(),
+            parameter_arrays: HashSet::new(),
             task_vars: HashMap::new(),
             unfiltered_initial_step_guards: Vec::new(),
             warnings: Vec::new(),
@@ -193,6 +199,7 @@ impl SemanticAnalyzer {
                 self.runtime_loop_depth = 0;
                 self.dynamic_analog_operator_guard_depth = 0;
                 self.current_default_transition = default_transition;
+                self.parameter_arrays.clear();
 
                 match self.analyze_module(module, default_transition) {
                     Ok(analyzed) => {
@@ -553,21 +560,43 @@ impl SemanticAnalyzer {
                 external_model_storage.insert(alias.alias.to_ascii_lowercase(), *has_model_storage);
             }
         }
-        self.validate_parameter_default_dependencies(&module.parameters, &module.aliasparams);
-        for ((param, scope), also_model) in module
+        // Preserve the first case-sensitive declaration so duplicate names do
+        // not perturb dependency order before the symbol-table diagnostic.
+        // The same table serves scalar defaults and array bounds.
+        let parameter_indices = module.parameters.iter().enumerate().fold(
+            HashMap::new(),
+            |mut indices, (index, parameter)| {
+                indices.entry(parameter.name.clone()).or_insert(index);
+                indices
+            },
+        );
+        self.parameter_arrays.extend(
+            module
+                .parameters
+                .iter()
+                .filter(|parameter| !parameter.dimensions.is_empty())
+                .map(|parameter| parameter.name.clone()),
+        );
+        self.validate_parameter_default_dependencies(
+            &module.parameters,
+            &module.aliasparams,
+            &parameter_indices,
+        );
+        for (parameter_index, ((param, scope), also_model)) in module
             .parameters
             .iter()
             .zip(parameter_scopes)
             .zip(parameter_also_model)
+            .enumerate()
         {
-            if !param.dimensions.is_empty() {
-                return Err(CompileError::Semantic(SemanticError::new(
-                    SemanticErrorKind::UnsupportedFeature(format!(
-                        "parameter array '{}' is retained with its declared dimensions, but array-valued parameter storage and instance overrides are not implemented",
-                        param.name
-                    )),
-                    param.span,
-                )));
+            let is_parameter_array = !param.dimensions.is_empty();
+            if is_parameter_array {
+                self.validate_parameter_array_declaration(
+                    param,
+                    parameter_index,
+                    &module.parameters,
+                    &parameter_indices,
+                );
             }
             if scope == ParameterScope::Model || also_model {
                 let default_reads_instance = param.default.as_ref().is_some_and(|expression| {
@@ -576,6 +605,17 @@ impl SemanticAnalyzer {
                         &canonical_model_storage,
                         &external_model_storage,
                     )
+                });
+                let shape_reads_instance = param.dimensions.iter().any(|dimension| {
+                    [&dimension.start, &dimension.end]
+                        .into_iter()
+                        .any(|expression| {
+                            Self::references_parameter_without_model_storage(
+                                expression,
+                                &canonical_model_storage,
+                                &external_model_storage,
+                            )
+                        })
                 });
                 // Range bounds are validation expressions, not part of the
                 // model-card value. CMC models legitimately constrain a model
@@ -596,6 +636,20 @@ impl SemanticAnalyzer {
                         param.span,
                     );
                 }
+                if shape_reads_instance {
+                    let storage = if scope == ParameterScope::Model {
+                        "model parameter array"
+                    } else {
+                        "dual-scope parameter-array model fallback"
+                    };
+                    self.record_error_at(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "{storage} '{}' cannot have dimensions that depend on an instance parameter lacking model storage",
+                            param.name,
+                        )),
+                        param.span,
+                    );
+                }
             }
             let value_type = match param.param_type {
                 ParamType::Real => ValueType::Real,
@@ -603,21 +657,28 @@ impl SemanticAnalyzer {
                 ParamType::String => ValueType::String,
             };
 
+            // Resolve the declaration-time value for diagnostics even when
+            // the executable default must remain symbolic. Keeping those two
+            // concerns separate lets a later array bound be checked through a
+            // transitive chain without baking overridable values into code.
+            let declared_default = param.default.as_ref().and_then(|e| self.eval_const(e));
+
             // A default that references other parameters must stay
             // symbolic: instance overrides of those parameters change it,
             // so it is evaluated per instance at setup time.
-            let default = if param
-                .default
-                .as_ref()
-                .is_some_and(|e| Self::references_identifiers(e, &param_names))
+            let default = if is_parameter_array
+                || param
+                    .default
+                    .as_ref()
+                    .is_some_and(|e| Self::references_identifiers(e, &param_names))
             {
                 None
             } else {
-                param.default.as_ref().and_then(|e| self.eval_const(e))
+                declared_default
             };
 
             if param.param_type == ParamType::Integer
-                && let Some(default) = default
+                && let Some(default) = declared_default
                 && (default.fract() != 0.0
                     || default < f64::from(i32::MIN)
                     || default > f64::from(i32::MAX))
@@ -632,7 +693,7 @@ impl SemanticAnalyzer {
                 );
             }
 
-            if let Some(declared_range) = &param.range {
+            if !is_parameter_array && let Some(declared_range) = &param.range {
                 if declared_range.bounds.len() > 1 {
                     self.record_error_at(
                         SemanticErrorKind::UnsupportedFeature(
@@ -681,13 +742,17 @@ impl SemanticAnalyzer {
             }
 
             // Parse parameter range if present
-            let range = param
-                .range
-                .as_ref()
-                .map(|r| self.parse_range(r, &param_names));
+            let range = if is_parameter_array {
+                None
+            } else {
+                param
+                    .range
+                    .as_ref()
+                    .map(|r| self.parse_range(r, &param_names))
+            };
 
             // Validate default against range
-            if let (Some(default_val), Some(range_constraint)) = (default, &range)
+            if let (Some(default_val), Some(range_constraint)) = (declared_default, &range)
                 && !range_constraint.contains(default_val)
             {
                 self.record_error_at(
@@ -700,7 +765,7 @@ impl SemanticAnalyzer {
                 );
             }
 
-            if let Some(value) = default {
+            if let Some(value) = declared_default {
                 self.param_consts.insert(param.name.clone(), value);
             }
 
@@ -711,6 +776,15 @@ impl SemanticAnalyzer {
                 also_model,
                 param_type: param.param_type,
                 value_type,
+                dimensions: param
+                    .dimensions
+                    .iter()
+                    .map(|dimension| AnalyzedParameterDimension {
+                        left: dimension.start.clone(),
+                        right: dimension.end.clone(),
+                        span: dimension.span,
+                    })
+                    .collect(),
                 default,
                 default_expr: param.default.clone(),
                 range: range.clone(),
@@ -3929,6 +4003,7 @@ impl SemanticAnalyzer {
                     .iter()
                     .map(|element| self.materialize_output_function_calls(element, module, sink))
                     .collect::<CompileResult<Vec<_>>>()?,
+                assignment_pattern: array.assignment_pattern,
                 span: array.span,
             }),
             Expression::AnalogOperator(op) => Expression::AnalogOperator(
@@ -4467,10 +4542,21 @@ impl SemanticAnalyzer {
     /// variables) and inline calls to user-defined analog functions.
     fn lower_expression(&mut self, expr: &Expression) -> CompileResult<Expression> {
         Ok(match expr {
-            Expression::Identifier(id) => match self.lookup_substitution(&id.name) {
-                Some(subst) => subst,
-                None => expr.clone(),
-            },
+            Expression::Identifier(id) => {
+                if self.parameter_arrays.contains(&id.name) {
+                    return Err(CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "parameter array '{}' cannot be used as a scalar expression",
+                            id.name
+                        )),
+                        id.span,
+                    )));
+                }
+                match self.lookup_substitution(&id.name) {
+                    Some(subst) => subst,
+                    None => expr.clone(),
+                }
+            }
             Expression::Number(_) | Expression::StringLit(_) | Expression::NullArgument(_) => {
                 expr.clone()
             }
@@ -4622,6 +4708,15 @@ impl SemanticAnalyzer {
             Expression::ArrayAccess(a) => {
                 let index = self.lower_expression(&a.index)?;
                 let array_name = self.resolve_substituted_name(&a.array);
+                if self.parameter_arrays.contains(&array_name) {
+                    return Err(CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "indexed access to parameter array '{}' is represented by its declaration metadata, but parameter-array element lowering is not implemented",
+                            a.array
+                        )),
+                        a.span,
+                    )));
+                }
                 let Some(layout) = self.arrays.get(&array_name).cloned() else {
                     return Err(CompileError::Semantic(SemanticError::new(
                         SemanticErrorKind::UnsupportedFeature(format!(
@@ -4657,6 +4752,7 @@ impl SemanticAnalyzer {
                     .collect::<CompileResult<Vec<_>>>()?;
                 Expression::ArrayLiteral(ArrayLiteralExpr {
                     elements,
+                    assignment_pattern: a.assignment_pattern,
                     span: a.span,
                 })
             }
@@ -5604,6 +5700,15 @@ impl SemanticAnalyzer {
                 *span,
             ))),
             Expression::Identifier(ident) => {
+                if self.parameter_arrays.contains(&ident.name) {
+                    return Err(CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "parameter array '{}' cannot be used as a scalar expression",
+                            ident.name
+                        )),
+                        ident.span,
+                    )));
+                }
                 if let Some(sym) = self.symbols.lookup(&ident.name) {
                     Ok(sym.value_type)
                 } else if let Some((base, _)) = ident.name.split_once('[')
@@ -5700,6 +5805,14 @@ impl SemanticAnalyzer {
         Self::eval_const_with(expr, &self.invariant_consts)
     }
 
+    fn exact_const_i64(value: f64) -> Option<i64> {
+        (value.is_finite()
+            && value.fract() == 0.0
+            && value >= i64::MIN as f64
+            && value < 9_223_372_036_854_775_808.0)
+            .then_some(value as i64)
+    }
+
     fn eval_const_with(expr: &Expression, env: &HashMap<SmolStr, f64>) -> Option<f64> {
         let eval = |e: &Expression| Self::eval_const_with(e, env);
         match expr {
@@ -5716,7 +5829,7 @@ impl SemanticAnalyzer {
                             0.0
                         }
                     }
-                    UnaryOp::BitNot => !(v as i64) as f64,
+                    UnaryOp::BitNot => (!Self::exact_const_i64(v)?) as f64,
                 })
             }
             Expression::Binary(b) => {
@@ -5737,11 +5850,25 @@ impl SemanticAnalyzer {
                     BinaryOp::Ge => f64::from(l >= r),
                     BinaryOp::And => f64::from(l != 0.0 && r != 0.0),
                     BinaryOp::Or => f64::from(l != 0.0 || r != 0.0),
-                    BinaryOp::Shl => ((l as i64) << (r as i64)) as f64,
-                    BinaryOp::Shr => ((l as i64) >> (r as i64)) as f64,
-                    BinaryOp::BitAnd => ((l as i64) & (r as i64)) as f64,
-                    BinaryOp::BitOr => ((l as i64) | (r as i64)) as f64,
-                    BinaryOp::BitXor => ((l as i64) ^ (r as i64)) as f64,
+                    BinaryOp::Shl => {
+                        let value = Self::exact_const_i64(l)?;
+                        let shift = u32::try_from(Self::exact_const_i64(r)?).ok()?;
+                        value.checked_shl(shift)? as f64
+                    }
+                    BinaryOp::Shr => {
+                        let value = Self::exact_const_i64(l)?;
+                        let shift = u32::try_from(Self::exact_const_i64(r)?).ok()?;
+                        value.checked_shr(shift)? as f64
+                    }
+                    BinaryOp::BitAnd => {
+                        (Self::exact_const_i64(l)? & Self::exact_const_i64(r)?) as f64
+                    }
+                    BinaryOp::BitOr => {
+                        (Self::exact_const_i64(l)? | Self::exact_const_i64(r)?) as f64
+                    }
+                    BinaryOp::BitXor => {
+                        (Self::exact_const_i64(l)? ^ Self::exact_const_i64(r)?) as f64
+                    }
                 })
             }
             Expression::Conditional(c) => {
@@ -5841,6 +5968,550 @@ impl SemanticAnalyzer {
         self.errors.push(SemanticError::new(kind, span));
     }
 
+    /// Validate the declaration-only portion of a public parameter array.
+    /// Bounds remain symbolic in analyzed output: instance overrides of an
+    /// earlier scalar parameter may change the eventual shape. This pass only
+    /// proves that resolving those bounds later is deterministic and numeric.
+    fn validate_parameter_array_declaration(
+        &mut self,
+        parameter: &ParameterDecl,
+        parameter_index: usize,
+        parameters: &[ParameterDecl],
+        parameter_indices: &HashMap<SmolStr, usize>,
+    ) {
+        if !parameter.type_is_explicit {
+            self.record_error_at(
+                SemanticErrorKind::UnsupportedFeature(format!(
+                    "parameter array '{}' requires an explicit integer or real element type",
+                    parameter.name
+                )),
+                parameter.span,
+            );
+        }
+        if parameter.default.is_none() {
+            self.record_error_at(
+                SemanticErrorKind::InvalidExpression(format!(
+                    "parameter array '{}' requires a default value",
+                    parameter.name
+                )),
+                parameter.span,
+            );
+        }
+        if parameter.param_type == ParamType::String {
+            self.record_error_at(
+                SemanticErrorKind::UnsupportedFeature(format!(
+                    "string parameter array '{}' is not supported; parameter arrays must have integer or real elements",
+                    parameter.name
+                )),
+                parameter.span,
+            );
+        }
+        if let Some(range) = &parameter.range {
+            self.record_error_at(
+                SemanticErrorKind::UnsupportedFeature(format!(
+                    "parameter array '{}' may not use from/exclude constraints until array-valued constraint semantics are implemented",
+                    parameter.name
+                )),
+                range.span,
+            );
+        }
+        if parameter.dimensions.len() > MAX_PARAMETER_ARRAY_RANK {
+            self.record_error_at(
+                SemanticErrorKind::UnsupportedFeature(format!(
+                    "parameter array '{}' has rank {}; the supported safety limit is {}",
+                    parameter.name,
+                    parameter.dimensions.len(),
+                    MAX_PARAMETER_ARRAY_RANK
+                )),
+                parameter.span,
+            );
+        }
+
+        let initializer = match parameter.default.as_ref() {
+            Some(Expression::ArrayLiteral(initializer)) if initializer.assignment_pattern => {
+                Some(initializer)
+            }
+            Some(Expression::ArrayLiteral(initializer)) => {
+                self.record_error_at(
+                    SemanticErrorKind::TypeMismatch {
+                        expected: "constant assignment pattern opened with `'{'".into(),
+                        found: "concatenation opened with '{'".into(),
+                        context: format!("default of parameter array '{}'", parameter.name),
+                    },
+                    initializer.span,
+                );
+                None
+            }
+            Some(other) => {
+                self.record_error_at(
+                    SemanticErrorKind::TypeMismatch {
+                        expected: "constant assignment pattern".into(),
+                        found: "scalar expression".into(),
+                        context: format!("default of parameter array '{}'", parameter.name),
+                    },
+                    other.span(),
+                );
+                None
+            }
+            None => None,
+        };
+
+        for (dimension_index, dimension) in parameter.dimensions.iter().enumerate() {
+            for (side, bound) in [("left", &dimension.start), ("right", &dimension.end)] {
+                let owner = format!(
+                    "{side} bound of dimension {} of parameter array '{}'",
+                    dimension_index + 1,
+                    parameter.name
+                );
+                if !self.validate_parameter_array_bound_expression(
+                    bound,
+                    &owner,
+                    parameter_index,
+                    parameters,
+                    parameter_indices,
+                ) {
+                    continue;
+                }
+
+                match self.eval_const(bound) {
+                    Some(value) if !value.is_finite() => {
+                        self.record_error_at(
+                            SemanticErrorKind::InvalidExpression(format!(
+                                "{owner} resolves to non-finite value {value}"
+                            )),
+                            bound.span(),
+                        );
+                    }
+                    Some(value) if value.fract() != 0.0 => {
+                        self.record_error_at(
+                            SemanticErrorKind::InvalidExpression(format!(
+                                "{owner} resolves to non-integral value {value}"
+                            )),
+                            bound.span(),
+                        );
+                    }
+                    Some(value)
+                        if !(-9_223_372_036_854_775_808.0..9_223_372_036_854_775_808.0)
+                            .contains(&value) =>
+                    {
+                        self.record_error_at(
+                            SemanticErrorKind::InvalidExpression(format!(
+                                "{owner} resolves outside the signed 64-bit index range: {value}"
+                            )),
+                            bound.span(),
+                        );
+                    }
+                    Some(_) => {}
+                    None => self.record_error_at(
+                        SemanticErrorKind::InvalidExpression(format!(
+                            "{owner} does not resolve to a valid integer using declared parameter defaults"
+                        )),
+                        bound.span(),
+                    ),
+                }
+            }
+        }
+
+        let constant_shape = self.resolve_parameter_array_default_shape(parameter);
+        if let Some(initializer) = initializer {
+            if parameter.param_type != ParamType::String {
+                let owner = format!("default of parameter array '{}'", parameter.name);
+                for element in &initializer.elements {
+                    self.validate_parameter_array_initializer_elements(
+                        element,
+                        parameter,
+                        &owner,
+                        parameter_index,
+                        parameters,
+                        parameter_indices,
+                    );
+                }
+            }
+
+            if let Some(shape) = constant_shape
+                && let Err(detail) =
+                    Self::validate_parameter_array_initializer_shape(initializer, &shape, 0)
+            {
+                self.record_error_at(
+                    SemanticErrorKind::TypeMismatch {
+                        expected: format!("rectangular assignment pattern with shape {shape:?}"),
+                        found: detail,
+                        context: format!("default of parameter array '{}'", parameter.name),
+                    },
+                    initializer.span,
+                );
+            }
+        }
+    }
+
+    fn resolve_parameter_array_default_shape(
+        &mut self,
+        parameter: &ParameterDecl,
+    ) -> Option<Vec<u64>> {
+        if parameter.dimensions.len() > MAX_PARAMETER_ARRAY_RANK {
+            return None;
+        }
+
+        let mut shape = Vec::with_capacity(parameter.dimensions.len());
+        let mut total_elements = 1_u64;
+        for (dimension_index, dimension) in parameter.dimensions.iter().enumerate() {
+            let left = Self::exact_const_i64(self.eval_const(&dimension.start)?)?;
+            let right = Self::exact_const_i64(self.eval_const(&dimension.end)?)?;
+            let Some(extent) = left.abs_diff(right).checked_add(1) else {
+                self.record_error_at(
+                    SemanticErrorKind::InvalidExpression(format!(
+                        "dimension {} of parameter array '{}' has an unrepresentable extent",
+                        dimension_index + 1,
+                        parameter.name
+                    )),
+                    dimension.span,
+                );
+                return None;
+            };
+            let Some(next_total) = total_elements.checked_mul(extent) else {
+                self.record_error_at(
+                    SemanticErrorKind::InvalidExpression(format!(
+                        "parameter array '{}' element count overflows the canonical shape representation",
+                        parameter.name
+                    )),
+                    parameter.span,
+                );
+                return None;
+            };
+            if next_total > MAX_PARAMETER_ARRAY_ELEMENTS {
+                self.record_error_at(
+                    SemanticErrorKind::UnsupportedFeature(format!(
+                        "parameter array '{}' declares {next_total} elements; the supported safety limit is {MAX_PARAMETER_ARRAY_ELEMENTS}",
+                        parameter.name
+                    )),
+                    parameter.span,
+                );
+                return None;
+            }
+            total_elements = next_total;
+            shape.push(extent);
+        }
+        Some(shape)
+    }
+
+    fn validate_parameter_array_initializer_elements(
+        &mut self,
+        expression: &Expression,
+        parameter: &ParameterDecl,
+        owner: &str,
+        parameter_index: usize,
+        parameters: &[ParameterDecl],
+        parameter_indices: &HashMap<SmolStr, usize>,
+    ) -> bool {
+        if let Expression::ArrayLiteral(array) = expression {
+            return array.elements.iter().fold(true, |valid, element| {
+                self.validate_parameter_array_initializer_elements(
+                    element,
+                    parameter,
+                    owner,
+                    parameter_index,
+                    parameters,
+                    parameter_indices,
+                ) && valid
+            });
+        }
+
+        let valid = self.validate_parameter_array_bound_expression(
+            expression,
+            owner,
+            parameter_index,
+            parameters,
+            parameter_indices,
+        );
+        if !valid {
+            return false;
+        }
+
+        let Some(value) = self.eval_const(expression) else {
+            self.record_error_at(
+                SemanticErrorKind::InvalidExpression(format!(
+                    "{owner} element does not resolve using declared parameter defaults"
+                )),
+                expression.span(),
+            );
+            return false;
+        };
+        if !value.is_finite() {
+            self.record_error_at(
+                SemanticErrorKind::InvalidExpression(format!(
+                    "{owner} element resolves to non-finite value {value}"
+                )),
+                expression.span(),
+            );
+            return false;
+        }
+        if parameter.param_type == ParamType::Integer
+            && (value.fract() != 0.0 || value < f64::from(i32::MIN) || value > f64::from(i32::MAX))
+        {
+            self.record_error_at(
+                SemanticErrorKind::TypeMismatch {
+                    expected: "32-bit integer array element".into(),
+                    found: value.to_string(),
+                    context: owner.into(),
+                },
+                expression.span(),
+            );
+            return false;
+        }
+        true
+    }
+
+    fn validate_parameter_array_initializer_shape(
+        initializer: &crate::ast::ArrayLiteralExpr,
+        shape: &[u64],
+        dimension: usize,
+    ) -> Result<(), String> {
+        let Some(&expected_len) = shape.get(dimension) else {
+            return Err(format!(
+                "nested assignment pattern extends beyond declared rank {}",
+                shape.len()
+            ));
+        };
+        if u64::try_from(initializer.elements.len()).ok() != Some(expected_len) {
+            return Err(format!(
+                "dimension {} has {} elements",
+                dimension + 1,
+                initializer.elements.len()
+            ));
+        }
+
+        let is_leaf = dimension + 1 == shape.len();
+        for element in &initializer.elements {
+            match (is_leaf, element) {
+                (true, Expression::ArrayLiteral(_)) => {
+                    return Err(format!(
+                        "dimension {} contains an unexpected nested pattern",
+                        dimension + 1
+                    ));
+                }
+                (false, Expression::ArrayLiteral(nested)) => {
+                    if !nested.assignment_pattern {
+                        return Err(format!(
+                            "dimension {} contains a concatenation instead of an assignment pattern",
+                            dimension + 1
+                        ));
+                    }
+                    Self::validate_parameter_array_initializer_shape(nested, shape, dimension + 1)?;
+                }
+                (false, _) => {
+                    return Err(format!(
+                        "dimension {} contains a scalar before the final dimension",
+                        dimension + 1
+                    ));
+                }
+                (true, _) => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Return true when `expression` belongs to the numeric constant-expression
+    /// subset used by parameter-array bounds. Diagnostics identify the first
+    /// invalid leaf so malformed shapes cannot degrade into an unresolved
+    /// runtime expression.
+    fn validate_parameter_array_bound_expression(
+        &mut self,
+        expression: &Expression,
+        owner: &str,
+        parameter_index: usize,
+        parameters: &[ParameterDecl],
+        parameter_indices: &HashMap<SmolStr, usize>,
+    ) -> bool {
+        let validate_child = |this: &mut Self, child: &Expression| {
+            this.validate_parameter_array_bound_expression(
+                child,
+                owner,
+                parameter_index,
+                parameters,
+                parameter_indices,
+            )
+        };
+
+        match expression {
+            Expression::Number(_) => true,
+            Expression::Identifier(identifier) if identifier.name == "inf" => true,
+            Expression::Identifier(identifier) => {
+                let Some(&referenced_index) = parameter_indices.get(&identifier.name) else {
+                    self.record_error_at(
+                        SemanticErrorKind::InvalidExpression(format!(
+                            "{owner} references unknown identifier '{}'",
+                            identifier.name
+                        )),
+                        identifier.span,
+                    );
+                    return false;
+                };
+                let referenced = &parameters[referenced_index];
+                if referenced_index == parameter_index {
+                    self.record_error_at(
+                        SemanticErrorKind::CircularDependency(format!(
+                            "{owner} references parameter '{}' itself",
+                            parameters[parameter_index].name
+                        )),
+                        identifier.span,
+                    );
+                    false
+                } else if referenced_index > parameter_index {
+                    self.record_error_at(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "{owner} references later parameter '{}'; parameter-array bounds may reference only previously declared scalar parameters",
+                            referenced.name
+                        )),
+                        identifier.span,
+                    );
+                    false
+                } else if !referenced.dimensions.is_empty() {
+                    self.record_error_at(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "{owner} references parameter array '{}'; parameter-array bounds may reference only previously declared scalar parameters",
+                            referenced.name
+                        )),
+                        identifier.span,
+                    );
+                    false
+                } else if referenced.param_type == ParamType::String {
+                    self.record_error_at(
+                        SemanticErrorKind::TypeMismatch {
+                            expected: "previously declared numeric scalar parameter".into(),
+                            found: format!("string parameter '{}'", referenced.name),
+                            context: owner.into(),
+                        },
+                        identifier.span,
+                    );
+                    false
+                } else {
+                    true
+                }
+            }
+            Expression::Unary(unary) => validate_child(self, &unary.operand),
+            Expression::Binary(binary) => {
+                let left = validate_child(self, &binary.left);
+                let right = validate_child(self, &binary.right);
+                left && right
+            }
+            Expression::Conditional(conditional) => {
+                let condition = validate_child(self, &conditional.condition);
+                let then_expr = validate_child(self, &conditional.then_expr);
+                let else_expr = validate_child(self, &conditional.else_expr);
+                condition && then_expr && else_expr
+            }
+            Expression::Call(call) => {
+                let expected_arity = match call.name.as_str() {
+                    "abs" | "sqrt" | "exp" | "ln" | "log" | "log10" | "floor" | "ceil" => Some(1),
+                    "min" | "max" | "pow" => Some(2),
+                    _ => None,
+                };
+                let Some(expected_arity) = expected_arity else {
+                    self.record_error_at(
+                        SemanticErrorKind::InvalidExpression(format!(
+                            "{owner} calls non-constant function '{}'",
+                            call.name
+                        )),
+                        call.span,
+                    );
+                    return false;
+                };
+                if call.args.len() != expected_arity {
+                    self.record_error_at(
+                        SemanticErrorKind::ArgumentCountMismatch {
+                            name: call.name.to_string(),
+                            expected: expected_arity.to_string(),
+                            got: call.args.len(),
+                        },
+                        call.span,
+                    );
+                    return false;
+                }
+                call.args.iter().fold(true, |valid, argument| {
+                    validate_child(self, argument) && valid
+                })
+            }
+            Expression::StringLit(string) => {
+                self.record_error_at(
+                    SemanticErrorKind::TypeMismatch {
+                        expected: "numeric constant expression".into(),
+                        found: "string literal".into(),
+                        context: owner.into(),
+                    },
+                    string.span,
+                );
+                false
+            }
+            Expression::ArrayAccess(access) => {
+                self.record_error_at(
+                    SemanticErrorKind::InvalidExpression(format!(
+                        "{owner} indexes array '{}'; parameter-array bounds may reference only previously declared scalar parameters",
+                        access.array
+                    )),
+                    access.span,
+                );
+                false
+            }
+            Expression::ArrayLiteral(array) => {
+                self.record_error_at(
+                    SemanticErrorKind::TypeMismatch {
+                        expected: "numeric constant expression".into(),
+                        found: "array literal".into(),
+                        context: owner.into(),
+                    },
+                    array.span,
+                );
+                false
+            }
+            Expression::SystemFunction(function) => {
+                self.record_error_at(
+                    SemanticErrorKind::InvalidExpression(format!(
+                        "{owner} calls non-constant system function '{}'",
+                        function.name
+                    )),
+                    function.span,
+                );
+                false
+            }
+            Expression::NullArgument(span) => {
+                self.record_error_at(
+                    SemanticErrorKind::InvalidExpression(format!(
+                        "{owner} contains a null argument"
+                    )),
+                    *span,
+                );
+                false
+            }
+            Expression::BranchAccess(access) => {
+                self.record_error_at(
+                    SemanticErrorKind::InvalidExpression(format!(
+                        "{owner} reads non-constant branch access"
+                    )),
+                    access.span(),
+                );
+                false
+            }
+            Expression::AnalogOperator(operator) => {
+                self.record_error_at(
+                    SemanticErrorKind::InvalidExpression(format!(
+                        "{owner} contains non-constant analog operator"
+                    )),
+                    operator.span(),
+                );
+                false
+            }
+            Expression::NoiseSource(noise) => {
+                self.record_error_at(
+                    SemanticErrorKind::InvalidExpression(format!(
+                        "{owner} contains non-constant noise source"
+                    )),
+                    noise.span(),
+                );
+                false
+            }
+        }
+    }
+
     /// Verilog-AMS 2.3.1 section 3.4 permits a parameter initializer to read
     /// only parameters declared before it. Enforce that language rule here,
     /// before symbolic defaults reach any backend, so composite forward and
@@ -5849,15 +6520,8 @@ impl SemanticAnalyzer {
         &mut self,
         parameters: &[ParameterDecl],
         aliases: &[AliasParamDecl],
+        indices: &HashMap<SmolStr, usize>,
     ) {
-        // Verilog-A identifiers are case-sensitive. Preserve the first
-        // declaration here so a duplicate declaration cannot silently change
-        // dependency order before the symbol-table diagnostic is emitted.
-        let mut indices = std::collections::HashMap::new();
-        for (index, parameter) in parameters.iter().enumerate() {
-            indices.entry(parameter.name.clone()).or_insert(index);
-        }
-
         // External SPICE parameter names and the generated `$param_given`
         // resolver are intentionally case-insensitive. Reject collisions up
         // front: otherwise the backend's sorted lookup table would pick one
@@ -5896,7 +6560,7 @@ impl SemanticAnalyzer {
             let mut references = Vec::new();
             Self::collect_parameter_identifier_references(
                 default,
-                &indices,
+                indices,
                 &param_given_indices,
                 &mut references,
             );
@@ -6030,12 +6694,17 @@ impl SemanticAnalyzer {
                     );
                 }
             }
-            Expression::ArrayAccess(access) => Self::collect_parameter_identifier_references(
-                &access.index,
-                parameter_indices,
-                param_given_indices,
-                references,
-            ),
+            Expression::ArrayAccess(access) => {
+                if let Some(&index) = parameter_indices.get(&access.array) {
+                    references.push((index, access.array.clone(), access.span));
+                }
+                Self::collect_parameter_identifier_references(
+                    &access.index,
+                    parameter_indices,
+                    param_given_indices,
+                    references,
+                );
+            }
             Expression::ArrayLiteral(array) => {
                 for element in &array.elements {
                     Self::collect_parameter_identifier_references(
@@ -6081,7 +6750,9 @@ impl SemanticAnalyzer {
                 .args
                 .iter()
                 .any(|a| Self::references_identifiers(a, names)),
-            Expression::ArrayAccess(a) => Self::references_identifiers(&a.index, names),
+            Expression::ArrayAccess(a) => {
+                names.contains(&a.array) || Self::references_identifiers(&a.index, names)
+            }
             Expression::ArrayLiteral(a) => a
                 .elements
                 .iter()
@@ -6161,11 +6832,16 @@ impl SemanticAnalyzer {
                     external_storage,
                 )
             }),
-            Expression::ArrayAccess(access) => Self::references_parameter_without_model_storage(
-                &access.index,
-                canonical_storage,
-                external_storage,
-            ),
+            Expression::ArrayAccess(access) => {
+                canonical_storage
+                    .get(&access.array)
+                    .is_some_and(|has_model_storage| !has_model_storage)
+                    || Self::references_parameter_without_model_storage(
+                        &access.index,
+                        canonical_storage,
+                        external_storage,
+                    )
+            }
             Expression::ArrayLiteral(array) => array.elements.iter().any(|element| {
                 Self::references_parameter_without_model_storage(
                     element,

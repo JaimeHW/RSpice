@@ -1534,7 +1534,7 @@ fn collect_canonical_state_exprs(
         | HirExprKind::NamedBranchAccess { .. } => {}
         HirExprKind::SystemFunction { args, .. }
         | HirExprKind::Call { args, .. }
-        | HirExprKind::ArrayLiteral { elements: args }
+        | HirExprKind::ArrayLiteral { elements: args, .. }
         | HirExprKind::NoiseSource { operands: args, .. } => {
             for arg in args {
                 collect_canonical_state_exprs(model, mir, *arg, operator, slots)?;
@@ -6366,7 +6366,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 
     fn constant_array_values(&self, expr_id: ExprId) -> JitResult<Vec<f64>> {
         match &self.expression(expr_id)?.kind {
-            HirExprKind::ArrayLiteral { elements } => elements
+            HirExprKind::ArrayLiteral { elements, .. } => elements
                 .iter()
                 .map(|element| self.constant_expr_value(*element))
                 .collect(),
@@ -6912,7 +6912,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     .into(),
                 });
             }
-            HirExprKind::ArrayLiteral { elements } => elements.clone(),
+            HirExprKind::ArrayLiteral { elements, .. } => elements.clone(),
             _ => vec![argument],
         };
         self.lower_zi_polynomial_elements(&elements, roots)

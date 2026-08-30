@@ -8,7 +8,8 @@
 
 use super::{
     AnalyzedArray, AnalyzedAssignment, AnalyzedBranch, AnalyzedContribution, AnalyzedFile,
-    AnalyzedInternalNode, AnalyzedLoop, AnalyzedModule, AnalyzedRegion, AnalyzedStatement,
+    AnalyzedInternalNode, AnalyzedLoop, AnalyzedModule, AnalyzedParameter, AnalyzedRegion,
+    AnalyzedStatement, MAX_PARAMETER_ARRAY_ELEMENTS, MAX_PARAMETER_ARRAY_RANK, SemanticAnalyzer,
 };
 use crate::ast::{
     AnalogOperator, ArrayAccessExpr, ArrayLiteralExpr, BinaryExpr, BranchAccess, CallExpr,
@@ -67,6 +68,14 @@ fn source_modules<'a>(analyzed: &'a AnalyzedFile) -> CompileResult<HashMap<SmolS
 struct NodeBinding {
     name: SmolStr,
     discipline: Option<SmolStr>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EffectiveParameterArrayShape {
+    /// Ordered left/right bounds. Comparing these, rather than normalized
+    /// extents alone, preserves an override that reverses an array's direction.
+    bounds: Vec<(i64, i64)>,
+    extents: Vec<u64>,
 }
 
 #[derive(Default)]
@@ -241,6 +250,7 @@ impl<'a> HierarchyElaborator<'a> {
 
         let connections = self.bind_connections(instance, child, parent_scope, path)?;
         let overrides = bind_parameter_overrides(instance, child, path)?;
+        self.validate_parameter_array_overrides(child, parent_scope, &overrides, path)?;
         let mut scope = ScopeMap {
             instance_path: Some(path.into()),
             ..ScopeMap::default()
@@ -326,6 +336,10 @@ impl<'a> HierarchyElaborator<'a> {
                     .map(|expr| rewrite_expression(expr, &scope))
                     .transpose()?
             };
+            for dimension in &mut parameter.dimensions {
+                dimension.left = rewrite_expression(&dimension.left, &scope)?;
+                dimension.right = rewrite_expression(&dimension.right, &scope)?;
+            }
             if let Some(range) = &mut parameter.range {
                 range.min_parameter =
                     mapped_optional_parameter(range.min_parameter.as_ref(), &scope, instance.span)?;
@@ -430,6 +444,159 @@ impl<'a> HierarchyElaborator<'a> {
         nested
     }
 
+    /// Validate array-valued overrides before any child state is appended to
+    /// the flattened module. Array dimensions are evaluated twice: once with
+    /// the child's declared scalar defaults and once with this instance's
+    /// effective scalar overrides. If any dimension's extent changes, the
+    /// array must be replaced by the same instance declaration so an inherited
+    /// default can never silently acquire a different shape. Ordered bounds
+    /// remain preserved independently in the flattened parameter metadata.
+    fn validate_parameter_array_overrides(
+        &self,
+        child: &AnalyzedModule,
+        parent_scope: &ScopeMap,
+        overrides: &HashMap<usize, Expression>,
+        path: &str,
+    ) -> CompileResult<()> {
+        if !child
+            .parameters
+            .iter()
+            .any(|parameter| !parameter.dimensions.is_empty())
+        {
+            return Ok(());
+        }
+
+        // Parent-side override expressions are resolved in their declaring
+        // scope. Previously flattened child parameters already carry rewritten
+        // names and expressions, so this also handles nested hierarchies.
+        let mut parent_values = HashMap::new();
+        for parameter in &self.flattened.parameters {
+            if !parameter.dimensions.is_empty() {
+                continue;
+            }
+            let value = parameter
+                .default_expr
+                .as_ref()
+                .and_then(|expression| {
+                    SemanticAnalyzer::eval_const_with(expression, &parent_values)
+                })
+                .or(parameter.default);
+            if let Some(value) = value {
+                parent_values.insert(parameter.name.clone(), value);
+            }
+        }
+
+        let mut declared_values = HashMap::new();
+        let mut effective_values = HashMap::new();
+        for (index, parameter) in child.parameters.iter().enumerate() {
+            if !parameter.dimensions.is_empty() {
+                continue;
+            }
+
+            let declared = parameter
+                .default_expr
+                .as_ref()
+                .and_then(|expression| {
+                    SemanticAnalyzer::eval_const_with(expression, &declared_values)
+                })
+                .or(parameter.default);
+            if let Some(value) = declared {
+                declared_values.insert(parameter.name.clone(), value);
+            }
+
+            let effective = if let Some(override_expression) = overrides.get(&index) {
+                let expression = rewrite_expression(override_expression, parent_scope)?;
+                SemanticAnalyzer::eval_const_with(&expression, &parent_values)
+            } else {
+                parameter
+                    .default_expr
+                    .as_ref()
+                    .and_then(|expression| {
+                        SemanticAnalyzer::eval_const_with(expression, &effective_values)
+                    })
+                    .or(parameter.default)
+            };
+            if let Some(value) = effective {
+                effective_values.insert(parameter.name.clone(), value);
+            }
+        }
+
+        for (index, parameter) in child.parameters.iter().enumerate() {
+            if parameter.dimensions.is_empty() {
+                continue;
+            }
+            let declared =
+                resolve_parameter_array_shape(parameter, &declared_values, path, "declared")?;
+            let effective =
+                resolve_parameter_array_shape(parameter, &effective_values, path, "effective")?;
+            let replacement = overrides.get(&index);
+
+            if declared.extents != effective.extents && replacement.is_none() {
+                return Err(semantic_error(
+                    SemanticErrorKind::UnsupportedFeature(format!(
+                        "instance '{path}' changes parameter array '{}' bounds from {} to {}; the array must be replaced in the same instance parameter override list",
+                        parameter.name,
+                        parameter_bounds_label(&declared.bounds),
+                        parameter_bounds_label(&effective.bounds),
+                    )),
+                    parameter.dimensions[0].span,
+                ));
+            }
+
+            let Some(replacement) = replacement else {
+                continue;
+            };
+            let Expression::ArrayLiteral(initializer) = replacement else {
+                return Err(semantic_error(
+                    SemanticErrorKind::TypeMismatch {
+                        expected: "constant assignment pattern opened with `'{'".into(),
+                        found: "scalar expression".into(),
+                        context: format!(
+                            "override of parameter array '{}' at instance '{path}'",
+                            parameter.name
+                        ),
+                    },
+                    replacement.span(),
+                ));
+            };
+            if !initializer.assignment_pattern {
+                return Err(semantic_error(
+                    SemanticErrorKind::TypeMismatch {
+                        expected: "constant assignment pattern opened with `'{'".into(),
+                        found: "concatenation opened with '{'".into(),
+                        context: format!(
+                            "override of parameter array '{}' at instance '{path}'",
+                            parameter.name
+                        ),
+                    },
+                    initializer.span,
+                ));
+            }
+            if let Err(detail) = SemanticAnalyzer::validate_parameter_array_initializer_shape(
+                initializer,
+                &effective.extents,
+                0,
+            ) {
+                return Err(semantic_error(
+                    SemanticErrorKind::TypeMismatch {
+                        expected: format!(
+                            "rectangular assignment pattern with effective shape {:?}",
+                            effective.extents
+                        ),
+                        found: detail,
+                        context: format!(
+                            "override of parameter array '{}' at instance '{path}'",
+                            parameter.name
+                        ),
+                    },
+                    initializer.span,
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
     fn bind_connections(
         &mut self,
         instance: &ModuleInstance,
@@ -522,6 +689,85 @@ impl<'a> HierarchyElaborator<'a> {
             }
         }
     }
+}
+
+fn resolve_parameter_array_shape(
+    parameter: &AnalyzedParameter,
+    scalar_values: &HashMap<SmolStr, f64>,
+    path: &str,
+    value_kind: &str,
+) -> CompileResult<EffectiveParameterArrayShape> {
+    if parameter.dimensions.len() > MAX_PARAMETER_ARRAY_RANK {
+        return Err(semantic_error(
+            SemanticErrorKind::UnsupportedFeature(format!(
+                "parameter array '{}' at instance '{path}' has rank {}; the supported safety limit is {MAX_PARAMETER_ARRAY_RANK}",
+                parameter.name,
+                parameter.dimensions.len(),
+            )),
+            parameter.dimensions[MAX_PARAMETER_ARRAY_RANK].span,
+        ));
+    }
+
+    let mut bounds = Vec::with_capacity(parameter.dimensions.len());
+    let mut extents = Vec::with_capacity(parameter.dimensions.len());
+    let mut total_elements = 1_u64;
+    for (dimension_index, dimension) in parameter.dimensions.iter().enumerate() {
+        let resolve_bound = |side: &str, expression: &Expression| {
+            SemanticAnalyzer::eval_const_with(expression, scalar_values)
+                .and_then(SemanticAnalyzer::exact_const_i64)
+                .ok_or_else(|| {
+                    semantic_error(
+                        SemanticErrorKind::InvalidExpression(format!(
+                            "{value_kind} {side} bound of dimension {} of parameter array '{}' at instance '{path}' does not resolve to a finite signed integer",
+                            dimension_index + 1,
+                            parameter.name,
+                        )),
+                        expression.span(),
+                    )
+                })
+        };
+        let left = resolve_bound("left", &dimension.left)?;
+        let right = resolve_bound("right", &dimension.right)?;
+        let extent = left.abs_diff(right).checked_add(1).ok_or_else(|| {
+            semantic_error(
+                SemanticErrorKind::InvalidExpression(format!(
+                    "{value_kind} dimension {} of parameter array '{}' at instance '{path}' has an unrepresentable extent",
+                    dimension_index + 1,
+                    parameter.name,
+                )),
+                dimension.span,
+            )
+        })?;
+        total_elements = total_elements.checked_mul(extent).ok_or_else(|| {
+            semantic_error(
+                SemanticErrorKind::InvalidExpression(format!(
+                    "{value_kind} element count of parameter array '{}' at instance '{path}' overflows the canonical shape representation",
+                    parameter.name,
+                )),
+                dimension.span,
+            )
+        })?;
+        if total_elements > MAX_PARAMETER_ARRAY_ELEMENTS {
+            return Err(semantic_error(
+                SemanticErrorKind::UnsupportedFeature(format!(
+                    "{value_kind} shape of parameter array '{}' at instance '{path}' declares {total_elements} elements; the supported safety limit is {MAX_PARAMETER_ARRAY_ELEMENTS}",
+                    parameter.name,
+                )),
+                dimension.span,
+            ));
+        }
+        bounds.push((left, right));
+        extents.push(extent);
+    }
+
+    Ok(EffectiveParameterArrayShape { bounds, extents })
+}
+
+fn parameter_bounds_label(bounds: &[(i64, i64)]) -> String {
+    bounds
+        .iter()
+        .map(|(left, right)| format!("[{left}:{right}]"))
+        .collect::<String>()
 }
 
 fn bind_parameter_overrides(
@@ -884,6 +1130,7 @@ fn rewrite_expression(expression: &Expression, scope: &ScopeMap) -> CompileResul
         }),
         Expression::ArrayLiteral(array) => Expression::ArrayLiteral(ArrayLiteralExpr {
             elements: rewrite_expressions(&array.elements, scope)?,
+            assignment_pattern: array.assignment_pattern,
             span: array.span,
         }),
         Expression::AnalogOperator(operator) => {

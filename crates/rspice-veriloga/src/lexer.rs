@@ -212,17 +212,18 @@ pub enum TokenKind {
     At,       // @
 
     // === Delimiters ===
-    LParen,     // (
-    RParen,     // )
-    LBracket,   // [
-    RBracket,   // ]
-    LBrace,     // {
-    RBrace,     // }
-    Comma,      // ,
-    Semicolon,  // ;
-    Dot,        // .
-    Hash,       // #
-    DoubleHash, // ##
+    LParen,                 // (
+    RParen,                 // )
+    LBracket,               // [
+    RBracket,               // ]
+    LBrace,                 // {
+    AssignmentPatternStart, // '{
+    RBrace,                 // }
+    Comma,                  // ,
+    Semicolon,              // ;
+    Dot,                    // .
+    Hash,                   // #
+    DoubleHash,             // ##
 
     // === Compiler Directives ===
     Directive, // `include, `define, etc.
@@ -555,11 +556,10 @@ impl<'a> Lexer<'a> {
                     TokenKind::Hash
                 }
             }
-            // Assignment pattern `'{ ... }` (LRM 2.4 array initializers):
-            // lexes as the same brace token as a concatenation literal
+            // Assignment pattern `'{ ... }` (distinct from concatenation).
             '\'' if self.peek_char() == Some('{') => {
                 self.advance();
-                TokenKind::LBrace
+                TokenKind::AssignmentPatternStart
             }
 
             // Compiler directive
@@ -974,6 +974,22 @@ mod tests {
             assert_eq!(toks[0].kind, TokenKind::RealLiteral, "for {src}");
         }
         assert_eq!(lex("42")[0].kind, TokenKind::IntegerLiteral);
+    }
+
+    #[test]
+    fn assignment_pattern_start_is_distinct_from_concatenation() {
+        assert_eq!(
+            kinds("'{1.0} {1.0}"),
+            vec![
+                TokenKind::AssignmentPatternStart,
+                TokenKind::RealLiteral,
+                TokenKind::RBrace,
+                TokenKind::LBrace,
+                TokenKind::RealLiteral,
+                TokenKind::RBrace,
+                TokenKind::Eof,
+            ]
+        );
     }
 
     #[test]

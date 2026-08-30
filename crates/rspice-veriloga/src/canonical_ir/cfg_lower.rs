@@ -365,7 +365,7 @@ fn hir_expr_is_instance_static(
                         })
                     })
         }
-        HirExprKind::ArrayLiteral { elements } => elements.iter().copied().all(recurse),
+        HirExprKind::ArrayLiteral { elements, .. } => elements.iter().copied().all(recurse),
         HirExprKind::BranchAccess { .. }
         | HirExprKind::NamedBranchAccess { .. }
         | HirExprKind::AnalogOperator { .. }
@@ -976,7 +976,7 @@ impl<'a> CfgLowerer<'a> {
                 // A table given as one array literal is its elements, matching
                 // how the plan counts operands; anything else is one operand.
                 let operands = match &self.hir.expressions[usize::from(args[0])].kind {
-                    HirExprKind::ArrayLiteral { elements } => elements.clone(),
+                    HirExprKind::ArrayLiteral { elements, .. } => elements.clone(),
                     _ => vec![args[0]],
                 };
                 self.noise_source(

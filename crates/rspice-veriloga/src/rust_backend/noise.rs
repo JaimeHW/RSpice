@@ -826,7 +826,9 @@ fn collect_expr_variable_ids(
             }
             HirExprKind::Call { args, .. }
             | HirExprKind::SystemFunction { args, .. }
-            | HirExprKind::ArrayLiteral { elements: args } => stack.extend(args.iter().copied()),
+            | HirExprKind::ArrayLiteral { elements: args, .. } => {
+                stack.extend(args.iter().copied())
+            }
             HirExprKind::ArrayAccess { index, .. } => stack.push(*index),
             HirExprKind::AnalogOperator { op } => push_analog_children(op, &mut stack),
             HirExprKind::Laplace { expr, .. } => stack.push(*expr),
@@ -1057,7 +1059,7 @@ fn expr_is_instance_static(
                 }
                 stack.extend(args.iter().copied());
             }
-            HirExprKind::ArrayLiteral { elements } => stack.extend(elements.iter().copied()),
+            HirExprKind::ArrayLiteral { elements, .. } => stack.extend(elements.iter().copied()),
             HirExprKind::ArrayAccess { .. }
             | HirExprKind::AnalogOperator { .. }
             | HirExprKind::Laplace { .. }

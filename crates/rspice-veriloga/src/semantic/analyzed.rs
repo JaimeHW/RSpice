@@ -159,11 +159,24 @@ pub struct AnalyzedParameter {
     pub also_model: bool,
     pub param_type: ParamType,
     pub value_type: ValueType,
+    /// Ordered declaration dimensions. Bounds remain symbolic because an
+    /// instance may override an earlier scalar parameter that shapes this
+    /// array. No compile-time flat storage base is implied here.
+    pub dimensions: Vec<AnalyzedParameterDimension>,
     /// Constant default value, when the default expression folds to a constant
     pub default: Option<f64>,
     /// Full default expression (may reference previously declared parameters)
     pub default_expr: Option<Expression>,
     pub range: Option<TypedParameterRange>,
+}
+
+/// One parameter-array declaration dimension, preserving the source's left to
+/// right bound order exactly (including descending ranges).
+#[derive(Debug, Clone)]
+pub struct AnalyzedParameterDimension {
+    pub left: Expression,
+    pub right: Expression,
+    pub span: Span,
 }
 
 /// Storage and preprocessing scope requested by a Verilog-A parameter.

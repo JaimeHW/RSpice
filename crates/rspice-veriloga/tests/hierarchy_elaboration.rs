@@ -2,6 +2,7 @@
 
 mod support;
 
+use rspice_veriloga::canonical_ir::HirExprKind;
 use rspice_veriloga::{CompilerOptions, RuntimeQualificationOptions, VerilogACompiler};
 use support::DeviceFixture;
 
@@ -24,6 +25,28 @@ fn compile_selected(source: &str, module: &str) -> DeviceFixture {
     {
         DeviceFixture { model }
     }
+}
+
+fn parameter_array_hierarchy(overrides: &str) -> String {
+    [
+        r#"
+module shaped(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer width = 2;
+    parameter real taps[width - 1:0] = '{1.0, 2.0};
+    analog I(p, n) <+ 0.0;
+endmodule
+module parent(p, n);
+    inout p, n;
+    electrical p, n;
+    shaped #("#,
+        overrides,
+        r#") stage(p, n);
+endmodule
+"#,
+    ]
+    .concat()
 }
 
 #[test]
@@ -348,4 +371,106 @@ module parent(p); inout p; electrical p; child duplicate (.p(), .p()); endmodule
             "unexpected error: {error}"
         );
     }
+}
+
+#[test]
+fn hierarchy_parameter_array_width_change_without_replacement_is_rejected() {
+    let error = VerilogACompiler::default()
+        .compile_canonical_ir_module(&parameter_array_hierarchy(".width(3)"), Some("parent"))
+        .expect_err("changed child array bounds require an atomic replacement");
+    let message = error.to_string();
+    assert!(
+        message.contains("parent.stage"),
+        "unexpected error: {message}"
+    );
+    assert!(
+        message.contains("changes parameter array 'taps' bounds from [1:0] to [2:0]"),
+        "unexpected error: {message}"
+    );
+    assert!(
+        message.contains("same instance parameter override list"),
+        "unexpected error: {message}"
+    );
+}
+
+#[test]
+fn hierarchy_parameter_array_equal_extent_bound_change_keeps_declared_default() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir_module(&parameter_array_hierarchy(".width(0)"), Some("parent"))
+        .expect("equal per-dimension extents do not require an array replacement");
+    let taps = artifact
+        .hir
+        .parameters
+        .iter()
+        .find(|parameter| parameter.name.ends_with("_taps"))
+        .expect("flattened child array parameter");
+    let initializer = taps.default_expr.as_ref().expect("declared array default");
+    assert!(matches!(
+        artifact.hir.expressions[usize::from(initializer.id)].kind,
+        HirExprKind::ArrayLiteral {
+            ref elements,
+            assignment_pattern: true,
+        } if elements.len() == 2
+    ));
+}
+
+#[test]
+fn hierarchy_parameter_array_mismatched_replacement_is_rejected() {
+    let error = VerilogACompiler::default()
+        .compile_canonical_ir_module(
+            &parameter_array_hierarchy(".width(3), .taps('{1.0, 2.0})"),
+            Some("parent"),
+        )
+        .expect_err("replacement must exactly match the effective child shape");
+    let message = error.to_string();
+    assert!(
+        message.contains("override of parameter array 'taps' at instance 'parent.stage'"),
+        "unexpected error: {message}"
+    );
+    assert!(
+        message.contains("effective shape [3]"),
+        "unexpected error: {message}"
+    );
+    assert!(
+        message.contains("dimension 1 has 2 elements"),
+        "unexpected error: {message}"
+    );
+}
+
+#[test]
+fn hierarchy_parameter_array_matching_replacement_is_accepted_and_keeps_direction() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir_module(
+            &parameter_array_hierarchy(".width(3), .taps('{1.0, 2.0, 3.0})"),
+            Some("parent"),
+        )
+        .expect("matching atomic child array replacement must elaborate");
+    let taps = artifact
+        .hir
+        .parameters
+        .iter()
+        .find(|parameter| parameter.name.ends_with("_taps"))
+        .expect("flattened child array parameter");
+    let initializer = taps
+        .default_expr
+        .as_ref()
+        .map(|expression| &artifact.hir.expressions[usize::from(expression.id)].kind)
+        .expect("array replacement expression");
+    assert!(matches!(
+        initializer,
+        HirExprKind::ArrayLiteral {
+            elements,
+            assignment_pattern: true,
+        } if elements.len() == 3
+    ));
+
+    let dimension = &taps.dimensions[0];
+    assert!(matches!(
+        &artifact.hir.expressions[usize::from(dimension.left.id)].kind,
+        HirExprKind::Binary { op, .. } if op == "Sub"
+    ));
+    assert!(matches!(
+        &artifact.hir.expressions[usize::from(dimension.right.id)].kind,
+        HirExprKind::Number { value, .. } if *value == 0.0
+    ));
 }

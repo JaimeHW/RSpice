@@ -717,7 +717,7 @@ fn canonical_expr_contains_ddt(
         | HirExprKind::NamedBranchAccess { .. } => Ok(false),
         HirExprKind::SystemFunction { args, .. }
         | HirExprKind::Call { args, .. }
-        | HirExprKind::ArrayLiteral { elements: args }
+        | HirExprKind::ArrayLiteral { elements: args, .. }
         | HirExprKind::NoiseSource { operands: args, .. } => {
             canonical_expr_list_contains_ddt(model, mir, args)
         }
@@ -1572,7 +1572,7 @@ fn canonical_expr_contains_noise(
         | HirExprKind::NamedBranchAccess { .. } => Ok(false),
         HirExprKind::SystemFunction { args, .. }
         | HirExprKind::Call { args, .. }
-        | HirExprKind::ArrayLiteral { elements: args } => {
+        | HirExprKind::ArrayLiteral { elements: args, .. } => {
             canonical_expr_list_contains_noise(model, mir, args)
         }
         HirExprKind::Unary { operand, .. } | HirExprKind::ArrayAccess { index: operand, .. } => {
@@ -1816,7 +1816,7 @@ fn canonical_table_points_from_expr(
     expr_id: ExprId,
 ) -> JitResult<Vec<(f64, f64)>> {
     match &canonical_expression(model, mir, expr_id)?.kind {
-        HirExprKind::ArrayLiteral { elements } => {
+        HirExprKind::ArrayLiteral { elements, .. } => {
             canonical_table_points(model, mir, equation_index, elements)
         }
         other => Err(JitError::InvalidCanonicalIr {
@@ -2204,6 +2204,21 @@ fn validate_canonical_artifact_for_model(
                 .unwrap_or_else(|| "canonical artifact validation failed".into())
                 .into(),
         })?;
+
+    if let Some(parameter) = artifact
+        .mir
+        .parameters
+        .iter()
+        .find(|parameter| !parameter.dimensions.is_empty())
+    {
+        return Err(JitError::unsupported_native_coverage(
+            model.name.clone(),
+            format!(
+                "parameter array '{}' before the array-valued executable ABI is available",
+                parameter.name
+            ),
+        ));
+    }
 
     if artifact.mir.module_name != model.name {
         return Err(JitError::InvalidCanonicalIr {

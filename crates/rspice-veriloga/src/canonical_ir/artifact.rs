@@ -12,12 +12,13 @@ use std::fmt::Write;
 
 use super::CanonicalNoiseSourcePlan;
 use super::{
-    CanonicalMetadata, CanonicalValueType, CompilerPhase, HirAnalogOperator, HirArray,
-    HirAssignment, HirBranch, HirContribution, HirContributionKind, HirCrossDirection, HirExprKind,
-    HirExprRef, HirExpression, HirInternalNode, HirLaplaceKind, HirLoop, HirModel, HirParamRange,
-    HirParameter, HirPort, HirStatement, HirVariable, HirZiKind, IrDiagnostic, IrValidationResult,
-    MirAnalysisDomain, MirBranch, MirBranchRef, MirBranchUnknown, MirEquation, MirEquationKind,
-    MirModel, MirNode, MirParameterSlot, MirStateSlot, SourceSpanRef, StableDigest,
+    CANONICAL_IR_SCHEMA_VERSION, CanonicalMetadata, CanonicalValueType, CompilerPhase,
+    HirAnalogOperator, HirArray, HirAssignment, HirBranch, HirContribution, HirContributionKind,
+    HirCrossDirection, HirExprKind, HirExprRef, HirExpression, HirInternalNode, HirLaplaceKind,
+    HirLoop, HirModel, HirParamRange, HirParameter, HirParameterDimension, HirPort, HirStatement,
+    HirVariable, HirZiKind, IrDiagnostic, IrValidationResult, MirAnalysisDomain, MirBranch,
+    MirBranchRef, MirBranchUnknown, MirEquation, MirEquationKind, MirModel, MirNode,
+    MirParameterSlot, MirStateSlot, SourceSpanRef, StableDigest,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -110,6 +111,10 @@ impl CanonicalIrArtifact {
             self.hir.contributions.len()
         )
         .expect("write to string");
+        for parameter in &self.hir.parameters {
+            write!(out, "hir ").expect("write to string");
+            write_hir_parameter(&mut out, parameter);
+        }
         writeln!(
             out,
             "mir nodes={} equations={}",
@@ -117,6 +122,10 @@ impl CanonicalIrArtifact {
             self.mir.equations.len()
         )
         .expect("write to string");
+        for parameter in &self.mir.parameters {
+            write!(out, "mir ").expect("write to string");
+            write_mir_parameter(&mut out, parameter);
+        }
         writeln!(out, "noise sources={}", self.noise_sources.sources.len())
             .expect("write to string");
         out
@@ -130,6 +139,22 @@ fn validate_parts(
     noise_sources: &CanonicalNoiseSourcePlan,
 ) -> Vec<IrDiagnostic> {
     let mut diagnostics = Vec::new();
+
+    if metadata.schema_version != CANONICAL_IR_SCHEMA_VERSION {
+        diagnostics.push(artifact_error(format!(
+            "unsupported canonical IR schema_version {}; this build requires {}",
+            metadata.schema_version, CANONICAL_IR_SCHEMA_VERSION
+        )));
+        return diagnostics;
+    }
+
+    if hir.schema_version != CANONICAL_IR_SCHEMA_VERSION {
+        diagnostics.push(artifact_error(format!(
+            "unsupported HIR schema_version {}; this build requires {}",
+            hir.schema_version, CANONICAL_IR_SCHEMA_VERSION
+        )));
+        return diagnostics;
+    }
 
     if let Err(mut child) = hir.validate() {
         diagnostics.append(&mut child);
@@ -308,6 +333,7 @@ fn validate_hir_mir_parameters(
             || hir_parameter.scope != mir_parameter.scope
             || hir_parameter.also_model != mir_parameter.also_model
             || hir_parameter.value_type != mir_parameter.value_type
+            || hir_parameter.dimensions != mir_parameter.dimensions
             || hir_parameter.default != mir_parameter.default
             || hir_parameter.default_expr != mir_parameter.default_expr
             || hir_parameter.range != mir_parameter.range
@@ -639,13 +665,14 @@ fn write_hir_port(out: &mut String, port: &HirPort) {
 fn write_hir_parameter(out: &mut String, parameter: &HirParameter) {
     writeln!(
         out,
-        "parameter id={} name={} public={} scope={} also_model={} type={} default={} default_expr={} range={} aliases={}",
+        "parameter id={} name={} public={} scope={} also_model={} type={} dimensions={} default={} default_expr={} range={} aliases={}",
         parameter.id.index(),
         enc_str(&parameter.name),
         parameter.is_public,
         parameter.scope.name(),
         parameter.also_model,
         value_type_label(parameter.value_type),
+        parameter_dimensions_label(&parameter.dimensions),
         option_f64(parameter.default),
         expr_ref_label(parameter.default_expr.as_ref()),
         range_label(parameter.range.as_ref()),
@@ -794,13 +821,14 @@ fn write_mir_node(out: &mut String, node: &MirNode) {
 fn write_mir_parameter(out: &mut String, parameter: &MirParameterSlot) {
     writeln!(
         out,
-        "parameter id={} name={} public={} scope={} also_model={} type={} default={} default_expr={} range={} aliases={}",
+        "parameter id={} name={} public={} scope={} also_model={} type={} dimensions={} default={} default_expr={} range={} aliases={}",
         parameter.id.index(),
         enc_str(&parameter.name),
         parameter.is_public,
         parameter.scope.name(),
         parameter.also_model,
         value_type_label(parameter.value_type),
+        parameter_dimensions_label(&parameter.dimensions),
         option_f64(parameter.default),
         expr_ref_label(parameter.default_expr.as_ref()),
         range_label(parameter.range.as_ref()),
@@ -948,8 +976,15 @@ fn hir_expr_kind_label(kind: &HirExprKind) -> String {
                 index.index()
             )
         }
-        HirExprKind::ArrayLiteral { elements } => {
-            format!("array_literal elements:{}", join_expr_ids(elements))
+        HirExprKind::ArrayLiteral {
+            elements,
+            assignment_pattern,
+        } => {
+            format!(
+                "array_literal assignment_pattern:{} elements:{}",
+                assignment_pattern,
+                join_expr_ids(elements)
+            )
         }
         HirExprKind::AnalogOperator { op } => analog_operator_label(op),
         HirExprKind::Laplace { expr, kind } => {
@@ -1195,6 +1230,22 @@ fn range_label(range: Option<&HirParamRange>) -> String {
 
 fn span_label(span: SourceSpanRef) -> String {
     format!("{}:{}-{}", span.source_file_id, span.start, span.end)
+}
+
+fn parameter_dimensions_label(dimensions: &[HirParameterDimension]) -> String {
+    enc_list(
+        dimensions
+            .iter()
+            .map(|dimension| {
+                format!(
+                    "left={};right={};span={}",
+                    expr_ref_label(Some(&dimension.left)),
+                    expr_ref_label(Some(&dimension.right)),
+                    span_label(dimension.span)
+                )
+            })
+            .collect(),
+    )
 }
 
 fn enc_str(value: &str) -> String {
