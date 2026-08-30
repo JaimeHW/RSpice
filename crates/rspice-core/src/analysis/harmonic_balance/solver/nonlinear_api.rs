@@ -67,34 +67,6 @@ impl HbSolver {
         ));
     }
 
-    /// Add a current-controlled switch for Newton iteration.
-    pub fn add_current_switch(
-        &mut self,
-        node_pos: usize,
-        node_neg: usize,
-        ctrl_pos: usize,
-        ctrl_neg: usize,
-        it: Value,
-        ih: Value,
-        ron: Value,
-        roff: Value,
-        smooth: Value,
-        control_gain: Value,
-    ) {
-        self.add_nonlinear_device(NonlinearDeviceInstance::current_switch(
-            node_pos,
-            node_neg,
-            ctrl_pos,
-            ctrl_neg,
-            it,
-            ih,
-            ron,
-            roff,
-            smooth,
-            control_gain,
-        ));
-    }
-
     /// Add a Verilog-A nonlinear device for Newton iteration.
     #[cfg(feature = "veriloga")]
     pub fn add_veriloga_device(&mut self, device: VerilogADevice) {

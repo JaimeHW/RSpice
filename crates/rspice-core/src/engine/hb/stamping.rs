@@ -25,29 +25,8 @@ impl Engine {
                         DepletionCap::new(diode.cj0, diode.vj, diode.m, diode.fc),
                         DepletionCap::none(),
                         diode.tt,
-                        0.0,
                     ),
             );
-        }
-
-        for bjt in &circuit.bjts.devices {
-            let collector = Self::hb_node_to_solver_index(bjt.node_collector, num_nodes);
-            let base = Self::hb_node_to_solver_index(bjt.node_base, num_nodes);
-            let emitter = Self::hb_node_to_solver_index(bjt.node_emitter, num_nodes);
-            let instance = match bjt.bjt_type {
-                crate::device::BjtType::Npn => NonlinearDeviceInstance::npn_bjt(
-                    collector, base, emitter, bjt.is, bjt.bf, bjt.br, bjt.nf, bjt.nr, bjt.vaf,
-                ),
-                crate::device::BjtType::Pnp => NonlinearDeviceInstance::pnp_bjt(
-                    collector, base, emitter, bjt.is, bjt.bf, bjt.br, bjt.nf, bjt.nr, bjt.vaf,
-                ),
-            };
-            solver.add_nonlinear_device(instance.with_thermal_voltage(bjt.vt).with_junction_caps(
-                DepletionCap::new(bjt.cje, bjt.vje, bjt.mje, bjt.fc),
-                DepletionCap::new(bjt.cjc, bjt.vjc, bjt.mjc, bjt.fc),
-                bjt.tf,
-                bjt.tr,
-            ));
         }
 
         for mos in &circuit.mosfets.devices {
@@ -97,8 +76,8 @@ impl Engine {
                 .with_body_effect(mos.gamma, mos.phi)
                 .with_intrinsic_gate(mos.cox * mos.w * leff)
                 .with_bulk_junctions(
-                    DepletionCap::new_exact(cbs0, mos.pb, mos.mj, mos.fc),
-                    DepletionCap::new_exact(cbd0, mos.pb, mos.mj, mos.fc),
+                    DepletionCap::new(cbs0, mos.pb, mos.mj, mos.fc),
+                    DepletionCap::new(cbd0, mos.pb, mos.mj, mos.fc),
                     is_s,
                     is_d,
                 );
@@ -157,7 +136,6 @@ impl Engine {
             let instance = instance.with_thermal_voltage(vt_jfet).with_junction_caps(
                 DepletionCap::new(jfet.params.cgs, jfet.params.pb, jfet.params.m, 0.5),
                 DepletionCap::new(jfet.params.cgd, jfet.params.pb, jfet.params.m, 0.5),
-                0.0,
                 0.0,
             );
             if let Some(temp_k) = jfet.noise_absolute_temperature {

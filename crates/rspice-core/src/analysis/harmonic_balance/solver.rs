@@ -883,10 +883,6 @@ pub struct NonlinearDeviceInstance {
 pub enum NonlinearDeviceType {
     /// Two-terminal diode (anode, cathode)
     Diode,
-    /// Three-terminal NPN BJT (collector, base, emitter)
-    NpnBjt,
-    /// Three-terminal PNP BJT (collector, base, emitter)
-    PnpBjt,
     /// Four-terminal NMOS (drain, gate, source, bulk)
     Nmos,
     /// Four-terminal PMOS (drain, gate, source, bulk)
@@ -897,9 +893,6 @@ pub enum NonlinearDeviceType {
     Pjfet,
     /// Four-terminal voltage-controlled switch (p, n, cp, cn)
     VoltageSwitch,
-    /// Four-terminal current-controlled switch with sensed control voltage
-    /// converted to current (p, n, cp, cn)
-    CurrentSwitch,
 }
 
 /// Depletion-capacitance parameter set for one junction.
@@ -929,20 +922,12 @@ impl DepletionCap {
         }
     }
 
-    /// Junction parameters with SPICE-standard clamping.
+    /// Construct a junction parameter set without mutating authored values.
+    ///
+    /// Production engine paths validate these values before constructing the
+    /// HB solver. Direct solver clients are likewise responsible for passing
+    /// finite `cj0 >= 0`, `vj > 0`, `0 <= m <= 1`, and `0 <= fc < 1`.
     pub fn new(cj0: Value, vj: Value, m: Value, fc: Value) -> Self {
-        Self {
-            cj0: cj0.max(0.0),
-            vj: vj.max(0.01),
-            m: m.clamp(0.01, 0.95),
-            fc: fc.clamp(0.0, 0.99),
-        }
-    }
-
-    /// Parameters already validated at the native Level-1 circuit boundary.
-    /// Unlike the compatibility constructor, this preserves every authored
-    /// value so exact HB does not silently project a valid model law.
-    pub(crate) fn new_exact(cj0: Value, vj: Value, m: Value, fc: Value) -> Self {
         Self { cj0, vj, m, fc }
     }
 }
@@ -956,20 +941,12 @@ impl Default for DepletionCap {
 /// Device parameters for nonlinear devices
 #[derive(Debug, Clone)]
 pub struct NonlinearDeviceParams {
-    /// Saturation current (Is for diode/BJT)
+    /// Saturation current (diode or gate-junction Is)
     pub is: Value,
     /// Ideality factor (n for diode)
     pub n: Value,
-    /// Forward emission coefficient (BJT B-E junction)
-    pub nf: Value,
-    /// Reverse emission coefficient (BJT B-C junction)
-    pub nr: Value,
     /// Thermal voltage
     pub vt: Value,
-    /// Forward beta (BJT)
-    pub bf: Value,
-    /// Reverse beta (BJT)
-    pub br: Value,
     /// Threshold voltage (MOSFET)
     pub vth: Value,
     /// Transconductance parameter K = μCox W/L (MOSFET)
@@ -980,8 +957,6 @@ pub struct NonlinearDeviceParams {
     pub gamma: Value,
     /// Surface potential phi (MOSFET, V)
     pub phi: Value,
-    /// Early voltage (BJT)
-    pub vaf: Value,
     /// Switch ON resistance
     pub ron: Value,
     /// Switch OFF resistance
@@ -990,12 +965,9 @@ pub struct NonlinearDeviceParams {
     pub vh: Value,
     /// Switch transition smoothness
     pub smooth: Value,
-    /// Control conversion gain (e.g. sense conductance A/V)
-    pub control_gain: Value,
-    /// Primary junction depletion capacitance (diode junction, BJT B-E,
-    /// JFET G-S)
+    /// Primary junction depletion capacitance (diode junction or JFET G-S)
     pub cap_a: DepletionCap,
-    /// Secondary junction depletion capacitance (BJT B-C, JFET G-D)
+    /// Secondary junction depletion capacitance (JFET G-D)
     pub cap_b: DepletionCap,
     /// Secondary-junction saturation current (MOS drain-bulk diode; the
     /// source-bulk diode rides on `is`)
@@ -1003,10 +975,8 @@ pub struct NonlinearDeviceParams {
     /// Total intrinsic oxide capacitance Cox' * W * Leff (MOS channel
     /// charge model; zero disables it)
     pub cox_wl: Value,
-    /// Forward transit time: diode TT / BJT TF (diffusion charge tau_f * i_f)
+    /// Diode transit time (diffusion charge `TT * Id`)
     pub tt_f: Value,
-    /// Reverse transit time: BJT TR (diffusion charge tau_r * i_r)
-    pub tt_r: Value,
 }
 
 impl Default for NonlinearDeviceParams {
@@ -1014,28 +984,21 @@ impl Default for NonlinearDeviceParams {
         Self {
             is: 1e-14,
             n: 1.0,
-            nf: 1.0,
-            nr: 1.0,
             vt: 0.02585,
-            bf: 100.0,
-            br: 1.0,
             vth: 0.7,
             kp: 2e-5,
             lambda: 0.0,
             gamma: 0.0,
             phi: 0.6,
-            vaf: f64::INFINITY,
             ron: 1.0,
             roff: 1e6,
             vh: 0.0,
             smooth: 0.1,
-            control_gain: 1.0,
             cap_a: DepletionCap::none(),
             cap_b: DepletionCap::none(),
             is2: 1e-14,
             cox_wl: 0.0,
             tt_f: 0.0,
-            tt_r: 0.0,
         }
     }
 }

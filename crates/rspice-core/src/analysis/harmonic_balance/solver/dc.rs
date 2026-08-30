@@ -1101,37 +1101,15 @@ impl HbSolver {
 
         // Build diode adjacency: for each node, track connected diodes with polarity
         // (neighbor, is_this_node_anode) - True if current node is anode of diode to neighbor
-        // Also include BJT B-E junctions as they behave like diodes
         let mut node_diodes: Vec<Vec<(usize, bool)>> = vec![vec![]; n];
         for device in &self.nonlinear_devices {
-            match device.device_type {
-                NonlinearDeviceType::Diode => {
-                    let anode = device.terminals[0];
-                    let cathode = device.terminals[1];
-                    if anode < n && cathode < n {
-                        node_diodes[anode].push((cathode, true)); // anode connects to cathode
-                        node_diodes[cathode].push((anode, false)); // cathode connects to anode
-                    }
+            if device.device_type == NonlinearDeviceType::Diode {
+                let anode = device.terminals[0];
+                let cathode = device.terminals[1];
+                if anode < n && cathode < n {
+                    node_diodes[anode].push((cathode, true)); // anode connects to cathode
+                    node_diodes[cathode].push((anode, false)); // cathode connects to anode
                 }
-                NonlinearDeviceType::NpnBjt => {
-                    // NPN: B-E junction is like diode with base as anode, emitter as cathode
-                    let base = device.terminals[1];
-                    let emitter = device.terminals[2];
-                    if base < n && emitter < n {
-                        node_diodes[base].push((emitter, true));
-                        node_diodes[emitter].push((base, false));
-                    }
-                }
-                NonlinearDeviceType::PnpBjt => {
-                    // PNP: E-B junction is like diode with emitter as anode, base as cathode
-                    let base = device.terminals[1];
-                    let emitter = device.terminals[2];
-                    if base < n && emitter < n {
-                        node_diodes[emitter].push((base, true));
-                        node_diodes[base].push((emitter, false));
-                    }
-                }
-                _ => {} // MOSFETs don't have junction diodes for DC init
             }
         }
 

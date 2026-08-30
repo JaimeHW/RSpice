@@ -125,37 +125,12 @@ fn depletion_charge(cap: &DepletionCap, v: Value) -> (Value, Value) {
     }
 }
 
-/// Currents and junction-frame partials of the Ebers-Moll transport core.
-struct BjtOperatingPoint {
-    /// Current absorbed at the collector terminal.
-    ic: Value,
-    /// Current absorbed at the base terminal.
-    ib: Value,
-    d_ic_d_vbe: Value,
-    d_ic_d_vbc: Value,
-    d_ib_d_vbe: Value,
-    d_ib_d_vbc: Value,
-}
-
 impl NonlinearDeviceParams {
     /// Create diode parameters
     pub fn diode(is: Value, n: Value) -> Self {
         Self {
             is,
             n,
-            ..Default::default()
-        }
-    }
-
-    /// Create BJT parameters
-    pub fn bjt(is: Value, bf: Value, br: Value, nf: Value, nr: Value, vaf: Value) -> Self {
-        Self {
-            is,
-            bf,
-            br: br.max(1e-6),
-            nf: nf.max(1e-3),
-            nr: nr.max(1e-3),
-            vaf,
             ..Default::default()
         }
     }
@@ -194,30 +169,10 @@ impl NonlinearDeviceParams {
     ) -> Self {
         Self {
             vth: vt,
-            vh: vh.abs(),
+            vh,
             ron,
             roff,
             smooth,
-            ..Default::default()
-        }
-    }
-
-    /// Create current-controlled switch parameters.
-    pub(crate) fn current_switch(
-        it: Value,
-        ih: Value,
-        ron: Value,
-        roff: Value,
-        smooth: Value,
-        control_gain: Value,
-    ) -> Self {
-        Self {
-            vth: it,
-            vh: ih.abs(),
-            ron: ron.max(1e-6),
-            roff: roff.max(1e-6),
-            smooth: smooth.max(1e-12),
-            control_gain: control_gain.max(1e-18),
             ..Default::default()
         }
     }
@@ -230,44 +185,6 @@ impl NonlinearDeviceInstance {
             device_type: NonlinearDeviceType::Diode,
             terminals: vec![anode, cathode],
             params: NonlinearDeviceParams::diode(is, n),
-        }
-    }
-
-    /// Create an NPN BJT instance
-    pub(crate) fn npn_bjt(
-        collector: usize,
-        base: usize,
-        emitter: usize,
-        is: Value,
-        bf: Value,
-        br: Value,
-        nf: Value,
-        nr: Value,
-        vaf: Value,
-    ) -> Self {
-        Self {
-            device_type: NonlinearDeviceType::NpnBjt,
-            terminals: vec![collector, base, emitter],
-            params: NonlinearDeviceParams::bjt(is, bf, br, nf, nr, vaf),
-        }
-    }
-
-    /// Create a PNP BJT instance
-    pub(crate) fn pnp_bjt(
-        collector: usize,
-        base: usize,
-        emitter: usize,
-        is: Value,
-        bf: Value,
-        br: Value,
-        nf: Value,
-        nr: Value,
-        vaf: Value,
-    ) -> Self {
-        Self {
-            device_type: NonlinearDeviceType::PnpBjt,
-            terminals: vec![collector, base, emitter],
-            params: NonlinearDeviceParams::bjt(is, bf, br, nf, nr, vaf),
         }
     }
 
@@ -358,39 +275,16 @@ impl NonlinearDeviceInstance {
         }
     }
 
-    /// Create a current-controlled switch instance.
-    pub(crate) fn current_switch(
-        node_pos: usize,
-        node_neg: usize,
-        ctrl_pos: usize,
-        ctrl_neg: usize,
-        it: Value,
-        ih: Value,
-        ron: Value,
-        roff: Value,
-        smooth: Value,
-        control_gain: Value,
-    ) -> Self {
-        Self {
-            device_type: NonlinearDeviceType::CurrentSwitch,
-            terminals: vec![node_pos, node_neg, ctrl_pos, ctrl_neg],
-            params: NonlinearDeviceParams::current_switch(it, ih, ron, roff, smooth, control_gain),
-        }
-    }
-
     /// Evaluate device current given terminal voltages
     /// Returns Vec of (node_index, current) pairs - current flowing INTO each node
     pub fn evaluate(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
         match self.device_type {
             NonlinearDeviceType::Diode => self.eval_diode(node_voltages),
-            NonlinearDeviceType::NpnBjt => self.eval_npn_bjt(node_voltages),
-            NonlinearDeviceType::PnpBjt => self.eval_pnp_bjt(node_voltages),
             NonlinearDeviceType::Nmos => self.eval_nmos(node_voltages),
             NonlinearDeviceType::Pmos => self.eval_pmos(node_voltages),
             NonlinearDeviceType::Njfet => self.eval_njfet(node_voltages),
             NonlinearDeviceType::Pjfet => self.eval_pjfet(node_voltages),
             NonlinearDeviceType::VoltageSwitch => self.eval_voltage_switch(node_voltages),
-            NonlinearDeviceType::CurrentSwitch => self.eval_current_switch(node_voltages),
         }
     }
 
@@ -399,14 +293,11 @@ impl NonlinearDeviceInstance {
     pub fn jacobian(&self, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
         match self.device_type {
             NonlinearDeviceType::Diode => self.jac_diode(node_voltages),
-            NonlinearDeviceType::NpnBjt => self.jac_npn_bjt(node_voltages),
-            NonlinearDeviceType::PnpBjt => self.jac_pnp_bjt(node_voltages),
             NonlinearDeviceType::Nmos => self.jac_nmos(node_voltages),
             NonlinearDeviceType::Pmos => self.jac_pmos(node_voltages),
             NonlinearDeviceType::Njfet => self.jac_njfet(node_voltages),
             NonlinearDeviceType::Pjfet => self.jac_pjfet(node_voltages),
             NonlinearDeviceType::VoltageSwitch => self.jac_voltage_switch(node_voltages),
-            NonlinearDeviceType::CurrentSwitch => self.jac_current_switch(node_voltages),
         }
     }
 
@@ -416,40 +307,27 @@ impl NonlinearDeviceInstance {
     pub(crate) fn noise_branches(&self) -> Vec<(usize, usize)> {
         match self.device_type {
             NonlinearDeviceType::Diode => vec![(self.terminals[0], self.terminals[1])],
-            NonlinearDeviceType::NpnBjt | NonlinearDeviceType::PnpBjt => vec![
-                (self.terminals[0], self.terminals[2]), // collector shot
-                (self.terminals[1], self.terminals[2]), // base shot
-            ],
             NonlinearDeviceType::Nmos | NonlinearDeviceType::Pmos => {
                 vec![(self.terminals[0], self.terminals[2])] // channel thermal
             }
             NonlinearDeviceType::Njfet | NonlinearDeviceType::Pjfet => {
                 vec![(self.terminals[0], self.terminals[2])] // channel thermal
             }
-            NonlinearDeviceType::VoltageSwitch | NonlinearDeviceType::CurrentSwitch => {
+            NonlinearDeviceType::VoltageSwitch => {
                 vec![(self.terminals[0], self.terminals[1])] // ON-resistance thermal
             }
         }
     }
 
     /// Human-readable mechanism label for one `noise_branches` entry.
-    pub(crate) fn noise_branch_label(&self, branch: usize) -> &'static str {
+    pub(crate) fn noise_branch_label(&self, _branch: usize) -> &'static str {
         match self.device_type {
             NonlinearDeviceType::Diode => "shot",
-            NonlinearDeviceType::NpnBjt | NonlinearDeviceType::PnpBjt => {
-                if branch == 0 {
-                    "ic shot"
-                } else {
-                    "ib shot"
-                }
-            }
             NonlinearDeviceType::Nmos
             | NonlinearDeviceType::Pmos
             | NonlinearDeviceType::Njfet
             | NonlinearDeviceType::Pjfet => "channel thermal",
-            NonlinearDeviceType::VoltageSwitch | NonlinearDeviceType::CurrentSwitch => {
-                "ron thermal"
-            }
+            NonlinearDeviceType::VoltageSwitch => "ron thermal",
         }
     }
 
@@ -477,20 +355,6 @@ impl NonlinearDeviceInstance {
                     q_e,
                     id.abs(),
                 ])?])
-            }
-            NonlinearDeviceType::NpnBjt => {
-                let op = self.bjt_core(1.0, node_voltages);
-                Ok(vec![
-                    ScaledNonnegative::checked_product(&[2.0, q_e, op.ic.abs()])?,
-                    ScaledNonnegative::checked_product(&[2.0, q_e, op.ib.abs()])?,
-                ])
-            }
-            NonlinearDeviceType::PnpBjt => {
-                let op = self.bjt_core(-1.0, node_voltages);
-                Ok(vec![
-                    ScaledNonnegative::checked_product(&[2.0, q_e, op.ic.abs()])?,
-                    ScaledNonnegative::checked_product(&[2.0, q_e, op.ib.abs()])?,
-                ])
             }
             NonlinearDeviceType::Nmos => {
                 let (_, _, _, gm, _, _) = self.mos_operating_point(1.0, node_voltages);
@@ -539,18 +403,6 @@ impl NonlinearDeviceInstance {
                     g,
                 ])?])
             }
-            NonlinearDeviceType::CurrentSwitch => {
-                let vcp = self.get_terminal_voltage(node_voltages, 2);
-                let vcn = self.get_terminal_voltage(node_voltages, 3);
-                let ictrl = self.params.control_gain * (vcp - vcn);
-                let (g, _) = self.switch_conductance_and_derivative(ictrl);
-                Ok(vec![ScaledNonnegative::checked_product(&[
-                    4.0,
-                    k_b,
-                    temperature,
-                    g,
-                ])?])
-            }
         }
     }
 
@@ -559,7 +411,7 @@ impl NonlinearDeviceInstance {
     /// charge-conserving square-law channel charge (Ward-Dutton partition)
     /// and the gate-bulk accumulation/depletion wedge.
     pub(crate) fn with_intrinsic_gate(mut self, cox_wl: Value) -> Self {
-        self.params.cox_wl = cox_wl.max(0.0);
+        self.params.cox_wl = cox_wl;
         self
     }
 
@@ -601,20 +453,18 @@ impl NonlinearDeviceInstance {
         self
     }
 
-    /// Attach junction charge parameters: `cap_a` is the primary junction
-    /// (diode junction, BJT B-E, JFET G-S), `cap_b` the secondary (BJT B-C,
-    /// JFET G-D); `tt_f`/`tt_r` are the forward/reverse transit times.
+    /// Attach junction charge parameters: `cap_a` is the diode or JFET G-S
+    /// junction, `cap_b` is the optional JFET G-D junction, and
+    /// `transit_time` is diode diffusion transit time.
     pub(crate) fn with_junction_caps(
         mut self,
         cap_a: DepletionCap,
         cap_b: DepletionCap,
-        tt_f: Value,
-        tt_r: Value,
+        transit_time: Value,
     ) -> Self {
         self.params.cap_a = cap_a;
         self.params.cap_b = cap_b;
-        self.params.tt_f = tt_f.max(0.0);
-        self.params.tt_r = tt_r.max(0.0);
+        self.params.tt_f = transit_time;
         self
     }
 
@@ -623,7 +473,6 @@ impl NonlinearDeviceInstance {
         self.params.cap_a.cj0 > 0.0
             || self.params.cap_b.cj0 > 0.0
             || self.params.tt_f > 0.0
-            || self.params.tt_r > 0.0
             || self.params.cox_wl > 0.0
     }
 
@@ -639,8 +488,6 @@ impl NonlinearDeviceInstance {
         }
         match self.device_type {
             NonlinearDeviceType::Diode => self.charge_diode(node_voltages),
-            NonlinearDeviceType::NpnBjt => self.charge_bjt(1.0, node_voltages),
-            NonlinearDeviceType::PnpBjt => self.charge_bjt(-1.0, node_voltages),
             NonlinearDeviceType::Nmos => self.charge_mos(1.0, node_voltages),
             NonlinearDeviceType::Pmos => self.charge_mos(-1.0, node_voltages),
             NonlinearDeviceType::Njfet => self.charge_jfet(1.0, node_voltages),
@@ -658,14 +505,160 @@ impl NonlinearDeviceInstance {
         }
         match self.device_type {
             NonlinearDeviceType::Diode => self.cap_diode(node_voltages),
-            NonlinearDeviceType::NpnBjt => self.cap_bjt(1.0, node_voltages),
-            NonlinearDeviceType::PnpBjt => self.cap_bjt(-1.0, node_voltages),
             NonlinearDeviceType::Nmos => self.cap_mos(1.0, node_voltages),
             NonlinearDeviceType::Pmos => self.cap_mos(-1.0, node_voltages),
             NonlinearDeviceType::Njfet => self.cap_jfet(1.0, node_voltages),
             NonlinearDeviceType::Pjfet => self.cap_jfet(-1.0, node_voltages),
             _ => Vec::new(),
         }
+    }
+
+    fn validate_depletion_cap(cap: DepletionCap) -> Result<(), &'static str> {
+        if !cap.cj0.is_finite() || cap.cj0 < 0.0 {
+            return Err("junction CJ0 must be finite and nonnegative");
+        }
+        if !cap.vj.is_finite() || cap.vj <= 0.0 {
+            return Err("junction VJ must be finite and positive");
+        }
+        if !cap.m.is_finite() || !(0.0..=1.0).contains(&cap.m) {
+            return Err("junction grading coefficient must be finite in [0, 1]");
+        }
+        if !cap.fc.is_finite() || !(0.0..1.0).contains(&cap.fc) {
+            return Err("junction FC must be finite in [0, 1)");
+        }
+        Ok(())
+    }
+
+    fn physical_parameter_error(&self) -> Option<&'static str> {
+        if let Err(reason) = Self::validate_depletion_cap(self.params.cap_a) {
+            return Some(reason);
+        }
+        if let Err(reason) = Self::validate_depletion_cap(self.params.cap_b) {
+            return Some(reason);
+        }
+        if !self.params.cox_wl.is_finite() || self.params.cox_wl < 0.0 {
+            return Some("intrinsic gate capacitance must be finite and nonnegative");
+        }
+        if !self.params.tt_f.is_finite() || self.params.tt_f < 0.0 {
+            return Some("transit time must be finite and nonnegative");
+        }
+        match self.device_type {
+            NonlinearDeviceType::Diode => {
+                if !self.params.is.is_finite() || self.params.is < 0.0 {
+                    return Some("diode IS must be finite and nonnegative");
+                }
+                if !self.params.n.is_finite() || self.params.n <= 0.0 {
+                    return Some("diode N must be finite and positive");
+                }
+                if !self.params.vt.is_finite() || self.params.vt <= 0.0 {
+                    return Some("diode thermal voltage must be finite and positive");
+                }
+                let nvt = self.params.n * self.params.vt;
+                if !nvt.is_finite() || nvt <= 0.0 {
+                    return Some("diode N*VT must be finite and positive");
+                }
+            }
+            NonlinearDeviceType::Nmos | NonlinearDeviceType::Pmos => {
+                if !self.params.vth.is_finite() {
+                    return Some("MOS threshold must be finite");
+                }
+                if !self.params.kp.is_finite() || self.params.kp < 0.0 {
+                    return Some("MOS KP must be finite and nonnegative");
+                }
+                if !self.params.lambda.is_finite() || self.params.lambda < 0.0 {
+                    return Some("MOS LAMBDA must be finite and nonnegative");
+                }
+                if !self.params.gamma.is_finite() || self.params.gamma < 0.0 {
+                    return Some("MOS GAMMA must be finite and nonnegative");
+                }
+                if !self.params.phi.is_finite() || self.params.phi <= 0.0 {
+                    return Some("MOS PHI must be finite and positive");
+                }
+                if !self.params.is.is_finite() || self.params.is < 0.0 {
+                    return Some("MOS source-bulk IS must be finite and nonnegative");
+                }
+                if !self.params.is2.is_finite() || self.params.is2 < 0.0 {
+                    return Some("MOS drain-bulk IS must be finite and nonnegative");
+                }
+                if !self.params.vt.is_finite() || self.params.vt <= 0.0 {
+                    return Some("MOS thermal voltage must be finite and positive");
+                }
+            }
+            NonlinearDeviceType::Njfet | NonlinearDeviceType::Pjfet => {
+                if !self.params.vth.is_finite() {
+                    return Some("JFET VTO must be finite");
+                }
+                if !self.params.kp.is_finite() || self.params.kp < 0.0 {
+                    return Some("JFET BETA must be finite and nonnegative");
+                }
+                if !self.params.lambda.is_finite() || self.params.lambda < 0.0 {
+                    return Some("JFET LAMBDA must be finite and nonnegative");
+                }
+                if !self.params.is.is_finite() || self.params.is < 0.0 {
+                    return Some("JFET IS must be finite and nonnegative");
+                }
+                if !self.params.vt.is_finite() || self.params.vt <= 0.0 {
+                    return Some("JFET thermal voltage must be finite and positive");
+                }
+            }
+            NonlinearDeviceType::VoltageSwitch => {
+                if let Some(reason) = self.voltage_switch_parameter_error() {
+                    return Some(reason);
+                }
+            }
+        }
+        None
+    }
+
+    fn voltage_switch_parameter_error(&self) -> Option<&'static str> {
+        let p = &self.params;
+        if !p.vth.is_finite() {
+            return Some("voltage-switch threshold must be finite");
+        }
+        if !p.vh.is_finite() || p.vh != 0.0 {
+            return Some("voltage-switch exact HB requires zero finite hysteresis");
+        }
+        if !p.smooth.is_finite() || p.smooth <= 0.0 {
+            return Some("voltage-switch SMOOTH must be finite and positive");
+        }
+        for (resistance, resistance_error, conductance_error) in [
+            (
+                p.ron,
+                "voltage-switch RON must be finite and positive",
+                "voltage-switch 1/RON must be finite and positive",
+            ),
+            (
+                p.roff,
+                "voltage-switch ROFF must be finite and positive",
+                "voltage-switch 1/ROFF must be finite and positive",
+            ),
+        ] {
+            if !resistance.is_finite() || resistance <= 0.0 {
+                return Some(resistance_error);
+            }
+            let conductance = 1.0 / resistance;
+            if !conductance.is_finite() || conductance <= 0.0 {
+                return Some(conductance_error);
+            }
+        }
+
+        let log_ron = p.ron.ln();
+        let log_roff = p.roff.ln();
+        let m = 0.5 * log_ron + 0.5 * log_roff;
+        let h = 0.5 * (log_roff - log_ron).abs();
+        if h > 0.0 {
+            let z = h / (h.hypot(1.0) + 1.0);
+            let log_max_slope = -m + h * z + h.ln() - p.smooth.ln() + (-z * z).ln_1p();
+            let max_slope = log_max_slope.exp();
+            if !log_max_slope.is_finite()
+                || log_max_slope > Value::MAX.ln()
+                || !max_slope.is_finite()
+                || max_slope <= 0.0
+            {
+                return Some("voltage-switch maximum |dg/dVctrl| must be finite and representable");
+            }
+        }
+        None
     }
 
     // --- Private evaluation methods ---
@@ -705,116 +698,6 @@ impl NonlinearDeviceInstance {
         // Physical conductance gd is POSITIVE. MNA stamp for 2-terminal conductance:
         // G[n+,n+] += gd, G[n+,n-] -= gd, G[n-,n+] -= gd, G[n-,n-] += gd
         vec![((a, a), gd), ((a, c), -gd), ((c, a), -gd), ((c, c), gd)]
-    }
-
-    /// Ebers-Moll transport core shared by NPN and PNP.
-    ///
-    /// Works in the polarity frame (`vbe_eff = p*(Vb - Ve)`, `vbc_eff =
-    /// p*(Vb - Vc)`); because the polarity enters both the junction voltages
-    /// and the terminal currents, the node-space Jacobian is polarity-free.
-    ///
-    /// Returns `(ic, ib)` terminal currents (current absorbed at collector and
-    /// base) plus the four partials of the polarity-frame currents with respect
-    /// to the effective junction voltages.
-    fn bjt_core(&self, p: Value, node_voltages: &[Value]) -> BjtOperatingPoint {
-        let v_c = self.get_terminal_voltage(node_voltages, 0);
-        let v_b = self.get_terminal_voltage(node_voltages, 1);
-        let v_e = self.get_terminal_voltage(node_voltages, 2);
-
-        let vbe = p * (v_b - v_e);
-        let vbc = p * (v_b - v_c);
-
-        let (i_f, gf) = junction_current(self.params.is, vbe, self.params.nf * self.params.vt);
-        let (i_r, gr) = junction_current(self.params.is, vbc, self.params.nr * self.params.vt);
-
-        // Forward Early effect on the transport current (SPICE level-1 form).
-        let (early, d_early_d_vbc) = if self.params.vaf.is_finite() && self.params.vaf > 0.0 {
-            (
-                (1.0 - vbc / self.params.vaf).max(0.01),
-                -1.0 / self.params.vaf,
-            )
-        } else {
-            (1.0, 0.0)
-        };
-
-        // Transport current Ict = Is*(exp(Vbe/NfVt) - exp(Vbc/NrVt)).
-        let i_ct = i_f - i_r;
-
-        let ic_int = i_ct * early - i_r / self.params.br;
-        let ib_int = i_f / self.params.bf + i_r / self.params.br;
-
-        BjtOperatingPoint {
-            ic: p * ic_int,
-            ib: p * ib_int,
-            d_ic_d_vbe: gf * early,
-            d_ic_d_vbc: -gr * early + i_ct * d_early_d_vbc - gr / self.params.br,
-            d_ib_d_vbe: gf / self.params.bf,
-            d_ib_d_vbc: gr / self.params.br,
-        }
-    }
-
-    fn eval_bjt(&self, p: Value, node_voltages: &[Value]) -> Vec<(usize, Value)> {
-        let op = self.bjt_core(p, node_voltages);
-        let ie = -(op.ic + op.ib); // KCL
-
-        vec![
-            (self.terminals[0], -op.ic), // Collector current out
-            (self.terminals[1], -op.ib), // Base current out
-            (self.terminals[2], -ie),    // Emitter current out
-        ]
-    }
-
-    /// BJT conductance stamps from the exact partials of the transport core.
-    ///
-    /// Stamp convention: entry `((i, j), g)` is the derivative of the current
-    /// absorbed at terminal i with respect to node voltage j. In the polarity
-    /// frame the chain rule contributes p twice, so the stamps below hold for
-    /// NPN and PNP alike.
-    fn jac_bjt(&self, p: Value, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
-        let op = self.bjt_core(p, node_voltages);
-
-        let c = self.terminals[0];
-        let b = self.terminals[1];
-        let e = self.terminals[2];
-
-        // Node-space partials: Vbe_eff and Vbc_eff both increase with Vb,
-        // decrease with Ve and Vc respectively.
-        let d_ic_d_vb = op.d_ic_d_vbe + op.d_ic_d_vbc;
-        let d_ic_d_vc = -op.d_ic_d_vbc;
-        let d_ic_d_ve = -op.d_ic_d_vbe;
-
-        let d_ib_d_vb = op.d_ib_d_vbe + op.d_ib_d_vbc;
-        let d_ib_d_vc = -op.d_ib_d_vbc;
-        let d_ib_d_ve = -op.d_ib_d_vbe;
-
-        vec![
-            ((c, b), d_ic_d_vb),
-            ((c, c), d_ic_d_vc),
-            ((c, e), d_ic_d_ve),
-            ((b, b), d_ib_d_vb),
-            ((b, c), d_ib_d_vc),
-            ((b, e), d_ib_d_ve),
-            // Emitter absorbs -(ic + ib).
-            ((e, b), -(d_ic_d_vb + d_ib_d_vb)),
-            ((e, c), -(d_ic_d_vc + d_ib_d_vc)),
-            ((e, e), -(d_ic_d_ve + d_ib_d_ve)),
-        ]
-    }
-
-    fn eval_npn_bjt(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
-        self.eval_bjt(1.0, node_voltages)
-    }
-
-    fn jac_npn_bjt(&self, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
-        self.jac_bjt(1.0, node_voltages)
-    }
-
-    fn eval_pnp_bjt(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
-        self.eval_bjt(-1.0, node_voltages)
-    }
-
-    fn jac_pnp_bjt(&self, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
-        self.jac_bjt(-1.0, node_voltages)
     }
 
     /// Level-1 MOSFET core in the polarity frame after drain/source swap.
@@ -1145,9 +1028,13 @@ impl NonlinearDeviceInstance {
         let g = (-log_r).exp();
 
         let sech2 = 1.0 - tanh_x * tanh_x;
-        let df_dvctrl = -0.5 * sech2 / smooth;
-        let dlogr_dvctrl = dlog_r * df_dvctrl;
-        let dg_dvctrl = -g * dlogr_dvctrl;
+        let dg_dvctrl = if dlog_r == 0.0 || sech2 == 0.0 {
+            0.0
+        } else {
+            let log_abs_derivative =
+                -log_r + dlog_r.abs().ln() + sech2.ln() - std::f64::consts::LN_2 - smooth.ln();
+            log_abs_derivative.exp().copysign(dlog_r)
+        };
 
         (g, dg_dvctrl)
     }
@@ -1216,58 +1103,6 @@ impl NonlinearDeviceInstance {
         let a = self.terminals[0];
         let k = self.terminals[1];
         vec![((a, a), c), ((a, k), -c), ((k, a), -c), ((k, k), c)]
-    }
-
-    /// BJT junction charges in the polarity frame: B-E depletion plus
-    /// forward diffusion `TF * i_f`, B-C depletion plus reverse diffusion
-    /// `TR * i_r`. The polarity factors cancel in node space exactly as for
-    /// the transport currents.
-    fn bjt_junction_charges(
-        &self,
-        p: Value,
-        node_voltages: &[Value],
-    ) -> (Value, Value, Value, Value) {
-        let v_c = self.get_terminal_voltage(node_voltages, 0);
-        let v_b = self.get_terminal_voltage(node_voltages, 1);
-        let v_e = self.get_terminal_voltage(node_voltages, 2);
-
-        let vbe = p * (v_b - v_e);
-        let vbc = p * (v_b - v_c);
-
-        let (q_dep_be, c_dep_be) = depletion_charge(&self.params.cap_a, vbe);
-        let (q_dep_bc, c_dep_bc) = depletion_charge(&self.params.cap_b, vbc);
-        let (i_f, gf) = junction_current(self.params.is, vbe, self.params.nf * self.params.vt);
-        let (i_r, gr) = junction_current(self.params.is, vbc, self.params.nr * self.params.vt);
-
-        let q_be = q_dep_be + self.params.tt_f * i_f;
-        let c_be = c_dep_be + self.params.tt_f * gf;
-        let q_bc = q_dep_bc + self.params.tt_r * i_r;
-        let c_bc = c_dep_bc + self.params.tt_r * gr;
-        (q_be, c_be, q_bc, c_bc)
-    }
-
-    fn charge_bjt(&self, p: Value, node_voltages: &[Value]) -> Vec<(usize, Value)> {
-        let (q_be, _, q_bc, _) = self.bjt_junction_charges(p, node_voltages);
-        let c = self.terminals[0];
-        let b = self.terminals[1];
-        let e = self.terminals[2];
-        vec![(b, -p * (q_be + q_bc)), (c, p * q_bc), (e, p * q_be)]
-    }
-
-    fn cap_bjt(&self, p: Value, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
-        let (_, c_be, _, c_bc) = self.bjt_junction_charges(p, node_voltages);
-        let c = self.terminals[0];
-        let b = self.terminals[1];
-        let e = self.terminals[2];
-        vec![
-            ((b, b), c_be + c_bc),
-            ((b, e), -c_be),
-            ((e, b), -c_be),
-            ((e, e), c_be),
-            ((b, c), -c_bc),
-            ((c, b), -c_bc),
-            ((c, c), c_bc),
-        ]
     }
 
     /// Smoothing half-width (volts) for the effective overdrive in the
@@ -1472,44 +1307,44 @@ impl NonlinearDeviceInstance {
             ((d, d), c_gd),
         ]
     }
+}
 
-    fn eval_current_switch(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
-        let vp = self.get_terminal_voltage(node_voltages, 0);
-        let vn = self.get_terminal_voltage(node_voltages, 1);
-        let vcp = self.get_terminal_voltage(node_voltages, 2);
-        let vcn = self.get_terminal_voltage(node_voltages, 3);
-        let vmain = vp - vn;
-        let ictrl = self.params.control_gain * (vcp - vcn);
-        let (g, _) = self.switch_conductance_and_derivative(ictrl);
-        let i = g * vmain;
-        vec![(self.terminals[0], -i), (self.terminals[1], i)]
-    }
-
-    fn jac_current_switch(&self, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
-        let vp = self.get_terminal_voltage(node_voltages, 0);
-        let vn = self.get_terminal_voltage(node_voltages, 1);
-        let vcp = self.get_terminal_voltage(node_voltages, 2);
-        let vcn = self.get_terminal_voltage(node_voltages, 3);
-        let vmain = vp - vn;
-        let ictrl = self.params.control_gain * (vcp - vcn);
-        let (g, dg_dictrl) = self.switch_conductance_and_derivative(ictrl);
-        let g_ctrl = dg_dictrl * self.params.control_gain * vmain;
-
-        let p = self.terminals[0];
-        let n = self.terminals[1];
-        let cp = self.terminals[2];
-        let cn = self.terminals[3];
-
-        vec![
-            ((p, p), g),
-            ((p, n), -g),
-            ((n, p), -g),
-            ((n, n), g),
-            ((p, cp), g_ctrl),
-            ((p, cn), -g_ctrl),
-            ((n, cp), -g_ctrl),
-            ((n, cn), g_ctrl),
-        ]
+impl HbSolver {
+    pub(super) fn validate_nonlinear_device_parameters(&self) -> Result<(), HbError> {
+        for (index, device) in self.nonlinear_devices.iter().enumerate() {
+            let expected_terminals = match device.device_type {
+                NonlinearDeviceType::Diode => 2,
+                NonlinearDeviceType::Nmos | NonlinearDeviceType::Pmos => 4,
+                NonlinearDeviceType::Njfet | NonlinearDeviceType::Pjfet => 3,
+                NonlinearDeviceType::VoltageSwitch => 4,
+            };
+            if device.terminals.len() != expected_terminals {
+                return Err(HbError::InvalidCircuit(format!(
+                    "nonlinear HB device {:?}#{index} has {} terminals, expected {expected_terminals}",
+                    device.device_type,
+                    device.terminals.len()
+                )));
+            }
+            if let Some((terminal, node)) = device
+                .terminals
+                .iter()
+                .copied()
+                .enumerate()
+                .find(|(_, node)| *node > self.num_nodes)
+            {
+                return Err(HbError::InvalidCircuit(format!(
+                    "nonlinear HB device {:?}#{index} terminal {terminal} node index {node} exceeds {} nodes plus the ground sentinel",
+                    device.device_type, self.num_nodes
+                )));
+            }
+            if let Some(reason) = device.physical_parameter_error() {
+                return Err(HbError::InvalidCircuit(format!(
+                    "nonlinear HB device {:?}#{index} has invalid physical parameters: {reason}",
+                    device.device_type
+                )));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1777,15 +1612,6 @@ mod tests {
     }
 
     #[test]
-    fn bjt_jacobians_match_finite_difference() {
-        let npn = NonlinearDeviceInstance::npn_bjt(0, 1, 2, 1e-14, 120.0, 3.0, 1.1, 1.05, 80.0);
-        assert_jacobian_matches_finite_difference(&npn, 3, (-0.9, 0.9), 60, 17);
-
-        let pnp = NonlinearDeviceInstance::pnp_bjt(0, 1, 2, 2e-14, 80.0, 2.0, 1.0, 1.2, 60.0);
-        assert_jacobian_matches_finite_difference(&pnp, 3, (-0.9, 0.9), 60, 19);
-    }
-
-    #[test]
     fn mosfet_jacobians_match_finite_difference() {
         let nmos = NonlinearDeviceInstance::nmos(0, 1, 2, 3, 0.7, 2e-5, 0.04);
         assert_jacobian_matches_finite_difference(&nmos, 4, (-3.0, 3.0), 80, 23);
@@ -1858,41 +1684,6 @@ mod tests {
     fn switch_jacobians_match_finite_difference() {
         let vsw = NonlinearDeviceInstance::voltage_switch(0, 1, 2, 3, 0.5, 0.1, 1.0, 1e6, 0.1);
         assert_jacobian_matches_finite_difference(&vsw, 4, (-2.0, 2.0), 60, 41);
-
-        let isw =
-            NonlinearDeviceInstance::current_switch(0, 1, 2, 3, 1e-3, 0.0, 1.0, 1e6, 1e-4, 1e-2);
-        assert_jacobian_matches_finite_difference(&isw, 4, (-2.0, 2.0), 60, 43);
-    }
-
-    /// At Vce = 0 the forward and reverse transport terms cancel exactly, so
-    /// the collector current must reduce to the reverse-recombination term
-    /// -Is*(exp(Vbe/Vt) - 1)/BR. The injection-style formula (i_f - i_r/br)
-    /// instead predicts a large positive residue, so this pins the transport
-    /// formulation through the saturation region.
-    #[test]
-    fn collector_current_vanishing_vce_reduces_to_recombination_term() {
-        let br = 2.0;
-        let is = 1e-14;
-        let npn = NonlinearDeviceInstance::npn_bjt(0, 1, 2, is, 100.0, br, 1.0, 1.0, f64::INFINITY);
-
-        // Vc = Ve = 0, Vb = 0.7: both junctions equally forward biased.
-        let v = vec![0.0, 0.7, 0.0];
-        let currents = npn.evaluate(&v);
-        let into_collector = currents
-            .iter()
-            .filter(|(node, _)| *node == 0)
-            .map(|(_, c)| *c)
-            .sum::<Value>();
-
-        let vt = 0.02585;
-        let i_r = is * ((0.7_f64 / vt).exp() - 1.0);
-        let expected_into_collector = i_r / br; // -ic with ic = -i_r/br
-
-        let err = (into_collector - expected_into_collector).abs();
-        assert!(
-            err <= 1e-9 * expected_into_collector.abs(),
-            "collector current at Vce=0 must be the recombination term: got {into_collector:.6e}, want {expected_into_collector:.6e}"
-        );
     }
 
     #[test]
@@ -1901,20 +1692,6 @@ mod tests {
         diode.params.cap_a = DepletionCap::new(10e-12, 0.7, 0.5, 0.5);
         diode.params.tt_f = 5e-9;
         assert_charge_jacobian_matches_finite_difference(&diode, 2, (-5.0, 0.8), 60, 51);
-
-        let mut npn = NonlinearDeviceInstance::npn_bjt(0, 1, 2, 1e-14, 120.0, 3.0, 1.0, 1.0, 80.0);
-        npn.params.cap_a = DepletionCap::new(2e-12, 0.75, 0.33, 0.5);
-        npn.params.cap_b = DepletionCap::new(1e-12, 0.6, 0.4, 0.5);
-        npn.params.tt_f = 300e-12;
-        npn.params.tt_r = 10e-9;
-        assert_charge_jacobian_matches_finite_difference(&npn, 3, (-0.9, 0.8), 60, 53);
-
-        let mut pnp = NonlinearDeviceInstance::pnp_bjt(0, 1, 2, 2e-14, 80.0, 2.0, 1.0, 1.0, 60.0);
-        pnp.params.cap_a = DepletionCap::new(2e-12, 0.75, 0.33, 0.5);
-        pnp.params.cap_b = DepletionCap::new(1e-12, 0.6, 0.4, 0.5);
-        pnp.params.tt_f = 500e-12;
-        pnp.params.tt_r = 20e-9;
-        assert_charge_jacobian_matches_finite_difference(&pnp, 3, (-0.9, 0.8), 60, 57);
 
         let mut njf = NonlinearDeviceInstance::njfet(0, 1, 2, -2.0, 1e-3, 0.02, 1e-14);
         njf.params.cap_a = DepletionCap::new(4e-12, 0.8, 0.5, 0.5);
@@ -2074,7 +1851,7 @@ mod tests {
 
     #[test]
     fn unit_grading_coefficient_uses_the_exact_logarithmic_limit() {
-        let cap = DepletionCap::new_exact(10e-12, 0.7, 1.0, 0.5);
+        let cap = DepletionCap::new(10e-12, 0.7, 1.0, 0.5);
         for voltage in [-2.0, -0.5, 0.1] {
             let (charge, capacitance) = depletion_charge(&cap, voltage);
             let x = 1.0 - voltage / cap.vj;
@@ -2086,6 +1863,38 @@ mod tests {
                     <= 8.0 * Value::EPSILON * capacitance.abs()
             );
         }
+    }
+
+    #[test]
+    fn retained_charge_parameter_boundaries_are_preserved_and_accepted() {
+        let primary = DepletionCap::new(0.0, Value::MIN_POSITIVE, 0.0, 0.0);
+        let secondary = DepletionCap::new(Value::from_bits(1), 1.0, 1.0, 0.999_999_999_999);
+        assert_eq!(primary.cj0.to_bits(), 0.0_f64.to_bits());
+        assert_eq!(primary.vj.to_bits(), Value::MIN_POSITIVE.to_bits());
+        assert_eq!(primary.m.to_bits(), 0.0_f64.to_bits());
+        assert_eq!(primary.fc.to_bits(), 0.0_f64.to_bits());
+        assert_eq!(secondary.cj0.to_bits(), Value::from_bits(1).to_bits());
+        assert_eq!(secondary.m.to_bits(), 1.0_f64.to_bits());
+
+        let transit_time = Value::from_bits(1);
+        let diode = NonlinearDeviceInstance::diode(0, 0, 0.0, 1.0).with_junction_caps(
+            primary,
+            secondary,
+            transit_time,
+        );
+        assert_eq!(diode.params.tt_f.to_bits(), transit_time.to_bits());
+
+        let intrinsic_gate = Value::from_bits(1);
+        let mos = NonlinearDeviceInstance::nmos(0, 0, 0, 0, 0.7, 0.0, 0.0)
+            .with_intrinsic_gate(intrinsic_gate);
+        assert_eq!(mos.params.cox_wl.to_bits(), intrinsic_gate.to_bits());
+
+        let mut solver = HbSolver::new(HbConfig::new(1.0e6).with_harmonics(1), 1);
+        solver.add_nonlinear_device(diode);
+        solver.add_nonlinear_device(mos);
+        solver
+            .validate_nonlinear_device_parameters()
+            .expect("exact retained boundary values are valid");
     }
 
     /// Level-1 channel-length modulation applies in triode and saturation;

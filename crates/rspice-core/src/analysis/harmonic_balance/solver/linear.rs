@@ -78,7 +78,8 @@ impl HbSolver {
         if let Some(error) = &self.configuration_error {
             return Err(HbError::InvalidConfig(error.clone()));
         }
-        self.config.validate().map_err(HbError::from)
+        self.config.validate().map_err(HbError::from)?;
+        self.validate_nonlinear_device_parameters()
     }
 
     /// Get number of harmonics

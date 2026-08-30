@@ -602,6 +602,36 @@ impl Engine {
                 reduced_diodes,
             ));
         }
+        let invalid_diodes = circuit
+            .diodes
+            .devices
+            .iter()
+            .filter(|diode| {
+                !diode.is.is_finite()
+                    || diode.is < 0.0
+                    || !diode.n.is_finite()
+                    || diode.n <= 0.0
+                    || !diode.vt.is_finite()
+                    || diode.vt <= 0.0
+                    || !(diode.n * diode.vt).is_finite()
+                    || !diode.cj0.is_finite()
+                    || diode.cj0 < 0.0
+                    || !diode.vj.is_finite()
+                    || diode.vj <= 0.0
+                    || !diode.m.is_finite()
+                    || !(0.0..=1.0).contains(&diode.m)
+                    || !diode.fc.is_finite()
+                    || !(0.0..1.0).contains(&diode.fc)
+                    || !diode.tt.is_finite()
+                    || diode.tt < 0.0
+            })
+            .count();
+        if invalid_diodes > 0 {
+            kinds.push(describe(
+                "LEVEL=1 diodes with invalid or nonrepresentable exact-HB junction parameters",
+                invalid_diodes,
+            ));
+        }
         if !circuit.bjts.is_empty() {
             kinds.push(describe(
                 "native BJT/VBIC models whose complete Gummel-Poon/VBIC equations are not represented by exact HB",
@@ -674,6 +704,8 @@ impl Engine {
                     || params.cgd < 0.0
                     || !params.pb.is_finite()
                     || params.pb <= 0.0
+                    || !params.m.is_finite()
+                    || !(0.0..=1.0).contains(&params.m)
             })
             .count();
         if invalid_jfets > 0 {

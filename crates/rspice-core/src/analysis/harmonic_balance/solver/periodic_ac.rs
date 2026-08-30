@@ -1177,6 +1177,7 @@ impl HbSolver {
         state: &HbSolverState,
         context: &str,
     ) -> Result<Vec<Vec<Value>>, HbError> {
+        self.validate_nonlinear_device_parameters()?;
         validate_periodic_state(state, self.num_nodes, context)?;
         let mut waveforms = Vec::with_capacity(self.num_nodes);
         for (node, spectrum) in state.x.iter().enumerate() {
@@ -1871,7 +1872,6 @@ impl HbSolver {
                     | NonlinearDeviceType::Njfet
                     | NonlinearDeviceType::Pjfet
                     | NonlinearDeviceType::VoltageSwitch
-                    | NonlinearDeviceType::CurrentSwitch
             );
             if temperature_dependent
                 && (!source_temperature.is_finite() || source_temperature <= 0.0)
@@ -3362,6 +3362,30 @@ mod matrix_free_tests {
                 .solve_periodic_ac(&state, 1.0e3, 0, 0, &[excitation])
                 .expect_err("invalid PAC excitation evidence must fail closed");
             assert!(error.to_string().contains(expected), "{error}");
+        }
+    }
+
+    #[test]
+    fn periodic_operators_reject_invalid_direct_solver_devices_before_sampling() {
+        let config = HbConfig::new(1.0e6).with_harmonics(1);
+        let mut solver = HbSolver::new(config, 1);
+        let mut diode = NonlinearDeviceInstance::diode(0, 0, 1.0e-14, 1.0);
+        diode.params.cap_a = DepletionCap::new(1.0e-12, 0.7, 1.01, 0.5);
+        solver.add_nonlinear_device(diode);
+        let state = HbSolverState::new(1, 1);
+
+        for error in [
+            solver
+                .conductance_spectra(&state, 1)
+                .expect_err("PAC conductance sampling must validate direct solver devices"),
+            solver
+                .capacitance_spectra(&state, 1)
+                .expect_err("PAC/PNoise charge sampling must validate direct solver devices"),
+        ] {
+            assert!(
+                error.to_string().contains("grading coefficient"),
+                "wrong periodic-device validation diagnostic: {error}"
+            );
         }
     }
 

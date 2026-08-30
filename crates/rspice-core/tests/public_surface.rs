@@ -51,6 +51,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use rspice_core::analysis::harmonic_balance::{
+    DepletionCap, HbConfig, HbError, HbSolver, HbSolverState, NonlinearDeviceInstance,
+};
+
 /// Ceiling on public items. Lower it whenever the real count drops. The build
 /// fails if the count exceeds this, and also if it falls far enough below that
 /// the ceiling has gone stale.
@@ -112,7 +116,13 @@ use std::path::{Path, PathBuf};
 /// the exact `solver::NonlinearDeviceInstance` path; retaining a second,
 /// simplified public device vocabulary made the supported numerical contract
 /// ambiguous.
-const MAX_PUBLIC_ITEMS: usize = 4257;
+///
+/// The latest net change is +3: authenticated PSS operating-point identity
+/// adds five frontend-consumed public statements (`PssOperatingPointIdentity`
+/// plus its canonical-parts, shooting-state-basis, producer-identity, and
+/// authenticated-construction APIs), while removing the obsolete public HB
+/// BJT-parameter and current-switch registration helpers offsets two.
+const MAX_PUBLIC_ITEMS: usize = 4260;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
@@ -256,4 +266,90 @@ fn restricted_visibility_does_not_count_as_public() {
     assert!(!is_public_item("fn private()"));
     assert!(!is_public_item("pub node_pos: Vec<NodeId>,"));
     assert!(!is_public_item("// pub fn commented_out()"));
+}
+
+#[test]
+fn public_hb_solver_rejects_invalid_charge_parameters_before_evaluation() {
+    let mut invalid_devices = Vec::new();
+
+    let mut invalid_junction = NonlinearDeviceInstance::diode(0, 0, 1.0e-14, 1.0);
+    invalid_junction.params.cap_a = DepletionCap::new(1.0e-12, 0.7, 1.01, 0.5);
+    invalid_devices.push((invalid_junction, "grading coefficient"));
+
+    let mut invalid_gate = NonlinearDeviceInstance::nmos(0, 0, 0, 0, 0.7, 1.0e-3, 0.0);
+    invalid_gate.params.cox_wl = -1.0e-15;
+    invalid_devices.push((invalid_gate, "intrinsic gate capacitance"));
+
+    let mut invalid_transit = NonlinearDeviceInstance::diode(0, 0, 1.0e-14, 1.0);
+    invalid_transit.params.tt_f = f64::NAN;
+    invalid_devices.push((invalid_transit, "transit time"));
+
+    let invalid_diode = NonlinearDeviceInstance::diode(0, 0, -1.0, 1.0);
+    invalid_devices.push((invalid_diode, "diode IS"));
+
+    let invalid_mos = NonlinearDeviceInstance::nmos(0, 0, 0, 0, 0.7, -1.0, 0.0);
+    invalid_devices.push((invalid_mos, "MOS KP"));
+
+    let invalid_jfet = NonlinearDeviceInstance::njfet(0, 0, 0, -2.0, -1.0, 0.0, 1.0e-14);
+    invalid_devices.push((invalid_jfet, "JFET BETA"));
+
+    let mut invalid_arity = NonlinearDeviceInstance::diode(0, 0, 1.0e-14, 1.0);
+    invalid_arity.terminals.pop();
+    invalid_devices.push((invalid_arity, "has 1 terminals, expected 2"));
+
+    let invalid_index = NonlinearDeviceInstance::diode(2, 0, 1.0e-14, 1.0);
+    invalid_devices.push((invalid_index, "node index 2 exceeds 1 nodes"));
+
+    for (device, expected) in invalid_devices {
+        let mut solver = HbSolver::new(HbConfig::new(1.0e6).with_harmonics(1), 1);
+        solver.add_nonlinear_device(device);
+        let mut state = HbSolverState::new(1, 1);
+        let error = solver
+            .solve_dc_operating_point(&mut state)
+            .expect_err("invalid public nonlinear-device parameters must fail before solving");
+        assert!(matches!(error, HbError::InvalidCircuit(_)));
+        assert!(
+            error.to_string().contains(expected),
+            "wrong public-solver parameter diagnostic: {error}"
+        );
+    }
+
+    let mut switch_solver = HbSolver::new(HbConfig::new(1.0e6).with_harmonics(1), 1);
+    switch_solver.add_voltage_switch(0, 0, 0, 0, 0.0, 0.1, 1.0, 1.0e6, 0.1);
+    let mut state = HbSolverState::new(1, 1);
+    let error = switch_solver
+        .solve_dc_operating_point(&mut state)
+        .expect_err("public exact-HB switch API must reject unrepresented hysteresis");
+    assert!(
+        error
+            .to_string()
+            .contains("requires zero finite hysteresis"),
+        "wrong public switch diagnostic: {error}"
+    );
+}
+
+#[test]
+fn public_hb_surface_does_not_advertise_rejected_approximate_kernels() {
+    let solver_root = src_dir().join("analysis/harmonic_balance");
+    let solver_source = fs::read_to_string(solver_root.join("solver.rs")).expect("read solver.rs");
+    let device_source =
+        fs::read_to_string(solver_root.join("solver/devices.rs")).expect("read solver/devices.rs");
+    let api_source = fs::read_to_string(solver_root.join("solver/nonlinear_api.rs"))
+        .expect("read solver/nonlinear_api.rs");
+    let combined = format!("{solver_source}\n{device_source}\n{api_source}");
+
+    for stale_name in [
+        "NpnBjt",
+        "PnpBjt",
+        "CurrentSwitch",
+        "npn_bjt",
+        "pnp_bjt",
+        "current_switch",
+        "add_current_switch",
+    ] {
+        assert!(
+            !combined.contains(stale_name),
+            "exact-HB public surface still advertises removed approximate kernel {stale_name}"
+        );
+    }
 }

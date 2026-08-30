@@ -293,6 +293,16 @@ q1 c b 0 qmod
         ),
         (
             "\
+* invalid diode grading must not be projected into the retained HB law
+v1 out 0 dc 1
+d1 out 0 dmod
+.model dmod d (is=1e-14 m=1.1)
+.end
+",
+            "invalid or nonrepresentable exact-HB junction parameters",
+        ),
+        (
+            "\
 * MOS2 equations cannot be routed through the HB MOS1 kernel
 vd d 0 dc 1
 vg g 0 dc 1
@@ -322,7 +332,7 @@ s1 out 0 ctrl 0 smod
 .model smod sw (vt=0 vh=0.1 ron=1 roff=1meg)
 .end
 ",
-            "requiring hysteretic",
+            "requiring hysteresis",
         ),
     ];
 
