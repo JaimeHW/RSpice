@@ -61,12 +61,6 @@ pub enum BenchError {
         /// Actionable preparation, compiler, or comparison failure.
         message: String,
     },
-    /// Generated built-in stamp-throughput measurement failed.
-    #[cfg(feature = "generated-stamp-base")]
-    GeneratedStamp {
-        /// Actionable measurement or reporting failure.
-        message: String,
-    },
     /// A baseline or performance-gate policy was invalid or incomparable.
     BenchmarkPolicy {
         /// Actionable explanation of the rejected policy or baseline.
@@ -107,8 +101,6 @@ impl fmt::Display for BenchError {
             Self::Klu { message } => write!(f, "{message}"),
             Self::GeneratedRust { message } => write!(f, "{message}"),
             Self::GeneratedCompile { message } => write!(f, "{message}"),
-            #[cfg(feature = "generated-stamp-base")]
-            Self::GeneratedStamp { message } => write!(f, "{message}"),
             Self::BenchmarkPolicy { message } => write!(f, "{message}"),
             Self::Internal(message) => write!(f, "internal error: {message}"),
         }

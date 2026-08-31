@@ -454,7 +454,11 @@ fn measure_structure(
 
     for line in source.lines() {
         let line = line.trim_start();
-        if line.starts_with("for ") || line.starts_with("while ") || line.starts_with("loop {") {
+        if line.starts_with("for ")
+            || line.starts_with("while ")
+            || line.starts_with("loop {")
+            || line.starts_with("loop{")
+        {
             structure.emitted_source_loops = structure.emitted_source_loops.saturating_add(1);
         }
         if line.starts_with("self.canonical_staged[") && line.contains("] = ") {
@@ -477,7 +481,7 @@ fn measure_structure(
         if line.starts_with("let mut o") {
             structure.capture_declarations = structure.capture_declarations.saturating_add(1);
         }
-        if let Some((target, _)) = line.split_once(" = ") {
+        if let Some(target) = generated_assignment_target(line) {
             if target
                 .strip_prefix('o')
                 .is_some_and(is_compact_generated_local)
@@ -497,6 +501,18 @@ fn measure_structure(
         }
     }
     Ok(())
+}
+
+/// The emitter deliberately removes optional whitespace from large generated
+/// kernels. Accept both the readable support-file spelling (`A = B`) and the
+/// compact kernel spelling (`A=B`) without mistaking comparisons for writes.
+fn generated_assignment_target(line: &str) -> Option<&str> {
+    let (target, value) = line.split_once('=')?;
+    let target = target.trim_end();
+    if value.starts_with('=') || target.ends_with(['!', '<', '>']) {
+        return None;
+    }
+    Some(target)
 }
 
 fn is_compact_generated_local(name: &str) -> bool {
@@ -699,11 +715,13 @@ let b = L3([1f64, 2f64, 3f64]);
 const CANONICAL_INSTANCE_STAGE_SLOTS: [u32; 3] = [7, 11, 13];
 let F;
 C = D;
+E=F;
 for index in 0..4 {
     self.canonical_staged[7] = values[index];
 }
 let mut oA = 0f64;
 oA = F;
+oB=G;
 while condition {
 }
 loop {
@@ -720,8 +738,18 @@ loop {
         assert_eq!(structure.cache_scatter_assignments, 1);
         assert_eq!(structure.cache_scatter_table_slots, 3);
         assert_eq!(structure.capture_declarations, 1);
-        assert_eq!(structure.capture_assignments, 1);
+        assert_eq!(structure.capture_assignments, 2);
         assert_eq!(structure.bare_local_declarations, 1);
-        assert_eq!(structure.local_edge_assignments, 1);
+        assert_eq!(structure.local_edge_assignments, 2);
+    }
+
+    #[test]
+    fn compact_assignment_detection_rejects_comparisons() {
+        assert_eq!(generated_assignment_target("A=B;"), Some("A"));
+        assert_eq!(generated_assignment_target("A = B;"), Some("A"));
+        assert_eq!(generated_assignment_target("A==B"), None);
+        assert_eq!(generated_assignment_target("A!=B"), None);
+        assert_eq!(generated_assignment_target("A<=B"), None);
+        assert_eq!(generated_assignment_target("A>=B"), None);
     }
 }
