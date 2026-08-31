@@ -278,8 +278,16 @@ impl NonlinearDeviceInstance {
     /// Evaluate device current given terminal voltages
     /// Returns Vec of (node_index, current) pairs - current flowing INTO each node
     pub fn evaluate(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
+        self.evaluate_with_diode_junction(node_voltages, None)
+    }
+
+    fn evaluate_with_diode_junction(
+        &self,
+        node_voltages: &[Value],
+        diode_junction: Option<crate::device::semiconductor::ResolvedDiodeJunction>,
+    ) -> Vec<(usize, Value)> {
         match self.device_type {
-            NonlinearDeviceType::Diode => self.eval_diode(node_voltages),
+            NonlinearDeviceType::Diode => self.eval_diode(node_voltages, diode_junction),
             NonlinearDeviceType::Nmos => self.eval_nmos(node_voltages),
             NonlinearDeviceType::Pmos => self.eval_pmos(node_voltages),
             NonlinearDeviceType::Njfet => self.eval_njfet(node_voltages),
@@ -291,8 +299,16 @@ impl NonlinearDeviceInstance {
     /// Compute Jacobian entries (∂I/∂V for each terminal pair)
     /// Returns Vec of ((from_node, to_node), dI/dV) - linearized conductance stamps
     pub fn jacobian(&self, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
+        self.jacobian_with_diode_junction(node_voltages, None)
+    }
+
+    fn jacobian_with_diode_junction(
+        &self,
+        node_voltages: &[Value],
+        diode_junction: Option<crate::device::semiconductor::ResolvedDiodeJunction>,
+    ) -> Vec<((usize, usize), Value)> {
         match self.device_type {
-            NonlinearDeviceType::Diode => self.jac_diode(node_voltages),
+            NonlinearDeviceType::Diode => self.jac_diode(node_voltages, diode_junction),
             NonlinearDeviceType::Nmos => self.jac_nmos(node_voltages),
             NonlinearDeviceType::Pmos => self.jac_pmos(node_voltages),
             NonlinearDeviceType::Njfet => self.jac_njfet(node_voltages),
@@ -353,6 +369,7 @@ impl NonlinearDeviceInstance {
     /// `(8/3)kT|gm|` for legacy MOS/JFET channels, and `4kT g(t)` for switch
     /// resistance. Numerical conductance floors and output conductance are not
     /// physical channel-noise generators in these Level-1 models.
+    #[cfg(test)]
     pub(super) fn noise_intensities(
         &self,
         node_voltages: &[Value],
@@ -360,12 +377,22 @@ impl NonlinearDeviceInstance {
         q_e: Value,
         k_b: Value,
     ) -> Result<Vec<ScaledNonnegative>, &'static str> {
+        self.noise_intensities_with_diode_junction(node_voltages, temperature, q_e, k_b, None)
+    }
+
+    fn noise_intensities_with_diode_junction(
+        &self,
+        node_voltages: &[Value],
+        temperature: Value,
+        q_e: Value,
+        k_b: Value,
+        diode_junction: Option<crate::device::semiconductor::ResolvedDiodeJunction>,
+    ) -> Result<Vec<ScaledNonnegative>, &'static str> {
         match self.device_type {
             NonlinearDeviceType::Diode => {
                 let v_a = self.get_terminal_voltage(node_voltages, 0);
                 let v_c = self.get_terminal_voltage(node_voltages, 1);
-                let (id, _) =
-                    junction_current(self.params.is, v_a - v_c, self.params.n * self.params.vt);
+                let (id, _) = self.diode_current_and_conductance(v_a - v_c, diode_junction);
                 Ok(vec![ScaledNonnegative::checked_product(&[
                     2.0,
                     q_e,
@@ -535,11 +562,19 @@ impl NonlinearDeviceInstance {
     /// into the node is d/dt of the returned charge. Devices without charge
     /// storage return an empty vector.
     pub fn charge(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
+        self.charge_with_diode_junction(node_voltages, None)
+    }
+
+    fn charge_with_diode_junction(
+        &self,
+        node_voltages: &[Value],
+        diode_junction: Option<crate::device::semiconductor::ResolvedDiodeJunction>,
+    ) -> Vec<(usize, Value)> {
         if !self.has_charge_storage() {
             return Vec::new();
         }
         match self.device_type {
-            NonlinearDeviceType::Diode => self.charge_diode(node_voltages),
+            NonlinearDeviceType::Diode => self.charge_diode(node_voltages, diode_junction),
             NonlinearDeviceType::Nmos => self.charge_mos(1.0, node_voltages),
             NonlinearDeviceType::Pmos => self.charge_mos(-1.0, node_voltages),
             NonlinearDeviceType::Njfet => self.charge_jfet(1.0, node_voltages),
@@ -551,12 +586,21 @@ impl NonlinearDeviceInstance {
     /// Capacitance stamps: derivative of the charge ABSORBED at each
     /// terminal with respect to node voltage, mirroring the `jacobian`
     /// conductance-stamp convention.
+    #[cfg(test)]
     pub(crate) fn charge_jacobian(&self, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
+        self.charge_jacobian_with_diode_junction(node_voltages, None)
+    }
+
+    fn charge_jacobian_with_diode_junction(
+        &self,
+        node_voltages: &[Value],
+        diode_junction: Option<crate::device::semiconductor::ResolvedDiodeJunction>,
+    ) -> Vec<((usize, usize), Value)> {
         if !self.has_charge_storage() {
             return Vec::new();
         }
         match self.device_type {
-            NonlinearDeviceType::Diode => self.cap_diode(node_voltages),
+            NonlinearDeviceType::Diode => self.cap_diode(node_voltages, diode_junction),
             NonlinearDeviceType::Nmos => self.cap_mos(1.0, node_voltages),
             NonlinearDeviceType::Pmos => self.cap_mos(-1.0, node_voltages),
             NonlinearDeviceType::Njfet => self.cap_jfet(1.0, node_voltages),
@@ -730,12 +774,26 @@ impl NonlinearDeviceInstance {
         node_voltages.get(node).copied().unwrap_or(0.0)
     }
 
-    fn eval_diode(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
+    fn diode_current_and_conductance(
+        &self,
+        vd: Value,
+        diode_junction: Option<crate::device::semiconductor::ResolvedDiodeJunction>,
+    ) -> (Value, Value) {
+        diode_junction
+            .map(|junction| junction.current_and_conductance(vd))
+            .unwrap_or_else(|| junction_current(self.params.is, vd, self.params.n * self.params.vt))
+    }
+
+    fn eval_diode(
+        &self,
+        node_voltages: &[Value],
+        diode_junction: Option<crate::device::semiconductor::ResolvedDiodeJunction>,
+    ) -> Vec<(usize, Value)> {
         let v_a = self.get_terminal_voltage(node_voltages, 0);
         let v_c = self.get_terminal_voltage(node_voltages, 1);
         let vd = v_a - v_c;
 
-        let (id, _) = junction_current(self.params.is, vd, self.params.n * self.params.vt);
+        let (id, _) = self.diode_current_and_conductance(vd, diode_junction);
 
         // Return current contribution to each node equation (current INTO node convention)
         // Diode current id flows FROM anode TO cathode
@@ -746,12 +804,16 @@ impl NonlinearDeviceInstance {
         ]
     }
 
-    fn jac_diode(&self, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
+    fn jac_diode(
+        &self,
+        node_voltages: &[Value],
+        diode_junction: Option<crate::device::semiconductor::ResolvedDiodeJunction>,
+    ) -> Vec<((usize, usize), Value)> {
         let v_a = self.get_terminal_voltage(node_voltages, 0);
         let v_c = self.get_terminal_voltage(node_voltages, 1);
         let vd = v_a - v_c;
 
-        let (_, gd) = junction_current(self.params.is, vd, self.params.n * self.params.vt);
+        let (_, gd) = self.diode_current_and_conductance(vd, diode_junction);
 
         let a = self.terminals[0];
         let c = self.terminals[1];
@@ -1141,25 +1203,33 @@ impl NonlinearDeviceInstance {
     }
 
     /// Diode stored charge: depletion plus diffusion `TT * Id`.
-    fn charge_diode(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
+    fn charge_diode(
+        &self,
+        node_voltages: &[Value],
+        diode_junction: Option<crate::device::semiconductor::ResolvedDiodeJunction>,
+    ) -> Vec<(usize, Value)> {
         let v_a = self.get_terminal_voltage(node_voltages, 0);
         let v_c = self.get_terminal_voltage(node_voltages, 1);
         let vd = v_a - v_c;
 
         let (q_dep, _) = depletion_charge(&self.params.cap_a, vd);
-        let (id, _) = junction_current(self.params.is, vd, self.params.n * self.params.vt);
+        let (id, _) = self.diode_current_and_conductance(vd, diode_junction);
         let q = q_dep + self.params.tt_f * id;
 
         vec![(self.terminals[0], -q), (self.terminals[1], q)]
     }
 
-    fn cap_diode(&self, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
+    fn cap_diode(
+        &self,
+        node_voltages: &[Value],
+        diode_junction: Option<crate::device::semiconductor::ResolvedDiodeJunction>,
+    ) -> Vec<((usize, usize), Value)> {
         let v_a = self.get_terminal_voltage(node_voltages, 0);
         let v_c = self.get_terminal_voltage(node_voltages, 1);
         let vd = v_a - v_c;
 
         let (_, c_dep) = depletion_charge(&self.params.cap_a, vd);
-        let (_, gd) = junction_current(self.params.is, vd, self.params.n * self.params.vt);
+        let (_, gd) = self.diode_current_and_conductance(vd, diode_junction);
         let c = c_dep + self.params.tt_f * gd;
 
         let a = self.terminals[0];
@@ -1371,6 +1441,57 @@ impl NonlinearDeviceInstance {
     }
 }
 
+impl HbNonlinearDevice {
+    pub(super) fn evaluate(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
+        self.device
+            .evaluate_with_diode_junction(node_voltages, self.resolved_diode_junction)
+    }
+
+    pub(super) fn jacobian(&self, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
+        self.device
+            .jacobian_with_diode_junction(node_voltages, self.resolved_diode_junction)
+    }
+
+    pub(super) fn charge(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
+        self.device
+            .charge_with_diode_junction(node_voltages, self.resolved_diode_junction)
+    }
+
+    pub(super) fn charge_jacobian(&self, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
+        self.device
+            .charge_jacobian_with_diode_junction(node_voltages, self.resolved_diode_junction)
+    }
+
+    pub(super) fn noise_intensities(
+        &self,
+        node_voltages: &[Value],
+        temperature: Value,
+        q_e: Value,
+        k_b: Value,
+    ) -> Result<Vec<ScaledNonnegative>, &'static str> {
+        self.device.noise_intensities_with_diode_junction(
+            node_voltages,
+            temperature,
+            q_e,
+            k_b,
+            self.resolved_diode_junction,
+        )
+    }
+
+    fn physical_parameter_error(&self) -> Option<&'static str> {
+        self.device.physical_parameter_error().or_else(|| {
+            self.resolved_diode_junction
+                .and_then(|junction| junction.physical_parameter_error())
+        })
+    }
+
+    #[cfg(test)]
+    fn diode_current_and_conductance(&self, vd: Value) -> (Value, Value) {
+        self.device
+            .diode_current_and_conductance(vd, self.resolved_diode_junction)
+    }
+}
+
 impl HbSolver {
     pub(super) fn validate_nonlinear_device_parameters(&self) -> Result<(), HbError> {
         if self.nonlinear_device_names.len() != self.nonlinear_devices.len()
@@ -1432,6 +1553,121 @@ mod tests {
 
     type DeliveredNodeQuantityFn<'a> = dyn Fn(&[Value]) -> Vec<(usize, Value)> + 'a;
     type StampEntriesFn<'a> = dyn Fn(&[Value]) -> Vec<((usize, usize), Value)> + 'a;
+
+    fn resolved_breakdown_diode(
+        transit_time: Value,
+    ) -> (
+        HbNonlinearDevice,
+        crate::device::semiconductor::ResolvedDiodeJunction,
+    ) {
+        let params: std::collections::HashMap<String, Value> =
+            [("IS", 1.0e-6), ("N", 1.48), ("BV", 5.0), ("IBV", 1.0e-6)]
+                .into_iter()
+                .map(|(name, value)| (name.to_string(), value))
+                .collect();
+        let mut native =
+            crate::device::Diode::spice_defaults("d1".to_string(), 1, 0).with_model_params(&params);
+        native.set_xyce_compatibility(true);
+        native.set_temperature_xyce_7(300.15, 300.15);
+        let junction = native.resolved_level_one_junction();
+        let hb = NonlinearDeviceInstance::diode(0, 1, native.is, native.n)
+            .with_thermal_voltage(native.vt)
+            .with_junction_caps(DepletionCap::none(), DepletionCap::none(), transit_time);
+        (
+            HbNonlinearDevice {
+                device: hb,
+                resolved_diode_junction: Some(junction),
+            },
+            junction,
+        )
+    }
+
+    #[test]
+    fn resolved_xyce_diode_regions_match_closed_form_and_exact_jacobian() {
+        let (hb, junction) = resolved_breakdown_diode(0.0);
+        let breakdown = junction
+            .breakdown_voltage()
+            .expect("authored BV has a resolved matched knee");
+        assert_eq!(breakdown.to_bits(), 5.0_f64.to_bits());
+        let voltages = [0.2, -1.0, -(breakdown + 0.05)];
+        let isat = 1.0e-6;
+        let vt = (1.3806226e-23 / 1.6021918e-19) * 300.15;
+        let nvt = 1.48 * vt;
+
+        for voltage in voltages {
+            let (current, conductance) = hb.diode_current_and_conductance(voltage);
+            let (expected_current, expected_conductance) = if voltage >= -3.0 * nvt {
+                let exponential = (voltage / nvt).exp();
+                (isat * (exponential - 1.0), isat * exponential / nvt)
+            } else if voltage < -breakdown {
+                let exponential = (-(breakdown + voltage) / vt).exp();
+                (-isat * exponential, isat * exponential / vt)
+            } else {
+                let argument = (3.0 * nvt / (voltage * std::f64::consts::E)).powi(3);
+                (-isat * (1.0 + argument), isat * 3.0 * argument / voltage)
+            };
+            let current_tolerance = 16.0 * Value::EPSILON * expected_current.abs().max(isat);
+            let conductance_tolerance =
+                16.0 * Value::EPSILON * expected_conductance.abs().max(isat / nvt);
+            assert!((current - expected_current).abs() <= current_tolerance);
+            assert!((conductance - expected_conductance).abs() <= conductance_tolerance);
+            assert!(conductance.is_finite() && conductance > 0.0);
+
+            let step = 1.0e-7;
+            let current_hi = hb.diode_current_and_conductance(voltage + step).0;
+            let current_lo = hb.diode_current_and_conductance(voltage - step).0;
+            let finite_difference = (current_hi - current_lo) / (2.0 * step);
+            let tolerance = 2.0e-7 * conductance.abs().max(finite_difference.abs()) + 1.0e-14;
+            assert!(
+                (conductance - finite_difference).abs() <= tolerance,
+                "at Vd={voltage:.6e}, G={conductance:.6e}, finite difference={finite_difference:.6e}"
+            );
+
+            let aa = hb
+                .jacobian(&[voltage, 0.0])
+                .into_iter()
+                .find_map(|((row, column), value)| (row == 0 && column == 0).then_some(value))
+                .expect("diode has an anode diagonal Jacobian entry");
+            assert_eq!(aa.to_bits(), conductance.to_bits());
+        }
+    }
+
+    #[test]
+    fn breakdown_current_drives_tt_charge_derivative_and_shot_noise() {
+        let transit_time = 8.0e-7;
+        let (hb, junction) = resolved_breakdown_diode(transit_time);
+        let voltage = -(junction.breakdown_voltage().unwrap() + 0.05);
+        let (current, conductance) = hb.diode_current_and_conductance(voltage);
+
+        let capacitance = hb
+            .charge_jacobian(&[voltage, 0.0])
+            .into_iter()
+            .find_map(|((row, column), value)| (row == 0 && column == 0).then_some(value))
+            .expect("diffusion charge has an anode diagonal capacitance");
+        assert_eq!(
+            capacitance.to_bits(),
+            (transit_time * conductance).to_bits()
+        );
+
+        let step = 1.0e-7;
+        let absorbed_charge = |vd: Value| {
+            -hb.charge(&[vd, 0.0])
+                .into_iter()
+                .find_map(|(node, value)| (node == 0).then_some(value))
+                .expect("diode charge includes the anode")
+        };
+        let finite_difference =
+            (absorbed_charge(voltage + step) - absorbed_charge(voltage - step)) / (2.0 * step);
+        let tolerance = 2.0e-7 * capacitance.abs().max(finite_difference.abs()) + 1.0e-20;
+        assert!((capacitance - finite_difference).abs() <= tolerance);
+
+        let shot = hb
+            .noise_intensities(&[voltage, 0.0], 300.15, 1.0, 1.0)
+            .expect("finite breakdown current has finite shot noise")[0];
+        let shot = libm::scalbn(shot.mantissa, shot.exponent);
+        let expected_shot = 2.0 * current.abs();
+        assert!((shot - expected_shot).abs() <= 8.0 * Value::EPSILON * expected_shot);
+    }
 
     #[test]
     fn nonlinear_noise_scaling_preserves_extremes_and_rejects_invalid_factors() {

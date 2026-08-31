@@ -646,7 +646,6 @@ impl Engine {
             .iter()
             .filter(|diode| {
                 diode.level != crate::device::DiodeLevel::Legacy
-                    || diode.bv.is_some()
                     || diode.forward_knee_current > 0.0
                     || diode.reverse_knee_current > 0.0
                     || diode.recombination_saturation_current != 0.0
@@ -661,7 +660,7 @@ impl Engine {
             .count();
         if reduced_diodes > 0 {
             kinds.push(describe(
-                "diodes requiring breakdown, high-injection, recombination, sidewall, tunneling, overlap, or non-LEVEL=1 equations not represented by exact HB",
+                "diodes requiring high-injection, recombination, sidewall, tunneling, overlap, or non-LEVEL=1 equations not represented by exact HB",
                 reduced_diodes,
             ));
         }
@@ -687,6 +686,7 @@ impl Engine {
                     || !(0.0..1.0).contains(&diode.fc)
                     || !diode.tt.is_finite()
                     || diode.tt < 0.0
+                    || diode.exact_hb_breakdown_parameter_error().is_some()
             })
             .count();
         if invalid_diodes > 0 {

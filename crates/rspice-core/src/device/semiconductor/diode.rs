@@ -188,6 +188,91 @@ pub struct DiodeIndices {
     pub cc: Option<CscIndex>,
 }
 
+/// Immutable, temperature-resolved Level-1 bottom-junction characteristic.
+///
+/// This is the canonical static junction law shared by the native diode and
+/// analyses such as harmonic balance that evaluate a device at many
+/// collocation samples without using its Newton-history state.  The optional
+/// breakdown voltage is the already temperature-adjusted, IBV-matched value,
+/// not the raw value authored on the model card.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ResolvedDiodeJunction {
+    saturation_current: Value,
+    emission_voltage: Value,
+    breakdown: Option<(Value, Value)>,
+}
+
+impl ResolvedDiodeJunction {
+    fn new(
+        saturation_current: Value,
+        emission_voltage: Value,
+        breakdown_voltage: Option<Value>,
+        breakdown_emission_voltage: Value,
+    ) -> Self {
+        Self {
+            saturation_current,
+            emission_voltage,
+            breakdown: breakdown_voltage.map(|voltage| (voltage, breakdown_emission_voltage)),
+        }
+    }
+
+    /// Physical current from anode to cathode and its exact voltage
+    /// derivative.  The three regions are Xyce/ngspice's forward
+    /// exponential, cubic reverse continuation, and avalanche breakdown.
+    pub(crate) fn current_and_conductance(self, voltage: Value) -> (Value, Value) {
+        let isat = self.saturation_current;
+        let nvt = self.emission_voltage;
+        if !(isat.is_finite() && isat > 0.0 && nvt.is_finite() && nvt > 0.0) {
+            return (0.0, 0.0);
+        }
+
+        if voltage >= -3.0 * nvt {
+            let (exponential, derivative) = Diode::limited_exp(voltage / nvt, MAX_EXP_ARG);
+            return (isat * (exponential - 1.0), (isat / nvt) * derivative);
+        }
+
+        if let Some((breakdown_voltage, breakdown_emission_voltage)) = self.breakdown
+            && voltage < -breakdown_voltage
+        {
+            let argument = -(breakdown_voltage + voltage) / breakdown_emission_voltage;
+            let (exponential, derivative) = Diode::limited_exp(argument, BREAKDOWN_EXP_ARG_MAX);
+            return (
+                -isat * exponential,
+                (isat / breakdown_emission_voltage) * derivative,
+            );
+        }
+
+        let mut argument = 3.0 * nvt / (voltage * std::f64::consts::E);
+        argument = argument * argument * argument;
+        (-isat * (1.0 + argument), isat * 3.0 * argument / voltage)
+    }
+
+    pub(crate) fn physical_parameter_error(self) -> Option<&'static str> {
+        if !self.saturation_current.is_finite() || self.saturation_current < 0.0 {
+            return Some("diode saturation current must be finite and nonnegative");
+        }
+        if !self.emission_voltage.is_finite() || self.emission_voltage <= 0.0 {
+            return Some("diode emission voltage N*VT must be finite and positive");
+        }
+        if let Some((voltage, emission_voltage)) = self.breakdown {
+            // IBV matching can legitimately move the effective knee below
+            // zero, so only finiteness is required for the resolved voltage.
+            if !voltage.is_finite() {
+                return Some("diode matched breakdown voltage must be finite");
+            }
+            if !emission_voltage.is_finite() || emission_voltage <= 0.0 {
+                return Some("diode breakdown emission voltage NBV*VT must be finite and positive");
+            }
+        }
+        None
+    }
+
+    #[cfg(test)]
+    pub(crate) fn breakdown_voltage(self) -> Option<Value> {
+        self.breakdown.map(|(voltage, _)| voltage)
+    }
+}
+
 /// Semiconductor diode with Shockley equation model
 #[derive(Debug, Clone)]
 pub struct Diode {
@@ -351,6 +436,10 @@ pub struct Diode {
     last_stamp_gd: std::cell::Cell<Value>,
     /// Folded AREA * M multiplier applied to the bottom junction.
     junction_scale: Value,
+    /// Temperature-shifted authored BV before IBV/NBV matching.
+    /// Retained so a later public dialect switch can rematch the knee with the
+    /// dialect's omitted-NBV default without discarding the temperature law.
+    temperature_shifted_breakdown_voltage: Option<Value>,
     /// Temperature-adjusted matched breakdown voltage (Xyce/ngspice tBrkdwnV).
     temperature_breakdown_voltage: Option<Value>,
     /// Pre-computed matrix indices for O(1) stamping
@@ -560,6 +649,7 @@ impl Diode {
             last_stamp_id: std::cell::Cell::new(0.0),
             last_stamp_gd: std::cell::Cell::new(0.0),
             junction_scale: 1.0,
+            temperature_shifted_breakdown_voltage: None,
             temperature_breakdown_voltage: None,
             indices: DiodeIndices::default(),
         }
@@ -1116,7 +1206,7 @@ impl Diode {
             self.tbv2 = v;
         }
         if !self.breakdown_emission_given {
-            self.breakdown_emission_coefficient = self.n;
+            self.breakdown_emission_coefficient = if self.xyce_dialect { 1.0 } else { self.n };
         }
         // ngspice defaults the activation energy against TLEV, not against the
         // level: the TLEV=2 bandgap law is written around 1.16 eV while the
@@ -1200,17 +1290,29 @@ impl Diode {
     /// routine.  Other dialects retain ngspice's `pnjlim_new` behavior.
     pub fn set_xyce_compatibility(&mut self, enabled: bool) {
         self.xyce_dialect = enabled;
+        // Xyce 7.10's diode registry gives NBV its own default of 1.0.
+        // ngspice instead defaults NBV to N.  Model parsing occurs before the
+        // dialect is selected, so project the omitted parameter here, before
+        // temperature processing performs the IBV/BV matching loop.
+        if !self.breakdown_emission_given {
+            self.breakdown_emission_coefficient = if enabled { 1.0 } else { self.n };
+        }
         if enabled {
             self.ngspice_dialect = false;
         }
+        self.rematch_temperature_breakdown_voltage();
     }
 
     /// Select ngspice's native diode extension semantics.
     pub(crate) fn set_ngspice_compatibility(&mut self, enabled: bool) {
         self.ngspice_dialect = enabled;
+        if enabled && !self.breakdown_emission_given {
+            self.breakdown_emission_coefficient = self.n;
+        }
         if enabled {
             self.xyce_dialect = false;
         }
+        self.rematch_temperature_breakdown_voltage();
     }
 
     /// Select Xyce's native transient device-convergence status policy for
@@ -1409,7 +1511,7 @@ impl Diode {
                 }
             }
             self.vt = vt;
-            self.temperature_breakdown_voltage = self.matched_breakdown_voltage(delta_t);
+            self.update_temperature_breakdown_voltage(delta_t);
             return;
         }
 
@@ -1469,11 +1571,22 @@ impl Diode {
         }
 
         self.vt = vt;
-        self.temperature_breakdown_voltage = self.matched_breakdown_voltage(delta_t);
+        self.update_temperature_breakdown_voltage(delta_t);
     }
 
-    /// Temperature-shifted breakdown voltage, run through the forward/reverse
-    /// matching loop.
+    fn update_temperature_breakdown_voltage(&mut self, delta_t: Value) {
+        self.temperature_shifted_breakdown_voltage = self.shifted_breakdown_voltage(delta_t);
+        self.rematch_temperature_breakdown_voltage();
+    }
+
+    fn rematch_temperature_breakdown_voltage(&mut self) {
+        self.temperature_breakdown_voltage = self
+            .temperature_shifted_breakdown_voltage
+            .and_then(|value| self.xbv_matched_breakdown_voltage(value));
+    }
+
+    /// Temperature-shifted breakdown voltage before the forward/reverse
+    /// IBV/NBV matching loop.
     ///
     /// Two shift laws live here because two dialects spell the coefficient
     /// differently. ngspice's TCV subtracts (`BV − TCV·dt`) at TLEV=0 and
@@ -1481,7 +1594,7 @@ impl Diode {
     /// opposite sign (`BV·(1 + TBV1·dt + TBV2·dt²)`). A card that names TCV
     /// gets ngspice's; anything else gets Xyce's, which degenerates to no
     /// shift when TBV1 and TBV2 are absent.
-    fn matched_breakdown_voltage(&self, delta_t: Value) -> Option<Value> {
+    fn shifted_breakdown_voltage(&self, delta_t: Value) -> Option<Value> {
         let bv = self.bv?;
         let shifted = if self.temperature_model.tcv_given {
             if self.temperature_model.tlev == 0 {
@@ -1496,7 +1609,6 @@ impl Diode {
             .is_finite()
             .then_some(shifted)
             .filter(|value| *value >= 0.0)
-            .and_then(|value| self.xbv_matched_breakdown_voltage(value))
     }
 
     /// Cached operating-point values from the last accepted Newton solution:
@@ -2048,6 +2160,50 @@ impl Diode {
         self.junction_branch(vd, isat, emission_coefficient, true)
     }
 
+    fn resolved_bottom_junction(
+        &self,
+        saturation_current: Value,
+        emission_coefficient: Value,
+    ) -> ResolvedDiodeJunction {
+        ResolvedDiodeJunction::new(
+            saturation_current,
+            emission_coefficient.max(EPSMIN) * self.vt,
+            self.active_breakdown_voltage(),
+            self.breakdown_emission_coefficient.max(EPSMIN) * self.vt,
+        )
+    }
+
+    /// Temperature-resolved bottom-junction law used by exact HB.
+    ///
+    /// High injection, recombination, sidewall, and tunneling mechanisms are
+    /// deliberately outside this base characteristic and remain guarded by
+    /// HB capability admission.  Breakdown belongs to the base Level-1
+    /// junction and is therefore retained here.
+    pub(crate) fn resolved_level_one_junction(&self) -> ResolvedDiodeJunction {
+        self.resolved_bottom_junction(self.bottom_saturation_current(), self.n)
+    }
+
+    /// Validate the authored and resolved breakdown inputs before an exact-HB
+    /// projection is admitted.  Model parsing normally guarantees these
+    /// invariants, but the circuit/device APIs remain programmatically
+    /// constructible and must fail closed rather than silently drop BV.
+    pub(crate) fn exact_hb_breakdown_parameter_error(&self) -> Option<&'static str> {
+        let bv = self.bv?;
+        if !bv.is_finite() || bv < 0.0 {
+            return Some("diode BV must be finite and nonnegative");
+        }
+        if !self.ibv.is_finite() || self.ibv <= 0.0 {
+            return Some("diode IBV must be finite and positive");
+        }
+        if !self.breakdown_emission_coefficient.is_finite()
+            || self.breakdown_emission_coefficient <= 0.0
+        {
+            return Some("diode NBV must be finite and positive");
+        }
+        self.resolved_level_one_junction()
+            .physical_parameter_error()
+    }
+
     /// Forward / reverse / breakdown junction branches for one exponential.
     ///
     /// `breakdown` selects whether this junction has a breakdown region at
@@ -2062,6 +2218,11 @@ impl Diode {
         emission_coefficient: Value,
         breakdown: bool,
     ) -> (Value, Value) {
+        if breakdown {
+            return self
+                .resolved_bottom_junction(isat, emission_coefficient)
+                .current_and_conductance(vd);
+        }
         if !(isat.is_finite() && isat > 0.0 && emission_coefficient.is_finite()) {
             return (0.0, 0.0);
         }
@@ -2330,6 +2491,27 @@ mod tests {
         d
     }
 
+    fn matched_breakdown_oracle(
+        bv: Value,
+        ibv: Value,
+        isat: Value,
+        nbv: Value,
+        vt: Value,
+    ) -> Value {
+        if ibv < isat * bv / vt {
+            return bv;
+        }
+        let mut matched = bv - nbv * vt * (1.0 + ibv / isat).ln();
+        for _ in 0..25 {
+            matched = bv - nbv * vt * (ibv / isat + 1.0 - matched / vt).ln();
+            let current = isat * (((bv - matched) / (nbv * vt)).exp() - 1.0 + matched / vt);
+            if (current - ibv).abs() <= 1.0e-3 * ibv {
+                break;
+            }
+        }
+        matched
+    }
+
     #[test]
     fn off_instance_starts_its_first_linearization_at_zero_bias() {
         // dioload.c evaluates an OFF instance at exactly `vd = 0` on
@@ -2549,6 +2731,126 @@ mod tests {
         assert_eq!(d.temperature_model.cta, 1.5e-3);
         assert_eq!(d.temperature_model.tpb, 2.5e-3);
         assert_eq!(d.temperature_model.trs1, 4e-5);
+    }
+
+    #[test]
+    fn omitted_breakdown_emission_default_is_dialect_specific() {
+        let params: std::collections::HashMap<String, Value> =
+            [("N", 1.48), ("BV", 600.0), ("IBV", 1.0e-4)]
+                .into_iter()
+                .map(|(name, value)| (name.to_string(), value))
+                .collect();
+        let mut diode = Diode::spice_defaults("d1".to_string(), 1, 0).with_model_params(&params);
+
+        assert_eq!(diode.breakdown_emission_coefficient, 1.48);
+        assert!(!diode.breakdown_emission_given);
+
+        diode.set_xyce_compatibility(true);
+        assert_eq!(diode.breakdown_emission_coefficient, 1.0);
+
+        diode.set_xyce_compatibility(false);
+        assert_eq!(diode.breakdown_emission_coefficient, 1.48);
+
+        diode.set_ngspice_compatibility(true);
+        assert_eq!(diode.breakdown_emission_coefficient, 1.48);
+
+        let mut explicit_params = params;
+        explicit_params.insert("NBV".to_string(), 1.2);
+        let mut explicit =
+            Diode::spice_defaults("d2".to_string(), 1, 0).with_model_params(&explicit_params);
+        explicit.set_xyce_compatibility(true);
+        assert_eq!(explicit.breakdown_emission_coefficient, 1.2);
+        assert!(explicit.breakdown_emission_given);
+    }
+
+    #[test]
+    fn dialect_switch_after_temperature_processing_rematches_shifted_breakdown_knee() {
+        let params: std::collections::HashMap<String, Value> = [
+            ("IS", 1.0e-14),
+            ("N", 1.48),
+            ("BV", 5.0),
+            ("IBV", 1.0e-3),
+            ("TBV1", 1.0e-3),
+        ]
+        .into_iter()
+        .map(|(name, value)| (name.to_string(), value))
+        .collect();
+        let mut diode = Diode::spice_defaults("d1".to_string(), 1, 0).with_model_params(&params);
+        let temp = REFTEMP + 10.0;
+        diode.set_temperature_xyce_7(temp, REFTEMP);
+
+        let shifted_bv = 5.0 * (1.0 + 1.0e-3 * 10.0);
+        let ngspice_default =
+            matched_breakdown_oracle(shifted_bv, diode.ibv, diode.is, 1.48, diode.vt);
+        let before = diode.active_breakdown_voltage().unwrap();
+        assert!((before - ngspice_default).abs() <= 16.0 * Value::EPSILON * shifted_bv);
+
+        diode.set_xyce_compatibility(true);
+        let xyce_default = matched_breakdown_oracle(shifted_bv, diode.ibv, diode.is, 1.0, diode.vt);
+        let after = diode.active_breakdown_voltage().unwrap();
+        assert!((after - xyce_default).abs() <= 16.0 * Value::EPSILON * shifted_bv);
+        assert!(
+            (after - before).abs() > 0.1,
+            "changing the omitted NBV default must materially rematch the knee: {before} -> {after}"
+        );
+    }
+
+    #[test]
+    fn tiny_positive_emission_coefficients_use_one_consistent_epsmin_law() {
+        let tiny_n = 0.5 * EPSMIN;
+        let tiny_nbv = 0.25 * EPSMIN;
+        let params: std::collections::HashMap<String, Value> = [
+            ("IS", 1.0e-14),
+            ("N", tiny_n),
+            ("BV", 0.0),
+            ("IBV", 1.0e-3),
+            ("NBV", tiny_nbv),
+        ]
+        .into_iter()
+        .map(|(name, value)| (name.to_string(), value))
+        .collect();
+        let mut diode = Diode::spice_defaults("d1".to_string(), 1, 0).with_model_params(&params);
+        diode.set_temperature(REFTEMP, REFTEMP);
+
+        let thermal = EPSMIN * diode.vt;
+        let expected_breakdown =
+            matched_breakdown_oracle(0.0, diode.ibv, diode.is, EPSMIN, diode.vt);
+        let actual_breakdown = diode.active_breakdown_voltage().unwrap();
+        assert!(
+            (actual_breakdown - expected_breakdown).abs()
+                <= 16.0 * Value::EPSILON * expected_breakdown.abs().max(thermal)
+        );
+
+        let junction = diode.resolved_level_one_junction();
+        let forward_voltage = 2.0 * thermal;
+        let forward_exponential = 2.0_f64.exp();
+        let expected_forward_current = diode.is * (forward_exponential - 1.0);
+        let expected_forward_conductance = diode.is * forward_exponential / thermal;
+        let (forward_current, forward_conductance) =
+            junction.current_and_conductance(forward_voltage);
+        assert!(
+            (forward_current - expected_forward_current).abs()
+                <= 32.0 * Value::EPSILON * expected_forward_current.abs()
+        );
+        assert!(
+            (forward_conductance - expected_forward_conductance).abs()
+                <= 32.0 * Value::EPSILON * expected_forward_conductance.abs()
+        );
+
+        let voltage = -4.0 * thermal;
+        let argument = -(expected_breakdown + voltage) / thermal;
+        let exponential = argument.exp();
+        let expected_current = -diode.is * exponential;
+        let expected_conductance = diode.is * exponential / thermal;
+        let (current, conductance) = junction.current_and_conductance(voltage);
+        assert!(current.is_finite() && conductance.is_finite());
+        assert!(
+            (current - expected_current).abs() <= 32.0 * Value::EPSILON * expected_current.abs()
+        );
+        assert!(
+            (conductance - expected_conductance).abs()
+                <= 32.0 * Value::EPSILON * expected_conductance.abs()
+        );
     }
 
     #[test]

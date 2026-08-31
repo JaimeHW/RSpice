@@ -811,7 +811,7 @@ pub struct HbSolver {
     source_spectra: Vec<Vec<Complex64>>,
 
     /// Registered nonlinear devices for Newton iteration
-    nonlinear_devices: Vec<NonlinearDeviceInstance>,
+    nonlinear_devices: Vec<HbNonlinearDevice>,
     /// Stable contributor owners aligned exactly with `nonlinear_devices`.
     /// Engine clients retain authored instance names; direct solver clients
     /// receive deterministic type-and-registration-index fallbacks.
@@ -897,6 +897,25 @@ pub struct NonlinearDeviceInstance {
     pub terminals: Vec<usize>,
     /// Device parameters (device-specific interpretation)
     pub params: NonlinearDeviceParams,
+}
+
+/// Solver-owned nonlinear-device registration state.
+///
+/// The public device and parameter structs intentionally remain exhaustive and
+/// source-compatible for direct HB clients. Engine-only resolved characteristics
+/// live in this private wrapper instead of changing either public struct's layout.
+#[derive(Debug, Clone)]
+struct HbNonlinearDevice {
+    device: NonlinearDeviceInstance,
+    resolved_diode_junction: Option<crate::device::semiconductor::ResolvedDiodeJunction>,
+}
+
+impl std::ops::Deref for HbNonlinearDevice {
+    type Target = NonlinearDeviceInstance;
+
+    fn deref(&self) -> &Self::Target {
+        &self.device
+    }
 }
 
 /// Type of nonlinear device

@@ -19,7 +19,7 @@ impl Engine {
         for diode in &circuit.diodes.devices {
             let anode = Self::hb_node_to_solver_index(diode.node_anode, num_nodes);
             let cathode = Self::hb_node_to_solver_index(diode.node_cathode, num_nodes);
-            solver.add_named_nonlinear_device(
+            solver.add_named_resolved_diode(
                 diode.name.clone(),
                 NonlinearDeviceInstance::diode(anode, cathode, diode.is, diode.n)
                     .with_thermal_voltage(diode.vt)
@@ -28,6 +28,7 @@ impl Engine {
                         DepletionCap::none(),
                         diode.tt,
                     ),
+                diode.resolved_level_one_junction(),
             );
         }
 

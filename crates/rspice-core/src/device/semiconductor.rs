@@ -16,5 +16,6 @@ pub(crate) use bjt::{
 pub use bjt::{Bjt, BjtType};
 pub(crate) use diode::{
     AcceptedDiodeNonlinearCheckpoint, DIODE_ACCEPTED_NONLINEAR_RUNTIME_TAG, DiodeNonlinearState,
+    ResolvedDiodeJunction,
 };
 pub use diode::{Diode, DiodeLevel};

@@ -8,7 +8,7 @@
 
 use num_complex::Complex64;
 use rspice_core::analysis::harmonic_balance::HbConfig;
-use rspice_core::engine::{Engine, HbAnalysisResult, SimulationConfig};
+use rspice_core::engine::{Engine, HbAnalysisResult, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::Netlist;
 use rspice_core::{ResourceKind, ResourceLimitError, ResourceLimits, SimulationError};
 
@@ -159,6 +159,47 @@ fn nonlinear_hb_result_budget_counts_retained_mna_branch_spectra() {
 }
 
 #[test]
+fn nonlinear_hb_admits_level_one_breakdown_and_closes_source_kcl() {
+    let deck = "\
+* exact Level-1 reverse-breakdown branch; IBV is below IS*BV/VT so BV is the knee
+VDRIVE out 0 DC -5.1
+D1 out 0 DMOD
+.model DMOD D (IS=1u N=1.48 BV=5 IBV=1u)
+.end
+";
+    let netlist = Netlist::parse(deck).expect("breakdown HB fixture parses");
+    let config = SimulationConfig {
+        spice_dialect: SpiceDialect::Xyce,
+        ..SimulationConfig::default()
+    };
+    let result = Engine::new(config)
+        .run_hb(&netlist, HbConfig::new(F0).with_harmonics(1))
+        .expect("canonical Level-1 breakdown is supported by exact HB");
+    assert!(result.converged);
+    assert!((coefficient(&result, "out", 0).re + 5.1).abs() <= 1.0e-12);
+
+    let source = result
+        .result
+        .mna_branch_currents
+        .iter()
+        .find(|branch| branch.device_name.eq_ignore_ascii_case("VDRIVE"))
+        .expect("exact HB retains the ideal-source branch current");
+
+    // Independent Xyce Level-1 oracle: omitted NBV defaults to 1, and the low
+    // IBV above leaves the matched knee at the authored 5 V.
+    let xyce_vt: f64 = (1.3806226e-23 / 1.6021918e-19) * 300.15;
+    let expected_source_current = 1.0e-6 * (0.1 / xyce_vt).exp();
+    let actual_source_current = source.coefficients[0].re;
+    assert!(
+        (actual_source_current - expected_source_current).abs()
+            <= 1.0e-7 * expected_source_current.abs().max(1.0e-18),
+        "source/diode KCL must use the canonical breakdown current: got {actual_source_current:.9e}, expected {expected_source_current:.9e}"
+    );
+    assert!(actual_source_current > 1.0e-5);
+    assert!(source.coefficients[1].norm() <= 1.0e-12);
+}
+
+#[test]
 fn nonlinear_hb_matrix_budget_counts_branch_spectrum_unknowns() {
     let deck = format!(
         "* nonlinear HB Newton-state accounting\n\
@@ -272,13 +313,13 @@ fn nonlinear_hb_rejects_device_models_it_would_otherwise_downgrade() {
     let cases = [
         (
             "\
-* diode breakdown cannot be reduced to a basic exponential
+* high injection cannot be reduced to the base Level-1 junction
 v1 out 0 dc 1
 d1 out 0 dmod
-.model dmod d (is=1e-14 bv=5 ibv=1u)
+.model dmod d (is=1e-14 ikf=1m)
 .end
 ",
-            "diodes requiring breakdown",
+            "diodes requiring high-injection",
         ),
         (
             "\

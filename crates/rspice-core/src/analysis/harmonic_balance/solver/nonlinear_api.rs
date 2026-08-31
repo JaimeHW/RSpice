@@ -5,9 +5,12 @@ impl HbSolver {
     /// Add a nonlinear device for Newton iteration
     pub fn add_nonlinear_device(&mut self, device: NonlinearDeviceInstance) {
         let fallback_name = format!("{:?}#{}", device.device_type, self.nonlinear_devices.len());
-        self.add_named_nonlinear_device_with_noise_temperature(
+        self.add_wrapped_nonlinear_device_with_noise_temperature(
             fallback_name,
-            device,
+            HbNonlinearDevice {
+                device,
+                resolved_diode_junction: None,
+            },
             NonlinearNoiseTemperature::Ambient,
         );
     }
@@ -18,9 +21,30 @@ impl HbSolver {
         name: impl Into<String>,
         device: NonlinearDeviceInstance,
     ) {
-        self.add_named_nonlinear_device_with_noise_temperature(
+        self.add_wrapped_nonlinear_device_with_noise_temperature(
             name,
-            device,
+            HbNonlinearDevice {
+                device,
+                resolved_diode_junction: None,
+            },
+            NonlinearNoiseTemperature::Ambient,
+        );
+    }
+
+    /// Register an engine-resolved Level-1 diode without changing the public
+    /// direct-solver device representation.
+    pub(crate) fn add_named_resolved_diode(
+        &mut self,
+        name: impl Into<String>,
+        device: NonlinearDeviceInstance,
+        junction: crate::device::semiconductor::ResolvedDiodeJunction,
+    ) {
+        self.add_wrapped_nonlinear_device_with_noise_temperature(
+            name,
+            HbNonlinearDevice {
+                device,
+                resolved_diode_junction: Some(junction),
+            },
             NonlinearNoiseTemperature::Ambient,
         );
     }
@@ -33,9 +57,12 @@ impl HbSolver {
         device: NonlinearDeviceInstance,
         noise_temperature_offset: Value,
     ) {
-        self.add_named_nonlinear_device_with_noise_temperature(
+        self.add_wrapped_nonlinear_device_with_noise_temperature(
             name,
-            device,
+            HbNonlinearDevice {
+                device,
+                resolved_diode_junction: None,
+            },
             NonlinearNoiseTemperature::Offset(noise_temperature_offset),
         );
     }
@@ -47,17 +74,20 @@ impl HbSolver {
         device: NonlinearDeviceInstance,
         noise_temperature: Value,
     ) {
-        self.add_named_nonlinear_device_with_noise_temperature(
+        self.add_wrapped_nonlinear_device_with_noise_temperature(
             name,
-            device,
+            HbNonlinearDevice {
+                device,
+                resolved_diode_junction: None,
+            },
             NonlinearNoiseTemperature::Absolute(noise_temperature),
         );
     }
 
-    fn add_named_nonlinear_device_with_noise_temperature(
+    fn add_wrapped_nonlinear_device_with_noise_temperature(
         &mut self,
         name: impl Into<String>,
-        device: NonlinearDeviceInstance,
+        device: HbNonlinearDevice,
         noise_temperature: NonlinearNoiseTemperature,
     ) {
         self.nonlinear_devices.push(device);
