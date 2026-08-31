@@ -1,0 +1,77 @@
+* Settle-cost ratchet deck: 72-gate all-NAND 8-bit ripple-carry adder.
+*
+* Pinned input for `engine::xspice_settle_ratchet`. Nothing here may change
+* without re-measuring the three ceilings that test carries: the counts it
+* asserts are a property of this deck and this deck only.
+*
+* Shape, and why it is this shape. Every logic element is a two-input NAND, so
+* the instance list is dominated by models that declare
+* `can_skip_unchanged_event_inputs` and that the settle dispatch is therefore
+* allowed to skip. Eight full-adder stages of nine gates each share one carry
+* chain, so a toggle on a low-order input reaches a long, ordered fan-out
+* rather than a single gate -- which is what makes the *fraction* skipped a
+* meaningful number instead of an artifact of a deck with nothing to skip.
+*
+* The stimulus is analog: sixteen PULSE sources with mutually prime-ish widths
+* and periods, crossed into the digital world by one `adc_bridge`. That keeps
+* the deck self-contained -- no `d_source` and no external stimulus file to
+* register, so the counters measure the settle loop and not a file reader --
+* while still producing a dense, aperiodic switching pattern over the run.
+*
+* Three outputs are read back through a `dac_bridge` into resistive loads so
+* the digital half is anchored to the analog solve and cannot be pruned as
+* unconnected.
+*
+* Run bound: `.tran 0.1ns 20ns`, which the ratchet test passes explicitly to
+* `Engine::run_tran` so the deck and the call cannot drift apart.
+.model nandmod d_nand(rise_delay=0.7e-9 fall_delay=0.7e-9 input_load=0.5e-12)
+.model adcmod adc_bridge(in_low=1 in_high=2)
+.model dacmod dac_bridge(out_low=0 out_high=3 out_undef=1.5 t_rise=0.5e-9 t_fall=0.5e-9)
+.subckt nand in1 in2 out
+a1 [in1 in2] out nandmod
+.ends nand
+* One full adder from nine NANDs. Ports: 1=a 2=b 3=cin 4=sum 5=cout.
+.subckt onebit 1 2 3 4 5
+x1   1  2  7   nand
+x2   1  7  8   nand
+x3   2  7  9   nand
+x4   8  9 10   nand
+x5   3 10 11   nand
+x6   3 11 12   nand
+x7  10 11 13   nand
+x8  12 13  4   nand
+x9  11  7  5   nand
+.ends onebit
+va0 na0 0 dc 0 pulse(0 3 0 0.4ns 0.4ns 5ns 12ns)
+va1 na1 0 dc 0 pulse(0 3 0 0.4ns 0.4ns 9ns 20ns)
+va2 na2 0 dc 0 pulse(0 3 0 0.4ns 0.4ns 3ns 8ns)
+va3 na3 0 dc 0 pulse(0 3 0 0.4ns 0.4ns 7ns 30ns)
+va4 na4 0 dc 0 pulse(0 3 0 0.4ns 0.4ns 2ns 7ns)
+va5 na5 0 dc 0 pulse(0 3 0 0.4ns 0.4ns 6ns 15ns)
+va6 na6 0 dc 0 pulse(0 3 0 0.4ns 0.4ns 10ns 23ns)
+va7 na7 0 dc 0 pulse(0 3 0 0.4ns 0.4ns 4ns 11ns)
+vb0 nb0 0 dc 0 pulse(0 3 0 0.4ns 0.4ns 11ns 26ns)
+vb1 nb1 0 dc 0 pulse(0 3 0 0.4ns 0.4ns 4ns 14ns)
+vb2 nb2 0 dc 0 pulse(0 3 0 0.4ns 0.4ns 13ns 34ns)
+vb3 nb3 0 dc 0 pulse(0 3 0 0.4ns 0.4ns 6ns 18ns)
+vb4 nb4 0 dc 0 pulse(0 3 0 0.4ns 0.4ns 8ns 17ns)
+vb5 nb5 0 dc 0 pulse(0 3 0 0.4ns 0.4ns 3ns 9ns)
+vb6 nb6 0 dc 0 pulse(0 3 0 0.4ns 0.4ns 12ns 28ns)
+vb7 nb7 0 dc 0 pulse(0 3 0 0.4ns 0.4ns 5ns 13ns)
+vz nz 0 dc 0
+aadc [na0 na1 na2 na3 na4 na5 na6 na7 nb0 nb1 nb2 nb3 nb4 nb5 nb6 nb7 nz]
++ [a0 a1 a2 a3 a4 a5 a6 a7 b0 b1 b2 b3 b4 b5 b6 b7 cin] adcmod
+x0 a0 b0 cin s0 c1 onebit
+x1 a1 b1 c1  s1 c2 onebit
+x2 a2 b2 c2  s2 c3 onebit
+x3 a3 b3 c3  s3 c4 onebit
+x4 a4 b4 c4  s4 c5 onebit
+x5 a5 b5 c5  s5 c6 onebit
+x6 a6 b6 c6  s6 c7 onebit
+x7 a7 b7 c7  s7 c8 onebit
+adac [s0 s7 c8] [o0 o7 o8] dacmod
+r0 o0 0 1k
+r7 o7 0 1k
+r8 o8 0 1k
+.tran 0.1ns 20ns
+.end
