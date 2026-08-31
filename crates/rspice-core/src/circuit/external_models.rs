@@ -2001,14 +2001,14 @@ impl CircuitData {
 
     /// Begin an equilibrium analysis whose equations are solved by the DC
     /// operating-point machinery but whose physical Verilog-A analysis is
-    /// DC, AC, or noise.
+    /// DC, AC, noise, or forced initial-condition evaluation.
     pub(crate) fn begin_veriloga_equilibrium_analysis(
         &mut self,
         analysis: u8,
     ) -> Result<(), String> {
-        if !matches!(analysis, 0 | 1 | 3) {
+        if !matches!(analysis, 0 | 1 | 3 | 4) {
             return Err(format!(
-                "equilibrium Verilog-A analysis must be 0=dc, 1=ac, or 3=noise, got {analysis}"
+                "equilibrium Verilog-A analysis must be 0=dc, 1=ac, 3=noise, or 4=ic, got {analysis}"
             ));
         }
         #[cfg(feature = "veriloga")]
@@ -2019,6 +2019,7 @@ impl CircuitData {
                 0 => crate::device::veriloga_builtins::GeneratedAnalysisKind::Dc,
                 1 => crate::device::veriloga_builtins::GeneratedAnalysisKind::Ac,
                 3 => crate::device::veriloga_builtins::GeneratedAnalysisKind::Noise,
+                4 => crate::device::veriloga_builtins::GeneratedAnalysisKind::Ic,
                 _ => unreachable!("validated equilibrium analysis"),
             };
             self.generated_veriloga_devices
@@ -2046,9 +2047,9 @@ impl CircuitData {
         initial_step: bool,
         final_step: bool,
     ) -> Result<(), String> {
-        if !matches!(analysis, 0 | 1 | 3) {
+        if !matches!(analysis, 0 | 1 | 3 | 4) {
             return Err(format!(
-                "equilibrium Verilog-A analysis must be 0=dc, 1=ac, or 3=noise, got {analysis}"
+                "equilibrium Verilog-A analysis must be 0=dc, 1=ac, 3=noise, or 4=ic, got {analysis}"
             ));
         }
         // Both arguments remain part of the lifecycle contract even in a
@@ -2110,6 +2111,11 @@ impl CircuitData {
         analysis: u8,
         final_step: bool,
     ) -> Result<(), String> {
+        if !matches!(analysis, 1 | 3) {
+            return Err(format!(
+                "frequency-domain Verilog-A analysis must be 1=ac or 3=noise, got {analysis}"
+            ));
+        }
         self.prepare_veriloga_equilibrium_analysis_point(analysis, false, final_step)
     }
 

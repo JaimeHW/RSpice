@@ -2359,6 +2359,22 @@ mod tests {
         assert!(dc.analysis_final_step());
         assert!(dc.limiting_enabled());
 
+        let ic = GeneratedEvalContext::with_analysis_step(
+            &voltages,
+            300.15,
+            1,
+            GeneratedAnalysisKind::Ic,
+            true,
+            true,
+        );
+        assert!(ic.analysis_ic());
+        assert!(ic.analysis_static());
+        assert!(!ic.analysis_dc());
+        assert!(!ic.analysis_smallsig());
+        assert!(ic.analysis_initial_step());
+        assert!(ic.analysis_final_step());
+        assert!(ic.limiting_enabled());
+
         let ac =
             GeneratedEvalContext::with_analysis(&voltages, 300.15, 1, GeneratedAnalysisKind::Ac);
         assert!(!ac.analysis_static());

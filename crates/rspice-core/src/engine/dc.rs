@@ -658,11 +658,12 @@ impl Engine {
             return Ok((result, report));
         }
 
+        let veriloga_analysis = if force_initial_conditions { 4 } else { 0 };
         circuit
-            .begin_veriloga_dc_analysis()
+            .begin_veriloga_equilibrium_analysis(veriloga_analysis)
             .map_err(SimulationError::Circuit)?;
         circuit
-            .prepare_veriloga_dc_analysis_point(true, true)
+            .prepare_veriloga_equilibrium_analysis_point(veriloga_analysis, true, true)
             .map_err(SimulationError::Circuit)?;
 
         // Build matrix structure (done once)

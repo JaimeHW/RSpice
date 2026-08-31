@@ -1,7 +1,7 @@
 //! End-to-end DC lifecycle pins for runtime-compiled Verilog-A devices.
 #![cfg(feature = "veriloga")]
 
-use rspice_core::{Engine, Netlist};
+use rspice_core::{Engine, Netlist, NoAbort};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -31,6 +31,52 @@ fn node_voltage(result: &rspice_core::solver::SimulationResult, name: &str) -> f
         .position(|candidate| candidate.eq_ignore_ascii_case(name))
         .unwrap_or_else(|| panic!("node {name} is absent from {:?}", result.node_names));
     result.node_voltages[index]
+}
+
+#[test]
+fn forced_initial_conditions_expose_ic_identity_and_boundaries() {
+    let model = write_model(
+        "forced_ic_identity",
+        r#"
+`include "disciplines.vams"
+module va_forced_ic_identity(anchor, out);
+    inout anchor, out;
+    electrical anchor, out;
+    real level;
+    analog begin
+        level = 0.0;
+        if (analysis("ic")) level = level + 1.0;
+        if (analysis("dc")) level = level + 100.0;
+        @(initial_step("ic")) level = level + 2.0;
+        @(final_step("ic")) level = level + 4.0;
+        V(out) <+ level;
+    end
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* forced-IC physical analysis identity\n\
+         R1 anchor 0 1g\n\
+         X1 anchor out va_forced_ic_identity\n\
+         .ic V(anchor)=1\n\
+         .va \"{}\" va_forced_ic_identity\n\
+         .end\n",
+        deck_path(&model)
+    );
+
+    let netlist = Netlist::parse(&deck).expect("parse forced-IC lifecycle deck");
+    let ordinary = Engine::default()
+        .run_dc_op(&netlist)
+        .expect("ordinary DC operating point runs");
+    assert!((node_voltage(&ordinary, "out") - 100.0).abs() < 1.0e-12);
+
+    let (forced, _) = Engine::default()
+        .run_dc_op_forced_ic_with_report_and_abort(&netlist, &NoAbort)
+        .expect("forced-IC operating point runs");
+    assert!((node_voltage(&forced, "anchor") - 1.0).abs() < 1.0e-12);
+    assert!((node_voltage(&forced, "out") - 7.0).abs() < 1.0e-12);
+
+    let _ = std::fs::remove_file(model);
 }
 
 #[test]
