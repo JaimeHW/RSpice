@@ -41,7 +41,7 @@ pub use pac::PacAnalysisResult;
 pub use pnoise::PnoiseAnalysisResult;
 pub use state::{HbEnvelopeContinuationState, HbEnvelopeStateGuarantee};
 
-const HB_OPERATING_POINT_IDENTITY_VERSION: u32 = 1;
+const HB_OPERATING_POINT_IDENTITY_VERSION: u32 = 2;
 
 fn hb_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -52,7 +52,12 @@ fn hb_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
 
 fn hb_config_identity(config: &HbConfig) -> String {
     let mut hasher = blake3::Hasher::new();
-    hasher.update(b"rspice-hb-source-transform-config-v1\0");
+    // Version 2 authenticates the dialect-selected source projection. The
+    // preceding contract produced analytic PULSE coefficients in every
+    // dialect, while Xyce APFT now projects single-tone sources on its finite
+    // collocation grid. Retained states from those transforms are not
+    // interchangeable even when every authored HbConfig field is identical.
+    hasher.update(b"rspice-hb-source-transform-config-v2\0");
     hb_identity_field(
         &mut hasher,
         "fundamental_freq",
@@ -1632,6 +1637,89 @@ mod tests {
         assert!((spectrum.dc - expected_dc).abs() < 1.0e-15);
         assert!((actual_h1 - expected_h1).norm() < 1.0e-14);
         assert!((spectrum.dc - 0.495).abs() > 1.0e-6);
+    }
+
+    #[test]
+    fn xyce_multi_tone_pulse_requires_the_nonuniform_apft_transform() {
+        let config = HbConfig::multi_tone(vec![
+            crate::analysis::harmonic_balance::HbTone::new(2.0e6, 2),
+            crate::analysis::harmonic_balance::HbTone::new(3.0e6, 2),
+        ])
+        .with_collocation_points(13);
+        let pulse = SourceSpec::Pulse {
+            v1: 0.0,
+            v2: 1.0,
+            delay: 0.0,
+            rise: 10.0e-9,
+            fall: 10.0e-9,
+            width: 0.48e-6,
+            period: 0.5e-6,
+            pulse_count: 0.0,
+            width_defaults_to_zero: false,
+        };
+
+        let error = Engine::hb_source_spectrum(
+            0.0,
+            0.0,
+            0.0,
+            Some(&pulse),
+            &config,
+            &[2],
+            SpiceDialect::Xyce,
+        )
+        .expect_err("uniform FFT projection must not impersonate Xyce multi-tone APFT");
+        assert!(
+            error
+                .to_string()
+                .contains("nonuniform APFT collocation transform"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn xyce_single_filtered_tone_uses_the_single_tone_collocation_transform() {
+        let ordinary = HbConfig::new(1.0e6)
+            .with_harmonics(2)
+            .with_collocation_points(5);
+        let filtered = HbConfig::multi_tone(vec![
+            crate::analysis::harmonic_balance::HbTone::new(1.0e6, 2).with_source("VDRIVE"),
+        ])
+        .with_collocation_points(5);
+        let pulse = SourceSpec::Pulse {
+            v1: -0.25,
+            v2: 0.75,
+            delay: 20.0e-9,
+            rise: 30.0e-9,
+            fall: 40.0e-9,
+            width: 0.35e-6,
+            period: 1.0e-6,
+            pulse_count: 0.0,
+            width_defaults_to_zero: false,
+        };
+
+        let ordinary_spectrum = Engine::hb_source_spectrum(
+            -0.25,
+            0.0,
+            0.0,
+            Some(&pulse),
+            &ordinary,
+            &[1],
+            SpiceDialect::Xyce,
+        )
+        .expect("ordinary single-tone Xyce projection");
+        let filtered_spectrum = Engine::hb_source_spectrum(
+            -0.25,
+            0.0,
+            0.0,
+            Some(&pulse),
+            &filtered,
+            &[1],
+            SpiceDialect::Xyce,
+        )
+        .expect("source-filtered single-tone Xyce projection");
+
+        assert_eq!(filtered_spectrum.dc, ordinary_spectrum.dc);
+        assert_eq!(filtered_spectrum.harmonics, ordinary_spectrum.harmonics);
     }
 
     #[test]

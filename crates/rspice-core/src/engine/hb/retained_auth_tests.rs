@@ -12,6 +12,27 @@ fn branch_state() -> Vec<Vec<Complex64>> {
 }
 
 #[test]
+fn pre_apft_source_transform_identity_version_is_rejected() {
+    let obsolete = HbOperatingPointIdentity {
+        version: 1,
+        semantic_netlist_identity: "0".repeat(64),
+        resolved_simulation_identity: "1".repeat(64),
+        hb_source_transform_identity: "2".repeat(64),
+        retained_state_identity: "3".repeat(64),
+    };
+
+    let error = obsolete
+        .validate()
+        .expect_err("an analytic-source identity must not authenticate APFT state");
+    assert!(
+        error
+            .to_string()
+            .contains("producer identity version 1 is unsupported; expected 2"),
+        "{error}"
+    );
+}
+
+#[test]
 fn legacy_node_only_state_is_reusable_only_without_mna_branches() {
     let point = HbOperatingPoint::try_from_parts(
         HbConfig::new(1.0e3).with_harmonics(1),

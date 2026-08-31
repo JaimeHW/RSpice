@@ -369,6 +369,13 @@ impl Engine {
         }
 
         if spice_dialect == crate::engine::SpiceDialect::Xyce {
+            if config.tones.len() > 1 {
+                return Err(HbError::InvalidConfig(
+                    "Xyce-compatible multi-tone PULSE projection requires the nonuniform APFT collocation transform, which is not implemented"
+                        .to_string(),
+                )
+                .into());
+            }
             return Self::hb_xyce_collocated_pulse_source_spectrum(pulse_spec, config);
         }
 
@@ -417,12 +424,12 @@ impl Engine {
         pulse_spec: &SourceSpec,
         config: &HbConfig,
     ) -> Result<HbSourceSpectrum, SimulationError> {
-        // Xyce's HB time-domain formulation represents the independent drive
-        // on the same finite odd collocation grid used by the nonlinear
-        // residual. Preserve that projection in the Xyce dialect; native and
-        // ngspice modes retain the continuous analytic Fourier integral above.
-        // Using the shared FFT implementation keeps this O(N log N), including
-        // for explicitly oversampled production grids.
+        // Xyce's single-tone HB time-domain formulation represents the
+        // independent drive on the same finite collocation grid used by the
+        // nonlinear residual. Preserve that projection in the Xyce dialect;
+        // native and ngspice modes retain the continuous analytic Fourier
+        // integral above. Using the shared FFT implementation keeps this
+        // O(N log N), including for explicitly oversampled production grids.
         let collocation_points = config
             .checked_fft_size()
             .map_err(|error| HbError::InvalidConfig(error.to_string()))?;
