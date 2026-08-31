@@ -100,7 +100,8 @@ pub(super) fn parse_pspice_u_stim(
         ));
     }
 
-    let (timestep, command_start) = parse_stim_options(name, &pins[shape.width + 1..], params, line_num)?;
+    let (timestep, command_start) =
+        parse_stim_options(name, &pins[shape.width + 1..], params, line_num)?;
     let commands = &pins[shape.width + 1 + command_start..];
     let program = compile_stim_program(name, &shape, timestep, commands, params, line_num)?;
 
@@ -388,8 +389,8 @@ fn compile_stim_program(
             continue;
         }
 
-        if upper.starts_with("LABEL") && let Some((key, value, consumed)) =
-            split_stim_assignment(commands, index)
+        if upper.starts_with("LABEL")
+            && let Some((key, value, consumed)) = split_stim_assignment(commands, index)
             && key.eq_ignore_ascii_case("LABEL")
         {
             let label = value.to_ascii_uppercase();
@@ -695,7 +696,9 @@ fn parse_stim_time(
         return Err(stim_error(
             name,
             line_num,
-            format!("has the negative time increment '{trimmed}'; stimulus time never runs backwards"),
+            format!(
+                "has the negative time increment '{trimmed}'; stimulus time never runs backwards"
+            ),
         ));
     }
     Ok(StimCommandTime { relative, seconds })

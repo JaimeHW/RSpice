@@ -193,8 +193,7 @@ fn decode_instruction(token: &str, width: usize) -> CmResult<StimInstruction> {
     let opcode = fields
         .next()
         .ok_or_else(|| stim_program_error(format!("empty stimulus instruction '{token}'")))?;
-    let malformed =
-        || stim_program_error(format!("malformed stimulus instruction '{token}'"));
+    let malformed = || stim_program_error(format!("malformed stimulus instruction '{token}'"));
 
     let instruction = match opcode {
         "V" => {
@@ -416,12 +415,7 @@ fn expand_program(program: &StimProgram, horizon: Value, max_rows: usize) -> CmR
     Ok(rows)
 }
 
-fn push_row(
-    rows: &mut StimRows,
-    time: Value,
-    bits: &[StimBit],
-    max_rows: usize,
-) -> CmResult<()> {
+fn push_row(rows: &mut StimRows, time: Value, bits: &[StimBit], max_rows: usize) -> CmResult<()> {
     if rows.times.len() >= max_rows {
         return Err(stim_program_error(format!(
             "stimulus program expands past the {max_rows}-transition resource limit"
@@ -431,7 +425,9 @@ fn push_row(
         stim_program_error(format!("unable to reserve a stimulus transition: {error}"))
     })?;
     rows.values.try_reserve(bits.len()).map_err(|error| {
-        stim_program_error(format!("unable to reserve stimulus transition values: {error}"))
+        stim_program_error(format!(
+            "unable to reserve stimulus transition values: {error}"
+        ))
     })?;
     rows.times.push(time);
     rows.values
@@ -448,8 +444,7 @@ fn push_row(
 fn stepped_bits(bits: &[StimBit], step: u64, increment: bool) -> Vec<StimBit> {
     let width = bits.len();
     let Some(current) = bits.iter().try_fold(0u64, |accumulator, bit| {
-        bit.numeric_bit()
-            .map(|value| (accumulator << 1) | value)
+        bit.numeric_bit().map(|value| (accumulator << 1) | value)
     }) else {
         return vec![StimBit::Unknown; width];
     };
@@ -695,7 +690,10 @@ mod tests {
         let rows = expand("W1 V:A:0.0:0 V:R:1e-8:1 V:R:1e-8:0 G:R:0.0:1:2", 1.0e-6);
         assert_eq!(rows.times.len(), 7);
         let last = rows.times.last().copied().expect("a final transition");
-        assert!((last - 6.0e-8).abs() <= 1.0e-18, "final transition at {last:e}");
+        assert!(
+            (last - 6.0e-8).abs() <= 1.0e-18,
+            "final transition at {last:e}"
+        );
     }
 
     #[test]
@@ -728,12 +726,7 @@ mod tests {
         let rows = expand("W2 V:A:0.0:10 I:R:1e-8:1 I:R:1e-8:1 D:R:1e-8:3", 1.0e-6);
         assert_rows(
             &rows,
-            &[
-                (0.0, "10"),
-                (1.0e-8, "11"),
-                (2.0e-8, "00"),
-                (3.0e-8, "01"),
-            ],
+            &[(0.0, "10"), (1.0e-8, "11"), (2.0e-8, "00"), (3.0e-8, "01")],
         );
     }
 

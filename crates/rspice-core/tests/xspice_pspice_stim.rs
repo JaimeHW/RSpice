@@ -104,12 +104,7 @@ U1 STIM(1,1) $G_DPWR $G_DGND OUT IO_STM
 
     assert_transitions(
         &driven_tokens(&result, "OUT"),
-        &[
-            (0.0, "0s"),
-            (1.0e-8, "1s"),
-            (2.0e-8, "0s"),
-            (3.0e-8, "1s"),
-        ],
+        &[(0.0, "0s"), (1.0e-8, "1s"), (2.0e-8, "0s"), (3.0e-8, "1s")],
     );
 }
 
@@ -153,12 +148,7 @@ U1 STIM(1,1) $G_DPWR $G_DGND OUT IO_STM
 
     assert_transitions(
         &driven_tokens(&result, "OUT"),
-        &[
-            (0.0, "0s"),
-            (1.0e-8, "1s"),
-            (1.5e-8, "0s"),
-            (2.0e-8, "1s"),
-        ],
+        &[(0.0, "0s"), (1.0e-8, "1s"), (1.5e-8, "0s"), (2.0e-8, "1s")],
     );
 }
 
@@ -533,12 +523,7 @@ U1 STIM(4,4) $G_DPWR $G_DGND B3 B2 B1 B0 IO_STM
 
     assert_transitions(
         &driven_tokens(&result, "B0"),
-        &[
-            (0.0, "0s"),
-            (1.0e-8, "1s"),
-            (2.0e-8, "0s"),
-            (3.0e-8, "1s"),
-        ],
+        &[(0.0, "0s"), (1.0e-8, "1s"), (2.0e-8, "0s"), (3.0e-8, "1s")],
     );
     assert_transitions(
         &driven_tokens(&result, "B1"),
@@ -568,12 +553,7 @@ U1 STIM(1,1) $G_DPWR $G_DGND OUT IO_STM TIMESTEP=5ns
 
     assert_transitions(
         &driven_tokens(&result, "OUT"),
-        &[
-            (0.0, "0s"),
-            (1.0e-8, "1s"),
-            (1.5e-8, "0s"),
-            (4.0e-8, "1s"),
-        ],
+        &[(0.0, "0s"), (1.0e-8, "1s"), (1.5e-8, "0s"), (4.0e-8, "1s")],
     );
 }
 
@@ -825,7 +805,10 @@ fn a_stimulus_with_no_commands_is_refused() {
 
 #[test]
 fn a_bus_narrower_than_its_declared_width_is_refused() {
-    let message = parse_error(&stim_deck("STIM(4,1111) $G_DPWR $G_DGND A B", "+ 0s 0000\n"));
+    let message = parse_error(&stim_deck(
+        "STIM(4,1111) $G_DPWR $G_DGND A B",
+        "+ 0s 0000\n",
+    ));
     assert!(
         message.contains("declares 4 output node(s)") && message.contains("I/O model name"),
         "unexpected diagnostic: {message}"

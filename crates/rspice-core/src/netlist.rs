@@ -12543,10 +12543,7 @@ mod tests {
                 ..
             } => {
                 assert_eq!(model, "pspice_d_stim");
-                assert_eq!(
-                    ports,
-                    &[XspicePort::DigitalVector(vec!["OUT".to_string()])]
-                );
+                assert_eq!(ports, &[XspicePort::DigitalVector(vec!["OUT".to_string()])]);
                 // The trailing model on a STIM device is an I/O model, not a
                 // timing model: a source has no propagation delay to select.
                 assert!(pspice_u_timing.is_none());
@@ -12689,10 +12686,7 @@ mod tests {
                     ..
                 } => {
                     assert_eq!(model, "pspice_d_stim");
-                    assert_eq!(
-                        ports,
-                        &[XspicePort::DigitalVector(vec![node.to_string()])]
-                    );
+                    assert_eq!(ports, &[XspicePort::DigitalVector(vec![node.to_string()])]);
                     assert!(
                         string_params
                             .iter()
