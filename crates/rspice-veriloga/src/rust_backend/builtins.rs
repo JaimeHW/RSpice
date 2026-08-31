@@ -51,6 +51,7 @@ const GENERATOR_SOURCE_DIGEST_INPUTS: &[&str] = &[
     "src/disciplines.rs",
     "src/error.rs",
     "src/expr_converter.rs",
+    "src/four_state.rs",
     "src/ir.rs",
     "src/laplace.rs",
     "src/lexer.rs",
@@ -1873,6 +1874,28 @@ mod tests {
                 .iter()
                 .any(|path| path.starts_with("../rspice-veriloga-runtime/src/")),
             "the runtime source tree must stay an atomic recursive digest input"
+        );
+    }
+
+    /// Every listed input has to exist, or it contributes nothing and the
+    /// digest goes quiet about a whole tree.
+    ///
+    /// This is the shape the hole in `src/four_state.rs` had: a compiler source
+    /// the generator reads, absent from the list, so a change to literal
+    /// decoding left the vendored built-ins looking current while they were
+    /// compiled from a different front end. A missing entry and a stale one
+    /// fail the same way — silently — which is why the list is checked against
+    /// the disk rather than only read.
+    #[test]
+    fn every_generator_digest_input_exists() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        for relative in GENERATOR_SOURCE_DIGEST_INPUTS {
+            let path = root.join(relative);
+            assert!(path.exists(), "digest input '{relative}' does not exist");
+        }
+        assert!(
+            GENERATOR_SOURCE_DIGEST_INPUTS.contains(&"src/four_state.rs"),
+            "four-state literal decoding is a generator input"
         );
     }
 

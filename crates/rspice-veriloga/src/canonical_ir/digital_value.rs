@@ -346,6 +346,21 @@ impl FourStateValue {
         Some(bits)
     }
 
+    /// The bit in the sign position — the most significant one.
+    ///
+    /// `0` for a value of no width at all, which has no sign position and no
+    /// sign. That is reachable: IEEE 1364-2005 section 4.1.14 permits a
+    /// replication count of zero, so `{0{a}}` is a concatenation of nothing.
+    /// Such a value is unsigned by rule (f) and never reaches a signed
+    /// extension, so this is a guard against an arithmetic underflow rather
+    /// than a rule about signedness.
+    pub fn sign_bit(&self) -> FourStateBit {
+        if self.width == 0 {
+            return FourStateBit::Zero;
+        }
+        self.bit(self.width - 1)
+    }
+
     /// The value as an integer under `signed`, or `None` if any bit is `x`/`z`.
     ///
     /// Unsigned reads the bits as a magnitude. Signed reads them as two's
@@ -361,7 +376,7 @@ impl FourStateValue {
     /// without building them.
     pub fn to_integer(&self, signed: bool) -> Option<i128> {
         let magnitude = i128::from(self.to_u64()?);
-        if signed && self.bit(self.width - 1) == FourStateBit::One {
+        if signed && self.sign_bit() == FourStateBit::One {
             return Some(magnitude - (1i128 << self.width));
         }
         Some(magnitude)
@@ -380,7 +395,7 @@ impl FourStateValue {
     /// decoding source text and lives in [`crate::four_state`].
     pub fn extended(&self, width: u32, signed: bool) -> Self {
         let fill = if signed {
-            self.bit(self.width - 1)
+            self.sign_bit()
         } else {
             FourStateBit::Zero
         };
@@ -741,7 +756,7 @@ pub fn shift(op: ShiftOp, value: &FourStateValue, count: &FourStateValue) -> Fou
     };
     let fill = match op {
         ShiftOp::Left | ShiftOp::Right => FourStateBit::Zero,
-        ShiftOp::ArithmeticRight => value.bit(width - 1),
+        ShiftOp::ArithmeticRight => value.sign_bit(),
     };
     let mut out = FourStateValue::splat(width, fill);
     if count >= u64::from(width) {

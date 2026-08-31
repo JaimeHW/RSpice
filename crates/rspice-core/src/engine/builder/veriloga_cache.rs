@@ -69,7 +69,21 @@ use super::*;
 // product afterwards, which is a different number rather than a narrower one —
 // `{cout, sum} = a + b` had a `cout` that could never be 1 — so every cached
 // digital artifact has to be rebuilt and the record's identity has to change.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 29;
+// Version 30 signs a digital expression, IEEE 1364-2005 section 5.4.2. A net,
+// variable or port declared `signed`, an `integer`, a plain decimal number and
+// a literal carrying the `s` base marker are signed; a bit-select, a
+// part-select and a concatenation are not, and one unsigned operand makes the
+// whole expression unsigned. A signed operand is sign-extended to its context
+// instead of zero-extended, a comparison between two signed operands is made
+// on signed numbers, division truncates toward zero with the modulus following
+// its first operand, and `>>>` shifts in the sign bit. A version-29 artifact
+// carried every one of those declarations and read none of them, so it
+// compiled a `reg signed` into an unsigned device: `p = a` widened -1 into 15
+// and `a < 0` was false for every value. `4'd9` also decodes to its declared
+// four bits now rather than to the 32-bit unsized floor. Both change the value
+// an artifact computes, so every cached digital artifact has to be rebuilt and
+// the record's identity has to change.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 30;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
