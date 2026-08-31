@@ -2086,6 +2086,7 @@ fn artifact_dump_is_deterministic_and_contains_phase_summaries() {
     assert!(first.contains("schema_version=10"));
     assert!(first.contains("source_package=fixture"));
     assert!(first.contains("source_digest="));
+    assert!(first.contains("source_identity="));
     assert!(first.contains("compiler_version="));
     assert!(first.contains("hir_digest="));
     assert!(first.contains("mir_digest="));

@@ -58,7 +58,7 @@ pub use ids::{
     ModuleId, NodeId, NoiseSourceId, ParamId, PortId, RegionId, ScheduleId, ShapeId, SourceId,
     StateId, SymbolId, ValueId, VariableId,
 };
-pub use metadata::{CANONICAL_IR_SCHEMA_VERSION, CanonicalMetadata, StableDigest};
+pub use metadata::{CANONICAL_IR_SCHEMA_VERSION, CanonicalMetadata, StableDigest, source_identity};
 pub use mir::{
     MirAnalysisDomain, MirBranch, MirBranchRef, MirBranchUnknown, MirEquation, MirEquationKind,
     MirModel, MirNode, MirParameterSlot, MirStateSlot,

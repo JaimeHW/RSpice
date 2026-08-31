@@ -467,6 +467,8 @@ pub struct HirModel {
     pub schema_version: u32,
     pub source_package: SmolStr,
     pub source_digest: SmolStr,
+    /// Full BLAKE3 identity of the exact preprocessed source closure.
+    pub source_identity: SmolStr,
     pub compiler_version: SmolStr,
     pub feature_flags: Vec<SmolStr>,
     /// Effective module-scoped `default_transition` value in seconds.
@@ -606,6 +608,7 @@ impl HirModel {
             schema_version: metadata.schema_version,
             source_package: metadata.source_package.clone(),
             source_digest: metadata.source_digest.clone(),
+            source_identity: metadata.source_identity.clone(),
             compiler_version: metadata.compiler_version.clone(),
             feature_flags: metadata.feature_flags.clone(),
             default_transition: module.default_transition,

@@ -5315,6 +5315,7 @@ dependencies = [
  "log",
  "nom",
  "num-complex",
+ "rspice-veriloga-runtime",
  "serde",
  "serde_json",
  "smol_str 0.3.6",

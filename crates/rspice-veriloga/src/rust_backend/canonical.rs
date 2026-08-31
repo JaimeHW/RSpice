@@ -72,7 +72,8 @@ use crate::canonical_ir::schedule::{
     worth_splitting,
 };
 use crate::canonical_ir::{
-    AdSeed, BlockId, CanonicalIrArtifact, ExprId, MirEquationKind, NodeId, ValueId, optimize_cfg,
+    AdSeed, BlockId, CanonicalIrArtifact, CanonicalValueType, ExprId, HirAnalogOperator,
+    HirExprKind, MirEquationKind, NodeId, SourceSpanRef, ValueId, optimize_cfg,
 };
 use crate::metrics::{
     CfgStructureMetrics, KernelRegionMetric, MetricsRecorder, PipelineCancelled, PipelineControl,
@@ -143,6 +144,8 @@ pub(crate) fn generate_device_measured(
     )?;
     checkpoint_phase(artifact, measurements, PipelinePhase::StateEmission)?;
     let phase_started = web_time::Instant::now();
+    let accepted_state_shape_identity = plan.accepted_state_shape_identity(artifact)?;
+    let state_extensions = plan.state_extensions(artifact);
     let state = state_file::generate_state_file_with_extensions(
         artifact,
         options,
@@ -151,7 +154,8 @@ pub(crate) fn generate_device_measured(
         plan.idt_slots.len(),
         plan.one_step_dae_split_safe,
         artifact.mir.branch_unknowns.len(),
-        &plan.state_extensions(artifact),
+        accepted_state_shape_identity,
+        &state_extensions,
     )?;
     record_phase(
         artifact,
@@ -190,6 +194,8 @@ pub(crate) fn generate_device_measured(
         public_model_name: names.public_model_name,
         folder_name: names.folder,
         source_digest: artifact.metadata.source_digest.to_string(),
+        source_identity: artifact.metadata.source_identity.to_string(),
+        accepted_state_shape_identity,
         files,
     })
 }
@@ -1139,6 +1145,294 @@ impl ModelPlan {
             limit_slots,
             one_step_dae_split_safe,
         })
+    }
+
+    fn accepted_state_shape_identity(
+        &self,
+        artifact: &CanonicalIrArtifact,
+    ) -> Result<[u8; 32], RustBackendError> {
+        let ordered = |slots: &HashMap<ExprId, usize>, family: &str| {
+            ordered_operator_slots(slots).map_err(|error| {
+                accepted_state_shape_error(artifact, format!("{family} state slots: {error}"))
+            })
+        };
+        let expression = |operator: ExprId| {
+            artifact
+                .hir
+                .expressions
+                .get(operator.index() as usize)
+                .filter(|expression| expression.id == operator)
+                .ok_or_else(|| {
+                    accepted_state_shape_error(
+                        artifact,
+                        format!("state operator {operator} is absent from canonical HIR"),
+                    )
+                })
+        };
+
+        let mut shape = AcceptedStateShapeHasher::new();
+
+        let ddt = ordered(&self.ddt_slots, "ddt")?;
+        shape.section("ddt", ddt.len());
+        for (slot, operator) in ddt.into_iter().enumerate() {
+            let expression = expression(operator)?;
+            shape.operator(
+                "ddt",
+                slot,
+                operator,
+                expression.span,
+                None,
+                &[
+                    "previous:f64:finite",
+                    "older:f64:finite",
+                    "derivative_previous:f64:finite",
+                    "initialized:bool",
+                ],
+            );
+        }
+
+        let idt = ordered(&self.idt_slots, "idt")?;
+        shape.section("idt", idt.len());
+        for (slot, operator) in idt.into_iter().enumerate() {
+            let expression = expression(operator)?;
+            shape.operator(
+                "idt",
+                slot,
+                operator,
+                expression.span,
+                None,
+                &[
+                    "previous:f64:finite",
+                    "older:f64:finite",
+                    "input_previous:f64:finite",
+                    "initialized:bool",
+                ],
+            );
+        }
+
+        let limit = ordered(&self.limit_slots, "limit")?;
+        shape.section("limit", limit.len());
+        for (slot, operator) in limit.into_iter().enumerate() {
+            let expression = expression(operator)?;
+            let selector = match &expression.kind {
+                HirExprKind::AnalogOperator {
+                    op: HirAnalogOperator::Limit { selector, .. },
+                } => selector.as_str(),
+                _ => {
+                    return Err(accepted_state_shape_error(
+                        artifact,
+                        format!("limiter state operator {operator} is not a canonical limit"),
+                    ));
+                }
+            };
+            shape.operator(
+                "limit",
+                slot,
+                operator,
+                expression.span,
+                Some(selector),
+                &["anchor:f64:finite", "initialized:bool"],
+            );
+        }
+
+        let mut detector_families = HashMap::new();
+        for value in &self.function.values {
+            let (operator, family) = match &value.kind {
+                CfgValueKind::Cross { operator, .. } => (*operator, "cross"),
+                CfgValueKind::Above { operator, .. } => (*operator, "above"),
+                _ => continue,
+            };
+            if let Some(previous) = detector_families.insert(operator, family)
+                && previous != family
+            {
+                return Err(accepted_state_shape_error(
+                    artifact,
+                    format!("event detector operator {operator} is both {previous} and {family}"),
+                ));
+            }
+        }
+        let detectors = ordered(&self.cross_slots, "event detector")?;
+        shape.section("event_detectors", detectors.len());
+        for (slot, operator) in detectors.into_iter().enumerate() {
+            let expression = expression(operator)?;
+            let family = detector_families.get(&operator).copied().ok_or_else(|| {
+                accepted_state_shape_error(
+                    artifact,
+                    format!("event detector state operator {operator} has no CFG family"),
+                )
+            })?;
+            shape.runtime_operator(
+                family,
+                slot,
+                operator,
+                expression.span,
+                None,
+                &rspice_veriloga_runtime::GeneratedCrossState::CHECKPOINT_SCHEMA,
+            );
+        }
+
+        let event_variables = artifact
+            .hir
+            .variables
+            .iter()
+            .filter(|variable| variable.is_state)
+            .collect::<Vec<_>>();
+        shape.section("event_variables", event_variables.len());
+        for (slot, variable) in event_variables.into_iter().enumerate() {
+            shape.record("event_variable");
+            shape.u64(slot as u64);
+            shape.u64(variable.id.index() as u64);
+            shape.field(variable.name.as_bytes());
+            shape.field(canonical_value_type_tag(variable.value_type).as_bytes());
+            shape.field(b"accepted:f64:nan-forbidden");
+        }
+
+        let has_timer_bound = !self.timer_slots.is_empty();
+        shape.section("timer_bound", usize::from(has_timer_bound));
+        if has_timer_bound {
+            shape.record("timer_bound");
+            shape.field(b"accepted:f64:positive-or-infinity");
+        }
+
+        shape.section("terminal_currents", artifact.hir.ports.len());
+        for (slot, port) in artifact.hir.ports.iter().enumerate() {
+            shape.record("terminal_current");
+            shape.u64(slot as u64);
+            shape.u64(port.id.index() as u64);
+            shape.field(port.name.as_bytes());
+            shape.field(port.direction.as_bytes());
+            shape.field(port.discipline.as_bytes());
+            shape.field(b"accepted:f64:finite");
+        }
+
+        Ok(shape.finish())
+    }
+}
+
+fn accepted_state_shape_error(
+    artifact: &CanonicalIrArtifact,
+    message: impl Into<String>,
+) -> RustBackendError {
+    RustBackendError::internal(
+        artifact.metadata.source_digest.to_string(),
+        artifact.mir.module_name.to_string(),
+        message,
+    )
+}
+
+fn ordered_operator_slots(slots: &HashMap<ExprId, usize>) -> Result<Vec<ExprId>, String> {
+    let mut ordered = vec![None; slots.len()];
+    for (&operator, &slot) in slots {
+        let destination = ordered
+            .get_mut(slot)
+            .ok_or_else(|| format!("slot {slot} is outside 0..{}", slots.len()))?;
+        if let Some(previous) = destination.replace(operator) {
+            return Err(format!(
+                "slot {slot} is assigned to both {previous} and {operator}"
+            ));
+        }
+    }
+    ordered
+        .into_iter()
+        .enumerate()
+        .map(|(slot, operator)| operator.ok_or_else(|| format!("slot {slot} is unassigned")))
+        .collect()
+}
+
+fn canonical_value_type_tag(value_type: CanonicalValueType) -> &'static str {
+    match value_type {
+        CanonicalValueType::Real => "real",
+        CanonicalValueType::Integer => "integer",
+        CanonicalValueType::String => "string",
+        CanonicalValueType::Boolean => "boolean",
+        CanonicalValueType::NatureAccess => "nature-access",
+        CanonicalValueType::Void => "void",
+        CanonicalValueType::Unknown => "unknown",
+        CanonicalValueType::Error => "error",
+    }
+}
+
+struct AcceptedStateShapeHasher(blake3::Hasher);
+
+impl AcceptedStateShapeHasher {
+    fn new() -> Self {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(b"rspice-generated-accepted-state-schema-v2\0");
+        Self(hasher)
+    }
+
+    fn section(&mut self, name: &str, count: usize) {
+        self.record("section");
+        self.field(name.as_bytes());
+        self.u64(count as u64);
+    }
+
+    fn operator(
+        &mut self,
+        family: &str,
+        slot: usize,
+        operator: ExprId,
+        span: SourceSpanRef,
+        selector: Option<&str>,
+        lanes: &[&str],
+    ) {
+        self.operator_header(family, slot, operator, span, selector);
+        self.u64(lanes.len() as u64);
+        for lane in lanes {
+            self.field(lane.as_bytes());
+        }
+    }
+
+    fn runtime_operator(
+        &mut self,
+        family: &str,
+        slot: usize,
+        operator: ExprId,
+        span: SourceSpanRef,
+        selector: Option<&str>,
+        lanes: &[rspice_veriloga_runtime::GeneratedCheckpointLaneDescriptor],
+    ) {
+        self.operator_header(family, slot, operator, span, selector);
+        self.u64(lanes.len() as u64);
+        for lane in lanes {
+            self.field(lane.name.as_bytes());
+            self.field(lane.lane_type.identity_tag().as_bytes());
+        }
+    }
+
+    fn operator_header(
+        &mut self,
+        family: &str,
+        slot: usize,
+        operator: ExprId,
+        span: SourceSpanRef,
+        selector: Option<&str>,
+    ) {
+        self.record("operator");
+        self.field(family.as_bytes());
+        self.u64(slot as u64);
+        self.u64(operator.index() as u64);
+        self.u64(u64::from(span.source_file_id));
+        self.u64(u64::from(span.start));
+        self.u64(u64::from(span.end));
+        self.field(selector.unwrap_or("").as_bytes());
+    }
+
+    fn record(&mut self, record: &str) {
+        self.field(record.as_bytes());
+    }
+
+    fn field(&mut self, field: &[u8]) {
+        self.0.update(&(field.len() as u64).to_le_bytes());
+        self.0.update(field);
+    }
+
+    fn u64(&mut self, value: u64) {
+        self.0.update(&value.to_le_bytes());
+    }
+
+    fn finish(self) -> [u8; 32] {
+        *self.0.finalize().as_bytes()
     }
 }
 
@@ -3240,8 +3534,8 @@ impl ModelPlan {
                          rollback_values = remaining;\n"
             );
 
-            let persistent_cross_lanes =
-                cross_count.saturating_mul(rspice_veriloga_runtime_checkpoint_lanes());
+            let persistent_cross_lanes = cross_count
+                .saturating_mul(rspice_veriloga_runtime::GeneratedCrossState::CHECKPOINT_LANES);
             extensions.persistent_event_lane_count = extensions
                 .persistent_event_lane_count
                 .saturating_add(persistent_cross_lanes);
@@ -3370,12 +3664,6 @@ impl ModelPlan {
             );
         }
     }
-}
-
-const fn rspice_veriloga_runtime_checkpoint_lanes() -> usize {
-    // Kept as a compiler constant so generated array and checkpoint sizing do
-    // not depend on executing emitted-runtime code during compilation.
-    6
 }
 
 enum StructuralSpecializationError {
@@ -4403,4 +4691,94 @@ fn unsupported(artifact: &CanonicalIrArtifact, feature: impl Into<String>) -> Ru
         artifact.mir.module_name.as_str(),
         feature,
     )
+}
+
+#[cfg(test)]
+mod accepted_state_shape_tests {
+    use super::*;
+    use rspice_veriloga_runtime::{GeneratedCheckpointLaneDescriptor, GeneratedCheckpointLaneType};
+
+    const SPAN_A: SourceSpanRef = SourceSpanRef {
+        source_file_id: 0,
+        start: 10,
+        end: 20,
+    };
+    const SPAN_B: SourceSpanRef = SourceSpanRef {
+        source_file_id: 0,
+        start: 30,
+        end: 40,
+    };
+
+    #[test]
+    fn ordered_operator_slots_is_exact_and_rejects_malformed_maps() {
+        let first = ExprId::from(3usize);
+        let second = ExprId::from(9usize);
+        let ordered = HashMap::from([(second, 1usize), (first, 0usize)]);
+        assert_eq!(ordered_operator_slots(&ordered), Ok(vec![first, second]));
+
+        let duplicate = HashMap::from([(first, 0usize), (second, 0usize)]);
+        assert!(
+            ordered_operator_slots(&duplicate)
+                .expect_err("duplicate slot must fail closed")
+                .contains("assigned to both")
+        );
+
+        let outside = HashMap::from([(first, 0usize), (second, 2usize)]);
+        assert!(
+            ordered_operator_slots(&outside)
+                .expect_err("out-of-range slot must fail closed")
+                .contains("outside")
+        );
+    }
+
+    fn two_operator_shape(first_family: &str, second_family: &str) -> [u8; 32] {
+        let mut shape = AcceptedStateShapeHasher::new();
+        shape.section("event_detectors", 2);
+        shape.operator(
+            first_family,
+            0,
+            ExprId::from(3usize),
+            SPAN_A,
+            None,
+            &["value:f64"],
+        );
+        shape.operator(
+            second_family,
+            1,
+            ExprId::from(9usize),
+            SPAN_B,
+            None,
+            &["value:f64"],
+        );
+        shape.finish()
+    }
+
+    #[test]
+    fn accepted_state_shape_is_deterministic_and_order_sensitive() {
+        let cross_then_above = two_operator_shape("cross", "above");
+        assert_eq!(cross_then_above, two_operator_shape("cross", "above"));
+        assert_ne!(cross_then_above, two_operator_shape("above", "cross"));
+    }
+
+    #[test]
+    fn accepted_state_shape_covers_runtime_lane_types() {
+        const REAL_LANE: [GeneratedCheckpointLaneDescriptor; 1] =
+            [GeneratedCheckpointLaneDescriptor {
+                name: "accepted",
+                lane_type: GeneratedCheckpointLaneType::NanForbiddenF64,
+            }];
+        const BOOLEAN_LANE: [GeneratedCheckpointLaneDescriptor; 1] =
+            [GeneratedCheckpointLaneDescriptor {
+                name: "accepted",
+                lane_type: GeneratedCheckpointLaneType::BoolAsF64,
+            }];
+        let digest = |lanes: &[GeneratedCheckpointLaneDescriptor]| {
+            let mut shape = AcceptedStateShapeHasher::new();
+            shape.section("probe", 1);
+            shape.runtime_operator("cross", 0, ExprId::from(3usize), SPAN_A, None, lanes);
+            shape.finish()
+        };
+
+        assert_ne!(digest(&REAL_LANE), digest(&BOOLEAN_LANE));
+    }
 }

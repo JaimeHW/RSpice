@@ -85,6 +85,8 @@ pub struct GeneratedRustDevice {
     pub folder_name: String,
     pub files: Vec<GeneratedRustFile>,
     pub source_digest: String,
+    pub source_identity: String,
+    pub accepted_state_shape_identity: [u8; 32],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

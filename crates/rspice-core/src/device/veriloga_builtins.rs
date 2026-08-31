@@ -31,18 +31,23 @@ use std::sync::Arc;
 pub use rspice_veriloga_models::registry as builtins;
 
 pub use rspice_veriloga_runtime::{
-    GENERATED_PERSISTENT_STATE_VERSION, GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION,
+    GENERATED_PERSISTENT_STATE_VERSION, GENERATED_VERILOGA_COMPATIBILITY_CATALOG,
+    GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, GENERATED_VERILOGA_V27_COMBINED_IDENTITY_ALIASES,
     GeneratedAnalysisKind, GeneratedDdtCoefficients, GeneratedDerivative, GeneratedEvalContext,
     GeneratedEvaluationError, GeneratedEvaluationMode, GeneratedMappedNoiseDescriptor,
     GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseEvaluation,
     GeneratedNoiseEvaluationError, GeneratedNoiseEvaluationRef, GeneratedNoiseInjection,
     GeneratedNoiseKind, GeneratedNoiseTopologyError, GeneratedReactiveStamper,
     GeneratedSimulationParameters, GeneratedStampLane, GeneratedStamper, GeneratedStaticStampCache,
+    GeneratedVerilogAAcceptedStateShapeIdentity, GeneratedVerilogACompatibilityCatalogEntry,
     GeneratedVerilogAEvaluationError, GeneratedVerilogAInstanceCheckpoint,
     GeneratedVerilogAModelDescriptor, GeneratedVerilogAParameterBound,
     GeneratedVerilogAParameterDescriptor, GeneratedVerilogAParameterScope,
     GeneratedVerilogAPersistentState, GeneratedVerilogARollbackState,
     GeneratedVerilogATerminalDescriptor, GeneratedVerilogATerminalDirection, Value,
+    generated_veriloga_checkpoint_compatibility_entry, generated_veriloga_compatibility_entry,
+    generated_veriloga_v26_compatibility_entry, generated_veriloga_wire_compatibility_entry,
+    validate_generated_veriloga_compatibility_catalog,
 };
 #[cfg(feature = "veriloga-builtins-base")]
 use rspice_veriloga_runtime::{GeneratedParameterAssignment, GeneratedParameterOrigin};
@@ -731,10 +736,15 @@ impl BuiltinVerilogAInstance {
     }
 
     fn checkpoint_state(&self) -> GeneratedVerilogAInstanceCheckpoint {
+        let descriptor = generated_veriloga_model_descriptor(self.model_name)
+            .expect("instantiated generated model must have a descriptor");
         GeneratedVerilogAInstanceCheckpoint {
             instance_name: self.instance_name.clone(),
             model_name: self.model_name.to_string(),
+            descriptor_abi_version: descriptor.abi_version,
+            source_identity: descriptor.source_identity.to_string(),
             model_identity: self.kind.checkpoint_model_identity().to_string(),
+            accepted_state_shape_identity: self.kind.accepted_state_shape_identity(),
             state_version: GENERATED_PERSISTENT_STATE_VERSION,
             state: self.kind.capture_persistent_state(),
             terminal_currents: self.terminal_currents.clone(),
@@ -757,11 +767,46 @@ impl BuiltinVerilogAInstance {
                 self.instance_name, checkpoint.model_name, self.model_name
             ));
         }
-        let model_identity = self.kind.checkpoint_model_identity();
-        if checkpoint.model_identity != model_identity {
+        let descriptor = generated_veriloga_model_descriptor(self.model_name).ok_or_else(|| {
+            format!(
+                "generated model descriptor '{}' is unavailable",
+                self.model_name
+            )
+        })?;
+        if checkpoint.descriptor_abi_version != descriptor.abi_version {
+            return Err(format!(
+                "generated descriptor ABI mismatch for '{}' ({}): captured {}, circuit has {}",
+                self.instance_name,
+                self.model_name,
+                checkpoint.descriptor_abi_version,
+                descriptor.abi_version,
+            ));
+        }
+        if checkpoint.source_identity != descriptor.source_identity {
+            return Err(format!(
+                "generated source identity mismatch for '{}' ({}): captured '{}', circuit has '{}'",
+                self.instance_name,
+                self.model_name,
+                checkpoint.source_identity,
+                descriptor.source_identity,
+            ));
+        }
+        if checkpoint.model_identity != descriptor.checkpoint_identity {
             return Err(format!(
                 "generated model identity mismatch for '{}' ({}): captured '{}', circuit has '{}'",
-                self.instance_name, self.model_name, checkpoint.model_identity, model_identity
+                self.instance_name,
+                self.model_name,
+                checkpoint.model_identity,
+                descriptor.checkpoint_identity,
+            ));
+        }
+        if checkpoint.accepted_state_shape_identity != descriptor.accepted_state_shape_identity {
+            return Err(format!(
+                "generated accepted-state shape identity mismatch for '{}' ({}): captured '{}', circuit has '{}'",
+                self.instance_name,
+                self.model_name,
+                checkpoint.accepted_state_shape_identity,
+                descriptor.accepted_state_shape_identity,
             ));
         }
         if checkpoint.state_version != GENERATED_PERSISTENT_STATE_VERSION {
@@ -1703,7 +1748,9 @@ mod tests {
     };
 
     #[cfg(feature = "veriloga-builtins-base")]
-    use super::{BuiltinVerilogADevices, instantiate_builtin};
+    use super::{
+        BuiltinVerilogADevices, GeneratedVerilogAAcceptedStateShapeIdentity, instantiate_builtin,
+    };
 
     /// An `OFF` instance is evaluated at its cut-off state until Newton moves.
     ///
@@ -2088,6 +2135,19 @@ mod tests {
         let mut wrong_identity = baseline.clone();
         wrong_identity[0].model_identity.push('0');
         invalid_cases.push(wrong_identity);
+
+        let mut wrong_source = baseline.clone();
+        wrong_source[0].source_identity.replace_range(..1, "0");
+        invalid_cases.push(wrong_source);
+
+        let mut wrong_descriptor_abi = baseline.clone();
+        wrong_descriptor_abi[0].descriptor_abi_version -= 1;
+        invalid_cases.push(wrong_descriptor_abi);
+
+        let mut wrong_shape_identity = baseline.clone();
+        wrong_shape_identity[0].accepted_state_shape_identity =
+            GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([0xff; 32]);
+        invalid_cases.push(wrong_shape_identity);
 
         let mut wrong_version = baseline.clone();
         wrong_version[0].state_version += 1;

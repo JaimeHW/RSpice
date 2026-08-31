@@ -45,7 +45,8 @@ use crate::device::semiconductor::{
 #[cfg(feature = "veriloga")]
 use crate::device::veriloga::VerilogADeviceCheckpoint;
 use crate::device::veriloga_builtins::{
-    GENERATED_PERSISTENT_STATE_VERSION, GeneratedVerilogAInstanceCheckpoint,
+    GENERATED_PERSISTENT_STATE_VERSION, GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION,
+    GeneratedVerilogAAcceptedStateShapeIdentity, GeneratedVerilogAInstanceCheckpoint,
     GeneratedVerilogAPersistentState,
 };
 use crate::device::{TransmissionLine, TransmissionLineCheckpoint};
@@ -62,6 +63,11 @@ use crate::numerics::integration::{
     TrapGearControllerSnapshot,
 };
 use crate::xspice::{CmContextCheckpoint, XspiceInstanceCheckpoint};
+use rspice_veriloga_runtime::generated_veriloga_checkpoint_compatibility_entry;
+#[cfg(test)]
+use rspice_veriloga_runtime::{
+    GENERATED_VERILOGA_COMPATIBILITY_CATALOG, GENERATED_VERILOGA_V27_COMBINED_IDENTITY_ALIASES,
+};
 use std::io::Read;
 
 use super::damped_status::XyceDampedAcceptedBoundaryCheckpoint;
@@ -98,7 +104,9 @@ use super::{
 /// 26 adds accepted ordinary variables written by generated event controls.
 /// Version 27 persists exact accepted runtime Verilog-A `slew` catch-up
 /// corners so checkpoint resume cannot step over a rate-limit endpoint.
-const FORMAT_VERSION: u32 = 27;
+/// Version 28 separates strong source, semantic-model, and accepted-state
+/// shape identities for generated models.
+const FORMAT_VERSION: u32 = 28;
 const RUNTIME_VERILOGA_FORMAT_VERSION: u32 = 17;
 #[cfg(feature = "veriloga")]
 const RUNTIME_VERILOGA_SLEW_INITIALIZATION_FORMAT_VERSION: u32 = 23;
@@ -113,6 +121,7 @@ const EXACT_INTEGRATION_RUNTIME_FORMAT_VERSION: u32 = 21;
 const GENERATED_STATEFUL_TRANSACTION_FORMAT_VERSION: u32 = 22;
 const GENERATED_TERMINAL_CURRENT_FORMAT_VERSION: u32 = 25;
 const GENERATED_EVENT_STATE_FORMAT_VERSION: u32 = 26;
+const GENERATED_IDENTITY_FORMAT_VERSION: u32 = 28;
 
 const PACKED_MAGIC: &[u8; 16] = b"RSPICE-CPACK\0\0\0\0";
 const PACKED_ENVELOPE_VERSION: u32 = 1;
@@ -2716,9 +2725,102 @@ fn read_generated_veriloga_states(
         let model_name = fields
             .next()
             .ok_or_else(|| format!("generated state row {row} is missing model name"))?;
-        let model_identity = fields
-            .next()
-            .ok_or_else(|| format!("generated state row {row} is missing model identity"))?;
+        let (
+            descriptor_abi_version,
+            source_identity,
+            model_identity,
+            accepted_state_shape_identity,
+        ) = if checkpoint_version >= GENERATED_IDENTITY_FORMAT_VERSION {
+            let descriptor_abi_version = fields
+                .next()
+                .ok_or_else(|| format!("generated state row {row} is missing descriptor ABI"))?
+                .parse::<u32>()
+                .map_err(|_| format!("generated state row {row} has invalid descriptor ABI"))?;
+            let source_identity = fields
+                .next()
+                .ok_or_else(|| format!("generated state row {row} is missing source identity"))?;
+            let model_identity = fields
+                .next()
+                .ok_or_else(|| format!("generated state row {row} is missing model identity"))?;
+            let shape_identity = fields.next().ok_or_else(|| {
+                format!("generated state row {row} is missing accepted-state shape identity")
+            })?;
+            let shape_identity =
+                GeneratedVerilogAAcceptedStateShapeIdentity::from_hex(shape_identity)
+                    .map_err(|error| format!("generated state row {row}: {error}"))?;
+            (
+                descriptor_abi_version,
+                copy_checkpoint_string(source_identity, "generated source identity", budget)?,
+                copy_checkpoint_string(model_identity, "generated model identity", budget)?,
+                shape_identity,
+            )
+        } else if checkpoint_version >= GENERATED_EVENT_STATE_FORMAT_VERSION {
+            let model_identity = fields
+                .next()
+                .ok_or_else(|| format!("generated state row {row} is missing model identity"))?;
+            let alias = generated_veriloga_checkpoint_compatibility_entry(
+                checkpoint_version,
+                model_name,
+                model_identity,
+            )
+                .map_err(|error| format!("generated compatibility catalog is malformed: {error}"))?
+                .ok_or_else(|| {
+                    format!(
+                        "generated state row {row} cannot migrate format-{checkpoint_version} identity for model '{model_name}' and semantic identity '{model_identity}': no explicit compatibility alias"
+                    )
+                })?;
+            if alias.target_descriptor_abi_version != GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION {
+                return Err(format!(
+                    "generated compatibility target descriptor ABI {} does not match current ABI {}",
+                    alias.target_descriptor_abi_version, GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION
+                ));
+            }
+            let shape_identity = GeneratedVerilogAAcceptedStateShapeIdentity::from_hex(
+                alias.accepted_state_shape_identity,
+            )
+            .map_err(|error| format!("generated compatibility catalog is malformed: {error}"))?;
+            (
+                alias.target_descriptor_abi_version,
+                copy_checkpoint_string(
+                    alias.source_identity,
+                    "migrated generated source identity",
+                    budget,
+                )?,
+                copy_checkpoint_string(
+                    alias.semantic_identity,
+                    "migrated generated model identity",
+                    budget,
+                )?,
+                shape_identity,
+            )
+        } else if checkpoint_version >= GENERATED_TERMINAL_CURRENT_FORMAT_VERSION {
+            // v25 is parsed for diagnostics, then discarded by the caller. It
+            // predates accepted event-controlled variables and cannot become
+            // resume-authoritative even for a recognized model identity.
+            let model_identity = fields
+                .next()
+                .ok_or_else(|| format!("generated state row {row} is missing model identity"))?;
+            (
+                0,
+                String::new(),
+                copy_checkpoint_string(model_identity, "legacy generated model identity", budget)?,
+                GeneratedVerilogAAcceptedStateShapeIdentity::default(),
+            )
+        } else {
+            // Formats before v25 are parsed only for diagnostics and are
+            // discarded below because they lack exact IDT history and/or
+            // terminal currents. Do not fabricate current provenance for
+            // a payload that can never become resume-authoritative.
+            let model_identity = fields
+                .next()
+                .ok_or_else(|| format!("generated state row {row} is missing model identity"))?;
+            (
+                0,
+                String::new(),
+                copy_checkpoint_string(model_identity, "legacy generated model identity", budget)?,
+                GeneratedVerilogAAcceptedStateShapeIdentity::default(),
+            )
+        };
         let state_version = fields
             .next()
             .ok_or_else(|| format!("generated state row {row} is missing state version"))?
@@ -2782,11 +2884,10 @@ fn read_generated_veriloga_states(
                 budget,
             )?,
             model_name: copy_checkpoint_string(model_name, "generated model name", budget)?,
-            model_identity: copy_checkpoint_string(
-                model_identity,
-                "generated model identity",
-                budget,
-            )?,
+            descriptor_abi_version,
+            source_identity,
+            model_identity,
+            accepted_state_shape_identity,
             state_version,
             state: GeneratedVerilogAPersistentState {
                 ddt_previous: ddt.remove(0),
@@ -4576,6 +4677,12 @@ impl TransientCheckpoint {
                 || instance.instance_name.chars().any(char::is_whitespace)
                 || instance.model_name.is_empty()
                 || instance.model_name.chars().any(char::is_whitespace)
+                || instance.descriptor_abi_version != GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION
+                || instance.source_identity.len() != 64
+                || !instance
+                    .source_identity
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
                 || instance.model_identity.len() != 64
                 || !instance
                     .model_identity
@@ -6192,10 +6299,13 @@ impl TransientCheckpoint {
         ));
         for instance in &self.generated_veriloga_instance_states {
             out.push_str(&format!(
-                "generated_veriloga_state {} {} {} {}\n",
+                "generated_veriloga_state {} {} {} {} {} {} {}\n",
                 instance.instance_name,
                 instance.model_name,
+                instance.descriptor_abi_version,
+                instance.source_identity,
                 instance.model_identity,
+                instance.accepted_state_shape_identity,
                 instance.state_version
             ));
             let state = &instance.state;
@@ -7693,7 +7803,11 @@ mod tests {
             generated_veriloga_instance_states: vec![GeneratedVerilogAInstanceCheckpoint {
                 instance_name: "xgen1".to_string(),
                 model_name: "generated_model".to_string(),
+                descriptor_abi_version: GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION,
+                source_identity: "abcdef0123456789".repeat(4),
                 model_identity: "0123456789abcdef".repeat(4),
+                accepted_state_shape_identity:
+                    GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([0x5a; 32]),
                 state_version: GENERATED_PERSISTENT_STATE_VERSION,
                 state: GeneratedVerilogAPersistentState {
                     ddt_previous: vec![-0.0, f64::MIN_POSITIVE],
@@ -8035,19 +8149,26 @@ mod tests {
             if version < 7 && line.starts_with("generated_veriloga_state_available ") {
                 break;
             }
-            if version < GENERATED_EVENT_STATE_FORMAT_VERSION
+            if version < GENERATED_IDENTITY_FORMAT_VERSION
                 && line.starts_with("generated_veriloga_state ")
             {
-                let (prefix, _) = line
-                    .rsplit_once(' ')
-                    .expect("generated state header has a version");
-                output.push_str(prefix);
-                output.push_str(if version >= GENERATED_TERMINAL_CURRENT_FORMAT_VERSION {
-                    " 3\n"
-                } else if version >= GENERATED_STATEFUL_TRANSACTION_FORMAT_VERSION {
+                let fields = line.split_whitespace().collect::<Vec<_>>();
+                assert_eq!(fields.len(), 8, "current generated state header");
+                output.push_str(fields[0]);
+                output.push(' ');
+                output.push_str(fields[1]);
+                output.push(' ');
+                output.push_str(fields[2]);
+                output.push(' ');
+                output.push_str(fields[5]);
+                output.push_str(if version >= GENERATED_EVENT_STATE_FORMAT_VERSION {
+                    " 4\n"
+                } else if version < GENERATED_STATEFUL_TRANSACTION_FORMAT_VERSION {
+                    " 1\n"
+                } else if version < GENERATED_TERMINAL_CURRENT_FORMAT_VERSION {
                     " 2\n"
                 } else {
-                    " 1\n"
+                    " 3\n"
                 });
                 continue;
             }
@@ -9791,16 +9912,14 @@ mod tests {
             );
         }
 
-        let err = TransientCheckpoint::from_text(&text.replace(
-            &format!(
-                "generated_veriloga_state xgen1 generated_model {identity} {GENERATED_PERSISTENT_STATE_VERSION}"
-            ),
-            &format!(
-                "generated_veriloga_state xgen1 generated_model {identity} {}",
-                GENERATED_PERSISTENT_STATE_VERSION + 1
-            ),
-        ))
-        .expect_err("unknown generated persistent-state versions must fail closed");
+        let header = text
+            .lines()
+            .find(|line| line.starts_with("generated_veriloga_state xgen1 "))
+            .expect("generated checkpoint header");
+        let mut fields = header.split_whitespace().collect::<Vec<_>>();
+        fields[7] = "5";
+        let err = TransientCheckpoint::from_text(&text.replacen(header, &fields.join(" "), 1))
+            .expect_err("unknown generated persistent-state versions must fail closed");
         assert!(
             err.contains("unsupported persistent-state version"),
             "unexpected error: {err}"
@@ -9862,6 +9981,92 @@ mod tests {
             err.contains("non-finite terminal current"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn version_twenty_six_and_twenty_seven_generated_identities_migrate_only_through_catalog_alias()
+    {
+        assert_eq!(GENERATED_VERILOGA_COMPATIBILITY_CATALOG.len(), 43);
+        for legacy_version in [
+            GENERATED_EVENT_STATE_FORMAT_VERSION,
+            GENERATED_IDENTITY_FORMAT_VERSION - 1,
+        ] {
+            for alias in GENERATED_VERILOGA_COMPATIBILITY_CATALOG {
+                let combined_identity = if legacy_version == GENERATED_EVENT_STATE_FORMAT_VERSION {
+                    alias
+                        .wire_v26_combined_identity_alias
+                        .expect("every formerly current generated model has a v26 alias")
+                } else {
+                    GENERATED_VERILOGA_V27_COMBINED_IDENTITY_ALIASES
+                        .iter()
+                        .find_map(|(model, identity)| {
+                            (*model == alias.public_model_name).then_some(*identity)
+                        })
+                        .expect("every format-27 generated model has an exact alias")
+                };
+                let mut checkpoint = sample();
+                let state = &mut checkpoint.generated_veriloga_instance_states[0];
+                state.model_name = alias.public_model_name.to_string();
+                state.source_identity = alias.source_identity.to_string();
+                state.model_identity = combined_identity.to_string();
+                state.accepted_state_shape_identity =
+                    GeneratedVerilogAAcceptedStateShapeIdentity::from_hex(
+                        alias.accepted_state_shape_identity,
+                    )
+                    .expect("catalog shape identity");
+
+                let legacy = legacy_text(&checkpoint, legacy_version);
+                let migrated = TransientCheckpoint::from_text(&legacy).unwrap_or_else(|error| {
+                    panic!(
+                        "{} v{legacy_version} alias did not migrate: {error}",
+                        alias.public_model_name
+                    )
+                });
+                let migrated = &migrated.generated_veriloga_instance_states[0];
+                assert_eq!(
+                    migrated.descriptor_abi_version,
+                    GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION
+                );
+                assert_eq!(migrated.source_identity, alias.source_identity);
+                assert_eq!(migrated.model_identity, alias.semantic_identity);
+                assert_eq!(
+                    migrated.accepted_state_shape_identity.to_string(),
+                    alias.accepted_state_shape_identity
+                );
+            }
+        }
+
+        let alias = &GENERATED_VERILOGA_COMPATIBILITY_CATALOG[0];
+        for legacy_version in [
+            GENERATED_EVENT_STATE_FORMAT_VERSION,
+            GENERATED_IDENTITY_FORMAT_VERSION - 1,
+        ] {
+            let combined_identity = if legacy_version == GENERATED_EVENT_STATE_FORMAT_VERSION {
+                alias.wire_v26_combined_identity_alias.expect("v26 alias")
+            } else {
+                GENERATED_VERILOGA_V27_COMBINED_IDENTITY_ALIASES
+                    .iter()
+                    .find_map(|(model, identity)| {
+                        (*model == alias.public_model_name).then_some(*identity)
+                    })
+                    .expect("v27 alias")
+            };
+            let mut checkpoint = sample();
+            let state = &mut checkpoint.generated_veriloga_instance_states[0];
+            state.model_name = alias.public_model_name.to_string();
+            state.model_identity = combined_identity.to_string();
+            let legacy = legacy_text(&checkpoint, legacy_version);
+            let unknown = legacy.replacen(
+                combined_identity,
+                "5408ff7da797cc591148f3e1e447035800ee3b794426762068d4785a9d3a8488",
+                1,
+            );
+            let error = TransientCheckpoint::from_text(&unknown).unwrap_err();
+            assert!(
+                error.contains("no explicit compatibility alias"),
+                "v{legacy_version}: unexpected error: {error}"
+            );
+        }
     }
 
     #[test]

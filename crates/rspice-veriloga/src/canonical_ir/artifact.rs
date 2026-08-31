@@ -98,6 +98,8 @@ impl CanonicalIrArtifact {
         writeln!(out, "schema_version={}", self.metadata.schema_version).expect("write to string");
         writeln!(out, "source_package={}", self.metadata.source_package).expect("write to string");
         writeln!(out, "source_digest={}", self.metadata.source_digest).expect("write to string");
+        writeln!(out, "source_identity={}", self.metadata.source_identity)
+            .expect("write to string");
         writeln!(out, "compiler_version={}", self.metadata.compiler_version)
             .expect("write to string");
         writeln!(out, "hir_digest={}", hir_digest).expect("write to string");
@@ -156,6 +158,13 @@ fn validate_parts(
         return diagnostics;
     }
 
+    if !super::metadata::is_source_identity(metadata.source_identity.as_str()) {
+        diagnostics.push(artifact_error(
+            "canonical source_identity must be a 64-character lowercase BLAKE3 digest",
+        ));
+        return diagnostics;
+    }
+
     if let Err(mut child) = hir.validate() {
         diagnostics.append(&mut child);
     }
@@ -193,6 +202,13 @@ fn artifact_diagnostics(
         diagnostics.push(artifact_error(format!(
             "metadata source_digest '{}' must match HIR source_digest '{}'",
             metadata.source_digest, hir.source_digest
+        )));
+    }
+
+    if metadata.source_identity != hir.source_identity {
+        diagnostics.push(artifact_error(format!(
+            "metadata source_identity '{}' must match HIR source_identity '{}'",
+            metadata.source_identity, hir.source_identity
         )));
     }
 
@@ -575,6 +591,7 @@ fn hir_summary(hir: &HirModel) -> String {
     writeln!(out, "schema_version={}", hir.schema_version).expect("write to string");
     writeln!(out, "source_package={}", enc_str(&hir.source_package)).expect("write to string");
     writeln!(out, "source_digest={}", enc_str(&hir.source_digest)).expect("write to string");
+    writeln!(out, "source_identity={}", enc_str(&hir.source_identity)).expect("write to string");
     writeln!(out, "compiler_version={}", enc_str(&hir.compiler_version)).expect("write to string");
     writeln!(out, "feature_flags={}", join_smol(&hir.feature_flags)).expect("write to string");
     writeln!(

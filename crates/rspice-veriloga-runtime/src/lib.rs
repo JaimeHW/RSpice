@@ -18,6 +18,15 @@
 // scalar arguments so generated call sites inline without temporary arrays.
 #![allow(clippy::too_many_arguments)]
 
+mod compatibility_catalog;
+
+pub use compatibility_catalog::{
+    GENERATED_VERILOGA_COMPATIBILITY_CATALOG, GENERATED_VERILOGA_V27_COMBINED_IDENTITY_ALIASES,
+    GeneratedVerilogACompatibilityCatalogEntry, generated_veriloga_checkpoint_compatibility_entry,
+    generated_veriloga_compatibility_entry, generated_veriloga_v26_compatibility_entry,
+    generated_veriloga_wire_compatibility_entry, validate_generated_veriloga_compatibility_catalog,
+};
+
 pub type Value = f64;
 
 /// Version of the immutable catalog contract emitted beside generated models.
@@ -25,7 +34,7 @@ pub type Value = f64;
 /// This is intentionally independent of checkpoint and stamp-workspace
 /// versions: consumers use it to decide whether a persisted schematic binding
 /// can be reconstructed from the compiled model catalog.
-pub const GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION: u32 = 2;
+pub const GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeneratedVerilogAParameterScope {
@@ -178,14 +187,65 @@ pub struct GeneratedVerilogAModelDescriptor {
     pub module_name: &'static str,
     /// Digest of the preprocessed source closure used for generation.
     pub source_digest: &'static str,
+    /// Full BLAKE3 identity of that exact preprocessed source closure.
+    pub source_identity: &'static str,
     /// Digest covering the executable instance/checkpoint layout.
     pub checkpoint_identity: &'static str,
+    /// Exact shape of accepted dynamic state persisted for this model.
+    pub accepted_state_shape_identity: GeneratedVerilogAAcceptedStateShapeIdentity,
     /// External terminals in the exact positional order expected by netlists.
     pub terminals: &'static [GeneratedVerilogATerminalDescriptor],
     pub parameters: &'static [GeneratedVerilogAParameterDescriptor],
     pub total_node_count: usize,
     pub internal_node_names: &'static [&'static str],
     pub branch_count: usize,
+}
+
+/// Typed BLAKE3 identity of a generated model's accepted-state layout.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct GeneratedVerilogAAcceptedStateShapeIdentity([u8; 32]);
+
+impl GeneratedVerilogAAcceptedStateShapeIdentity {
+    pub const fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    pub const fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+
+    pub fn from_hex(value: &str) -> Result<Self, String> {
+        if value.len() != 64 {
+            return Err(
+                "accepted-state shape identity must contain 64 lowercase hex digits".into(),
+            );
+        }
+        let mut bytes = [0u8; 32];
+        for (index, pair) in value.as_bytes().chunks_exact(2).enumerate() {
+            let nybble = |byte| match byte {
+                b'0'..=b'9' => Some(byte - b'0'),
+                b'a'..=b'f' => Some(byte - b'a' + 10),
+                _ => None,
+            };
+            let high = nybble(pair[0]).ok_or_else(|| {
+                "accepted-state shape identity must contain 64 lowercase hex digits".to_string()
+            })?;
+            let low = nybble(pair[1]).ok_or_else(|| {
+                "accepted-state shape identity must contain 64 lowercase hex digits".to_string()
+            })?;
+            bytes[index] = high << 4 | low;
+        }
+        Ok(Self(bytes))
+    }
+}
+
+impl std::fmt::Display for GeneratedVerilogAAcceptedStateShapeIdentity {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for byte in self.0 {
+            write!(formatter, "{byte:02x}")?;
+        }
+        Ok(())
+    }
 }
 
 /// Provenance of a parameter assignment applied to a generated Verilog-A model.
@@ -1236,6 +1296,31 @@ pub struct GeneratedCrossState {
     pub initialized: bool,
 }
 
+/// Scalar representation used by one accepted-state checkpoint lane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GeneratedCheckpointLaneType {
+    NanForbiddenF64,
+    I8AsF64,
+    BoolAsF64,
+}
+
+impl GeneratedCheckpointLaneType {
+    pub const fn identity_tag(self) -> &'static str {
+        match self {
+            Self::NanForbiddenF64 => "f64:nan-forbidden",
+            Self::I8AsF64 => "i8-as-f64",
+            Self::BoolAsF64 => "bool-as-f64",
+        }
+    }
+}
+
+/// One ordered lane in an accepted-state checkpoint schema.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct GeneratedCheckpointLaneDescriptor {
+    pub name: &'static str,
+    pub lane_type: GeneratedCheckpointLaneType,
+}
+
 impl GeneratedCrossState {
     pub const INITIAL: Self = Self {
         value: 0.0,
@@ -1246,9 +1331,37 @@ impl GeneratedCrossState {
         initialized: false,
     };
 
-    /// Six scalar checkpoint lanes, kept stable so generated state can travel
-    /// through the existing variable-vector checkpoint envelope.
-    pub const CHECKPOINT_LANES: usize = 6;
+    /// Ordered accepted-state schema shared by the runtime serializer and the
+    /// offline generator's shape identity.
+    pub const CHECKPOINT_SCHEMA: [GeneratedCheckpointLaneDescriptor; 6] = [
+        GeneratedCheckpointLaneDescriptor {
+            name: "value",
+            lane_type: GeneratedCheckpointLaneType::NanForbiddenF64,
+        },
+        GeneratedCheckpointLaneDescriptor {
+            name: "time",
+            lane_type: GeneratedCheckpointLaneType::NanForbiddenF64,
+        },
+        GeneratedCheckpointLaneDescriptor {
+            name: "side",
+            lane_type: GeneratedCheckpointLaneType::I8AsF64,
+        },
+        GeneratedCheckpointLaneDescriptor {
+            name: "last_event_time",
+            lane_type: GeneratedCheckpointLaneType::NanForbiddenF64,
+        },
+        GeneratedCheckpointLaneDescriptor {
+            name: "last_crossing_time",
+            lane_type: GeneratedCheckpointLaneType::NanForbiddenF64,
+        },
+        GeneratedCheckpointLaneDescriptor {
+            name: "initialized",
+            lane_type: GeneratedCheckpointLaneType::BoolAsF64,
+        },
+    ];
+
+    /// Scalar checkpoint lane count, derived from [`Self::CHECKPOINT_SCHEMA`].
+    pub const CHECKPOINT_LANES: usize = Self::CHECKPOINT_SCHEMA.len();
 
     #[inline]
     pub fn append_checkpoint_lanes(self, values: &mut Vec<Value>) {
@@ -1681,7 +1794,10 @@ pub const GENERATED_PERSISTENT_STATE_VERSION: u32 = 4;
 pub struct GeneratedVerilogAInstanceCheckpoint {
     pub instance_name: String,
     pub model_name: String,
+    pub descriptor_abi_version: u32,
+    pub source_identity: String,
     pub model_identity: String,
+    pub accepted_state_shape_identity: GeneratedVerilogAAcceptedStateShapeIdentity,
     pub state_version: u32,
     pub state: GeneratedVerilogAPersistentState,
     /// Exact currents entering external module terminals at the accepted
@@ -7315,7 +7431,7 @@ mod fixed_lane_tests {
     }
 
     #[test]
-    fn descriptor_v2_unifies_terminal_current_and_dual_scope_metadata() {
+    fn descriptor_v3_unifies_identity_terminal_current_and_dual_scope_metadata() {
         const TERMINALS: [GeneratedVerilogATerminalDescriptor; 1] =
             [GeneratedVerilogATerminalDescriptor {
                 name: "FG",
@@ -7354,7 +7470,7 @@ mod fixed_lane_tests {
         const INSTANCE_PARAMETER: GeneratedVerilogAParameterDescriptor =
             GeneratedVerilogAParameterDescriptor::instance("instance_only", Some(1.0));
 
-        assert_eq!(GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, 2);
+        assert_eq!(GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, 3);
         assert_eq!(TERMINALS[0].name, "FG");
         assert_eq!(TERMINALS[0].current_parameter, "ifg");
         assert_eq!(PARAMETER, EXPECTED_PARAMETER);
@@ -7375,6 +7491,51 @@ mod fixed_lane_tests {
                 .origin,
             GeneratedParameterOrigin::ModelCard
         );
+    }
+
+    #[test]
+    fn compatibility_catalog_requires_an_exact_strong_source_key() {
+        validate_generated_veriloga_compatibility_catalog().expect("catalog is globally valid");
+        let retained = &GENERATED_VERILOGA_COMPATIBILITY_CATALOG[0];
+        assert_eq!(
+            generated_veriloga_compatibility_entry(retained.module_name, retained.source_identity,),
+            Ok(Some(retained)),
+        );
+        assert!(
+            generated_veriloga_compatibility_entry("VBIC13", retained.source_identity,)
+                .expect("valid catalog")
+                .is_none(),
+            "catalog matching must not infer case-insensitive equivalence"
+        );
+        let mut changed_source = retained.source_identity.to_string();
+        changed_source.replace_range(..1, "0");
+        assert!(
+            generated_veriloga_compatibility_entry(retained.module_name, &changed_source,)
+                .expect("valid catalog")
+                .is_none(),
+            "a source near-match must fail closed"
+        );
+        assert_eq!(
+            generated_veriloga_v26_compatibility_entry(
+                retained.public_model_name,
+                retained
+                    .wire_v26_combined_identity_alias
+                    .expect("v26 alias"),
+            ),
+            Ok(Some(retained)),
+        );
+    }
+
+    #[test]
+    fn accepted_state_shape_identity_hex_is_strict_and_round_trips() {
+        let value = GENERATED_VERILOGA_COMPATIBILITY_CATALOG[0].accepted_state_shape_identity;
+        let identity = GeneratedVerilogAAcceptedStateShapeIdentity::from_hex(value)
+            .expect("catalog shape is valid");
+        assert_eq!(identity.to_string(), value);
+        assert!(
+            GeneratedVerilogAAcceptedStateShapeIdentity::from_hex(&value.to_uppercase()).is_err()
+        );
+        assert!(GeneratedVerilogAAcceptedStateShapeIdentity::from_hex(&value[..62]).is_err());
     }
 
     #[test]

@@ -1,11 +1,9 @@
 //! Provenance metadata and the reproducible digest used to stamp it.
 //!
 //! [`CanonicalMetadata`] records which source package a model was compiled
-//! from; [`StableDigest`] provides the content hash each IR level is stamped
-//! with. Note the digest's deliberately narrow contract: it is a fast FNV-1a
-//! hash for change detection and reproducibility, explicitly not a
-//! cryptographic one. Identity that has to resist tampering uses the BLAKE3
-//! chain in [`crate::virtual_source`] instead.
+//! from; [`StableDigest`] provides the compact reproducible digest historically
+//! exposed by compiled model descriptors. Security-sensitive source identity
+//! is recorded independently as a full BLAKE3 digest.
 
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
@@ -16,6 +14,18 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 10;
+
+/// Collision-resistant identity of one exact preprocessed source closure.
+pub fn source_identity(source_text: &str) -> String {
+    blake3::hash(source_text.as_bytes()).to_hex().to_string()
+}
+
+pub(crate) fn is_source_identity(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
 
 /// Stable deterministic digest for canonical IR metadata.
 ///
@@ -51,6 +61,8 @@ pub struct CanonicalMetadata {
     /// diagnostic data and are intentionally excluded from canonical identity.
     pub source_package: SmolStr,
     pub source_digest: SmolStr,
+    /// Full BLAKE3 identity of the exact preprocessed source closure.
+    pub source_identity: SmolStr,
     pub compiler_version: SmolStr,
     pub feature_flags: Vec<SmolStr>,
 }
@@ -61,6 +73,7 @@ impl CanonicalMetadata {
             schema_version: CANONICAL_IR_SCHEMA_VERSION,
             source_package: source_package.into(),
             source_digest: StableDigest::from_text(source_text).as_hex().into(),
+            source_identity: source_identity(source_text).into(),
             compiler_version: env!("CARGO_PKG_VERSION").into(),
             feature_flags: Vec::new(),
         }

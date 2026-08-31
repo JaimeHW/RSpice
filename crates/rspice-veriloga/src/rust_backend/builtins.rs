@@ -40,6 +40,8 @@ pub const REGENERATE_BUILTINS_COMMAND: &str = "cargo run -p rspice-veriloga --pr
 const GENERATOR_SOURCE_DIGEST_INPUTS: &[&str] = &[
     "../../Cargo.toml",
     "../../Cargo.lock",
+    "../rspice-veriloga-runtime/Cargo.toml",
+    "../rspice-veriloga-runtime/src",
     "build.rs",
     "Cargo.toml",
     "src/lib.rs",
@@ -1862,6 +1864,18 @@ fn generate_devices_with_stack(
 mod tests {
     use super::*;
 
+    #[test]
+    fn generator_digest_covers_the_complete_runtime_contract_tree() {
+        assert!(GENERATOR_SOURCE_DIGEST_INPUTS.contains(&"../rspice-veriloga-runtime/Cargo.toml"));
+        assert!(GENERATOR_SOURCE_DIGEST_INPUTS.contains(&"../rspice-veriloga-runtime/src"));
+        assert!(
+            !GENERATOR_SOURCE_DIGEST_INPUTS
+                .iter()
+                .any(|path| path.starts_with("../rspice-veriloga-runtime/src/")),
+            "the runtime source tree must stay an atomic recursive digest input"
+        );
+    }
+
     fn generated_device_fixture(folder_name: &str, public_model_name: &str) -> GeneratedRustDevice {
         GeneratedRustDevice {
             module_name: public_model_name.to_string(),
@@ -1869,6 +1883,8 @@ mod tests {
             folder_name: folder_name.to_string(),
             files: Vec::new(),
             source_digest: "fixture".to_string(),
+            source_identity: "00".repeat(32),
+            accepted_state_shape_identity: [0; 32],
         }
     }
 
@@ -2669,6 +2685,23 @@ fn write_registry(
         out.push_str("        }\n");
     }
     out.push_str("    }\n\n");
+    out.push_str("    pub fn accepted_state_shape_identity(&self) -> super::GeneratedVerilogAAcceptedStateShapeIdentity {\n");
+    if devices.is_empty() {
+        out.push_str("        let _ = self;\n");
+        out.push_str("        unreachable!(\"empty generated Verilog-A registry has no accepted-state shape identity\")\n");
+    } else {
+        out.push_str("        match self {\n");
+        for (index, (device, feature)) in devices.iter().zip(&feature_names).enumerate() {
+            writeln!(
+                out,
+                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(_) => {}::Instance::ACCEPTED_STATE_SHAPE_IDENTITY,",
+                device.folder_name,
+            )?;
+        }
+        out.push_str("            Self::__NonExhaustive(value) => match *value {},\n");
+        out.push_str("        }\n");
+    }
+    out.push_str("    }\n\n");
     out.push_str(
         "    pub fn capture_persistent_state(&self) -> super::GeneratedVerilogAPersistentState {\n",
     );
@@ -2944,9 +2977,11 @@ fn write_registry(
     {
         writeln!(
             out,
-            "    #[cfg(feature = {feature:?})]\n    super::GeneratedVerilogAModelDescriptor {{ abi_version: super::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, model_name: {registry_name:?}, module_name: {:?}, source_digest: {:?}, checkpoint_identity: {}::Instance::CHECKPOINT_MODEL_IDENTITY, terminals: &{}::Instance::TERMINALS, parameters: &{}::Instance::PARAMETER_DESCRIPTORS, total_node_count: {}::Instance::NODE_COUNT, internal_node_names: &{}::Instance::INTERNAL_NODE_NAMES, branch_count: {}::Instance::BRANCH_COUNT }},",
+            "    #[cfg(feature = {feature:?})]\n    super::GeneratedVerilogAModelDescriptor {{ abi_version: super::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, model_name: {registry_name:?}, module_name: {:?}, source_digest: {:?}, source_identity: {:?}, checkpoint_identity: {}::Instance::CHECKPOINT_MODEL_IDENTITY, accepted_state_shape_identity: {}::Instance::ACCEPTED_STATE_SHAPE_IDENTITY, terminals: &{}::Instance::TERMINALS, parameters: &{}::Instance::PARAMETER_DESCRIPTORS, total_node_count: {}::Instance::NODE_COUNT, internal_node_names: &{}::Instance::INTERNAL_NODE_NAMES, branch_count: {}::Instance::BRANCH_COUNT }},",
             device.module_name,
             device.source_digest,
+            device.source_identity,
+            device.folder_name,
             device.folder_name,
             device.folder_name,
             device.folder_name,

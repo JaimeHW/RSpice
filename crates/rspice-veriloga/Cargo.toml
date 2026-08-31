@@ -19,6 +19,7 @@ log.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 blake3 = "1.5"
+rspice-veriloga-runtime.workspace = true
 web-time = "1.1"
 wasm-encoder = { workspace = true, optional = true }
 wasmparser = { workspace = true, optional = true }

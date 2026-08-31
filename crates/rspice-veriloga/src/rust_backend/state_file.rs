@@ -126,6 +126,7 @@ pub(super) fn generate_state_file_with_extensions(
     idt_state_count: usize,
     one_step_dae_split_safe: bool,
     branch_count: usize,
+    accepted_state_shape_identity: [u8; 32],
     extensions: &StateFileExtensions,
 ) -> Result<String, RustBackendError> {
     validate_canonical_parameter_default_order(artifact)?;
@@ -148,7 +149,7 @@ pub(super) fn generate_state_file_with_extensions(
         ""
     };
     out.push_str(&format!(
-        "use {}::{{{cross_event_imports}GeneratedDdtCoefficients, GeneratedParameterAssignment, GeneratedParameterOrigin, GeneratedVerilogAParameterBound as B, GeneratedVerilogAParameterDescriptor as P, GeneratedVerilogAPersistentState, GeneratedVerilogARollbackState, GeneratedVerilogATerminalDescriptor, GeneratedVerilogATerminalDirection, boxed_zero_bool_array, boxed_zero_f64_array{parameter_alias_installer}}};\n",
+        "use {}::{{{cross_event_imports}GeneratedDdtCoefficients, GeneratedParameterAssignment, GeneratedParameterOrigin, GeneratedVerilogAAcceptedStateShapeIdentity, GeneratedVerilogAParameterBound as B, GeneratedVerilogAParameterDescriptor as P, GeneratedVerilogAPersistentState, GeneratedVerilogARollbackState, GeneratedVerilogATerminalDescriptor, GeneratedVerilogATerminalDirection, boxed_zero_bool_array, boxed_zero_f64_array{parameter_alias_installer}}};\n",
         options.runtime_path,
     ));
     if !artifact.mir.parameters.is_empty() {
@@ -400,6 +401,9 @@ pub(super) fn generate_state_file_with_extensions(
     ));
     out.push_str(&format!(
         "    pub const IDT_STATE_COUNT: usize = {idt_state_count};\n"
+    ));
+    out.push_str(&format!(
+        "    pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes({accepted_state_shape_identity:?});\n"
     ));
     out.push_str(&format!(
         "    pub const EVENT_STATE_COUNT: usize = {event_state_count};\n"
@@ -1352,25 +1356,89 @@ fn hash_identity_field(hasher: &mut blake3::Hasher, field: &[u8]) {
 pub(super) fn finalize_checkpoint_identity(
     device: &mut GeneratedRustDevice,
 ) -> Result<(), RustBackendError> {
-    let mut hasher = blake3::Hasher::new();
+    let mut artifact_hasher = blake3::Hasher::new();
     // The schema tag is the manual compatibility boundary for the checkpoint
-    // encoding. The remaining fields describe the generated model itself.
-    // Do not salt this identity with the compiler build digest: unrelated
-    // compiler changes must not invalidate persisted state or every generated
-    // model crate in Cargo's cache.
-    hasher.update(b"rspice-generated-persistent-state-v4\0");
-    hash_identity_field(&mut hasher, device.module_name.as_bytes());
-    hash_identity_field(&mut hasher, device.public_model_name.as_bytes());
-    hash_identity_field(&mut hasher, device.folder_name.as_bytes());
-    hash_identity_field(&mut hasher, device.source_digest.as_bytes());
+    // artifact encoding. This digest qualifies an explicit historical alias;
+    // it is deliberately distinct from the stable semantic model identity.
+    artifact_hasher.update(b"rspice-generated-persistent-state-v4\0");
+    hash_identity_field(&mut artifact_hasher, device.module_name.as_bytes());
+    hash_identity_field(&mut artifact_hasher, device.public_model_name.as_bytes());
+    hash_identity_field(&mut artifact_hasher, device.folder_name.as_bytes());
+    hash_identity_field(&mut artifact_hasher, device.source_identity.as_bytes());
 
     let mut files = device.files.iter().collect::<Vec<_>>();
     files.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
     for file in files {
-        hash_identity_field(&mut hasher, file.relative_path.as_bytes());
-        hash_identity_field(&mut hasher, file.contents.as_bytes());
+        hash_identity_field(&mut artifact_hasher, file.relative_path.as_bytes());
+        hash_identity_field(&mut artifact_hasher, file.contents.as_bytes());
     }
-    let identity = hasher.finalize().to_hex().to_string();
+    let artifact_identity = artifact_hasher.finalize().to_hex().to_string();
+
+    let compatibility = rspice_veriloga_runtime::generated_veriloga_compatibility_entry(
+        &device.module_name,
+        &device.source_identity,
+    )
+    .map_err(|error| {
+        RustBackendError::internal(
+            device.source_digest.clone(),
+            device.module_name.clone(),
+            error,
+        )
+    })?;
+    let generic_semantic_identity = generated_model_semantic_identity(device);
+    let generated_shape_identity =
+        rspice_veriloga_runtime::GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes(
+            device.accepted_state_shape_identity,
+        )
+        .to_string();
+    let identity = if let Some(entry) = compatibility {
+        if entry.target_descriptor_abi_version
+            != rspice_veriloga_runtime::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION
+        {
+            return Err(RustBackendError::internal(
+                device.source_digest.clone(),
+                device.module_name.clone(),
+                format!(
+                    "generated compatibility target descriptor ABI is {}, current ABI is {}",
+                    entry.target_descriptor_abi_version,
+                    rspice_veriloga_runtime::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION
+                ),
+            ));
+        }
+        if entry.accepted_state_shape_identity != generated_shape_identity {
+            return Err(RustBackendError::internal(
+                device.source_digest.clone(),
+                device.module_name.clone(),
+                format!(
+                    "generated compatibility accepted-state shape mismatch: catalog={}, generated={generated_shape_identity}",
+                    entry.accepted_state_shape_identity
+                ),
+            ));
+        }
+        if let Some(target_artifact_identity) = entry.semantic_identity_override_artifact {
+            if target_artifact_identity != artifact_identity {
+                return Err(RustBackendError::internal(
+                    device.source_digest.clone(),
+                    device.module_name.clone(),
+                    format!(
+                        "generated compatibility target artifact identity mismatch: catalog={target_artifact_identity}, generated={artifact_identity}"
+                    ),
+                ));
+            }
+        } else if entry.semantic_identity != generic_semantic_identity {
+            return Err(RustBackendError::internal(
+                device.source_digest.clone(),
+                device.module_name.clone(),
+                format!(
+                    "generated compatibility semantic identity mismatch: catalog={}, generated={generic_semantic_identity}",
+                    entry.semantic_identity
+                ),
+            ));
+        }
+        entry.semantic_identity
+    } else {
+        generic_semantic_identity.as_str()
+    };
     let declaration = format!(
         "pub const CHECKPOINT_MODEL_IDENTITY: &'static str = {CHECKPOINT_IDENTITY_PLACEHOLDER:?};"
     );
@@ -1392,6 +1460,18 @@ pub(super) fn finalize_checkpoint_identity(
         ));
     }
     Ok(())
+}
+
+fn generated_model_semantic_identity(device: &GeneratedRustDevice) -> String {
+    let mut hasher = blake3::Hasher::new();
+    // This tag is the explicit compiler/runtime semantic boundary. Emission,
+    // formatting, folder, and generated-file changes do not churn the model
+    // identity; a semantic compiler change must advance this tag.
+    hasher.update(b"rspice-generated-model-semantics-v1\0");
+    hash_identity_field(&mut hasher, device.module_name.as_bytes());
+    hash_identity_field(&mut hasher, device.public_model_name.as_bytes());
+    hash_identity_field(&mut hasher, device.source_identity.as_bytes());
+    hasher.finalize().to_hex().to_string()
 }
 
 fn emit_parameter_defaults(
@@ -2853,7 +2933,11 @@ fn range_contains(range: &crate::canonical_ir::HirParamRange, value: f64) -> boo
 
 #[cfg(test)]
 mod tests {
-    use super::{ParameterBoundPool, compact_generated_indentation};
+    use super::{
+        CHECKPOINT_IDENTITY_PLACEHOLDER, ParameterBoundPool, compact_generated_indentation,
+        finalize_checkpoint_identity, generated_model_semantic_identity,
+    };
+    use crate::rust_backend::{GeneratedRustDevice, GeneratedRustFile};
 
     #[test]
     fn generated_indentation_uses_tabs_without_touching_token_text() {
@@ -2878,5 +2962,101 @@ mod tests {
         assert_eq!(pool.encoded_option_literal(Some(-0.0)).expect("-0"), "2");
         assert_eq!(pool.values[0].to_bits(), 0.0f64.to_bits());
         assert_eq!(pool.values[1].to_bits(), (-0.0f64).to_bits());
+    }
+
+    #[test]
+    fn retained_semantic_identity_requires_the_exact_catalog_target_artifact() {
+        let catalog = rspice_veriloga_runtime::GENERATED_VERILOGA_COMPATIBILITY_CATALOG
+            .iter()
+            .find(|entry| entry.semantic_identity_override_artifact.is_some())
+            .expect("retained semantic identity catalog entry");
+        let accepted_state_shape_identity =
+            *rspice_veriloga_runtime::GeneratedVerilogAAcceptedStateShapeIdentity::from_hex(
+                catalog.accepted_state_shape_identity,
+            )
+            .expect("catalog shape identity")
+            .as_bytes();
+        let fixture = |source_identity: String| GeneratedRustDevice {
+            module_name: catalog.module_name.to_string(),
+            public_model_name: catalog.public_model_name.to_string(),
+            folder_name: "fixture".to_string(),
+            files: vec![GeneratedRustFile {
+                relative_path: "state.rs".to_string(),
+                contents: format!(
+                    "pub const CHECKPOINT_MODEL_IDENTITY: &'static str = {CHECKPOINT_IDENTITY_PLACEHOLDER:?};"
+                ),
+            }],
+            source_digest: "aa00e2e747501388".to_string(),
+            source_identity,
+            accepted_state_shape_identity,
+        };
+
+        let mut retained = fixture(catalog.source_identity.to_string());
+        let error = finalize_checkpoint_identity(&mut retained)
+            .expect_err("a source match cannot bless an arbitrary generated artifact");
+        assert!(
+            error
+                .to_string()
+                .contains("target artifact identity mismatch"),
+            "unexpected error: {error}"
+        );
+
+        let mut changed_source = catalog.source_identity.to_string();
+        changed_source.replace_range(..1, "0");
+        let mut uncataloged = fixture(changed_source);
+        let semantic_identity = generated_model_semantic_identity(&uncataloged);
+        finalize_checkpoint_identity(&mut uncataloged).expect("uncataloged identity finalizes");
+        assert!(
+            uncataloged.files[0].contents.contains(&semantic_identity),
+            "uncataloged models use their stable semantic identity"
+        );
+
+        let mut formatting_change = uncataloged.clone();
+        formatting_change.folder_name = "different-generated-folder".to_string();
+        formatting_change.files[0]
+            .contents
+            .push_str("\n// emission-only formatting change\n");
+        assert_eq!(
+            generated_model_semantic_identity(&formatting_change),
+            semantic_identity,
+            "generated paths and file formatting are not model semantics"
+        );
+    }
+
+    #[test]
+    fn generic_catalog_targets_match_the_derived_semantic_identity() {
+        for catalog in rspice_veriloga_runtime::GENERATED_VERILOGA_COMPATIBILITY_CATALOG
+            .iter()
+            .filter(|entry| entry.semantic_identity_override_artifact.is_none())
+        {
+            let accepted_state_shape_identity =
+                *rspice_veriloga_runtime::GeneratedVerilogAAcceptedStateShapeIdentity::from_hex(
+                    catalog.accepted_state_shape_identity,
+                )
+                .expect("catalog shape identity")
+                .as_bytes();
+            let mut device = GeneratedRustDevice {
+                module_name: catalog.module_name.to_string(),
+                public_model_name: catalog.module_name.to_string(),
+                folder_name: "formatting-independent-fixture".to_string(),
+                files: vec![GeneratedRustFile {
+                    relative_path: "state.rs".to_string(),
+                    contents: format!(
+                        "pub const CHECKPOINT_MODEL_IDENTITY: &'static str = {CHECKPOINT_IDENTITY_PLACEHOLDER:?};"
+                    ),
+                }],
+                source_digest: "0123456789abcdef".to_string(),
+                source_identity: catalog.source_identity.to_string(),
+                accepted_state_shape_identity,
+            };
+
+            finalize_checkpoint_identity(&mut device)
+                .unwrap_or_else(|error| panic!("{}: {error}", catalog.public_model_name));
+            assert!(
+                device.files[0].contents.contains(catalog.semantic_identity),
+                "{} did not emit its authenticated semantic identity",
+                catalog.public_model_name
+            );
+        }
     }
 }
