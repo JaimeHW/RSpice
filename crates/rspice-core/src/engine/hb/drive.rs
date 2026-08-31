@@ -8,6 +8,7 @@ impl Engine {
         spec: Option<&SourceSpec>,
         config: &HbConfig,
         drive_harmonics: &[usize],
+        spice_dialect: crate::engine::SpiceDialect,
     ) -> Result<HbSourceSpectrum, SimulationError> {
         let Some(spec) = spec else {
             return Ok(HbSourceSpectrum {
@@ -28,6 +29,7 @@ impl Engine {
                 Some(inner),
                 config,
                 drive_harmonics,
+                spice_dialect,
             ),
             SourceSpec::RfPort { inner, port } => {
                 let Some((amplitude, frequency, phase)) = port.drive_tone() else {
@@ -38,6 +40,7 @@ impl Engine {
                         Some(inner),
                         config,
                         drive_harmonics,
+                        spice_dialect,
                     );
                 };
                 // A declared drive silences the AC magnitude, exactly as an
@@ -65,6 +68,7 @@ impl Engine {
                     Some(&inner),
                     config,
                     drive_harmonics,
+                    spice_dialect,
                 )?;
                 if amplitude != 0.0 {
                     let harmonic = Self::hb_periodic_source_harmonic(
@@ -122,6 +126,7 @@ impl Engine {
                 Some(transient),
                 config,
                 drive_harmonics,
+                spice_dialect,
             ),
             SourceSpec::Sin {
                 offset,
@@ -200,7 +205,9 @@ impl Engine {
                     *width,
                     *period,
                     *pulse_count,
+                    spec,
                     config,
+                    spice_dialect,
                 )?;
                 if drive_harmonics.is_empty() {
                     spectrum.harmonics.clear();
@@ -289,7 +296,9 @@ impl Engine {
         width: Value,
         period: Value,
         pulse_count: Value,
+        pulse_spec: &SourceSpec,
         config: &HbConfig,
+        spice_dialect: crate::engine::SpiceDialect,
     ) -> Result<HbSourceSpectrum, SimulationError> {
         // Harmonic balance solves for a steady state, so the drive has to be
         // periodic for the whole run. A PULSE bounded by `NP` stops after
@@ -359,6 +368,10 @@ impl Engine {
             });
         }
 
+        if spice_dialect == crate::engine::SpiceDialect::Xyce {
+            return Self::hb_xyce_collocated_pulse_source_spectrum(pulse_spec, config);
+        }
+
         // Integrate the authored continuous, piecewise-linear waveform.  The
         // Fourier coefficient of a ramp is evaluated through its rectangular
         // derivative using sinc, which remains well-conditioned as a rise or
@@ -397,6 +410,49 @@ impl Engine {
                 harmonics.push((harmonic, amplitude, phasor.arg()));
             }
         }
+        Ok(HbSourceSpectrum { dc, harmonics })
+    }
+
+    fn hb_xyce_collocated_pulse_source_spectrum(
+        pulse_spec: &SourceSpec,
+        config: &HbConfig,
+    ) -> Result<HbSourceSpectrum, SimulationError> {
+        // Xyce's HB time-domain formulation represents the independent drive
+        // on the same finite odd collocation grid used by the nonlinear
+        // residual. Preserve that projection in the Xyce dialect; native and
+        // ngspice modes retain the continuous analytic Fourier integral above.
+        // Using the shared FFT implementation keeps this O(N log N), including
+        // for explicitly oversampled production grids.
+        let collocation_points = config
+            .checked_fft_size()
+            .map_err(|error| HbError::InvalidConfig(error.to_string()))?;
+        let hb_period = config.fundamental_freq.recip();
+        let collocation_step = hb_period / collocation_points as Value;
+        let samples = (0..collocation_points)
+            .map(|sample| {
+                crate::circuit::VoltageSources::evaluate_source_spec_at_time_with_dialect(
+                    pulse_spec,
+                    sample as Value * collocation_step,
+                    collocation_step,
+                    hb_period,
+                    crate::engine::SpiceDialect::Xyce,
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut fft = HbFft::try_with_size(config.num_harmonics, collocation_points)
+            .map_err(|error| HbError::InvalidConfig(error.to_string()))?;
+        let coefficients = fft.to_frequency_domain(&samples);
+        let dc = coefficients[0].re;
+        let harmonics = coefficients
+            .into_iter()
+            .enumerate()
+            .skip(1)
+            .filter_map(|(harmonic, coefficient)| {
+                let phasor = 2.0 * coefficient;
+                let amplitude = phasor.norm();
+                (amplitude != 0.0).then_some((harmonic, amplitude, phasor.arg()))
+            })
+            .collect();
         Ok(HbSourceSpectrum { dc, harmonics })
     }
 

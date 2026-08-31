@@ -1337,7 +1337,7 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SimulationConfig;
+    use crate::{SimulationConfig, SpiceDialect};
 
     #[test]
     fn authored_nonlin_hb_budget_changes_only_the_derived_hb_config() {
@@ -1529,11 +1529,26 @@ mod tests {
             pulse_count: 0.0,
             width_defaults_to_zero: false,
         };
-        let spectrum = Engine::hb_source_spectrum(1.0, 0.0, 0.0, Some(&pulse), &minimal_grid, &[1])
-            .expect("periodic pulse spectrum");
-        let oversized =
-            Engine::hb_source_spectrum(1.0, 0.0, 0.0, Some(&pulse), &oversized_grid, &[1])
-                .expect("same pulse on an oversized collocation grid");
+        let spectrum = Engine::hb_source_spectrum(
+            1.0,
+            0.0,
+            0.0,
+            Some(&pulse),
+            &minimal_grid,
+            &[1],
+            SpiceDialect::BestAvailable,
+        )
+        .expect("periodic pulse spectrum");
+        let oversized = Engine::hb_source_spectrum(
+            1.0,
+            0.0,
+            0.0,
+            Some(&pulse),
+            &oversized_grid,
+            &[1],
+            SpiceDialect::BestAvailable,
+        )
+        .expect("same pulse on an oversized collocation grid");
 
         assert_eq!(spectrum.dc, oversized.dc);
         assert_eq!(spectrum.harmonics, oversized.harmonics);
@@ -1559,6 +1574,67 @@ mod tests {
     }
 
     #[test]
+    fn xyce_pulse_source_uses_the_requested_collocation_projection() {
+        let config = HbConfig::new(1.0e6)
+            .with_harmonics(101)
+            .with_collocation_points(203);
+        let pulse = SourceSpec::Pulse {
+            v1: 0.0,
+            v2: 1.0,
+            delay: 0.0,
+            rise: 5.0e-9,
+            fall: 5.0e-9,
+            width: 0.49e-6,
+            period: 1.0e-6,
+            pulse_count: 0.0,
+            width_defaults_to_zero: false,
+        };
+        let spectrum = Engine::hb_source_spectrum(
+            0.0,
+            0.0,
+            0.0,
+            Some(&pulse),
+            &config,
+            &[1],
+            SpiceDialect::Xyce,
+        )
+        .expect("Xyce-compatible periodic pulse spectrum");
+
+        let samples = (0..203)
+            .map(|sample| {
+                let time = sample as Value / (203.0 * 1.0e6);
+                if time < 5.0e-9 {
+                    time / 5.0e-9
+                } else if time < 495.0e-9 {
+                    1.0
+                } else if time < 500.0e-9 {
+                    (500.0e-9 - time) / 5.0e-9
+                } else {
+                    0.0
+                }
+            })
+            .collect::<Vec<_>>();
+        let expected_dc = samples.iter().sum::<Value>() / samples.len() as Value;
+        let expected_h1 = samples
+            .iter()
+            .enumerate()
+            .map(|(sample, value)| {
+                Complex64::from_polar(
+                    *value,
+                    -std::f64::consts::TAU * sample as Value / samples.len() as Value,
+                )
+            })
+            .sum::<Complex64>()
+            / samples.len() as Value
+            * 2.0;
+        let (_, amplitude, phase) = spectrum.harmonics[0];
+        let actual_h1 = Complex64::from_polar(amplitude, phase);
+        assert!((spectrum.dc - expected_dc).abs() < 1.0e-15);
+        assert!((actual_h1 - expected_h1).norm() < 1.0e-14);
+        assert!((spectrum.dc - 0.495).abs() > 1.0e-6);
+    }
+
+    #[test]
     fn sin_source_is_converted_from_sine_to_cosine_reference() {
         let config = HbConfig::new(1.0e3).with_harmonics(3);
         let sin = SourceSpec::Sin {
@@ -1569,8 +1645,16 @@ mod tests {
             damping: 0.0,
             phase: 0.0,
         };
-        let spectrum = Engine::hb_source_spectrum(2.0, 0.0, 0.0, Some(&sin), &config, &[1])
-            .expect("periodic sine spectrum");
+        let spectrum = Engine::hb_source_spectrum(
+            2.0,
+            0.0,
+            0.0,
+            Some(&sin),
+            &config,
+            &[1],
+            SpiceDialect::BestAvailable,
+        )
+        .expect("periodic sine spectrum");
 
         assert_eq!(spectrum.dc, 2.0);
         let (_, amplitude, phase) = spectrum.harmonics[0];
@@ -1595,8 +1679,16 @@ mod tests {
                 phase: 0.0,
             }),
         };
-        let spectrum = Engine::hb_source_spectrum(0.0, 99.0, 1.0, Some(&source), &config, &[1])
-            .expect("periodic transient spectrum");
+        let spectrum = Engine::hb_source_spectrum(
+            0.0,
+            99.0,
+            1.0,
+            Some(&source),
+            &config,
+            &[1],
+            SpiceDialect::BestAvailable,
+        )
+        .expect("periodic transient spectrum");
 
         assert_eq!(spectrum.dc, 1.0);
         let (_, amplitude, phase) = spectrum.harmonics[0];
@@ -1616,8 +1708,16 @@ mod tests {
             damping: 0.0,
             phase: 0.0,
         };
-        let spectrum = Engine::hb_source_spectrum(2.0, 0.0, 0.0, Some(&sin), &config, &[])
-            .expect("filtered periodic source");
+        let spectrum = Engine::hb_source_spectrum(
+            2.0,
+            0.0,
+            0.0,
+            Some(&sin),
+            &config,
+            &[],
+            SpiceDialect::BestAvailable,
+        )
+        .expect("filtered periodic source");
 
         assert_eq!(spectrum.dc, 2.0);
         assert!(spectrum.harmonics.is_empty());
@@ -1634,8 +1734,16 @@ mod tests {
             damping: 0.0,
             phase: 0.0,
         };
-        let err = Engine::hb_source_spectrum(0.0, 0.0, 0.0, Some(&sin), &config, &[1])
-            .expect_err("non-finite source parameters must fail");
+        let err = Engine::hb_source_spectrum(
+            0.0,
+            0.0,
+            0.0,
+            Some(&sin),
+            &config,
+            &[1],
+            SpiceDialect::BestAvailable,
+        )
+        .expect_err("non-finite source parameters must fail");
         assert!(err.to_string().contains("amplitude must be finite"));
     }
 

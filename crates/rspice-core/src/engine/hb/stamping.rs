@@ -544,8 +544,15 @@ impl Engine {
                 .map(|name| name.as_str())
                 .unwrap_or("");
             let harmonics = Self::hb_drive_harmonics_for_source(drive_tones, source_name);
-            let spectrum =
-                Self::hb_source_spectrum(dc, ac_mag, ac_phase, spec, config, &harmonics)?;
+            let spectrum = Self::hb_source_spectrum(
+                dc,
+                ac_mag,
+                ac_phase,
+                spec,
+                config,
+                &harmonics,
+                self.config.spice_dialect,
+            )?;
             solver
                 .try_add_named_voltage_source_branch_harmonics(
                     np,
@@ -604,8 +611,15 @@ impl Engine {
                 .map(|name| name.as_str())
                 .unwrap_or("");
             let harmonics = Self::hb_drive_harmonics_for_source(drive_tones, source_name);
-            let spectrum =
-                Self::hb_source_spectrum(dc, ac_mag, ac_phase, spec, config, &harmonics)?;
+            let spectrum = Self::hb_source_spectrum(
+                dc,
+                ac_mag,
+                ac_phase,
+                spec,
+                config,
+                &harmonics,
+                self.config.spice_dialect,
+            )?;
 
             // Stamp DC component (harmonic 0)
             if np > 0 {
