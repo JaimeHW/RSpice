@@ -69,3 +69,10 @@ crates/rspice-ui/contracts/** text eol=lf
 # fixture is include_str!'d into a test binary. CRLF materialization would
 # change both on Windows alone, so the format is pinned to LF everywhere.
 *.rspiceproj text eol=lf
+
+# Accepted-timestep goldens (AMS invariant I1) are written with LF by the
+# bless path in `tests/timestep_sequence_goldens.rs`. Pinning them keeps a
+# Windows re-bless from rewriting every line as a CRLF-only diff. The reader
+# tolerates either ending, so this is diff hygiene rather than a correctness
+# gate. The root-anchored `testdata/**` rule above does not reach here.
+crates/rspice-core/tests/testdata/timestep_goldens/** text eol=lf
