@@ -1511,3 +1511,413 @@ fn a_resume_state_from_another_process_is_refused() {
         "the refused resumption changed nothing"
     );
 }
+
+// ===========================================================================
+// Elaborated hierarchy (IEEE 1364-2005 sections 12.1.2 and 12.3)
+// ===========================================================================
+//
+// The interpreter is unchanged by hierarchy, and that is the claim these
+// tests make: a design of several modules is elaborated into one plan, and the
+// same `start`/`resume`/`apply_deferred` that runs a single module runs it.
+// Nothing below asks the plan which instance anything came from.
+
+/// A whole elaborated design, run by the same interpreter one module is.
+struct Design {
+    plan: CanonicalDigitalPlan,
+    store: Store,
+    /// What each process is waiting for, once it has suspended.
+    waits: Vec<Option<(DigitalWaitRequest, DigitalResumeState)>>,
+}
+
+impl Design {
+    fn new(source: &str, module: &str) -> Self {
+        let plan = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir_module(source, Some(module))
+            .expect("the hierarchy must elaborate and lower")
+            .digital;
+        let values = plan
+            .signals
+            .iter()
+            .map(|signal| FourStateValue::splat(signal.width, FourStateBit::Unknown))
+            .collect();
+        let waits = vec![None; plan.processes.len()];
+        Self {
+            plan,
+            store: Store {
+                values,
+                deferred: Vec::new(),
+                driven: BTreeMap::new(),
+            },
+            waits,
+        }
+    }
+
+    fn signal(&self, name: &str) -> DigitalSignalId {
+        self.plan
+            .signals
+            .iter()
+            .find(|signal| signal.name == name)
+            .unwrap_or_else(|| panic!("no elaborated signal named {name}"))
+            .id
+    }
+
+    fn set(&mut self, name: &str, spelling: &str) {
+        let id = self.signal(name);
+        self.store.values[usize::from(id)] = parse_value(spelling);
+    }
+
+    fn get(&self, name: &str) -> String {
+        self.store.values[usize::from(self.signal(name))].spelling()
+    }
+
+    /// Run every process from its entry, which is what a kernel does once at
+    /// the start of a simulation.
+    fn start_all(&mut self) {
+        for index in 0..self.plan.processes.len() {
+            let outcome = start(&self.plan, &self.plan.processes[index], &mut self.store)
+                .expect("the process must run");
+            self.record(index, outcome);
+        }
+    }
+
+    fn record(&mut self, index: usize, outcome: DigitalProcessOutcome) {
+        self.waits[index] = match outcome {
+            DigitalProcessOutcome::Suspended(suspension) => Some(suspension.into_parts()),
+            DigitalProcessOutcome::Finished => None,
+        };
+    }
+
+    /// Apply every driver's latest contribution to the net it drives.
+    ///
+    /// A stand-in for the kernel's resolver, and no more than that: a net with
+    /// two drivers has two contributions and a table between them, which is
+    /// not the compiler's, so a fixture that reaches one is refused here
+    /// rather than guessed at.
+    fn resolve_drivers(&mut self) {
+        let drives: Vec<DigitalDrive> = self.store.driven.values().cloned().collect();
+        for drive in drives {
+            let count = self.plan.drivers_of(drive.driver.signal).count();
+            assert_eq!(
+                count, 1,
+                "multi-driver resolution belongs to the kernel; signal {:?} has {count} drivers",
+                drive.driver.signal
+            );
+            apply_deferred(
+                &self.plan,
+                &mut self.store,
+                &DigitalDeferredUpdate {
+                    target: drive.target.clone(),
+                    value: drive.value.clone(),
+                    region: DigitalSchedulingRegion::Active,
+                },
+            )
+            .expect("a drive must apply");
+        }
+    }
+
+    /// Relax the continuous drivers to their fixed point.
+    ///
+    /// Every driver re-evaluates and re-drives on each pass, so a combinational
+    /// network settles in as many passes as it has levels. Convergence is
+    /// asserted rather than assumed: a network that never settles is a
+    /// lowering defect, not a test that needs more passes.
+    fn settle(&mut self) {
+        for _ in 0..16 {
+            let before = self.store.values.clone();
+            for index in 0..self.plan.processes.len() {
+                if self.plan.processes[index].kind != DigitalProcessKind::ContinuousAssign {
+                    continue;
+                }
+                let Some((_, state)) = self.waits[index].clone() else {
+                    continue;
+                };
+                let outcome = resume(
+                    &self.plan,
+                    &self.plan.processes[index],
+                    &state,
+                    &mut self.store,
+                )
+                .expect("a driver must resume");
+                self.record(index, outcome);
+            }
+            self.resolve_drivers();
+            if self.store.values == before {
+                return;
+            }
+        }
+        panic!("the driver network did not settle");
+    }
+
+    /// Move one signal and resume whatever that transition satisfies.
+    ///
+    /// The sensitivity test is the interpreter's own
+    /// [`any_term_is_satisfied`], so a process wakes here for exactly the
+    /// reason a kernel would wake it.
+    fn transition(&mut self, name: &str, spelling: &str) {
+        let id = self.signal(name);
+        let before = self.store.values[usize::from(id)].clone();
+        let after = parse_value(spelling);
+        self.store.values[usize::from(id)] = after.clone();
+
+        let woken: Vec<usize> = (0..self.plan.processes.len())
+            .filter(|index| match &self.waits[*index] {
+                Some((DigitalWaitRequest::Event(terms), _)) => {
+                    any_term_is_satisfied(terms, id, &before, &after)
+                }
+                _ => false,
+            })
+            .collect();
+        for index in woken {
+            let state = self.waits[index]
+                .as_ref()
+                .map(|(_, state)| state.clone())
+                .expect("the process is suspended");
+            let outcome = resume(
+                &self.plan,
+                &self.plan.processes[index],
+                &state,
+                &mut self.store,
+            )
+            .expect("the woken process must resume");
+            self.record(index, outcome);
+        }
+
+        // Section 11: the nonblocking updates of the slot land after every
+        // process in it has run, and the drivers settle on what they wrote.
+        let updates = std::mem::take(&mut self.store.deferred);
+        for update in &updates {
+            apply_deferred(&self.plan, &mut self.store, update).expect("an update must apply");
+        }
+        self.settle();
+    }
+}
+
+/// A gate library and a two-level structural design over it.
+const NAND2: &str = "module nand2(y, a, b);\n\
+                     \x20   output y;\n\
+                     \x20   input a, b;\n\
+                     \x20   wire y, a, b;\n\
+                     \x20   assign y = ~(a & b);\n\
+                     endmodule\n";
+
+fn structural(child: &str, top_section: &str) -> String {
+    format!(
+        "{child}\n\
+         module top(p, n);\n\
+         \x20   inout p, n;\n\
+         \x20   electrical p, n;\n\
+         {top_section}\n\
+         \x20   analog I(p, n) <+ V(p, n);\n\
+         endmodule\n"
+    )
+}
+
+/// A half adder built from two gate instances computes what a half adder
+/// computes. The point is not the arithmetic: it is that two instances of two
+/// different modules, connected through the parent's nets, evaluate together.
+#[test]
+fn a_structural_half_adder_computes_its_truth_table() {
+    let library = "module xor2(y, a, b);\n\
+                   \x20   output y;\n\
+                   \x20   input a, b;\n\
+                   \x20   wire y, a, b;\n\
+                   \x20   assign y = a ^ b;\n\
+                   endmodule\n\
+                   module and2(y, a, b);\n\
+                   \x20   output y;\n\
+                   \x20   input a, b;\n\
+                   \x20   wire y, a, b;\n\
+                   \x20   assign y = a & b;\n\
+                   endmodule\n";
+    let source = structural(
+        library,
+        "    wire a, b, sum, carry;\n\
+     \x20   xor2 x1(sum, a, b);\n\
+     \x20   and2 a1(carry, a, b);",
+    );
+
+    for (a, b) in [("0", "0"), ("0", "1"), ("1", "0"), ("1", "1")] {
+        let mut design = Design::new(&source, "top");
+        design.set("a", a);
+        design.set("b", b);
+        design.start_all();
+        design.resolve_drivers();
+        design.settle();
+
+        let expected_sum = u8::from((a == "1") ^ (b == "1"));
+        let expected_carry = u8::from((a == "1") && (b == "1"));
+        assert_eq!(design.get("sum"), expected_sum.to_string(), "a={a} b={b}");
+        assert_eq!(
+            design.get("carry"),
+            expected_carry.to_string(),
+            "a={a} b={b}"
+        );
+    }
+}
+
+/// Two levels of hierarchy: the top instantiates an AND that is itself two
+/// NAND instances. Nothing in the plan says so — there is one flat network of
+/// four nets and two drivers — and it computes `a & b`.
+#[test]
+fn a_two_level_hierarchy_computes_through_both_levels() {
+    let library = format!(
+        "{NAND2}\
+         module and2(y, a, b);\n\
+         \x20   output y;\n\
+         \x20   input a, b;\n\
+         \x20   wire y, a, b, n1;\n\
+         \x20   nand2 g1(n1, a, b);\n\
+         \x20   nand2 g2(y, n1, n1);\n\
+         endmodule\n"
+    );
+    let source = structural(&library, "    wire a, b, y;\n     and2 u1(y, a, b);");
+
+    for (a, b) in [("0", "0"), ("0", "1"), ("1", "0"), ("1", "1")] {
+        let mut design = Design::new(&source, "top");
+        // The elaborated design is flat: the inner net is the only one that
+        // needed a hierarchical name.
+        assert_eq!(design.plan.signals.len(), 4);
+        assert_eq!(design.plan.processes.len(), 2);
+        design.set("a", a);
+        design.set("b", b);
+        design.start_all();
+        design.resolve_drivers();
+        design.settle();
+        let expected = u8::from((a == "1") && (b == "1"));
+        assert_eq!(design.get("y"), expected.to_string(), "a={a} b={b}");
+    }
+}
+
+/// The ISCAS-85 c17 benchmark, six instances of one gate module, over every
+/// one of its thirty-two input vectors.
+///
+/// Six instances of one module is the case a flattening that lost identity
+/// would get wrong in a way no smaller fixture would show: the gates share a
+/// source module, three nets fan out to two gates each, and the answer depends
+/// on every instance having evaluated its own inputs.
+#[test]
+fn the_c17_benchmark_computes_over_its_whole_input_space() {
+    let source = structural(
+        NAND2,
+        "    wire n1, n2, n3, n6, n7;\n\
+     \x20   wire n10, n11, n16, n19, n22, n23;\n\
+     \x20   nand2 g10(n10, n1, n3);\n\
+     \x20   nand2 g11(n11, n3, n6);\n\
+     \x20   nand2 g16(n16, n2, n11);\n\
+     \x20   nand2 g19(n19, n11, n7);\n\
+     \x20   nand2 g22(n22, n10, n16);\n\
+     \x20   nand2 g23(n23, n16, n19);",
+    );
+
+    for vector in 0u8..32 {
+        let bit = |position: u8| u8::from(vector & (1 << position) != 0);
+        let (n1, n2, n3, n6, n7) = (bit(0), bit(1), bit(2), bit(3), bit(4));
+        // An independent evaluation of the same netlist, which is what makes
+        // this a check rather than a restatement of the compiler's answer.
+        let nand = |x: u8, y: u8| 1 - (x & y);
+        let n10 = nand(n1, n3);
+        let n11 = nand(n3, n6);
+        let n16 = nand(n2, n11);
+        let n19 = nand(n11, n7);
+        let n22 = nand(n10, n16);
+        let n23 = nand(n16, n19);
+
+        let mut design = Design::new(&source, "top");
+        for (name, value) in [("n1", n1), ("n2", n2), ("n3", n3), ("n6", n6), ("n7", n7)] {
+            design.set(name, &value.to_string());
+        }
+        design.start_all();
+        design.resolve_drivers();
+        design.settle();
+        assert_eq!(design.get("n22"), n22.to_string(), "vector {vector:05b}");
+        assert_eq!(design.get("n23"), n23.to_string(), "vector {vector:05b}");
+    }
+}
+
+/// A two-stage shift register: two instances of one flip-flop module, clocked
+/// together.
+///
+/// The sequential case, and the one that needs per-instance process identity —
+/// each edge resumes two processes, each writing its own instance's variable —
+/// and the implicit driver of IEEE 1364-2005 section 12.3.9.2, which is what
+/// carries each instance's `reg` out onto the net the next stage reads.
+#[test]
+fn a_two_stage_shift_register_shifts_one_stage_per_edge() {
+    let source = structural(
+        "module dff(q, clk, d);\n\
+         \x20   output q;\n\
+         \x20   input clk, d;\n\
+         \x20   reg q;\n\
+         \x20   wire clk, d;\n\
+         \x20   always @(posedge clk) q <= d;\n\
+         endmodule\n",
+        "    wire clk, d, q1, q2;\n\
+     \x20   dff u1(.q(q1), .clk(clk), .d(d));\n\
+     \x20   dff u2(.q(q2), .clk(clk), .d(q1));",
+    );
+    let mut design = Design::new(&source, "top");
+    design.set("clk", "0");
+    design.set("d", "1");
+    design.set("u1.q", "0");
+    design.set("u2.q", "0");
+    design.start_all();
+    design.resolve_drivers();
+    design.settle();
+    assert_eq!(design.get("q1"), "0");
+    assert_eq!(design.get("q2"), "0");
+
+    // First edge: the `1` on `d` reaches the first stage only. Both flops
+    // sampled at the same instant, so the second saw the *old* `q1`, which is
+    // the whole reason a nonblocking assignment exists.
+    design.transition("clk", "1");
+    assert_eq!(design.get("q1"), "1");
+    assert_eq!(design.get("q2"), "0");
+
+    design.transition("clk", "0");
+    assert_eq!(design.get("q1"), "1", "nothing happens on the falling edge");
+    assert_eq!(design.get("q2"), "0");
+
+    design.transition("clk", "1");
+    assert_eq!(design.get("q1"), "1");
+    assert_eq!(design.get("q2"), "1", "the second edge shifts it on");
+}
+
+/// Two instances driving one net are two contributions, kept apart.
+///
+/// The execution half of the multi-driver pin: the store holds one value per
+/// driver identity, so nothing has overwritten anything. A collapse that
+/// merged the two output ports into one driver of the net would have destroyed
+/// one of these before a resolver could see it, and no assertion about the
+/// net's *value* would have noticed.
+#[test]
+fn two_instances_driving_one_net_contribute_separately() {
+    let source = structural(
+        "module drv(y, a);\n\
+         \x20   output y;\n\
+         \x20   input a;\n\
+         \x20   wire y, a;\n\
+         \x20   assign y = a;\n\
+         endmodule\n",
+        "    wire a, b, bus;\n\
+     \x20   drv d1(bus, a);\n\
+     \x20   drv d2(bus, b);",
+    );
+    let mut design = Design::new(&source, "top");
+    design.set("a", "1");
+    design.set("b", "0");
+    design.start_all();
+
+    let bus = design.signal("bus");
+    let drivers: Vec<DigitalDriverId> = design.plan.drivers_of(bus).map(|d| d.id).collect();
+    assert_eq!(drivers.len(), 2);
+    assert_eq!(design.store.driven.len(), 2, "one contribution per driver");
+    let contributions: Vec<String> = drivers
+        .iter()
+        .map(|driver| design.store.driven[driver].value.spelling())
+        .collect();
+    assert_eq!(
+        contributions,
+        vec!["1".to_string(), "0".to_string()],
+        "each instance published what it computed, and neither overwrote the other"
+    );
+}
