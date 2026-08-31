@@ -45,7 +45,7 @@
 //! makes a run's ordering depend on what else in the process scheduled an event
 //! first. That is not reproducible, and this kernel does not inherit it.
 
-use crate::xspice::EventValue;
+use super::EventValue;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::mem;

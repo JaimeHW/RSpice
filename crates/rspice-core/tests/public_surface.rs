@@ -141,7 +141,7 @@ use rspice_core::analysis::harmonic_balance::{
 /// and narrowing them is the change that should lower this number again.
 ///
 /// +28 is the discrete-event scheduler kernel in
-/// `engine::event_scheduler`: the tick time base (`TimeResolution` and its
+/// `xspice::event_scheduler`: the tick time base (`TimeResolution` and its
 /// five operations plus `MAX_EXACT_TICKS`), the stratified region vocabulary
 /// (`SchedulerRegion`, `ORDERED`), the event payload (`EventTarget`,
 /// `ScheduledEvent`), the typed failure surface (`SchedulerError`,

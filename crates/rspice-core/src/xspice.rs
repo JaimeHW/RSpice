@@ -44,6 +44,15 @@ mod context;
 mod data_file;
 mod digital;
 mod event;
+// The discrete-event scheduler kernel for the digital substrate.
+//
+// It lives here rather than under `engine` because of what the layering
+// ratchet in `tests/module_layering.rs` permits: the kernel's payload is
+// `EventValue`, which is this module's, and its consumers are this module's
+// `instance` (rank 9) and `circuit::external_models` (rank 10). A kernel at
+// `engine` (rank 12) would be an upward edge from both. Rank 9 is the only
+// rank that can name `EventValue` and be named by everything that schedules.
+pub mod event_scheduler;
 mod external;
 pub mod ifspec;
 mod instance;

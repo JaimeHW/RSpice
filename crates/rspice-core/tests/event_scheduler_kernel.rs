@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use std::env;
 use std::process::Command;
 
-use rspice_core::engine::event_scheduler::{
+use rspice_core::xspice::event_scheduler::{
     EventScheduler, EventTarget, OscillationCause, SchedulerError, SchedulerLimits,
     SchedulerRegion, TimeResolution,
 };
