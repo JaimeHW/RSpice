@@ -69,8 +69,12 @@ pub use host::DigitalRunError;
 /// simulated time.
 ///
 /// [`DigitalWaitRequest::Delay`]: rspice_veriloga::canonical_ir::digital_eval::DigitalWaitRequest::Delay
-pub const TIME_UNIT_RULING: &str = "one tick is 1 ns; one Verilog time unit is one tick; \
-                                    a `timescale directive is refused rather than applied";
+/// Crate-private because a caller does not need the string: the refusal that
+/// cites it — [`DigitalRunError::TimescaleDirective`] — prints it, and the
+/// documentation above is what a reader comparing this against another
+/// simulator actually has to read.
+pub(crate) const TIME_UNIT_RULING: &str = "one tick is 1 ns; one Verilog time unit is one tick; \
+                                           a `timescale directive is refused rather than applied";
 
 /// Decimal exponent of the tick, as [`TimeResolution`] spells it.
 const TIME_UNIT_EXPONENT: i8 = -9;

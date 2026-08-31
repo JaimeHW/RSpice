@@ -162,13 +162,28 @@ use rspice_core::analysis::harmonic_balance::{
 /// iteration so a network that will not quiet is diagnosed rather than
 /// looping). Each is driven by the same integration test.
 ///
-/// The current net change is -20, from 4,291 to 4,271. Those +3 are in it, and
-/// the rehost itself removes 23: `xspice::Event`, `xspice::EventQueue` and
+/// The previous net change was -20, from 4,291 to 4,271. Those +3 were in it,
+/// and the rehost itself removed 23: `xspice::Event`, `xspice::EventQueue` and
 /// `EventQueueStats` with their constructors, scheduling, draining,
 /// cancellation and statistics methods, and `XspiceInstance::schedule_events`,
 /// which no longer names a public queue type. The kernel is what schedules
 /// now, and nothing outside this crate ever named the queue it replaced.
-const MAX_PUBLIC_ITEMS: usize = 4271;
+///
+/// The latest raise is +8, from 4,271 to 4,279: the whole entry path for
+/// executing digital Verilog, which the conformance suite's oracle harness
+/// calls. It is the second case the doc above admits — a deliberate new API a
+/// frontend is meant to call — and it is the *entire* API, not a helper that
+/// leaked:
+///
+/// `xspice::verilog::run_digital_verilog` is the call. `DigitalStimulus`,
+/// `DigitalPort` and `DigitalClock` are its input; `DigitalRunReport` and
+/// `DigitalObservation` are its output; `DigitalRunError` is its refusal, which
+/// costs two statements because the type lives in the crate-private `host`
+/// module and is re-exported. Everything else the host and the signal store
+/// declare — the store itself, the resolution table, the process scheduler — is
+/// `pub(crate)`, as is the time-unit ruling, which the refusal prints rather
+/// than a caller reading.
+const MAX_PUBLIC_ITEMS: usize = 4279;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
