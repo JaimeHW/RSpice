@@ -105,7 +105,9 @@ fn digital(value: u8) -> EventValue {
 fn drain(scheduler: &mut EventScheduler, bound: u64) -> Vec<(u64, u64)> {
     let mut executed = Vec::new();
     scheduler
-        .run_due_events(bound, |event, _| executed.push((event.tick, event.sequence)))
+        .run_due_events(bound, |event, _| {
+            executed.push((event.tick, event.sequence))
+        })
         .expect("a queue nothing feeds back into settles");
     executed
 }
@@ -153,7 +155,8 @@ fn run_temp_deck(
     fs::write(dir.join("stim.stim"), stimulus).expect("write d_source stimulus");
     let deck_path = dir.join("deck.cir");
     fs::write(&deck_path, deck).expect("write deck");
-    let netlist = Netlist::parse_file(&deck_path).unwrap_or_else(|err| panic!("deck parses: {err}"));
+    let netlist =
+        Netlist::parse_file(&deck_path).unwrap_or_else(|err| panic!("deck parses: {err}"));
     let result = Engine::default()
         .run_tran(&netlist, tstop, max_step)
         .expect("transient solves");
@@ -212,9 +215,24 @@ fn d5_c1_a_rejected_step_rolls_the_event_world_back_completely() {
     let mut live = scheduler();
     // Three events on one node/port/instance, distinguished only by driver
     // index, so the restored image has to preserve that field to behave.
-    live.schedule_superseding_at(10, SchedulerRegion::Active, target("u1", "q", 7, 0), digital(1));
-    live.schedule_superseding_at(20, SchedulerRegion::Active, target("u1", "q", 7, 1), digital(0));
-    live.schedule_superseding_at(30, SchedulerRegion::Active, target("u1", "q", 7, 2), digital(1));
+    live.schedule_superseding_at(
+        10,
+        SchedulerRegion::Active,
+        target("u1", "q", 7, 0),
+        digital(1),
+    );
+    live.schedule_superseding_at(
+        20,
+        SchedulerRegion::Active,
+        target("u1", "q", 7, 1),
+        digital(0),
+    );
+    live.schedule_superseding_at(
+        30,
+        SchedulerRegion::Active,
+        target("u1", "q", 7, 2),
+        digital(1),
+    );
 
     // Settle one timepoint, so the snapshot is taken mid-run rather than from
     // a virgin scheduler: `current_tick` and the sequence counter have moved.
@@ -227,7 +245,12 @@ fn d5_c1_a_rejected_step_rolls_the_event_world_back_completely() {
     // The rejected attempt: it drains everything and schedules more.
     let rejected_order = drain(&mut live, 40);
     assert_eq!(rejected_order, vec![(20, 1), (30, 2)]);
-    live.schedule_superseding_at(50, SchedulerRegion::Active, target("u1", "q", 7, 0), digital(0));
+    live.schedule_superseding_at(
+        50,
+        SchedulerRegion::Active,
+        target("u1", "q", 7, 0),
+        digital(0),
+    );
     assert_eq!(live.current_tick(), 40);
 
     // Now retry from the image, and check each observable separately.
@@ -244,7 +267,12 @@ fn d5_c1_a_rejected_step_rolls_the_event_world_back_completely() {
     );
     assert_eq!(
         restored
-            .schedule_at(60, SchedulerRegion::Active, target("u2", "d", 8, 0), digital(1))
+            .schedule_at(
+                60,
+                SchedulerRegion::Active,
+                target("u2", "d", 8, 0),
+                digital(1)
+            )
             .expect("a tick above the horizon is schedulable"),
         3,
         "the sequence counter must resume where the accepted image left it, \
@@ -335,7 +363,10 @@ fn d5_c2_xspice_event_tick_encoding_is_the_ieee_bit_pattern() {
             .iter()
             .map(|time| time.to_bits())
             .collect::<Vec<_>>(),
-        awkward.iter().map(|time| time.to_bits()).collect::<Vec<_>>(),
+        awkward
+            .iter()
+            .map(|time| time.to_bits())
+            .collect::<Vec<_>>(),
         "every scheduled event time must come back bit-identical"
     );
 }
@@ -356,7 +387,10 @@ fn d5_c2_the_step_controller_snaps_back_to_the_exact_event_time() {
 
     let previous = 0.9e-9;
     let (dt, lands) = breakpoints.limit_step(previous, 1.0e-9);
-    assert!(lands, "a proposal that reaches the event time must be cut to it");
+    assert!(
+        lands,
+        "a proposal that reaches the event time must be cut to it"
+    );
 
     // The subtraction/addition round trip is exactly what needs correcting.
     let naive = previous + dt;
