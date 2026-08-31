@@ -2657,26 +2657,368 @@ pub mod autodiff {
         ctx
     }
 
+    #[derive(Clone, Copy)]
+    enum SimplifiedConstant {
+        Value(f64),
+        Other,
+    }
+
+    impl SimplifiedConstant {
+        fn is_zero(self) -> bool {
+            matches!(self, Self::Value(value) if value == 0.0)
+        }
+    }
+
+    /// Return the constant produced by [`simplify`], if any. Results are
+    /// memoized by expression identity so zero-factor and constant-condition
+    /// checks stay linear even for deeply skewed expression trees.
+    fn simplified_constant(
+        expr: &IrExpr,
+        constants: &mut HashMap<*const IrExpr, SimplifiedConstant>,
+    ) -> SimplifiedConstant {
+        let key = std::ptr::from_ref(expr);
+        if let Some(value) = constants.get(&key) {
+            return *value;
+        }
+        let value = match expr {
+            IrExpr::Const(value) => SimplifiedConstant::Value(*value),
+            IrExpr::Binary(op, left, right) => {
+                let left = simplified_constant(left, constants);
+                let right = simplified_constant(right, constants);
+                if let (SimplifiedConstant::Value(left), SimplifiedConstant::Value(right)) =
+                    (left, right)
+                {
+                    match op {
+                        BinaryOp::Add => SimplifiedConstant::Value(left + right),
+                        BinaryOp::Sub => SimplifiedConstant::Value(left - right),
+                        BinaryOp::Mul => SimplifiedConstant::Value(left * right),
+                        BinaryOp::Div => SimplifiedConstant::Value(left / right),
+                        BinaryOp::Pow => SimplifiedConstant::Value(left.powf(right)),
+                        _ => SimplifiedConstant::Other,
+                    }
+                } else {
+                    match op {
+                        BinaryOp::Add if left.is_zero() => right,
+                        BinaryOp::Add if right.is_zero() => left,
+                        BinaryOp::Sub if right.is_zero() => left,
+                        BinaryOp::Mul if left.is_zero() || right.is_zero() => {
+                            SimplifiedConstant::Value(0.0)
+                        }
+                        BinaryOp::Mul if matches!(left, SimplifiedConstant::Value(1.0)) => right,
+                        BinaryOp::Mul if matches!(right, SimplifiedConstant::Value(1.0)) => left,
+                        BinaryOp::Div if left.is_zero() => SimplifiedConstant::Value(0.0),
+                        BinaryOp::Div if matches!(right, SimplifiedConstant::Value(1.0)) => left,
+                        _ => SimplifiedConstant::Other,
+                    }
+                }
+            }
+            IrExpr::Unary(op, inner) => {
+                let inner = simplified_constant(inner, constants);
+                match (op, inner) {
+                    (UnaryOp::Neg, SimplifiedConstant::Value(value)) => {
+                        SimplifiedConstant::Value(-value)
+                    }
+                    (UnaryOp::Pos, value) => value,
+                    _ => SimplifiedConstant::Other,
+                }
+            }
+            IrExpr::Conditional(condition, then_expr, else_expr) => {
+                let condition = simplified_constant(condition, constants);
+                let then_expr = simplified_constant(then_expr, constants);
+                let else_expr = simplified_constant(else_expr, constants);
+                match condition {
+                    SimplifiedConstant::Value(value) if value != 0.0 => then_expr,
+                    SimplifiedConstant::Value(_) => else_expr,
+                    SimplifiedConstant::Other => SimplifiedConstant::Other,
+                }
+            }
+            IrExpr::Call(_, arguments) => {
+                for argument in arguments {
+                    simplified_constant(argument, constants);
+                }
+                SimplifiedConstant::Other
+            }
+            IrExpr::DdtCompanion(inner) | IrExpr::IdtCompanion(inner) => {
+                if simplified_constant(inner, constants).is_zero() {
+                    SimplifiedConstant::Value(0.0)
+                } else {
+                    SimplifiedConstant::Other
+                }
+            }
+            _ => SimplifiedConstant::Other,
+        };
+        constants.insert(key, value);
+        value
+    }
+
+    /// Collect the independent noise processes that can affect `expr`.
+    ///
+    /// This is the set-valued counterpart of [`differentiate_with_shadows`]
+    /// for [`DerivativeWrt::Noise`].  Keeping the traversal here in lock-step
+    /// with that routine is important: operands which are metadata or merely
+    /// select a value (noise PSDs, array indices, conditional predicates, and
+    /// stateful-operator timing arguments) are deliberately not traversed.
+    /// Actual derivative expressions are still built later, after liveness
+    /// has removed processes which cannot reach a contribution.
+    fn collect_expression_noise_axes(
+        expr: &IrExpr,
+        deps: &HashMap<SmolStr, BTreeSet<usize>>,
+        num_processes: usize,
+        constants: &mut HashMap<*const IrExpr, SimplifiedConstant>,
+        axes: &mut BTreeSet<usize>,
+    ) {
+        macro_rules! collect {
+            ($value:expr) => {
+                collect_expression_noise_axes($value, deps, num_processes, constants, axes)
+            };
+        }
+        match expr {
+            IrExpr::Var(name) => {
+                if let Some(processes) = deps.get(name) {
+                    axes.extend(processes.iter().copied());
+                }
+            }
+            // A runtime index selects an element; it is not part of the
+            // differentiable value path.
+            IrExpr::VarIndexed { array, .. } => {
+                if let Some(processes) = deps.get(array) {
+                    axes.extend(processes.iter().copied());
+                }
+            }
+            IrExpr::WhiteNoise { site, .. }
+            | IrExpr::FlickerNoise { site, .. }
+            | IrExpr::NoiseTable { site, .. } => {
+                let process = site.ordinal as usize;
+                if process < num_processes {
+                    axes.insert(process);
+                }
+            }
+            IrExpr::Binary(op, left, right) => match op {
+                BinaryOp::Add | BinaryOp::Sub => {
+                    collect!(left);
+                    collect!(right);
+                }
+                BinaryOp::Mul => {
+                    // `simplify` removes either product-rule term when its
+                    // primal multiplier is identically zero.
+                    if !simplified_constant(right, constants).is_zero() {
+                        collect!(left);
+                    }
+                    if !simplified_constant(left, constants).is_zero() {
+                        collect!(right);
+                    }
+                }
+                BinaryOp::Div => {
+                    // The quotient numerator is dl*right - left*dr.
+                    // Keep numerator provenance even for an identically zero
+                    // denominator: symbolic AD produces 0/0 (NaN), not a zero
+                    // derivative, and the runtime must diagnose that singular
+                    // expression instead of pruning its process as dead.
+                    collect!(left);
+                    if !simplified_constant(left, constants).is_zero() {
+                        collect!(right);
+                    }
+                }
+                BinaryOp::Pow => {
+                    if let IrExpr::Const(exponent) = right.as_ref() {
+                        if *exponent != 0.0 {
+                            collect!(left);
+                        }
+                    } else {
+                        // d(u^v) contains v' and, unless v is identically
+                        // zero, u'.
+                        collect!(right);
+                        if !simplified_constant(right, constants).is_zero() {
+                            collect!(left);
+                        }
+                    }
+                }
+                // These operators are piecewise constant under the Jacobian
+                // convention used by `differentiate_with_shadows`.
+                BinaryOp::Mod
+                | BinaryOp::Eq
+                | BinaryOp::Ne
+                | BinaryOp::Lt
+                | BinaryOp::Le
+                | BinaryOp::Gt
+                | BinaryOp::Ge
+                | BinaryOp::And
+                | BinaryOp::Or
+                | BinaryOp::BitAnd
+                | BinaryOp::BitOr
+                | BinaryOp::BitXor
+                | BinaryOp::Shl
+                | BinaryOp::Shr => {}
+            },
+            IrExpr::Unary(UnaryOp::Neg | UnaryOp::Pos, inner) => collect!(inner),
+            IrExpr::Unary(UnaryOp::Not | UnaryOp::BitNot, _) => {}
+            IrExpr::Conditional(condition, then_expr, else_expr) => {
+                // The predicate selects a derivative branch but is not itself
+                // differentiated. Match `simplify`'s constant-branch fold.
+                match simplified_constant(condition, constants) {
+                    SimplifiedConstant::Value(value) if value != 0.0 => collect!(then_expr),
+                    SimplifiedConstant::Value(_) => collect!(else_expr),
+                    SimplifiedConstant::Other => {
+                        collect!(then_expr);
+                        collect!(else_expr);
+                    }
+                }
+            }
+            IrExpr::Call(function, arguments) => match (function, arguments.as_slice()) {
+                (IrFunction::Floor | IrFunction::Ceil, [_]) => {}
+                (
+                    IrFunction::Abs
+                    | IrFunction::Sqrt
+                    | IrFunction::Exp
+                    | IrFunction::LimitedExp
+                    | IrFunction::Log
+                    | IrFunction::Log10
+                    | IrFunction::Sin
+                    | IrFunction::Cos
+                    | IrFunction::Tan
+                    | IrFunction::Sinh
+                    | IrFunction::Cosh
+                    | IrFunction::Tanh
+                    | IrFunction::Asin
+                    | IrFunction::Acos
+                    | IrFunction::Atan
+                    | IrFunction::Asinh
+                    | IrFunction::Acosh
+                    | IrFunction::Atanh,
+                    [inner],
+                ) => collect!(inner),
+                (IrFunction::Atan2, [ordinate, abscissa]) => {
+                    if !simplified_constant(abscissa, constants).is_zero() {
+                        collect!(ordinate);
+                    }
+                    if !simplified_constant(ordinate, constants).is_zero() {
+                        collect!(abscissa);
+                    }
+                }
+                (IrFunction::Min | IrFunction::Max, [left, right]) => {
+                    collect!(left);
+                    collect!(right);
+                }
+                (IrFunction::Pow, [base, exponent]) => {
+                    if let IrExpr::Const(exponent) = exponent {
+                        if *exponent != 0.0 {
+                            collect!(base);
+                        }
+                    } else {
+                        collect!(exponent);
+                        if !simplified_constant(exponent, constants).is_zero() {
+                            collect!(base);
+                        }
+                    }
+                }
+                // Malformed calls differentiate to zero and are diagnosed by
+                // their construction path.
+                _ => {}
+            },
+            IrExpr::Limexp(inner)
+            | IrExpr::Ddt(inner)
+            | IrExpr::CanonicalLimit(inner)
+            | IrExpr::LaplaceND { expr: inner, .. }
+            | IrExpr::LaplaceZP { expr: inner, .. }
+            | IrExpr::LaplaceNDDerivative { expr: inner, .. }
+            | IrExpr::LaplaceZPDerivative { expr: inner, .. }
+            | IrExpr::ZiFilter { expr: inner, .. }
+            | IrExpr::ZiFilterDerivative { expr: inner, .. } => collect!(inner),
+            IrExpr::Idt(inner, _) | IrExpr::Limit(inner, _) => collect!(inner),
+            IrExpr::IdtMod { expr: inner, .. } => collect!(inner),
+            IrExpr::TableLookup { input, .. } => collect!(input),
+            IrExpr::AbsDelay {
+                expr: input,
+                delay_time,
+                ..
+            } => {
+                collect!(input);
+                collect!(delay_time);
+            }
+            IrExpr::AbsDelayDerivative {
+                input_derivative,
+                delay_derivative,
+                ..
+            } => {
+                collect!(input_derivative);
+                collect!(delay_derivative);
+            }
+            IrExpr::Transition { expr: input, .. } => collect!(input),
+            IrExpr::TransitionDerivative {
+                input_derivative, ..
+            } => collect!(input_derivative),
+            IrExpr::Slew {
+                expr: input,
+                max_pos_slew,
+                max_neg_slew,
+                ..
+            } => {
+                collect!(input);
+                if let Some(rate) = max_pos_slew {
+                    collect!(rate);
+                }
+                if let Some(rate) = max_neg_slew {
+                    collect!(rate);
+                }
+            }
+            IrExpr::SlewDerivative {
+                input_derivative,
+                max_pos_slew_derivative,
+                max_neg_slew_derivative,
+                ..
+            } => {
+                collect!(input_derivative);
+                if let Some(rate) = max_pos_slew_derivative {
+                    collect!(rate);
+                }
+                if let Some(rate) = max_neg_slew_derivative {
+                    collect!(rate);
+                }
+            }
+            IrExpr::Ddx { .. } => {
+                // ddx is resolved along its solver axis before the outer noise
+                // derivative. Preserve that ordering; walking the raw operand
+                // would incorrectly retain noise which its ddx eliminates.
+                let shadows = ShadowContext {
+                    noise_shadowed: deps.clone(),
+                    ..ShadowContext::default()
+                };
+                let resolved = resolve_ddx(expr, &shadows);
+                axes.extend(expression_noise_axes(&resolved, deps, num_processes));
+            }
+            // Solver probes, parameters, analysis/event queries, companion
+            // derivative carriers, and table slopes are constant on a noise
+            // realization axis.
+            IrExpr::Const(_)
+            | IrExpr::Param(_)
+            | IrExpr::ParamGiven(_)
+            | IrExpr::Voltage(_, _)
+            | IrExpr::Current(_, _)
+            | IrExpr::BranchCurrent(_)
+            | IrExpr::Time
+            | IrExpr::Temperature
+            | IrExpr::Vt
+            | IrExpr::Mfactor
+            | IrExpr::PortConnected(_)
+            | IrExpr::Cross { .. }
+            | IrExpr::LastCrossing { .. }
+            | IrExpr::Analysis(_)
+            | IrExpr::Above { .. }
+            | IrExpr::Timer { .. }
+            | IrExpr::DdtCompanion(_)
+            | IrExpr::IdtCompanion(_)
+            | IrExpr::TableDerivative { .. } => {}
+        }
+    }
+
     fn expression_noise_axes(
         expr: &IrExpr,
         deps: &HashMap<SmolStr, BTreeSet<usize>>,
         num_processes: usize,
     ) -> BTreeSet<usize> {
-        let shadows = ShadowContext {
-            noise_shadowed: deps.clone(),
-            ..ShadowContext::default()
-        };
+        let mut constants = HashMap::new();
         let mut axes = BTreeSet::new();
-        for process in 0..num_processes {
-            let derivative = simplify(differentiate_with_shadows(
-                expr,
-                &DerivativeWrt::Noise(process),
-                &shadows,
-            ));
-            if !matches!(derivative, IrExpr::Const(value) if value == 0.0) {
-                axes.insert(process);
-            }
-        }
+        collect_expression_noise_axes(expr, deps, num_processes, &mut constants, &mut axes);
         axes
     }
 
@@ -2817,6 +3159,9 @@ pub mod autodiff {
             if !changed {
                 break;
             }
+        }
+        if deps.is_empty() {
+            return;
         }
         let live = shadow_liveness(&ir.assignments, &ir.variables, &ir.arrays, shadow_roots);
         deps.retain(|name, _| live.contains(name));
@@ -4309,6 +4654,239 @@ pub mod autodiff {
                 IrExpr::IdtCompanion(Box::new(inner))
             }
             other => other,
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn noise(process: u32) -> IrExpr {
+            IrExpr::WhiteNoise {
+                site: NoiseSiteId {
+                    source: 0,
+                    start: process,
+                    end: process + 1,
+                    ordinal: process,
+                },
+                power: Box::new(IrExpr::Const(1.0)),
+                name: None,
+            }
+        }
+
+        fn add(left: IrExpr, right: IrExpr) -> IrExpr {
+            IrExpr::Binary(BinaryOp::Add, Box::new(left), Box::new(right))
+        }
+
+        fn mul(left: IrExpr, right: IrExpr) -> IrExpr {
+            IrExpr::Binary(BinaryOp::Mul, Box::new(left), Box::new(right))
+        }
+
+        fn old_ad_axes(
+            expr: &IrExpr,
+            deps: &HashMap<SmolStr, BTreeSet<usize>>,
+            num_processes: usize,
+        ) -> BTreeSet<usize> {
+            let shadows = ShadowContext {
+                noise_shadowed: deps.clone(),
+                ..ShadowContext::default()
+            };
+            (0..num_processes)
+                .filter(|process| {
+                    let derivative = simplify(differentiate_with_shadows(
+                        expr,
+                        &DerivativeWrt::Noise(*process),
+                        &shadows,
+                    ));
+                    !matches!(derivative, IrExpr::Const(value) if value == 0.0)
+                })
+                .collect()
+        }
+
+        #[test]
+        fn structural_noise_axes_match_symbolic_ad_for_value_expressions() {
+            let deps = HashMap::from([
+                (SmolStr::new("assigned"), BTreeSet::from([2usize])),
+                (SmolStr::new("samples"), BTreeSet::from([3usize])),
+            ]);
+            let corpus = [
+                (
+                    "noise metadata is not a realization operand",
+                    IrExpr::WhiteNoise {
+                        site: NoiseSiteId {
+                            source: 0,
+                            start: 0,
+                            end: 1,
+                            ordinal: 0,
+                        },
+                        power: Box::new(noise(1)),
+                        name: None,
+                    },
+                ),
+                (
+                    "assigned variable and direct process",
+                    add(IrExpr::Var("assigned".into()), noise(0)),
+                ),
+                (
+                    "zero multiplier removes derivative",
+                    mul(IrExpr::Const(0.0), noise(0)),
+                ),
+                (
+                    "zero power removes derivative",
+                    IrExpr::Binary(
+                        BinaryOp::Pow,
+                        Box::new(noise(0)),
+                        Box::new(IrExpr::Const(0.0)),
+                    ),
+                ),
+                (
+                    "discrete operator has zero derivative",
+                    IrExpr::Binary(BinaryOp::Gt, Box::new(noise(0)), Box::new(noise(1))),
+                ),
+                (
+                    "constant conditional selects one derivative branch",
+                    IrExpr::Conditional(
+                        Box::new(IrExpr::Const(0.0)),
+                        Box::new(noise(0)),
+                        Box::new(noise(1)),
+                    ),
+                ),
+                (
+                    "continuous function follows its argument",
+                    IrExpr::Call(IrFunction::Exp, vec![noise(0)]),
+                ),
+                (
+                    "pow function follows binary-pow zero-exponent semantics",
+                    IrExpr::Call(IrFunction::Pow, vec![noise(0), IrExpr::Const(0.0)]),
+                ),
+                (
+                    "atan2 removes a derivative multiplied by zero",
+                    IrExpr::Call(IrFunction::Atan2, vec![noise(0), IrExpr::Const(0.0)]),
+                ),
+                (
+                    "piecewise-constant function has zero derivative",
+                    IrExpr::Call(IrFunction::Floor, vec![noise(0)]),
+                ),
+                (
+                    "ddx is resolved before noise provenance",
+                    IrExpr::Ddx {
+                        expr: Box::new(mul(noise(1), IrExpr::Voltage(0, usize::MAX))),
+                        axis: DdxAxis::Potential {
+                            pos: Some(0),
+                            neg: None,
+                        },
+                    },
+                ),
+                (
+                    "ddx can eliminate a noise-only value",
+                    IrExpr::Ddx {
+                        expr: Box::new(noise(1)),
+                        axis: DdxAxis::Potential {
+                            pos: Some(0),
+                            neg: None,
+                        },
+                    },
+                ),
+            ];
+
+            for (description, expr) in corpus {
+                assert_eq!(
+                    expression_noise_axes(&expr, &deps, 4),
+                    old_ad_axes(&expr, &deps, 4),
+                    "{description}"
+                );
+            }
+
+            let singular_division = IrExpr::Binary(
+                BinaryOp::Div,
+                Box::new(noise(0)),
+                Box::new(IrExpr::Const(0.0)),
+            );
+            assert_eq!(
+                expression_noise_axes(&singular_division, &deps, 1),
+                old_ad_axes(&singular_division, &deps, 1),
+                "a zero denominator must not prune numerator noise before runtime validation"
+            );
+        }
+
+        #[test]
+        fn structural_noise_axes_follow_only_stateful_derivative_operands() {
+            let deps = HashMap::from([(SmolStr::new("samples"), BTreeSet::from([3usize]))]);
+            let indexed = IrExpr::VarIndexed {
+                array: "samples".into(),
+                base: 0,
+                len: 4,
+                lower: 0,
+                index: Box::new(noise(1)),
+            };
+            assert_eq!(
+                expression_noise_axes(&indexed, &deps, 4),
+                BTreeSet::from([3]),
+                "runtime array reads follow the selected value, not the index"
+            );
+
+            let conditional = IrExpr::Conditional(
+                Box::new(noise(0)),
+                Box::new(noise(1)),
+                Box::new(IrExpr::Var("samples".into())),
+            );
+            assert_eq!(
+                expression_noise_axes(&conditional, &deps, 4),
+                BTreeSet::from([1, 3]),
+                "conditional predicates select a derivative branch but are not differentiated"
+            );
+
+            let absdelay = IrExpr::AbsDelay {
+                site: AbsDelaySiteId {
+                    source: 0,
+                    start: 0,
+                    end: 1,
+                    ordinal: 0,
+                },
+                expr: Box::new(noise(0)),
+                delay_time: Box::new(noise(1)),
+                max_delay: Some(Box::new(noise(2))),
+            };
+            assert_eq!(
+                expression_noise_axes(&absdelay, &deps, 4),
+                BTreeSet::from([0, 1]),
+                "absdelay differentiates its value and delay, not max-delay metadata"
+            );
+
+            let transition = IrExpr::Transition {
+                site: TransitionSiteId {
+                    source: 0,
+                    start: 0,
+                    end: 1,
+                    ordinal: 0,
+                },
+                expr: Box::new(noise(0)),
+                delay: Some(Box::new(noise(1))),
+                rise_time: Some(Box::new(noise(2))),
+                fall_time: Some(Box::new(noise(3))),
+            };
+            assert_eq!(
+                expression_noise_axes(&transition, &deps, 4),
+                BTreeSet::from([0]),
+                "transition timing operands are primal-only"
+            );
+
+            let slew = IrExpr::Slew {
+                site: SlewSiteId {
+                    source: 0,
+                    start: 0,
+                    end: 1,
+                    ordinal: 0,
+                },
+                expr: Box::new(noise(0)),
+                max_pos_slew: Some(Box::new(noise(1))),
+                max_neg_slew: Some(Box::new(noise(2))),
+            };
+            assert_eq!(
+                expression_noise_axes(&slew, &deps, 4),
+                BTreeSet::from([0, 1, 2]),
+                "slew has derivative action through its value and rate operands"
+            );
         }
     }
 }
