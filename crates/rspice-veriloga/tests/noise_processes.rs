@@ -395,6 +395,48 @@ endmodule
     }
 
     #[test]
+    fn canonical_metadata_observes_noise_analysis_step_lifecycle() {
+        let source = r#"
+module lifecycle_noise(p, n);
+    inout p, n; electrical p, n;
+    real power;
+    analog begin
+        power = 10.0;
+        @(initial_step("noise")) power = power + 1.0;
+        @(final_step("noise")) power = power + 2.0;
+        I(p, n) <+ white_noise(power, "lifecycle");
+    end
+endmodule
+"#;
+
+        for (initial, final_step, expected, phase) in [
+            (false, false, 10.0, "middle point"),
+            (false, true, 12.0, "final point of a multi-point analysis"),
+            (true, true, 13.0, "single-point analysis"),
+        ] {
+            let mut device = device(source);
+            device
+                .try_set_analysis_step(initial, final_step)
+                .expect("analysis-step lifecycle configures");
+
+            let selected_backend = device
+                .try_noise_sources(&[0.0])
+                .expect("selected backend noise metadata evaluates");
+            assert_eq!(selected_backend.len(), 1, "{phase}");
+            assert!(
+                (selected_backend[0].psd - expected).abs() < 1.0e-12,
+                "{phase}"
+            );
+
+            let grouped = device
+                .try_noise_processes_at_frequency(&[0.0], 1.0e3)
+                .expect("canonical grouped metadata evaluates");
+            assert_eq!(grouped.len(), 1, "{phase}");
+            assert!((grouped[0].psd - expected).abs() < 1.0e-12, "{phase}");
+        }
+    }
+
+    #[test]
     fn mismatched_canonical_artifact_is_rejected() {
         let compiler =
             rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions::default());
@@ -495,6 +537,69 @@ endmodule
                 "{error}"
             );
         }
+    }
+
+    #[test]
+    fn canonical_validator_rejects_corrupt_grouped_noise_injection_routing() {
+        use rspice_veriloga::codegen::StampIndex;
+
+        let source = r#"
+module corrupt_noise_routing(p, n);
+    inout p, n; electrical p, n;
+    analog I(p, n) <+ white_noise(1.0, "routing");
+endmodule
+"#;
+        let compiler =
+            rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions::default());
+        let model = compiler.compile(source).expect("noise model compiles");
+        let canonical = compiler
+            .compile_canonical_ir(source)
+            .expect("canonical noise model compiles");
+        VerilogADevice::try_new_with_canonical_ir(
+            "Avalid",
+            Arc::new(model.clone()),
+            &canonical,
+            &[1, 0],
+        )
+        .expect("uncorrupted grouped-noise routing constructs");
+
+        let assert_rejected = |corrupt: rspice_veriloga::CompiledModel, defect: &str| {
+            let error = VerilogADevice::try_new_with_canonical_ir(
+                "Acorrupt",
+                Arc::new(corrupt),
+                &canonical,
+                &[1, 0],
+            )
+            .expect_err(defect);
+            assert!(
+                error.to_string().contains("artifact/model mismatch"),
+                "{defect}: {error}"
+            );
+        };
+
+        let mut endpoint_redirect = model.clone();
+        endpoint_redirect.noise_sources[0].injections[0].pos = StampIndex::Terminal(1);
+        assert_rejected(endpoint_redirect, "redirected endpoint must be rejected");
+
+        let mut out_of_bounds_program = model.clone();
+        out_of_bounds_program.noise_sources[0].injections[0].program_idx =
+            out_of_bounds_program.stamp_programs.len();
+        assert_rejected(
+            out_of_bounds_program,
+            "out-of-bounds program identity must be rejected",
+        );
+
+        let mut wrong_kind = model.clone();
+        wrong_kind.noise_sources[0].injections[0].is_current = false;
+        assert_rejected(wrong_kind, "mismatched contribution kind must be rejected");
+
+        let mut wrong_ordinal = model.clone();
+        wrong_ordinal.noise_sources[0].injections[0].branch_ordinal = Some(0);
+        assert_rejected(wrong_ordinal, "mismatched branch ordinal must be rejected");
+
+        let mut wrong_sign = model;
+        wrong_sign.noise_sources[0].injections[0].rhs_sign = 1.0;
+        assert_rejected(wrong_sign, "wrong RHS sign must be rejected");
     }
 
     #[test]

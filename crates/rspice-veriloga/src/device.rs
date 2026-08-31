@@ -1945,6 +1945,7 @@ impl CanonicalNoiseRuntimePlan {
                     "canonical grouped-noise artifact/model mismatch: {detail}"
                 ))
             })?;
+        Self::validate_compiled_injections(artifact, model)?;
         if artifact.hir.module_name != model.name
             || artifact.hir.ports.len() != model.num_terminals
             || artifact
@@ -2077,6 +2078,185 @@ impl CanonicalNoiseRuntimePlan {
         })
     }
 
+    fn validate_compiled_injections(
+        artifact: &CanonicalIrArtifact,
+        model: &CompiledModel,
+    ) -> Result<(), VmError> {
+        fn invalid(detail: impl Into<String>) -> VmError {
+            VmError::InvalidModel(format!(
+                "canonical grouped-noise artifact/model mismatch: {}",
+                detail.into()
+            ))
+        }
+
+        fn same_index(left: &StampIndex, right: &StampIndex) -> bool {
+            match (left, right) {
+                (StampIndex::Ground, StampIndex::Ground) => true,
+                (StampIndex::Terminal(left), StampIndex::Terminal(right))
+                | (StampIndex::Internal(left), StampIndex::Internal(right))
+                | (StampIndex::Branch(left), StampIndex::Branch(right)) => left == right,
+                _ => false,
+            }
+        }
+
+        fn current_pair(
+            model: &CompiledModel,
+            program: &crate::codegen::StampProgram,
+            program_idx: usize,
+        ) -> Result<(StampIndex, StampIndex), VmError> {
+            let mut pos = None;
+            let mut neg = None;
+            for location in &program.stamp_locations {
+                if !matches!(location.col, StampIndex::Ground) {
+                    return Err(invalid(format!(
+                        "grouped-noise injection program {program_idx} has a non-ground current source column"
+                    )));
+                }
+                let valid_row = match location.row {
+                    StampIndex::Terminal(index) => index < model.num_terminals,
+                    StampIndex::Internal(index) => index < model.internal_nodes,
+                    StampIndex::Ground => true,
+                    StampIndex::Branch(_) => false,
+                };
+                if !valid_row {
+                    return Err(invalid(format!(
+                        "grouped-noise injection program {program_idx} has an invalid current source row"
+                    )));
+                }
+                if location.sign == -1.0 {
+                    if pos.replace(location.row.clone()).is_some() {
+                        return Err(invalid(format!(
+                            "grouped-noise injection program {program_idx} has duplicate positive current rows"
+                        )));
+                    }
+                } else if location.sign == 1.0 {
+                    if neg.replace(location.row.clone()).is_some() {
+                        return Err(invalid(format!(
+                            "grouped-noise injection program {program_idx} has duplicate negative current rows"
+                        )));
+                    }
+                } else {
+                    return Err(invalid(format!(
+                        "grouped-noise injection program {program_idx} has invalid current-row sign {}",
+                        location.sign
+                    )));
+                }
+            }
+            match (pos, neg) {
+                (Some(pos), Some(neg)) if !same_index(&pos, &neg) => Ok((pos, neg)),
+                (Some(pos), None) if !matches!(&pos, StampIndex::Ground) => {
+                    Ok((pos, StampIndex::Ground))
+                }
+                (None, Some(neg)) if !matches!(&neg, StampIndex::Ground) => {
+                    Ok((StampIndex::Ground, neg))
+                }
+                _ => Err(invalid(format!(
+                    "grouped-noise injection program {program_idx} does not identify a valid current branch"
+                ))),
+            }
+        }
+
+        for (process_index, source) in model.noise_sources.iter().enumerate() {
+            for (injection_index, injection) in source.injections.iter().enumerate() {
+                let program = model.stamp_programs.get(injection.program_idx).ok_or_else(|| {
+                    invalid(format!(
+                        "noise process {process_index} injection {injection_index} references missing stamp program {}",
+                        injection.program_idx
+                    ))
+                })?;
+                let equation = artifact
+                    .mir
+                    .equations
+                    .get(injection.program_idx)
+                    .ok_or_else(|| {
+                        invalid(format!(
+                            "noise process {process_index} injection {injection_index} references missing canonical equation {}",
+                            injection.program_idx
+                        ))
+                    })?;
+                if usize::from(equation.id) != injection.program_idx {
+                    return Err(invalid(format!(
+                        "noise process {process_index} injection {injection_index} references canonical equation {} whose identity is {}",
+                        injection.program_idx, equation.id
+                    )));
+                }
+
+                let expected_kind = if program.indirect {
+                    crate::canonical_ir::MirEquationKind::Indirect
+                } else if program.branch_ordinal.is_some() {
+                    crate::canonical_ir::MirEquationKind::Potential
+                } else {
+                    crate::canonical_ir::MirEquationKind::Current
+                };
+                if equation.kind != expected_kind {
+                    return Err(invalid(format!(
+                        "noise process {process_index} injection {injection_index} equation kind does not match stamp program {}",
+                        injection.program_idx
+                    )));
+                }
+                if injection.branch_ordinal != program.branch_ordinal {
+                    return Err(invalid(format!(
+                        "noise process {process_index} injection {injection_index} branch ordinal does not match stamp program {}",
+                        injection.program_idx
+                    )));
+                }
+                let expected_is_current = match expected_kind {
+                    crate::canonical_ir::MirEquationKind::Current => Some(true),
+                    crate::canonical_ir::MirEquationKind::Potential => Some(false),
+                    // Canonical MIR deliberately makes an indirect constraint
+                    // orientation-free and does not retain whether its source
+                    // access was a flow or potential. Both forms use the same
+                    // branch-row noise and multiplicity convention.
+                    crate::canonical_ir::MirEquationKind::Indirect => None,
+                };
+                if expected_is_current.is_some_and(|expected| injection.is_current != expected) {
+                    return Err(invalid(format!(
+                        "noise process {process_index} injection {injection_index} contribution kind does not match stamp program {}",
+                        injection.program_idx
+                    )));
+                }
+                let expected_rhs_sign: f64 = match expected_kind {
+                    crate::canonical_ir::MirEquationKind::Potential => 1.0,
+                    crate::canonical_ir::MirEquationKind::Current
+                    | crate::canonical_ir::MirEquationKind::Indirect => -1.0,
+                };
+                if injection.rhs_sign.to_bits() != expected_rhs_sign.to_bits() {
+                    return Err(invalid(format!(
+                        "noise process {process_index} injection {injection_index} RHS sign {} does not match expected {expected_rhs_sign}",
+                        injection.rhs_sign
+                    )));
+                }
+
+                let (expected_pos, expected_neg) = match program.branch_ordinal {
+                    Some(ordinal) => {
+                        let branch = model.branch_sources.get(ordinal).ok_or_else(|| {
+                            invalid(format!(
+                                "noise process {process_index} injection {injection_index} references missing branch source {ordinal}"
+                            ))
+                        })?;
+                        if branch.indirect != program.indirect {
+                            return Err(invalid(format!(
+                                "noise process {process_index} injection {injection_index} branch source kind does not match stamp program {}",
+                                injection.program_idx
+                            )));
+                        }
+                        (branch.pos.clone(), branch.neg.clone())
+                    }
+                    None => current_pair(model, program, injection.program_idx)?,
+                };
+                if !same_index(&injection.pos, &expected_pos)
+                    || !same_index(&injection.neg, &expected_neg)
+                {
+                    return Err(invalid(format!(
+                        "noise process {process_index} injection {injection_index} endpoints do not match stamp program {}",
+                        injection.program_idx
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn evaluate(
         &self,
         context: &VmContext,
@@ -2104,6 +2284,12 @@ impl CanonicalNoiseRuntimePlan {
         let mut analyses = std::collections::HashSet::new();
         for analysis in ["noise", "smallsig", "smallsignal", "small_signal"] {
             analyses.insert(SmolStr::new(analysis));
+        }
+        if context.analysis_initial_step {
+            analyses.insert(SmolStr::new("__rspice_initial_step"));
+        }
+        if context.analysis_final_step {
+            analyses.insert(SmolStr::new("__rspice_final_step"));
         }
         let inputs = crate::canonical_ir::CfgEvalInputs {
             parameters: context.parameters.clone(),
@@ -6667,22 +6853,36 @@ impl VerilogADevice {
         } else {
             &self.model.noise_assignment_steps
         })?;
-        let circuit_node = |index: &StampIndex| -> usize {
+        let circuit_node = |index: &StampIndex| -> Result<usize, VmError> {
             match index {
-                StampIndex::Terminal(terminal) => {
-                    self.node_mapping.get(*terminal).copied().unwrap_or(0)
-                }
+                StampIndex::Terminal(terminal) => self
+                    .node_mapping
+                    .get(*terminal)
+                    .copied()
+                    .ok_or_else(|| {
+                        VmError::InvalidModel(format!(
+                            "grouped-noise terminal endpoint {terminal} is outside the device mapping"
+                        ))
+                    }),
                 StampIndex::Internal(internal) => self
                     .internal_node_indices
                     .get(*internal)
                     .copied()
-                    .unwrap_or(0),
+                    .ok_or_else(|| {
+                        VmError::InvalidModel(format!(
+                            "grouped-noise internal endpoint {internal} is outside the device mapping"
+                        ))
+                    }),
                 StampIndex::Branch(branch) => self
                     .branch_current_indices
                     .get(*branch)
                     .copied()
-                    .unwrap_or(0),
-                StampIndex::Ground => 0,
+                    .ok_or_else(|| {
+                        VmError::InvalidModel(format!(
+                            "grouped-noise branch endpoint {branch} is outside the device mapping"
+                        ))
+                    }),
+                StampIndex::Ground => Ok(0),
             }
         };
         let mut processes = Vec::with_capacity(metadata.len());
@@ -6701,13 +6901,18 @@ impl VerilogADevice {
             }
             let mut injections = Vec::with_capacity(source.injections.len());
             let mut any_active_injection = false;
-            for injection in &source.injections {
-                if !self
+            for (injection_index, injection) in source.injections.iter().enumerate() {
+                let injection_active = self
                     .program_active
                     .get(injection.program_idx)
                     .copied()
-                    .unwrap_or(true)
-                {
+                    .ok_or_else(|| {
+                        VmError::InvalidModel(format!(
+                            "noise process {expected} injection {injection_index} activation index {} is outside the model table",
+                            injection.program_idx
+                        ))
+                    })?;
+                if !injection_active {
                     continue;
                 }
                 // Activation is structural/control-flow activation of an
@@ -6738,14 +6943,19 @@ impl VerilogADevice {
                     )));
                 }
                 let (node_pos, node_neg) = match (scales_as_current, injection.branch_ordinal) {
-                    (false, Some(ordinal)) => (
-                        self.branch_current_indices
+                    (false, Some(ordinal)) => {
+                        let branch_node = self
+                            .branch_current_indices
                             .get(ordinal)
                             .copied()
-                            .unwrap_or(0),
-                        0,
-                    ),
-                    _ => (circuit_node(&injection.pos), circuit_node(&injection.neg)),
+                            .ok_or_else(|| {
+                                VmError::InvalidModel(format!(
+                                    "noise process {expected} injection {injection_index} branch ordinal {ordinal} is outside the device mapping"
+                                ))
+                            })?;
+                        (branch_node, 0)
+                    }
+                    _ => (circuit_node(&injection.pos)?, circuit_node(&injection.neg)?),
                 };
                 injections.push(EvaluatedNoiseInjection {
                     node_pos,
