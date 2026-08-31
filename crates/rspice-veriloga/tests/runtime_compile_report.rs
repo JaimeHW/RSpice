@@ -181,6 +181,133 @@ fn required_generated_rust_never_silently_falls_back_to_the_interpreter() {
 }
 
 #[test]
+fn generated_rust_stateful_operator_qualification_is_explicit_and_fail_closed() {
+    let cases = [
+        (
+            "Laplace",
+            r#"
+module generated_laplace(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ laplace_nd(V(p, n), '{1.0}, '{1.0, 1.0});
+endmodule
+"#,
+            "laplace_nd",
+        ),
+        (
+            "Zi",
+            r#"
+module generated_zi(p, n);
+    inout p, n;
+    electrical p, n;
+    real sampled;
+    analog begin
+        sampled = zi_nd(V(p, n), '{1.0}, '{1.0}, 1.0e-6, 0.0);
+        I(p, n) <+ sampled;
+    end
+endmodule
+"#,
+            "zi_nd",
+        ),
+        (
+            "absdelay",
+            r#"
+module generated_absdelay(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ absdelay(V(p, n), 1.0e-6);
+endmodule
+"#,
+            "absdelay",
+        ),
+        (
+            "transition",
+            r#"
+module generated_transition(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ transition(V(p, n), 0.0, 1.0e-6, 1.0e-6);
+endmodule
+"#,
+            "transition",
+        ),
+        (
+            "rate-limited slew",
+            r#"
+module generated_slew_limited(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ slew(V(p, n), 1.0, -1.0);
+endmodule
+"#,
+            "rate-limited slew",
+        ),
+    ];
+    let qualification_only = RuntimeQualificationOptions {
+        generated_rust: true,
+        ..RuntimeQualificationOptions::NONE
+    };
+
+    for (operator, source, expected_detail) in cases {
+        let report = compiler()
+            .compile_runtime_with_qualifications(source, None, qualification_only)
+            .unwrap_or_else(|error| panic!("{operator} runtime compilation failed: {error}"));
+        let generated = report.targets.get(RuntimeTarget::GeneratedRust);
+        assert_eq!(
+            generated.readiness,
+            RuntimeTargetReadiness::Rejected,
+            "{operator}: {generated:?}"
+        );
+        assert!(
+            generated.detail.contains(expected_detail),
+            "{operator}: {}",
+            generated.detail
+        );
+        assert!(
+            report.generated_rust.is_none(),
+            "{operator} must not publish a partial generated artifact"
+        );
+        assert!(
+            report.targets.is_available(RuntimeTarget::BytecodeVm),
+            "{operator} remains executable by the production VM"
+        );
+        report
+            .validate_integrity()
+            .unwrap_or_else(|error| panic!("{operator} report integrity failed: {error}"));
+
+        let required = report
+            .enforce_fallback_policy(RuntimeQualificationOptions::GENERATED_RUST_REQUIRED)
+            .expect_err("requiring rejected generated Rust must fail closed");
+        assert_eq!(required.target, RuntimeTarget::GeneratedRust, "{operator}");
+        assert_eq!(
+            required.readiness,
+            RuntimeTargetReadiness::Rejected,
+            "{operator}"
+        );
+        assert!(required.detail.contains(expected_detail), "{operator}");
+    }
+
+    let passthrough = r#"
+module generated_slew_passthrough(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ slew(V(p, n));
+endmodule
+"#;
+    let report = compiler()
+        .compile_runtime_with_qualifications(passthrough, None, qualification_only)
+        .expect("one-argument slew must qualify for generated Rust");
+    assert!(report.targets.is_available(RuntimeTarget::GeneratedRust));
+    assert!(report.generated_rust.is_some());
+    report
+        .enforce_fallback_policy(RuntimeQualificationOptions::GENERATED_RUST_REQUIRED)
+        .expect("required one-argument slew generated Rust remains available");
+    report
+        .validate_integrity()
+        .expect("one-argument slew report remains coherent");
+}
+
+#[test]
 fn required_native_backend_is_a_typed_fail_closed_contract() {
     let result = compiler().compile_runtime_with_qualifications(
         SENSOR_BRIDGE_SOURCE,
