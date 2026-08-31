@@ -915,24 +915,66 @@ mod canonical_ir_boundary {
         assert_eq!(artifact.digital.signals.len(), 2);
     }
 
-    /// A continuous assignment still has no lowered form, and says so by name
-    /// rather than being dropped from the artifact.
+    /// A continuous assignment lowers to a driver process and a driver on the
+    /// net, rather than being refused or -- worse -- dropped.
     #[test]
-    fn canonical_ir_construction_refuses_a_continuous_assignment() {
+    fn canonical_ir_construction_lowers_a_continuous_assignment() {
         let source = digital_module(
             "    wire a, b;\n\
              \x20   wire y;\n\
              \x20   assign y = a & b;",
         );
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(&source)
+            .expect("a continuous assignment must lower");
+        assert_eq!(artifact.digital.processes.len(), 1);
+        assert_eq!(artifact.digital.drivers.len(), 1);
+        let driver = &artifact.digital.drivers[0];
+        let y = artifact
+            .digital
+            .signals
+            .iter()
+            .find(|signal| signal.name == "y")
+            .expect("declared");
+        assert_eq!(driver.id.signal, y.id);
+        assert_eq!(driver.id.index, 0);
+        assert_eq!(driver.process, artifact.digital.processes[0].id);
+    }
+
+    /// A delay on a driver is a transport delay, which needs the kernel's
+    /// timing wheel rather than a suspension in the process. It refuses by
+    /// name.
+    #[test]
+    fn canonical_ir_construction_refuses_a_delayed_continuous_assignment() {
+        let source = digital_module(
+            "    wire a;\n\
+             \x20   wire y;\n\
+             \x20   assign #5 y = a;",
+        );
         let error = VerilogACompiler::new(CompilerOptions::default())
             .compile_canonical_ir(&source)
-            .expect_err("a continuous assignment must be refused");
-        let rendered = error.to_string();
+            .expect_err("a delayed driver must be refused");
         assert!(
-            rendered.contains("continuous assignment to `y`"),
-            "{rendered}"
+            error
+                .to_string()
+                .contains("delay on a continuous assignment"),
+            "{error}"
         );
-        assert!(rendered.contains("has no lowered form yet"), "{rendered}");
+    }
+
+    /// A `reg` declaration initializer is not a driver: IEEE 1364-2005 section
+    /// 6.2.1 makes it an `initial` assignment. It refuses rather than being
+    /// dropped the way the net form used to be.
+    #[test]
+    fn a_variable_declaration_initializer_is_refused() {
+        let source = digital_module("    reg q = 1'b0;");
+        let error = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(&source)
+            .expect_err("a variable declaration initializer must be refused");
+        assert!(
+            error.to_string().contains("declaration initializer"),
+            "{error}"
+        );
     }
 
     /// The runtime path, which is what feeds the JIT and generated-Rust

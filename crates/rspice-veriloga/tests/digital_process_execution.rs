@@ -12,18 +12,19 @@
 //! frozen and why.
 
 use rspice_veriloga::canonical_ir::digital::{
-    CanonicalDigitalPlan, CfgDigitalProcess, DigitalEdge, DigitalSchedulingRegion,
-    DigitalSensitivityOrigin,
+    CanonicalDigitalPlan, CfgDigitalProcess, DigitalDriverId, DigitalEdge, DigitalProcessKind,
+    DigitalSchedulingRegion, DigitalSensitivityOrigin,
 };
 use rspice_veriloga::canonical_ir::digital_eval::{
-    DigitalDeferredUpdate, DigitalEnvironment, DigitalEvalError, DigitalProcessOutcome,
-    DigitalResumeState, DigitalSuspension, DigitalWaitRequest, any_term_is_satisfied,
-    apply_deferred, classify_edge, resume, start,
+    DigitalDeferredUpdate, DigitalDrive, DigitalEnvironment, DigitalEvalError,
+    DigitalProcessOutcome, DigitalResumeState, DigitalSuspension, DigitalWaitRequest,
+    any_term_is_satisfied, apply_deferred, classify_edge, resume, start,
 };
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
 use rspice_veriloga::canonical_ir::ids::DigitalSignalId;
 use rspice_veriloga::four_state::FourStateBit;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
+use std::collections::BTreeMap;
 
 // ===========================================================================
 // Harness
@@ -55,11 +56,17 @@ fn parse_value(spelling: &str) -> FourStateValue {
     FourStateValue::from_bits_msb_first(&bits)
 }
 
-/// A signal store and a nonblocking-update queue: the smallest thing that
-/// satisfies [`DigitalEnvironment`], and a stand-in for the event kernel's own.
+/// A signal store, a nonblocking-update queue, and one slot per driver: the
+/// smallest thing that satisfies [`DigitalEnvironment`], and a stand-in for the
+/// event kernel's own.
 struct Store {
     values: Vec<FourStateValue>,
     deferred: Vec<DigitalDeferredUpdate>,
+    /// The latest contribution of each driver, which is what a resolver
+    /// combines. Kept per driver rather than written into the net, because a
+    /// net with two drivers has two contributions and storing one over the
+    /// other is the bug the driver identity exists to prevent.
+    driven: BTreeMap<DigitalDriverId, DigitalDrive>,
 }
 
 impl DigitalEnvironment for Store {
@@ -73,6 +80,10 @@ impl DigitalEnvironment for Store {
 
     fn defer_update(&mut self, update: DigitalDeferredUpdate) {
         self.deferred.push(update);
+    }
+
+    fn drive_signal(&mut self, drive: DigitalDrive) {
+        self.driven.insert(drive.driver, drive);
     }
 }
 
@@ -100,6 +111,7 @@ impl Harness {
             store: Store {
                 values,
                 deferred: Vec::new(),
+                driven: BTreeMap::new(),
             },
         }
     }
@@ -169,6 +181,38 @@ impl Harness {
 
     fn deferred_count(&self) -> usize {
         self.store.deferred.len()
+    }
+
+    /// Settle the nets every driver contributed to.
+    ///
+    /// Resolution proper is the kernel's — combining two drivers of one net is
+    /// a table over the whole net — so this stand-in refuses to guess: a net
+    /// with one driver resolves to that driver's contribution, and a net with
+    /// two is a fixture this harness will not pretend to run.
+    fn resolve_drivers(&mut self) {
+        let drives: Vec<DigitalDrive> = self.store.driven.values().cloned().collect();
+        for drive in drives {
+            let count = self.plan.drivers_of(drive.driver.signal).count();
+            assert_eq!(
+                count, 1,
+                "multi-driver resolution belongs to the kernel; signal {:?} has {count} drivers",
+                drive.driver.signal
+            );
+            apply_deferred(
+                &self.plan,
+                &mut self.store,
+                &DigitalDeferredUpdate {
+                    target: drive.target.clone(),
+                    value: drive.value.clone(),
+                    region: DigitalSchedulingRegion::Active,
+                },
+            )
+            .expect("a drive must apply");
+        }
+    }
+
+    fn drive_count(&self) -> usize {
+        self.store.driven.len()
     }
 }
 
@@ -998,6 +1042,179 @@ fn a_process_local_survives_a_suspension() {
         "1010",
         "the local held the value from before the delay"
     );
+}
+
+// ===========================================================================
+// Continuous assignments (IEEE 1364-2005 section 6.1)
+// ===========================================================================
+
+/// A continuous assignment is a driver, so it evaluates *before* it waits: it
+/// is active from the start of the simulation rather than from the first change
+/// of an operand.
+///
+/// It also suspends afterwards rather than finishing, because it has to
+/// re-evaluate when an operand moves.
+#[test]
+fn a_continuous_assignment_drives_before_it_waits() {
+    let mut harness = Harness::new(
+        "    wire a, b;\n\
+     \x20   wire y;\n\
+     \x20   assign y = a & b;",
+    );
+    harness.set("a", "1");
+    harness.set("b", "1");
+    harness.set("y", "x");
+
+    let suspension = expect_suspended(harness.run());
+    assert_eq!(harness.drive_count(), 1, "the driver ran before suspending");
+    harness.resolve_drivers();
+    assert_eq!(harness.get("y"), "1");
+
+    // The operands move; the driver wakes and publishes the new value.
+    harness.set("b", "0");
+    let state = suspension.resume_state().clone();
+    expect_suspended(harness.resume(0, &state));
+    harness.resolve_drivers();
+    assert_eq!(harness.get("y"), "0");
+}
+
+/// The sensitivity is derived from the right-hand side's read set, the rule
+/// section 9.7.5 gives `@*`. The driven net is not in it — a driver that woke
+/// itself would never settle.
+#[test]
+fn a_continuous_assignment_waits_on_its_operands() {
+    let mut harness = Harness::new(
+        "    wire a, b, outside;\n\
+     \x20   wire y;\n\
+     \x20   assign y = a | b;",
+    );
+    assert_eq!(
+        harness.process(0).kind,
+        DigitalProcessKind::ContinuousAssign
+    );
+    assert_eq!(
+        harness
+            .process(0)
+            .static_sensitivity
+            .as_ref()
+            .expect("a driver has a static list")
+            .origin,
+        DigitalSensitivityOrigin::Implicit
+    );
+
+    harness.set("a", "0");
+    harness.set("b", "0");
+    harness.set("outside", "0");
+    harness.set("y", "0");
+    let suspension = expect_suspended(harness.run());
+    let DigitalWaitRequest::Event(terms) = suspension.wait() else {
+        panic!("a driver waits on an event");
+    };
+    let zero = parse_value("0");
+    let one = parse_value("1");
+    for name in ["a", "b"] {
+        let signal = harness.signal(name);
+        assert!(any_term_is_satisfied(terms, signal, &zero, &one), "{name}");
+    }
+    for name in ["y", "outside"] {
+        let signal = harness.signal(name);
+        assert!(!any_term_is_satisfied(terms, signal, &zero, &one), "{name}");
+    }
+}
+
+/// A driver with no operands cannot change, so it evaluates once and returns
+/// rather than waiting for an event that can never arrive.
+#[test]
+fn a_constant_driver_finishes_after_driving_once() {
+    let mut harness = Harness::new(
+        "    wire y;\n\
+     \x20   assign y = 1'b1;",
+    );
+    harness.set("y", "x");
+    expect_finished(harness.run());
+    assert!(harness.process(0).static_sensitivity.is_none());
+    harness.resolve_drivers();
+    assert_eq!(harness.get("y"), "1");
+}
+
+/// Each element of a concatenation target is its own driver: two nets, each
+/// driven by one expression. The right-hand side is resized to the total width
+/// first, exactly as a procedural concatenation target is.
+#[test]
+fn a_concatenation_target_becomes_one_driver_per_element() {
+    let mut harness = Harness::new(
+        "    wire [1:0] a, b;\n\
+     \x20   wire cout;\n\
+     \x20   wire [1:0] sum;\n\
+     \x20   assign {cout, sum} = a + b;",
+    );
+    let cout = harness.signal("cout");
+    let sum = harness.signal("sum");
+    assert_eq!(harness.plan.drivers.len(), 2);
+    assert_eq!(harness.plan.drivers_of(cout).count(), 1);
+    assert_eq!(harness.plan.drivers_of(sum).count(), 1);
+    // Each net's driver is index 0 of that net: the numbering is per net, not
+    // per module.
+    for driver in &harness.plan.drivers {
+        assert_eq!(driver.id.index, 0);
+    }
+
+    harness.set("a", "11");
+    harness.set("b", "01");
+    harness.set("cout", "x");
+    harness.set("sum", "xx");
+    expect_suspended(harness.run());
+    harness.resolve_drivers();
+    // `11 + 01` is two bits wide, so it wraps to `00` and the carry the
+    // three-bit target asks for is a zero-extension, not a third result bit.
+    assert_eq!(harness.get("sum"), "00");
+    assert_eq!(harness.get("cout"), "0");
+}
+
+/// Two drivers on one net produce two driver identities, each with its own
+/// index, and the plan reports both before anything runs — which is what a
+/// resolver needs in order to know it has a net to resolve at all.
+#[test]
+fn two_drivers_on_one_net_get_distinct_identities() {
+    let plan = VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir(&digital_module(
+            "    wire a, b;\n\
+         \x20   wire y;\n\
+         \x20   assign y = a;\n\
+         \x20   assign y = b;",
+        ))
+        .expect("two drivers on a net compile")
+        .digital;
+    let y = plan
+        .signals
+        .iter()
+        .find(|signal| signal.name == "y")
+        .expect("declared")
+        .id;
+    let indices: Vec<u32> = plan.drivers_of(y).map(|driver| driver.id.index).collect();
+    assert_eq!(indices, vec![0, 1], "declaration order, per net");
+    // And each has its own process, so the two are separately schedulable.
+    let processes: Vec<_> = plan.drivers_of(y).map(|driver| driver.process).collect();
+    assert_ne!(processes[0], processes[1]);
+    assert_eq!(plan.processes.len(), 2);
+}
+
+/// IEEE 1364-2005 section 6.1.2: a net declaration assignment *is* a continuous
+/// assignment. It used to be dropped at the declaration, which left the net
+/// with no driver at all and said nothing about it.
+#[test]
+fn a_net_declaration_assignment_is_a_driver() {
+    let mut harness = Harness::new(
+        "    wire a, b;\n\
+     \x20   wire y = a ^ b;",
+    );
+    assert_eq!(harness.plan.drivers.len(), 1);
+    harness.set("a", "1");
+    harness.set("b", "0");
+    harness.set("y", "x");
+    expect_suspended(harness.run());
+    harness.resolve_drivers();
+    assert_eq!(harness.get("y"), "1");
 }
 
 // ===========================================================================

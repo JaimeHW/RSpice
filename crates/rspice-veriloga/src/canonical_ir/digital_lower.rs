@@ -62,9 +62,9 @@
 use super::cfg::{CfgTerminator, CfgValueKind, CfgValueType, CfgVariable, DigitalWait, SsaBuilder};
 use super::diagnostic::{CompilerPhase, IrDiagnostic, SourceSpanRef};
 use super::digital::{
-    CanonicalDigitalPlan, CfgDigitalProcess, DigitalEdge, DigitalProcessKind,
-    DigitalSchedulingRegion, DigitalSensitivityOrigin, DigitalSensitivityTerm, DigitalSignal,
-    DigitalStaticSensitivity, DigitalWriteSelect, DigitalWriteTarget,
+    CanonicalDigitalPlan, CfgDigitalProcess, DigitalDriver, DigitalDriverId, DigitalEdge,
+    DigitalProcessKind, DigitalSchedulingRegion, DigitalSensitivityOrigin, DigitalSensitivityTerm,
+    DigitalSignal, DigitalStaticSensitivity, DigitalWriteSelect, DigitalWriteTarget,
 };
 use super::digital_value::{
     ArithmeticOp, BitwiseOp, DigitalCaseMatch, FourStateValue, LogicalOp, RelationalOp, ShiftOp,
@@ -98,21 +98,6 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
         .map(|signal| (signal.name.as_str(), signal.id))
         .collect();
 
-    // A continuous assignment has no lowered form. Refuse each by name rather
-    // than dropping it: a plan that silently omits a driver describes a
-    // different circuit.
-    for assignment in &digital.continuous_assigns {
-        diagnostics.push(IrDiagnostic::error(
-            CompilerPhase::CfgLowering,
-            format!(
-                "continuous assignment to `{}` has no lowered form yet; only \
-                 `always` and `initial` processes are lowered in this wave",
-                assignment.target
-            ),
-            assignment.span.into(),
-        ));
-    }
-
     let mut processes = Vec::new();
     for process in &digital.processes {
         match lower_process(process, &signals, &index) {
@@ -121,10 +106,135 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
         }
     }
 
+    // Continuous assignments become processes too, numbered after the ones the
+    // front end named. An `assign` has no source-level process id — the parser
+    // assigns those to `always` and `initial` only — so the numbering continues
+    // rather than restarting, and a plan's process ids stay unique.
+    let mut next_id = digital
+        .processes
+        .iter()
+        .map(|process| process.id.0)
+        .max()
+        .map_or(0, |highest| highest + 1);
+    let mut drivers = Vec::new();
+    for assignment in &digital.continuous_assigns {
+        let id = DigitalProcessId::from(next_id as usize);
+        next_id += 1;
+        match lower_continuous_assign(assignment, &signals, &index, id, &mut drivers) {
+            Ok(lowered) => processes.push(lowered),
+            Err(mut errors) => diagnostics.append(&mut errors),
+        }
+    }
+
     if !diagnostics.is_empty() {
         return Err(diagnostics);
     }
-    Ok(CanonicalDigitalPlan { signals, processes })
+    Ok(CanonicalDigitalPlan {
+        signals,
+        processes,
+        drivers,
+    })
+}
+
+/// Lower one continuous assignment into a driver process.
+///
+/// The shape is the design of a driver, so it is worth reading as one. The
+/// entry block evaluates the right-hand side and publishes it as this driver's
+/// contribution; the entry block *then* suspends on the operands it read. A
+/// driver is active from the start of the simulation rather than from the first
+/// change of an operand (IEEE 1364-2005 section 6.1), and evaluating before
+/// waiting is how that is spelled in a graph.
+///
+/// The sensitivity is derived from the right-hand side's read set, the same
+/// rule section 9.7.5 gives `@*`, and reported as
+/// [`DigitalSensitivityOrigin::Implicit`] because that is what it is.
+///
+/// A driver with no operands — `assign y = 1'b0;` — has no list to wait on and
+/// returns instead of looping. Its value cannot change, so a process that woke
+/// for it would have nothing to do.
+fn lower_continuous_assign(
+    assignment: &crate::semantic::AnalyzedContinuousAssign,
+    signals: &[DigitalSignal],
+    index: &HashMap<&str, DigitalSignalId>,
+    id: DigitalProcessId,
+    drivers: &mut Vec<DigitalDriver>,
+) -> Result<CfgDigitalProcess, Vec<IrDiagnostic>> {
+    let mut lowerer = ProcessLowerer {
+        signals,
+        index,
+        builder: SsaBuilder::new(),
+        diagnostics: Vec::new(),
+        locals: Vec::new(),
+        scopes: Vec::new(),
+    };
+
+    if let Some(delay) = &assignment.assignment.delay {
+        lowerer.error(
+            "a delay on a continuous assignment has no lowered form yet: it is a \
+             transport delay on the driver, which needs the kernel's timing wheel \
+             rather than a suspension in the process",
+            delay.span(),
+        );
+    }
+
+    let entry = lowerer.builder.create_block();
+    let value = lowerer.expression(entry, &assignment.assignment.value);
+    lowerer.drive(entry, &assignment.assignment.target, value, id, drivers);
+
+    let mut reads = BTreeSet::new();
+    collect_expression_reads(&assignment.assignment.value, &mut reads);
+    let terms: Vec<DigitalSensitivityTerm> = reads
+        .into_iter()
+        .filter_map(|name| index.get(name.as_str()).copied())
+        .map(|signal| DigitalSensitivityTerm { signal, edge: None })
+        .collect();
+
+    let static_sensitivity = if terms.is_empty() {
+        lowerer.builder.set_terminator(entry, CfgTerminator::Return);
+        None
+    } else {
+        let resume = lowerer.builder.create_block();
+        lowerer.builder.set_terminator(
+            entry,
+            CfgTerminator::Wait {
+                wait: DigitalWait::Event(terms.clone()),
+                resume,
+                resume_args: Vec::new(),
+            },
+        );
+        lowerer.builder.seal_block(resume);
+        lowerer.builder.set_terminator(
+            resume,
+            CfgTerminator::Jump {
+                target: entry,
+                args: Vec::new(),
+            },
+        );
+        Some(DigitalStaticSensitivity {
+            terms,
+            origin: DigitalSensitivityOrigin::Implicit,
+        })
+    };
+    lowerer.builder.seal_all_blocks();
+
+    if !lowerer.diagnostics.is_empty() {
+        return Err(lowerer.diagnostics);
+    }
+    let function = lowerer.builder.finish(entry).map_err(|error| {
+        vec![IrDiagnostic::error(
+            CompilerPhase::CfgLowering,
+            format!("lowering a continuous assignment produced an invalid graph: {error}"),
+            assignment.span.into(),
+        )]
+    })?;
+
+    Ok(CfgDigitalProcess {
+        id,
+        kind: DigitalProcessKind::ContinuousAssign,
+        function,
+        static_sensitivity,
+        span: assignment.span.into(),
+    })
 }
 
 fn lower_signals(analyzed: &[AnalyzedDigitalSignal]) -> Vec<DigitalSignal> {
@@ -882,6 +992,77 @@ impl ProcessLowerer<'_> {
                     }
                 };
                 self.builder.push(block, CfgValueType::Effect, kind);
+            }
+        }
+    }
+
+    /// Emit the driver-write nodes for one continuous assignment's target.
+    ///
+    /// The same split a procedural concatenation target gets, and for the same
+    /// reason — `assign {cout, sum} = a + b;` resizes to the total width and
+    /// then distributes — but each element becomes a *separate driver*. That is
+    /// what it is: two nets, each driven by one expression, and a resolver
+    /// working on `cout` has no business being handed `sum`'s contribution.
+    fn drive(
+        &mut self,
+        block: BlockId,
+        target: &DigitalLValue,
+        value: ValueId,
+        process: DigitalProcessId,
+        drivers: &mut Vec<DigitalDriver>,
+    ) {
+        match target {
+            DigitalLValue::Concat { elements, .. } => {
+                let widths: Vec<u32> = elements
+                    .iter()
+                    .map(|part| self.lvalue_width(part))
+                    .collect();
+                let total: u32 = widths.iter().sum();
+                let value = self.resize(block, value, total);
+                let mut offset = total;
+                for (element, width) in elements.iter().zip(widths) {
+                    offset -= width;
+                    let slice = self.builder.push(
+                        block,
+                        CfgValueType::FourState { width },
+                        CfgValueKind::DigitalPartSelect {
+                            input: value,
+                            msb: i64::from(offset + width - 1),
+                            lsb: i64::from(offset),
+                        },
+                    );
+                    self.drive(block, element, slice, process, drivers);
+                }
+            }
+            _ => {
+                let Some(resolved) = self.write_target(target) else {
+                    return;
+                };
+                // Declaration order among this net's drivers, which is what
+                // makes the identity stable across a recompilation.
+                let index = drivers
+                    .iter()
+                    .filter(|driver| driver.id.signal == resolved.signal)
+                    .count() as u32;
+                let driver = DigitalDriverId {
+                    signal: resolved.signal,
+                    index,
+                };
+                drivers.push(DigitalDriver {
+                    id: driver,
+                    target: resolved.clone(),
+                    process,
+                    span: target.span().into(),
+                });
+                self.builder.push(
+                    block,
+                    CfgValueType::Effect,
+                    CfgValueKind::DigitalDriverWrite {
+                        driver,
+                        target: resolved,
+                        value,
+                    },
+                );
             }
         }
     }

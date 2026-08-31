@@ -307,6 +307,49 @@ impl SemanticAnalyzer {
         }
 
         let mut continuous_assigns = Vec::new();
+        // IEEE 1364-2005 section 6.1.2: a net declaration assignment *is* a
+        // continuous assignment, so it becomes one here rather than being
+        // dropped on the floor of the declaration — a net whose driver went
+        // missing describes a different circuit and says nothing about it.
+        for declaration in &module.digital_nets {
+            for item in &declaration.items {
+                let Some(init) = &item.init else { continue };
+                let assignment = ContinuousAssign {
+                    target: DigitalLValue::Identifier {
+                        name: item.name.clone(),
+                        span: item.span,
+                    },
+                    value: init.clone(),
+                    delay: None,
+                    span: item.span,
+                };
+                if let Some(analyzed) =
+                    self.analyze_continuous_assign(&assignment, &signals, &index)
+                {
+                    continuous_assigns.push(analyzed);
+                }
+            }
+        }
+        // A *variable* declaration assignment is not one. Section 6.2.1 makes
+        // it an initial-block assignment, which is a process rather than a
+        // driver, and synthesizing that process is not this wave's — so it
+        // refuses instead of being dropped the way the net form was.
+        for declaration in &module.digital_variables {
+            for item in &declaration.items {
+                if item.init.is_some() {
+                    self.record_error_at(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "a declaration initializer on the `{}` `{}` is not supported yet; \
+                             IEEE 1364-2005 section 6.2.1 makes it equivalent to an `initial` \
+                             assignment, so write one",
+                            declaration.kind.keyword(),
+                            item.name
+                        )),
+                        item.span,
+                    );
+                }
+            }
+        }
         for assignment in &module.continuous_assigns {
             if let Some(analyzed_assignment) =
                 self.analyze_continuous_assign(assignment, &signals, &index)
