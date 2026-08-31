@@ -3084,6 +3084,7 @@ fn hir_lowering_preserves_laplace_operand_groups() {
         ground_nodes: Vec::new(),
         arrays: HashMap::new(),
         symbol_table: SymbolTable::new(),
+        digital: Default::default(),
     };
     let metadata = CanonicalMetadata::for_source("fixture", "laplace_filter");
     let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
@@ -3183,6 +3184,7 @@ fn hir_lowering_preserves_typed_analog_operator_slots() {
         ground_nodes: Vec::new(),
         arrays: HashMap::new(),
         symbol_table: SymbolTable::new(),
+        digital: Default::default(),
     };
     let metadata = CanonicalMetadata::for_source("fixture", "typed_ops");
     let hir = HirModel::from_analyzed_module(&metadata, &analyzed);

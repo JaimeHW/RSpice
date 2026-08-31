@@ -10329,6 +10329,7 @@ mod tests {
             ground_nodes: Vec::new(),
             arrays: HashMap::new(),
             symbol_table: SymbolTable::new(),
+            digital: Default::default(),
         };
         let metadata = CanonicalMetadata::for_source("fixture", module_name);
         HirModel::from_analyzed_module(&metadata, &analyzed)
