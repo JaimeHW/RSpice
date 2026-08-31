@@ -112,6 +112,7 @@
 pub mod corpus;
 pub mod oracle;
 pub mod run;
+pub mod scale;
 pub mod testbench;
 pub mod trace;
 
