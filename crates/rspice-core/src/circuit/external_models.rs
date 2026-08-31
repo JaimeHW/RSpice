@@ -70,15 +70,17 @@ struct GeneratedVerilogADcAcceptedState {
 /// happens here is what an executed event *means* to the analog side: it
 /// updates one driver, and the node's value is whatever its drivers resolve
 /// to. `Ok(true)` means something an instance can see changed.
-#[allow(clippy::too_many_arguments)]
+///
+/// The queue and the value maps arrive as their shared handles rather than as
+/// mutable borrows of their contents, and the emptiness check runs before
+/// either is unshared. That ordering is the whole point: this is the only
+/// writer of the six maps and it runs at every settle pass of every Newton
+/// iteration, so taking the mutable view first would copy the event world for
+/// every quiet analog step and defeat the sharing the rollback snapshot
+/// depends on.
 fn apply_xspice_events_at_or_before(
-    digital_values: &mut HashMap<NodeId, crate::xspice::DigitalValue>,
-    digital_drivers: &mut XspiceDigitalDrivers,
-    digital_event_times: &mut HashMap<NodeId, Value>,
-    real_values: &mut HashMap<NodeId, Value>,
-    real_drivers: &mut XspiceRealDrivers,
-    real_event_times: &mut HashMap<NodeId, Value>,
-    event_queue: &mut crate::xspice::XspiceEventScheduler,
+    event_values: &mut crate::xspice::SharedXspiceEventValues,
+    event_queue: &mut crate::xspice::SharedXspiceEventQueue,
     touched_digital_nodes: &mut Vec<NodeId>,
     touched_real_nodes: &mut Vec<NodeId>,
     time: Value,
@@ -86,9 +88,20 @@ fn apply_xspice_events_at_or_before(
     let mut changed = false;
     touched_digital_nodes.clear();
     touched_real_nodes.clear();
+    // Shared borrow: nothing is copied for a step with no due event, which is
+    // every Newton iteration after the first and every purely analog step.
     if !event_queue.has_event_at_or_before(time) {
         return Ok(false);
     }
+    let event_queue = event_queue.make_mut();
+    let crate::xspice::XspiceEventValues {
+        digital_values,
+        digital_drivers,
+        digital_event_times,
+        real_values,
+        real_drivers,
+        real_event_times,
+    } = event_values.make_mut();
     event_queue.run_due_events(time, |event| {
         let node_id = event.node_id;
         let event_time = event.time;
@@ -528,12 +541,10 @@ impl CircuitData {
         // the drivers that would not quiet rather than a pass count.
         let mut pass = 0usize;
         loop {
-            let digital_values = &mut self.xspice_digital_values;
-            let digital_drivers = &mut self.xspice_digital_drivers;
-            let digital_event_times = &mut self.xspice_digital_event_times;
-            let real_values = &mut self.xspice_real_values;
-            let real_drivers = &mut self.xspice_real_drivers;
-            let real_event_times = &mut self.xspice_real_event_times;
+            // Shared handles, not mutable views of their contents: a pass that
+            // drains nothing and schedules nothing must leave the event world
+            // still shared with the rollback snapshot.
+            let event_values = &mut self.xspice_event_values;
             let event_queue = &mut self.xspice_event_queue;
             let touched_digital_nodes = &mut self.xspice_touched_digital_nodes;
             let touched_real_nodes = &mut self.xspice_touched_real_nodes;
@@ -542,12 +553,7 @@ impl CircuitData {
             let next_pending = &mut self.xspice_dispatch_next_pending;
             next_pending.fill(false);
             let mut changed = match apply_xspice_events_at_or_before(
-                digital_values,
-                digital_drivers,
-                digital_event_times,
-                real_values,
-                real_drivers,
-                real_event_times,
+                event_values,
                 event_queue,
                 touched_digital_nodes,
                 touched_real_nodes,
@@ -608,11 +614,11 @@ impl CircuitData {
                     instance.debug_assert_event_inputs_quiet(
                         solution,
                         num_nodes,
-                        digital_values,
-                        digital_event_times,
+                        &event_values.digital_values,
+                        &event_values.digital_event_times,
                         event_loads,
-                        real_values,
-                        real_event_times,
+                        &event_values.real_values,
+                        &event_values.real_event_times,
                         &current_source_values,
                         &analog_transitions,
                         analysis,
@@ -626,11 +632,11 @@ impl CircuitData {
                 if let Err(e) = instance.update_inputs_with_analog_transitions(
                     solution,
                     num_nodes,
-                    digital_values,
-                    digital_event_times,
+                    &event_values.digital_values,
+                    &event_values.digital_event_times,
                     event_loads,
-                    real_values,
-                    real_event_times,
+                    &event_values.real_values,
+                    &event_values.real_event_times,
                     &current_source_values,
                     &analog_transitions,
                 ) {
@@ -652,14 +658,16 @@ impl CircuitData {
                     analog_transitions.insert(key, transition);
                 }
 
-                instance.schedule_events(event_queue, time);
+                // Asking first keeps the sweep off the copy-on-write path for
+                // every instance whose evaluation queued no output, which on a
+                // settling gate-level design is nearly all of them. The drain
+                // this replaces would have moved an empty pending list into
+                // the scheduler and copied it to do so.
+                if instance.has_pending_events() {
+                    instance.schedule_events(event_queue.make_mut(), time);
+                }
                 let instance_changed = match apply_xspice_events_at_or_before(
-                    digital_values,
-                    digital_drivers,
-                    digital_event_times,
-                    real_values,
-                    real_drivers,
-                    real_event_times,
+                    event_values,
                     event_queue,
                     touched_digital_nodes,
                     touched_real_nodes,
@@ -714,7 +722,12 @@ impl CircuitData {
 
             // Something moved, so another delta cycle is owed. The scheduler
             // is what decides the network has stopped converging.
-            if let Err(error) = event_queue.note_delta_cycle(time) {
+            //
+            // Unguarded on purpose: reaching here means a drain returned
+            // `true`, which it can only do past its emptiness check, so the
+            // scheduler is already unshared and this mutable view copies
+            // nothing.
+            if let Err(error) = event_queue.make_mut().note_delta_cycle(time) {
                 let message = xspice_event_settling_message(time, &error);
                 if self.xspice_evaluation_error.is_none() {
                     self.xspice_evaluation_error = Some(message.clone());
@@ -742,7 +755,8 @@ impl CircuitData {
     ) {
         snapshot.clear();
         snapshot.extend(
-            self.xspice_digital_values
+            self.xspice_event_values
+                .digital_values
                 .iter()
                 .filter_map(|(&node_id, &value)| (node_id > 0).then_some((node_id, value))),
         );
@@ -753,7 +767,8 @@ impl CircuitData {
     pub(crate) fn fill_xspice_real_snapshot(&self, snapshot: &mut Vec<(NodeId, Value)>) {
         snapshot.clear();
         snapshot.extend(
-            self.xspice_real_values
+            self.xspice_event_values
+                .real_values
                 .iter()
                 .filter_map(|(&node_id, &value)| (node_id > 0).then_some((node_id, value))),
         );
@@ -2850,8 +2865,7 @@ mod tests {
     use crate::solver::StaticMatrix;
     use crate::xspice::{
         AnalysisType, CmContext, CmError, CmResult, CodeModel, DigitalValue, EvaluationPhase,
-        EventValue, ParamSpec, PortConnection, PortDirection, PortSpec, PortType,
-        XspiceEventScheduler, XspiceInstance,
+        EventValue, ParamSpec, PortConnection, PortDirection, PortSpec, PortType, XspiceInstance,
     };
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::sync::{Arc, Mutex};
@@ -2920,13 +2934,9 @@ mod tests {
 
     #[test]
     fn apply_xspice_events_resolves_touched_nodes_from_node_driver_maps() {
-        let mut digital_values = HashMap::new();
-        let mut digital_drivers = HashMap::new();
-        let mut digital_event_times = HashMap::new();
-        let mut real_values = HashMap::new();
-        let mut real_drivers = HashMap::new();
-        let mut real_event_times = HashMap::new();
-        let mut event_queue = XspiceEventScheduler::new();
+        let mut event_values = SharedXspiceEventValues::default();
+        let mut queue = SharedXspiceEventQueue::new();
+        let event_queue = queue.make_mut();
         let mut touched_digital_nodes = Vec::with_capacity(4);
         let mut touched_real_nodes = Vec::with_capacity(4);
         let digital_capacity = touched_digital_nodes.capacity();
@@ -2953,13 +2963,8 @@ mod tests {
 
         assert!(
             apply_xspice_events_at_or_before(
-                &mut digital_values,
-                &mut digital_drivers,
-                &mut digital_event_times,
-                &mut real_values,
-                &mut real_drivers,
-                &mut real_event_times,
-                &mut event_queue,
+                &mut event_values,
+                &mut queue,
                 &mut touched_digital_nodes,
                 &mut touched_real_nodes,
                 1.0e-9,
@@ -2972,25 +2977,26 @@ mod tests {
         assert_eq!(touched_digital_nodes.capacity(), digital_capacity);
         assert_eq!(touched_real_nodes.capacity(), real_capacity);
         assert_eq!(
-            digital_drivers.get(&1).map(|drivers| drivers.len()),
+            event_values.digital_drivers.get(&1).map(HashMap::len),
             Some(2)
         );
-        assert_eq!(real_drivers.get(&2).map(|drivers| drivers.len()), Some(2));
-        assert_eq!(digital_values.get(&1).copied(), Some(DigitalValue::one()));
-        assert_eq!(digital_event_times.get(&1).copied(), Some(1.0e-9));
-        assert_eq!(real_values.get(&2).copied(), Some(3.0));
-        assert_eq!(real_event_times.get(&2).copied(), Some(1.0e-9));
-        assert!(event_queue.is_empty());
+        assert_eq!(event_values.real_drivers.get(&2).map(HashMap::len), Some(2));
+        assert_eq!(
+            event_values.digital_values.get(&1).copied(),
+            Some(DigitalValue::one())
+        );
+        assert_eq!(
+            event_values.digital_event_times.get(&1).copied(),
+            Some(1.0e-9)
+        );
+        assert_eq!(event_values.real_values.get(&2).copied(), Some(3.0));
+        assert_eq!(event_values.real_event_times.get(&2).copied(), Some(1.0e-9));
+        assert!(queue.is_empty());
 
         assert!(
             !apply_xspice_events_at_or_before(
-                &mut digital_values,
-                &mut digital_drivers,
-                &mut digital_event_times,
-                &mut real_values,
-                &mut real_drivers,
-                &mut real_event_times,
-                &mut event_queue,
+                &mut event_values,
+                &mut queue,
                 &mut touched_digital_nodes,
                 &mut touched_real_nodes,
                 1.0e-9,
@@ -3006,13 +3012,9 @@ mod tests {
 
     #[test]
     fn apply_xspice_events_preserves_vector_driver_elements_on_same_node() {
-        let mut digital_values = HashMap::new();
-        let mut digital_drivers = HashMap::new();
-        let mut digital_event_times = HashMap::new();
-        let mut real_values = HashMap::new();
-        let mut real_drivers = HashMap::new();
-        let mut real_event_times = HashMap::new();
-        let mut event_queue = XspiceEventScheduler::new();
+        let mut event_values = SharedXspiceEventValues::default();
+        let mut queue = SharedXspiceEventQueue::new();
+        let event_queue = queue.make_mut();
         let mut touched_digital_nodes = Vec::new();
         let mut touched_real_nodes = Vec::new();
 
@@ -3051,13 +3053,8 @@ mod tests {
 
         assert!(
             apply_xspice_events_at_or_before(
-                &mut digital_values,
-                &mut digital_drivers,
-                &mut digital_event_times,
-                &mut real_values,
-                &mut real_drivers,
-                &mut real_event_times,
-                &mut event_queue,
+                &mut event_values,
+                &mut queue,
                 &mut touched_digital_nodes,
                 &mut touched_real_nodes,
                 1.0e-9,
@@ -3066,12 +3063,15 @@ mod tests {
         );
 
         assert_eq!(
-            digital_drivers.get(&1).map(|drivers| drivers.len()),
+            event_values.digital_drivers.get(&1).map(HashMap::len),
             Some(2)
         );
-        assert_eq!(real_drivers.get(&2).map(|drivers| drivers.len()), Some(2));
-        assert_eq!(digital_values.get(&1).copied(), Some(DigitalValue::one()));
-        assert_eq!(real_values.get(&2).copied(), Some(3.0));
+        assert_eq!(event_values.real_drivers.get(&2).map(HashMap::len), Some(2));
+        assert_eq!(
+            event_values.digital_values.get(&1).copied(),
+            Some(DigitalValue::one())
+        );
+        assert_eq!(event_values.real_values.get(&2).copied(), Some(3.0));
     }
 
     struct OutputModel {
@@ -3584,10 +3584,9 @@ mod tests {
     #[test]
     fn fill_xspice_digital_snapshot_reuses_buffer_and_sorts_nodes() {
         let mut circuit = CircuitData::new();
-        circuit.xspice_digital_values.insert(3, DigitalValue::one());
-        circuit
-            .xspice_digital_values
-            .insert(1, DigitalValue::zero());
+        let event_values = circuit.xspice_event_values.make_mut();
+        event_values.digital_values.insert(3, DigitalValue::one());
+        event_values.digital_values.insert(1, DigitalValue::zero());
 
         let mut snapshot = Vec::with_capacity(8);
         let capacity = snapshot.capacity();
@@ -4315,5 +4314,257 @@ mod tests {
             7.0e-9,
             "and the accept is rolled back with everything else"
         );
+    }
+
+    //=========================================================================
+    // Rollback exactness for the shared event world
+    //=========================================================================
+    //
+    // D5 clause 1 says a rejected step rolls the event world back completely,
+    // and the mechanism is that the value maps and the scheduler ride inside
+    // `NonlinearDeviceStateSnapshot`. Sharing them behind an `Arc` must not
+    // weaken that: the restored world has to be the captured world, value for
+    // value and event for event.
+    //
+    // These check both halves. Identity — the restored handles are the
+    // captured allocations — and content against an eager deep clone taken
+    // before the attempt, which is the image the copy-at-capture code
+    // produced. The scheduler has no `PartialEq`, so its content oracle is its
+    // `Debug` rendering, which walks every kernel field: the future tier, all
+    // four slot queues, the sequence counter, `current_tick`, the started
+    // flag, the per-slot delta and event counts, the activation counts, and
+    // the per-driver supersede index. All of them are `BTreeMap`s, so the
+    // rendering is ordered and comparing it is exact rather than incidental.
+
+    /// Both event-world allocations the circuit currently points at.
+    fn event_world_addresses(
+        circuit: &CircuitData,
+    ) -> (
+        *const crate::xspice::XspiceEventValues,
+        *const crate::xspice::XspiceEventScheduler,
+    ) {
+        (
+            std::ptr::from_ref(&*circuit.xspice_event_values),
+            std::ptr::from_ref(&*circuit.xspice_event_queue),
+        )
+    }
+
+    /// The captured world's content, as an eager deep copy plus the
+    /// scheduler's full structural rendering.
+    fn event_world_image(circuit: &CircuitData) -> (crate::xspice::XspiceEventValues, String) {
+        (
+            (*circuit.xspice_event_values).clone(),
+            format!("{:?}", *circuit.xspice_event_queue),
+        )
+    }
+
+    /// Two chained event models that actually drive the queue: a probe that
+    /// emits a digital one on every evaluation, and an inverter that answers
+    /// it, so a settle pass schedules, drains, resolves and supersedes.
+    fn event_active_circuit() -> CircuitData {
+        let mut circuit = CircuitData::new();
+        circuit.get_or_create_node("n1");
+        circuit.get_or_create_node("n2");
+        circuit.add_xspice_instance(event_output_probe_instance(Arc::new(Mutex::new(0))));
+        circuit.add_xspice_instance(feedback_inverter_instance());
+        circuit
+    }
+
+    /// Run the settle loop the way a transient trial does.
+    fn settle_at(circuit: &mut CircuitData, time: Value) {
+        circuit
+            .try_evaluate_xspice_with_analysis(time, 1.0e-9, &[0.0, 0.0], AnalysisType::Transient)
+            .expect("the event models settle");
+    }
+
+    #[test]
+    fn a_restored_attempt_returns_the_exact_event_world_it_captured() {
+        let mut circuit = event_active_circuit();
+
+        // Settle one timepoint first, so the capture is taken mid-run rather
+        // than from a virgin world: values are resolved, drivers are indexed,
+        // and the scheduler's tick and sequence counter have both moved.
+        settle_at(&mut circuit, 1.0e-9);
+
+        let expected = event_world_image(&circuit);
+        let captured = circuit.transient_trial_state_snapshot();
+        let at_capture = event_world_addresses(&circuit);
+
+        // The rejected attempt: a later timepoint that drains what the first
+        // one queued, schedules and supersedes more, and rewrites the resolved
+        // node values.
+        settle_at(&mut circuit, 3.0e-9);
+        circuit.xspice_event_queue.make_mut().schedule(
+            9.0e-9,
+            2,
+            "out",
+            "Aprobe",
+            0,
+            EventValue::Digital(DigitalValue::zero()),
+        );
+
+        assert_ne!(
+            event_world_addresses(&circuit),
+            at_capture,
+            "the attempt must have copied away from the captured world, or \
+             the snapshot is observing it and this test proves nothing"
+        );
+        assert_ne!(
+            event_world_image(&circuit).1,
+            expected.1,
+            "and it must have moved the scheduler, not merely touched it"
+        );
+
+        circuit.restore_nonlinear_state(captured);
+
+        assert_eq!(
+            event_world_addresses(&circuit),
+            at_capture,
+            "a rejected step must come back to the allocations the capture took"
+        );
+        let restored = event_world_image(&circuit);
+        assert_eq!(
+            restored.0, expected.0,
+            "every resolved value, driver entry and event time must read as it \
+             did before the attempt"
+        );
+        assert_eq!(
+            restored.1, expected.1,
+            "and the scheduler must be the captured scheduler in every kernel \
+             field: pending events, slot, sequence counter, open tick and \
+             supersede index"
+        );
+    }
+
+    #[test]
+    fn repeated_event_reject_cycles_including_a_backwards_bound_do_not_drift() {
+        let mut circuit = event_active_circuit();
+        settle_at(&mut circuit, 1.0e-9);
+
+        // A reused snapshot buffer, refreshed per attempt, which is what the
+        // transient loop actually holds.
+        let mut attempt = circuit.transient_trial_state_snapshot();
+
+        // Bounds that step forward and then back, the way a rejected step
+        // retries at a smaller timepoint. A backwards bound opens a fresh due
+        // slot (D5 clause 4), so it moves scheduler state a forward one does
+        // not.
+        for (round, time) in [4.0e-9, 8.0e-9, 6.0e-9, 2.0e-9, 7.0e-9]
+            .into_iter()
+            .enumerate()
+        {
+            circuit.refresh_transient_trial_state_snapshot(&mut attempt);
+            let expected = event_world_image(&circuit);
+            let at_capture = event_world_addresses(&circuit);
+
+            settle_at(&mut circuit, time);
+            circuit.xspice_event_queue.make_mut().schedule(
+                time + 5.0e-9,
+                1,
+                "out",
+                "Aprobe",
+                0,
+                EventValue::Digital(DigitalValue::zero()),
+            );
+
+            circuit.restore_nonlinear_state(attempt);
+            assert_eq!(
+                event_world_addresses(&circuit),
+                at_capture,
+                "round {round}: repeated attempt/reject cycles must keep \
+                 landing on the captured allocations, with no drift"
+            );
+            let restored = event_world_image(&circuit);
+            assert_eq!(restored.0, expected.0, "round {round}: resolved values");
+            assert_eq!(restored.1, expected.1, "round {round}: scheduler image");
+
+            attempt = circuit.transient_trial_state_snapshot();
+        }
+    }
+
+    #[test]
+    fn a_quiet_step_leaves_the_event_world_shared_with_its_snapshot() {
+        let mut circuit = mixed_event_and_time_driven_circuit();
+
+        // Hold a capture across the step, so a write would have to copy away
+        // from it. Without a live snapshot the world is unshared and every
+        // write lands in place, which would prove nothing.
+        let captured = circuit.transient_trial_state_snapshot();
+        let at_capture = event_world_addresses(&circuit);
+
+        let mut matrix =
+            StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).expect("1x1 matrix should construct");
+        let mut rhs = vec![0.0];
+        circuit.stamp_xspice_transient_trial(
+            &mut matrix,
+            &mut rhs,
+            1.0e-9,
+            1.0e-9,
+            &[0.0, 0.0, 0.0],
+        );
+        circuit.accept_xspice_transient_timestep_with_coefficients(
+            2.0e-9,
+            1.0e-9,
+            &[0.0, 0.0, 0.0],
+            &crate::numerics::integration::CompanionCoefficients::backward_euler(),
+            false,
+        );
+
+        // The pass genuinely ran: the time-driven model evaluated and queued a
+        // breakpoint request. Without that, an untouched world would prove
+        // only that nothing happened at all.
+        assert_eq!(
+            circuit.take_xspice_requested_breakpoints().len(),
+            1,
+            "the settle pass must actually have evaluated the instances"
+        );
+        assert_eq!(
+            event_world_addresses(&circuit),
+            at_capture,
+            "a step whose gates emit nothing and whose queue holds nothing due \
+             must copy neither the value maps nor the scheduler: the drain's \
+             emptiness check and the scheduling sweep's pending-output check \
+             are what keep it off the copy-on-write path"
+        );
+
+        drop(captured);
+    }
+
+    #[test]
+    fn a_pending_but_not_yet_due_event_does_not_copy_the_event_world() {
+        // A queue that is *not* empty, holding one event dated past the
+        // timepoint being settled. The drain's guard is
+        // `has_event_at_or_before`, not `is_empty`: a design whose next gate
+        // output is still several analog steps away must not pay a copy at
+        // every step in between.
+        let mut circuit = mixed_event_and_time_driven_circuit();
+        circuit.xspice_event_queue.make_mut().schedule(
+            5.0e-7,
+            2,
+            "out",
+            "Ag0",
+            0,
+            EventValue::Digital(DigitalValue::one()),
+        );
+        assert!(!circuit.xspice_event_queue.is_empty());
+
+        let captured = circuit.transient_trial_state_snapshot();
+        let at_capture = event_world_addresses(&circuit);
+
+        settle_at(&mut circuit, 1.0e-9);
+
+        assert_eq!(
+            event_world_addresses(&circuit),
+            at_capture,
+            "an event dated beyond the settle bound is not due, so nothing may \
+             be drained and nothing may be copied"
+        );
+        assert_eq!(
+            circuit.xspice_event_queue.len(),
+            1,
+            "and it must still be pending for the step that reaches its time"
+        );
+
+        drop(captured);
     }
 }
