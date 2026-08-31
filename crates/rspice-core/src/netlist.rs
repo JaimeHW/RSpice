@@ -12494,6 +12494,239 @@ mod tests {
         );
     }
 
+    /// The compiled stimulus program attached to a lowered STIM instance.
+    fn pspice_u_stim_program(netlist: &Netlist, name: &str) -> String {
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case(name))
+            .unwrap_or_else(|| panic!("{name} exists"));
+        match &element.kind {
+            ElementKind::Xspice {
+                model,
+                string_params,
+                ..
+            } => {
+                assert_eq!(model, "pspice_d_stim");
+                string_params
+                    .iter()
+                    .find(|(key, _)| key == "stim_program")
+                    .map(|(_, program)| program.clone())
+                    .expect("a lowered STIM carries its compiled program")
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pspice_u_stim_lowers_to_a_digital_stimulus_instance() {
+        let netlist = Netlist::parse(
+            "pspice u stim\n\
+             U1 STIM(1,1) $G_DPWR $G_DGND OUT IO_STM\n\
+             + 0s 0\n\
+             + +10ns 1\n\
+             + 25ns 0\n\
+             .end\n",
+        )
+        .expect("PSpice STIM should lower to a digital stimulus instance");
+
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| element.name == "U1")
+            .expect("U1 exists");
+        match &element.kind {
+            ElementKind::Xspice {
+                model,
+                ports,
+                pspice_u_timing,
+                ..
+            } => {
+                assert_eq!(model, "pspice_d_stim");
+                assert_eq!(
+                    ports,
+                    &[XspicePort::DigitalVector(vec!["OUT".to_string()])]
+                );
+                // The trailing model on a STIM device is an I/O model, not a
+                // timing model: a source has no propagation delay to select.
+                assert!(pspice_u_timing.is_none());
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        }
+        // Times are carried as the exact double the deck's suffixed value
+        // resolved to, so the program round-trips rather than re-rounding.
+        // `25ns` is 2.5000000000000002e-8 through the shared SPICE value
+        // lexer, the same double every other numeric field on the card gets.
+        assert_eq!(
+            pspice_u_stim_program(&netlist, "U1"),
+            "W1 V:A:0.0:0 V:R:1e-8:1 V:A:2.5000000000000002e-8:0"
+        );
+    }
+
+    #[test]
+    fn pspice_u_stim_resolves_labels_to_instruction_indices() {
+        let netlist = Netlist::parse(
+            "pspice u stim goto\n\
+             U1 STIM(1,1) $G_DPWR $G_DGND CLK IO_STM\n\
+             + 0s 0\n\
+             + LABEL=TICK\n\
+             + +10ns 1\n\
+             + +10ns 0\n\
+             + +0s GOTO TICK -1 TIMES\n\
+             .end\n",
+        )
+        .expect("PSpice STIM should resolve its GOTO label");
+
+        // LABEL=TICK names instruction 1, the first command after the initial
+        // drive; -1 is the forever count.
+        assert_eq!(
+            pspice_u_stim_program(&netlist, "U1"),
+            "W1 V:A:0.0:0 V:R:1e-8:1 V:R:1e-8:0 G:R:0.0:1:-1"
+        );
+    }
+
+    #[test]
+    fn pspice_u_stim_expands_a_hexadecimal_format_into_bus_bits() {
+        let netlist = Netlist::parse(
+            "pspice u stim hex\n\
+             U1 STIM(8,44) $G_DPWR $G_DGND B7 B6 B5 B4 B3 B2 B1 B0 IO_STM\n\
+             + 0s A5\n\
+             + 10ns XZ\n\
+             .end\n",
+        )
+        .expect("PSpice STIM should expand hexadecimal values");
+
+        assert_eq!(
+            pspice_u_stim_program(&netlist, "U1"),
+            "W8 V:A:0.0:10100101 V:A:1e-8:XXXXZZZZ"
+        );
+    }
+
+    #[test]
+    fn pspice_u_stim_scales_clock_relative_times_by_timestep() {
+        let netlist = Netlist::parse(
+            "pspice u stim timestep\n\
+             U1 STIM(1,1) $G_DPWR $G_DGND OUT IO_STM IO_LEVEL=2 TIMESTEP=5ns\n\
+             + 0s 0\n\
+             + +2c 1\n\
+             + 8c 0\n\
+             .end\n",
+        )
+        .expect("PSpice STIM should scale clock-relative times");
+
+        assert_eq!(
+            pspice_u_stim_program(&netlist, "U1"),
+            "W1 V:A:0.0:0 V:R:1e-8:1 V:A:4e-8:0"
+        );
+    }
+
+    #[test]
+    fn pspice_u_stim_resolves_parametric_command_times() {
+        let netlist = Netlist::parse(
+            "pspice u stim parametric time\n\
+             .param TCLK=10ns\n\
+             U1 STIM(1,1) $G_DPWR $G_DGND OUT IO_STM\n\
+             + 0s 0\n\
+             + {TCLK} 1\n\
+             + {2*TCLK} 0\n\
+             .end\n",
+        )
+        .expect("PSpice STIM should resolve parametric times");
+
+        assert_eq!(
+            pspice_u_stim_program(&netlist, "U1"),
+            "W1 V:A:0.0:0 V:A:1e-8:1 V:A:2e-8:0"
+        );
+    }
+
+    #[test]
+    fn pspice_u_stim_compiles_counting_and_repeat_commands() {
+        let netlist = Netlist::parse(
+            "pspice u stim counting\n\
+             U1 STIM(2,11) $G_DPWR $G_DGND B1 B0 IO_STM\n\
+             + 0s 00\n\
+             + REPEAT 3 TIMES\n\
+             + +10ns INCR BY 01\n\
+             + ENDREPEAT\n\
+             + +10ns DECR BY 11\n\
+             .end\n",
+        )
+        .expect("PSpice STIM should compile counting and repeat commands");
+
+        assert_eq!(
+            pspice_u_stim_program(&netlist, "U1"),
+            "W2 V:A:0.0:00 P:3 I:R:1e-8:1 E D:R:1e-8:3"
+        );
+    }
+
+    #[test]
+    fn pspice_u_stim_inside_a_subcircuit_lowers_per_instance() {
+        let netlist = Netlist::parse(
+            "pspice u stim in subckt\n\
+             X1 OUTA CLOCKSRC\n\
+             X2 OUTB CLOCKSRC\n\
+             .subckt CLOCKSRC Q\n\
+             U1 STIM(1,1) $G_DPWR $G_DGND Q IO_STM\n\
+             + 0s 0\n\
+             + +10ns 1\n\
+             .ends\n\
+             .end\n",
+        )
+        .expect("PSpice STIM inside a subcircuit parses");
+
+        let flattened = flatten_netlist_with_models(&netlist).expect("subcircuit flattens");
+        for (instance, node) in [("X1.U1", "OUTA"), ("X2.U1", "OUTB")] {
+            let element = flattened
+                .elements
+                .iter()
+                .find(|element| element.name.eq_ignore_ascii_case(instance))
+                .unwrap_or_else(|| panic!("{instance} exists"));
+            match &element.kind {
+                ElementKind::Xspice {
+                    model,
+                    ports,
+                    string_params,
+                    ..
+                } => {
+                    assert_eq!(model, "pspice_d_stim");
+                    assert_eq!(
+                        ports,
+                        &[XspicePort::DigitalVector(vec![node.to_string()])]
+                    );
+                    assert!(
+                        string_params
+                            .iter()
+                            .any(|(key, program)| key == "stim_program"
+                                && program == "W1 V:A:0.0:0 V:R:1e-8:1"),
+                        "instance program differs: {string_params:?}"
+                    );
+                }
+                other => panic!("expected XSPICE lowering, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn pspice_u_stim_reports_a_typed_syntax_error_rather_than_panicking() {
+        let err = Netlist::parse(
+            "pspice u stim malformed\n\
+             U1 STIM(3,11) $G_DPWR $G_DGND A B C IO_STM\n\
+             + 0s 00\n\
+             .end\n",
+        )
+        .expect_err("a format that does not sum to the width is refused");
+
+        let ParseError::Syntax { line, message } = err else {
+            panic!("expected a typed syntax error");
+        };
+        assert_eq!(line, 2);
+        assert!(
+            message.contains("PSpice STIM U-device 'U1'")
+                && message.contains("must sum to the width"),
+            "unexpected error: {message}"
+        );
+    }
+
     #[test]
     fn pspice_u_unsupported_frontend_families_fail_closed() {
         let err = Netlist::parse(
