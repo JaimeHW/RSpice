@@ -358,6 +358,9 @@ fn poly_eval_signature_from_inputs(
     }
 }
 
+/// Test-only: production compares the cached signature in place rather than
+/// materializing a fresh one per evaluation.
+#[cfg(test)]
 fn poly_eval_signature(ctx: &CmContext) -> CmResult<PolyEvalSignature> {
     let inputs = checked_inputs(ctx)?;
     Ok(poly_eval_signature_from_inputs(

@@ -1802,7 +1802,11 @@ impl CmContext {
         self.port_control_columns.clear();
     }
 
-    /// Get all pending events and clear the queue
+    /// Get all pending events and clear the queue.
+    ///
+    /// Test-only: production drains through `drain_pending_events`, which keeps
+    /// the queue allocation alive across evaluations.
+    #[cfg(test)]
     pub(crate) fn take_pending_events(&mut self) -> Vec<PendingDigitalEvent> {
         std::mem::take(&mut self.pending_events)
     }
@@ -1812,7 +1816,11 @@ impl CmContext {
         self.pending_events.drain(..)
     }
 
-    /// Get all pending real events and clear the queue
+    /// Get all pending real events and clear the queue.
+    ///
+    /// Test-only: production drains through `drain_pending_real_events`, which
+    /// keeps the queue allocation alive across evaluations.
+    #[cfg(test)]
     pub(crate) fn take_pending_real_events(&mut self) -> Vec<PendingRealEvent> {
         std::mem::take(&mut self.pending_real_events)
     }

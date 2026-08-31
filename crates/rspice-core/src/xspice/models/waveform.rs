@@ -168,6 +168,9 @@ fn triangle_params() -> &'static [ParamSpec] {
     })
 }
 
+/// Test-only allocating variant; production reads the table from the cached
+/// per-instance resource.
+#[cfg(test)]
 fn controlled_frequency_table(ctx: &CmContext) -> CmResult<FrequencyTableData> {
     controlled_frequency_table_optional_uncached(ctx)?
         .map(frequency_table_data)

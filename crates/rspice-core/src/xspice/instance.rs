@@ -2236,16 +2236,6 @@ impl XspiceInstance {
         }
     }
 
-    /// Get pending digital events
-    pub(crate) fn take_pending_events(&mut self) -> Vec<PendingDigitalEvent> {
-        self.context.take_pending_events()
-    }
-
-    /// Get pending real-valued events
-    pub(crate) fn take_pending_real_events(&mut self) -> Vec<PendingRealEvent> {
-        self.context.take_pending_real_events()
-    }
-
     /// Drain transient breakpoint requests while preserving context storage.
     pub(crate) fn drain_requested_breakpoints(&mut self) -> impl Iterator<Item = Value> + '_ {
         self.context.drain_requested_breakpoints()

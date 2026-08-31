@@ -75,6 +75,8 @@ struct AswitchEval {
 
 #[derive(Debug, Clone, Copy)]
 struct PswitchEval {
+    /// Asserted by unit tests; the stamping path uses `output_conductance`.
+    #[allow(dead_code)]
     resistance: Value,
     output_conductance: Value,
     control_partial: Value,
@@ -1914,6 +1916,9 @@ fn cache_ilimit_eval(ctx: &mut CmContext) -> CmResult<IlimitEval> {
     Ok(eval)
 }
 
+/// Test-only uncached variant; production evaluates through the cached
+/// per-instance ilimit resource.
+#[cfg(test)]
 fn ilimit_eval(ctx: &CmContext) -> CmResult<IlimitEval> {
     let signature = ilimit_eval_signature(ctx)?;
     Ok(ilimit_eval_from_signature(&signature))

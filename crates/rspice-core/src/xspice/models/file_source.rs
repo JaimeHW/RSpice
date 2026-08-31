@@ -320,6 +320,9 @@ fn skip_filesource_data_delimiters(input: &str, mut offset: usize) -> usize {
     offset
 }
 
+/// Test-only unlimited variant; production parses through
+/// `parse_filesource_contents_limited` with the run's resource limits.
+#[cfg(test)]
 fn parse_filesource_contents(
     file: &str,
     width: usize,
@@ -432,11 +435,9 @@ fn parse_filesource_contents_limited(
     Ok(fields)
 }
 
-fn parse_filesource_file(file: &str, width: usize) -> CmResult<Vec<RawFileSourceField>> {
-    let contents = data_file::read_to_string(file).map_err(|err| filesource_error(file, err))?;
-    parse_filesource_contents(file, width, &contents)
-}
-
+/// Test-only unlimited variant; production loads through
+/// `load_filesource_limited` with the run's resource limits.
+#[cfg(test)]
 fn load_filesource(
     file: &str,
     width: usize,

@@ -481,23 +481,6 @@ fn d_pwm_frequency(ctx: &CmContext) -> CmResult<Value> {
     Ok(frequency.max(1.0e-6))
 }
 
-fn scalar_param_in_range(
-    ctx: &CmContext,
-    model: &str,
-    name: &str,
-    min: Value,
-    max: Value,
-) -> CmResult<Value> {
-    let value = ctx.param(name);
-    if !value.is_finite() || value < min || value > max {
-        return Err(oscillator_error(
-            model,
-            format!("{name} must be in [{min}, {max}], got {value}"),
-        ));
-    }
-    Ok(value)
-}
-
 fn scalar_finite_param(ctx: &CmContext, model: &str, name: &str) -> CmResult<Value> {
     let value = ctx.param(name);
     if !value.is_finite() {

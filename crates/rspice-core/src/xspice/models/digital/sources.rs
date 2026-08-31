@@ -32,6 +32,8 @@ struct DSourceRows {
 }
 
 impl DSourceRows {
+    /// Test-only: production walks rows by index against the cached row count.
+    #[cfg(test)]
     fn len(&self) -> usize {
         self.rows.len()
     }
@@ -351,6 +353,9 @@ fn parse_d_source_token(input_file: &str, line: usize, token: &str) -> CmResult<
     Ok(digital_table_output_from_code(code).expect("valid digital output code"))
 }
 
+/// Test-only unlimited variant; production parses through
+/// `parse_d_source_contents_limited` with the run's resource limits.
+#[cfg(test)]
 fn parse_d_source_contents(
     input_file: &str,
     width: usize,
@@ -372,6 +377,9 @@ enum DSourceParseError {
 }
 
 impl DSourceParseError {
+    /// Test-only: production callers map the variants where they already hold
+    /// the file-scoped error context.
+    #[cfg(test)]
     fn into_cm_error(self, input_file: &str) -> CmError {
         match self {
             Self::Model(error) => error,
@@ -480,12 +488,9 @@ fn parse_d_source_contents_limited(
     })
 }
 
-fn parse_d_source_file(input_file: &str, width: usize) -> CmResult<DSourceRows> {
-    let contents = data_file::read_to_string(input_file)
-        .map_err(|err| d_source_file_error(input_file, err))?;
-    parse_d_source_contents(input_file, width, &contents)
-}
-
+/// Test-only unlimited variant; production loads through
+/// `load_d_source_rows_limited` with the run's resource limits.
+#[cfg(test)]
 fn load_d_source_rows(
     input_file: &str,
     width: usize,
@@ -1082,14 +1087,6 @@ fn d_state_cache_key(
     }
 }
 
-fn parse_d_state_input_token(state_file: &str, line: usize, token: &str) -> CmResult<Option<bool>> {
-    match parse_d_state_input_code(state_file, line, token)? {
-        0 => Ok(Some(false)),
-        1 => Ok(Some(true)),
-        _ => Ok(None),
-    }
-}
-
 fn parse_d_state_input_code(state_file: &str, line: usize, token: &str) -> CmResult<i64> {
     match token {
         "0" => Ok(0),
@@ -1387,6 +1384,9 @@ fn d_state_reserve_row_outputs(
         })
 }
 
+/// Test-only unlimited variant; production loads through
+/// `load_d_state_table_limited` with the run's resource limits.
+#[cfg(test)]
 fn parse_d_state_file(
     state_file: &str,
     input_width: usize,
@@ -1397,6 +1397,9 @@ fn parse_d_state_file(
     parse_d_state_contents(state_file, input_width, output_width, &contents)
 }
 
+/// Test-only unlimited variant; production parses through
+/// `parse_d_state_contents_limited` with the run's resource limits.
+#[cfg(test)]
 fn parse_d_state_contents(
     state_file: &str,
     input_width: usize,
@@ -1624,6 +1627,9 @@ fn d_state_range_index(
     Ok(ranges)
 }
 
+/// Test-only unlimited variant; production loads through
+/// `load_d_state_table_limited` with the run's resource limits.
+#[cfg(test)]
 fn load_d_state_table(
     state_file: &str,
     input_width: usize,

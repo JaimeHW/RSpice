@@ -551,11 +551,6 @@ fn bidi_drive_strength_base(width: usize) -> usize {
     BIDI_STATE_DRIVE_STRENGTH_BASE_OFFSET * width
 }
 
-#[cfg(test)]
-fn bidi_int_strength_base(width: usize) -> usize {
-    BIDI_INT_OUTPUT_STRENGTH_BASE_OFFSET * width
-}
-
 fn bidi_direction(params: BidiParams, dir: &[DigitalValue], index: usize) -> BidiDirection {
     match params.direction {
         0 => BidiDirection::Dac,

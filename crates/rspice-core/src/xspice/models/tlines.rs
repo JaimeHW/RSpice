@@ -304,18 +304,6 @@ fn nonnegative_param(ctx: &CmContext, name: &str, default: Value) -> CmResult<Va
     }
 }
 
-fn finite_param(ctx: &CmContext, name: &str, default: Value) -> CmResult<Value> {
-    let value = ctx.param_or(name, default);
-    if value.is_finite() {
-        Ok(value)
-    } else {
-        Err(CmError::InvalidParameter {
-            name: name.to_string(),
-            message: format!("expected finite value, got {value}"),
-        })
-    }
-}
-
 fn integer_param(ctx: &CmContext, name: &str, default: i64) -> i64 {
     ctx.param_or(name, default as Value).round() as i64
 }

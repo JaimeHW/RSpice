@@ -158,6 +158,9 @@ fn d_ram_shape_from_signature(signature: DMemoryShapeSignature) -> CmResult<DMem
     })
 }
 
+/// Test-only uncached variant; production resolves the shape through
+/// `d_ram_cached_shape`.
+#[cfg(test)]
 fn d_ram_shape(ctx: &CmContext) -> CmResult<DMemoryShape> {
     d_ram_shape_from_signature(d_ram_shape_signature(ctx))
 }

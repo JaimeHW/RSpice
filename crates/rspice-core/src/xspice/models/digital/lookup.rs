@@ -73,6 +73,9 @@ fn d_lut_state_code(state: DigitalState) -> i64 {
     }
 }
 
+/// Test-only inverse of `d_lut_state_code`; production decodes table bytes
+/// through `d_lut_table_state_from_byte`.
+#[cfg(test)]
 fn d_lut_state_from_code(code: i64) -> DigitalState {
     match code {
         0 => DigitalState::Zero,
@@ -282,6 +285,9 @@ fn d_genlut_delay_plan(
     Ok(plan)
 }
 
+/// Test-only indexing helper; production reads the byte once and calls
+/// `d_lut_table_state_from_byte`.
+#[cfg(test)]
 fn d_lut_table_state(table: &[u8], index: usize) -> DigitalState {
     d_lut_table_state_from_byte(table.get(index).copied())
 }
@@ -297,6 +303,8 @@ fn d_genlut_value_code(value: DigitalValue) -> (i64, i64) {
     (state, strength)
 }
 
+/// Test-only inverse of `d_genlut_value_code`'s strength half.
+#[cfg(test)]
 fn d_genlut_strength_from_code(code: i64) -> DigitalStrength {
     match code {
         1 => DigitalStrength::HighZ,
@@ -306,6 +314,9 @@ fn d_genlut_strength_from_code(code: i64) -> DigitalStrength {
     }
 }
 
+/// Test-only indexing helper; production reads the byte once and calls
+/// `d_genlut_table_value_from_byte`.
+#[cfg(test)]
 fn d_genlut_lookup_value(table: &[u8], index: usize) -> DigitalValue {
     d_genlut_table_value_from_byte(table.get(index).copied())
 }
@@ -337,6 +348,9 @@ fn d_lut_index_for_width(inputs: &[DigitalValue], input_width: usize) -> CmResul
     Ok(Some(index))
 }
 
+/// Test-only wrapper; production passes the declared port width explicitly to
+/// `d_lut_index_for_width`.
+#[cfg(test)]
 fn d_lut_index(inputs: &[DigitalValue]) -> CmResult<Option<usize>> {
     d_lut_index_for_width(inputs, inputs.len())
 }
@@ -352,6 +366,9 @@ fn d_genlut_shape(ctx: &CmContext) -> CmResult<(usize, usize)> {
     Ok((input_width, output_width))
 }
 
+/// Test-only single-index lookup; production expands the whole vector once via
+/// `d_genlut_expand_param_values`.
+#[cfg(test)]
 fn d_genlut_param_value(ctx: &CmContext, name: &str, index: usize, default: Value) -> Value {
     match ctx.real_vector_param(name) {
         Some(values) if index < values.len() => values[index],
@@ -478,6 +495,9 @@ struct DGenlutInputScan {
     unknown_bits: usize,
 }
 
+/// Test-only wrapper; production reuses the cached expanded delay vector and
+/// calls `d_genlut_scan_inputs_with_delays` directly.
+#[cfg(test)]
 fn d_genlut_scan_inputs(
     ctx: &CmContext,
     inputs: &[DigitalValue],

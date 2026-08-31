@@ -598,6 +598,9 @@ fn mult_transfer_base_signature(ctx: &CmContext) -> MultTransferBaseSignature {
     }
 }
 
+/// Test-only: production compares the cached signature in place through
+/// `mult_transfer_inputs_match` instead of materializing a new one.
+#[cfg(test)]
 fn mult_transfer_signature_from_inputs(
     base: MultTransferBaseSignature,
     inputs: &[AnalogValue],
@@ -611,6 +614,7 @@ fn mult_transfer_signature_from_inputs(
     }
 }
 
+#[cfg(test)]
 fn mult_transfer_signature(ctx: &CmContext) -> MultTransferSignature {
     mult_transfer_signature_from_inputs(
         mult_transfer_base_signature(ctx),
@@ -742,6 +746,8 @@ fn mult_output_from_transfer(transfer: &MultTransfer) -> Value {
     transfer.accumulate_in * transfer.transfer_gain + transfer.out_offset
 }
 
+/// Test-only convenience wrapper; production evaluates from the cached transfer.
+#[cfg(test)]
 fn mult_output_from_context(ctx: &CmContext) -> CmResult<Value> {
     let transfer = mult_transfer_for_context(ctx)?;
     Ok(mult_output_from_transfer(transfer.as_ref()))
@@ -784,6 +790,8 @@ fn mult_partials_from_transfer(transfer: &MultTransfer) -> CmResult<Vec<(String,
     Ok(partials)
 }
 
+/// Test-only convenience wrapper; production evaluates from the cached transfer.
+#[cfg(test)]
 fn mult_partials_from_context(ctx: &CmContext) -> CmResult<Vec<(String, usize, Value)>> {
     let transfer = mult_transfer_for_context(ctx)?;
     mult_partials_from_transfer(transfer.as_ref())
@@ -1265,11 +1273,6 @@ fn limit_transfer_from_signature(signature: LimitTransferSignature) -> LimitTran
         signature.fraction,
     );
     LimitTransfer { output, in_partial }
-}
-
-fn limit_transfer_from_context(ctx: &CmContext) -> CmResult<(Value, Value)> {
-    let transfer = limit_transfer_for_context(ctx)?;
-    Ok((transfer.output, transfer.in_partial))
 }
 
 fn limit_transfer_for_context(ctx: &CmContext) -> CmResult<LimitTransfer> {

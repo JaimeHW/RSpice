@@ -58,12 +58,18 @@ struct DigParams {
     s0_rlo: Value,
     s0_rhi: Value,
     s0_tsw: Value,
+    /// Parsed and finite-checked for ngspice parameter-set parity; the input
+    /// threshold logic reads the `s0_vhi`/`s1_vlo` pair only.
+    #[allow(dead_code)]
     s0_vlo: Value,
     s0_vhi: Value,
     s1_rlo: Value,
     s1_rhi: Value,
     s1_tsw: Value,
     s1_vlo: Value,
+    /// Parsed and finite-checked for ngspice parameter-set parity; the input
+    /// threshold logic reads the `s0_vhi`/`s1_vlo` pair only.
+    #[allow(dead_code)]
     s1_vhi: Value,
     delay: Value,
 }

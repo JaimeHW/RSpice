@@ -71,6 +71,9 @@ fn bump_virtual_data_file_epoch(files: &mut VirtualDataFileRegistry) -> Result<u
     Ok(epoch)
 }
 
+/// Test-only: production model caches synchronize their epoch through
+/// [`with_virtual_data_file_snapshot`] while holding the registry lock.
+#[cfg(test)]
 pub(crate) fn virtual_data_file_epoch() -> u64 {
     lock_virtual_files().epoch
 }
@@ -262,6 +265,9 @@ fn native_path_error(
     )
 }
 
+/// Test-only unlimited variant; production always reads through
+/// `read_native_to_string_with_stamp_limited` with the run's resource limits.
+#[cfg(test)]
 fn read_native_to_string_with_stamp(path: &str) -> Result<(Arc<str>, DataFileStamp), String> {
     read_native_to_string_with_stamp_limited(
         path,
@@ -305,6 +311,7 @@ fn read_native_to_string_with_stamp_limited(
     read_path(path_ref, limit)
 }
 
+#[cfg(test)]
 fn native_stamp(path: &str) -> Result<DataFileStamp, String> {
     read_native_to_string_with_stamp(path).map(|(_, stamp)| stamp)
 }
@@ -407,6 +414,9 @@ pub(crate) fn test_registry_guard() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// Test-only: production model loaders take the stamp from the same read that
+/// returns the contents, so no separate stat/hash pass is needed.
+#[cfg(test)]
 pub(crate) fn data_file_stamp(path: &str) -> Result<DataFileStamp, String> {
     if let Some(file) = registered(path)? {
         return Ok(file.stamp);

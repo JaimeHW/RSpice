@@ -266,6 +266,9 @@ fn eval_signature_from_inputs(base: EvalBaseSignature, inputs: &[AnalogValue]) -
     }
 }
 
+/// Test-only: production compares the cached signature in place rather than
+/// materializing a fresh one per evaluation.
+#[cfg(test)]
 fn eval_signature(ctx: &CmContext) -> CmResult<EvalSignature> {
     Ok(eval_signature_from_inputs(
         eval_base_signature(ctx)?,

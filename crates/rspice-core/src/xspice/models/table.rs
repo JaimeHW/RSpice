@@ -502,6 +502,9 @@ fn table_line_data(line: &str) -> (&str, bool, bool) {
     (data, header_ignored, data_comment)
 }
 
+/// Test-only unlimited variant; production tokenizes through
+/// `tokenize_table_contents_limited` with the run's resource limits.
+#[cfg(test)]
 fn tokenize_table_contents<'a>(
     model: &str,
     file: &str,
@@ -782,13 +785,9 @@ fn parse_table3d_values(
     Ok(values)
 }
 
-fn parse_table2d_file(file: &str) -> CmResult<Table2DData> {
-    let model = TableKind::Table2D.model_name();
-    let contents =
-        data_file::read_to_string(file).map_err(|err| table_file_error(model, file, err))?;
-    parse_table2d_contents(file, &contents)
-}
-
+/// Test-only unlimited variant; production parses through
+/// `parse_table2d_contents_limited` with the run's resource limits.
+#[cfg(test)]
 fn parse_table2d_contents(file: &str, contents: &str) -> CmResult<Table2DData> {
     parse_table2d_contents_limited(
         file,
@@ -836,13 +835,9 @@ fn parse_table2d_cursor(
     Ok(Table2DData { x, y, values })
 }
 
-fn parse_table3d_file(file: &str) -> CmResult<Table3DData> {
-    let model = TableKind::Table3D.model_name();
-    let contents =
-        data_file::read_to_string(file).map_err(|err| table_file_error(model, file, err))?;
-    parse_table3d_contents(file, &contents)
-}
-
+/// Test-only unlimited variant; production parses through
+/// `parse_table3d_contents_limited` with the run's resource limits.
+#[cfg(test)]
 fn parse_table3d_contents(file: &str, contents: &str) -> CmResult<Table3DData> {
     parse_table3d_contents_limited(
         file,
@@ -949,6 +944,9 @@ fn validate_table3d_order(table: &Table3DData, order: usize) -> CmResult<()> {
     Ok(())
 }
 
+/// Test-only unlimited variant; production loads through `load_table2d_limited`
+/// with the run's resource limits.
+#[cfg(test)]
 fn load_table2d(file: &str) -> CmResult<(Arc<Table2DData>, Option<data_file::DataFileStamp>)> {
     load_table2d_limited(file, crate::resource::ResourceLimits::default())
 }
@@ -1009,6 +1007,9 @@ fn load_table2d_limited(
     Ok((table, virtual_stamp))
 }
 
+/// Test-only unlimited variant; production loads through `load_table3d_limited`
+/// with the run's resource limits.
+#[cfg(test)]
 fn load_table3d(file: &str) -> CmResult<(Arc<Table3DData>, Option<data_file::DataFileStamp>)> {
     load_table3d_limited(file, crate::resource::ResourceLimits::default())
 }
@@ -1328,6 +1329,9 @@ fn eno_window_start(index: usize, order: usize, len: usize) -> usize {
     }
 }
 
+/// Test-only allocating variant; production evaluates through
+/// `eno1d_eval_with_scratch` against the per-instance scratch buffers.
+#[cfg(test)]
 fn eno1d_eval(samples: &[Value], order: usize, index: usize, offset: Value) -> CmResult<Eno1dEval> {
     let mut scratch = Vec::new();
     eno1d_eval_with_scratch(samples, order, index, offset, &mut scratch)
@@ -1403,37 +1407,6 @@ fn eno1d_eval_with_scratch(
     })
 }
 
-fn eno2d_eval_grid<'a, F>(
-    row_count: usize,
-    mut row_at: F,
-    order: usize,
-    x_index: usize,
-    y_index: usize,
-    x_offset: Value,
-    y_offset: Value,
-) -> CmResult<Eno2dEval>
-where
-    F: FnMut(usize) -> &'a [Value],
-{
-    let mut values_along_y = Vec::new();
-    let mut dx_along_y = Vec::new();
-    let mut x_scratch = Vec::new();
-    let mut y_scratch = Vec::new();
-    eno2d_eval_grid_with_scratch(
-        row_count,
-        &mut row_at,
-        order,
-        x_index,
-        y_index,
-        x_offset,
-        y_offset,
-        &mut values_along_y,
-        &mut dx_along_y,
-        &mut x_scratch,
-        &mut y_scratch,
-    )
-}
-
 #[allow(clippy::too_many_arguments)]
 fn eno2d_eval_grid_with_scratch<'a, F>(
     row_count: usize,
@@ -1474,16 +1447,6 @@ where
     })
 }
 
-fn table2d_eno_derivatives(
-    table: &Table2DData,
-    order: usize,
-    x_axis: AxisEval,
-    y_axis: AxisEval,
-) -> CmResult<Eno2dEval> {
-    let mut scratch = TableEvalScratch::default();
-    table2d_eno_derivatives_with_scratch(table, order, x_axis, y_axis, &mut scratch)
-}
-
 fn table2d_eno_derivatives_with_scratch(
     table: &Table2DData,
     order: usize,
@@ -1504,17 +1467,6 @@ fn table2d_eno_derivatives_with_scratch(
         &mut scratch.x_scratch,
         &mut scratch.y_scratch,
     )
-}
-
-fn table3d_eno_derivatives(
-    table: &Table3DData,
-    order: usize,
-    x_axis: AxisEval,
-    y_axis: AxisEval,
-    z_axis: AxisEval,
-) -> CmResult<Eno3dEval> {
-    let mut scratch = TableEvalScratch::default();
-    table3d_eno_derivatives_with_scratch(table, order, x_axis, y_axis, z_axis, &mut scratch)
 }
 
 fn table3d_eno_derivatives_with_scratch(

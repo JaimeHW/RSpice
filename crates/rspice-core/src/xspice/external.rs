@@ -210,6 +210,10 @@ impl DigitalCosimRuntimeFactory for HostDigitalCosimFactory {
     }
 }
 
+// The d_process bit-packing and FIFO-path helpers below are reachable only from
+// `mod native`, which is `cfg(not(target_arch = "wasm32"))`; the wasm factory
+// rejects d_process before any spec is parsed.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn packed_byte_len(bit_count: usize) -> usize {
     if bit_count == 0 {
         0
@@ -218,6 +222,7 @@ fn packed_byte_len(bit_count: usize) -> usize {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn validate_digital_process_spec(spec: &DigitalProcessSpec) -> CmResult<(usize, usize)> {
     if spec.process_file.trim().is_empty() {
         return Err(CmError::InvalidParameter {
@@ -244,6 +249,7 @@ fn validate_digital_process_spec(spec: &DigitalProcessSpec) -> CmResult<(usize, 
     ))
 }
 
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn d_process_fifo_base_name(process_file: &str) -> Option<&str> {
     if process_file.ends_with("||") {
         Some(&process_file[..process_file.len() - 2])
@@ -254,6 +260,7 @@ fn d_process_fifo_base_name(process_file: &str) -> Option<&str> {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn d_process_fifo_endpoint_paths(process_file: &str) -> Option<(String, String)> {
     d_process_fifo_base_name(process_file).map(|base| (format!("{base}_in"), format!("{base}_out")))
 }

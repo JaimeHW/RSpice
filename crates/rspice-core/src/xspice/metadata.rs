@@ -428,12 +428,6 @@ fn set_soft_range(params: &mut [ParamSpec], name: &str, min: Value, max: Value) 
     set_soft_min(params, name, min) | set_soft_max(params, name, max)
 }
 
-fn set_min_many(params: &mut [ParamSpec], names: &[&str], min: Value) -> bool {
-    names
-        .iter()
-        .fold(false, |changed, name| set_min(params, name, min) | changed)
-}
-
 fn set_soft_min_many(params: &mut [ParamSpec], names: &[&str], min: Value) -> bool {
     names.iter().fold(false, |changed, name| {
         set_soft_min(params, name, min) | changed
