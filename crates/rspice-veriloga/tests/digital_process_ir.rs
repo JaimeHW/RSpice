@@ -1075,3 +1075,316 @@ fn an_undefined_four_state_merge_resolves_to_unknown() {
     };
     assert_eq!(value.spelling(), "xx");
 }
+
+// ===========================================================================
+// Elaborated hierarchy (IEEE 1364-2005 sections 12.1.2 and 12.3)
+// ===========================================================================
+//
+// The shape pinned here is that there is no hierarchy left. A design of
+// several modules lowers to one plan with one signal table, and what survives
+// the flattening is identity: which instance a process belongs to, and which
+// driver of a net a contribution is.
+
+/// A two-input NAND with an internal net, so a test can see what hoisting does
+/// to a name that has nowhere else to go.
+const NAND2: &str = "module nand2(y, a, b);\n\
+                     \x20   output y;\n\
+                     \x20   input a, b;\n\
+                     \x20   wire y, a, b, t;\n\
+                     \x20   assign t = a & b;\n\
+                     \x20   assign y = ~t;\n\
+                     endmodule\n";
+
+fn hierarchy(child: &str, top_section: &str) -> String {
+    format!(
+        "{child}\n\
+         module top(p, n);\n\
+         \x20   inout p, n;\n\
+         \x20   electrical p, n;\n\
+         {top_section}\n\
+         \x20   analog I(p, n) <+ V(p, n);\n\
+         endmodule\n"
+    )
+}
+
+fn elaborated(child: &str, top_section: &str) -> CanonicalDigitalPlan {
+    VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir_module(&hierarchy(child, top_section), Some("top"))
+        .expect("the hierarchy must elaborate and lower")
+        .digital
+}
+
+fn signal_names(plan: &CanonicalDigitalPlan) -> Vec<String> {
+    plan.signals
+        .iter()
+        .map(|signal| signal.name.to_string())
+        .collect()
+}
+
+/// A signal an instance declares and does not connect out keeps the instance
+/// path, which is the IEEE 1364-2005 section 12.4 hierarchical name minus the
+/// top module. A `.` cannot occur in an identifier, so a hoisted name can
+/// never collide with one the author wrote.
+#[test]
+fn an_instance_signal_is_hoisted_under_its_instance_path() {
+    let plan = elaborated(
+        NAND2,
+        "    wire a, b, n1, y;\n     nand2 g1(n1, a, b);\n     nand2 g2(y, n1, n1);",
+    );
+    assert_eq!(
+        signal_names(&plan),
+        vec!["a", "b", "n1", "y", "g1.t", "g2.t"]
+    );
+}
+
+/// Nesting composes the path rather than restarting it.
+#[test]
+fn a_nested_instance_carries_the_whole_path() {
+    let source = "module inv(y, a);\n\
+                  \x20   output y;\n\
+                  \x20   input a;\n\
+                  \x20   wire y, a, t;\n\
+                  \x20   assign t = ~a;\n\
+                  \x20   assign y = t;\n\
+                  endmodule\n\
+                  module pair(y, a);\n\
+                  \x20   output y;\n\
+                  \x20   input a;\n\
+                  \x20   wire y, a, mid;\n\
+                  \x20   inv i1(mid, a);\n\
+                  \x20   inv i2(y, mid);\n\
+                  endmodule\n";
+    let plan = elaborated(source, "    wire x, z;\n     pair u1(z, x);");
+    assert_eq!(
+        signal_names(&plan),
+        vec!["x", "z", "u1.mid", "u1.i1.t", "u1.i2.t"]
+    );
+}
+
+/// A net port and the net it is connected to are one elaborated signal.
+///
+/// This is the port-connection decision, stated as a count: two instances of a
+/// four-signal module connected to four parent nets produce six signals, not
+/// twelve. IEEE 1364-2005 section 12.3.10 asks what net type results from
+/// connecting two dissimilar nets, a question that only exists because the two
+/// become one; section 12.3.9.3 makes an inout connection exactly that join.
+#[test]
+fn a_connected_net_port_collapses_onto_the_net_it_names() {
+    let plan = elaborated(
+        NAND2,
+        "    wire a, b, n1, y;\n     nand2 g1(n1, a, b);\n     nand2 g2(y, n1, n1);",
+    );
+    assert_eq!(plan.signals.len(), 6);
+    // Two ports of one instance may name the same net, and that is one signal.
+    let n1 = plan
+        .signals
+        .iter()
+        .find(|signal| signal.name == "n1")
+        .expect("the collapsed net");
+    let reads: usize = plan
+        .processes
+        .iter()
+        .flat_map(|process| &process.function.values)
+        .filter(|value| {
+            matches!(value.kind, CfgValueKind::DigitalSignalRead { signal } if signal == n1.id)
+        })
+        .count();
+    assert!(
+        reads >= 2,
+        "both of g2's inputs must read the one collapsed net, found {reads} reads"
+    );
+}
+
+/// An unconnected port is a net of its own: IEEE 1364-2005 section 12.3.9
+/// leaves it undriven, which is what a hoisted net nobody names already is.
+#[test]
+fn an_unconnected_port_keeps_its_own_signal() {
+    let plan = elaborated(NAND2, "    wire a, b;\n     nand2 g1(, a, b);");
+    assert_eq!(signal_names(&plan), vec!["a", "b", "g1.y", "g1.t"]);
+}
+
+/// Two instances of one module are two sets of processes.
+///
+/// The property a scheduler needs: it resumes *a* process, so two instances of
+/// one `always` block cannot be one identity. The source module's own process
+/// id is shared between them and is deliberately not used.
+#[test]
+fn two_instances_of_one_module_own_distinct_processes() {
+    let child = "module dff(q, clk, d);\n\
+                 \x20   output q;\n\
+                 \x20   input clk, d;\n\
+                 \x20   reg q;\n\
+                 \x20   wire clk, d;\n\
+                 \x20   always @(posedge clk) q <= d;\n\
+                 endmodule\n";
+    let plan = elaborated(
+        child,
+        "    wire clk, d, q1, q2;\n\
+     \x20   dff u1(.q(q1), .clk(clk), .d(d));\n\
+     \x20   dff u2(.q(q2), .clk(clk), .d(q1));",
+    );
+    let always: Vec<_> = plan
+        .processes
+        .iter()
+        .filter(|process| process.kind == DigitalProcessKind::Always)
+        .collect();
+    assert_eq!(always.len(), 2, "one `always` per instance");
+    assert_ne!(
+        always[0].id, always[1].id,
+        "two instances of one process must be two identities"
+    );
+    // Each writes its own instance's variable, not one shared signal.
+    let written: Vec<_> = always
+        .iter()
+        .flat_map(|process| &process.function.values)
+        .filter_map(|value| match &value.kind {
+            CfgValueKind::DigitalNonblockingWrite { target, .. } => Some(target.signal),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(written.len(), 2);
+    assert_ne!(written[0], written[1]);
+}
+
+/// The property this whole design has to preserve: a net driven by two
+/// instances has two drivers, told apart by index.
+///
+/// Collapsing an output port does not fold its driver into the net. A driver
+/// is named by net and by index among that net's drivers, so two children
+/// driving one parent net are two contributions a resolver sees separately —
+/// which is the case where a collapse that *did* merge the drivers would have
+/// silently destroyed one of them.
+#[test]
+fn two_child_outputs_on_one_net_are_two_drivers() {
+    let child = "module drv(y, a);\n\
+                 \x20   output y;\n\
+                 \x20   input a;\n\
+                 \x20   wire y, a;\n\
+                 \x20   assign y = a;\n\
+                 endmodule\n";
+    let plan = elaborated(
+        child,
+        "    wire a, b, bus;\n     drv d1(bus, a);\n     drv d2(bus, b);",
+    );
+    let bus = plan
+        .signals
+        .iter()
+        .find(|signal| signal.name == "bus")
+        .expect("the shared net");
+    let drivers: Vec<_> = plan.drivers_of(bus.id).collect();
+    assert_eq!(drivers.len(), 2, "one driver per instance");
+    assert_eq!(drivers[0].id.index, 0);
+    assert_eq!(drivers[1].id.index, 1);
+    assert_ne!(
+        drivers[0].process, drivers[1].process,
+        "each driver is computed by its own instance's process"
+    );
+}
+
+/// Driver indices are declaration order among the net's drivers, and that
+/// order is elaboration order, so it does not move between compilations of the
+/// same source.
+#[test]
+fn elaborated_driver_identities_are_stable_across_recompilation() {
+    let child = "module drv(y, a);\n\
+                 \x20   output y;\n\
+                 \x20   input a;\n\
+                 \x20   wire y, a;\n\
+                 \x20   assign y = a;\n\
+                 endmodule\n";
+    let section = "    wire a, b, bus;\n     drv d1(bus, a);\n     drv d2(bus, b);";
+    let first = elaborated(child, section);
+    let second = elaborated(child, section);
+    assert_eq!(first.drivers, second.drivers);
+    assert_eq!(first.signals, second.signals);
+    assert_eq!(
+        first
+            .processes
+            .iter()
+            .map(|process| process.id)
+            .collect::<Vec<_>>(),
+        second
+            .processes
+            .iter()
+            .map(|process| process.id)
+            .collect::<Vec<_>>()
+    );
+}
+
+/// A variable output port is the one port class that does not collapse.
+///
+/// IEEE 1364-2005 section 12.3.9.2 lets an output port be a variable, and a
+/// variable cannot be joined with a net: one holds what a process wrote, the
+/// other is the resolution of its drivers. So the port keeps its own signal
+/// and the connection becomes a driver on the connected net — a real driver
+/// with a real identity, indistinguishable from an `assign` the parent could
+/// have written.
+#[test]
+fn a_variable_output_port_drives_the_connected_net_through_an_implicit_assignment() {
+    let child = "module dff(q, clk, d);\n\
+                 \x20   output q;\n\
+                 \x20   input clk, d;\n\
+                 \x20   reg q;\n\
+                 \x20   wire clk, d;\n\
+                 \x20   always @(posedge clk) q <= d;\n\
+                 endmodule\n";
+    let plan = elaborated(
+        child,
+        "    wire clk, d, q;\n     dff u1(.q(q), .clk(clk), .d(d));",
+    );
+    // The instance's variable stayed its own signal rather than joining `q`.
+    assert_eq!(signal_names(&plan), vec!["clk", "d", "q", "u1.q"]);
+    let net = plan
+        .signals
+        .iter()
+        .find(|signal| signal.name == "q")
+        .expect("the connected net");
+    let variable = plan
+        .signals
+        .iter()
+        .find(|signal| signal.name == "u1.q")
+        .expect("the instance's variable");
+    assert!(!net.procedurally_assignable, "`q` is a net");
+    assert!(variable.procedurally_assignable, "`u1.q` is a variable");
+
+    let drivers: Vec<_> = plan.drivers_of(net.id).collect();
+    assert_eq!(drivers.len(), 1, "the connection is the net's one driver");
+    assert_eq!(drivers[0].id.index, 0);
+
+    // The synthesized driver is an ordinary continuous-assignment process: it
+    // reads the instance's variable and publishes it as this driver's value.
+    let process = plan
+        .process(drivers[0].process)
+        .expect("the driver's process");
+    assert_eq!(process.kind, DigitalProcessKind::ContinuousAssign);
+    let sensitivity = process
+        .static_sensitivity
+        .as_ref()
+        .expect("a driver waits on its operands");
+    assert_eq!(sensitivity.origin, DigitalSensitivityOrigin::Implicit);
+    assert_eq!(sensitivity.terms.len(), 1);
+    assert_eq!(sensitivity.terms[0].signal, variable.id);
+    assert!(
+        process
+            .function
+            .values
+            .iter()
+            .any(|value| matches!(value.kind, CfgValueKind::DigitalDriverWrite { .. })),
+        "the connection publishes a driver contribution"
+    );
+}
+
+/// A design with no hierarchy produces exactly the plan it always did: the
+/// compiled module's own signals keep their names and their positions, and
+/// nothing about the elaboration is visible.
+#[test]
+fn a_module_with_no_instances_lowers_unchanged() {
+    let plan = plan(
+        "    wire a, b;\n\
+     \x20   wire y;\n\
+     \x20   assign y = a & b;",
+    );
+    assert_eq!(signal_names(&plan), vec!["a", "b", "y"]);
+    assert_eq!(plan.processes.len(), 1);
+    assert_eq!(plan.drivers.len(), 1);
+}
