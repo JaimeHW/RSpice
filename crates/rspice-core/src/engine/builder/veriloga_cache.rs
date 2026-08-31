@@ -83,7 +83,12 @@ use super::*;
 // four bits now rather than to the 32-bit unsized floor. Both change the value
 // an artifact computes, so every cached digital artifact has to be rebuilt and
 // the record's identity has to change.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 30;
+// Version 31 groups each syntactic Verilog-A noise primitive as one coherent
+// process and serializes its derivative-shadow replay plus every signed circuit
+// injection. A version-30 artifact has neither the schema marker nor those
+// routing programs, so accepting it would silently revert repeated uses of one
+// process to independent sources and lose cancellation/correlation.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 31;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
