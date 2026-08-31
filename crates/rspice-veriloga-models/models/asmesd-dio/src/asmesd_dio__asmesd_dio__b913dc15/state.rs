@@ -326,7 +326,7 @@ impl<const DDT: usize, const IDT: usize> StampState<DDT, IDT> {
 	}
 }
 
-pub(crate) type CanonicalModelValues = [f64; 31];
+pub(crate) type CanonicalModelValues = [f64; 30];
 pub struct Instance {
 	pub nodes: [usize; 7],
 	pub branches: [usize; 7],
@@ -341,7 +341,7 @@ pub struct Instance {
 	pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
 	pub(crate) canonical_reactive: Box<[f64; 43]>,
 	pub(crate) canonical_model_values: Option<std::sync::Arc<CanonicalModelValues>>,
-	pub(crate) canonical_staged: Box<[f64; 40]>,
+	pub(crate) canonical_staged: Box<[f64; 39]>,
 	pub(crate) canonical_instance_valid: bool,
 	pub(crate) canonical_temperature_valid: bool,
 	pub(crate) canonical_temperature: f64,

@@ -5,9 +5,9 @@ use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
 use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
-pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 5] = [5, 6, 4, 1, 3];
-pub(super) const CANONICAL_INSTANCE_STAGE_SLOTS: [u32; 11] = [9, 10, 11, 12, 0, 13, 14, 16, 15, 17, 18];
-pub(super) const CANONICAL_TEMPERATURE_STAGE_SLOTS: [u32; 3] = [2, 7, 8];
+pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 4] = [5, 3, 4, 2];
+pub(super) const CANONICAL_INSTANCE_STAGE_SLOTS: [u32; 11] = [6, 7, 8, 9, 0, 10, 11, 13, 12, 14, 15];
+pub(super) const CANONICAL_TEMPERATURE_STAGE_SLOTS: [u32; 1] = [1];
 
 pub(super) fn canonical_model_preprocess(
     parameters: &[f64],
@@ -16,18 +16,17 @@ pub(super) fn canonical_model_preprocess(
     staged: &[f64],
     temperature: f64,
     thermal_voltage: f64,
-) -> [f64; 5] {
-		let B = parameter_given[11] as u8 as f64;
-	    let mut oC = 0.0;
-		let A = parameters[15] != 1002f64;
-		if parameter_given[11] {
-			let C = 1f64 - (0.01f64 * parameters[11]);
-			oC = C;
-		}
-		let D = 273.15f64 + parameters[16];
-		let E = (parameters[29] > 0f64) || (parameters[27] > 0f64);
-		let F = parameters[35] + 1f64;
-    [A as u8 as f64, oC, D, E as u8 as f64, F]
+) -> [f64; 4] {
+	let A=parameter_given[11] as u8 as f64;
+	let mut oB=0.0;
+	if parameter_given[11]{
+	let B=1f64- (0.01f64* parameters[11]);
+	oB=B;
+	}
+	let C=273.15f64+ parameters[16];
+	let D=(parameters[29]> 0f64)|| (parameters[27]> 0f64);
+	let E=parameters[35]+ 1f64;
+    [oB, C, D as u8 as f64, E]
 }
 
 pub(super) fn canonical_instance_preprocess(
@@ -38,65 +37,65 @@ pub(super) fn canonical_instance_preprocess(
     temperature: f64,
     thermal_voltage: f64,
 ) -> [f64; 11] {
-		let A = parameters[3];
-		let B = parameters[4];
-		let D = parameters[23];
-		let G = parameter_given[1] as u8 as f64;
-		let H = parameter_given[2] as u8 as f64;
-		let K = 0f64;
-		let M = parameters[2];
-		let N = parameters[1];
-		let R = parameters[0];
-	    let mut oE = false;
-	    let mut oO = false;
-	    let mut oP = false;
-	    let mut oQ = false;
-	    let mut oS = false;
-	    let mut oT = false;
-	    let mut oU = false;
-	    let mut oV = false;
-		let C = A != 0.0 && B != 0.0;
-		let F;
-		if C {
-			F = D;
-		} else {
-			let E = A != 0.0 || B != 0.0;
-			oE = E;
-			let L = if E {
-				let J = D * 0.5f64;
-				J
-			} else {
-				K
-			};
-			F = L;
-		}
-		let I = (parameter_given[1] && parameter_given[2]) && (!(parameter_given[0]));
-		if I {
-			let O = (M == K) || (N == K);
-			oO = O;
-		} else {
-			let P = parameter_given[2] && (!(parameter_given[1]));
-			oP = P;
-			if P {
-				let Q = M == K;
-				oQ = Q;
-				if !Q {
-					let T = R == K;
-					oT = T;
-				}
-			} else {
-				let S = R == K;
-				oS = S;
-				if !S {
-					let U = N == K;
-					oU = U;
-				}
-			}
-		}
-		if !C {
-			let V = A != 0.0 || B != 0.0;
-			oV = V;
-		}
+	let A=parameters[3];
+	let B=parameters[4];
+	let D=parameters[23];
+	let G=parameter_given[1] as u8 as f64;
+	let H=parameter_given[2] as u8 as f64;
+	let K=0f64;
+	let M=parameters[2];
+	let N=parameters[1];
+	let R=parameters[0];
+	let mut oE=false;
+	let mut oO=false;
+	let mut oP=false;
+	let mut oQ=false;
+	let mut oS=false;
+	let mut oT=false;
+	let mut oU=false;
+	let mut oV=false;
+	let C=A!=0.0&& B!=0.0;
+	let F;
+	if C{
+	F=D;
+	}else{
+	let E=A!=0.0|| B!=0.0;
+	oE=E;
+	let L=if E{
+	let J=D* 0.5f64;
+	J
+	}else{
+	K
+	};
+	F=L;
+	}
+	let I=(parameter_given[1]&& parameter_given[2])&& (!(parameter_given[0]));
+	if I{
+	let O=(M== K)|| (N== K);
+	oO=O;
+	}else{
+	let P=parameter_given[2]&& (!(parameter_given[1]));
+	oP=P;
+	if P{
+	let Q=M== K;
+	oQ=Q;
+	if !Q{
+	let T=R== K;
+	oT=T;
+	}
+	}else{
+	let S=R== K;
+	oS=S;
+	if !S{
+	let U=N== K;
+	oU=U;
+	}
+	}
+	}
+	if !C{
+	let V=A!=0.0|| B!=0.0;
+	oV=V;
+	}
     [C as u8 as f64, oE as u8 as f64, I as u8 as f64, oO as u8 as f64, F, oP as u8 as f64, oQ as u8 as f64, oT as u8 as f64, oS as u8 as f64, oU as u8 as f64, oV as u8 as f64]
 }
 
@@ -107,11 +106,9 @@ pub(super) fn canonical_temperature_preprocess(
     staged: &[f64],
     temperature: f64,
     thermal_voltage: f64,
-) -> [f64; 3] {
-		let A = (temperature + parameters[5]) - 273.15f64;
-		let B = A < parameters[12];
-		let C = A > parameters[13];
-    [A, B as u8 as f64, C as u8 as f64]
+) -> [f64; 1] {
+	let A=(temperature+ parameters[5])- 273.15f64;
+    [A]
 }
 
 
@@ -271,484 +268,466 @@ impl Instance {
                 0.0
             }
         };
-			let A = parameter_given[10] as u8 as f64;
-			let B = parameters[10];
-			let C = 1f64;
-			let F = parameter_given[11] as u8 as f64;
-			let G = staged[6];
-			let H = 0f64;
-			let L = staged[9] != 0.0;
-			let M = staged[11] != 0.0;
-			let N = staged[12] != 0.0;
-			let O = staged[13] != 0.0;
-			let U = parameters[0];
-			let W = parameters[22];
-			let Y = 1e99f64;
-			let Z = parameters[1];
-			let AB = staged[0];
-			let AJ = parameters[17];
-			let AK = parameters[2];
-			let AS = staged[14] != 0.0;
-			let AT = staged[15] != 0.0;
-			let BB = staged[16] != 0.0;
-			let CA = staged[17] != 0.0;
-			let CW = parameters[25];
-			let CX = parameters[24];
-			let DD = parameters[37];
-			let DE = parameters[38];
-			let DI = parameters[39];
-			let DK = parameters[40];
-			let DY = staged[18] != 0.0;
-			let EG = parameters[7];
-			let EH = node_potentials[2];
-			let EL = parameters[35];
-			let EP = parameters[36];
-			let FP = parameters[28];
-			let FT = parameters[26];
-			let FZ = 0.3333333333333333f64;
-			let GA = parameters[29];
-			let GB = parameters[27];
-			let GE = L2([0f64; 2]);
-			let GT = 0f64;
-			let GW = L3([0f64; 3]);
-			let HE = ddt_scale();
-			let HU = 0f64;
-			let HV = 0f64;
-			let E = if parameter_given[10] {
-				B
-			} else {
-				let D = ctx.simparam_or("scale", C);
-				D
-			};
-			let J = if parameter_given[11] {
-				G
-			} else {
-				let I = C - (0.01f64 * (ctx.simparam_or("shrink", H)));
-				I
-			};
-			let K = (J * E) * 1e6f64;
-			let P;
-			let Q;
-			let R;
-			let S;
-			let T;
-			if M {
-				let AD;
-				let AE;
-				let AF;
-				let AG;
-				let AH;
-				if N {
-					let V = U * K;
-					let X = V + W;
-					AD = H;
-					AE = V;
-					AF = H;
-					AG = H;
-					AH = X;
-				} else {
-					let AA = Z * K;
-					let AC = AA + AB;
-					let AI = AC > H;
-					let AP;
-					let AQ;
-					let AR;
-					if AI {
-						let AL = (AJ / AK) * AC;
-						let AM = AL - W;
-						AP = AM;
-						AQ = AK;
-						AR = AL;
-					} else {
-						let AN = U * K;
-						let AO = AN + W;
-						AP = AN;
-						AQ = H;
-						AR = AO;
-					}
-					AD = AA;
-					AE = AP;
-					AF = AC;
-					AG = AQ;
-					AH = AR;
-				}
-				P = AD;
-				Q = AE;
-				R = AF;
-				S = AG;
-				T = AH;
-			} else {
-				let AU;
-				let AV;
-				let AW;
-				let AX;
-				let AY;
-				if O {
-					let BC;
-					let BD;
-					let BE;
-					let BF;
-					let BG;
-					if AS {
-						let AZ = U * K;
-						let BA = AZ + W;
-						BC = H;
-						BD = AZ;
-						BE = H;
-						BF = H;
-						BG = BA;
-					} else {
-						let BL;
-						let BM;
-						let BN;
-						let BO;
-						let BP;
-						if BB {
-							let BH = Z * K;
-							let BI = BH + AB;
-							BL = BH;
-							BM = H;
-							BN = BI;
-							BO = Y;
-							BP = H;
-						} else {
-							let BJ = U * K;
-							let BK = BJ + W;
-							let BQ = BK > H;
-							let BV;
-							let BW;
-							let BX;
-							if BQ {
-								let BR = (AK / AJ) * BK;
-								let BS = BR - AB;
-								BV = BS;
-								BW = BR;
-								BX = AK;
-							} else {
-								let BT = Z * K;
-								let BU = BT + AB;
-								BV = BT;
-								BW = BU;
-								BX = Y;
-							}
-							BL = BV;
-							BM = BJ;
-							BN = BW;
-							BO = BX;
-							BP = BK;
-						}
-						BC = BL;
-						BD = BM;
-						BE = BN;
-						BF = BO;
-						BG = BP;
-					}
-					AU = BC;
-					AV = BD;
-					AW = BE;
-					AX = BF;
-					AY = BG;
-				} else {
-					let CB;
-					let CC;
-					let CD;
-					let CE;
-					let CF;
-					if AT {
-						let BY = Z * K;
-						let BZ = BY + AB;
-						CB = BY;
-						CC = H;
-						CD = BZ;
-						CE = Y;
-						CF = H;
-					} else {
-						let CK;
-						let CL;
-						let CM;
-						let CN;
-						let CO;
-						if CA {
-							let CG = U * K;
-							let CH = CG + W;
-							CK = H;
-							CL = CG;
-							CM = H;
-							CN = H;
-							CO = CH;
-						} else {
-							let CI = U * K;
-							let CJ = CI + W;
-							let CP = Z * K;
-							let CQ = CP + AB;
-							let CR = CJ > H;
-							let CS;
-							if CR {
-								let CT = CQ > H;
-								let CV;
-								if CT {
-									let CU = AJ * (CQ / CJ);
-									CV = CU;
-								} else {
-									CV = H;
-								}
-								CS = CV;
-							} else {
-								CS = Y;
-							}
-							CK = CP;
-							CL = CI;
-							CM = CQ;
-							CN = CS;
-							CO = CJ;
-						}
-						CB = CK;
-						CC = CL;
-						CD = CM;
-						CE = CN;
-						CF = CO;
-					}
-					AU = CB;
-					AV = CC;
-					AW = CD;
-					AX = CE;
-					AY = CF;
-				}
-				P = AU;
-				Q = AV;
-				R = AW;
-				S = AX;
-				T = AY;
-			}
-			let DA = if CW != 0.0 {
-				let CY = R + CX;
-				CY
-			} else {
-				let CZ = P + CX;
-				CZ
-			};
-			let DB = S > H;
-			let DC = R > H;
-			let DF;
-			let DG;
-			if DC {
-				let DN;
-				let DO;
-				if L {
-					let DJ = DD + (DI / R);
-					let DL = DE + (DK / R);
-					DN = DJ;
-					DO = DL;
-				} else {
-					let DM = parameters[3] != 0.0 || parameters[4] != 0.0;
-					let DR;
-					let DS;
-					if DM {
-						let DP = DD + ((0.5f64 * DI) / R);
-						let DQ = DE + ((0.5f64 * DK) / R);
-						DR = DP;
-						DS = DQ;
-					} else {
-						DR = DD;
-						DS = DE;
-					}
-					DN = DR;
-					DO = DS;
-				}
-				DF = DN;
-				DG = DO;
-			} else {
-				DF = DD;
-				DG = DE;
-			}
-			let DH = T > H;
-			let DV;
-			let DW;
-			if DH {
-				let DT = DF + (parameters[41] / T);
-				let DU = DG + (parameters[42] / T);
-				DV = DT;
-				DW = DU;
-			} else {
-				DV = DF;
-				DW = DG;
-			}
-			let DZ;
-			if L {
-				let DX = 2f64 * (P + Q);
-				DZ = DX;
-			} else {
-				let EF = if DY {
-					let ED = (2f64 * P) + Q;
-					ED
-				} else {
-					let EE = 2f64 * P;
-					EE
-				};
-				DZ = EF;
-			}
-			let EA = P * Q;
-			let EB = (parameters[44] + (parameters[45] * DZ)) + (parameters[46] * EA);
-			let EC = (parameters[47] + (parameters[48] * DZ)) + (parameters[49] * EA);
-			let EI = 1f64 * EG;
-			let EJ = staged[2] + (EG * EH);
-			let EK = EJ < staged[3];
-			let ER;
-			let ES;
-			if EK {
-				let EM = ((EJ - EL) - C).exp();
-				let EN = EI * EM;
-				let EO = EL + EM;
-				ER = EO;
-				ES = EN;
-			} else {
-				let EQ = EJ > (EP - C);
-				let FB;
-				let FC;
-				if EQ {
-					let EY = ((EP - EJ) - C).exp();
-					let EZ = EP - EY;
-					let FA = ((EI * -1f64) * EY) * -1f64;
-					FB = EZ;
-					FC = FA;
-				} else {
-					FB = EJ;
-					FC = EI;
-				}
-				ER = FB;
-				ES = FC;
-			}
-			let ET = (ER + 273.15f64) - staged[4];
-			let EU = DV + (ET * DW);
-			let EV = (ES * EU) + ((ES * DW) * ET);
-			let EW = C + (ET * EU);
-			let EX = EW < 0.11f64;
-			let FG;
-			let FH;
-			if EX {
-				let FD = ((10f64 * (EW - 0.01f64)) - C).exp();
-				let FE = ((EV * 10f64) * FD) * 0.1f64;
-				let FF = 0.01f64 + (0.1f64 * FD);
-				FG = FF;
-				FH = FE;
-			} else {
-				FG = EW;
-				FH = EV;
-			}
-			let FI = S * FG;
-			let FJ = FH * S;
-			let FK = node_potentials[0] - node_potentials[1];
-			let FL = L2([1f64, 0.0]) - L2([0.0, 1f64]);
-			let FM = DB && (staged[1] != 0.0);
-			let GF;
-			let GG;
-			if FM {
-				let FN = FK / DA;
-				let FO = FL / DA;
-				let FQ = FP * FN;
-				let FR = (FO * FP) * FQ;
-				let FS = (C + (FQ * FQ)).sqrt();
-				let FU = FT * (FN.abs());
-				let FV = (FO * ((2f64 * ((FN >= 0f64) as u8 as f64)) - 1f64)) * FT;
-				let FW = FU * FU;
-				let FX = FV * FU;
-				let FY = C + (FW * FU);
-				let GC = (((C - GA) - GB) + (GA * FS)) + (GB * (FY.powf(FZ)));
-				let GD = (((FR + FR) * (1f64 / (2f64 * FS))) * GA) + (((((FX + FX) * FU) + (FV * FW)) * (FZ * (FY.powf(-0.6666666666666667f64)))) * GB);
-				GF = GC;
-				GG = GD;
-			} else {
-				GF = C;
-				GG = GE;
-			}
-			let GH = FI * GF;
-			let GI = GG * FI;
-			let GJ = FK / GH;
-			let GK = (L3([FL[0], FL[1], 0.0]) - ((L3([0.0, 0.0, (FJ * GF)]) + L3([GI[0], GI[1], 0.0])) * GJ)) / GH;
-			let GL = -FK;
-			let GM = GL * GJ;
-			let GN = (FL * -1f64) * GJ;
-			let GO = L3([GN[0], GN[1], 0.0]) + (GK * GL);
-			let GP = EH * EB;
-			let GQ = 1f64 * EB;
-			let GR = EH * EC;
-			let GS = 1f64 * EC;
-			let GX;
-			let GY;
-			let GZ;
-			let HA;
-			let HB;
-			let HC;
-			if EG != 0.0 {
-				GX = GP;
-				GY = GM;
-				GZ = H;
-				HA = GQ;
-				HB = GO;
-				HC = GT;
-			} else {
-				let GU = 1e6f64 * EH;
-				let GV = 1f64 * 1e6f64;
-				GX = H;
-				GY = H;
-				GZ = GU;
-				HA = GT;
-				HB = GW;
-				HC = GV;
-			}
-			let HG;
-			let HH;
-			let HI;
-			let HJ;
-			if EG != 0.0 {
-				let HD = ddt(0, GR);
-				let HF = GS * HE;
-				HG = HD;
-				HH = GR;
-				HI = HF;
-				HJ = GS;
-			} else {
-				HG = H;
-				HH = H;
-				HI = GT;
-				HJ = GT;
-			}
-			let HK = GK[0];
-			let HL = GK[1];
-			let HM = GK[2];
-			let HN = HA;
-			let HO = HB[0];
-			let HP = HB[1];
-			let HQ = HB[2];
-			let HR = HC;
-			let HS = HI;
-			let HT = HJ;
+		let A=parameter_given[10] as u8 as f64;
+		let B=parameters[10];
+		let C=1f64;
+		let F=parameter_given[11] as u8 as f64;
+		let G=staged[5];
+		let H=0f64;
+		let I=0.01f64;
+		let L=1e6f64;
+		let N=staged[6]!=0.0;
+		let O=staged[8]!=0.0;
+		let P=staged[9]!=0.0;
+		let Q=staged[10]!=0.0;
+		let W=parameters[0];
+		let Y=parameters[22];
+		let AA=1e99f64;
+		let AB=parameters[1];
+		let AD=staged[0];
+		let AL=parameters[17];
+		let AM=parameters[2];
+		let AU=staged[11]!=0.0;
+		let AV=staged[12]!=0.0;
+		let BD=staged[13]!=0.0;
+		let CC=staged[14]!=0.0;
+		let CY=parameters[25];
+		let CZ=parameters[24];
+		let DF=parameters[37];
+		let DG=parameters[38];
+		let DK=parameters[39];
+		let DM=parameters[40];
+		let EA=staged[15]!=0.0;
+		let EI=parameters[7];
+		let EJ=node_potentials[2];
+		let EN=parameters[35];
+		let ER=parameters[36];
+		let FR=parameters[28];
+		let FV=parameters[26];
+		let GB=0.3333333333333333f64;
+		let GC=parameters[29];
+		let GD=parameters[27];
+		let GG=L2([0f64;2]);
+		let GV=0f64;
+		let GY=L3([0f64;3]);
+		let HG=ddt_scale();
+		let HW=0f64;
+		let HX=0f64;
+		let E=if parameter_given[10]{
+		B
+		}else{
+		let D=ctx.simparam_or("scale", C);
+		D
+		};
+		let K=if parameter_given[11]{
+		G
+		}else{
+		let J=C- (I* (ctx.simparam_or("shrink", H)));
+		J
+		};
+		let M=(K* E)* L;
+		let R;
+		let S;
+		let T;
+		let U;
+		let V;
+		if O{
+		let AF;
+		let AG;
+		let AH;
+		let AI;
+		let AJ;
+		if P{
+		let X=W* M;
+		let Z=X+ Y;
+		AF=H;
+		AG=X;
+		AH=H;
+		AI=H;
+		AJ=Z;
+		}else{
+		let AC=AB* M;
+		let AE=AC+ AD;
+		let AK=AE> H;
+		let AR;
+		let AS;
+		let AT;
+		if AK{
+		let AN=(AL/ AM)* AE;
+		let AO=AN- Y;
+		AR=AO;
+		AS=AM;
+		AT=AN;
+		}else{
+		let AP=W* M;
+		let AQ=AP+ Y;
+		AR=AP;
+		AS=H;
+		AT=AQ;
+		}
+		AF=AC;
+		AG=AR;
+		AH=AE;
+		AI=AS;
+		AJ=AT;
+		}
+		R=AF;
+		S=AG;
+		T=AH;
+		U=AI;
+		V=AJ;
+		}else{
+		let AW;
+		let AX;
+		let AY;
+		let AZ;
+		let BA;
+		if Q{
+		let BE;
+		let BF;
+		let BG;
+		let BH;
+		let BI;
+		if AU{
+		let BB=W* M;
+		let BC=BB+ Y;
+		BE=H;
+		BF=BB;
+		BG=H;
+		BH=H;
+		BI=BC;
+		}else{
+		let BN;
+		let BO;
+		let BP;
+		let BQ;
+		let BR;
+		if BD{
+		let BJ=AB* M;
+		let BK=BJ+ AD;
+		BN=BJ;
+		BO=H;
+		BP=BK;
+		BQ=AA;
+		BR=H;
+		}else{
+		let BL=W* M;
+		let BM=BL+ Y;
+		let BS=BM> H;
+		let BX;
+		let BY;
+		let BZ;
+		if BS{
+		let BT=(AM/ AL)* BM;
+		let BU=BT- AD;
+		BX=BU;
+		BY=BT;
+		BZ=AM;
+		}else{
+		let BV=AB* M;
+		let BW=BV+ AD;
+		BX=BV;
+		BY=BW;
+		BZ=AA;
+		}
+		BN=BX;
+		BO=BL;
+		BP=BY;
+		BQ=BZ;
+		BR=BM;
+		}
+		BE=BN;
+		BF=BO;
+		BG=BP;
+		BH=BQ;
+		BI=BR;
+		}
+		AW=BE;
+		AX=BF;
+		AY=BG;
+		AZ=BH;
+		BA=BI;
+		}else{
+		let CD;
+		let CE;
+		let CF;
+		let CG;
+		let CH;
+		if AV{
+		let CA=AB* M;
+		let CB=CA+ AD;
+		CD=CA;
+		CE=H;
+		CF=CB;
+		CG=AA;
+		CH=H;
+		}else{
+		let CM;
+		let CN;
+		let CO;
+		let CP;
+		let CQ;
+		if CC{
+		let CI=W* M;
+		let CJ=CI+ Y;
+		CM=H;
+		CN=CI;
+		CO=H;
+		CP=H;
+		CQ=CJ;
+		}else{
+		let CK=W* M;
+		let CL=CK+ Y;
+		let CR=AB* M;
+		let CS=CR+ AD;
+		let CT=CL> H;
+		let CU;
+		if CT{
+		let CV=CS> H;
+		let CX;
+		if CV{
+		let CW=AL* (CS/ CL);
+		CX=CW;
+		}else{
+		CX=H;
+		}
+		CU=CX;
+		}else{
+		CU=AA;
+		}
+		CM=CR;
+		CN=CK;
+		CO=CS;
+		CP=CU;
+		CQ=CL;
+		}
+		CD=CM;
+		CE=CN;
+		CF=CO;
+		CG=CP;
+		CH=CQ;
+		}
+		AW=CD;
+		AX=CE;
+		AY=CF;
+		AZ=CG;
+		BA=CH;
+		}
+		R=AW;
+		S=AX;
+		T=AY;
+		U=AZ;
+		V=BA;
+		}
+		let DC=if CY!=0.0{
+		let DA=T+ CZ;
+		DA
+		}else{
+		let DB=R+ CZ;
+		DB
+		};
+		let DD=U> H;
+		let DE=T> H;
+		let DH;
+		let DI;
+		if DE{
+		let DP;
+		let DQ;
+		if N{
+		let DL=DF+ (DK/ T);
+		let DN=DG+ (DM/ T);
+		DP=DL;
+		DQ=DN;
+		}else{
+		let DO=parameters[3]!=0.0|| parameters[4]!=0.0;
+		let DT;
+		let DU;
+		if DO{
+		let DR=DF+ ((0.5f64* DK)/ T);
+		let DS=DG+ ((0.5f64* DM)/ T);
+		DT=DR;
+		DU=DS;
+		}else{
+		DT=DF;
+		DU=DG;
+		}
+		DP=DT;
+		DQ=DU;
+		}
+		DH=DP;
+		DI=DQ;
+		}else{
+		DH=DF;
+		DI=DG;
+		}
+		let DJ=V> H;
+		let DX;
+		let DY;
+		if DJ{
+		let DV=DH+ (parameters[41]/ V);
+		let DW=DI+ (parameters[42]/ V);
+		DX=DV;
+		DY=DW;
+		}else{
+		DX=DH;
+		DY=DI;
+		}
+		let EB;
+		if N{
+		let DZ=2f64* (R+ S);
+		EB=DZ;
+		}else{
+		let EH=if EA{
+		let EF=(2f64* R)+ S;
+		EF
+		}else{
+		let EG=2f64* R;
+		EG
+		};
+		EB=EH;
+		}
+		let EC=R* S;
+		let ED=(parameters[44]+ (parameters[45]* EB))+ (parameters[46]* EC);
+		let EE=(parameters[47]+ (parameters[48]* EB))+ (parameters[49]* EC);
+		let EK=1f64* EI;
+		let EL=staged[1]+ (EI* EJ);
+		let EM=EL< staged[2];
+		let ET;
+		let EU;
+		if EM{
+		let EO=((EL- EN)- C).exp();
+		let EP=EK* EO;
+		let EQ=EN+ EO;
+		ET=EQ;
+		EU=EP;
+		}else{
+		let ES=EL> (ER- C);
+		let FD;
+		let FE;
+		if ES{
+		let FA=((ER- EL)- C).exp();
+		let FB=ER- FA;
+		let FC=((EK* -1f64)* FA)* -1f64;
+		FD=FB;
+		FE=FC;
+		}else{
+		FD=EL;
+		FE=EK;
+		}
+		ET=FD;
+		EU=FE;
+		}
+		let EV=(ET+ 273.15f64)- staged[3];
+		let EW=DX+ (EV* DY);
+		let EX=(EU* EW)+ ((EU* DY)* EV);
+		let EY=C+ (EV* EW);
+		let EZ=EY< 0.11f64;
+		let FI;
+		let FJ;
+		if EZ{
+		let FF=((10f64* (EY- I))- C).exp();
+		let FG=((EX* 10f64)* FF)* 0.1f64;
+		let FH=I+ (0.1f64* FF);
+		FI=FH;
+		FJ=FG;
+		}else{
+		FI=EY;
+		FJ=EX;
+		}
+		let FK=U* FI;
+		let FL=FJ* U;
+		let FM=node_potentials[0]- node_potentials[1];
+		let FN=L2([1f64,0.0])- L2([0.0,1f64]);
+		let FO=DD&& (staged[4]!=0.0);
+		let GH;
+		let GI;
+		if FO{
+		let FP=FM/ DC;
+		let FQ=FN/ DC;
+		let FS=FR* FP;
+		let FT=(FQ* FR)* FS;
+		let FU=(C+ (FS* FS)).sqrt();
+		let FW=FV* (FP.abs());
+		let FX=(FQ* ((2f64* ((FP>= 0f64) as u8 as f64))- 1f64))* FV;
+		let FY=FW* FW;
+		let FZ=FX* FW;
+		let GA=C+ (FY* FW);
+		let GE=(((C- GC)- GD)+ (GC* FU))+ (GD* (GA.powf(GB)));
+		let GF=(((FT+ FT)* (1f64/ (2f64* FU)))* GC)+ (((((FZ+ FZ)* FW)+ (FX* FY))* (GB* (GA.powf(-0.6666666666666667f64))))* GD);
+		GH=GE;
+		GI=GF;
+		}else{
+		GH=C;
+		GI=GG;
+		}
+		let GJ=FK* GH;
+		let GK=GI* FK;
+		let GL=FM/ GJ;
+		let GM=(L3([FN[0],FN[1],0.0])- ((L3([0.0,0.0,(FL* GH)])+ L3([GK[0],GK[1],0.0]))* GL))/ GJ;
+		let GN=-FM;
+		let GO=GN* GL;
+		let GP=(FN* -1f64)* GL;
+		let GQ=L3([GP[0],GP[1],0.0])+ (GM* GN);
+		let GR=EJ* ED;
+		let GS=1f64* ED;
+		let GT=EJ* EE;
+		let GU=1f64* EE;
+		let GZ;
+		let HA;
+		let HB;
+		let HC;
+		let HD;
+		let HE;
+		if EI!=0.0{
+		GZ=GR;
+		HA=GO;
+		HB=H;
+		HC=GS;
+		HD=GQ;
+		HE=GV;
+		}else{
+		let GW=L* EJ;
+		let GX=1f64* L;
+		GZ=H;
+		HA=H;
+		HB=GW;
+		HC=GV;
+		HD=GY;
+		HE=GX;
+		}
+		let HI;
+		let HJ;
+		let HK;
+		let HL;
+		if EI!=0.0{
+		let HF=ddt(0, GT);
+		let HH=GU* HG;
+		HI=HF;
+		HJ=GT;
+		HK=HH;
+		HL=GU;
+		}else{
+		HI=H;
+		HJ=H;
+		HK=GV;
+		HL=GV;
+		}
+		let HM=GM[0];
+		let HN=GM[1];
+		let HO=GM[2];
+		let HP=HC;
+		let HQ=HD[0];
+		let HR=HD[1];
+		let HS=HD[2];
+		let HT=HE;
+		let HU=HK;
+		let HV=HL;
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(0),
             Some(1),
-            multiplicity * (GJ),
+            multiplicity * (GL),
             [0, 1, 2],
-            [HK, HL, HM],
-            [],
-            [],
-            multiplicity,
-        );
-        stamper.stamp_current_sparse_local::<1, 0>(
-            Some(2),
-            None,
-            multiplicity * (GX),
-            [2],
-            [HN],
-            [],
-            [],
-            multiplicity,
-        );
-        stamper.stamp_current_sparse_local::<3, 0>(
-            Some(2),
-            None,
-            multiplicity * (GY),
-            [0, 1, 2],
-            [HO, HP, HQ],
+            [HM, HN, HO],
             [],
             [],
             multiplicity,
@@ -758,7 +737,17 @@ impl Instance {
             None,
             multiplicity * (GZ),
             [2],
-            [HR],
+            [HP],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<3, 0>(
+            Some(2),
+            None,
+            multiplicity * (HA),
+            [0, 1, 2],
+            [HQ, HR, HS],
             [],
             [],
             multiplicity,
@@ -766,9 +755,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(2),
             None,
-            multiplicity * (HG),
+            multiplicity * (HB),
             [2],
-            [HS],
+            [HT],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(2),
+            None,
+            multiplicity * (HI),
+            [2],
+            [HU],
             [],
             [],
             multiplicity,
@@ -776,7 +775,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(0),
             Some(1),
-            multiplicity * (HU),
+            multiplicity * (HW),
             [],
             [],
             [],
@@ -786,21 +785,21 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(0),
             Some(1),
-            multiplicity * (HV),
+            multiplicity * (HX),
             [],
             [],
             [],
             [],
             multiplicity,
         );
-        self.canonical_reactive[0] = GJ;
-        self.canonical_reactive[1] = GX;
-        self.canonical_reactive[2] = GY;
-        self.canonical_reactive[3] = GZ;
-        self.canonical_reactive[4] = HH;
-        self.canonical_reactive[5] = HT;
-        self.canonical_reactive[6] = HU;
-        self.canonical_reactive[7] = HV;
+        self.canonical_reactive[0] = GL;
+        self.canonical_reactive[1] = GZ;
+        self.canonical_reactive[2] = HA;
+        self.canonical_reactive[3] = HB;
+        self.canonical_reactive[4] = HJ;
+        self.canonical_reactive[5] = HV;
+        self.canonical_reactive[6] = HW;
+        self.canonical_reactive[7] = HX;
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {

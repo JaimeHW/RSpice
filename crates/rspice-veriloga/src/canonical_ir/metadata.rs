@@ -13,7 +13,7 @@ use smol_str::SmolStr;
 /// This is a hard compatibility boundary: caches and external backends must
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 10;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 11;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

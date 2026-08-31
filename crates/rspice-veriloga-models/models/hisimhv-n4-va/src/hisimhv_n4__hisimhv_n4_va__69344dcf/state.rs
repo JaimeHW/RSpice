@@ -1331,7 +1331,6 @@ impl<const DDT: usize, const IDT: usize> StampState<DDT, IDT> {
 	}
 }
 
-pub(crate) type CanonicalModelValues = [f64; 251];
 pub struct Instance {
 	pub nodes: [usize; 18],
 	pub branches: [usize; 12],
@@ -1344,13 +1343,7 @@ pub struct Instance {
 	pub(crate) time: f64,
 	pub(crate) timestep: f64,
 	pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
-	pub(crate) canonical_reactive: Box<[f64; 165]>,
-	pub(crate) canonical_model_values: Option<std::sync::Arc<CanonicalModelValues>>,
-	pub(crate) canonical_staged: Box<[f64; 893]>,
-	pub(crate) canonical_instance_valid: bool,
-	pub(crate) canonical_temperature_valid: bool,
-	pub(crate) canonical_temperature: f64,
-	pub(crate) canonical_thermal_voltage: f64,
+	pub(crate) canonical_reactive: Box<[f64; 169]>,
 }
 
 impl Clone for Instance {
@@ -1369,12 +1362,6 @@ impl Clone for Instance {
 			timestep: self.timestep,
 			ddt_coefficients: self.ddt_coefficients,
 			canonical_reactive: self.canonical_reactive.clone(),
-			canonical_model_values: self.canonical_model_values.clone(),
-			canonical_staged: self.canonical_staged.clone(),
-			canonical_instance_valid: self.canonical_instance_valid,
-			canonical_temperature_valid: self.canonical_temperature_valid,
-			canonical_temperature: self.canonical_temperature,
-			canonical_thermal_voltage: self.canonical_thermal_voltage,
 		}
 	}
 }
@@ -2282,12 +2269,6 @@ impl Instance {
 			timestep: 0.0,
 			ddt_coefficients: GeneratedDdtCoefficients::inactive(),
 			canonical_reactive: boxed_zero_f64_array(),
-			canonical_model_values: None,
-			canonical_staged: boxed_zero_f64_array(),
-			canonical_instance_valid: false,
-			canonical_temperature_valid: false,
-			canonical_temperature: 0.0,
-			canonical_thermal_voltage: 0.0,
 		}
 	}
 
@@ -3606,22 +3587,13 @@ impl Instance {
 
 	#[inline]
 	fn invalidate_parameter_caches(&mut self, index: usize) {
-		if PARAMETER_MODEL_FLAGS[index] {
-			self.canonical_model_values = None;
-		}
-		self.canonical_instance_valid = false;
-		self.canonical_temperature_valid = false;
+		let _ = index;
 	}
 
 	#[inline]
 	pub fn set_multiplicity(&mut self, multiplicity: f64) -> Result<(), String> {
 		if multiplicity.is_finite() && multiplicity > 0.0 {
-			let changed = self.multiplicity.to_bits() != multiplicity.to_bits();
 			self.multiplicity = multiplicity;
-			if changed {
-				self.canonical_instance_valid = false;
-				self.canonical_temperature_valid = false;
-			}
 			Ok(())
 		} else {
 			Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", multiplicity))
