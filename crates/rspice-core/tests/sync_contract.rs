@@ -670,6 +670,130 @@ fn d5_c4_oscillation_accounting_does_not_leak_across_retries() {
 }
 
 //=============================================================================
+// Clause 5 — A2D crossing timestamps
+//=============================================================================
+
+/// A Xyce DIG buffer on a slow analog ramp, stepped deliberately coarsely.
+///
+/// The ramp crosses the model's `s0vhi` input threshold of 1.8 V at exactly
+/// 6 ns (`1.8 / 3 * 10 ns`), which falls *inside* an accepted step rather than
+/// on one of its endpoints. `delay=5n` puts the resulting output transition at
+/// 11 ns — a time no coarse step lands on by itself.
+const DIG_CROSSING_DECK: &str = "\
+* D5 clause 5: a DIG gate dates its output from the interpolated input crossing
+vdpwr dpwr 0 3
+vin in 0 pwl(0 0 10n 3)
+abuf dpwr 0 [in] out dbuf
+rload out 0 100k
+.model dbuf xyce_d_buffer (clo=1e-12 chi=1e-12 cload=1e-12 rload=1e6
++ s0rlo=5 s0rhi=200 s0tsw=1p s0vlo=-1 s0vhi=1.8
++ s1rlo=200 s1rhi=5 s1tsw=1p s1vlo=1.0 s1vhi=3
++ delay=5n)
+.end
+";
+
+/// The input ramp reaches `s0vhi` here — strictly between two coarse steps.
+const DIG_CROSSING_TIME: f64 = 6.0e-9;
+/// `delay` on the model card.
+const DIG_CROSSING_DELAY: f64 = 5.0e-9;
+/// Coarse step. 2.5 ns divides neither the crossing-derived output time nor
+/// the crossing itself onto the grid.
+const DIG_CROSSING_MAX_STEP: f64 = 2.5e-9;
+
+/// **D5 clause 5.** A code model with analog inputs dates its transition from
+/// the interpolated crossing *inside* the accepted step, not from the step's
+/// grid time.
+///
+/// This is the clause that makes conservative lockstep more than
+/// "digital runs on the analog grid". The analog engine cannot see a threshold
+/// crossing; it lands where LTE and breakpoints tell it to, and the crossing
+/// falls wherever it falls in between. `input_transition_time`
+/// (`xspice/models/digital_output.rs`) recovers it by linear interpolation
+/// across the accepted step and clamps it into `[time_prev, time]`, so the
+/// event is dated at a real instant of the analog solution rather than at the
+/// sampling artefact that noticed it.
+///
+/// The deck is built so the two hypotheses give different answers and cannot
+/// be confused:
+///
+/// * dated from the **interpolated crossing**: 6 ns + 5 ns = **11 ns**
+/// * dated from the **grid time that detected it**: 7.5 ns + 5 ns = 12.5 ns
+///
+/// 12.5 ns is a multiple of the 2.5 ns step and so would be visited anyway;
+/// 11 ns is not, and nothing but the interpolation puts an accepted timepoint
+/// there. The gate requests a breakpoint at its pending output time
+/// (`update_output` → `ctx.request_breakpoint`), which reaches the integrator
+/// through `collect_xspice_runtime_breakpoints`, so the interpolated instant
+/// becomes an accepted analog timepoint — clause 2 applied to a time the event
+/// world computed rather than one a stimulus declared.
+#[test]
+fn d5_c5_an_input_crossing_is_dated_inside_the_step_not_at_its_grid_time() {
+    let result = run_deck(DIG_CROSSING_DECK, 2.0e-8, DIG_CROSSING_MAX_STEP);
+
+    let interpolated = DIG_CROSSING_TIME + DIG_CROSSING_DELAY;
+    let grid_dated = 7.5e-9 + DIG_CROSSING_DELAY;
+    assert!(
+        (grid_dated - interpolated).abs() > 1.0e-9,
+        "the deck must separate the two hypotheses, or the test proves nothing"
+    );
+
+    let nearest = result
+        .time
+        .iter()
+        .copied()
+        .min_by(|left, right| {
+            (left - interpolated)
+                .abs()
+                .total_cmp(&(right - interpolated).abs())
+        })
+        .expect("the run accepted at least one timepoint");
+    assert!(
+        (nearest - interpolated).abs() <= 1.0e-16,
+        "the interpolated crossing plus the model delay must be an accepted \
+         analog timepoint: expected {interpolated:e}, nearest accepted {nearest:e}. \
+         A transition dated at the detecting step's grid time would put it at \
+         {grid_dated:e} instead."
+    );
+
+    // And the output actually switches on the interpolated schedule. Sampled
+    // between the two hypotheses, the gate must already have driven high; if it
+    // were dated from the grid time it would still be low here.
+    let out = result
+        .try_voltage_waveform_named("out")
+        .expect("the gate output node is solved");
+    // The last accepted sample at or before the target, deliberately not the
+    // nearest one: sampling either side of 12 ns could pick the grid-dated
+    // hypothesis's own timepoint at 12.5 ns and prove nothing.
+    let sample = |target: f64| {
+        let index = result
+            .time
+            .iter()
+            .rposition(|time| *time <= target)
+            .unwrap_or_else(|| panic!("no accepted timepoint at or before {target:e}"));
+        (result.time[index], out[index])
+    };
+
+    let (before_time, before) = sample(10.0e-9);
+    let (between_time, between) = sample(12.0e-9);
+    assert!(
+        before_time < interpolated && between_time < grid_dated,
+        "both samples must straddle only the interpolated transition: took \
+         {before_time:e} and {between_time:e} against {interpolated:e}/{grid_dated:e}"
+    );
+    assert!(
+        before < 0.5,
+        "the gate must still be low before the interpolated transition, \
+         got {before} V at {before_time:e}"
+    );
+    assert!(
+        between > 2.5,
+        "the gate must have switched by 12 ns on the interpolated schedule; a \
+         grid-dated transition at {grid_dated:e} would leave it low. \
+         Got {between} V at {between_time:e}"
+    );
+}
+
+//=============================================================================
 // Clause 6 — pure-analog inertness
 //=============================================================================
 
