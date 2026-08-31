@@ -53,6 +53,13 @@
 //! - A process-local `reg` whose bounds are not literal, and an array of any
 //!   kind inside a process.
 //! - `**`, a non-constant delay, and a non-constant select bound.
+//! - Anything carrying the `signed` marker: a net, variable or port declared
+//!   `signed`, and a literal written with the `s` base marker. IEEE 1364-2005
+//!   section 5.4.2's signed semantics are not implemented, and this front end
+//!   computes on unsigned values throughout — so lowering a `signed`
+//!   declaration would produce a device that sign-extends nothing, compares
+//!   unsigned, and shifts in zeros, which is a wrong answer rather than a
+//!   missing one.
 //!
 //! Refused before this pass, and still refused: tasks and functions,
 //! `fork`/`join`, `wait`, `disable`, and `force`/`release` — the parser stops
@@ -125,6 +132,15 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
     // after *that* net and which is therefore already in the table. Reusing
     // the entry is what collapsing is; there is no separate merge step.
     // ------------------------------------------------------------------
+    for declared in digital.signals.iter().chain(
+        digital
+            .instances
+            .iter()
+            .flat_map(|instance| instance.signals.iter().map(|signal| &signal.declared)),
+    ) {
+        refuse_signed_declaration(declared, &mut diagnostics);
+    }
+
     let mut signals = lower_signals(&digital.signals);
     let mut elaborated: HashMap<SmolStr, DigitalSignalId> = signals
         .iter()
@@ -391,6 +407,38 @@ fn lower_continuous_assign(
         static_sensitivity,
         span: assignment.span.into(),
     })
+}
+
+/// What every `signed` refusal says it is missing.
+///
+/// One string, because the four places that can carry the marker — a net, a
+/// variable, a port, a literal — are refusing the same unimplemented clause,
+/// and a reader who meets two of them should not have to work out whether they
+/// mean the same thing.
+const SIGNED_UNIMPLEMENTED: &str = "IEEE 1364-2005 section 5.4.2's signed \
+     expression semantics are not implemented, so lowering it would compile a \
+     device that zero-extends where the standard sign-extends, compares \
+     unsigned, and shifts in zeros — a wrong answer rather than a missing one. \
+     Declare it unsigned, or wait for signed support";
+
+/// Refuse a net, variable, or port declared `signed`.
+///
+/// At the lowering boundary rather than in the analyzer: analysis resolves the
+/// declaration's shape faithfully, [`DigitalSignal::signed`] carries the
+/// qualifier, and nothing downstream reads it. The refusal belongs where the
+/// unimplemented semantics would otherwise be silently dropped.
+fn refuse_signed_declaration(signal: &AnalyzedDigitalSignal, diagnostics: &mut Vec<IrDiagnostic>) {
+    if !signal.signedness.is_signed() {
+        return;
+    }
+    diagnostics.push(IrDiagnostic::error(
+        CompilerPhase::CfgLowering,
+        format!(
+            "`{} signed` has no lowered form yet: {SIGNED_UNIMPLEMENTED}",
+            signal.class.keyword()
+        ),
+        SourceSpanRef::from(signal.span),
+    ));
 }
 
 fn lower_signals(analyzed: &[AnalyzedDigitalSignal]) -> Vec<DigitalSignal> {
@@ -755,6 +803,17 @@ impl ProcessLowerer<'_> {
         }
 
         for declaration in &inner.digital_variables {
+            if declaration.signedness.is_signed() {
+                self.error(
+                    format!(
+                        "a process-local `{} signed` has no lowered form yet: \
+                         {SIGNED_UNIMPLEMENTED}",
+                        declaration.kind.keyword()
+                    ),
+                    declaration.span,
+                );
+                continue;
+            }
             let width = match &declaration.range {
                 None => Some(1),
                 Some(range) => match (self.constant(&range.msb), self.constant(&range.lsb)) {
@@ -1592,6 +1651,9 @@ impl ProcessLowerer<'_> {
         let width = self.self_width(expression).max(context);
         match expression {
             Expression::Digital(crate::ast::DigitalExpr::FourState(literal)) => {
+                if self.refuse_signed_literal(&literal.value.raw, literal.span) {
+                    return self.unknown(width);
+                }
                 // A sized literal keeps the width its author wrote and is
                 // extended, if at all, as an ordinary operand. An unsized one
                 // takes the context, padded by section 3.5.1's rule rather than
@@ -1652,6 +1714,9 @@ impl ProcessLowerer<'_> {
                 // else: `{a, b, c, 1'b1}` is four bits, while the same
                 // concatenation holding a 32-bit `1` is thirty-five, whose low
                 // four bits are a different value entirely.
+                if self.refuse_signed_literal(&number.raw, number.span) {
+                    return self.unknown(width);
+                }
                 if let Ok(literal) = crate::four_state::decode(&number.raw) {
                     let value = match literal.declared_width {
                         Some(_) => FourStateValue::from_literal(&literal),
@@ -1741,6 +1806,33 @@ impl ProcessLowerer<'_> {
                 self.unknown(1)
             }
         }
+    }
+
+    /// Refuse a literal written with the `s` base marker.
+    ///
+    /// IEEE 1364-2005 section 3.5.1 puts the marker in the base — `4'sd9` — and
+    /// section 5.4.2 makes it the one thing that distinguishes a signed based
+    /// literal from an unsigned one. [`FourStateValue`] has nowhere to put it,
+    /// so a marked literal would lower into exactly the value its unmarked
+    /// spelling gives.
+    ///
+    /// Read from the raw spelling rather than from a decoded literal, so that
+    /// a `4'sd9` — which [`crate::four_state::decode`] cannot decode, having no
+    /// per-digit expansion for two-state decimal digits — is refused rather
+    /// than falling through to the plain-decimal path with its marker dropped.
+    /// Returns whether it refused, so the caller stops rather than reporting
+    /// the same literal twice: the analog decoder has already applied the
+    /// marker's sign to `4'sd9`, and lowering the negative number it produced
+    /// would add a second diagnostic about one mistake.
+    fn refuse_signed_literal(&mut self, raw: &str, span: Span) -> bool {
+        if !crate::four_state::has_signed_marker(raw) {
+            return false;
+        }
+        self.error(
+            format!("the `s` marker on `{raw}` has no lowered form yet: {SIGNED_UNIMPLEMENTED}"),
+            span,
+        );
+        true
     }
 
     /// Lower a context-determined operand and extend it to `width`.

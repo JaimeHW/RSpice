@@ -146,6 +146,27 @@ impl FourStateLiteral {
     }
 }
 
+/// Split a based literal's suffix into its signed marker, its base character,
+/// and its digits.
+///
+/// IEEE 1364-2005 section 3.5.1 orders them exactly so: an optional `s`/`S`,
+/// then the base, then the digits. Splitting in one place is what keeps a hex
+/// `d` digit from being read as the decimal base marker and a base character
+/// from being read as a digit — three separate scans of the same grammar would
+/// be three chances to disagree about `8'shFF`.
+///
+/// `None` when the suffix has no base character at all.
+fn split_base(suffix: &str) -> Option<(bool, char, &str)> {
+    let mut characters = suffix.trim_start().chars();
+    let first = characters.next()?;
+    let (signed, base) = if matches!(first, 's' | 'S') {
+        (true, characters.next()?)
+    } else {
+        (false, first)
+    };
+    Some((signed, base, characters.as_str()))
+}
+
 /// Whether the digits of an already-lexed based literal require four-state
 /// decoding.
 ///
@@ -155,21 +176,31 @@ pub fn digits_are_four_state(raw: &str) -> bool {
     let Some((_, suffix)) = raw.split_once('\'') else {
         return false;
     };
-    // Skip the optional signed marker and the base character so a hex `d`
-    // digit is never mistaken for the decimal base marker, and a base
-    // character is never mistaken for a digit.
-    let mut characters = suffix.trim_start().chars();
-    let first = characters.next();
-    if matches!(first, Some('s' | 'S')) && characters.next().is_none() {
+    let Some((_, _, digits)) = split_base(suffix) else {
         return false;
-    }
-    if first.is_none() {
-        return false;
-    }
-    characters
-        .as_str()
+    };
+    digits
         .chars()
         .any(|c| matches!(c, 'x' | 'X' | 'z' | 'Z' | '?'))
+}
+
+/// Whether a literal's source spelling carries the section 3.5.1 `s` marker.
+///
+/// Read from the raw text rather than from a [`FourStateLiteral`], because
+/// [`decode`] answers only for the literals it can decode: a based *decimal*
+/// literal whose digits are ordinary numerals — `4'sd9` — has no per-digit bit
+/// expansion and is refused there, so asking the decoded form whether it was
+/// marked would answer "no" for exactly the spellings that carry the marker
+/// most often.
+///
+/// A literal with no base marker at all is unsigned by this test, which is not
+/// the same question as section 5.4.2's: a *plain decimal* number is signed
+/// without any marker. This answers only what the author wrote.
+pub fn has_signed_marker(raw: &str) -> bool {
+    raw.trim()
+        .split_once('\'')
+        .and_then(|(_, suffix)| split_base(suffix))
+        .is_some_and(|(signed, _, _)| signed)
 }
 
 /// Decode a based literal whose digits contain at least one `x`, `z`, or `?`.
@@ -187,20 +218,8 @@ pub fn decode(raw: &str) -> Result<FourStateLiteral, String> {
 
     let declared_width = decode_width(raw, size)?;
 
-    let mut characters = suffix.trim_start().chars();
-    let first = characters
-        .next()
-        .ok_or_else(|| format!("'{raw}' is missing a base and digits"))?;
-    let (signed, base_character) = if matches!(first, 's' | 'S') {
-        (
-            true,
-            characters
-                .next()
-                .ok_or_else(|| format!("'{raw}' is missing a base after the signed marker"))?,
-        )
-    } else {
-        (false, first)
-    };
+    let (signed, base_character, rest) =
+        split_base(suffix).ok_or_else(|| format!("'{raw}' is missing a base and digits"))?;
     let base = match base_character {
         'b' | 'B' => LiteralBase::Binary,
         'o' | 'O' => LiteralBase::Octal,
@@ -209,8 +228,7 @@ pub fn decode(raw: &str) -> Result<FourStateLiteral, String> {
         other => return Err(format!("'{raw}' has invalid base '{other}'")),
     };
 
-    let digits: String = characters
-        .as_str()
+    let digits: String = rest
         .chars()
         .filter(|character| *character != '_' && !character.is_whitespace())
         .collect();

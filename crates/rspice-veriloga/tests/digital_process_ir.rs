@@ -1202,6 +1202,27 @@ fn unlowered_constructs_refuse_by_name() {
              \x20   initial begin : work integer i; i <= 0; q = 1'b0; end",
             "nonblocking assignment to the process-local `i`",
         ),
+        // IEEE 1364-2005 section 5.4.2. Analysis resolves all three faithfully
+        // — the qualifier reaches `DigitalSignal::signed` and the `s` marker
+        // reaches `FourStateLiteral::signed` — and nothing below reads either,
+        // so each refuses here rather than lowering into the unsigned device
+        // its unmarked spelling would give.
+        (
+            "    wire signed [7:0] sbus;\n\
+             \x20   reg q;\n\
+             \x20   always @* q = sbus[0];",
+            "`wire signed`",
+        ),
+        (
+            "    reg q;\n\
+             \x20   initial begin : work reg signed [3:0] t; t = 4'b0000; q = t[0]; end",
+            "process-local `reg signed`",
+        ),
+        (
+            "    reg [7:0] q;\n\
+             \x20   initial q = 4'sd9;",
+            "the `s` marker on `4'sd9`",
+        ),
     ];
     for (section, expected) in cases {
         let error = VerilogACompiler::new(CompilerOptions::default())
