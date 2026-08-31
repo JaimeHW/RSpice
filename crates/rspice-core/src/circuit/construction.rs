@@ -558,6 +558,9 @@ impl CircuitData {
         for instance in &mut self.xspice_instances {
             instance.remap_circuit_nodes(|node| Self::remap_node_id(node, old_node_id));
         }
+        // The instances now carry renumbered connections, so the cached net
+        // kinds still describe the pre-remap node IDs. Replay them.
+        self.rebuild_net_kinds();
 
         #[cfg(feature = "veriloga")]
         self.veriloga_devices

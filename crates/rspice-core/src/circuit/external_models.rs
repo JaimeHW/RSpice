@@ -302,6 +302,24 @@ impl CircuitData {
         self.xspice_has_event_driven_devices
     }
 
+    /// Recompute every net kind from the XSPICE instances that decide it.
+    ///
+    /// `add_xspice_instance` is the only writer of `net_kinds`, so the
+    /// instances are the record and the table is a cache of it. Choosing a
+    /// late ground reference renumbers every node above the new ground, which
+    /// moves an event connection onto a different node ID; replaying the marks
+    /// against the already-renumbered connections is what keeps the cache
+    /// honest. Rebuilding rather than permuting in place also drops the marks
+    /// of a net that became ground, which is not a net and takes no kind.
+    pub(crate) fn rebuild_net_kinds(&mut self) {
+        self.net_kinds = NetKinds::default();
+        for instance in &self.xspice_instances {
+            for connection in instance.connections() {
+                mark_xspice_event_connection_nets(&mut self.net_kinds, connection);
+            }
+        }
+    }
+
     /// Whether a net carries an event-driven value rather than a solved
     /// voltage. Ground and unknown nodes are continuous.
     #[inline]

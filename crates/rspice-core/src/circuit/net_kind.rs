@@ -27,9 +27,13 @@ pub(crate) enum NetKind {
 /// Net kinds by node ID, with `Continuous` as the unrecorded default.
 ///
 /// Only non-continuous nets take a slot, so a purely analog circuit carries an
-/// empty table and every lookup answers from the default. The table is never
-/// truncated to the node count: node IDs shift when a late ground reference is
-/// chosen, and the recorded kinds keep the identities they were given.
+/// empty table and every lookup answers from the default.
+///
+/// The table caches an answer the XSPICE instances own, so it is only valid
+/// against the node numbering the marks were recorded under. Choosing a late
+/// ground reference renumbers nodes; `CircuitData::rebuild_net_kinds` replays
+/// the marks afterwards rather than shifting them, because the net that became
+/// ground has to lose its kind entirely.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct NetKinds {
     by_node: Vec<NetKind>,
@@ -154,6 +158,53 @@ mod tests {
         );
 
         // The analog nets either side of the bridges stay continuous.
+        for name in ["in", "out"] {
+            let node = circuit.get_node_by_name(name).expect("deck names the net");
+            assert_eq!(circuit.net_kinds.kind(node), NetKind::Continuous);
+        }
+        assert_views_agree(&circuit);
+    }
+
+    /// A deck with no explicit node `0` gets its ground chosen after every
+    /// element is in place, and that choice shifts every higher node ID down by
+    /// one. The recorded kinds are keyed by node ID, so they have to follow the
+    /// renumbering or they describe the wrong nets: before this was fixed the
+    /// table marked the analog output net discrete and the digital net
+    /// continuous, which is exactly backwards.
+    #[test]
+    fn event_net_identity_survives_a_late_auto_ground_remap() {
+        let circuit = build(
+            "* no explicit ground, so `ref` is auto-selected after elaboration\n\
+             vin in ref pulse(0 1 0 1p 1p 1n 2n)\n\
+             r1 in ref 1k\n\
+             a_adc [in] [dig] adc\n\
+             .model adc adc_bridge (in_low=0.4 in_high=0.6)\n\
+             a_dac [dig] [out] dac\n\
+             .model dac dac_bridge (out_low=0 out_high=1)\n\
+             r2 out ref 1k\n\
+             .tran 100p 2n\n\
+             .end\n",
+        );
+
+        // `ref` became ground, so it is no longer a net of its own.
+        assert_eq!(circuit.get_node_by_name("ref"), Some(0));
+        let dig = circuit
+            .get_node_by_name("dig")
+            .expect("the deck names `dig`");
+        let out = circuit
+            .get_node_by_name("out")
+            .expect("the deck names `out`");
+        // The remap moved `dig` down onto the ID `out` used to hold, which is
+        // what made a shifted table point at the wrong net.
+        assert!(dig < out, "the remap is expected to renumber `dig` below `out`");
+
+        assert_eq!(
+            circuit.net_kinds.discrete_nodes().collect::<Vec<NodeId>>(),
+            vec![dig],
+            "only the bridged digital net is discrete after the remap"
+        );
+        assert!(circuit.is_discrete_net(dig));
+        assert!(!circuit.is_discrete_net(out));
         for name in ["in", "out"] {
             let node = circuit.get_node_by_name(name).expect("deck names the net");
             assert_eq!(circuit.net_kinds.kind(node), NetKind::Continuous);
