@@ -2114,6 +2114,247 @@ fn a_resume_state_from_another_process_is_refused() {
 }
 
 // ===========================================================================
+// Signed expressions (IEEE 1364-2005 section 5.4.2)
+// ===========================================================================
+//
+// The IR tests pin which operand got which extension. These pin the numbers
+// that come out, because the two can fail apart: an operand correctly
+// sign-extended into an operator that then divides unsigned produces a wrong
+// answer with a right-looking graph.
+//
+// Every fixture here is the same source twice, once with `signed` and once
+// without, so what is being read is the *difference* the qualifier makes rather
+// than an absolute value that might be right for the wrong reason.
+
+/// Run one `initial` process and read one output.
+fn signed_case(section: &str, output: &str) -> String {
+    let mut harness = Harness::new(section);
+    harness.run();
+    harness.get(output)
+}
+
+/// Section 5.4.1's extension under section 5.4.2's rule, at the assignment.
+///
+/// `reg signed [3:0] a` holding `1111` is -1, and -1 in eight bits is
+/// `11111111`. The same four bits in an unsigned `reg` are 15, and 15 in eight
+/// bits is `00001111`. One declaration keyword, two values, and nothing else
+/// in the fixture differs.
+#[test]
+fn a_signed_value_sign_extends_to_a_wider_target() {
+    assert_eq!(
+        signed_case(
+            "    reg signed [3:0] a;\n\
+             \x20   reg [7:0] p;\n\
+             \x20   initial begin a = 4'b1111; p = a; end",
+            "p",
+        ),
+        "11111111",
+    );
+    assert_eq!(
+        signed_case(
+            "    reg [3:0] a;\n\
+             \x20   reg [7:0] p;\n\
+             \x20   initial begin a = 4'b1111; p = a; end",
+            "p",
+        ),
+        "00001111",
+    );
+}
+
+/// Section 4.3.2: an `x` or `z` in the sign position extends with itself, so a
+/// value whose sign is not known does not acquire a known one.
+#[test]
+fn an_unknown_sign_bit_extends_as_itself() {
+    assert_eq!(
+        signed_case(
+            "    reg signed [3:0] a;\n\
+             \x20   reg [7:0] p;\n\
+             \x20   initial begin a = 4'bx111; p = a; end",
+            "p",
+        ),
+        "xxxxx111",
+    );
+    // Unsigned, the same bits gain four known zeros: section 5.2.1's fill does
+    // not consult the top bit at all.
+    assert_eq!(
+        signed_case(
+            "    reg [3:0] a;\n\
+             \x20   reg [7:0] p;\n\
+             \x20   initial begin a = 4'bx111; p = a; end",
+            "p",
+        ),
+        "0000x111",
+    );
+}
+
+/// Section 4.1.6 with 5.4.2: `-1 < 0` holds between signed operands and does
+/// not the moment either side is unsigned, where the same bits mean 15.
+#[test]
+fn a_relational_comparison_reads_its_operands_as_the_declaration_says() {
+    let compare = |declarations: &str, expression: &str| {
+        signed_case(
+            &format!(
+                "{declarations}\n\
+                 \x20   reg y;\n\
+                 \x20   initial begin a = 4'b1111; b = 4'b0000; y = {expression}; end",
+            ),
+            "y",
+        )
+    };
+    assert_eq!(
+        compare("    reg signed [3:0] a, b;", "a < b"),
+        "1",
+        "-1 < 0"
+    );
+    assert_eq!(compare("    reg [3:0] a, b;", "a < b"), "0", "15 < 0");
+    // One unsigned operand is enough to make the whole comparison unsigned,
+    // even though `a` is still declared signed.
+    assert_eq!(
+        compare("    reg signed [3:0] a;\n\x20   reg [3:0] b;", "a < b"),
+        "0",
+        "a signed operand compared against an unsigned one is read unsigned",
+    );
+}
+
+/// Rule (b) reaching a comparison: `-1` is a signed 32-bit literal, so
+/// `a == -1` sign-extends `a` to meet it and holds. The based spelling of the
+/// same bit pattern is unsigned and does not.
+#[test]
+fn a_plain_decimal_literal_is_signed_and_a_based_one_is_not() {
+    let compare = |expression: &str| {
+        signed_case(
+            &format!(
+                "    reg signed [3:0] a;\n\
+                 \x20   reg y;\n\
+                 \x20   initial begin a = 4'b1111; y = {expression}; end",
+            ),
+            "y",
+        )
+    };
+    assert_eq!(compare("a == -1"), "1");
+    // `4'd15` is unsigned, so the comparison is unsigned and `a` is read as 15.
+    assert_eq!(compare("a == 4'd15"), "1");
+    // ...and against the signed spelling of the same four bits, both sides are
+    // signed and both are -1.
+    assert_eq!(compare("a == 4'sd15"), "1");
+    // The discriminating pair, and it is the *literal's* marker that decides.
+    // Against `8'sd15` both sides are signed, so `a` sign-extends to -1 and
+    // meets 15: not equal. Against `8'd15` the literal is unsigned, which makes
+    // the whole comparison unsigned, so `a` zero-extends to 15 and meets 15.
+    // Same four bits on the left; two answers, from the marker alone.
+    assert_eq!(compare("a == 8'sd15"), "0", "-1 is not 15");
+    assert_eq!(
+        compare("a == 8'd15"),
+        "1",
+        "an unsigned literal unsigns `a`"
+    );
+}
+
+/// Section 4.1.5: signed and unsigned `+ - *` produce the same bits at a common
+/// width — the whole difference is the extension that got them there — and `/`
+/// and `%` do not.
+#[test]
+fn only_division_and_modulus_differ_between_signed_and_unsigned() {
+    let compute = |signedness: &str, expression: &str| {
+        signed_case(
+            &format!(
+                "    reg {signedness}[3:0] a, b;\n\
+                 \x20   reg {signedness}[3:0] p;\n\
+                 \x20   initial begin a = 4'b1001; b = 4'b0010; p = {expression}; end",
+            ),
+            "p",
+        )
+    };
+    // Nine and two, or minus seven and two, at four bits: the same bits out.
+    for expression in ["a + b", "a - b", "a * b"] {
+        assert_eq!(
+            compute("signed ", expression),
+            compute("", expression),
+            "`{expression}` at a common width is the same operation"
+        );
+    }
+    // 9 / 2 = 4; -7 / 2 truncates toward zero to -3, which is `1101`.
+    assert_eq!(compute("", "a / b"), "0100");
+    assert_eq!(compute("signed ", "a / b"), "1101");
+    // 9 % 2 = 1; -7 % 2 takes the sign of the first operand and is -1.
+    assert_eq!(compute("", "a % b"), "0001");
+    assert_eq!(compute("signed ", "a % b"), "1111");
+}
+
+/// Section 4.1.12: `>>>` shifts in the sign bit of a signed expression and
+/// zeros otherwise, and `>>` shifts in zeros whatever the declaration says.
+#[test]
+fn arithmetic_right_shift_fills_with_the_sign_only_when_signed() {
+    let shift = |signedness: &str, spelling: &str| {
+        signed_case(
+            &format!(
+                "    reg {signedness}[7:0] a;\n\
+                 \x20   reg [7:0] p;\n\
+                 \x20   initial begin a = 8'b10000000; p = a {spelling} 2; end",
+            ),
+            "p",
+        )
+    };
+    assert_eq!(shift("signed ", ">>>"), "11100000");
+    assert_eq!(shift("", ">>>"), "00100000", "unsigned `>>>` is `>>`");
+    assert_eq!(shift("signed ", ">>"), "00100000", "`>>` never sign-fills");
+    // `<<<` is `<<`, which the standard states outright.
+    assert_eq!(shift("signed ", "<<<"), shift("signed ", "<<"));
+    assert_eq!(shift("signed ", "<<<"), "00000000");
+}
+
+/// Rules (d), (e) and (f) at run time: a part-select of a whole `reg signed` is
+/// unsigned, so the expression containing it is, so the signed sibling reaches
+/// it zero-extended. The same expression without the select sign-extends.
+#[test]
+fn a_select_makes_its_expression_unsigned() {
+    let assign = |right: &str| {
+        signed_case(
+            &format!(
+                "    reg signed [3:0] a;\n\
+                 \x20   reg signed [7:0] p;\n\
+                 \x20   initial begin a = 4'b1111; p = {right}; end",
+            ),
+            "p",
+        )
+    };
+    // -1 + 0 at eight bits, both operands signed.
+    assert_eq!(assign("a + 4'sd0"), "11111111");
+    // `a[3:0]` is the same four bits and unsigned, so the sum is unsigned and
+    // `a` is zero-extended: 15 + 15 = 30.
+    assert_eq!(assign("a + a[3:0]"), "00011110");
+    // A concatenation of one element, likewise.
+    assert_eq!(assign("a + {a}"), "00011110");
+}
+
+/// The signedness travels *down* as well as up. In `(a + b) + c` with `a` and
+/// `b` signed and `c` a plain `reg`, the unsigned `c` makes the whole
+/// expression unsigned and the inner sum is computed unsigned too — which is
+/// section 5.5's "determined from the whole context before evaluation".
+#[test]
+fn an_unsigned_operand_poisons_the_whole_expression() {
+    let assign = |declarations: &str| {
+        signed_case(
+            &format!(
+                "{declarations}\n\
+                 \x20   reg [7:0] p;\n\
+                 \x20   initial begin a = 4'b1111; b = 4'b0000; c = 4'b0000;\n\
+                 \x20       p = (a + b) + c; end",
+            ),
+            "p",
+        )
+    };
+    // All signed: -1 + 0 + 0 at eight bits.
+    assert_eq!(assign("    reg signed [3:0] a, b, c;"), "11111111");
+    // `c` unsigned: 15 + 0 + 0 at eight bits, and `a` was zero-extended even
+    // though `a + b` on its own would have been signed.
+    assert_eq!(
+        assign("    reg signed [3:0] a, b;\n\x20   reg [3:0] c;"),
+        "00001111",
+    );
+}
+
+// ===========================================================================
 // Elaborated hierarchy (IEEE 1364-2005 sections 12.1.2 and 12.3)
 // ===========================================================================
 //

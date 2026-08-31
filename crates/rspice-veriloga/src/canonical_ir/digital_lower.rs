@@ -132,15 +132,6 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
     // after *that* net and which is therefore already in the table. Reusing
     // the entry is what collapsing is; there is no separate merge step.
     // ------------------------------------------------------------------
-    for declared in digital.signals.iter().chain(
-        digital
-            .instances
-            .iter()
-            .flat_map(|instance| instance.signals.iter().map(|signal| &signal.declared)),
-    ) {
-        refuse_signed_declaration(declared, &mut diagnostics);
-    }
-
     let mut signals = lower_signals(&digital.signals);
     let mut elaborated: HashMap<SmolStr, DigitalSignalId> = signals
         .iter()
@@ -350,7 +341,7 @@ fn lower_continuous_assign(
     // does not distinguish a continuous assignment from a procedural one:
     // `assign p = a * b;` with an eight-bit `p` multiplies at eight bits.
     let context = lowerer.lvalue_width(&assignment.assignment.target);
-    let value = lowerer.sized(entry, &assignment.assignment.value, context);
+    let value = lowerer.assigned_value(entry, &assignment.assignment.value, context);
     lowerer.drive(entry, &assignment.assignment.target, value, id, drivers);
 
     let mut reads = BTreeSet::new();
@@ -407,38 +398,6 @@ fn lower_continuous_assign(
         static_sensitivity,
         span: assignment.span.into(),
     })
-}
-
-/// What every `signed` refusal says it is missing.
-///
-/// One string, because the four places that can carry the marker — a net, a
-/// variable, a port, a literal — are refusing the same unimplemented clause,
-/// and a reader who meets two of them should not have to work out whether they
-/// mean the same thing.
-const SIGNED_UNIMPLEMENTED: &str = "IEEE 1364-2005 section 5.4.2's signed \
-     expression semantics are not implemented, so lowering it would compile a \
-     device that zero-extends where the standard sign-extends, compares \
-     unsigned, and shifts in zeros — a wrong answer rather than a missing one. \
-     Declare it unsigned, or wait for signed support";
-
-/// Refuse a net, variable, or port declared `signed`.
-///
-/// At the lowering boundary rather than in the analyzer: analysis resolves the
-/// declaration's shape faithfully, [`DigitalSignal::signed`] carries the
-/// qualifier, and nothing downstream reads it. The refusal belongs where the
-/// unimplemented semantics would otherwise be silently dropped.
-fn refuse_signed_declaration(signal: &AnalyzedDigitalSignal, diagnostics: &mut Vec<IrDiagnostic>) {
-    if !signal.signedness.is_signed() {
-        return;
-    }
-    diagnostics.push(IrDiagnostic::error(
-        CompilerPhase::CfgLowering,
-        format!(
-            "`{} signed` has no lowered form yet: {SIGNED_UNIMPLEMENTED}",
-            signal.class.keyword()
-        ),
-        SourceSpanRef::from(signal.span),
-    ));
 }
 
 fn lower_signals(analyzed: &[AnalyzedDigitalSignal]) -> Vec<DigitalSignal> {
@@ -589,8 +548,53 @@ struct ProcessLocal {
     /// reach and which therefore cannot be shadowed or read by mistake.
     name: Option<SmolStr>,
     width: u32,
+    /// Whether reading it yields a signed value, IEEE 1364-2005 table 5-21.
+    ///
+    /// True for an `integer`, which the table makes signed without any
+    /// qualifier, and for a `reg signed`. False for a plain `reg` and for the
+    /// invented `repeat` counter, which counts down to zero and is nobody's
+    /// operand.
+    signed: bool,
     /// Where it was declared, for a diagnostic about it.
     span: Span,
+}
+
+/// The width and signedness an enclosing expression imposes on an operand.
+///
+/// The two halves of IEEE 1364-2005's top-down pass, carried together because
+/// section 5.5 determines them together: "the size and the signedness of the
+/// expression are determined from the whole context before evaluation". Sizing
+/// an operand without also deciding how it is extended answers half the
+/// question, and the half it leaves out is the one that decides whether
+/// `-1` reaches an eight-bit operator as -1 or as 15.
+#[derive(Clone, Copy)]
+struct Context {
+    /// Section 5.4.1's context size. Zero asks for nothing.
+    width: u32,
+    /// Whether the *enclosing* expression is signed.
+    ///
+    /// Not a claim about the operand. Section 5.4.2 rule (j) makes an
+    /// expression signed only when every one of its context-determined
+    /// operands is, so this flag travels downward as a permission that is
+    /// `and`ed with each operand's own classification: one unsigned operand
+    /// makes the shared context unsigned, and every other operand in it is
+    /// then extended and interpreted as unsigned however it was declared.
+    signed: bool,
+}
+
+impl Context {
+    /// The context of an expression that nothing outside sizes or signs.
+    ///
+    /// `signed: true` is the absence of an imposition rather than a claim:
+    /// nothing outside is forcing unsignedness, so the expression's own
+    /// classification stands. Every self-determined position of table 5-22
+    /// uses this — a `case` selector, a branch condition, a `repeat` count, an
+    /// event term, a concatenation operand, a shift count, a comparison
+    /// operand, a reduction operand.
+    const SELF_DETERMINED: Self = Self {
+        width: 0,
+        signed: true,
+    };
 }
 
 struct ProcessLowerer<'a> {
@@ -628,6 +632,13 @@ impl ProcessLowerer<'_> {
             .map_or(1, |signal| signal.width)
     }
 
+    /// Whether a signal was declared `signed`, IEEE 1364-2005 table 5-21.
+    fn signed_signal(&self, signal: DigitalSignalId) -> bool {
+        self.signals
+            .get(usize::from(signal))
+            .is_some_and(|signal| signal.signed)
+    }
+
     // ------------------------------------------------------------------
     // Process-local variables
     // ------------------------------------------------------------------
@@ -651,6 +662,10 @@ impl ProcessLowerer<'_> {
         self.locals[usize::from(id)].width
     }
 
+    fn local_signed(&self, id: DigitalLocalId) -> bool {
+        self.locals[usize::from(id)].signed
+    }
+
     /// Declare a local and give it its initial value in `block`.
     ///
     /// The initial value is written at the declaration, which makes every
@@ -668,16 +683,22 @@ impl ProcessLowerer<'_> {
         block: BlockId,
         name: Option<SmolStr>,
         width: u32,
+        signed: bool,
         span: Span,
         initial: Option<ValueId>,
     ) -> DigitalLocalId {
         let id = DigitalLocalId::from(self.locals.len());
-        self.locals.push(ProcessLocal { name, width, span });
+        self.locals.push(ProcessLocal {
+            name,
+            width,
+            signed,
+            span,
+        });
         let variable = CfgVariable::DigitalLocal(id);
         self.builder
             .declare_variable(variable, CfgValueType::FourState { width });
         let initial = match initial {
-            Some(value) => self.resize(block, value, width),
+            Some(value) => self.resize(block, value, width, false),
             None => self.builder.push_leaf(
                 CfgValueType::FourState { width },
                 CfgValueKind::FourStateConstant(FourStateValue::splat(
@@ -719,9 +740,14 @@ impl ProcessLowerer<'_> {
     }
 
     /// Write a local, resizing per IEEE 1364-2005 section 5.2.1.
+    ///
+    /// Zero-fill, and correct because it is never reached with a value that
+    /// needed the other kind: an assignment's right-hand side is sign-extended
+    /// to the target's width by [`Self::assigned_value`] before it gets here,
+    /// so a narrower value arriving at this point is an unsigned one.
     fn write_local(&mut self, block: BlockId, id: DigitalLocalId, value: ValueId) {
         let width = self.local_width(id);
-        let value = self.resize(block, value, width);
+        let value = self.resize(block, value, width, false);
         self.builder
             .write_variable(CfgVariable::DigitalLocal(id), block, value);
     }
@@ -742,6 +768,10 @@ impl ProcessLowerer<'_> {
                 op: ArithmeticOp::Sub,
                 left: current,
                 right: one,
+                // The counter is the lowering's own, counts down to zero, and
+                // is nobody's operand; unsigned is what "how many passes are
+                // left" means.
+                signed: false,
             },
         );
         self.builder
@@ -797,23 +827,23 @@ impl ProcessLowerer<'_> {
                 let initial = item
                     .init
                     .as_ref()
-                    .map(|init| self.sized(block, init, width));
-                self.declare_local(block, Some(item.name.clone()), width, item.span, initial);
+                    .map(|init| self.assigned_value(block, init, width));
+                // IEEE 1364-2005 table 5-21 makes an `integer` signed, and
+                // gives it no qualifier with which to say otherwise. So a loop
+                // counter compares signed, and `i < 0` can be true.
+                self.declare_local(
+                    block,
+                    Some(item.name.clone()),
+                    width,
+                    true,
+                    item.span,
+                    initial,
+                );
             }
         }
 
         for declaration in &inner.digital_variables {
-            if declaration.signedness.is_signed() {
-                self.error(
-                    format!(
-                        "a process-local `{} signed` has no lowered form yet: \
-                         {SIGNED_UNIMPLEMENTED}",
-                        declaration.kind.keyword()
-                    ),
-                    declaration.span,
-                );
-                continue;
-            }
+            let signed = declaration.signedness.is_signed();
             let width = match &declaration.range {
                 None => Some(1),
                 Some(range) => match (self.constant(&range.msb), self.constant(&range.lsb)) {
@@ -842,8 +872,15 @@ impl ProcessLowerer<'_> {
                 let initial = item
                     .init
                     .as_ref()
-                    .map(|init| self.sized(block, init, width));
-                self.declare_local(block, Some(item.name.clone()), width, item.span, initial);
+                    .map(|init| self.assigned_value(block, init, width));
+                self.declare_local(
+                    block,
+                    Some(item.name.clone()),
+                    width,
+                    signed,
+                    item.span,
+                    initial,
+                );
             }
         }
     }
@@ -980,7 +1017,8 @@ impl ProcessLowerer<'_> {
                 // a suspension inside the body like any other local, and so
                 // that nothing in the body can name it.
                 self.scopes.push(Vec::new());
-                let counter = self.declare_local(block, None, width, statement.span, Some(count));
+                let counter =
+                    self.declare_local(block, None, width, false, statement.span, Some(count));
                 let exit = self.loop_statement(
                     block,
                     &statement.body,
@@ -1077,6 +1115,12 @@ impl ProcessLowerer<'_> {
         for item in &case.items {
             let mut matched: Option<ValueId> = None;
             for label in &item.labels {
+                // Section 9.5 extends every case expression to the width of the
+                // widest, and the extension is section 5.4.2's: signed when the
+                // selector and *this* label both are. Decided per label rather
+                // than once for the arm, because two labels of one arm may be
+                // classified differently and each is its own comparison.
+                let signed = self.comparison_is_signed(&case.selector, label);
                 let label_value = self.expression(current, label);
                 let test = self.builder.push(
                     current,
@@ -1085,6 +1129,7 @@ impl ProcessLowerer<'_> {
                         selector,
                         label: label_value,
                         kind: match_kind,
+                        signed,
                     },
                 );
                 matched = Some(match matched {
@@ -1150,13 +1195,8 @@ impl ProcessLowerer<'_> {
     /// which is why the value node is emitted into the current block and only
     /// the write lands after the wait.
     fn assign(&mut self, block: BlockId, assign: &DigitalAssign, nonblocking: bool) -> BlockId {
-        // IEEE 1364-2005 section 5.4.1 makes the left-hand side part of the
-        // right-hand side's context, so the target's width is what seeds the
-        // sizing. Section 5.2.1's resize is still applied afterwards, at the
-        // write; with the context right it is usually a no-op, and it is not
-        // one for a narrowing assignment or a concatenation target.
         let context = self.lvalue_width(&assign.target);
-        let mut carried = [self.sized(block, &assign.value, context)];
+        let mut carried = [self.assigned_value(block, &assign.value, context)];
         let block = match &assign.timing {
             // The value crosses the suspension as a resume argument; without
             // that the write would read a value the interpreter no longer has.
@@ -1165,6 +1205,32 @@ impl ProcessLowerer<'_> {
         };
         self.write(block, &assign.target, carried[0], nonblocking);
         block
+    }
+
+    /// Lower an assignment's right-hand side under the context its target
+    /// gives it, IEEE 1364-2005 sections 5.4.1, 5.4.2 and 5.2.1.
+    ///
+    /// The target's *width* seeds the sizing, because section 5.4.1 puts the
+    /// left-hand side in the right-hand side's context. Its *signedness* does
+    /// not enter: section 5.4.2 rule (a) says an expression's type depends only
+    /// on its operands and not on what it is assigned to, so an unsigned target
+    /// cannot make a signed right-hand side compute unsigned, and a signed
+    /// target cannot rescue an unsigned one.
+    ///
+    /// The extension afterwards is the one step the write below cannot do. A
+    /// value narrower than its target is padded wherever it lands — at the
+    /// concatenation split, at [`Self::write_local`], in the interpreter's
+    /// signal write — and every one of those zero-fills, which is section
+    /// 5.2.1's rule for an unsigned expression and the wrong answer for a
+    /// signed one. So only the signed half is emitted here; stating the
+    /// unsigned half as well would put a node where the rule already applies.
+    fn assigned_value(&mut self, block: BlockId, value: &Expression, width: u32) -> ValueId {
+        let signed = self.self_signed(value);
+        let lowered = self.sized(block, value, Context { width, signed });
+        if signed && self.value_width(lowered) < width {
+            return self.resize(block, lowered, width, true);
+        }
+        lowered
     }
 
     /// Emit the write nodes for one target.
@@ -1188,7 +1254,7 @@ impl ProcessLowerer<'_> {
                     .map(|part| self.lvalue_width(part))
                     .collect();
                 let total: u32 = widths.iter().sum();
-                let value = self.resize(block, value, total);
+                let value = self.resize(block, value, total, false);
                 let mut offset = total;
                 for (element, width) in elements.iter().zip(widths) {
                     offset -= width;
@@ -1277,7 +1343,7 @@ impl ProcessLowerer<'_> {
                     .map(|part| self.lvalue_width(part))
                     .collect();
                 let total: u32 = widths.iter().sum();
-                let value = self.resize(block, value, total);
+                let value = self.resize(block, value, total, false);
                 let mut offset = total;
                 for (element, width) in elements.iter().zip(widths) {
                     offset -= width;
@@ -1326,17 +1392,26 @@ impl ProcessLowerer<'_> {
         }
     }
 
-    /// Resize a value to `width`, IEEE 1364-2005 section 5.2.1.
+    /// Resize a value to `width`, extending by `signed`.
     ///
-    /// Built from the two nodes the IR already has rather than from a resize
-    /// node of its own: zero-extension is a concatenation with a zero constant,
-    /// truncation is a part select of the low bits, and an exact fit is
-    /// nothing at all. A dedicated node would need its own semantics in every
-    /// consumer, and these two already have theirs.
+    /// Built from the nodes the IR already has rather than from a resize node
+    /// of its own: truncation is a part select of the low bits, zero-extension
+    /// is a concatenation with a zero constant, and an exact fit is nothing at
+    /// all. A dedicated node would need its own semantics in every consumer,
+    /// and these already have theirs.
     ///
-    /// Assignment-context resizing, so it zero-fills — a leading `x` does not
-    /// propagate the way section 3.5.1 propagates one in a literal.
-    fn resize(&mut self, block: BlockId, value: ValueId, width: u32) -> ValueId {
+    /// Sign extension is built from them too, and is the standard's own idiom:
+    /// `{{n{value[msb]}}, value}`, a concatenation of `n` copies of the sign
+    /// bit above the value. That is section 5.4.1's extension of a signed
+    /// operand and, because a part select copies the bit rather than testing
+    /// it, section 4.3.2's rule for a sign position holding `x` or `z` — such a
+    /// value extends with that bit and is unknown all the way up, which is what
+    /// makes the extension honest about not knowing the sign.
+    ///
+    /// A zero-fill is section 5.2.1's assignment-context resizing, and does
+    /// *not* propagate a leading `x` the way section 3.5.1 propagates one in a
+    /// literal.
+    fn resize(&mut self, block: BlockId, value: ValueId, width: u32, signed: bool) -> ValueId {
         let current = self.value_width(value);
         if current == width {
             return value;
@@ -1352,18 +1427,31 @@ impl ProcessLowerer<'_> {
                 },
             );
         }
-        let padding = self.builder.push_leaf(
-            CfgValueType::FourState {
-                width: width - current,
-            },
-            CfgValueKind::FourStateConstant(FourStateValue::zero(width - current)),
-        );
+        let mut parts = Vec::with_capacity((width - current + 1) as usize);
+        if signed {
+            let sign = self.builder.push(
+                block,
+                CfgValueType::FourState { width: 1 },
+                CfgValueKind::DigitalPartSelect {
+                    input: value,
+                    msb: i64::from(current) - 1,
+                    lsb: i64::from(current) - 1,
+                },
+            );
+            parts.resize(usize::try_from(width - current).unwrap_or(0), sign);
+        } else {
+            parts.push(self.builder.push_leaf(
+                CfgValueType::FourState {
+                    width: width - current,
+                },
+                CfgValueKind::FourStateConstant(FourStateValue::zero(width - current)),
+            ));
+        }
+        parts.push(value);
         self.builder.push(
             block,
             CfgValueType::FourState { width },
-            CfgValueKind::DigitalConcat {
-                parts: vec![padding, value],
-            },
+            CfgValueKind::DigitalConcat { parts },
         )
     }
 
@@ -1591,24 +1679,28 @@ impl ProcessLowerer<'_> {
     /// outside the expression machinery wants: a `case` selector, a branch
     /// condition, a `repeat` count and an event term are all self-determined
     /// per IEEE 1364-2005 table 5-22. An assignment's right-hand side is not —
-    /// see [`Self::sized`] — and goes through `sized` with the target's width.
+    /// see [`Self::assigned_value`] — and goes through `sized` with the
+    /// target's width.
     fn expression(&mut self, block: BlockId, expression: &Expression) -> ValueId {
-        self.sized(block, expression, 0)
+        self.sized(block, expression, Context::SELF_DETERMINED)
     }
 
-    /// Lower `expression` under an outer context of `context` bits, IEEE
-    /// 1364-2005 section 5.4.1.
+    /// Lower `expression` under `context`, IEEE 1364-2005 sections 5.4.1 and
+    /// 5.4.2.
     ///
     /// # The rule this implements
     ///
     /// Sizing an expression is two passes over one tree, and doing it in one
     /// is the defect this exists to prevent. The first pass is bottom-up:
     /// [`Self::self_width`] gives every expression its *self-determined* size
-    /// from its operands alone. The second is top-down and is this function:
+    /// from its operands alone, and [`Self::self_signed`] its self-determined
+    /// signedness the same way. The second is top-down and is this function:
     /// the context size is the larger of the self-determined size and whatever
-    /// the enclosing expression asks for, and it is pushed back down into the
-    /// operands the standard calls *context-determined*, which are extended to
-    /// it **before** the operation runs.
+    /// the enclosing expression asks for, the context signedness is the
+    /// enclosing expression's `and`ed with this expression's own, and both are
+    /// pushed back down into the operands the standard calls
+    /// *context-determined*, which are extended to them **before** the
+    /// operation runs.
     ///
     /// Section 5.4.1 puts the assignment's left-hand side in that context. So
     /// `p = a * b` with four-bit operands and an eight-bit `p` multiplies at
@@ -1616,44 +1708,63 @@ impl ProcessLowerer<'_> {
     /// widening the product afterwards yields 1. Both are total answers; only
     /// one is the language's.
     ///
+    /// # Why the signedness rides the same context
+    ///
+    /// Section 5.5 settles both before evaluation and from the whole context,
+    /// and section 5.4.2 rule (j) makes an expression signed only when *every*
+    /// one of its context-determined operands is. So one unsigned operand makes
+    /// the shared context unsigned, and that decision travels back down into
+    /// the other operands exactly as the width does: in `p = (a + b) + c` with
+    /// `a` and `b` signed and `c` a plain `reg`, the inner `a + b` is computed
+    /// unsigned too. Carrying the signedness separately from the width would
+    /// mean two walks that can disagree about which subexpression they are
+    /// describing; carrying it in the same [`Context`] means the pair is
+    /// decided once, at each node, and used together.
+    ///
     /// # What is returned
     ///
-    /// A value of exactly `max(self_width(expression), context)` bits when the
-    /// expression is context-determined, and of exactly `self_width` when it is
-    /// not. A self-determined expression is *not* padded here: whether its
-    /// value needs extending depends on what consumes it, and the consumer that
-    /// needs it — a context-determined operator — does it through
-    /// [`Self::operand`]. An assignment does not need it, because section
-    /// 5.2.1's resize at the write is still the last step and does the same job
-    /// without a node.
+    /// A value of exactly `max(self_width(expression), context.width)` bits
+    /// when the expression is context-determined, and of exactly `self_width`
+    /// when it is not. A self-determined expression is *not* padded here:
+    /// whether its value needs extending depends on what consumes it, and the
+    /// consumer that needs it — a context-determined operator — does it through
+    /// [`Self::operand`], which is also the only place that knows whether to
+    /// pad with zeros or with the sign bit.
     ///
-    /// # The classification (table 5-22)
+    /// # The classification (table 5-22 and section 5.4.2)
     ///
-    /// Context-determined operands, which receive `width`: both sides of
+    /// Context-determined operands, which receive the context: both sides of
     /// `+ - * / %`, of the bitwise `& | ^ ~^`, the operand of unary `~ + -`,
-    /// the *left* operand of `<< >>`, and both arms of `?:`. Each of those
-    /// operators takes the context size as its result size.
+    /// the *left* operand of `<< >> >>>`, and both arms of `?:`. Each of those
+    /// operators takes the context size as its result size, and is signed iff
+    /// all of those operands are.
     ///
-    /// Self-determined, which receive nothing: the right operand of `<< >>`,
+    /// Self-determined, which receive nothing: the right operand of a shift,
     /// every operand of a concatenation and its replication count, a reduction
     /// operand, the condition of `?:`, and both operands of a logical
     /// `&& || !`. A comparison's two operands size to each other and to nothing
     /// outside; the result of a comparison, a logical operator or a reduction
-    /// is one bit whatever surrounds it.
+    /// is one *unsigned* bit whatever surrounds it, which is rules (g) and (h).
+    ///
+    /// Unsigned whatever their operands, per rules (d), (e) and (f): a
+    /// bit-select, a part-select even of a whole vector, and a concatenation or
+    /// replication. Those three are why a signed context can be lost inside an
+    /// expression that reads nothing but signed declarations.
     ///
     /// A comparison's operands are lowered self-determined and are *not*
     /// resized to each other here, because they need no node to be: section
     /// 4.1.7's equality, section 9.5's identity comparison and section 4.1.6's
-    /// relational operators each extend the narrower operand themselves, and
-    /// zero-extending an unsigned operand cannot change any of their answers.
-    /// Emitting the resize would state the rule twice and mean it once.
-    fn sized(&mut self, block: BlockId, expression: &Expression, context: u32) -> ValueId {
-        let width = self.self_width(expression).max(context);
+    /// relational operators each extend the narrower operand themselves, under
+    /// the signedness the comparison node carries. Emitting the resize would
+    /// state the rule twice and mean it once.
+    fn sized(&mut self, block: BlockId, expression: &Expression, context: Context) -> ValueId {
+        let width = self.self_width(expression).max(context.width);
+        let inner = Context {
+            width,
+            signed: context.signed && self.self_signed(expression),
+        };
         match expression {
             Expression::Digital(crate::ast::DigitalExpr::FourState(literal)) => {
-                if self.refuse_signed_literal(&literal.value.raw, literal.span) {
-                    return self.unknown(width);
-                }
                 // A sized literal keeps the width its author wrote and is
                 // extended, if at all, as an ordinary operand. An unsized one
                 // takes the context, padded by section 3.5.1's rule rather than
@@ -1680,8 +1791,8 @@ impl ProcessLowerer<'_> {
                 )
             }
             Expression::Digital(crate::ast::DigitalExpr::Xnor(xnor)) => {
-                let left = self.operand(block, &xnor.left, width);
-                let right = self.operand(block, &xnor.right, width);
+                let left = self.operand(block, &xnor.left, inner);
+                let right = self.operand(block, &xnor.right, inner);
                 self.builder.push(
                     block,
                     CfgValueType::FourState { width },
@@ -1690,6 +1801,26 @@ impl ProcessLowerer<'_> {
                         left,
                         right,
                     },
+                )
+            }
+            // Section 4.1.12. The left operand is context-determined and
+            // carries the result size, exactly as `>>`'s does; the count is
+            // self-determined. What is decided here is the fill: `>>>` shifts
+            // in the sign bit only when the shift's own expression is signed,
+            // and is `>>` when it is not — so the lowering answers the question
+            // once and the IR node means what it says.
+            Expression::Digital(crate::ast::DigitalExpr::ArithmeticShiftRight(shift)) => {
+                let value = self.operand(block, &shift.left, inner);
+                let count = self.expression(block, &shift.right);
+                let op = if inner.signed {
+                    ShiftOp::ArithmeticRight
+                } else {
+                    ShiftOp::Right
+                };
+                self.builder.push(
+                    block,
+                    CfgValueType::FourState { width },
+                    CfgValueKind::DigitalShift { op, value, count },
                 )
             }
             Expression::Digital(crate::ast::DigitalExpr::CaseEquality(equality)) => {
@@ -1714,9 +1845,6 @@ impl ProcessLowerer<'_> {
                 // else: `{a, b, c, 1'b1}` is four bits, while the same
                 // concatenation holding a 32-bit `1` is thirty-five, whose low
                 // four bits are a different value entirely.
-                if self.refuse_signed_literal(&number.raw, number.span) {
-                    return self.unknown(width);
-                }
                 if let Ok(literal) = crate::four_state::decode(&number.raw) {
                     let value = match literal.declared_width {
                         Some(_) => FourStateValue::from_literal(&literal),
@@ -1784,8 +1912,8 @@ impl ProcessLowerer<'_> {
             // a+b` computes both at `p`'s width.
             Expression::Conditional(conditional) => {
                 let condition = self.condition(block, &conditional.condition);
-                let then_value = self.operand(block, &conditional.then_expr, width);
-                let else_value = self.operand(block, &conditional.else_expr, width);
+                let then_value = self.operand(block, &conditional.then_expr, inner);
+                let else_value = self.operand(block, &conditional.else_expr, inner);
                 self.builder.push(
                     block,
                     CfgValueType::FourState { width },
@@ -1796,8 +1924,8 @@ impl ProcessLowerer<'_> {
                     },
                 )
             }
-            Expression::Unary(unary) => self.unary(block, unary, width),
-            Expression::Binary(binary) => self.binary(block, binary, width),
+            Expression::Unary(unary) => self.unary(block, unary, inner),
+            Expression::Binary(binary) => self.binary(block, binary, inner),
             other => {
                 self.error(
                     "this expression form has no discrete-domain lowering",
@@ -1808,47 +1936,136 @@ impl ProcessLowerer<'_> {
         }
     }
 
-    /// Refuse a literal written with the `s` base marker.
-    ///
-    /// IEEE 1364-2005 section 3.5.1 puts the marker in the base — `4'sd9` — and
-    /// section 5.4.2 makes it the one thing that distinguishes a signed based
-    /// literal from an unsigned one. [`FourStateValue`] has nowhere to put it,
-    /// so a marked literal would lower into exactly the value its unmarked
-    /// spelling gives.
-    ///
-    /// Read from the raw spelling rather than from a decoded literal, so that
-    /// a `4'sd9` — which [`crate::four_state::decode`] cannot decode, having no
-    /// per-digit expansion for two-state decimal digits — is refused rather
-    /// than falling through to the plain-decimal path with its marker dropped.
-    /// Returns whether it refused, so the caller stops rather than reporting
-    /// the same literal twice: the analog decoder has already applied the
-    /// marker's sign to `4'sd9`, and lowering the negative number it produced
-    /// would add a second diagnostic about one mistake.
-    fn refuse_signed_literal(&mut self, raw: &str, span: Span) -> bool {
-        if !crate::four_state::has_signed_marker(raw) {
-            return false;
-        }
-        self.error(
-            format!("the `s` marker on `{raw}` has no lowered form yet: {SIGNED_UNIMPLEMENTED}"),
-            span,
-        );
-        true
-    }
-
-    /// Lower a context-determined operand and extend it to `width`.
+    /// Lower a context-determined operand and extend it to the context.
     ///
     /// The extension is section 5.4.1's, which happens *before* the operator
-    /// runs — the whole point of the pass. It zero-fills, because this front
-    /// end computes on unsigned values throughout; section 5.4.2's
-    /// sign-extension has nothing to apply to until a signed type exists.
+    /// runs — the whole point of the pass — and section 5.4.2 decides what it
+    /// fills with. Note which signedness that is: the **enclosing
+    /// expression's**, carried in `context`, not the operand's own. Rule (j)
+    /// makes the two agree whenever the expression is signed, because an
+    /// expression is signed only when all of its context-determined operands
+    /// are; the case the distinction covers is the other one, where a single
+    /// unsigned operand has made the whole context unsigned and a signed
+    /// sibling must therefore be zero-extended into it.
     ///
-    /// [`Self::sized`] already returns `width` bits for a context-determined
-    /// operand, so the resize is a no-op for one and a real extension only for
-    /// a self-determined operand — a comparison, a reduction, a concatenation,
-    /// a register narrower than the context.
-    fn operand(&mut self, block: BlockId, expression: &Expression, width: u32) -> ValueId {
-        let value = self.sized(block, expression, width);
-        self.resize(block, value, width)
+    /// [`Self::sized`] already returns `context.width` bits for a
+    /// context-determined operand, so the resize is a no-op for one and a real
+    /// extension only for a self-determined operand — a comparison, a
+    /// reduction, a concatenation, a register narrower than the context.
+    fn operand(&mut self, block: BlockId, expression: &Expression, context: Context) -> ValueId {
+        let value = self.sized(block, expression, context);
+        self.resize(block, value, context.width, context.signed)
+    }
+
+    /// The self-determined signedness of an expression, IEEE 1364-2005 section
+    /// 5.4.2.
+    ///
+    /// The bottom-up half of the signing, and the exact counterpart of
+    /// [`Self::self_width`]: pure, emitting nothing, consulted by
+    /// [`Self::sized`] for every expression it lowers so the two halves cannot
+    /// disagree about which subexpression they describe.
+    ///
+    /// # The clause, rule by rule
+    ///
+    /// * **(a)** The type depends only on the operands, never on the left-hand
+    ///   side. That is why this takes no context: an assignment cannot make its
+    ///   right-hand side signed, and cannot make a signed one unsigned either.
+    /// * **(b)** A decimal number with no base is signed. `-1` is therefore a
+    ///   signed 32-bit value, which is the whole reason `a == -1` behaves
+    ///   differently from `a == 32'hFFFFFFFF`.
+    /// * **(c)** A based number is unsigned *unless* its base carries the `s`
+    ///   marker: `4'd9` is unsigned, `4'sd9` is signed, and the two spell the
+    ///   same four bits.
+    /// * **(d), (e), (f)** A bit-select, a part-select, and a concatenation or
+    ///   replication are unsigned regardless of their operands — a part-select
+    ///   of a whole `reg signed` included. These three are how a signed
+    ///   expression stops being one without any unsigned declaration in sight.
+    /// * **(g), (h)** A comparison and a reduction yield an unsigned bit, and
+    ///   so does a logical operator, whatever they were given.
+    /// * **(j)** For everything with context-determined operands, the result is
+    ///   signed iff *every* one of those operands is. One unsigned operand
+    ///   makes the whole expression unsigned, and [`Self::sized`] then carries
+    ///   that decision back down into the signed siblings.
+    ///
+    /// A form this cannot classify does not lower either, and answers unsigned
+    /// — the classification of the all-`x` placeholder left after the refusal.
+    fn self_signed(&self, expression: &Expression) -> bool {
+        match expression {
+            // Rule (c), from the source spelling: the marker survives decoding
+            // into `FourStateLiteral::signed`.
+            Expression::Digital(crate::ast::DigitalExpr::FourState(literal)) => {
+                literal.value.signed
+            }
+            // Rules (b) and (c) together. A number that carries a base marker
+            // is signed only with `s`; one that carries none is a plain decimal
+            // and is signed. Read from the raw spelling because that is where
+            // both facts live — `crate::four_state::decode` cannot be asked, as
+            // an analog literal's raw text may not decode at all.
+            Expression::Number(number) => {
+                !number.raw.contains('\'') || crate::four_state::has_signed_marker(&number.raw)
+            }
+            // Table 5-21: a declaration is signed only when it says so, and an
+            // `integer` says so by being one.
+            Expression::Identifier(identifier) => match self.lookup_local(&identifier.name) {
+                Some(local) => self.local_signed(local),
+                None => self
+                    .index
+                    .get(identifier.name.as_str())
+                    .is_some_and(|signal| self.signed_signal(*signal)),
+            },
+            // Rules (d), (e) and (f).
+            Expression::Digital(crate::ast::DigitalExpr::PartSelect(_))
+            | Expression::ArrayAccess(_)
+            | Expression::ArrayLiteral(_) => false,
+            // Rules (g) and (h).
+            Expression::Digital(crate::ast::DigitalExpr::CaseEquality(_))
+            | Expression::Digital(crate::ast::DigitalExpr::Reduction(_)) => false,
+            // Rule (j) over the operands each operator makes
+            // context-determined. Both arms of `?:`, both sides of `~^`, and
+            // the operand of `~ + -`; the condition of `?:` and the operand of
+            // `!` are self-determined and take no part, and `!` yields an
+            // unsigned bit in any case.
+            Expression::Digital(crate::ast::DigitalExpr::Xnor(xnor)) => {
+                self.self_signed(&xnor.left) && self.self_signed(&xnor.right)
+            }
+            Expression::Digital(crate::ast::DigitalExpr::ArithmeticShiftRight(shift)) => {
+                self.self_signed(&shift.left)
+            }
+            Expression::Conditional(conditional) => {
+                self.self_signed(&conditional.then_expr) && self.self_signed(&conditional.else_expr)
+            }
+            Expression::Unary(unary) => match unary.op {
+                UnaryOp::Not => false,
+                UnaryOp::BitNot | UnaryOp::Pos | UnaryOp::Neg => self.self_signed(&unary.operand),
+            },
+            Expression::Binary(binary) => match binary.op {
+                BinaryOp::BitAnd
+                | BinaryOp::BitOr
+                | BinaryOp::BitXor
+                | BinaryOp::Add
+                | BinaryOp::Sub
+                | BinaryOp::Mul
+                | BinaryOp::Div
+                | BinaryOp::Mod
+                | BinaryOp::Pow => {
+                    self.self_signed(&binary.left) && self.self_signed(&binary.right)
+                }
+                BinaryOp::And
+                | BinaryOp::Or
+                | BinaryOp::Eq
+                | BinaryOp::Ne
+                | BinaryOp::Lt
+                | BinaryOp::Le
+                | BinaryOp::Gt
+                | BinaryOp::Ge => false,
+                // A shift takes its type from the value being shifted. The
+                // count is self-determined and cannot make a signed shift
+                // unsigned, which is what keeps `a >>> 1` arithmetic when the
+                // count is a plain `reg`.
+                BinaryOp::Shl | BinaryOp::Shr => self.self_signed(&binary.left),
+            },
+            _ => false,
+        }
     }
 
     /// The self-determined size of an expression, IEEE 1364-2005 table 5-22.
@@ -1880,6 +2097,12 @@ impl ProcessLowerer<'_> {
             Expression::Digital(crate::ast::DigitalExpr::Xnor(xnor)) => self
                 .self_width(&xnor.left)
                 .max(self.self_width(&xnor.right)),
+            // Section 4.1.12 and table 5-22, the same row `<<` and `>>` are on:
+            // a shift is as wide as the value being shifted, and the count does
+            // not enter.
+            Expression::Digital(crate::ast::DigitalExpr::ArithmeticShiftRight(shift)) => {
+                self.self_width(&shift.left)
+            }
             // Section 4.1.8: an identity comparison is one bit, and so is a
             // reduction of section 4.1.10.
             Expression::Digital(crate::ast::DigitalExpr::CaseEquality(_))
@@ -2017,6 +2240,7 @@ impl ProcessLowerer<'_> {
         block: BlockId,
         equality: &crate::ast::CaseEqualityExpr,
     ) -> ValueId {
+        let signed = self.comparison_is_signed(&equality.left, &equality.right);
         let selector = self.expression(block, &equality.left);
         let label = self.expression(block, &equality.right);
         let matched = self.builder.push(
@@ -2026,6 +2250,7 @@ impl ProcessLowerer<'_> {
                 selector,
                 label,
                 kind: DigitalCaseMatch::Exact,
+                signed,
             },
         );
         if !equality.negate {
@@ -2113,14 +2338,20 @@ impl ProcessLowerer<'_> {
         )
     }
 
-    /// Lower a unary operator at the context width `width`.
+    /// Lower a unary operator under `context`.
     ///
     /// Table 5-22 splits the four: `!` is one bit and its operand is
     /// self-determined, while `~`, `+` and `-` take the context size and pass
     /// it to their operand. The difference is observable — `~(a == b)` in an
     /// eight-bit context inverts a zero-extended one bit and yields
     /// `8'b11111110`, not the `8'b00000000` that inverting first would give.
-    fn unary(&mut self, block: BlockId, unary: &crate::ast::UnaryExpr, width: u32) -> ValueId {
+    fn unary(
+        &mut self,
+        block: BlockId,
+        unary: &crate::ast::UnaryExpr,
+        context: Context,
+    ) -> ValueId {
+        let width = context.width;
         match unary.op {
             UnaryOp::Not => {
                 let input = self.expression(block, &unary.operand);
@@ -2131,20 +2362,25 @@ impl ProcessLowerer<'_> {
                 )
             }
             UnaryOp::BitNot => {
-                let input = self.operand(block, &unary.operand, width);
+                let input = self.operand(block, &unary.operand, context);
                 self.builder.push(
                     block,
                     CfgValueType::FourState { width },
                     CfgValueKind::DigitalBitwiseNot { input },
                 )
             }
-            // Unary `+` is the identity on an unsigned operand, so the operand
-            // already sized to the context *is* the result.
-            UnaryOp::Pos => self.operand(block, &unary.operand, width),
+            // Unary `+` is the identity on its operand however that operand is
+            // signed, so the operand already extended to the context *is* the
+            // result. The extension is where `+a` differs from `a`, and
+            // [`Self::operand`] has already done it.
+            UnaryOp::Pos => self.operand(block, &unary.operand, context),
             UnaryOp::Neg => {
-                // `-x` is `0 - x` at the context width, which is what makes it
-                // wrap rather than go negative.
-                let input = self.operand(block, &unary.operand, width);
+                // `-x` is `0 - x` at the context width. Two's complement makes
+                // that the same subtraction for a signed and an unsigned
+                // operand; what differs is the extension that produced `x`,
+                // which is why the negation of a narrow signed value is right
+                // only when the operand reached the context signed.
+                let input = self.operand(block, &unary.operand, context);
                 let zero = self.builder.push_leaf(
                     CfgValueType::FourState { width },
                     CfgValueKind::FourStateConstant(FourStateValue::zero(width)),
@@ -2156,28 +2392,39 @@ impl ProcessLowerer<'_> {
                         op: ArithmeticOp::Sub,
                         left: zero,
                         right: input,
+                        signed: context.signed,
                     },
                 )
             }
         }
     }
 
-    /// Lower a binary operator at the context width `width`.
+    /// Lower a binary operator under `context`.
     ///
     /// Three groups, and which group an operator is in is the whole of table
     /// 5-22 for the binary forms:
     ///
     /// * **arithmetic and bitwise** — both operands context-determined, result
-    ///   `width`. This is where the context has to reach or the operation runs
-    ///   narrow and the answer is wrong rather than merely narrow.
+    ///   `context.width` and signed by `context.signed`. This is where the
+    ///   context has to reach or the operation runs narrow and the answer is
+    ///   wrong rather than merely narrow.
     /// * **logical and comparison** — one bit of result, operands
     ///   self-determined. A comparison's two operands size to each other, which
     ///   the operators themselves do (see [`Self::sized`]); the outer context
-    ///   reaches neither.
+    ///   reaches neither, and neither does the outer signedness. What the node
+    ///   does carry is the comparison's *own* signedness, from its two operands
+    ///   alone, because section 5.4.2 makes the comparison signed only when
+    ///   both of them are.
     /// * **shift** — the left operand is context-determined and carries the
     ///   result size; the right is self-determined, being a number of positions
     ///   rather than a value combined with anything.
-    fn binary(&mut self, block: BlockId, binary: &crate::ast::BinaryExpr, width: u32) -> ValueId {
+    fn binary(
+        &mut self,
+        block: BlockId,
+        binary: &crate::ast::BinaryExpr,
+        context: Context,
+    ) -> ValueId {
+        let width = context.width;
         let kind = match binary.op {
             BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor => {
                 let op = match binary.op {
@@ -2185,8 +2432,8 @@ impl ProcessLowerer<'_> {
                     BinaryOp::BitOr => BitwiseOp::Or,
                     _ => BitwiseOp::Xor,
                 };
-                let left = self.operand(block, &binary.left, width);
-                let right = self.operand(block, &binary.right, width);
+                let left = self.operand(block, &binary.left, context);
+                let right = self.operand(block, &binary.right, context);
                 CfgValueKind::DigitalBitwise { op, left, right }
             }
             BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
@@ -2197,9 +2444,14 @@ impl ProcessLowerer<'_> {
                     BinaryOp::Div => ArithmeticOp::Div,
                     _ => ArithmeticOp::Mod,
                 };
-                let left = self.operand(block, &binary.left, width);
-                let right = self.operand(block, &binary.right, width);
-                CfgValueKind::DigitalArithmetic { op, left, right }
+                let left = self.operand(block, &binary.left, context);
+                let right = self.operand(block, &binary.right, context);
+                CfgValueKind::DigitalArithmetic {
+                    op,
+                    left,
+                    right,
+                    signed: context.signed,
+                }
             }
             BinaryOp::And | BinaryOp::Or => {
                 let op = if matches!(binary.op, BinaryOp::And) {
@@ -2217,6 +2469,7 @@ impl ProcessLowerer<'_> {
             }
             BinaryOp::Eq | BinaryOp::Ne => {
                 let negate = matches!(binary.op, BinaryOp::Ne);
+                let signed = self.comparison_is_signed(&binary.left, &binary.right);
                 let left = self.expression(block, &binary.left);
                 let right = self.expression(block, &binary.right);
                 return self.builder.push(
@@ -2226,6 +2479,7 @@ impl ProcessLowerer<'_> {
                         left,
                         right,
                         negate,
+                        signed,
                     },
                 );
             }
@@ -2236,21 +2490,30 @@ impl ProcessLowerer<'_> {
                     BinaryOp::Gt => RelationalOp::Gt,
                     _ => RelationalOp::Ge,
                 };
+                let signed = self.comparison_is_signed(&binary.left, &binary.right);
                 let left = self.expression(block, &binary.left);
                 let right = self.expression(block, &binary.right);
                 return self.builder.push(
                     block,
                     CfgValueType::FourState { width: 1 },
-                    CfgValueKind::DigitalRelational { op, left, right },
+                    CfgValueKind::DigitalRelational {
+                        op,
+                        left,
+                        right,
+                        signed,
+                    },
                 );
             }
             BinaryOp::Shl | BinaryOp::Shr => {
+                // Section 4.1.12: `<<` and `>>` fill with zero whatever the
+                // expression's sign, so neither needs one. `<<<` arrives here
+                // as `<<`, which the standard says it is.
                 let op = if matches!(binary.op, BinaryOp::Shl) {
                     ShiftOp::Left
                 } else {
                     ShiftOp::Right
                 };
-                let value = self.operand(block, &binary.left, width);
+                let value = self.operand(block, &binary.left, context);
                 let count = self.expression(block, &binary.right);
                 CfgValueKind::DigitalShift { op, value, count }
             }
@@ -2264,6 +2527,23 @@ impl ProcessLowerer<'_> {
         };
         self.builder
             .push(block, CfgValueType::FourState { width }, kind)
+    }
+
+    /// Whether a comparison is made on signed numbers, IEEE 1364-2005 sections
+    /// 4.1.6 and 5.4.2.
+    ///
+    /// The operands are context-determined *with respect to each other* and to
+    /// nothing outside, so the comparison forms its own context — and rule (j)
+    /// applies inside it: signed only when both operands are. A single
+    /// unsigned operand makes the comparison unsigned, which is why `-1 < 0`
+    /// stops holding the moment one side is a plain `reg`.
+    ///
+    /// The enclosing expression takes no part in either direction. Rule (g)
+    /// makes the result an unsigned bit however the comparison was made, so a
+    /// signed context outside cannot reach in, and an unsigned one cannot
+    /// suppress a signed comparison within.
+    fn comparison_is_signed(&self, left: &Expression, right: &Expression) -> bool {
+        self.self_signed(left) && self.self_signed(right)
     }
 
     fn named_value(&mut self, block: BlockId, name: &str, span: Span) -> ValueId {

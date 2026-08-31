@@ -844,6 +844,16 @@ pub enum DigitalExpr {
     /// A reduction operator: `&a`, `~&a`, `|a`, `~|a`, `^a`, `~^a` (section
     /// 4.1.10).
     Reduction(ReductionExpr),
+    /// Arithmetic right shift: `a >>> b` (section 4.1.12).
+    ///
+    /// Here rather than as a [`BinaryOp`] for the reason [`Self::Xnor`] gives.
+    /// The continuous half of the language shifts machine integers through a
+    /// bytecode instruction, a native encoding and a WebAssembly opcode; a
+    /// [`BinaryOp`] variant would have to be given a meaning in each of those
+    /// to gain a discrete-domain one here. There is no `<<<` variant, because
+    /// section 4.1.12 makes `<<<` the same operation as `<<` and the lexer
+    /// spells them one token.
+    ArithmeticShiftRight(ArithmeticShiftExpr),
 }
 
 impl DigitalExpr {
@@ -854,6 +864,7 @@ impl DigitalExpr {
             Self::Xnor(xnor) => xnor.span,
             Self::CaseEquality(equality) => equality.span,
             Self::Reduction(reduction) => reduction.span,
+            Self::ArithmeticShiftRight(shift) => shift.span,
         }
     }
 
@@ -865,6 +876,7 @@ impl DigitalExpr {
             Self::Xnor(_) => "bitwise XNOR operator",
             Self::CaseEquality(_) => "case equality operator",
             Self::Reduction(_) => "reduction operator",
+            Self::ArithmeticShiftRight(_) => "arithmetic right shift operator",
         }
     }
 
@@ -877,6 +889,7 @@ impl DigitalExpr {
             Self::Xnor(xnor) => vec![&xnor.left, &xnor.right],
             Self::CaseEquality(equality) => vec![&equality.left, &equality.right],
             Self::Reduction(reduction) => vec![&reduction.operand],
+            Self::ArithmeticShiftRight(shift) => vec![&shift.left, &shift.right],
         }
     }
 
@@ -887,7 +900,11 @@ impl DigitalExpr {
     /// wants every read has to look.
     pub fn base_name(&self) -> Option<&SmolStr> {
         match self {
-            Self::FourState(_) | Self::Xnor(_) | Self::CaseEquality(_) | Self::Reduction(_) => None,
+            Self::FourState(_)
+            | Self::Xnor(_)
+            | Self::CaseEquality(_)
+            | Self::Reduction(_)
+            | Self::ArithmeticShiftRight(_) => None,
             Self::PartSelect(select) => Some(&select.name),
         }
     }
@@ -896,6 +913,19 @@ impl DigitalExpr {
 /// Bitwise XNOR: `a ~^ b` or `a ^~ b`.
 #[derive(Debug, Clone)]
 pub struct XnorExpr {
+    pub left: Box<Expression>,
+    pub right: Box<Expression>,
+    pub span: Span,
+}
+
+/// Arithmetic right shift: `a >>> b`.
+///
+/// The left operand is context-determined and carries the result size; the
+/// right is a number of positions and is self-determined, exactly as for `>>`
+/// (IEEE 1364-2005 table 5-22). What differs is only the fill, and only when
+/// the shift's own expression is signed.
+#[derive(Debug, Clone)]
+pub struct ArithmeticShiftExpr {
     pub left: Box<Expression>,
     pub right: Box<Expression>,
     pub span: Span,

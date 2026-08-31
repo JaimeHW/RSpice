@@ -896,40 +896,52 @@ impl<'a, E: DigitalEnvironment + ?Sized> Interpreter<'a, E> {
                 left,
                 right,
                 negate,
+                signed,
             } => {
-                let (left, right, negate) = (*left, *right, *negate);
+                let (left, right, negate, signed) = (*left, *right, *negate, *signed);
                 let left = self.four_state(left)?;
                 let right = self.four_state(right)?;
                 Ok(DigitalScalar::FourState(digital_value::equality(
-                    &left, &right, negate,
+                    &left, &right, negate, signed,
                 )))
             }
             CfgValueKind::DigitalCaseMatch {
                 selector,
                 label,
                 kind,
+                signed,
             } => {
-                let (selector, label, kind) = (*selector, *label, *kind);
+                let (selector, label, kind, signed) = (*selector, *label, *kind, *signed);
                 let selector = self.four_state(selector)?;
                 let label = self.four_state(label)?;
                 Ok(DigitalScalar::FourState(digital_value::case_match(
-                    kind, &selector, &label,
+                    kind, &selector, &label, signed,
                 )))
             }
-            CfgValueKind::DigitalRelational { op, left, right } => {
-                let (op, left, right) = (*op, *left, *right);
+            CfgValueKind::DigitalRelational {
+                op,
+                left,
+                right,
+                signed,
+            } => {
+                let (op, left, right, signed) = (*op, *left, *right, *signed);
                 let left = self.four_state(left)?;
                 let right = self.four_state(right)?;
                 Ok(DigitalScalar::FourState(digital_value::relational(
-                    op, &left, &right,
+                    op, &left, &right, signed,
                 )))
             }
-            CfgValueKind::DigitalArithmetic { op, left, right } => {
-                let (op, left, right) = (*op, *left, *right);
+            CfgValueKind::DigitalArithmetic {
+                op,
+                left,
+                right,
+                signed,
+            } => {
+                let (op, left, right, signed) = (*op, *left, *right, *signed);
                 let left = self.four_state(left)?;
                 let right = self.four_state(right)?;
                 Ok(DigitalScalar::FourState(digital_value::arithmetic(
-                    op, &left, &right,
+                    op, &left, &right, signed,
                 )))
             }
             CfgValueKind::DigitalShift { op, value, count } => {

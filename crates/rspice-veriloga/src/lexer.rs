@@ -253,6 +253,12 @@ pub enum TokenKind {
     BitNot, // ~
     Shl,    // <<
     Shr,    // >>
+    /// `>>>`, the arithmetic right shift of IEEE 1364-2005 section 4.1.12.
+    ///
+    /// `<<<` has no token of its own: the standard makes it the same operation
+    /// as `<<`, so the lexer spells it [`Self::Shl`] and nothing downstream has
+    /// to be told that two names mean one shift.
+    ArithShr,
 
     // === Operators - Assignment ===
     Assign_, // =
@@ -642,6 +648,13 @@ impl<'a> Lexer<'a> {
                     TokenKind::Le
                 } else if self.peek_char() == Some('<') {
                     self.advance();
+                    // IEEE 1364-2005 section 4.1.12 defines `<<<` as the same
+                    // operation as `<<` — both fill the vacated positions with
+                    // zero — so the third `<` is consumed and the two spellings
+                    // become one token.
+                    if self.peek_char() == Some('<') {
+                        self.advance();
+                    }
                     TokenKind::Shl
                 } else {
                     TokenKind::Lt
@@ -653,7 +666,12 @@ impl<'a> Lexer<'a> {
                     TokenKind::Ge
                 } else if self.peek_char() == Some('>') {
                     self.advance();
-                    TokenKind::Shr
+                    if self.peek_char() == Some('>') {
+                        self.advance();
+                        TokenKind::ArithShr
+                    } else {
+                        TokenKind::Shr
+                    }
                 } else {
                     TokenKind::Gt
                 }

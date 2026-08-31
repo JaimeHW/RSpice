@@ -655,6 +655,10 @@ impl Unroller<'_> {
                 self.substitute(&mut equality.right);
             }
             DigitalExpr::Reduction(reduction) => self.substitute(&mut reduction.operand),
+            DigitalExpr::ArithmeticShiftRight(shift) => {
+                self.substitute(&mut shift.left);
+                self.substitute(&mut shift.right);
+            }
         }
     }
 

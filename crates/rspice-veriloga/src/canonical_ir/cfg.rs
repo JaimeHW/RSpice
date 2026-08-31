@@ -414,6 +414,11 @@ pub enum CfgValueKind {
         left: ValueId,
         right: ValueId,
         negate: bool,
+        /// Whether the comparison's own context is signed, IEEE 1364-2005
+        /// section 5.4.2: both operands signed, or neither. It decides how the
+        /// narrower operand reaches the wider one, and nothing else — the
+        /// result is an unsigned bit either way.
+        signed: bool,
     },
     /// A `case` item match, yielding one bit and never an unknown one.
     ///
@@ -428,20 +433,37 @@ pub enum CfgValueKind {
         selector: ValueId,
         label: ValueId,
         kind: digital_value::DigitalCaseMatch,
+        /// Whether the two expressions being matched are both signed, which
+        /// decides how the narrower one is extended to the wider.
+        signed: bool,
     },
     /// Relational comparison, yielding one bit.
     DigitalRelational {
         op: digital_value::RelationalOp,
         left: ValueId,
         right: ValueId,
+        /// Whether the comparison is signed, IEEE 1364-2005 section 5.4.2.
+        ///
+        /// The one flag on this node that changes an answer rather than a
+        /// representation: `-1 < 0` holds between two signed operands and does
+        /// not the moment either side is unsigned.
+        signed: bool,
     },
     /// Arithmetic on four-state values, all-unknown if any operand bit is.
     DigitalArithmetic {
         op: digital_value::ArithmeticOp,
         left: ValueId,
         right: ValueId,
+        /// Whether the operands stand for signed numbers.
+        ///
+        /// Inert for `+`, `-` and `*`, whose bits are the same either way once
+        /// the operands are at a common width — the whole of signed arithmetic
+        /// lives in the extension that happens before them. `/` and `%` are
+        /// where it decides the answer.
+        signed: bool,
     },
-    /// Logical shift, keeping the shifted value's width.
+    /// Shift, keeping the shifted value's width. Whether it fills with zero or
+    /// with the sign bit is the operator's own, [`digital_value::ShiftOp`].
     DigitalShift {
         op: digital_value::ShiftOp,
         value: ValueId,

@@ -236,8 +236,19 @@ impl FourStateValue {
 
     /// Encode a two-state unsigned integer of the given width, truncating.
     pub fn from_u64(width: u32, bits: u64) -> Self {
+        Self::from_integer(width, i128::from(bits))
+    }
+
+    /// Encode a two-state integer of the given width, keeping its low bits.
+    ///
+    /// Signed and unsigned share this because two's complement gives them the
+    /// same bits: -5 and 11 are one four-bit pattern, and which of the two a
+    /// reader calls it is [`Self::to_integer`]'s question rather than this
+    /// one's.
+    pub fn from_integer(width: u32, bits: i128) -> Self {
+        let bits = bits as u128;
         let mut value = Self::zero(width);
-        for index in 0..width.min(64) {
+        for index in 0..width.min(128) {
             if bits >> index & 1 == 1 {
                 value.set_bit(index, FourStateBit::One);
             }
@@ -335,19 +346,58 @@ impl FourStateValue {
         Some(bits)
     }
 
-    /// Resize to `width`, truncating from the top or zero-extending.
+    /// The value as an integer under `signed`, or `None` if any bit is `x`/`z`.
     ///
-    /// This is assignment-context resizing (IEEE 1364-2005 section 5.2.1),
-    /// which zero-fills — *not* the literal padding rule in section 3.5.1,
-    /// where a leading `x` extends with itself. The two rules differ and are
-    /// deliberately in different places: the literal rule belongs to decoding
-    /// source text and lives in [`crate::four_state`].
-    pub fn resized(&self, width: u32) -> Self {
-        let mut out = Self::zero(width);
+    /// Unsigned reads the bits as a magnitude. Signed reads them as two's
+    /// complement *at this value's own width*, so a four-bit `1111` is -1 while
+    /// an eight-bit `00001111` is 15 — the same bits under two declarations are
+    /// two numbers, which is the whole of IEEE 1364-2005 section 5.4.2 in one
+    /// sentence.
+    ///
+    /// Reading at the operand's own width is also what lets a comparison
+    /// between operands of different widths be made on the numbers rather than
+    /// on extended bit patterns: extension preserves the number by
+    /// construction, so comparing the numbers compares the extended values
+    /// without building them.
+    pub fn to_integer(&self, signed: bool) -> Option<i128> {
+        let magnitude = i128::from(self.to_u64()?);
+        if signed && self.bit(self.width - 1) == FourStateBit::One {
+            return Some(magnitude - (1i128 << self.width));
+        }
+        Some(magnitude)
+    }
+
+    /// Extend or truncate to `width`, filling by `signed`.
+    ///
+    /// IEEE 1364-2005 section 5.4.1 extends a context-determined operand before
+    /// the operator runs, and section 5.4.2 decides with what: the sign bit when
+    /// the *expression* is signed, zero when it is not. Section 4.3.2 makes an
+    /// `x` or `z` in the sign position extend with itself, which falls out of
+    /// copying the bit rather than testing it.
+    ///
+    /// Not the literal padding rule of section 3.5.1, where a leading `x`
+    /// extends with itself whatever the signedness. That rule belongs to
+    /// decoding source text and lives in [`crate::four_state`].
+    pub fn extended(&self, width: u32, signed: bool) -> Self {
+        let fill = if signed {
+            self.bit(self.width - 1)
+        } else {
+            FourStateBit::Zero
+        };
+        let mut out = Self::splat(width, fill);
         for index in 0..width.min(self.width) {
             out.set_bit(index, self.bit(index));
         }
         out
+    }
+
+    /// Resize to `width`, truncating from the top or zero-extending.
+    ///
+    /// Assignment-context resizing, IEEE 1364-2005 section 5.2.1: the
+    /// unsigned half of [`Self::extended`], named for the clause that asks for
+    /// it.
+    pub fn resized(&self, width: u32) -> Self {
+        self.extended(width, false)
     }
 }
 
@@ -462,13 +512,22 @@ pub fn one_bit(bit: FourStateBit) -> FourStateValue {
 /// rule that makes `==` unusable for testing whether a signal is unknown, and
 /// the reason the standard also defines `===` — which is [`case_match`] with
 /// [`DigitalCaseMatch::Exact`], not a variant of this function.
-pub fn equality(left: &FourStateValue, right: &FourStateValue, negate: bool) -> FourStateValue {
+/// `signed` is the sign of the comparison's own context, IEEE 1364-2005
+/// section 5.4.2: both operands are signed, or the comparison is unsigned. It
+/// decides only how the narrower operand reaches the wider one — the *result*
+/// is an unsigned bit either way, which is rule (g).
+pub fn equality(
+    left: &FourStateValue,
+    right: &FourStateValue,
+    negate: bool,
+    signed: bool,
+) -> FourStateValue {
     if left.has_unknown() || right.has_unknown() {
         return one_bit(FourStateBit::Unknown);
     }
     let width = left.width().max(right.width());
-    let left = left.resized(width);
-    let right = right.resized(width);
+    let left = left.extended(width, signed);
+    let right = right.extended(width, signed);
     let equal = (0..width).all(|index| left.bit(index) == right.bit(index));
     one_bit(if equal != negate {
         FourStateBit::One
@@ -531,10 +590,11 @@ pub fn case_match(
     kind: DigitalCaseMatch,
     selector: &FourStateValue,
     label: &FourStateValue,
+    signed: bool,
 ) -> FourStateValue {
     let width = selector.width().max(label.width());
-    let selector = selector.resized(width);
-    let label = label.resized(width);
+    let selector = selector.extended(width, signed);
+    let label = label.extended(width, signed);
     let matched = (0..width).all(|index| {
         let (left, right) = (selector.bit(index), label.bit(index));
         kind.ignores(left) || kind.ignores(right) || left == right
@@ -555,15 +615,23 @@ pub enum RelationalOp {
     Ge,
 }
 
-/// Apply a relational operator, IEEE 1364-2005 section 4.1.6.
+/// Apply a relational operator, IEEE 1364-2005 sections 4.1.6 and 5.4.2.
 ///
 /// "If either operand contains an x or z, the result is a 1-bit unknown."
+///
+/// `signed` is the one place a relational operator's answer depends on how its
+/// operands were declared: section 5.4.2 makes the comparison signed when both
+/// operands are signed and unsigned when either is not, so `-1 < 0` is true
+/// between two signed operands and false the moment one of them is a plain
+/// `reg`. One function rather than two, because the only difference is which
+/// number the bits stand for.
 pub fn relational(
     op: RelationalOp,
     left: &FourStateValue,
     right: &FourStateValue,
+    signed: bool,
 ) -> FourStateValue {
-    let (Some(left), Some(right)) = (left.to_u64(), right.to_u64()) else {
+    let (Some(left), Some(right)) = (left.to_integer(signed), right.to_integer(signed)) else {
         return one_bit(FourStateBit::Unknown);
     };
     let outcome = match op {
@@ -589,7 +657,7 @@ pub enum ArithmeticOp {
     Mod,
 }
 
-/// Apply an arithmetic operator, IEEE 1364-2005 section 4.1.5.
+/// Apply an arithmetic operator, IEEE 1364-2005 sections 4.1.5 and 5.4.2.
 ///
 /// "If any operand bit value is the unknown value x, then the entire result
 /// value shall be x." The result keeps the operand width, so it is all-`x` of
@@ -598,13 +666,28 @@ pub enum ArithmeticOp {
 ///
 /// Division or modulus by zero is likewise the whole result unknown, which is
 /// the standard's rule and not an error this compiler raises.
+///
+/// # What `signed` changes, and what it does not
+///
+/// `+`, `-` and `*` on two's complement produce the same bits either way at a
+/// common width, which is why the whole of signed arithmetic lives in the
+/// *extension* that section 5.4.1 performs before the operator runs rather than
+/// in the operator. The flag is carried through them anyway, and pinned as
+/// inert by a test, because a node that says which arithmetic it is performing
+/// is worth more than one whose meaning rests on an invariant its reader has to
+/// rediscover.
+///
+/// `/` and `%` are where it bites: section 4.1.5 truncates division toward zero
+/// and gives the modulus the sign of its *first* operand, so `-7 / 2` is -3 and
+/// `-7 % 2` is -1 — neither of which the unsigned reading of those bits gives.
 pub fn arithmetic(
     op: ArithmeticOp,
     left: &FourStateValue,
     right: &FourStateValue,
+    signed: bool,
 ) -> FourStateValue {
     let width = left.width().max(right.width());
-    let (Some(left), Some(right)) = (left.to_u64(), right.to_u64()) else {
+    let (Some(left), Some(right)) = (left.to_integer(signed), right.to_integer(signed)) else {
         return FourStateValue::splat(width, FourStateBit::Unknown);
     };
     let value = match op {
@@ -614,31 +697,53 @@ pub fn arithmetic(
         ArithmeticOp::Div | ArithmeticOp::Mod if right == 0 => {
             return FourStateValue::splat(width, FourStateBit::Unknown);
         }
-        ArithmeticOp::Div => left / right,
-        ArithmeticOp::Mod => left % right,
+        // Rust's `/` truncates toward zero and its `%` takes the sign of the
+        // left operand, which is section 4.1.5's rule exactly. `wrapping_`
+        // covers the one pair that has no representable quotient — the most
+        // negative value over -1 — whose truncation to `width` bits is itself.
+        ArithmeticOp::Div => left.wrapping_div(right),
+        ArithmeticOp::Mod => left.wrapping_rem(right),
     };
-    FourStateValue::from_u64(width, value)
+    FourStateValue::from_integer(width, value)
 }
 
-/// Shift direction.
+/// Shift direction, and what fills the positions it vacates.
+///
+/// Three rather than two, because IEEE 1364-2005 section 4.1.12 gives `>>>` a
+/// fill rule of its own. There is no `ArithmeticLeft`: the standard makes
+/// `<<<` and `<<` the same operation, so the lowering spells one of them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ShiftOp {
     Left,
     Right,
+    /// `>>>` on a signed expression: vacated positions take the sign bit.
+    ///
+    /// Emitted only when the shift's own expression is signed. Section 4.1.12
+    /// makes `>>>` fill with zero when the result type is unsigned — which is
+    /// [`Self::Right`] — so the lowering decides once, and a reader of this node
+    /// never has to ask whether it means what it says.
+    ArithmeticRight,
 }
 
-/// Apply a logical shift, IEEE 1364-2005 section 4.1.12.
+/// Apply a shift, IEEE 1364-2005 section 4.1.12.
 ///
-/// Vacated bits are filled with zero, and the result keeps the left operand's
-/// width. An `x`/`z` bit in the *shift count* makes the whole result unknown;
-/// an `x` in the value being shifted simply moves, because a shift does not
-/// combine bits.
+/// The result keeps the left operand's width, and the positions the shift
+/// vacates take the operator's fill: zero for `<<` and `>>`, and the sign bit
+/// for an arithmetic `>>>`. An `x`/`z` bit in the *shift count* makes the whole
+/// result unknown; an `x` in the value being shifted simply moves, because a
+/// shift does not combine bits — and an `x` in the *sign* position of a `>>>`
+/// fills with itself, which is section 4.3.2's rule falling out of copying the
+/// bit rather than testing it.
 pub fn shift(op: ShiftOp, value: &FourStateValue, count: &FourStateValue) -> FourStateValue {
     let width = value.width();
     let Some(count) = count.to_u64() else {
         return FourStateValue::splat(width, FourStateBit::Unknown);
     };
-    let mut out = FourStateValue::zero(width);
+    let fill = match op {
+        ShiftOp::Left | ShiftOp::Right => FourStateBit::Zero,
+        ShiftOp::ArithmeticRight => value.bit(width - 1),
+    };
+    let mut out = FourStateValue::splat(width, fill);
     if count >= u64::from(width) {
         return out;
     }
@@ -646,7 +751,9 @@ pub fn shift(op: ShiftOp, value: &FourStateValue, count: &FourStateValue) -> Fou
     for index in 0..width {
         let source = match op {
             ShiftOp::Left => index.checked_sub(count),
-            ShiftOp::Right => index.checked_add(count).filter(|source| *source < width),
+            ShiftOp::Right | ShiftOp::ArithmeticRight => {
+                index.checked_add(count).filter(|source| *source < width)
+            }
         };
         if let Some(source) = source {
             out.set_bit(index, value.bit(source));
@@ -934,28 +1041,28 @@ mod tests {
     #[test]
     fn equality_is_poisoned_by_unknown_bits() {
         assert_eq!(
-            equality(&parse("1010"), &parse("1010"), false).spelling(),
+            equality(&parse("1010"), &parse("1010"), false, false).spelling(),
             "1"
         );
         assert_eq!(
-            equality(&parse("1010"), &parse("1011"), false).spelling(),
+            equality(&parse("1010"), &parse("1011"), false, false).spelling(),
             "0"
         );
         assert_eq!(
-            equality(&parse("1010"), &parse("101x"), false).spelling(),
+            equality(&parse("1010"), &parse("101x"), false, false).spelling(),
             "x"
         );
         assert_eq!(
-            equality(&parse("101z"), &parse("1010"), false).spelling(),
+            equality(&parse("101z"), &parse("1010"), false, false).spelling(),
             "x"
         );
         // Inequality is poisoned identically, not the complement of `x`.
         assert_eq!(
-            equality(&parse("1010"), &parse("1011"), true).spelling(),
+            equality(&parse("1010"), &parse("1011"), true, false).spelling(),
             "1"
         );
         assert_eq!(
-            equality(&parse("1010"), &parse("101x"), true).spelling(),
+            equality(&parse("1010"), &parse("101x"), true, false).spelling(),
             "x"
         );
     }
@@ -963,15 +1070,15 @@ mod tests {
     #[test]
     fn relational_operators_are_poisoned_by_unknown_bits() {
         assert_eq!(
-            relational(RelationalOp::Lt, &parse("0010"), &parse("0011")).spelling(),
+            relational(RelationalOp::Lt, &parse("0010"), &parse("0011"), false).spelling(),
             "1"
         );
         assert_eq!(
-            relational(RelationalOp::Ge, &parse("0010"), &parse("0011")).spelling(),
+            relational(RelationalOp::Ge, &parse("0010"), &parse("0011"), false).spelling(),
             "0"
         );
         assert_eq!(
-            relational(RelationalOp::Lt, &parse("001x"), &parse("0011")).spelling(),
+            relational(RelationalOp::Lt, &parse("001x"), &parse("0011"), false).spelling(),
             "x"
         );
     }
@@ -981,24 +1088,24 @@ mod tests {
     #[test]
     fn arithmetic_poisons_the_entire_result() {
         assert_eq!(
-            arithmetic(ArithmeticOp::Add, &parse("0010"), &parse("0011")).spelling(),
+            arithmetic(ArithmeticOp::Add, &parse("0010"), &parse("0011"), false).spelling(),
             "0101"
         );
         assert_eq!(
-            arithmetic(ArithmeticOp::Add, &parse("001x"), &parse("0011")).spelling(),
+            arithmetic(ArithmeticOp::Add, &parse("001x"), &parse("0011"), false).spelling(),
             "xxxx"
         );
         assert_eq!(
-            arithmetic(ArithmeticOp::Mul, &parse("0011"), &parse("00z1")).spelling(),
+            arithmetic(ArithmeticOp::Mul, &parse("0011"), &parse("00z1"), false).spelling(),
             "xxxx"
         );
         // Division by zero is unknown, not a raised error.
         assert_eq!(
-            arithmetic(ArithmeticOp::Div, &parse("1000"), &parse("0000")).spelling(),
+            arithmetic(ArithmeticOp::Div, &parse("1000"), &parse("0000"), false).spelling(),
             "xxxx"
         );
         assert_eq!(
-            arithmetic(ArithmeticOp::Sub, &parse("0101"), &parse("0011")).spelling(),
+            arithmetic(ArithmeticOp::Sub, &parse("0101"), &parse("0011"), false).spelling(),
             "0010"
         );
     }
@@ -1116,6 +1223,163 @@ mod tests {
         assert_eq!(
             FourStateValue::splat(3, FourStateBit::Unknown).spelling(),
             "xxx"
+        );
+    }
+
+    /// IEEE 1364-2005 section 5.4.2: the same bits are two numbers, and which
+    /// one they are is the declaration's answer rather than the value's.
+    #[test]
+    fn a_value_reads_as_two_numbers_depending_on_its_signedness() {
+        assert_eq!(parse("1111").to_integer(false), Some(15));
+        assert_eq!(parse("1111").to_integer(true), Some(-1));
+        assert_eq!(parse("00001111").to_integer(true), Some(15));
+        assert_eq!(parse("1000").to_integer(true), Some(-8));
+        assert_eq!(parse("0111").to_integer(true), Some(7));
+        // An unknown bit has no number under either reading.
+        assert_eq!(parse("1x11").to_integer(true), None);
+    }
+
+    /// Section 5.4.1's extension, both fills. The signed one copies the top
+    /// bit, which section 4.3.2 makes an `x` or `z` sign extend as itself.
+    #[test]
+    fn extension_fills_with_zero_or_with_the_sign_bit() {
+        assert_eq!(parse("1111").extended(8, false).spelling(), "00001111");
+        assert_eq!(parse("1111").extended(8, true).spelling(), "11111111");
+        assert_eq!(parse("0111").extended(8, true).spelling(), "00000111");
+        assert_eq!(parse("x111").extended(8, true).spelling(), "xxxxx111");
+        assert_eq!(parse("z111").extended(8, true).spelling(), "zzzzz111");
+        // Truncation does not consult the sign at all.
+        assert_eq!(parse("11110000").extended(4, true).spelling(), "0000");
+        assert_eq!(parse("11110000").extended(4, false).spelling(), "0000");
+    }
+
+    /// Section 4.1.6 with 5.4.2: `-1 < 0` under a signed comparison and not
+    /// under an unsigned one, from one pair of bit patterns.
+    #[test]
+    fn relational_operators_read_their_operands_by_signedness() {
+        assert_eq!(
+            relational(RelationalOp::Lt, &parse("1111"), &parse("0000"), true).spelling(),
+            "1",
+            "-1 < 0"
+        );
+        assert_eq!(
+            relational(RelationalOp::Lt, &parse("1111"), &parse("0000"), false).spelling(),
+            "0",
+            "15 < 0 is false"
+        );
+        // Operands of different widths are compared as numbers, which is the
+        // same answer extending them first would give.
+        assert_eq!(
+            relational(RelationalOp::Lt, &parse("1111"), &parse("00000001"), true).spelling(),
+            "1",
+            "-1 < 1"
+        );
+        assert_eq!(
+            relational(RelationalOp::Lt, &parse("1111"), &parse("00000001"), false).spelling(),
+            "0",
+            "15 < 1 is false"
+        );
+        // An unknown bit still poisons the result under either reading.
+        assert_eq!(
+            relational(RelationalOp::Lt, &parse("111x"), &parse("0000"), true).spelling(),
+            "x"
+        );
+    }
+
+    /// Section 4.1.7 with 5.4.2: equality compares extended operands, and the
+    /// extension is the comparison's own signedness.
+    #[test]
+    fn equality_extends_its_operands_by_signedness() {
+        // Four-bit `1111` against eight-bit `11111111`: equal when both are
+        // signed (-1 and -1) and not when they are unsigned (15 and 255).
+        assert_eq!(
+            equality(&parse("1111"), &parse("11111111"), false, true).spelling(),
+            "1"
+        );
+        assert_eq!(
+            equality(&parse("1111"), &parse("11111111"), false, false).spelling(),
+            "0"
+        );
+    }
+
+    /// Section 4.1.5: `+ - *` are one operation on two's complement, and `/`
+    /// and `%` are two.
+    #[test]
+    fn only_division_and_modulus_read_the_signedness() {
+        for (op, left, right) in [
+            (ArithmeticOp::Add, "1001", "0010"),
+            (ArithmeticOp::Sub, "1001", "0010"),
+            (ArithmeticOp::Mul, "1001", "0010"),
+        ] {
+            assert_eq!(
+                arithmetic(op, &parse(left), &parse(right), true),
+                arithmetic(op, &parse(left), &parse(right), false),
+                "{op:?} must not depend on the signedness at a common width"
+            );
+        }
+        // 9 / 2 = 4, and -7 / 2 truncates toward zero to -3.
+        assert_eq!(
+            arithmetic(ArithmeticOp::Div, &parse("1001"), &parse("0010"), false).spelling(),
+            "0100"
+        );
+        assert_eq!(
+            arithmetic(ArithmeticOp::Div, &parse("1001"), &parse("0010"), true).spelling(),
+            "1101"
+        );
+        // The modulus takes the sign of its first operand: 9 % 2 = 1 and
+        // -7 % 2 = -1.
+        assert_eq!(
+            arithmetic(ArithmeticOp::Mod, &parse("1001"), &parse("0010"), false).spelling(),
+            "0001"
+        );
+        assert_eq!(
+            arithmetic(ArithmeticOp::Mod, &parse("1001"), &parse("0010"), true).spelling(),
+            "1111"
+        );
+        // The one signed pair with no representable quotient truncates to
+        // itself rather than trapping: -8 / -1 in four bits is -8.
+        assert_eq!(
+            arithmetic(ArithmeticOp::Div, &parse("1000"), &parse("1111"), true).spelling(),
+            "1000"
+        );
+        // Division by zero is still unknown, under either reading.
+        assert_eq!(
+            arithmetic(ArithmeticOp::Div, &parse("1001"), &parse("0000"), true).spelling(),
+            "xxxx"
+        );
+    }
+
+    /// Section 4.1.12: `>>>` fills with the sign bit, `>>` with zero, and both
+    /// keep the shifted value's width.
+    #[test]
+    fn arithmetic_right_shift_fills_with_the_sign_bit() {
+        assert_eq!(
+            shift(ShiftOp::ArithmeticRight, &parse("10000000"), &parse("010")).spelling(),
+            "11100000"
+        );
+        assert_eq!(
+            shift(ShiftOp::Right, &parse("10000000"), &parse("010")).spelling(),
+            "00100000"
+        );
+        // A positive value fills with its own zero, so `>>>` and `>>` agree.
+        assert_eq!(
+            shift(ShiftOp::ArithmeticRight, &parse("01000000"), &parse("010")).spelling(),
+            shift(ShiftOp::Right, &parse("01000000"), &parse("010")).spelling(),
+        );
+        // Section 4.3.2: an unknown sign bit fills with itself.
+        assert_eq!(
+            shift(ShiftOp::ArithmeticRight, &parse("x0000000"), &parse("010")).spelling(),
+            "xxx00000"
+        );
+        // Shifting past the width leaves the fill and nothing else: all sign
+        // bits for `>>>`, all zeros for `>>`.
+        assert_eq!(
+            shift(ShiftOp::ArithmeticRight, &parse("1000"), &parse("1000")).spelling(),
+            "1111"
+        );
+        assert_eq!(
+            shift(ShiftOp::Right, &parse("1000"), &parse("1000")).spelling(),
+            "0000"
         );
     }
 

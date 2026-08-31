@@ -2250,16 +2250,19 @@ mod digital_leaf_class {
                 left: value,
                 right: value,
                 negate: false,
+                signed: false,
             },
             CfgValueKind::DigitalRelational {
                 op: RelationalOp::Lt,
                 left: value,
                 right: value,
+                signed: false,
             },
             CfgValueKind::DigitalArithmetic {
                 op: ArithmeticOp::Add,
                 left: value,
                 right: value,
+                signed: false,
             },
             CfgValueKind::DigitalShift {
                 op: ShiftOp::Left,

@@ -2137,12 +2137,27 @@ impl<'a> Parser<'a> {
         Ok(left)
     }
 
-    /// Parse shifts (<< >>)
+    /// Parse shifts (`<<`, `>>`, `>>>`; `<<<` lexes as `<<`)
     fn parse_shift(&mut self) -> Result<Expression, ParseError> {
         let start = self.current_span();
         let mut left = self.parse_additive()?;
 
         loop {
+            // `>>>` is not a `BinaryOp`. IEEE 1364-2005 section 4.1.12 gives it
+            // a fill rule the continuous domain has no operator for, so it is a
+            // `DigitalExpr` — which is also what makes an analog expression
+            // holding one refuse by name rather than shift the wrong bits in.
+            if matches!(self.current().kind, TokenKind::ArithShr) {
+                self.advance();
+                let right = self.parse_additive()?;
+                left =
+                    Expression::Digital(DigitalExpr::ArithmeticShiftRight(ArithmeticShiftExpr {
+                        left: Box::new(left),
+                        right: Box::new(right),
+                        span: start.extend(self.previous_span()),
+                    }));
+                continue;
+            }
             let op = match self.current().kind {
                 TokenKind::Shl => {
                     self.advance();

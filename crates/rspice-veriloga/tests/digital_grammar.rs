@@ -814,6 +814,12 @@ fn the_new_discrete_operators_are_refused_in_the_continuous_domain() {
         ("(~|a)", "reduction operator"),
         ("(^a)", "reduction operator"),
         ("(~^a)", "reduction operator"),
+        // `>>>` joined them for the same reason: its fill rule is IEEE
+        // 1364-2005 section 4.1.12's, and the continuous domain shifts machine
+        // integers through a bytecode instruction, a native encoding and a
+        // WebAssembly opcode, none of which has one. `<<<` is absent because
+        // the standard makes it `<<`, which the analog half already has.
+        ("(a >>> b)", "arithmetic right shift operator"),
     ] {
         let message = analyze_error(&format!(
             "module analog_operator(p, n);\n\

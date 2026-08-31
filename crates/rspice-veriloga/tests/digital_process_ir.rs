@@ -12,7 +12,7 @@ use rspice_veriloga::canonical_ir::digital::{
     CanonicalDigitalPlan, CfgDigitalProcess, DigitalEdge, DigitalProcessKind,
     DigitalSchedulingRegion, DigitalSensitivityOrigin,
 };
-use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
+use rspice_veriloga::canonical_ir::digital_value::{FourStateValue, ShiftOp};
 use rspice_veriloga::canonical_ir::{BlockId, CanonicalIrArtifact};
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 
@@ -1053,6 +1053,275 @@ fn a_replication_expands_into_the_concatenation() {
 }
 
 // ===========================================================================
+// Section 5.4.2, rule by rule
+// ===========================================================================
+//
+// The signedness half of the same two-pass rule the section above pins. It
+// fails in two independent ways and both are checked separately: an operator
+// can be *labelled* signed while its operands arrived zero-extended, and
+// operands can arrive sign-extended into an operator that then compares them
+// unsigned. Neither is visible in a result width, which is why these tests
+// assert the operand nodes rather than only the operator's.
+
+/// How a value reached the width its consumer asked for.
+#[derive(Debug, PartialEq, Eq)]
+enum Extension {
+    /// A concatenation with zeros above the value: section 5.2.1's fill, and
+    /// section 5.4.1's for an unsigned operand.
+    Zero,
+    /// A concatenation of copies of the value's own top bit: section 5.4.1's
+    /// fill for an operand of a signed expression.
+    Sign,
+    /// Not an extension at all — the value was already the width asked for, or
+    /// the node is a concatenation the author wrote.
+    None,
+}
+
+/// Read the extension back off the graph.
+///
+/// Structural rather than by flag, because the lowering has no extension node:
+/// it builds both kinds out of a concatenation, the signed one being the
+/// standard's own `{{n{value[msb]}}, value}` idiom. So the question "which fill
+/// did this operand get" is answered by looking at what is concatenated above
+/// it, which is also the only form a consumer of the IR can see.
+fn extension_of(
+    process: &CfgDigitalProcess,
+    value: rspice_veriloga::canonical_ir::ids::ValueId,
+) -> Extension {
+    let CfgValueKind::DigitalConcat { parts } = &process.function.value(value).kind else {
+        return Extension::None;
+    };
+    let Some((source, fill)) = parts.split_last() else {
+        return Extension::None;
+    };
+    if fill.is_empty() || fill.iter().any(|part| *part != fill[0]) {
+        return Extension::None;
+    }
+    match &process.function.value(fill[0]).kind {
+        CfgValueKind::FourStateConstant(constant) if !constant.spelling().contains('1') => {
+            Extension::Zero
+        }
+        CfgValueKind::DigitalPartSelect { input, msb, lsb }
+            if input == source
+                && msb == lsb
+                && *msb == i64::from(width_of(process, *source)) - 1 =>
+        {
+            Extension::Sign
+        }
+        _ => Extension::None,
+    }
+}
+
+/// The left operand of the one arithmetic node in a process.
+fn arithmetic_operands(
+    process: &CfgDigitalProcess,
+) -> (
+    rspice_veriloga::canonical_ir::ids::ValueId,
+    rspice_veriloga::canonical_ir::ids::ValueId,
+    bool,
+) {
+    process
+        .function
+        .values
+        .iter()
+        .find_map(|value| match value.kind {
+            CfgValueKind::DigitalArithmetic {
+                left,
+                right,
+                signed,
+                ..
+            } => Some((left, right, signed)),
+            _ => None,
+        })
+        .expect("the operator is in the graph")
+}
+
+/// Rule (j) and section 5.4.1 together: a signed operand of a signed
+/// expression is sign-extended to the context *before* the operator runs, and
+/// the operator is labelled signed.
+///
+/// `reg signed [3:0] a` holding -1 reaching an eight-bit context must arrive as
+/// `8'b11111111`. Zero-extending it would deliver 15, which is a different
+/// number and a total answer — the failure this test exists to catch.
+#[test]
+fn a_signed_operand_reaches_a_signed_context_sign_extended() {
+    let process = only_process(
+        "    reg signed [3:0] a, b;\n\
+         \x20   reg signed [7:0] p;\n\
+         \x20   initial p = a + b;",
+    );
+    let (left, right, signed) = arithmetic_operands(&process);
+    assert!(signed, "both operands are signed, so the sum is");
+    assert_eq!(width_of(&process, left), 8);
+    assert_eq!(width_of(&process, right), 8);
+    assert_eq!(extension_of(&process, left), Extension::Sign);
+    assert_eq!(extension_of(&process, right), Extension::Sign);
+}
+
+/// The same expression with unsigned declarations, which is the control: the
+/// widths are identical and only the fill differs.
+#[test]
+fn an_unsigned_operand_reaches_its_context_zero_extended() {
+    let process = only_process(
+        "    reg [3:0] a, b;\n\
+         \x20   reg [7:0] p;\n\
+         \x20   initial p = a + b;",
+    );
+    let (left, right, signed) = arithmetic_operands(&process);
+    assert!(!signed);
+    assert_eq!(width_of(&process, left), 8);
+    assert_eq!(extension_of(&process, left), Extension::Zero);
+    assert_eq!(extension_of(&process, right), Extension::Zero);
+}
+
+/// Rule (j)'s teeth: one unsigned operand makes the whole expression unsigned,
+/// and the decision travels back down — the *signed* sibling is zero-extended
+/// too, not sign-extended into an unsigned sum.
+#[test]
+fn one_unsigned_operand_makes_the_whole_context_unsigned() {
+    let process = only_process(
+        "    reg signed [3:0] a;\n\
+         \x20   reg [3:0] b;\n\
+         \x20   reg signed [7:0] p;\n\
+         \x20   initial p = a + b;",
+    );
+    let (left, right, signed) = arithmetic_operands(&process);
+    assert!(!signed, "`b` is unsigned, so `a + b` is");
+    assert_eq!(
+        extension_of(&process, left),
+        Extension::Zero,
+        "the signed operand is zero-extended into an unsigned context"
+    );
+    assert_eq!(extension_of(&process, right), Extension::Zero);
+}
+
+/// Rule (a): the target takes no part in the classification. An unsigned `p`
+/// does not make a signed right-hand side compute unsigned.
+#[test]
+fn the_assignment_target_does_not_decide_the_signedness() {
+    let process = only_process(
+        "    reg signed [3:0] a, b;\n\
+         \x20   reg [7:0] p;\n\
+         \x20   initial p = a + b;",
+    );
+    let (left, _, signed) = arithmetic_operands(&process);
+    assert!(signed, "an unsigned target cannot unsign its operands");
+    assert_eq!(extension_of(&process, left), Extension::Sign);
+}
+
+/// Rules (d), (e) and (f): a bit-select, a part-select and a concatenation are
+/// unsigned however their operands are declared. Each is a place a signed
+/// expression stops being one with no unsigned declaration anywhere in it.
+#[test]
+fn selects_and_concatenations_are_unsigned_whatever_they_hold() {
+    for right in ["a[3:1]", "{a}", "a[0]"] {
+        let process = only_process(&format!(
+            "    reg signed [3:0] a;\n\
+             \x20   reg signed [7:0] p;\n\
+             \x20   initial p = a + {right};",
+        ));
+        let (left, _, signed) = arithmetic_operands(&process);
+        assert!(!signed, "`a + {right}` must be unsigned");
+        assert_eq!(
+            extension_of(&process, left),
+            Extension::Zero,
+            "`a` is zero-extended into the unsigned context `{right}` created"
+        );
+    }
+}
+
+/// Section 4.1.6 with 5.4.2: the comparison is signed only when *both* its
+/// operands are, and the outer context reaches neither. Four combinations, one
+/// flag each.
+#[test]
+fn a_comparison_is_signed_only_when_both_its_operands_are() {
+    for (left, right, expected) in [
+        ("s", "t", true),
+        ("s", "u", false),
+        ("u", "s", false),
+        ("u", "v", false),
+    ] {
+        let process = only_process(&format!(
+            "    reg signed [3:0] s, t;\n\
+             \x20   reg [3:0] u, v;\n\
+             \x20   reg y;\n\
+             \x20   initial y = {left} < {right};",
+        ));
+        let signed = process
+            .function
+            .values
+            .iter()
+            .find_map(|value| match value.kind {
+                CfgValueKind::DigitalRelational { signed, .. } => Some(signed),
+                _ => None,
+            })
+            .expect("the comparison is in the graph");
+        assert_eq!(signed, expected, "`{left} < {right}`");
+    }
+}
+
+/// Section 4.1.12: `>>>` fills with the sign bit when its expression is signed
+/// and with zero when it is not, so the lowering picks the operator rather than
+/// leaving a node whose meaning depends on a flag elsewhere. `<<<` is `<<`.
+#[test]
+fn arithmetic_right_shift_is_arithmetic_only_in_a_signed_expression() {
+    for (declaration, spelling, expected) in [
+        ("reg signed [7:0] a;", ">>>", ShiftOp::ArithmeticRight),
+        ("reg [7:0] a;", ">>>", ShiftOp::Right),
+        ("reg signed [7:0] a;", ">>", ShiftOp::Right),
+        ("reg signed [7:0] a;", "<<<", ShiftOp::Left),
+        ("reg signed [7:0] a;", "<<", ShiftOp::Left),
+    ] {
+        let process = only_process(&format!(
+            "    {declaration}\n\
+             \x20   reg [7:0] p;\n\
+             \x20   initial p = a {spelling} 2;",
+        ));
+        let op = process
+            .function
+            .values
+            .iter()
+            .find_map(|value| match value.kind {
+                CfgValueKind::DigitalShift { op, .. } => Some(op),
+                _ => None,
+            })
+            .expect("the shift is in the graph");
+        assert_eq!(op, expected, "`{declaration} ... a {spelling} 2`");
+    }
+}
+
+/// Rule (b): a decimal number with no base is signed, and a based one is
+/// unsigned without the `s` marker. The three spellings of nine are one value
+/// and two classifications.
+#[test]
+fn literal_signedness_follows_the_base_marker() {
+    for (spelling, expected) in [("9", true), ("4'd9", false), ("4'sd9", true)] {
+        let process = only_process(&format!(
+            "    reg signed [3:0] a;\n\
+             \x20   reg signed [7:0] p;\n\
+             \x20   initial p = a + {spelling};",
+        ));
+        let (_, _, signed) = arithmetic_operands(&process);
+        assert_eq!(signed, expected, "`a + {spelling}`");
+    }
+}
+
+/// Table 5-21: an `integer` is signed and has no qualifier with which to say
+/// otherwise, while a plain `reg` of the same width is not.
+#[test]
+fn an_integer_local_is_signed_and_a_reg_is_not() {
+    for (declaration, expected) in [("integer i;", true), ("reg [31:0] i;", false)] {
+        let process = only_process(&format!(
+            "    reg signed [31:0] a;\n\
+             \x20   reg [31:0] p;\n\
+             \x20   initial begin : work {declaration} i = 0; p = a + i; end",
+        ));
+        let (_, _, signed) = arithmetic_operands(&process);
+        assert_eq!(signed, expected, "`a + i` with `{declaration}`");
+    }
+}
+
+// ===========================================================================
 // Refusals
 // ===========================================================================
 
@@ -1166,6 +1435,21 @@ fn the_deferred_constructs_now_lower() {
         "    reg [1:0] sel;\n\
          \x20   reg q;\n\
          \x20   always @* casex (sel) 2'b1?: q = 1'b1; default: q = 1'b0; endcase",
+        // IEEE 1364-2005 section 5.4.2. Each of these carried the `signed`
+        // marker into a lowering that had nothing to do with it, and refused
+        // rather than compile an unsigned device: a declaration, a
+        // process-local, and the `s` on a literal.
+        "    wire signed [7:0] sbus;\n\
+         \x20   reg q;\n\
+         \x20   always @* q = sbus[0];",
+        "    reg q;\n\
+         \x20   initial begin : work reg signed [3:0] t; t = 4'b0000; q = t[0]; end",
+        "    reg [7:0] q;\n\
+         \x20   initial q = 4'sd9;",
+        // Section 4.1.12's arithmetic right shift, which had no token at all.
+        "    reg signed [7:0] a;\n\
+         \x20   reg [7:0] q;\n\
+         \x20   initial q = a >>> 2;",
     ] {
         let process = only_process(section);
         process
@@ -1201,27 +1485,6 @@ fn unlowered_constructs_refuse_by_name() {
             "    reg q;\n\
              \x20   initial begin : work integer i; i <= 0; q = 1'b0; end",
             "nonblocking assignment to the process-local `i`",
-        ),
-        // IEEE 1364-2005 section 5.4.2. Analysis resolves all three faithfully
-        // — the qualifier reaches `DigitalSignal::signed` and the `s` marker
-        // reaches `FourStateLiteral::signed` — and nothing below reads either,
-        // so each refuses here rather than lowering into the unsigned device
-        // its unmarked spelling would give.
-        (
-            "    wire signed [7:0] sbus;\n\
-             \x20   reg q;\n\
-             \x20   always @* q = sbus[0];",
-            "`wire signed`",
-        ),
-        (
-            "    reg q;\n\
-             \x20   initial begin : work reg signed [3:0] t; t = 4'b0000; q = t[0]; end",
-            "process-local `reg signed`",
-        ),
-        (
-            "    reg [7:0] q;\n\
-             \x20   initial q = 4'sd9;",
-            "the `s` marker on `4'sd9`",
         ),
     ];
     for (section, expected) in cases {
