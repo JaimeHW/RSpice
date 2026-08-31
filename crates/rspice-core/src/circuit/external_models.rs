@@ -8,7 +8,7 @@
 //! propagates the device's own breakpoint requests back to the integrator.
 
 use super::*;
-use crate::xspice::XspiceInstanceCheckpoint;
+use crate::xspice::{EventInputKind, XspiceInstanceCheckpoint};
 #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -143,6 +143,22 @@ fn apply_xspice_events_at_or_before(
         changed |= previous_value != Some(resolved);
     }
     Ok(changed)
+}
+
+/// Mark the fan-out of both touched-node lists as having dirty event inputs.
+///
+/// Every drain is followed by this, the failing ones included: `run_due_events`
+/// can report an oscillation after it has already executed events, and the
+/// nodes those events moved are in the lists whether or not the call returned
+/// `Ok`.
+fn mark_drained_fanout_dirty(
+    dispatch: &super::xspice_dispatch::XspiceEventDispatch,
+    instances: &mut [crate::xspice::XspiceInstance],
+    touched_digital_nodes: &[NodeId],
+    touched_real_nodes: &[NodeId],
+) {
+    dispatch.mark_fanout_dirty(instances, EventInputKind::Digital, touched_digital_nodes);
+    dispatch.mark_fanout_dirty(instances, EventInputKind::Real, touched_real_nodes);
 }
 
 /// Mark every net one event connection reaches as discrete. Analog port
@@ -498,6 +514,12 @@ impl CircuitData {
             .xspice_event_dispatch
             .as_ref()
             .expect("ensure_xspice_event_dispatch built the map");
+        // The skip is sound only where `XspiceInstance::evaluate` would have
+        // taken its signature early return, and that return is gated on the
+        // analysis. Outside transient the model body runs on every call, so
+        // the whole pass runs as it always did — the flags a transient pass
+        // left behind say nothing about a DC or AC one.
+        let dirty_dispatch_applies = analysis == crate::xspice::AnalysisType::Transient;
 
         // Delta cycles, not a bounded relaxation. A settling network leaves at
         // the `!changed` exit below, in the same iteration it always did; one
@@ -532,6 +554,16 @@ impl CircuitData {
             ) {
                 Ok(changed) => changed,
                 Err(error) => {
+                    // A drain that fails mid-slot has already applied the
+                    // events it executed, so the flags are owed before the
+                    // error leaves. Only the diagnostic path continues from
+                    // here, and it must not read a stale flag.
+                    mark_drained_fanout_dirty(
+                        dispatch,
+                        instances,
+                        touched_digital_nodes,
+                        touched_real_nodes,
+                    );
                     let message = xspice_event_settling_message(time, &error);
                     if self.xspice_evaluation_error.is_none() {
                         self.xspice_evaluation_error = Some(message.clone());
@@ -541,10 +573,14 @@ impl CircuitData {
             };
             // What the drain just touched is owed an evaluation in *this*
             // pass, which is what the node-list dispatch this replaced did.
-            dispatch.mark_fanout_dirty(instances, touched_digital_nodes);
-            dispatch.mark_fanout_dirty(instances, touched_real_nodes);
-            dispatch.record_fanout_pending(pending, touched_digital_nodes);
-            dispatch.record_fanout_pending(pending, touched_real_nodes);
+            mark_drained_fanout_dirty(
+                dispatch,
+                instances,
+                touched_digital_nodes,
+                touched_real_nodes,
+            );
+            dispatch.record_fanout_pending(pending, EventInputKind::Digital, touched_digital_nodes);
+            dispatch.record_fanout_pending(pending, EventInputKind::Real, touched_real_nodes);
             if pass == 0 {
                 // The opening pass dispatches every instance, exactly as it
                 // always has. Narrowing it is the quiet-input check below, and
@@ -559,7 +595,10 @@ impl CircuitData {
                     continue;
                 }
                 let instance = &mut instances[index];
-                if dispatch.is_dirty_dispatched(index) && !instance.event_inputs_dirty() {
+                if dirty_dispatch_applies
+                    && dispatch.is_dirty_dispatched(index)
+                    && !instance.event_inputs_dirty()
+                {
                     #[cfg(debug_assertions)]
                     instance.debug_assert_event_inputs_quiet(
                         solution,
@@ -622,6 +661,12 @@ impl CircuitData {
                 ) {
                     Ok(changed) => changed,
                     Err(error) => {
+                        mark_drained_fanout_dirty(
+                            dispatch,
+                            instances,
+                            touched_digital_nodes,
+                            touched_real_nodes,
+                        );
                         let message = xspice_event_settling_message(time, &error);
                         if self.xspice_evaluation_error.is_none() {
                             self.xspice_evaluation_error = Some(message.clone());
@@ -631,8 +676,12 @@ impl CircuitData {
                 };
                 // A driver reached these nets whether or not the resolved
                 // value moved, so the persistent flags are owed either way.
-                dispatch.mark_fanout_dirty(instances, touched_digital_nodes);
-                dispatch.mark_fanout_dirty(instances, touched_real_nodes);
+                mark_drained_fanout_dirty(
+                    dispatch,
+                    instances,
+                    touched_digital_nodes,
+                    touched_real_nodes,
+                );
                 if instance_changed {
                     changed = true;
                     // Owed to the *next* pass, not this one: an instance
@@ -640,8 +689,16 @@ impl CircuitData {
                     // order rather than being revisited out of turn. Gating
                     // this on `instance_changed` is what the node-list
                     // dispatch it replaces did.
-                    dispatch.record_fanout_pending(next_pending, touched_digital_nodes);
-                    dispatch.record_fanout_pending(next_pending, touched_real_nodes);
+                    dispatch.record_fanout_pending(
+                        next_pending,
+                        EventInputKind::Digital,
+                        touched_digital_nodes,
+                    );
+                    dispatch.record_fanout_pending(
+                        next_pending,
+                        EventInputKind::Real,
+                        touched_real_nodes,
+                    );
                 }
             }
 

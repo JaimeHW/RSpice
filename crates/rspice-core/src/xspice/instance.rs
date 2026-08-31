@@ -670,6 +670,19 @@ impl DigitalPortConnection {
     }
 }
 
+/// Which of the two event-value families a port reads from a net.
+///
+/// The settle loop keeps digital and real event values in separate maps and
+/// drains them into separate touched-node lists, so a net number alone does
+/// not identify what changed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EventInputKind {
+    /// Digital state and strength.
+    Digital,
+    /// Real-valued event.
+    Real,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum EventInputSignatureValue {
     Digital(DigitalValue),
@@ -1792,12 +1805,16 @@ impl XspiceInstance {
             })
     }
 
-    /// Visit every circuit net this instance reads event values from.
+    /// Visit every circuit net this instance reads event values from, with the
+    /// kind of value the port reads from it.
     ///
     /// The walk matches the one the settle loop's dispatch filter performs,
-    /// so a net-to-instance index built from this is exactly the inverse of
-    /// that filter.
-    pub(crate) fn for_each_event_input_net(&self, mut visit: impl FnMut(usize)) {
+    /// kind for kind, so a net-to-instance index built from this is exactly
+    /// the inverse of that filter. The kind is carried rather than dropped
+    /// because a digital drain and a real drain report separate touched-node
+    /// lists: collapsing them into one index would wake an instance on a net
+    /// number it reads a different kind of value from.
+    pub(crate) fn for_each_event_input_net(&self, mut visit: impl FnMut(EventInputKind, usize)) {
         for (port, connection) in self.ports.iter().zip(self.connections.iter()) {
             if port.direction != super::PortDirection::In
                 && port.direction != super::PortDirection::InOut
@@ -1805,14 +1822,24 @@ impl XspiceInstance {
                 continue;
             }
             match connection {
-                PortConnection::Digital(node)
-                | PortConnection::DigitalInverted(node)
-                | PortConnection::Real(node) => visit(*node),
-                PortConnection::DigitalVector(nodes) | PortConnection::RealVector(nodes) => {
-                    nodes.iter().copied().for_each(&mut visit);
+                PortConnection::Digital(node) | PortConnection::DigitalInverted(node) => {
+                    visit(EventInputKind::Digital, *node);
+                }
+                PortConnection::Real(node) => visit(EventInputKind::Real, *node),
+                PortConnection::DigitalVector(nodes) => {
+                    nodes
+                        .iter()
+                        .for_each(|node| visit(EventInputKind::Digital, *node));
+                }
+                PortConnection::RealVector(nodes) => {
+                    nodes
+                        .iter()
+                        .for_each(|node| visit(EventInputKind::Real, *node));
                 }
                 PortConnection::DigitalVectorMapped(nodes) => {
-                    nodes.iter().for_each(|connection| visit(connection.node));
+                    nodes
+                        .iter()
+                        .for_each(|connection| visit(EventInputKind::Digital, connection.node));
                 }
                 _ => {}
             }

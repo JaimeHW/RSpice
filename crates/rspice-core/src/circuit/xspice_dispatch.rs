@@ -11,7 +11,10 @@
 //! # What the map holds
 //!
 //! One entry per net that some instance reads events from, listing the
-//! *registration indices* of those instances in ascending order. Registration
+//! *registration indices* of those instances in ascending order — and one such
+//! index per event-value family, because a digital drain and a real drain
+//! report separate touched-node lists and the same net number can appear in
+//! both. Registration
 //! order is the order the settle loop walks, so a dispatch built from this map
 //! visits instances in exactly the order a full pass would; the subset changes,
 //! the sequence does not. That is what keeps a settled fixpoint bit-identical
@@ -31,10 +34,16 @@
 //! *event-input signature* — the value and accepted event time of every
 //! event-driven input port — equals the signature recorded at the previous
 //! evaluation, for models that declare
-//! [`CodeModel::can_skip_unchanged_event_inputs`]. So the question is not "is
-//! this model a pure function of its inputs and state" — the engine has already
-//! taken that position — but "can the caller predict that the signature check
-//! will match, without paying for the check".
+//! [`CodeModel::can_skip_unchanged_event_inputs`] **and only in transient**. So
+//! the question is not "is this model a pure function of its inputs and state"
+//! — the engine has already taken that position — but "can the caller predict
+//! that the signature check will match, without paying for the check".
+//!
+//! The transient qualifier is part of the subset relation, not a detail: in DC
+//! and AC that early return does not exist, the model body runs on every call,
+//! and a flag a transient pass left clear says nothing about whether skipping
+//! is safe. The dispatch is therefore disabled outside transient and the pass
+//! runs whole, which is what it always did.
 //!
 //! It can, because of where the signature's ingredients come from.
 //!
@@ -69,7 +78,18 @@
 //!    empty;
 //! 6. re-entered the event drain, which finds nothing new to apply.
 //!
-//! None of the six is observable, so the fixpoint the loop settles to is
+//! Step 3 also skips the context bookkeeping `evaluate` does before its early
+//! return, and those omissions are inert for the same reason step 1 is. Clearing
+//! the stamp buffer leaves the instance holding its previous stamps, which no
+//! stamping walk can read: every one of them dispatches on connection kind, and
+//! the eligibility rule admits none of the analog forms they match. Refreshing
+//! the port-context bindings only assigns analog, differential, current-probe,
+//! hybrid, and branch-current port nodes, which the same rule excludes. The
+//! stale `time`, `timestep`, `analysis`, and phase are read only by model
+//! bodies, which do not run, and the next real dispatch overwrites them first.
+//! Condition 2 of the eligibility rule is doing that work, not condition 1.
+//!
+//! None of it is observable, so the fixpoint the loop settles to is
 //! unchanged. ∎
 //!
 //! The hypothesis is tracked by one bit per instance,
@@ -92,15 +112,19 @@
 //! analog and hybrid model stay in that set.
 
 use super::{CircuitData, NodeId};
-use crate::xspice::XspiceInstance;
+use crate::xspice::{EventInputKind, XspiceInstance};
 use std::collections::HashMap;
 
 /// Which instances read events from which nets.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct XspiceEventDispatch {
     /// Net to the ascending registration indices of the instances whose input
-    /// ports read it.
-    fanout: HashMap<NodeId, Vec<u32>>,
+    /// ports read a digital value from it.
+    digital_fanout: HashMap<NodeId, Vec<u32>>,
+    /// The same for real-valued event inputs. Kept apart from the digital
+    /// index because the two drains report separate touched-node lists and a
+    /// net number means nothing without its kind.
+    real_fanout: HashMap<NodeId, Vec<u32>>,
     /// Per instance, in registration order: whether it may be skipped while
     /// its input nets are quiet. Every other instance is evaluated on the
     /// opening pass of every settle call, exactly as it was before this map
@@ -111,11 +135,16 @@ pub(crate) struct XspiceEventDispatch {
 impl XspiceEventDispatch {
     /// Build the map for a fixed instance list.
     pub(crate) fn build(instances: &[XspiceInstance]) -> Self {
-        let mut fanout: HashMap<NodeId, Vec<u32>> = HashMap::new();
+        let mut digital_fanout: HashMap<NodeId, Vec<u32>> = HashMap::new();
+        let mut real_fanout: HashMap<NodeId, Vec<u32>> = HashMap::new();
         let mut dirty_dispatched = Vec::with_capacity(instances.len());
         for (index, instance) in instances.iter().enumerate() {
             let index = index as u32;
-            instance.for_each_event_input_net(|node| {
+            instance.for_each_event_input_net(|kind, node| {
+                let fanout = match kind {
+                    EventInputKind::Digital => &mut digital_fanout,
+                    EventInputKind::Real => &mut real_fanout,
+                };
                 let entry = fanout.entry(node).or_default();
                 // Instances are visited in ascending registration order, so
                 // the list stays sorted and a net repeated across an
@@ -127,15 +156,19 @@ impl XspiceEventDispatch {
             dirty_dispatched.push(instance.supports_event_dirty_dispatch());
         }
         Self {
-            fanout,
+            digital_fanout,
+            real_fanout,
             dirty_dispatched,
         }
     }
 
-    /// Registration indices of the instances reading events from `node`.
     #[inline]
-    pub(crate) fn fanout(&self, node: NodeId) -> &[u32] {
-        self.fanout.get(&node).map_or(&[], Vec::as_slice)
+    fn fanout(&self, kind: EventInputKind, node: NodeId) -> &[u32] {
+        let fanout = match kind {
+            EventInputKind::Digital => &self.digital_fanout,
+            EventInputKind::Real => &self.real_fanout,
+        };
+        fanout.get(&node).map_or(&[], Vec::as_slice)
     }
 
     /// Whether the instance at `index` may be skipped while its inputs are
@@ -145,16 +178,22 @@ impl XspiceEventDispatch {
         self.dirty_dispatched.get(index).copied().unwrap_or(false)
     }
 
-    /// Mark every instance reading events from `nodes` as having dirty inputs.
+    /// Mark every instance reading `kind` values from `nodes` as having dirty
+    /// inputs.
     ///
     /// This is the flag that outlives the current settle call: a driver moved
     /// onto the net, so the recorded event-input signature of everything
     /// downstream can no longer be assumed current. It is set even when the
     /// net's resolved value did not change, because the accepted event time is
     /// part of that signature.
-    pub(crate) fn mark_fanout_dirty(&self, instances: &mut [XspiceInstance], nodes: &[NodeId]) {
+    pub(crate) fn mark_fanout_dirty(
+        &self,
+        instances: &mut [XspiceInstance],
+        kind: EventInputKind,
+        nodes: &[NodeId],
+    ) {
         for &node in nodes {
-            for &index in self.fanout(node) {
+            for &index in self.fanout(kind, node) {
                 if let Some(instance) = instances.get_mut(index as usize) {
                     instance.mark_event_inputs_dirty();
                 }
@@ -162,11 +201,16 @@ impl XspiceEventDispatch {
         }
     }
 
-    /// Record every instance reading events from `nodes` as owed an
+    /// Record every instance reading `kind` values from `nodes` as owed an
     /// evaluation in the pass `pending` describes.
-    pub(crate) fn record_fanout_pending(&self, pending: &mut [bool], nodes: &[NodeId]) {
+    pub(crate) fn record_fanout_pending(
+        &self,
+        pending: &mut [bool],
+        kind: EventInputKind,
+        nodes: &[NodeId],
+    ) {
         for &node in nodes {
-            for &index in self.fanout(node) {
+            for &index in self.fanout(kind, node) {
                 if let Some(slot) = pending.get_mut(index as usize) {
                     *slot = true;
                 }
