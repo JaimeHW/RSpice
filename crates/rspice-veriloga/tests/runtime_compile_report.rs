@@ -697,53 +697,43 @@ fn a_source_without_discarded_constructs_carries_no_warnings() {
     assert!(report.diagnostics.is_empty());
 }
 
+/// A region opener now *parses* — see `generate_regions.rs` for what it
+/// elaborates to. What remains a refusal is `endgenerate` with no region open,
+/// which is the one spelling that cannot mean anything.
+///
+/// The span assertion is the load-bearing part and is why this test lives here
+/// rather than with the rest of the generate coverage: the diagnostic has to
+/// point at the keyword the author must remove, not at the module.
 #[test]
-fn generate_regions_are_refused_by_name_with_their_own_code() {
-    for (keyword, source) in [
-        (
-            "genvar",
-            "module tapped(p, n);\n  inout p, n; electrical p, n;\n  genvar k;\n  analog I(p, n) <+ V(p, n);\nendmodule\n",
-        ),
-        (
-            "generate",
-            "module tapped(p, n);\n  inout p, n; electrical p, n;\n  generate\n  endgenerate\n  analog I(p, n) <+ V(p, n);\nendmodule\n",
-        ),
-        (
-            "endgenerate",
-            "module tapped(p, n);\n  inout p, n; electrical p, n;\n  endgenerate\n  analog I(p, n) <+ V(p, n);\nendmodule\n",
-        ),
-    ] {
-        let error = compiler()
-            .compile_runtime(source, Some("tapped"))
-            .expect_err("generate regions have no elaborator");
-        let diagnostics = compile_diagnostics(source, &error);
+fn a_region_terminator_with_no_region_open_is_refused_by_name() {
+    const KEYWORD: &str = "endgenerate";
+    let source = "module tapped(p, n);\n  inout p, n; electrical p, n;\n  endgenerate\n  analog I(p, n) <+ V(p, n);\nendmodule\n";
 
-        assert_eq!(diagnostics.len(), 1);
-        let diagnostic = &diagnostics[0];
-        assert_eq!(diagnostic.severity, CompileDiagnosticSeverity::Error);
-        assert_eq!(diagnostic.phase, CompileDiagnosticPhase::Parser);
-        assert_eq!(diagnostic.code, "VA-PARSE-UNSUPPORTED-GENERATE");
-        assert!(diagnostic.message.contains(keyword));
-        assert!(
-            diagnostic
-                .message
-                .contains("generate regions are not supported")
-        );
-        let span = diagnostic
-            .span
-            .as_ref()
-            .expect("the refusal names the construct's own span");
-        let byte_start = u32::try_from(source.find(keyword).unwrap()).unwrap();
-        assert_eq!(span.byte_start, byte_start);
-        assert_eq!(
-            span.byte_end,
-            byte_start + u32::try_from(keyword.len()).unwrap()
-        );
-        assert_eq!(
-            span.start,
-            Some(CompileSourcePosition { line: 3, column: 3 })
-        );
-    }
+    let error = compiler()
+        .compile_runtime(source, Some("tapped"))
+        .expect_err("a region terminator with nothing to terminate");
+    let diagnostics = compile_diagnostics(source, &error);
+
+    assert_eq!(diagnostics.len(), 1);
+    let diagnostic = &diagnostics[0];
+    assert_eq!(diagnostic.severity, CompileDiagnosticSeverity::Error);
+    assert_eq!(diagnostic.phase, CompileDiagnosticPhase::Parser);
+    assert_eq!(diagnostic.code, "VA-PARSE-UNSUPPORTED-GENERATE");
+    assert!(diagnostic.message.contains(KEYWORD));
+    let span = diagnostic
+        .span
+        .as_ref()
+        .expect("the refusal names the construct's own span");
+    let byte_start = u32::try_from(source.find(KEYWORD).unwrap()).unwrap();
+    assert_eq!(span.byte_start, byte_start);
+    assert_eq!(
+        span.byte_end,
+        byte_start + u32::try_from(KEYWORD.len()).unwrap()
+    );
+    assert_eq!(
+        span.start,
+        Some(CompileSourcePosition { line: 3, column: 3 })
+    );
 }
 
 #[test]

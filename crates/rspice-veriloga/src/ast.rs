@@ -88,6 +88,19 @@ pub struct Module {
     /// Each carries the [`DigitalProcessId`] it was given here, so a later
     /// pass can name a process without depending on its index in this vector.
     pub digital_processes: Vec<DigitalProcess>,
+    /// `genvar` declarations (IEEE 1364-2005 section 12.1.3.2).
+    ///
+    /// Retained after the generate regions are unrolled, because the names are
+    /// what a diagnostic about a misused one has to quote.
+    pub genvars: Vec<GenvarDecl>,
+    /// Generate regions **as written**, before elaboration-time unrolling.
+    ///
+    /// Empty on every module the rest of the compiler ever sees: the parser
+    /// unrolls each region at `endmodule` and appends the result to the item
+    /// lists above, so nothing downstream has a second shape of module item to
+    /// understand. A region that survives here is one that could not be
+    /// unrolled, and the parser has already refused it by then.
+    pub generates: Vec<GenerateConstruct>,
     /// Module attributes
     pub attributes: Vec<Attribute>,
     /// Source span
@@ -124,10 +137,109 @@ impl Module {
             digital_variables: Vec::new(),
             continuous_assigns: Vec::new(),
             digital_processes: Vec::new(),
+            genvars: Vec::new(),
+            generates: Vec::new(),
             attributes: Vec::new(),
             span,
         }
     }
+}
+
+/// `genvar i, j;` — IEEE 1364-2005 section 12.1.3.2.
+#[derive(Debug, Clone)]
+pub struct GenvarDecl {
+    pub names: Vec<SmolStr>,
+    pub span: Span,
+}
+
+/// One construct of a generate region, IEEE 1364-2005 section 12.4.
+#[derive(Debug, Clone)]
+pub enum GenerateConstruct {
+    /// `for (i = 0; i < N; i = i + 1) begin : name ... end` (section 12.4.1).
+    Loop(Box<GenerateLoop>),
+    /// `if (constant) ... else ...` (section 12.4.2).
+    Conditional(Box<GenerateConditional>),
+    /// `case (constant) ... endcase` (section 12.4.2).
+    Case(Box<GenerateCase>),
+    /// A block, or a bare module item, written directly in the region.
+    Block(GenerateBlock),
+}
+
+impl GenerateConstruct {
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Loop(loop_) => loop_.span,
+            Self::Conditional(conditional) => conditional.span,
+            Self::Case(case) => case.span,
+            Self::Block(block) => block.span,
+        }
+    }
+
+    /// The keyword that opened it, for a diagnostic that has to name it.
+    pub const fn keyword(&self) -> &'static str {
+        match self {
+            Self::Loop(_) => "for",
+            Self::Conditional(_) => "if",
+            Self::Case(_) => "case",
+            Self::Block(_) => "begin",
+        }
+    }
+}
+
+/// The body of one generate construct.
+///
+/// The module items are parsed into an ordinary [`Module`] used purely as an
+/// item bucket, so that one production reads every module item form and the
+/// unroller has one shape to copy out of. Nothing about that inner module is a
+/// module: it has no name of its own, no ports, and never reaches semantic
+/// analysis.
+#[derive(Debug, Clone)]
+pub struct GenerateBlock {
+    /// `begin : name`. Section 12.4.1 requires one on a generate loop, because
+    /// the loop's instances are named by the block and the index.
+    pub name: Option<SmolStr>,
+    pub items: Box<Module>,
+    /// Generate constructs written inside this block, in declaration order.
+    pub nested: Vec<GenerateConstruct>,
+    pub span: Span,
+}
+
+/// `for (genvar = init; condition; genvar = update) body`
+#[derive(Debug, Clone)]
+pub struct GenerateLoop {
+    pub genvar: SmolStr,
+    pub init: Expression,
+    pub condition: Expression,
+    /// The genvar's next value, as the header's assignment writes it.
+    pub update: Expression,
+    pub body: GenerateBlock,
+    pub span: Span,
+}
+
+/// `if (condition) then_block [else else_block]`
+#[derive(Debug, Clone)]
+pub struct GenerateConditional {
+    pub condition: Expression,
+    pub then_block: GenerateBlock,
+    pub else_block: Option<GenerateBlock>,
+    pub span: Span,
+}
+
+/// `case (selector) labels: block ... [default: block] endcase`
+#[derive(Debug, Clone)]
+pub struct GenerateCase {
+    pub selector: Expression,
+    pub items: Vec<GenerateCaseItem>,
+    pub default: Option<GenerateBlock>,
+    pub span: Span,
+}
+
+/// One arm of a generate case.
+#[derive(Debug, Clone)]
+pub struct GenerateCaseItem {
+    pub labels: Vec<Expression>,
+    pub block: GenerateBlock,
+    pub span: Span,
 }
 
 /// Port in module port list

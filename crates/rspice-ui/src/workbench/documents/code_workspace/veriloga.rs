@@ -2236,25 +2236,25 @@ endmodule
 
     #[test]
     fn an_unsupported_generate_region_reaches_the_editor_with_its_compiler_code() {
+        // `generate` and `genvar` are elaborated (IEEE 1364-2005 section 12.4),
+        // so what still carries this code is an `endgenerate` with no region
+        // open. What the test is about is unchanged: a parse refusal reaches
+        // the editor with its compiler code, severity, and line.
         let app = legacy_source_with(
             "legacy",
-            "module legacy(p, n);\n  inout p, n; electrical p, n;\n  genvar k;\n  analog I(p, n) <+ V(p, n);\nendmodule\n",
+            "module legacy(p, n);\n  inout p, n; electrical p, n;\n  endgenerate\n  analog I(p, n) <+ V(p, n);\nendmodule\n",
         );
 
         let selected = selected_veriloga_source(&app).unwrap();
         let VerilogACompileOutcome::Failure(diagnostics) = compile_selected_source(&selected)
         else {
-            panic!("generate regions have no elaborator")
+            panic!("a region terminator with nothing to terminate")
         };
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].code(), "VA-PARSE-UNSUPPORTED-GENERATE");
         assert_eq!(diagnostics[0].severity, CodeEditorSeverity::Error);
-        assert!(
-            diagnostics[0]
-                .message
-                .contains("generate regions are not supported")
-        );
+        assert!(diagnostics[0].message.contains("no open generate region"));
         assert_eq!(diagnostics[0].line, Some(3));
     }
 

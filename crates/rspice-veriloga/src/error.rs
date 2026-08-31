@@ -199,13 +199,13 @@ pub enum ParseErrorKind {
     #[error("Unsupported {context}: {found}")]
     UnsupportedConstruct { context: String, found: String },
 
-    /// A `generate` region, its `endgenerate` terminator, or a `genvar`
-    /// declaration. The keywords lex, but this compiler has no generate
-    /// elaborator, so the construct is refused by name instead of failing
-    /// later as an unrecognized module item.
-    #[error(
-        "Unsupported construct '{keyword}': generate regions are not supported by the RSpice Verilog-A compiler"
-    )]
+    /// An `endgenerate` with no region open.
+    ///
+    /// `generate` and `genvar` have productions of their own — a region is read
+    /// and unrolled at `endmodule`, per IEEE 1364-2005 section 12.4 — so what
+    /// is left here is a terminator with nothing to terminate, which is refused
+    /// by name rather than reported as an unrecognized module item.
+    #[error("Unsupported construct '{keyword}': there is no open generate region for it to close")]
     UnsupportedGenerate { keyword: String },
 
     /// A reserved IEEE 1364 / Verilog-AMS *digital* keyword, refused at the

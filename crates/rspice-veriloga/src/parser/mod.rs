@@ -11,6 +11,7 @@ use crate::source::Span;
 use smol_str::SmolStr;
 
 mod digital;
+mod generate;
 
 /// Declared attributes carried forward to the bare names that follow a typed
 /// port in an ANSI port list.
@@ -138,6 +139,13 @@ impl<'a> Parser<'a> {
 
         self.expect(TokenKind::Endmodule)?;
         module.span = start.extend(self.previous_span());
+
+        // IEEE 1364-2005 section 12.4 elaborates a generate region into module
+        // items, once, from constants. Doing it here means every later pass
+        // reads the module the author would have had to write by hand, and
+        // needs no arm for a construct that contributes no run-time behaviour
+        // of its own.
+        generate::expand(&mut module, &mut self.next_process_id)?;
         Ok(module)
     }
 
@@ -416,10 +424,20 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
-            // Generate regions lex, so they must be refused by name. Falling
-            // through to the unrecognized-module-item error would blame the
-            // keyword without saying that the construct itself is the gap.
-            TokenKind::Genvar | TokenKind::Generate | TokenKind::Endgenerate => {
+            // IEEE 1364-2005 section 12.4. The region is read here and unrolled
+            // at `endmodule`, so no later pass sees one.
+            TokenKind::Genvar => {
+                let declaration = self.parse_genvar_decl()?;
+                module.genvars.push(declaration);
+            }
+            TokenKind::Generate => {
+                let constructs = self.parse_generate_region()?;
+                module.generates.extend(constructs);
+            }
+            // An `endgenerate` with no region open. Refused by name rather than
+            // as an unrecognized module item, which would blame the keyword
+            // without saying what is missing.
+            TokenKind::Endgenerate => {
                 return Err(self.unsupported_generate());
             }
             // The digital half of Verilog-AMS. `analog initial` and
