@@ -562,7 +562,8 @@ type Expected = &'static [&'static str];
 ///   those halves exchanged, and `bit0` is `d[0]`. Worked out from the
 ///   assignment targets: the two part selects write `swapped` from the
 ///   opposite half of `d` each, and the concatenation target splits `d` most
-///   significant part first.
+///   significant part first. `tagged` is `{d[6:0], 1'b1}`, which is `d`'s low
+///   seven bits moved up one place with a one underneath them.
 ///
 /// * **gate_forms** — the four truth tables over all sixteen input
 ///   combinations: `wide` is `a & b & c & d`, `pair0` is `~(a & b)`, `pair1`
@@ -764,12 +765,12 @@ const EXPECTED: [(&str, Expected); 13] = [
     (
         "lvalue_forms",
         &[
-            "swapped=00000000 hi=0000 lo=0000 bit0=0",
-            "swapped=01011010 hi=1010 lo=0101 bit0=1",
-            "swapped=00001111 hi=1111 lo=0000 bit0=0",
-            "swapped=00000000 hi=0000 lo=0000 bit0=0",
-            "swapped=01110001 hi=0001 lo=0111 bit0=1",
-            "swapped=10111100 hi=1100 lo=1011 bit0=1",
+            "swapped=00000000 hi=0000 lo=0000 bit0=0 tagged=00000000",
+            "swapped=01011010 hi=1010 lo=0101 bit0=1 tagged=01001011",
+            "swapped=00001111 hi=1111 lo=0000 bit0=0 tagged=11100001",
+            "swapped=00000000 hi=0000 lo=0000 bit0=0 tagged=00000000",
+            "swapped=01110001 hi=0001 lo=0111 bit0=1 tagged=00101111",
+            "swapped=10111100 hi=1100 lo=1011 bit0=1 tagged=10010111",
         ],
     ),
     (
