@@ -1408,8 +1408,7 @@ fn a_module_may_not_drive_its_own_input_port() {
 /// writes that overwrite each other.
 #[test]
 fn a_bit_select_port_connection_becomes_a_driver_on_that_bit() {
-    let source = format!(
-        "module inv(y, a);\n\
+    let source = "module inv(y, a);\n\
          \x20   output y;\n     input a;\n     wire y, a;\n\
          \x20   assign y = ~a;\n\
          endmodule\n\
@@ -1421,9 +1420,8 @@ fn a_bit_select_port_connection_becomes_a_driver_on_that_bit() {
          \x20   inv u1 (out[1], bus[1]);\n\
          \x20   inv u2 (out[2], bus[2]);\n\
          \x20   inv u3 (out[3], bus[3]);\n\
-         endmodule\n"
-    );
-    let plan = plan(&source, "top");
+         endmodule\n";
+    let plan = plan(source, "top");
 
     // The ports kept their own signals rather than collapsing onto `out`/`bus`.
     let names: Vec<&str> = plan
