@@ -848,12 +848,8 @@ pub fn validate_generated_veriloga_compatibility_catalog() -> Result<(), String>
                 "generated compatibility v27 alias {index} has {matching_targets} target entries"
             ));
         }
-        for (other_model, other_identity) in
-            &GENERATED_VERILOGA_V27_COMBINED_IDENTITY_ALIASES[index + 1..]
-        {
-            if public_model_name == other_model
-                || (public_model_name == other_model && combined_identity == other_identity)
-            {
+        for (other_model, _) in &GENERATED_VERILOGA_V27_COMBINED_IDENTITY_ALIASES[index + 1..] {
+            if public_model_name == other_model {
                 return Err("generated compatibility v27 alias table has a duplicate model".into());
             }
         }
