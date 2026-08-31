@@ -1352,6 +1352,7 @@ pub(super) fn parse_pspice_u_device(
             line_num,
             elements,
         ),
+        "STIM" => parse_pspice_u_stim(&name, &fields, line_num, elements, params),
         "SRFF" => parse_pspice_u_srlatch(
             &name,
             &fields,
@@ -1390,7 +1391,7 @@ pub(super) fn parse_pspice_u_device(
         _ => Err(ParseError::Syntax {
             line: line_num,
             message: format!(
-                "Unsupported PSpice U-device type '{}'; supported frontend lowerings are simple gates, CONSTRAINT, DFF, DLTCH, DLYLINE, JKFF, TFF, LOGICEXP, PINDLY, PULLUP, PULLDN, SRFF, BUFA, INVA, ANDA, NANDA, ORA, NORA, XORA, NXORA, BUF3, INV3, AND3, NAND3, OR3, NOR3, XOR3, NXOR3, BUF3A, INV3A, AND3A, NAND3A, OR3A, NOR3A, XOR3A, NXOR3A, AO, AOI, OA, and OAI",
+                "Unsupported PSpice U-device type '{}'; supported frontend lowerings are simple gates, CONSTRAINT, DFF, DLTCH, DLYLINE, JKFF, TFF, LOGICEXP, PINDLY, PULLUP, PULLDN, SRFF, STIM, BUFA, INVA, ANDA, NANDA, ORA, NORA, XORA, NXORA, BUF3, INV3, AND3, NAND3, OR3, NOR3, XOR3, NXOR3, BUF3A, INV3A, AND3A, NAND3A, OR3A, NOR3A, XOR3A, NXOR3A, AO, AOI, OA, and OAI",
                 fields[1]
             ),
         }),
@@ -3956,7 +3957,7 @@ fn pspice_u_count_triple(raw: &str) -> Option<(usize, usize, usize)> {
     Some((first, second, third))
 }
 
-fn normalize_pspice_u_node(raw: &str) -> String {
+pub(super) fn normalize_pspice_u_node(raw: &str) -> String {
     raw.trim().to_ascii_uppercase()
 }
 
@@ -3982,7 +3983,7 @@ fn pspice_u_timing_from_token(
     })
 }
 
-fn pspice_u_is_no_connect(raw: &str) -> bool {
+pub(super) fn pspice_u_is_no_connect(raw: &str) -> bool {
     let normalized = raw.trim().to_ascii_uppercase();
     matches!(normalized.as_str(), "$D_NC" | "NULL")
 }
