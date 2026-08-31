@@ -431,6 +431,71 @@ pub enum CfgValueKind {
 }
 
 impl CfgValueKind {
+    /// Whether this kind belongs to the discrete-domain half of the language.
+    ///
+    /// Deliberately an exhaustive match with no catch-all, and the only one
+    /// over this enum that exists purely to be exhaustive. Every other place a
+    /// new kind has to be considered — `operands`, `leaf_class`,
+    /// `static_dependencies`, the emitter's inlining predicates — has a
+    /// catch-all that will absorb it in silence. This one will not compile
+    /// until somebody says which half of the language the new kind is in, and
+    /// the answer is what the scheduling, derivative, and emitter refusals are
+    /// all keyed on.
+    pub fn is_digital(&self) -> bool {
+        match self {
+            Self::RealConstant(_)
+            | Self::BooleanConstant(_)
+            | Self::BlockParameter
+            | Self::Parameter(_)
+            | Self::ParameterGiven(_)
+            | Self::EventState(_)
+            | Self::Temperature
+            | Self::ThermalVoltage
+            | Self::Multiplicity
+            | Self::Time
+            | Self::Analysis(_)
+            | Self::SimParam { .. }
+            | Self::NodePotential(_)
+            | Self::BranchFlow(_)
+            | Self::BranchUnknownFlow(_)
+            | Self::Ddt { .. }
+            | Self::DdtScale
+            | Self::Idt { .. }
+            | Self::IdtScale
+            | Self::Cross { .. }
+            | Self::Above { .. }
+            | Self::Timer { .. }
+            | Self::Limit { .. }
+            | Self::Ddx { .. }
+            | Self::LimitPrevious { .. }
+            | Self::Unary { .. }
+            | Self::Binary { .. }
+            | Self::LaneSplat(_)
+            | Self::LaneWiden { .. }
+            | Self::LaneBinary { .. }
+            | Self::LaneScalar { .. }
+            | Self::LaneExtract { .. }
+            | Self::Staged { .. } => false,
+
+            Self::FourStateConstant(_)
+            | Self::IntegerConstant(_)
+            | Self::DigitalSignalRead { .. }
+            | Self::DigitalBitwise { .. }
+            | Self::DigitalBitwiseNot { .. }
+            | Self::DigitalLogical { .. }
+            | Self::DigitalLogicalNot { .. }
+            | Self::DigitalEquality { .. }
+            | Self::DigitalRelational { .. }
+            | Self::DigitalArithmetic { .. }
+            | Self::DigitalShift { .. }
+            | Self::DigitalPartSelect { .. }
+            | Self::DigitalConcat { .. }
+            | Self::DigitalSelect { .. }
+            | Self::DigitalBlockingWrite { .. }
+            | Self::DigitalNonblockingWrite { .. } => true,
+        }
+    }
+
     /// Values this one reads.
     ///
     /// Every pass that rewrites or walks the graph needs this, and having one
@@ -631,7 +696,9 @@ pub enum CfgValueType {
     /// the target's width, and arithmetic that overflows the operand width
     /// wraps within it. A four-state value whose width is not known statically
     /// is not something this IR can represent, which is deliberate.
-    FourState { width: u32 },
+    FourState {
+        width: u32,
+    },
     /// Carries ordering, not data.
     ///
     /// The type of a signal write. A write has to sit in the instruction
@@ -647,11 +714,9 @@ impl CfgValueType {
     pub fn shape(self) -> Option<ShapeId> {
         match self {
             Self::Lanes(shape) => Some(shape),
-            Self::Real
-            | Self::Boolean
-            | Self::Integer
-            | Self::FourState { .. }
-            | Self::Effect => None,
+            Self::Real | Self::Boolean | Self::Integer | Self::FourState { .. } | Self::Effect => {
+                None
+            }
         }
     }
 

@@ -574,7 +574,9 @@ impl Emitter<'_> {
                 }
                 // Reaching a function exit before the proposed join changes
                 // control behavior and is never an empty region.
-                CfgTerminator::Return | CfgTerminator::Wait { .. } | CfgTerminator::Unset => return true,
+                CfgTerminator::Return | CfgTerminator::Wait { .. } | CfgTerminator::Unset => {
+                    return true;
+                }
             }
         }
         false
@@ -841,7 +843,9 @@ impl Emitter<'_> {
 
             self.instructions(current, depth)?;
             match &self.function.block(current).terminator {
-                CfgTerminator::Return | CfgTerminator::Wait { .. } | CfgTerminator::Unset => return Ok(()),
+                CfgTerminator::Return | CfgTerminator::Wait { .. } | CfgTerminator::Unset => {
+                    return Ok(());
+                }
                 CfgTerminator::Jump { target, args } => {
                     let (target, args) = (*target, args.clone());
                     if self.loop_headers.contains(&target) {

@@ -506,7 +506,11 @@ fn kernel_region_metrics(
                 write!(out, "digital-blocking-write:{target:?}")
             }
             CfgValueKind::DigitalNonblockingWrite { target, region, .. } => {
-                write!(out, "digital-nonblocking-write:{target:?}:{}", region.name())
+                write!(
+                    out,
+                    "digital-nonblocking-write:{target:?}:{}",
+                    region.name()
+                )
             }
         }
         .expect("write value signature");
@@ -593,13 +597,8 @@ fn kernel_region_metrics(
                 resume,
                 resume_args,
             } => {
-                write!(
-                    signature,
-                    "wait:{:?}:{}(",
-                    wait,
-                    target_signature(*resume)
-                )
-                .expect("write wait signature");
+                write!(signature, "wait:{:?}:{}(", wait, target_signature(*resume))
+                    .expect("write wait signature");
                 for argument in resume_args {
                     write!(signature, "{},", operand_signature(block_index, *argument))
                         .expect("write wait argument signature");

@@ -793,21 +793,45 @@ mod tests {
         assert_eq!(truth(&parse("1x")), FourStateBit::One);
         assert_eq!(logical_not(&parse("00x0")).spelling(), "x");
         assert_eq!(logical_not(&parse("0000")).spelling(), "1");
-        assert_eq!(logical(LogicalOp::And, &parse("1x"), &parse("00")).spelling(), "0");
-        assert_eq!(logical(LogicalOp::Or, &parse("0x"), &parse("00")).spelling(), "x");
+        assert_eq!(
+            logical(LogicalOp::And, &parse("1x"), &parse("00")).spelling(),
+            "0"
+        );
+        assert_eq!(
+            logical(LogicalOp::Or, &parse("0x"), &parse("00")).spelling(),
+            "x"
+        );
     }
 
     /// IEEE 1364-2005 section 4.1.7: `==` is unknown if either side has an
     /// unknown bit, even when the two-state bits already disagree.
     #[test]
     fn equality_is_poisoned_by_unknown_bits() {
-        assert_eq!(equality(&parse("1010"), &parse("1010"), false).spelling(), "1");
-        assert_eq!(equality(&parse("1010"), &parse("1011"), false).spelling(), "0");
-        assert_eq!(equality(&parse("1010"), &parse("101x"), false).spelling(), "x");
-        assert_eq!(equality(&parse("101z"), &parse("1010"), false).spelling(), "x");
+        assert_eq!(
+            equality(&parse("1010"), &parse("1010"), false).spelling(),
+            "1"
+        );
+        assert_eq!(
+            equality(&parse("1010"), &parse("1011"), false).spelling(),
+            "0"
+        );
+        assert_eq!(
+            equality(&parse("1010"), &parse("101x"), false).spelling(),
+            "x"
+        );
+        assert_eq!(
+            equality(&parse("101z"), &parse("1010"), false).spelling(),
+            "x"
+        );
         // Inequality is poisoned identically, not the complement of `x`.
-        assert_eq!(equality(&parse("1010"), &parse("1011"), true).spelling(), "1");
-        assert_eq!(equality(&parse("1010"), &parse("101x"), true).spelling(), "x");
+        assert_eq!(
+            equality(&parse("1010"), &parse("1011"), true).spelling(),
+            "1"
+        );
+        assert_eq!(
+            equality(&parse("1010"), &parse("101x"), true).spelling(),
+            "x"
+        );
     }
 
     #[test]
@@ -857,14 +881,29 @@ mod tests {
     /// unknown *count* poisons everything.
     #[test]
     fn shifts_zero_fill_and_keep_their_width() {
-        assert_eq!(shift(ShiftOp::Left, &parse("0011"), &parse("01")).spelling(), "0110");
-        assert_eq!(shift(ShiftOp::Right, &parse("0011"), &parse("01")).spelling(), "0001");
+        assert_eq!(
+            shift(ShiftOp::Left, &parse("0011"), &parse("01")).spelling(),
+            "0110"
+        );
+        assert_eq!(
+            shift(ShiftOp::Right, &parse("0011"), &parse("01")).spelling(),
+            "0001"
+        );
         // An `x` in the shifted value simply moves.
-        assert_eq!(shift(ShiftOp::Left, &parse("001x"), &parse("01")).spelling(), "01x0");
+        assert_eq!(
+            shift(ShiftOp::Left, &parse("001x"), &parse("01")).spelling(),
+            "01x0"
+        );
         // An `x` in the count does not.
-        assert_eq!(shift(ShiftOp::Left, &parse("0011"), &parse("x1")).spelling(), "xxxx");
+        assert_eq!(
+            shift(ShiftOp::Left, &parse("0011"), &parse("x1")).spelling(),
+            "xxxx"
+        );
         // Shifting past the width empties the value.
-        assert_eq!(shift(ShiftOp::Left, &parse("0011"), &parse("1000")).spelling(), "0000");
+        assert_eq!(
+            shift(ShiftOp::Left, &parse("0011"), &parse("1000")).spelling(),
+            "0000"
+        );
     }
 
     #[test]
@@ -880,10 +919,7 @@ mod tests {
 
     #[test]
     fn concatenation_puts_the_first_operand_highest() {
-        assert_eq!(
-            concat(&[parse("10"), parse("xz")]).spelling(),
-            "10xz"
-        );
+        assert_eq!(concat(&[parse("10"), parse("xz")]).spelling(), "10xz");
         assert_eq!(concat(&[parse("1")]).spelling(), "1");
     }
 
@@ -893,7 +929,10 @@ mod tests {
     fn resizing_zero_fills_rather_than_extending_unknown() {
         assert_eq!(parse("x1").resized(4).spelling(), "00x1");
         assert_eq!(parse("1010").resized(2).spelling(), "10");
-        assert_eq!(FourStateValue::splat(3, FourStateBit::Unknown).spelling(), "xxx");
+        assert_eq!(
+            FourStateValue::splat(3, FourStateBit::Unknown).spelling(),
+            "xxx"
+        );
     }
 
     #[test]

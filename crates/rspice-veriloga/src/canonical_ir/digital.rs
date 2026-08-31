@@ -256,8 +256,6 @@ impl CanonicalDigitalPlan {
     }
 
     pub fn process(&self, id: DigitalProcessId) -> Option<&CfgDigitalProcess> {
-        self.processes
-            .iter()
-            .find(|process| process.id == id)
+        self.processes.iter().find(|process| process.id == id)
     }
 }

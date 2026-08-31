@@ -1206,10 +1206,12 @@ fn build_stage(
                     }
                 }
             }
-            CfgTerminator::Return | CfgTerminator::Wait { .. } | CfgTerminator::Unset => CfgTerminator::Jump {
-                target: exit,
-                args: Vec::new(),
-            },
+            CfgTerminator::Return | CfgTerminator::Wait { .. } | CfgTerminator::Unset => {
+                CfgTerminator::Jump {
+                    target: exit,
+                    args: Vec::new(),
+                }
+            }
         };
 
         blocks[usize::from(id)] = CfgBlock {
@@ -2191,5 +2193,147 @@ mod tests {
              out of the guard that protects it"
         );
         assert_eq!(schedule.class(outputs[1]), InvalidationClass::Newton);
+    }
+}
+
+/// The leaf-class audit for discrete-domain kinds.
+///
+/// [`leaf_class`] ends in a catch-all answering [`InvalidationClass::Model`] —
+/// the coarsest class, computed once per model card and cached for the life of
+/// it. A kind that reaches that arm by accident is not a compile error and not
+/// a test failure anywhere else; it is a value that silently stops being
+/// recomputed. These tests exist because that failure has no other symptom.
+#[cfg(test)]
+mod digital_leaf_class {
+    use super::*;
+    use crate::canonical_ir::digital::{
+        DigitalSchedulingRegion, DigitalWriteSelect, DigitalWriteTarget,
+    };
+    use crate::canonical_ir::digital_value::{
+        ArithmeticOp, BitwiseOp, FourStateValue, LogicalOp, RelationalOp, ShiftOp,
+    };
+    use crate::canonical_ir::{DigitalSignalId, ValueId};
+
+    /// One of every discrete-domain kind.
+    ///
+    /// Hand-built, because Rust cannot enumerate a variant list. What keeps it
+    /// honest is [`CfgValueKind::is_digital`], whose match is exhaustive: a new
+    /// variant does not compile until it is classified there, and
+    /// `every_sample_is_digital` ties this list back to that classification.
+    fn samples() -> Vec<CfgValueKind> {
+        let value = ValueId::from(0usize);
+        let target = DigitalWriteTarget {
+            signal: DigitalSignalId::from(0usize),
+            select: DigitalWriteSelect::Whole,
+        };
+        vec![
+            CfgValueKind::FourStateConstant(FourStateValue::zero(4)),
+            CfgValueKind::IntegerConstant(7),
+            CfgValueKind::DigitalSignalRead {
+                signal: DigitalSignalId::from(0usize),
+            },
+            CfgValueKind::DigitalBitwise {
+                op: BitwiseOp::And,
+                left: value,
+                right: value,
+            },
+            CfgValueKind::DigitalBitwiseNot { input: value },
+            CfgValueKind::DigitalLogical {
+                op: LogicalOp::Or,
+                left: value,
+                right: value,
+            },
+            CfgValueKind::DigitalLogicalNot { input: value },
+            CfgValueKind::DigitalEquality {
+                left: value,
+                right: value,
+                negate: false,
+            },
+            CfgValueKind::DigitalRelational {
+                op: RelationalOp::Lt,
+                left: value,
+                right: value,
+            },
+            CfgValueKind::DigitalArithmetic {
+                op: ArithmeticOp::Add,
+                left: value,
+                right: value,
+            },
+            CfgValueKind::DigitalShift {
+                op: ShiftOp::Left,
+                value,
+                count: value,
+            },
+            CfgValueKind::DigitalPartSelect {
+                input: value,
+                msb: 3,
+                lsb: 0,
+            },
+            CfgValueKind::DigitalConcat {
+                parts: vec![value, value],
+            },
+            CfgValueKind::DigitalSelect {
+                condition: value,
+                then_value: value,
+                else_value: value,
+            },
+            CfgValueKind::DigitalBlockingWrite {
+                target: target.clone(),
+                value,
+            },
+            CfgValueKind::DigitalNonblockingWrite {
+                target,
+                value,
+                region: DigitalSchedulingRegion::NonBlockingAssign,
+            },
+        ]
+    }
+
+    /// Not one of them may reach the catch-all.
+    #[test]
+    fn no_digital_kind_falls_through_to_model_scope() {
+        for kind in samples() {
+            assert_eq!(
+                leaf_class(&kind, &[]),
+                InvalidationClass::Newton,
+                "{kind:?} is unclassified; the catch-all would cache it at model \
+                 scope, where it would be computed once and never again"
+            );
+        }
+    }
+
+    /// Ties the sample list to the exhaustive classification, so a sample that
+    /// stops being digital — or an analog kind copied in by mistake — fails
+    /// here rather than quietly weakening the test above.
+    #[test]
+    fn every_sample_is_digital() {
+        for kind in samples() {
+            assert!(kind.is_digital(), "{kind:?}");
+        }
+    }
+
+    /// The analog classifications that carry weight are unchanged. A digital
+    /// arm inserted at the wrong point in the match would show up here.
+    #[test]
+    fn analog_classification_is_unchanged() {
+        let node = CfgValueKind::NodePotential(crate::canonical_ir::NodeId::from(0usize));
+        assert_eq!(leaf_class(&node, &[]), InvalidationClass::Newton);
+        assert_eq!(
+            leaf_class(&CfgValueKind::Temperature, &[]),
+            InvalidationClass::Temperature
+        );
+        assert_eq!(
+            leaf_class(&CfgValueKind::Time, &[]),
+            InvalidationClass::Timestep
+        );
+        assert_eq!(
+            leaf_class(&CfgValueKind::Multiplicity, &[]),
+            InvalidationClass::Instance
+        );
+        assert_eq!(
+            leaf_class(&CfgValueKind::RealConstant(1.0), &[]),
+            InvalidationClass::Model
+        );
+        assert!(!node.is_digital());
     }
 }

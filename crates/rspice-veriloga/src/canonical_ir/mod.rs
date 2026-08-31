@@ -50,18 +50,18 @@ pub use cfg_opt::optimize as optimize_cfg;
 pub use diagnostic::{
     CompilerPhase, DiagnosticSeverity, IrDiagnostic, IrValidationResult, SourceSpanRef,
 };
-pub use hir::{
-    CanonicalValueType, HirAnalogOperator, HirArray, HirAssignment, HirBranch, HirContribution,
-    HirContributionKind, HirCrossDirection, HirExprKind, HirExprRef, HirExpression,
-    HirInternalNode, HirLaplaceKind, HirLimiterArgument, HirLoop, HirModel, HirParamRange,
-    HirParameter, HirParameterDimension, HirPort, HirStatement, HirVariable, HirZiKind,
-};
 pub use digital::{
     CanonicalDigitalPlan, CfgDigitalProcess, DigitalEdge, DigitalProcessKind,
     DigitalSchedulingRegion, DigitalSensitivityOrigin, DigitalSensitivityTerm, DigitalSignal,
     DigitalStaticSensitivity, DigitalWriteSelect, DigitalWriteTarget,
 };
 pub use digital_value::FourStateValue;
+pub use hir::{
+    CanonicalValueType, HirAnalogOperator, HirArray, HirAssignment, HirBranch, HirContribution,
+    HirContributionKind, HirCrossDirection, HirExprKind, HirExprRef, HirExpression,
+    HirInternalNode, HirLaplaceKind, HirLimiterArgument, HirLoop, HirModel, HirParamRange,
+    HirParameter, HirParameterDimension, HirPort, HirStatement, HirVariable, HirZiKind,
+};
 pub use ids::{
     ArrayId, BlockId, BranchId, BranchUnknownId, ContributionId, DigitalProcessId, DigitalSignalId,
     DisciplineId, EquationId, ExprId, ModuleId, NodeId, NoiseSourceId, ParamId, PortId, RegionId,

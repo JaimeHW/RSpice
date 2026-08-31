@@ -51,12 +51,12 @@ use super::digital_value::{
     ArithmeticOp, BitwiseOp, FourStateValue, LogicalOp, RelationalOp, ShiftOp,
 };
 use super::ids::{BlockId, DigitalProcessId, DigitalSignalId, ValueId};
+use crate::ast::DigitalProcessKind as AstKind;
 use crate::ast::{
     ArrayLiteralElement, BinaryOp, DigitalAssign, DigitalCase, DigitalLValue, DigitalStatement,
     EdgeKind, Expression, TimingControl, UnaryOp,
 };
 use crate::four_state::FourStateBit;
-use crate::ast::DigitalProcessKind as AstKind;
 use crate::semantic::{AnalyzedDigital, AnalyzedDigitalProcess, AnalyzedDigitalSignal};
 use crate::source::Span;
 use std::collections::{BTreeSet, HashMap};
@@ -481,16 +481,13 @@ impl ProcessLowerer<'_> {
     /// A concatenation target becomes one write per element, over slices of
     /// the right-hand side taken from the most significant end down, which is
     /// what `{carry, sum} = ...` means.
-    fn write(
-        &mut self,
-        block: BlockId,
-        target: &DigitalLValue,
-        value: ValueId,
-        nonblocking: bool,
-    ) {
+    fn write(&mut self, block: BlockId, target: &DigitalLValue, value: ValueId, nonblocking: bool) {
         match target {
             DigitalLValue::Concat { elements, .. } => {
-                let widths: Vec<u32> = elements.iter().map(|part| self.lvalue_width(part)).collect();
+                let widths: Vec<u32> = elements
+                    .iter()
+                    .map(|part| self.lvalue_width(part))
+                    .collect();
                 let mut offset: u32 = widths.iter().sum();
                 for (element, width) in elements.iter().zip(widths) {
                     offset -= width;
@@ -820,7 +817,8 @@ impl ProcessLowerer<'_> {
                 // IEEE 1364-2005 section 4.1.14 requires a constant
                 // replication count, so the repetition is expanded here and
                 // the IR needs no replication node.
-                let Some(count) = constant_of(&replication.count).filter(|count| *count >= 0) else {
+                let Some(count) = constant_of(&replication.count).filter(|count| *count >= 0)
+                else {
                     self.error(
                         "a replication count must be a non-negative constant",
                         replication.span,
@@ -1085,7 +1083,10 @@ fn collect_reads(statement: &DigitalStatement, reads: &mut BTreeSet<String>) {
         }
         DigitalStatement::For(statement) => {
             collect_expression_reads(&statement.condition, reads);
-            collect_reads(&DigitalStatement::BlockingAssign((*statement.init).clone()), reads);
+            collect_reads(
+                &DigitalStatement::BlockingAssign((*statement.init).clone()),
+                reads,
+            );
             collect_reads(
                 &DigitalStatement::BlockingAssign((*statement.update).clone()),
                 reads,
