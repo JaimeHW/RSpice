@@ -9,7 +9,8 @@
 //! so the GPL-3 corpus never reaches a product binary.
 
 use rspice_conformance::suites::xyce::{
-    XyceDeck, XyceDeckSection, XyceRunnerConfig, XyceTestResult, XyceTestRunner, XyceValueMismatch,
+    XyceDeck, XyceDeckSection, XyceRunnerConfig, XyceTestResult, XyceTestRunner,
+    XyceTransientGridAlignment, XyceValueMismatch,
 };
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
@@ -181,6 +182,7 @@ fn xyce_watchdog_error_result(
         mismatches: Vec::new(),
         duration_ms,
         contract: contract.to_string(),
+        transient_grid_alignment: None,
     }
 }
 
@@ -340,6 +342,13 @@ fn decode_xyce_test_result(encoded: &str) -> Result<XyceTestResult, String> {
         value if value.is_empty() => None,
         value => Some(value),
     };
+    let transient_grid_alignment =
+        match take_xyce_result_field(&mut fields, "transient_grid_alignment")? {
+            value if value.is_empty() => None,
+            value => Some(XyceTransientGridAlignment::parse(&value).ok_or_else(|| {
+                format!("Invalid result field transient_grid_alignment={value:?}")
+            })?),
+        };
     let mismatch_count = parse_xyce_result_field::<usize>(&mut fields, "mismatch_count")?;
     let mut mismatches = Vec::with_capacity(mismatch_count);
     for index in 0..mismatch_count {
@@ -358,6 +367,7 @@ fn decode_xyce_test_result(encoded: &str) -> Result<XyceTestResult, String> {
         mismatches,
         duration_ms,
         contract,
+        transient_grid_alignment,
     })
 }
 
@@ -604,6 +614,7 @@ fn test_xyce_classification_report_is_deterministic_and_fail_closed() {
                     "upstream_excluded"
                 }
                 .to_string(),
+                transient_grid_alignment: None,
             }
         })
         .collect::<Vec<_>>();

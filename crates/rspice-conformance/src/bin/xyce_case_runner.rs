@@ -24,7 +24,9 @@
 //! `--test-dir`, `--circuit`, and `--result` are required; the rest default
 //! to [`XyceRunnerConfig::default`].
 
-use rspice_conformance::suites::xyce::{XyceRunnerConfig, XyceTestResult, XyceTestRunner};
+use rspice_conformance::suites::xyce::{
+    XyceRunnerConfig, XyceTestResult, XyceTestRunner, XyceTransientGridAlignment,
+};
 use std::path::PathBuf;
 
 fn main() {
@@ -71,6 +73,14 @@ fn encode_xyce_test_result(result: &XyceTestResult) -> String {
             .unwrap_or_default(),
     );
     push_field(&mut output, "duration_ms", result.duration_ms);
+    push_field(
+        &mut output,
+        "transient_grid_alignment",
+        result
+            .transient_grid_alignment
+            .map(XyceTransientGridAlignment::as_str)
+            .unwrap_or_default(),
+    );
     push_field(
         &mut output,
         "error",

@@ -25,6 +25,7 @@ impl XyceTestRunner {
             mismatches: Vec::new(),
             duration_ms: start.elapsed().as_millis(),
             contract: contract.to_string(),
+            transient_grid_alignment: None,
         }
     }
 
@@ -47,6 +48,7 @@ impl XyceTestRunner {
             mismatches: Vec::new(),
             duration_ms: start.elapsed().as_millis(),
             contract: "upstream_excluded".to_string(),
+            transient_grid_alignment: None,
         }
     }
 

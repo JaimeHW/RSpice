@@ -371,6 +371,7 @@ fn upstream_exclusion_statistics_separate_provenance_disposition() {
         mismatches: Vec::new(),
         duration_ms: 1,
         contract: "fixture".to_string(),
+        transient_grid_alignment: None,
     };
     let results = [
         result(true, false, false, Some("Netlists/FAMILY/exclude")),

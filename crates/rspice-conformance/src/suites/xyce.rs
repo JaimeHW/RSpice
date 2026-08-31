@@ -7376,6 +7376,91 @@ pub struct XyceValueMismatch {
     pub relative_error: f64,
 }
 
+/// How a transient `.prn` comparison lined the engine's samples up with the
+/// reference table's rows.
+///
+/// This is not a tolerance, and the difference between the two is the whole
+/// reason it is surfaced. [`Self::IndexAligned`] compares reference row `i`
+/// against accepted step `i` of the run: the engine had to *choose the same
+/// steps* Xyce chose, which is the strictest claim this suite can make about a
+/// transient. [`Self::Interpolated`] evaluates the run at each reference time
+/// instead — a materially weaker claim that the waveform passes through the
+/// right points, saying nothing about where the integrator put them.
+///
+/// The mode is derived rather than declared: [`XyceTestRunner`] picks it per
+/// comparison from the two time axes it was handed. A change to the engine's
+/// accepted-step sequence can therefore move a deck from the strict mode to
+/// the lenient one with no deck, tolerance, or contract edit anywhere — the
+/// gate quietly weakens and every test still passes. `tests/xyce/
+/// grid-alignment-manifest.tsv` pins which decks are entitled to the strict
+/// mode, checked in both directions, so that transition has to be a conscious
+/// one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum XyceTransientGridAlignment {
+    /// Reference row `i` was compared against accepted step `i`.
+    IndexAligned,
+    /// The run was interpolated onto each reference time.
+    Interpolated,
+}
+
+impl XyceTransientGridAlignment {
+    /// The manifest and report-file spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::IndexAligned => "index_aligned",
+            Self::Interpolated => "interpolated",
+        }
+    }
+
+    /// Inverse of [`Self::as_str`]; `None` for any other token.
+    pub fn parse(token: &str) -> Option<Self> {
+        match token {
+            "index_aligned" => Some(Self::IndexAligned),
+            "interpolated" => Some(Self::Interpolated),
+            _ => None,
+        }
+    }
+}
+
+thread_local! {
+    /// Grid alignment observed since the current deck started running.
+    ///
+    /// A deck can drive more than one transient comparison — stepped runs and
+    /// the two-table contracts each call the comparison path repeatedly — so
+    /// the per-deck answer is a fold rather than a single sample, and the fold
+    /// is conservative: a deck counts as index-aligned only when *every*
+    /// comparison it made was. One interpolated fallback anywhere is the
+    /// weakening the manifest exists to notice.
+    ///
+    /// Thread-local rather than a field on the runner because the observation
+    /// is a property of the comparison that just ran, not of the runner's
+    /// configuration, and because `XyceTestRunner` is shared as `&self`
+    /// throughout the suite.
+    static OBSERVED_TRANSIENT_GRID_ALIGNMENT: std::cell::Cell<Option<XyceTransientGridAlignment>> =
+        const { std::cell::Cell::new(None) };
+}
+
+fn reset_observed_transient_grid_alignment() {
+    OBSERVED_TRANSIENT_GRID_ALIGNMENT.with(|observed| observed.set(None));
+}
+
+fn record_transient_grid_alignment(alignment: XyceTransientGridAlignment) {
+    OBSERVED_TRANSIENT_GRID_ALIGNMENT.with(|observed| {
+        let folded = match (observed.get(), alignment) {
+            (Some(XyceTransientGridAlignment::Interpolated), _)
+            | (_, XyceTransientGridAlignment::Interpolated) => {
+                XyceTransientGridAlignment::Interpolated
+            }
+            _ => XyceTransientGridAlignment::IndexAligned,
+        };
+        observed.set(Some(folded));
+    });
+}
+
+fn observed_transient_grid_alignment() -> Option<XyceTransientGridAlignment> {
+    OBSERVED_TRANSIENT_GRID_ALIGNMENT.with(std::cell::Cell::get)
+}
+
 /// Result for one discovered Xyce deck.
 #[derive(Debug, Clone)]
 pub struct XyceTestResult {
@@ -7403,6 +7488,10 @@ pub struct XyceTestResult {
     pub duration_ms: u128,
     /// Contract label applied by the runner.
     pub contract: String,
+    /// Which geometry the deck's transient `.prn` comparisons used, folded
+    /// across every comparison the deck made. `None` for decks that never
+    /// reached a transient reference comparison at all.
+    pub transient_grid_alignment: Option<XyceTransientGridAlignment>,
 }
 
 /// Aggregate Xyce corpus statistics.

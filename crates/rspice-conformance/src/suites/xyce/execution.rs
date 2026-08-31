@@ -101,7 +101,17 @@ impl XyceTestRunner {
         self.run_discovered_test(&deck)
     }
 
+    /// Every route into a deck's contract funnels through here, which makes it
+    /// the one place that can bracket a run and report which transient
+    /// comparison geometry it ended up using.
     pub(super) fn run_discovered_test(&self, deck: &XyceDeck) -> XyceTestResult {
+        reset_observed_transient_grid_alignment();
+        let mut result = self.run_discovered_test_observed(deck);
+        result.transient_grid_alignment = observed_transient_grid_alignment();
+        result
+    }
+
+    fn run_discovered_test_observed(&self, deck: &XyceDeck) -> XyceTestResult {
         let start = Instant::now();
         if deck.section != XyceDeckSection::Netlists {
             return self.run_discovered_test_unqualified(deck);

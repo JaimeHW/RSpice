@@ -5278,6 +5278,43 @@ impl XyceTestRunner {
         }
     }
 
+    /// Decide which geometry a transient comparison may use.
+    ///
+    /// Index alignment demands the same number of samples as reference rows
+    /// *and* that no adjacent interval drifts by more than a third in either
+    /// direction — the ratio window `[0.75, 4/3]`. Anything else falls back to
+    /// interpolating the run onto the reference times, which is a weaker gate.
+    ///
+    /// This is a named function rather than a local `bool` so the choice is
+    /// observable per deck; the predicate itself is unchanged. See
+    /// [`XyceTransientGridAlignment`] for why that matters.
+    pub(super) fn transient_grid_alignment(
+        reference_times: &[f64],
+        actual_times: &[Value],
+    ) -> XyceTransientGridAlignment {
+        let index_aligned = actual_times.len() == reference_times.len()
+            && reference_times.windows(2).zip(actual_times.windows(2)).all(
+                |(reference_window, actual_window)| {
+                    let reference_dt = reference_window[1] - reference_window[0];
+                    let actual_dt = actual_window[1] - actual_window[0];
+                    if !reference_dt.is_finite()
+                        || !actual_dt.is_finite()
+                        || reference_dt <= 0.0
+                        || actual_dt <= 0.0
+                    {
+                        return false;
+                    }
+                    let ratio = actual_dt / reference_dt;
+                    ratio.is_finite() && (0.75..=1.333_333_333_333_333_3).contains(&ratio)
+                },
+            );
+        if index_aligned {
+            XyceTransientGridAlignment::IndexAligned
+        } else {
+            XyceTransientGridAlignment::Interpolated
+        }
+    }
+
     pub(super) fn compare_tran_prn_reference(
         &self,
         reference: &XycePrnTable,
@@ -5315,22 +5352,9 @@ impl XyceTestRunner {
                 row.get(layout.time_column).copied().unwrap_or(f64::NAN) / tran_time_scale_factor
             })
             .collect::<Vec<_>>();
-        let index_aligned_grid = result.time.len() == reference_times.len()
-            && reference_times.windows(2).zip(result.time.windows(2)).all(
-                |(reference_window, actual_window)| {
-                    let reference_dt = reference_window[1] - reference_window[0];
-                    let actual_dt = actual_window[1] - actual_window[0];
-                    if !reference_dt.is_finite()
-                        || !actual_dt.is_finite()
-                        || reference_dt <= 0.0
-                        || actual_dt <= 0.0
-                    {
-                        return false;
-                    }
-                    let ratio = actual_dt / reference_dt;
-                    ratio.is_finite() && (0.75..=1.333_333_333_333_333_3).contains(&ratio)
-                },
-            );
+        let grid_alignment = Self::transient_grid_alignment(&reference_times, &result.time);
+        record_transient_grid_alignment(grid_alignment);
+        let index_aligned_grid = grid_alignment == XyceTransientGridAlignment::IndexAligned;
         let stateful_waveforms = data_columns
             .iter()
             .map(|probe| Self::derived_tran_probe_waveform(probe, netlist, result))
