@@ -53,6 +53,10 @@ mod data;
 mod dc;
 mod distortion;
 mod error;
+// The discrete-event scheduler kernel for the digital substrate. Public so the
+// integration tests that are its only consumer today can drive it; the analog
+// engine does not call it yet.
+pub mod event_scheduler;
 mod hb;
 mod health;
 mod matrix;

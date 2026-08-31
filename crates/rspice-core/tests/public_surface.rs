@@ -127,7 +127,35 @@ use rspice_core::analysis::harmonic_balance::{
 /// evaluation and stamping APIs are fallible so non-finite equations cannot
 /// be silently converted into zero-valued sources; callers need the typed
 /// error to retain source identity and analysis-coordinate diagnostics.
-const MAX_PUBLIC_ITEMS: usize = 4261;
+///
+/// The current raise is +30, and it is two unrelated amounts.
+///
+/// +2 of it is arrears, not growth. `b97258608` ("Bound model library
+/// ingestion and discovery") added ten public statements under `src/library/`
+/// without touching this ceiling; eight statements deleted earlier in the same
+/// range absorbed all but two, so the tree has been two over at 4,263 since
+/// that commit and this test has been failing on `main`. Raising to cover them
+/// records the debt rather than paying it — several of those ten
+/// (`with_max_source_files`, `DEFAULT_MAX_LIBRARY_SOURCE_FILES`,
+/// `DEFAULT_MAX_VERILOGA_DISCOVERY_FILES`) look like `pub(crate)` candidates,
+/// and narrowing them is the change that should lower this number again.
+///
+/// +28 is the discrete-event scheduler kernel in
+/// `engine::event_scheduler`: the tick time base (`TimeResolution` and its
+/// five operations plus `MAX_EXACT_TICKS`), the stratified region vocabulary
+/// (`SchedulerRegion`, `ORDERED`), the event payload (`EventTarget`,
+/// `ScheduledEvent`), the typed failure surface (`SchedulerError`,
+/// `OscillationCause`, `OscillationDiagnostic`), the ceilings and per-slot
+/// report (`SchedulerLimits`, `TimeSlotReport`), and the scheduler itself
+/// (`EventScheduler` with six operations, `SchedulerContext` with three).
+///
+/// These are public for a reason this test's usual rule does not cover: the
+/// kernel has no in-crate consumer until XSPICE is rehosted on it, so
+/// `pub(crate)` would make every one of them dead code under `-D warnings`.
+/// The integration test `event_scheduler_kernel.rs` is the consumer that
+/// keeps them honest in the meantime. When the rehost lands and the analog
+/// engine calls this module directly, most of this surface should narrow.
+const MAX_PUBLIC_ITEMS: usize = 4291;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
