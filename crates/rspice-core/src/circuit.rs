@@ -11,7 +11,8 @@ use crate::device::{Cccs, Ccvs, MatrixStamper, NonlinearConvergenceCriteria, Vcc
 use crate::numerics::integration::CompanionCoefficients;
 use crate::solver::{CscIndex, StaticMatrix, TripletMatrix};
 use crate::xspice::{
-    CodeModelRegistry, DigitalValue, SharedXspiceInstance, XspiceEventScheduler, XspiceInstance,
+    CodeModelRegistry, SharedXspiceEventQueue, SharedXspiceEventValues, SharedXspiceInstance,
+    XspiceInstance,
 };
 use crate::{NodeId, Value};
 use std::collections::{HashMap, HashSet};
@@ -79,10 +80,6 @@ fn generated_catalog_op_label(text: &str) -> Option<&'static str> {
 }
 pub(crate) mod xyce_dae;
 pub(crate) mod xyce_load;
-
-type XspiceDriverId = (String, String, usize);
-type XspiceDigitalDrivers = HashMap<NodeId, HashMap<XspiceDriverId, DigitalValue>>;
-type XspiceRealDrivers = HashMap<NodeId, HashMap<XspiceDriverId, Value>>;
 
 #[inline]
 fn solution_node_voltage(solution: &[Value], node: NodeId) -> Option<Value> {
@@ -599,22 +596,14 @@ pub struct CircuitData {
     pub(crate) xspice_instances: Vec<SharedXspiceInstance>,
     /// Cached presence of event-driven XSPICE ports.
     pub(crate) xspice_has_event_driven_devices: bool,
-    /// Circuit-level digital node values driven by XSPICE events.
-    pub(crate) xspice_digital_values: HashMap<NodeId, DigitalValue>,
-    /// Per-output digital driver values, resolved onto digital nodes.
-    pub(crate) xspice_digital_drivers: XspiceDigitalDrivers,
-    /// Last event time per XSPICE digital node.
-    pub(crate) xspice_digital_event_times: HashMap<NodeId, Value>,
+    /// Resolved event-node values, per-driver state, and event times, shared
+    /// with rollback snapshots until an event writes through them.
+    pub(crate) xspice_event_values: SharedXspiceEventValues,
     /// ngspice-style total LOAD() contribution per event node.
     pub(crate) xspice_event_loads: HashMap<NodeId, Value>,
-    /// Circuit-level real-valued event node values driven by XSPICE events.
-    pub(crate) xspice_real_values: HashMap<NodeId, Value>,
-    /// Per-output real-valued event drivers, summed onto real nodes.
-    pub(crate) xspice_real_drivers: XspiceRealDrivers,
-    /// Last event time per XSPICE real-valued event node.
-    pub(crate) xspice_real_event_times: HashMap<NodeId, Value>,
-    /// Circuit-level XSPICE digital event queue.
-    pub(crate) xspice_event_queue: XspiceEventScheduler,
+    /// Circuit-level XSPICE digital event queue, shared with rollback
+    /// snapshots until an event is scheduled or drained.
+    pub(crate) xspice_event_queue: SharedXspiceEventQueue,
     /// Scratch nodes touched while applying a batch of XSPICE digital events.
     pub(crate) xspice_touched_digital_nodes: Vec<NodeId>,
     /// Scratch nodes touched while applying a batch of XSPICE real-valued events.

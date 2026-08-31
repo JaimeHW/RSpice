@@ -63,12 +63,9 @@ const EXCLUDED_FROM_DEVICE_COUNT: &[(&str, &str)] = &[
         "branch residuals retained from the current Core stamp",
     ),
     (
-        "xspice_digital_drivers",
-        "per-output digital drive state of the counted XSPICE instances",
-    ),
-    (
-        "xspice_real_drivers",
-        "per-output real-valued drive state of those same instances",
+        "xspice_event_values",
+        "resolved event-node values and the per-output drive state behind them, \
+         all of it belonging to the counted XSPICE instances",
     ),
     (
         "xspice_event_queue",

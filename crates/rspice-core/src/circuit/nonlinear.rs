@@ -44,13 +44,14 @@ pub(crate) struct NonlinearDeviceStateSnapshot {
     // reference-count bump per instance; the copy is deferred to whatever the
     // step attempt actually touches. See `SharedXspiceInstance`.
     xspice_instances: Vec<SharedXspiceInstance>,
-    xspice_digital_values: HashMap<NodeId, DigitalValue>,
-    xspice_digital_drivers: XspiceDigitalDrivers,
-    xspice_digital_event_times: HashMap<NodeId, Value>,
-    xspice_real_values: HashMap<NodeId, Value>,
-    xspice_real_drivers: XspiceRealDrivers,
-    xspice_real_event_times: HashMap<NodeId, Value>,
-    xspice_event_queue: XspiceEventScheduler,
+    // The event world, on the same terms: capture is two reference-count
+    // bumps, and the copy is deferred to the first event the attempt drains
+    // or schedules. D5 clause 1 asks that a rejected step roll the event
+    // world back completely, and it still does — `Arc::make_mut` copies
+    // before any write a snapshot could otherwise observe. See
+    // `SharedXspiceEventValues` and `SharedXspiceEventQueue`.
+    xspice_event_values: SharedXspiceEventValues,
+    xspice_event_queue: SharedXspiceEventQueue,
     #[cfg(feature = "veriloga")]
     veriloga_devices: crate::device::veriloga::VerilogADevices,
     #[cfg(feature = "veriloga-builtins-base")]
@@ -135,8 +136,11 @@ mod tests {
     /// them.
     #[test]
     fn xspice_event_queue_survives_the_nonlinear_state_round_trip() {
+        use crate::xspice::DigitalValue;
+
         fn queue_two_events(circuit: &mut CircuitData) {
-            circuit.xspice_event_queue.schedule(
+            let queue = circuit.xspice_event_queue.make_mut();
+            queue.schedule(
                 2.0e-9,
                 1,
                 "out",
@@ -144,7 +148,7 @@ mod tests {
                 0,
                 crate::xspice::EventValue::Digital(DigitalValue::one()),
             );
-            circuit.xspice_event_queue.schedule(
+            queue.schedule(
                 4.0e-9,
                 2,
                 "out",
@@ -174,6 +178,7 @@ mod tests {
             // The rejected attempt executes both events.
             circuit
                 .xspice_event_queue
+                .make_mut()
                 .run_due_events(4.0e-9, |_| {})
                 .expect("a queue nothing feeds back into settles");
             assert!(
@@ -1004,12 +1009,7 @@ impl CircuitData {
             generic_switches: self.generic_switches.clone(),
             behavioral_sources: self.behavioral_sources.clone(),
             xspice_instances: self.xspice_instances.clone(),
-            xspice_digital_values: self.xspice_digital_values.clone(),
-            xspice_digital_drivers: self.xspice_digital_drivers.clone(),
-            xspice_digital_event_times: self.xspice_digital_event_times.clone(),
-            xspice_real_values: self.xspice_real_values.clone(),
-            xspice_real_drivers: self.xspice_real_drivers.clone(),
-            xspice_real_event_times: self.xspice_real_event_times.clone(),
+            xspice_event_values: self.xspice_event_values.clone(),
             xspice_event_queue: self.xspice_event_queue.clone(),
             #[cfg(feature = "veriloga")]
             veriloga_devices: self.veriloga_devices.clone(),
@@ -1090,23 +1090,8 @@ impl CircuitData {
             .clone_from(&self.behavioral_sources);
         snapshot.xspice_instances.clone_from(&self.xspice_instances);
         snapshot
-            .xspice_digital_values
-            .clone_from(&self.xspice_digital_values);
-        snapshot
-            .xspice_digital_drivers
-            .clone_from(&self.xspice_digital_drivers);
-        snapshot
-            .xspice_digital_event_times
-            .clone_from(&self.xspice_digital_event_times);
-        snapshot
-            .xspice_real_values
-            .clone_from(&self.xspice_real_values);
-        snapshot
-            .xspice_real_drivers
-            .clone_from(&self.xspice_real_drivers);
-        snapshot
-            .xspice_real_event_times
-            .clone_from(&self.xspice_real_event_times);
+            .xspice_event_values
+            .clone_from(&self.xspice_event_values);
         snapshot
             .xspice_event_queue
             .clone_from(&self.xspice_event_queue);
@@ -1250,12 +1235,7 @@ impl CircuitData {
         }
         self.behavioral_sources = snapshot.behavioral_sources;
         self.xspice_instances = snapshot.xspice_instances;
-        self.xspice_digital_values = snapshot.xspice_digital_values;
-        self.xspice_digital_drivers = snapshot.xspice_digital_drivers;
-        self.xspice_digital_event_times = snapshot.xspice_digital_event_times;
-        self.xspice_real_values = snapshot.xspice_real_values;
-        self.xspice_real_drivers = snapshot.xspice_real_drivers;
-        self.xspice_real_event_times = snapshot.xspice_real_event_times;
+        self.xspice_event_values = snapshot.xspice_event_values;
         self.xspice_event_queue = snapshot.xspice_event_queue;
         #[cfg(feature = "veriloga")]
         {

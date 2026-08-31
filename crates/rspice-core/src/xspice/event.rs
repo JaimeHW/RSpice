@@ -10,7 +10,9 @@ use super::digital::DigitalValue;
 use super::event_scheduler::{
     EventScheduler, EventTarget, SchedulerError, SchedulerLimits, SchedulerRegion, TimeResolution,
 };
-use crate::Value;
+use crate::{NodeId, Value};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 //=============================================================================
 // Event Types
@@ -315,6 +317,147 @@ impl XspiceEventScheduler {
     #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.inner.pending() == 0
+    }
+}
+
+//=============================================================================
+// The event world, shared with rollback snapshots until something writes
+//=============================================================================
+
+/// Identity of one output driver: instance, port, and vector element.
+pub(crate) type XspiceDriverId = (String, String, usize);
+/// Per-node digital drive state, one entry per driver of the node.
+pub(crate) type XspiceDigitalDrivers = HashMap<NodeId, HashMap<XspiceDriverId, DigitalValue>>;
+/// Per-node real-valued drive state, one entry per driver of the node.
+pub(crate) type XspiceRealDrivers = HashMap<NodeId, HashMap<XspiceDriverId, Value>>;
+
+/// What every event-driven net of one circuit currently carries.
+///
+/// Six maps rather than six fields on `CircuitData` because they are written
+/// as a unit and rolled back as a unit: the drain resolves a node's drivers
+/// into its value and stamps the event time in the same step, so a snapshot
+/// holding any one of them without the others would describe a state the
+/// drain never produces. Grouping them is also what lets the whole set ride
+/// behind a single [`Arc`] — see [`SharedXspiceEventValues`].
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct XspiceEventValues {
+    /// Resolved digital value of each event-driven node.
+    pub(crate) digital_values: HashMap<NodeId, DigitalValue>,
+    /// Per-output digital driver values, resolved onto digital nodes.
+    pub(crate) digital_drivers: XspiceDigitalDrivers,
+    /// Last event time per digital node.
+    pub(crate) digital_event_times: HashMap<NodeId, Value>,
+    /// Resolved real-valued value of each event-driven node.
+    pub(crate) real_values: HashMap<NodeId, Value>,
+    /// Per-output real-valued drivers, summed onto real nodes.
+    pub(crate) real_drivers: XspiceRealDrivers,
+    /// Last event time per real-valued node.
+    pub(crate) real_event_times: HashMap<NodeId, Value>,
+}
+
+/// A circuit's handle on its resolved event-node state, shared with rollback
+/// snapshots until something writes through it.
+///
+/// Rollback capture used to deep-copy all six maps at every attempted timestep
+/// and merit checkpoint. On a gate-level design the driver maps are the
+/// expensive half — a `HashMap` per node of `(instance, port, element)` keys,
+/// so two `String`s per driver — and a run copied them whether or not any
+/// event had fired. Sharing them behind an [`Arc`] turns that capture into a
+/// reference-count bump and defers the copy to the first write after it.
+///
+/// The rollback image this produces is the image the deep copy produced.
+/// [`Arc::make_mut`] copies whenever the pointer is shared, so a snapshot that
+/// aliases the maps observes every subsequent write on a fresh allocation and
+/// never on its own; and writing is the only way to reach that path, because
+/// [`Self::make_mut`] is the only mutable view. `DerefMut` is deliberately not
+/// implemented, so every mutation site is spelled out.
+#[derive(Clone, Default)]
+pub(crate) struct SharedXspiceEventValues(Arc<XspiceEventValues>);
+
+impl SharedXspiceEventValues {
+    /// Take a mutable view, copying the maps first if a snapshot still shares
+    /// them.
+    ///
+    /// Callers on a per-step path must ask a cheap shared-borrow predicate
+    /// whether the write would change anything before calling this — a write
+    /// that stores what is already there still costs a copy. The drain's
+    /// predicate is [`XspiceEventScheduler::has_event_at_or_before`].
+    #[inline]
+    pub(crate) fn make_mut(&mut self) -> &mut XspiceEventValues {
+        Arc::make_mut(&mut self.0)
+    }
+}
+
+impl std::ops::Deref for SharedXspiceEventValues {
+    type Target = XspiceEventValues;
+
+    #[inline]
+    fn deref(&self) -> &XspiceEventValues {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for SharedXspiceEventValues {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&*self.0, f)
+    }
+}
+
+/// A circuit's handle on its event queue, shared with rollback snapshots until
+/// something writes through it.
+///
+/// The scheduler is the mechanism D5 clause 1 is enforced by: a rejected step
+/// rolls the event world back completely because the queue rides inside
+/// `NonlinearDeviceStateSnapshot`. Sharing it changes nothing about that
+/// image. `EventScheduler`'s derived `Clone` is a deep copy of a future tier,
+/// four slot queues, a per-driver supersede index and the activation counts,
+/// and the settling of one accepted timepoint left all of it unchanged for
+/// every rejected trial that followed; the copy now happens on the first
+/// write instead of at every capture.
+///
+/// As with [`SharedXspiceEventValues`], [`Self::make_mut`] is the only mutable
+/// view and there is no `DerefMut`, so a snapshot can never observe a write
+/// through a handle it aliases.
+#[derive(Clone)]
+pub(crate) struct SharedXspiceEventQueue(Arc<XspiceEventScheduler>);
+
+impl SharedXspiceEventQueue {
+    /// Create a circuit's empty event queue.
+    pub(crate) fn new() -> Self {
+        Self(Arc::new(XspiceEventScheduler::new()))
+    }
+
+    /// Take a mutable view, copying the scheduler first if a snapshot still
+    /// shares it.
+    ///
+    /// Per-step callers must gate this on a shared-borrow predicate:
+    /// [`XspiceEventScheduler::has_event_at_or_before`] for the drain, and
+    /// `XspiceInstance::has_pending_events` for the scheduling sweep. Both
+    /// answer no on a quiet analog step, which is when the sharing pays.
+    #[inline]
+    pub(crate) fn make_mut(&mut self) -> &mut XspiceEventScheduler {
+        Arc::make_mut(&mut self.0)
+    }
+}
+
+impl Default for SharedXspiceEventQueue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::ops::Deref for SharedXspiceEventQueue {
+    type Target = XspiceEventScheduler;
+
+    #[inline]
+    fn deref(&self) -> &XspiceEventScheduler {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for SharedXspiceEventQueue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&*self.0, f)
     }
 }
 

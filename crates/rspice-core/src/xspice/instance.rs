@@ -2494,6 +2494,18 @@ impl XspiceInstance {
         self.context.drain_requested_breakpoints()
     }
 
+    /// Whether [`Self::schedule_events`] would place anything in the queue.
+    ///
+    /// The settle loop visits every dispatched instance and asks this before
+    /// taking the mutable view that would copy a circuit event queue still
+    /// shared with a rollback snapshot. An instance whose evaluation queued no
+    /// output — which is most of them once a gate network is settling —
+    /// contributes nothing to schedule.
+    #[inline]
+    pub(crate) fn has_pending_events(&self) -> bool {
+        self.context.has_pending_events()
+    }
+
     /// Process digital events scheduled by this instance
     pub(crate) fn schedule_events(
         &mut self,

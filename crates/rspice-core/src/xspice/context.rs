@@ -1830,6 +1830,17 @@ impl CmContext {
         self.pending_real_events.drain(..)
     }
 
+    /// Whether either pending-event queue holds anything to schedule.
+    ///
+    /// The settle loop asks this before taking the mutable view of the circuit
+    /// event queue that would copy a scheduler still shared with a rollback
+    /// snapshot. Draining two empty lists into it is a no-op that would cost a
+    /// full copy of the queue.
+    #[inline]
+    pub(crate) fn has_pending_events(&self) -> bool {
+        !self.pending_events.is_empty() || !self.pending_real_events.is_empty()
+    }
+
     /// Request that the transient stepper place a breakpoint at an absolute time.
     pub fn request_breakpoint(&mut self, time: Value) {
         if time.is_finite() && time >= 0.0 {

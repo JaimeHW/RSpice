@@ -85,7 +85,9 @@ pub use data_file::{
 };
 pub use digital::{DigitalState, DigitalStrength, DigitalValue};
 pub use event::EventValue;
-pub(crate) use event::XspiceEventScheduler;
+pub(crate) use event::{
+    SharedXspiceEventQueue, SharedXspiceEventValues, XspiceEventScheduler, XspiceEventValues,
+};
 pub use external::{
     DigitalCosimInputEvent, DigitalCosimRuntime, DigitalCosimRuntimeFactory, DigitalCosimSpec,
     DigitalCosimStep, DigitalProcessRuntime, DigitalProcessRuntimeFactory, DigitalProcessSpec,
