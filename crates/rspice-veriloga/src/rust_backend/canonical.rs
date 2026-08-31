@@ -488,6 +488,9 @@ fn kernel_region_metrics(
             CfgValueKind::DigitalEquality { negate, .. } => {
                 write!(out, "digital-equality:{negate}")
             }
+            CfgValueKind::DigitalCaseMatch { kind, .. } => {
+                write!(out, "digital-case-match:{}", kind.keyword())
+            }
             CfgValueKind::DigitalRelational { op, .. } => {
                 write!(out, "digital-relational:{op:?}")
             }

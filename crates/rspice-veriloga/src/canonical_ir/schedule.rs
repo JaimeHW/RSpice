@@ -1845,6 +1845,7 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         | CfgValueKind::DigitalPartSelect { .. }
         | CfgValueKind::DigitalConcat { .. }
         | CfgValueKind::DigitalSelect { .. }
+        | CfgValueKind::DigitalCaseMatch { .. }
         | CfgValueKind::DigitalBlockingWrite { .. }
         | CfgValueKind::DigitalNonblockingWrite { .. } => InvalidationClass::Newton,
 

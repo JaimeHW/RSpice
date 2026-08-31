@@ -477,6 +477,69 @@ pub fn equality(left: &FourStateValue, right: &FourStateValue, negate: bool) -> 
     })
 }
 
+/// Which `case` form a match test came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DigitalCaseMatch {
+    /// `case`: every bit must be identical, `x` and `z` included.
+    Exact,
+    /// `casez`: a `z` (or `?`) in either operand is a don't-care.
+    WildcardZ,
+    /// `casex`: an `x`, `z`, or `?` in either operand is a don't-care.
+    WildcardXZ,
+}
+
+impl DigitalCaseMatch {
+    /// Whether a bit of either operand makes its position a don't-care.
+    ///
+    /// IEEE 1364-2005 section 9.5.1 puts the don't-care on *either* operand,
+    /// not only on the case item: a `casez` selector holding `z` matches an
+    /// item holding anything at that position. The asymmetric reading — the
+    /// item may wildcard, the selector may not — is the common
+    /// misimplementation, and this is the whole difference between the forms.
+    const fn ignores(self, bit: FourStateBit) -> bool {
+        match self {
+            Self::Exact => false,
+            Self::WildcardZ => matches!(bit, FourStateBit::HighImpedance),
+            Self::WildcardXZ => matches!(bit, FourStateBit::HighImpedance | FourStateBit::Unknown),
+        }
+    }
+
+    pub const fn keyword(self) -> &'static str {
+        match self {
+            Self::Exact => "case",
+            Self::WildcardZ => "casez",
+            Self::WildcardXZ => "casex",
+        }
+    }
+}
+
+/// Match a `case` item against the selector, IEEE 1364-2005 sections 9.5 and
+/// 9.5.1.
+///
+/// One bit, and never an unknown one: a case item either matches or does not,
+/// which is what makes `case` usable where `==` is not. The comparison is an
+/// identity comparison at the wider of the two widths — section 9.5 extends
+/// every case expression to the width of the widest, and section 5.2.1's
+/// zero-fill is what that extension does.
+pub fn case_match(
+    kind: DigitalCaseMatch,
+    selector: &FourStateValue,
+    label: &FourStateValue,
+) -> FourStateValue {
+    let width = selector.width().max(label.width());
+    let selector = selector.resized(width);
+    let label = label.resized(width);
+    let matched = (0..width).all(|index| {
+        let (left, right) = (selector.bit(index), label.bit(index));
+        kind.ignores(left) || kind.ignores(right) || left == right
+    });
+    one_bit(if matched {
+        FourStateBit::One
+    } else {
+        FourStateBit::Zero
+    })
+}
+
 /// A relational operator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum RelationalOp {

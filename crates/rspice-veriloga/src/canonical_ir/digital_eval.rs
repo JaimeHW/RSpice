@@ -875,6 +875,18 @@ impl<'a, E: DigitalEnvironment + ?Sized> Interpreter<'a, E> {
                     &left, &right, negate,
                 )))
             }
+            CfgValueKind::DigitalCaseMatch {
+                selector,
+                label,
+                kind,
+            } => {
+                let (selector, label, kind) = (*selector, *label, *kind);
+                let selector = self.four_state(selector)?;
+                let label = self.four_state(label)?;
+                Ok(DigitalScalar::FourState(digital_value::case_match(
+                    kind, &selector, &label,
+                )))
+            }
             CfgValueKind::DigitalRelational { op, left, right } => {
                 let (op, left, right) = (*op, *left, *right);
                 let left = self.four_state(left)?;

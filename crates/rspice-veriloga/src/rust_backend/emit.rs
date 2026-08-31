@@ -1762,6 +1762,7 @@ impl Emitter<'_> {
             | CfgValueKind::DigitalLogical { .. }
             | CfgValueKind::DigitalLogicalNot { .. }
             | CfgValueKind::DigitalEquality { .. }
+            | CfgValueKind::DigitalCaseMatch { .. }
             | CfgValueKind::DigitalRelational { .. }
             | CfgValueKind::DigitalArithmetic { .. }
             | CfgValueKind::DigitalShift { .. }

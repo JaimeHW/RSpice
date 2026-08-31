@@ -377,6 +377,20 @@ pub enum CfgValueKind {
         right: ValueId,
         negate: bool,
     },
+    /// A `case` item match, yielding one bit and never an unknown one.
+    ///
+    /// A different operator from [`Self::DigitalEquality`], not a use of it.
+    /// IEEE 1364-2005 section 9.5 compares a case item against the selector
+    /// bit by bit *including* `x` and `z`, so a selector of `x0` matches the
+    /// item `2'bx0` — while `==` yields `x` there and would send it to the
+    /// default. Section 9.5.1's `casez` and `casex` are the same comparison
+    /// with a set of positions ignored, which is why the three forms are one
+    /// node with a kind rather than three lowerings.
+    DigitalCaseMatch {
+        selector: ValueId,
+        label: ValueId,
+        kind: digital_value::DigitalCaseMatch,
+    },
     /// Relational comparison, yielding one bit.
     DigitalRelational {
         op: digital_value::RelationalOp,
@@ -493,6 +507,7 @@ impl CfgValueKind {
             | Self::DigitalLogical { .. }
             | Self::DigitalLogicalNot { .. }
             | Self::DigitalEquality { .. }
+            | Self::DigitalCaseMatch { .. }
             | Self::DigitalRelational { .. }
             | Self::DigitalArithmetic { .. }
             | Self::DigitalShift { .. }
@@ -561,6 +576,9 @@ impl CfgValueKind {
             | Self::DigitalEquality { left, right, .. }
             | Self::DigitalRelational { left, right, .. }
             | Self::DigitalArithmetic { left, right, .. } => vec![*left, *right],
+            Self::DigitalCaseMatch {
+                selector, label, ..
+            } => vec![*selector, *label],
             Self::DigitalShift { value, count, .. } => vec![*value, *count],
             Self::DigitalConcat { parts } => parts.clone(),
             Self::DigitalSelect {
@@ -655,6 +673,12 @@ impl CfgValueKind {
             | Self::DigitalArithmetic { left, right, .. } => {
                 *left = map(*left);
                 *right = map(*right);
+            }
+            Self::DigitalCaseMatch {
+                selector, label, ..
+            } => {
+                *selector = map(*selector);
+                *label = map(*label);
             }
             Self::DigitalShift { value, count, .. } => {
                 *value = map(*value);
@@ -1727,6 +1751,18 @@ impl SsaBuilder {
             // long before the header could be sealed, so an undefined result
             // has already been redirected to zero for it.
             let _ = self.try_remove_trivial_parameter(block, parameter);
+        }
+    }
+
+    /// Seal every block that is still open.
+    ///
+    /// The backstop a lowering calls once it has finished creating edges. A
+    /// construct that refused partway through leaves its blocks behind, and an
+    /// unsealed block reaching [`Self::finish`] holds parameters whose
+    /// arguments were never supplied.
+    pub fn seal_all_blocks(&mut self) {
+        for index in 0..self.blocks.len() {
+            self.seal_block(BlockId::from(index));
         }
     }
 
