@@ -62,28 +62,7 @@ impl<'a> SimulationContext<'a> {
     /// - Wrapped match: "out" matches "V(out)" or "I(out)"
     /// - Case-insensitive matching
     fn find_waveform(&self, signal: &str) -> Option<&WaveformData> {
-        let signal_lower = signal.to_lowercase();
-
-        // Try exact match first
-        if let Some(wf) = self
-            .simulation
-            .waveforms
-            .iter()
-            .find(|wf| wf.name.eq_ignore_ascii_case(signal))
-        {
-            return Some(wf);
-        }
-
-        // Try matching as net name inside V() or I()
-        self.simulation.waveforms.iter().find(|wf| {
-            let wf_net = wf
-                .name
-                .trim_start_matches("V(")
-                .trim_start_matches("I(")
-                .trim_end_matches(')')
-                .to_lowercase();
-            wf_net == signal_lower
-        })
+        find_in(&self.simulation.waveforms, signal)
     }
 }
 
@@ -105,8 +84,6 @@ impl<'a> WaveformsContext<'a> {
 /// net name inside `V()`/`I()`, and AC magnitude entries (`|V(out)|`
 /// matches `V(out)` so `dB(V(out)/V(in))` works on AC strips).
 fn find_in<'a>(waveforms: &'a [WaveformData], signal: &str) -> Option<&'a WaveformData> {
-    let signal_lower = signal.to_lowercase();
-
     if let Some(wf) = waveforms
         .iter()
         .find(|wf| wf.name.eq_ignore_ascii_case(signal))
@@ -124,15 +101,24 @@ fn find_in<'a>(waveforms: &'a [WaveformData], signal: &str) -> Option<&'a Wavefo
 
     // Bare net name matches inside V() / I() wrappers.
     waveforms.iter().find(|wf| {
-        let wf_net = wf
-            .name
-            .trim_matches('|')
-            .trim_start_matches("V(")
-            .trim_start_matches("I(")
-            .trim_end_matches(')')
-            .to_lowercase();
-        wf_net == signal_lower
+        bare_wrapped_signal_name(&wf.name)
+            .is_some_and(|wrapped| wrapped.eq_ignore_ascii_case(signal))
     })
+}
+
+/// Return the body of a voltage/current wrapper without assuming the producer
+/// used uppercase `V`/`I`. AC magnitude traces retain the same signal spelling
+/// inside a symmetric pair of bars.
+fn bare_wrapped_signal_name(name: &str) -> Option<&str> {
+    let name = name
+        .strip_prefix('|')
+        .and_then(|inner| inner.strip_suffix('|'))
+        .unwrap_or(name);
+    let prefix = name.get(..2)?;
+    if !prefix.eq_ignore_ascii_case("V(") && !prefix.eq_ignore_ascii_case("I(") {
+        return None;
+    }
+    name.strip_suffix(')')?.get(2..)
 }
 
 impl<'a> EvaluationContext for WaveformsContext<'a> {
@@ -211,3 +197,37 @@ impl<'a> EvaluationContext for SimulationContext<'a> {
 // =============================================================================
 // Tests
 // =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn waveform(name: &str, value: f64) -> WaveformData {
+        WaveformData::new(name, vec![0.0, 1.0], vec![value, value], "#ffffff")
+    }
+
+    fn expected(value: f64) -> CalcValue {
+        CalcValue::Waveform(vec![0.0, 1.0], vec![value, value])
+    }
+
+    #[test]
+    fn live_context_resolves_case_insensitive_wrappers_from_bare_names() {
+        let simulation = SimulationState {
+            waveforms: vec![waveform("v(OUT)", 1.25), waveform("i(VdD)", 2.5)],
+            ..SimulationState::default()
+        };
+        let context = SimulationContext::new(&simulation);
+
+        assert_eq!(context.get_waveform("oUt", None).unwrap(), expected(1.25));
+        assert_eq!(context.get_waveform("VDD", None).unwrap(), expected(2.5));
+    }
+
+    #[test]
+    fn per_analysis_context_resolves_case_insensitive_wrappers_from_bare_names() {
+        let waveforms = vec![waveform("|v(OUT)|", 3.75), waveform("i(VdD)", 5.0)];
+        let context = WaveformsContext::new(&waveforms);
+
+        assert_eq!(context.get_waveform("out", None).unwrap(), expected(3.75));
+        assert_eq!(context.get_waveform("vdd", None).unwrap(), expected(5.0));
+    }
+}
