@@ -1,0 +1,24 @@
+# RSPICE-VERILOG-STIMULUS 1
+#
+# One rising edge and one falling edge per vector, at `k*10 + 5` and
+# `k*10 + 10`, sampled at `k*10 + 8` between them. Every vector carries a
+# different word, so a half-cycle of lag is visible on every observation but
+# the first.
+
+module edge_forms
+
+input clk 1
+input d 4
+
+output rise 4
+output fall 4
+
+clock clk 5
+step 10
+settle 8
+
+vector 0011
+vector 0101
+vector 1001
+vector 1110
+vector 0110

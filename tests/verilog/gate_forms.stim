@@ -1,0 +1,40 @@
+# RSPICE-VERILOG-STIMULUS 1
+#
+# Four inputs, all sixteen combinations in ascending binary order. Small
+# enough that sampling would be a choice needing justification and exhaustion
+# is not.
+
+module gate_forms
+
+input a 1
+input b 1
+input c 1
+input d 1
+
+output wide 1
+output pair0 1
+output pair1 1
+output fanned0 1
+output fanned1 1
+output inverted0 1
+output inverted1 1
+
+step 10
+settle 5
+
+vector 0 0 0 0
+vector 0 0 0 1
+vector 0 0 1 0
+vector 0 0 1 1
+vector 0 1 0 0
+vector 0 1 0 1
+vector 0 1 1 0
+vector 0 1 1 1
+vector 1 0 0 0
+vector 1 0 0 1
+vector 1 0 1 0
+vector 1 0 1 1
+vector 1 1 0 0
+vector 1 1 0 1
+vector 1 1 1 0
+vector 1 1 1 1

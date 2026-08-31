@@ -1,0 +1,27 @@
+# RSPICE-VERILOG-STIMULUS 1
+#
+# Reset for two vectors, then five different data words in a row. The data
+# changes every vector on purpose: a delayed update is only distinguishable
+# from an immediate one while the value it carries is stale.
+
+module delay_forms
+
+input clk 1
+input rst 1
+input d 4
+
+output prompt 4
+output lagged 4
+output held 4
+
+clock clk 5
+step 10
+settle 8
+
+vector 1 0000
+vector 1 0000
+vector 0 0011
+vector 0 0101
+vector 0 1001
+vector 0 1110
+vector 0 0110

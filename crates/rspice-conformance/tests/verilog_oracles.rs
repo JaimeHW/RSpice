@@ -36,7 +36,7 @@ use std::fs;
 /// size; this tells you *which* language mechanism stopped being covered, which
 /// is the question anyone reading the failure actually has. Removing a case is
 /// allowed — editing this list is how you say you meant to.
-const REQUIRED_CASES: [(&str, &str); 6] = [
+const REQUIRED_CASES: [(&str, &str); 13] = [
     ("c17", "structural gate netlist (ISCAS85)"),
     (
         "gate_primitives",
@@ -49,7 +49,32 @@ const REQUIRED_CASES: [(&str, &str); 6] = [
     ("dff_register", "posedge clocking and asynchronous reset"),
     ("nba_ordering", "blocking versus non-blocking assignment"),
     ("xz_propagation", "four-state X and Z propagation"),
+    ("case_forms", "case, casez and casex, and an implicit sensitivity list"),
+    ("loop_forms", "the for, while and repeat loops"),
+    (
+        "delay_forms",
+        "intra-assignment and statement delays inside a process",
+    ),
+    (
+        "lvalue_forms",
+        "part-select, concatenation and bit-select assignment targets",
+    ),
+    (
+        "gate_forms",
+        "unnamed, multi-instance, n-input and multi-output gate spellings",
+    ),
+    ("bus_forms", "two continuous drivers resolving on one net"),
+    ("edge_forms", "negedge sensitivity and a register before its first write"),
 ];
+
+/// Cases whose answer depends on x or z, and which Verilator therefore cannot
+/// arbitrate.
+///
+/// Named rather than counted, and checked in both directions below: a case
+/// that silently gained Verilator would make the suite report a disagreement
+/// that is Verilator being two-state, and a two-state case that silently lost
+/// it would drop out of the oracle-versus-oracle check without saying so.
+const FOUR_STATE_CASES: [&str; 3] = ["xz_propagation", "bus_forms", "edge_forms"];
 
 fn corpus() -> Corpus {
     Corpus::load(&corpus_dir()).unwrap_or_else(|err| panic!("the Verilog corpus must load: {err}"))
@@ -93,28 +118,31 @@ fn the_corpus_is_complete_and_self_consistent() {
         );
     }
 
-    // The four-state case is the one entry Verilator cannot be held to. If it
-    // ever silently gains Verilator, the suite would start reporting a
-    // disagreement that is Verilator being two-state rather than anything
-    // being wrong.
-    let four_state = corpus
-        .case("xz_propagation")
-        .expect("checked by REQUIRED_CASES above");
-    assert!(four_state.admits(VerilogEngine::Icarus));
-    assert!(
-        !four_state.admits(VerilogEngine::Verilator),
-        "Verilator is a two-state simulator and cannot arbitrate X/Z"
-    );
+    // Every case runs on Icarus; only the four-state ones are held back from
+    // Verilator, and exactly those. Stated as a per-case equality rather than
+    // a count, so a case moving into or out of the four-state set has to be
+    // said out loud in `FOUR_STATE_CASES`.
+    for case in &corpus.cases {
+        assert!(
+            case.admits(VerilogEngine::Icarus),
+            "case '{}' names no four-state oracle",
+            case.name
+        );
+        let four_state = FOUR_STATE_CASES.contains(&case.name.as_str());
+        assert_eq!(
+            case.admits(VerilogEngine::Verilator),
+            !four_state,
+            "case '{}': Verilator is a two-state simulator, so it may arbitrate \
+             exactly the cases whose answers never contain x or z",
+            case.name
+        );
+    }
 
-    // Everything else must be comparable across both, or the oracle-vs-oracle
-    // check degenerates into one simulator talking to itself.
-    let both = corpus
-        .cases
-        .iter()
-        .filter(|case| case.admits(VerilogEngine::Icarus) && case.admits(VerilogEngine::Verilator))
-        .count();
+    // And the oracle-vs-oracle check must have something left to compare, or
+    // it degenerates into one simulator talking to itself.
+    let both = corpus.cases.len() - FOUR_STATE_CASES.len();
     assert!(
-        both >= REQUIRED_CASES.len() - 1,
+        both >= 8,
         "only {both} case(s) can be cross-checked between two oracles"
     );
 }
@@ -499,7 +527,52 @@ type Expected = &'static [&'static str];
 ///   `?` in a case item a don't-care, so `4'b1???` matches any selector whose
 ///   top bit is `1`, `4'b01??` the next, `4'b001?` the next, and `4'b0001` and
 ///   `4'b0000` reach the default.
-const EXPECTED: [(&str, Expected); 6] = [
+///
+/// * **case_forms** — the three case statements evaluated by hand over the
+///   eight selectors of `case_forms.stim`, with `mixed = a ^ b` worked out
+///   first. Each arm's label was matched against the selector's binary
+///   spelling: `case` exactly, `casez` with `?` matching anything, and `casex`
+///   likewise (the two agree here because no selector bit is x or z, which is
+///   what makes the case two-state clean). `hit` is set by one arm only.
+///
+/// * **loop_forms** — three closed forms, one per loop. `ones` is the
+///   population count of `d`; `shifted` is `(d << 3) & 0xff`, the `while`
+///   loop's three left shifts; `doubled` is `(d * 4) & 0xff`, the two
+///   self-additions of `repeat (2)`. The reset vectors are zero throughout.
+///
+/// * **delay_forms** — from the timing, not from the text. Vector `k` applies
+///   its inputs at `10k`, the edge is at `10k + 5`, and the sample at
+///   `10k + 8`. `prompt` is written at the edge, so it shows `d[k]`. `lagged`
+///   captures `d[k]` at the edge and updates at `10k + 11`, which is after
+///   vector `k`'s sample and before vector `k + 1`'s, so it shows `d[k - 1]`.
+///   `held` suspends its process to `10k + 9`, reads `d` there — still
+///   `d[k]`, since the next vector is not applied until `10(k + 1)` — and
+///   updates immediately, again landing between the two samples. Both
+///   therefore trail `prompt` by one observation, and both are zero for the
+///   two reset vectors and for the first vector after them, whose predecessor
+///   was a reset.
+///
+/// * **lvalue_forms** — `hi` and `lo` are the two halves of `d`, `swapped` is
+///   those halves exchanged, and `bit0` is `d[0]`. Worked out from the
+///   assignment targets: the two part selects write `swapped` from the
+///   opposite half of `d` each, and the concatenation target splits `d` most
+///   significant part first.
+///
+/// * **gate_forms** — the four truth tables over all sixteen input
+///   combinations: `wide` is `a & b & c & d`, `pair0` is `~(a & b)`, `pair1`
+///   is `~(c & d)`, both `fanned` outputs are `a` and both `inverted` outputs
+///   are `~b`.
+///
+/// * **bus_forms** — IEEE 1364-2005 table 5-1, applied per bit. One enable
+///   gives that driver's operand; neither gives z; both give the operand where
+///   the two agree and x where they differ, which is why the fifth vector
+///   reads `1xx0`.
+///
+/// * **edge_forms** — the rising edge at `10k + 5` writes `rise` from `d[k]`,
+///   and the falling edge at `10k` writes `fall` from whatever `rise` held
+///   then, which is `d[k - 1]`. Before any falling edge has run with a written
+///   `rise`, `fall` is the x that section 4.2 gives an unwritten `reg`.
+const EXPECTED: [(&str, Expected); 13] = [
     (
         "c17",
         &[
@@ -642,6 +715,98 @@ const EXPECTED: [(&str, Expected); 6] = [
             "and_x=x or_x=1 bus=z eq_case=1 eq_log=x sel=01",
             "and_x=x or_x=1 bus=z eq_case=1 eq_log=x sel=00",
             "and_x=x or_x=1 bus=z eq_case=1 eq_log=x sel=00",
+        ],
+    ),
+    (
+        "case_forms",
+        &[
+            "exact=10101010 wildz=11111111 wildx=11001100 hit=0",
+            "exact=10101010 wildz=11111111 wildx=11001100 hit=0",
+            "exact=11001100 wildz=01100110 wildx=01011010 hit=0",
+            "exact=01100110 wildz=01100110 wildx=10101010 hit=1",
+            "exact=00000000 wildz=00001111 wildx=00001111 hit=0",
+            "exact=00000000 wildz=11110000 wildx=01011010 hit=0",
+            "exact=00000000 wildz=00000000 wildx=00000000 hit=0",
+            "exact=00000000 wildz=11111111 wildx=01011010 hit=0",
+        ],
+    ),
+    (
+        "loop_forms",
+        &[
+            "ones=0000 shifted=00000000 doubled=00000000",
+            "ones=0101 shifted=10011000 doubled=11001100",
+            "ones=0001 shifted=00001000 doubled=00000100",
+            "ones=1000 shifted=11111000 doubled=11111100",
+            "ones=0000 shifted=00000000 doubled=00000000",
+            "ones=0100 shifted=10101000 doubled=01010100",
+            "ones=0001 shifted=00000000 doubled=00000000",
+            "ones=0100 shifted=01111000 doubled=00111100",
+        ],
+    ),
+    (
+        "delay_forms",
+        &[
+            "prompt=0000 lagged=0000 held=0000",
+            "prompt=0000 lagged=0000 held=0000",
+            "prompt=0011 lagged=0000 held=0000",
+            "prompt=0101 lagged=0011 held=0011",
+            "prompt=1001 lagged=0101 held=0101",
+            "prompt=1110 lagged=1001 held=1001",
+            "prompt=0110 lagged=1110 held=1110",
+        ],
+    ),
+    (
+        "lvalue_forms",
+        &[
+            "swapped=00000000 hi=0000 lo=0000 bit0=0",
+            "swapped=01011010 hi=1010 lo=0101 bit0=1",
+            "swapped=00001111 hi=1111 lo=0000 bit0=0",
+            "swapped=00000000 hi=0000 lo=0000 bit0=0",
+            "swapped=01110001 hi=0001 lo=0111 bit0=1",
+            "swapped=10111100 hi=1100 lo=1011 bit0=1",
+        ],
+    ),
+    (
+        "gate_forms",
+        &[
+            "wide=0 pair0=1 pair1=1 fanned0=0 fanned1=0 inverted0=1 inverted1=1",
+            "wide=0 pair0=1 pair1=1 fanned0=0 fanned1=0 inverted0=1 inverted1=1",
+            "wide=0 pair0=1 pair1=1 fanned0=0 fanned1=0 inverted0=1 inverted1=1",
+            "wide=0 pair0=1 pair1=0 fanned0=0 fanned1=0 inverted0=1 inverted1=1",
+            "wide=0 pair0=1 pair1=1 fanned0=0 fanned1=0 inverted0=0 inverted1=0",
+            "wide=0 pair0=1 pair1=1 fanned0=0 fanned1=0 inverted0=0 inverted1=0",
+            "wide=0 pair0=1 pair1=1 fanned0=0 fanned1=0 inverted0=0 inverted1=0",
+            "wide=0 pair0=1 pair1=0 fanned0=0 fanned1=0 inverted0=0 inverted1=0",
+            "wide=0 pair0=1 pair1=1 fanned0=1 fanned1=1 inverted0=1 inverted1=1",
+            "wide=0 pair0=1 pair1=1 fanned0=1 fanned1=1 inverted0=1 inverted1=1",
+            "wide=0 pair0=1 pair1=1 fanned0=1 fanned1=1 inverted0=1 inverted1=1",
+            "wide=0 pair0=1 pair1=0 fanned0=1 fanned1=1 inverted0=1 inverted1=1",
+            "wide=0 pair0=0 pair1=1 fanned0=1 fanned1=1 inverted0=0 inverted1=0",
+            "wide=0 pair0=0 pair1=1 fanned0=1 fanned1=1 inverted0=0 inverted1=0",
+            "wide=0 pair0=0 pair1=1 fanned0=1 fanned1=1 inverted0=0 inverted1=0",
+            "wide=1 pair0=0 pair1=0 fanned0=1 fanned1=1 inverted0=0 inverted1=0",
+        ],
+    ),
+    (
+        "bus_forms",
+        &[
+            "bus=1010 seen=1010",
+            "bus=0101 seen=0101",
+            "bus=zzzz seen=zzzz",
+            "bus=xxxx seen=xxxx",
+            "bus=1xx0 seen=1xx0",
+            "bus=1111 seen=1111",
+            "bus=0000 seen=0000",
+        ],
+    ),
+    (
+        "edge_forms",
+        &[
+            "rise=0011 fall=xxxx",
+            "rise=0101 fall=0011",
+            "rise=1001 fall=0101",
+            "rise=1110 fall=1001",
+            "rise=0110 fall=1110",
         ],
     ),
 ];

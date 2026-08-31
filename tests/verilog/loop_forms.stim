@@ -1,0 +1,33 @@
+# RSPICE-VERILOG-STIMULUS 1
+#
+# One rising edge per vector, sampled after it, with the same timing as the
+# corpus's other clocked cases: half period 5, step 10, settle 8.
+#
+# The reset is asserted twice -- once at the start, so every observation is of
+# a defined state, and once in the middle, so the clear path is exercised from
+# a non-zero one. The data words are chosen so that the three loops disagree:
+# a word whose popcount, left shift and quadruple are all different, a single
+# bit at each end, and all ones.
+
+module loop_forms
+
+input clk 1
+input rst 1
+input d 8
+
+output ones 4
+output shifted 8
+output doubled 8
+
+clock clk 5
+step 10
+settle 8
+
+vector 1 00000000
+vector 0 10110011
+vector 0 00000001
+vector 0 11111111
+vector 1 11111111
+vector 0 01010101
+vector 0 10000000
+vector 0 00001111

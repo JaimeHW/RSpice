@@ -1,0 +1,26 @@
+# RSPICE-VERILOG-STIMULUS 1
+#
+# Each driver alone, neither, and both -- twice for both, once where the two
+# operands disagree on every bit and once where they agree on some, so the
+# per-bit nature of the resolution is visible rather than assumed.
+
+module bus_forms
+
+input ena 1
+input enb 1
+input a 4
+input b 4
+
+output bus 4
+output seen 4
+
+step 10
+settle 5
+
+vector 1 0 1010 0101
+vector 0 1 1010 0101
+vector 0 0 1010 0101
+vector 1 1 1010 0101
+vector 1 1 1100 1010
+vector 1 1 1111 1111
+vector 0 1 1111 0000

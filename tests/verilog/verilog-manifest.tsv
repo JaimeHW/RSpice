@@ -32,3 +32,13 @@ ripple_adder.v	iverilog,verilator	8-bit carry chain, generate-unrolled from full
 dff_register.v	iverilog,verilator	posedge clocking, asynchronous reset, non-blocking vector update
 nba_ordering.v	iverilog,verilator	blocking versus non-blocking, arranged to be defined rather than raced
 xz_propagation.v	iverilog	four-state rules; Verilator is two-state by design and is excluded
+
+# Cases added by the construct-coverage audit: each closes a family the front
+# end implements and no case above reached.
+case_forms.v	iverilog,verilator	case, casez and casex on one selector, in an implicitly sensitive block
+loop_forms.v	iverilog,verilator	for, while and repeat, each computing one output of a clocked process
+delay_forms.v	iverilog,verilator	intra-assignment and statement delays against an undelayed assignment
+lvalue_forms.v	iverilog,verilator	part-select, concatenation and bit-select assignment targets
+gate_forms.v	iverilog,verilator	unnamed, multi-instance, n-input and multi-output gate spellings
+bus_forms.v	iverilog	two continuous drivers on one net; Verilator cannot arbitrate a z
+edge_forms.v	iverilog	negedge beside posedge, and a register before its first write

@@ -1,0 +1,27 @@
+# RSPICE-VERILOG-STIMULUS 1
+#
+# Words whose two halves differ, so a part select that wrote the wrong half or
+# a concatenation that split at the wrong place changes the answer. The reset
+# is asserted at the start and again from a non-zero state.
+
+module lvalue_forms
+
+input clk 1
+input rst 1
+input d 8
+
+output swapped 8
+output hi 4
+output lo 4
+output bit0 1
+
+clock clk 5
+step 10
+settle 8
+
+vector 1 00000000
+vector 0 10100101
+vector 0 11110000
+vector 1 11111111
+vector 0 00010111
+vector 0 11001011

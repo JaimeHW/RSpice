@@ -1,0 +1,32 @@
+# RSPICE-VERILOG-STIMULUS 1
+#
+# Eight selectors chosen so that each of the three case statements takes a
+# different arm from the other two at least once, and so that every arm of
+# every one of them -- including all three defaults -- is taken.
+#
+# The operands change halfway through, which is what makes the implicit
+# sensitivity list load-bearing: a process that woke only on `sel` would keep
+# the first pair's answers.
+
+module case_forms
+
+input sel 4
+input a 8
+input b 8
+
+output exact 8
+output wildz 8
+output wildx 8
+output hit 1
+
+step 10
+settle 5
+
+vector 0000 10101010 11001100
+vector 0001 10101010 11001100
+vector 0010 10101010 11001100
+vector 0011 10101010 11001100
+vector 0101 11110000 00001111
+vector 1010 11110000 00001111
+vector 1111 00000000 11111111
+vector 0110 00000000 11111111
