@@ -626,6 +626,11 @@ impl CircuitData {
                     continue;
                 }
 
+                // Past the skip check, so this instance is one the dispatch
+                // did not avoid. Counted here rather than at `evaluate` so the
+                // tally is of settle-loop work, not of every path that happens
+                // to call a model.
+                crate::xspice::settle_cost::note_instance_evaluation();
                 let instance = instances[index].make_mut();
                 instance.set_transient_companion_coefficients(companion_coefficients);
                 instance.set_xyce_one_step_order2(xyce_one_step_order2);

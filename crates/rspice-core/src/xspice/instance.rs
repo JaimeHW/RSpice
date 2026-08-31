@@ -861,9 +861,17 @@ impl SharedXspiceInstance {
     /// Callers on a per-step path should ask a cheap shared-borrow predicate
     /// whether the write would change anything before calling this — a write
     /// that stores what is already there still costs a copy.
+    ///
+    /// Each copy this actually takes is counted, so
+    /// `engine::xspice_settle_ratchet` can fail a change that puts the deep
+    /// copies back.
     #[inline]
     pub(crate) fn make_mut(&mut self) -> &mut XspiceInstance {
-        Arc::make_mut(&mut self.0)
+        let (instance, copied) = crate::xspice::settle_cost::make_mut_reporting_copy(&mut self.0);
+        if copied {
+            crate::xspice::settle_cost::note_instance_deep_copy();
+        }
+        instance
     }
 }
 

@@ -382,9 +382,17 @@ impl SharedXspiceEventValues {
     /// whether the write would change anything before calling this — a write
     /// that stores what is already there still costs a copy. The drain's
     /// predicate is [`XspiceEventScheduler::has_event_at_or_before`].
+    ///
+    /// Each copy this actually takes is counted, so
+    /// `engine::xspice_settle_ratchet` can fail a change that puts the deep
+    /// copies back.
     #[inline]
     pub(crate) fn make_mut(&mut self) -> &mut XspiceEventValues {
-        Arc::make_mut(&mut self.0)
+        let (values, copied) = crate::xspice::settle_cost::make_mut_reporting_copy(&mut self.0);
+        if copied {
+            crate::xspice::settle_cost::note_event_values_deep_copy();
+        }
+        values
     }
 }
 
@@ -434,9 +442,17 @@ impl SharedXspiceEventQueue {
     /// [`XspiceEventScheduler::has_event_at_or_before`] for the drain, and
     /// `XspiceInstance::has_pending_events` for the scheduling sweep. Both
     /// answer no on a quiet analog step, which is when the sharing pays.
+    ///
+    /// Each copy this actually takes is counted, so
+    /// `engine::xspice_settle_ratchet` can fail a change that puts the deep
+    /// copies back.
     #[inline]
     pub(crate) fn make_mut(&mut self) -> &mut XspiceEventScheduler {
-        Arc::make_mut(&mut self.0)
+        let (queue, copied) = crate::xspice::settle_cost::make_mut_reporting_copy(&mut self.0);
+        if copied {
+            crate::xspice::settle_cost::note_event_queue_deep_copy();
+        }
+        queue
     }
 }
 

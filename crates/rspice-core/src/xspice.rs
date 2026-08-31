@@ -58,6 +58,12 @@ pub mod ifspec;
 mod instance;
 mod metadata;
 mod registry;
+// Exact counters for the settle loop's dispatch and copy-on-write structures,
+// read by the `engine::xspice_settle_ratchet` CI ratchet. Rank 9 because its
+// writers are this module's `instance` and `event` (rank 9) and
+// `circuit::external_models` (rank 10); a counter module above either would be
+// an upward edge from both.
+pub(crate) mod settle_cost;
 mod traits;
 
 // Built-in code models
