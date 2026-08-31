@@ -577,6 +577,16 @@ const fn compact_layout_for_width(local_width: f32, has_touch_screen: bool) -> b
     local_width <= COMPACT_BREAKPOINT || has_touch_screen
 }
 
+const fn tool_status_copy(available: bool, shown_in_profile: bool) -> &'static str {
+    if !available {
+        "specified · unavailable"
+    } else if shown_in_profile {
+        "active profile"
+    } else {
+        "available by deep link"
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct ToolCardLayout {
     icon: Rect,
@@ -687,11 +697,7 @@ fn tool_card(
     }
 
     let status_font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let profile_copy = if row.shown_in_profile(profile) {
-        "active profile"
-    } else {
-        "available by deep link"
-    };
+    let profile_copy = tool_status_copy(available, row.shown_in_profile(profile));
     let status_text_width = ui
         .painter()
         .layout_no_wrap(
@@ -737,7 +743,9 @@ fn tool_card(
         detail_font,
         t.color.text_dim,
     );
-    let status_tone = if row.shown_in_profile(profile) {
+    let status_tone = if !available {
+        t.color.warn
+    } else if row.shown_in_profile(profile) {
         t.color.ok
     } else {
         t.color.text_faint
@@ -1221,6 +1229,14 @@ mod tests {
         assert!(compact_layout_for_width(COMPACT_BREAKPOINT, false));
         assert!(!compact_layout_for_width(COMPACT_BREAKPOINT + 1.0, false));
         assert!(compact_layout_for_width(1_440.0, true));
+    }
+
+    #[test]
+    fn unavailable_tools_are_never_described_as_active_or_deep_link_available() {
+        assert_eq!(tool_status_copy(false, true), "specified · unavailable");
+        assert_eq!(tool_status_copy(false, false), "specified · unavailable");
+        assert_eq!(tool_status_copy(true, true), "active profile");
+        assert_eq!(tool_status_copy(true, false), "available by deep link");
     }
 
     #[test]

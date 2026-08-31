@@ -800,6 +800,7 @@ impl RSpiceApp {
     }
 
     fn render_frame_dialogs(&mut self, ctx: &Context) {
+        self.synchronize_route_owned_dialogs();
         self.synchronize_design_management_route();
         self.render_confirmation_dialog(ctx);
         dialogs::property_dialog::render_property_dialog(ctx, &mut self.state);
@@ -887,6 +888,64 @@ impl RSpiceApp {
         } else if !route_active && self.state.dialogs.design_management.open {
             self.state.dialogs.design_management.close_and_discard();
         }
+    }
+
+    /// Keep canonical overlay/manager routes synchronized with their
+    /// transient egui owners. Commands open the route and dialog together;
+    /// this also covers direct deep links, Back/Forward, and restored
+    /// sessions without leaving a route that paints only its old workspace.
+    fn synchronize_route_owned_dialogs(&mut self) {
+        let surface = self.state.workbench.current_route().surface_id();
+
+        if surface == crate::workbench::SurfaceId::CommandPalette {
+            if !self.state.dialogs.command_palette.open {
+                self.state.dialogs.command_palette.open_routed();
+            }
+        } else if self.state.dialogs.command_palette.route_owned {
+            self.state.dialogs.command_palette.close();
+        }
+
+        if surface == crate::workbench::SurfaceId::HelpCenter {
+            if !self.state.dialogs.help_center.open {
+                self.state
+                    .dialogs
+                    .help_center
+                    .open_routed(crate::workbench::app::HelpCenterPage::Help);
+            }
+        } else if self.state.dialogs.help_center.route_owned {
+            self.state.dialogs.help_center.close();
+        }
+    }
+}
+
+/// Close a route-owned transient surface without stranding its canonical URL.
+/// Ordinary opens return to their exact source; a direct deep link replaces
+/// itself with the currently projected primary workspace.
+pub(crate) fn close_route_owned_transient(
+    state: &mut AppState,
+    surface: crate::workbench::SurfaceId,
+    label: &str,
+) {
+    if state.workbench.current_route().surface_id() != surface {
+        return;
+    }
+    if state
+        .workbench
+        .navigate_back(crate::workbench::RouteTransitionSource::User)
+        .is_some()
+    {
+        return;
+    }
+    let fallback = crate::workbench::SurfaceRoute::surface(
+        crate::workbench::SurfaceId::from_workspace(state.workbench.workspace),
+    );
+    if let Err(error) = state
+        .workbench
+        .replace_route(fallback, crate::workbench::RouteTransitionSource::User)
+    {
+        state.push_user_message(ConsoleMessage::warning(format!(
+            "Could not close {label}: {error}"
+        )));
     }
 }
 
@@ -1858,6 +1917,71 @@ mod tests {
             .expect("Design workspace route is executable");
         app.synchronize_design_management_route();
         assert!(!app.state.dialogs.design_management.open);
+    }
+
+    #[test]
+    fn direct_command_palette_and_help_routes_restore_their_dialog_owners() {
+        use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
+
+        let mut app = RSpiceApp::test_instance();
+        app.state
+            .workbench
+            .replace_route(
+                SurfaceRoute::surface(SurfaceId::CommandPalette),
+                RouteTransitionSource::Restore,
+            )
+            .expect("Command Palette route is executable");
+        app.synchronize_route_owned_dialogs();
+        assert!(app.state.dialogs.command_palette.open);
+        assert!(app.state.dialogs.command_palette.route_owned);
+
+        app.state
+            .workbench
+            .replace_route(
+                SurfaceRoute::surface(SurfaceId::HelpCenter),
+                RouteTransitionSource::BrowserPop,
+            )
+            .expect("Help Center route is executable");
+        app.synchronize_route_owned_dialogs();
+        assert!(!app.state.dialogs.command_palette.open);
+        assert!(app.state.dialogs.help_center.open);
+        assert!(app.state.dialogs.help_center.route_owned);
+
+        app.state
+            .workbench
+            .replace_route(
+                SurfaceRoute::surface(SurfaceId::Design),
+                RouteTransitionSource::BrowserPop,
+            )
+            .expect("Design route is executable");
+        app.synchronize_route_owned_dialogs();
+        assert!(!app.state.dialogs.help_center.open);
+    }
+
+    #[test]
+    fn route_owned_transient_close_returns_to_source_or_safe_workspace() {
+        use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
+
+        let source = SurfaceRoute::surface(SurfaceId::Design);
+        let palette = SurfaceRoute::surface(SurfaceId::CommandPalette);
+        let mut state = AppState::default();
+        state
+            .workbench
+            .navigate(palette, RouteTransitionSource::User)
+            .expect("palette route opens");
+        close_route_owned_transient(&mut state, SurfaceId::CommandPalette, "Command Palette");
+        assert_eq!(state.workbench.current_route(), source);
+
+        let mut direct = AppState::default();
+        direct
+            .workbench
+            .replace_route(
+                SurfaceRoute::surface(SurfaceId::HelpCenter),
+                RouteTransitionSource::Restore,
+            )
+            .expect("direct Help route opens");
+        close_route_owned_transient(&mut direct, SurfaceId::HelpCenter, "Help Center");
+        assert_eq!(direct.workbench.current_route(), source);
     }
 
     #[test]

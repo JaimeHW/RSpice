@@ -1,9 +1,11 @@
 //! Canonical GUI surface identities and immutable design metadata.
 //!
-//! Values in this module are a direct Rust projection of
-//! `mockups/rspice-workbench-host/implementation/surface-registry.json`.
-//! They describe product/design identity only; catalog presence is not an
-//! implementation, engine, platform, entitlement, or release-readiness claim.
+//! Identity, labels, archetypes, tiers, and deep links begin as a Rust
+//! projection of `mockups/rspice-workbench-host/implementation/surface-registry.json`.
+//! Release status is deliberately fail-closed against the executable Rust
+//! route registry: a design-specification release target remains Preview here
+//! until a complete route owner is registered. Catalog presence alone is not
+//! an implementation, engine, platform, entitlement, or readiness claim.
 
 use std::{fmt, str::FromStr};
 
@@ -257,7 +259,7 @@ define_surface_catalog! {
     Models => { id: "models", label: "Models and libraries", archetype: PrimaryWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?view=models" },
     Netlist => { id: "netlist", label: "Code and automation", archetype: PrimaryWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?view=netlist" },
     ReleaseCockpit => { id: "release-cockpit", label: "Release closure · RC-19", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=release-cockpit" },
-    MultiTestStudio => { id: "multi-test-studio", label: "AFE release verification", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=multi-test-studio" },
+    MultiTestStudio => { id: "multi-test-studio", label: "AFE release verification", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: Preview, deep_link: "?surface=multi-test-studio" },
     AmsWorkbench => { id: "ams-workbench", label: "AMS · mixed-signal verification", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=ams-workbench" },
     RfWorkbench => { id: "rf-workbench", label: "RF · receiver and PA verification", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=rf-workbench" },
     HighSigmaWorkbench => { id: "high-sigma-workbench", label: "High-sigma variation", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=high-sigma-workbench" },
@@ -268,15 +270,15 @@ define_surface_catalog! {
     ReliabilityWorkbench => { id: "reliability-workbench", label: "Reliability, fault and SOA", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=reliability-workbench" },
     VisualizationStudio => { id: "visualization-studio", label: "Visualization Studio", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=visualization-studio" },
     DigitalEventWorkbench => { id: "digital-event-workbench", label: "Digital & AMS event viewer", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=digital-event-workbench" },
-    RfDataDisplayWorkbench => { id: "rf-data-display-workbench", label: "RF data display worksheet", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=rf-data-display-workbench" },
+    RfDataDisplayWorkbench => { id: "rf-data-display-workbench", label: "RF data display worksheet", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: Preview, deep_link: "?surface=rf-data-display-workbench" },
     MeasurementInterchangeWorkbench => { id: "measurement-interchange-workbench", label: "Measurement data interchange", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=measurement-interchange-workbench" },
-    StatisticalVisualizationWorkbench => { id: "statistical-visualization-workbench", label: "Statistical visualization laboratory", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=statistical-visualization-workbench" },
+    StatisticalVisualizationWorkbench => { id: "statistical-visualization-workbench", label: "Statistical visualization laboratory", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: Preview, deep_link: "?surface=statistical-visualization-workbench" },
     ReportAuthoring => { id: "report-authoring", label: "Verification report · RC-19", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=report-authoring" },
     ModelEditor => { id: "model-editor", label: "Device model editor", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=model-editor" },
     PcellDesigner => { id: "pcell-designer", label: "Parameterized-cell designer", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=pcell-designer" },
     ModelExtraction => { id: "model-extraction", label: "Model extraction · BSIM4 candidate", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=model-extraction" },
     ModelCorrelation => { id: "model-correlation", label: "Measurement correlation", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=model-correlation" },
-    JobDiagnostics => { id: "job-diagnostics", label: "Failure diagnostics · Run 40", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=job-diagnostics" },
+    JobDiagnostics => { id: "job-diagnostics", label: "Failure diagnostics · Run 40", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: Preview, deep_link: "?surface=job-diagnostics" },
     RegressionOrchestration => { id: "regression-orchestration", label: "Regression orchestration · main", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=regression-orchestration" },
     ApiBrowser => { id: "api-browser", label: "Automation API browser", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=api-browser" },
     FastspiceWorkbench => { id: "fastspice-workbench", label: "FastSPICE · full-chip and memory", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=fastspice-workbench" },
@@ -287,14 +289,14 @@ define_surface_catalog! {
     PowerElectronicsWorkbench => { id: "power-electronics-workbench", label: "Power electronics design center", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=power-electronics-workbench" },
     InstrumentWorkbench => { id: "instrument-workbench", label: "Measurement and calibration hub", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=instrument-workbench" },
     PcbWorkbench => { id: "pcb-workbench", label: "PCB and laminate authoring", archetype: SpecialistWorkspace, tier: QualifiedExternalFirst, status: ExternalFirst, deep_link: "?surface=pcb-workbench" },
-    CliBatchWorkbench => { id: "cli-batch-workbench", label: "CLI, batch and reproducible execution", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=cli-batch-workbench" },
+    CliBatchWorkbench => { id: "cli-batch-workbench", label: "CLI, batch and reproducible execution", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: Preview, deep_link: "?surface=cli-batch-workbench" },
     DesignMigrationWorkbench => { id: "design-migration-workbench", label: "Process migration and layout reuse", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=design-migration-workbench" },
     RfApplicationWorkbench => { id: "rf-application-workbench", label: "RF application synthesis and characterization", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=rf-application-workbench" },
     CosimulationWorkbench => { id: "cosimulation-workbench", label: "System co-simulation and external runtimes", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=cosimulation-workbench" },
     ComplianceLabWorkbench => { id: "compliance-lab-workbench", label: "High-speed compliance laboratory", archetype: SpecialistWorkspace, tier: QualifiedExternalFirst, status: ExternalFirst, deep_link: "?surface=compliance-lab-workbench" },
     QuantumWorkbench => { id: "quantum-workbench", label: "Quantum electronics design center", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=quantum-workbench" },
     SolverQualificationCenter => { id: "solver-qualification-center", label: "Simulator qualification center", archetype: SpecialistWorkspace, tier: Internal, status: InternalOnly, deep_link: "?surface=solver-qualification-center" },
-    DeckCompatibilityCenter => { id: "deck-compatibility-center", label: "Netlist compatibility and migration", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=deck-compatibility-center" },
+    DeckCompatibilityCenter => { id: "deck-compatibility-center", label: "Netlist compatibility and migration", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: Preview, deep_link: "?surface=deck-compatibility-center" },
     ProtectedIpCenter => { id: "protected-ip-center", label: "Protected model and IP execution", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=protected-ip-center" },
     LibraryCellviewManager => { id: "library-cellview-manager", label: "Library, cellview, symbol and form authoring", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=library-cellview-manager" },
     ProjectLauncher => { id: "project-launcher", label: "Project launcher", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=project-launcher" },
@@ -303,16 +305,16 @@ define_surface_catalog! {
     AccountOrganization => { id: "account-organization", label: "Account and administration", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=account-organization" },
     CommandPalette => { id: "command-palette", label: "Command palette", archetype: Overlay, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=command-palette" },
     JobsManager => { id: "jobs-manager", label: "Jobs, targets and run history", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=jobs-manager" },
-    WorkflowDialog => { id: "workflow-dialog", label: "Transactional workflow dialog", archetype: Modal, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=workflow-dialog" },
+    WorkflowDialog => { id: "workflow-dialog", label: "Transactional workflow dialog", archetype: Modal, tier: ReleaseTarget, status: Preview, deep_link: "?surface=workflow-dialog" },
     NotificationCenter => { id: "notification-center", label: "Notifications and activity", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=notification-center" },
     HelpCenter => { id: "help-center", label: "Help center", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=help-center" },
     FeatureAvailability => { id: "feature-availability", label: "Capability and platform matrix", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=feature-availability" },
     ProductReadinessCenter => { id: "product-readiness-center", label: "Product readiness contracts", archetype: Internal, tier: Internal, status: InternalOnly, deep_link: "?surface=product-readiness-center" },
     SpecialistToolBrowser => { id: "specialist-tool-browser", label: "Specialist tool browser", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=specialist-tool-browser" },
-    MobileNavigation => { id: "mobile-navigation", label: "Compact task navigation", archetype: Overlay, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=mobile-navigation" },
-    MobileTaskHandoff => { id: "mobile-task-handoff", label: "Qualified-target handoff", archetype: Modal, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=mobile-task-handoff" },
-    SurfaceContextMenu => { id: "surface-context-menu", label: "Selection context menu", archetype: Overlay, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=surface-context-menu" },
-    DockedTool => { id: "docked-tool", label: "Docked subordinate tool", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=docked-tool" },
+    MobileNavigation => { id: "mobile-navigation", label: "Compact task navigation", archetype: Overlay, tier: ReleaseTarget, status: Preview, deep_link: "?surface=mobile-navigation" },
+    MobileTaskHandoff => { id: "mobile-task-handoff", label: "Qualified-target handoff", archetype: Modal, tier: ReleaseTarget, status: Preview, deep_link: "?surface=mobile-task-handoff" },
+    SurfaceContextMenu => { id: "surface-context-menu", label: "Selection context menu", archetype: Overlay, tier: ReleaseTarget, status: Preview, deep_link: "?surface=surface-context-menu" },
+    DockedTool => { id: "docked-tool", label: "Docked subordinate tool", archetype: Manager, tier: ReleaseTarget, status: Preview, deep_link: "?surface=docked-tool" },
 }
 
 impl fmt::Display for SurfaceId {
@@ -404,8 +406,8 @@ mod tests {
                 .filter(|surface| surface.release_status() == status)
                 .count()
         };
-        assert_eq!(count_status(ReleaseStatus::ReleaseScope), 32);
-        assert_eq!(count_status(ReleaseStatus::Preview), 24);
+        assert_eq!(count_status(ReleaseStatus::ReleaseScope), 21);
+        assert_eq!(count_status(ReleaseStatus::Preview), 35);
         assert_eq!(count_status(ReleaseStatus::ExternalFirst), 6);
         assert_eq!(count_status(ReleaseStatus::InternalOnly), 2);
 

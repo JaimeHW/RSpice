@@ -2056,7 +2056,7 @@ impl Command {
                 app.state.ui.code_workspace.page =
                     crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
             }
-            Self::CommandPalette => app.state.dialogs.command_palette.open(),
+            Self::CommandPalette => open_command_palette(app),
             Self::KeyboardShortcuts => app.state.dialogs.shortcuts_help = true,
             Self::AccountOrganization => super::account_organization::open(app),
             Self::License => app.open_license_dialog(),
@@ -2185,39 +2185,59 @@ impl Command {
                         ));
                 }
             }
-            Self::HelpCenter => app
-                .state
-                .dialogs
-                .help_center
-                .open(crate::workbench::app::HelpCenterPage::Help),
-            Self::ReleaseNotes => app
-                .state
-                .dialogs
-                .help_center
-                .open(crate::workbench::app::HelpCenterPage::ReleaseNotes),
-            Self::MigrationGuide => app
-                .state
-                .dialogs
-                .help_center
-                .open(crate::workbench::app::HelpCenterPage::MigrationGuide),
-            Self::SystemDiagnostics => app
-                .state
-                .dialogs
-                .help_center
-                .open(crate::workbench::app::HelpCenterPage::Diagnostics),
-            Self::SupportBundle => app
-                .state
-                .dialogs
-                .help_center
-                .open(crate::workbench::app::HelpCenterPage::SupportBundle),
-            Self::LegalPrivacy => app
-                .state
-                .dialogs
-                .help_center
-                .open(crate::workbench::app::HelpCenterPage::LegalPrivacy),
+            Self::HelpCenter => open_help_center(app, crate::workbench::app::HelpCenterPage::Help),
+            Self::ReleaseNotes => {
+                open_help_center(app, crate::workbench::app::HelpCenterPage::ReleaseNotes)
+            }
+            Self::MigrationGuide => {
+                open_help_center(app, crate::workbench::app::HelpCenterPage::MigrationGuide)
+            }
+            Self::SystemDiagnostics => {
+                open_help_center(app, crate::workbench::app::HelpCenterPage::Diagnostics)
+            }
+            Self::SupportBundle => {
+                open_help_center(app, crate::workbench::app::HelpCenterPage::SupportBundle)
+            }
+            Self::LegalPrivacy => {
+                open_help_center(app, crate::workbench::app::HelpCenterPage::LegalPrivacy)
+            }
             Self::About => app.state.dialogs.about = true,
         }
     }
+}
+
+fn open_command_palette(app: &mut RSpiceApp) {
+    let route = super::SurfaceRoute::surface(super::SurfaceId::CommandPalette);
+    if app.state.workbench.current_route() != route
+        && let Err(error) = app
+            .state
+            .workbench
+            .navigate(route, super::RouteTransitionSource::User)
+    {
+        app.state
+            .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
+                "The Command Palette could not be opened: {error}"
+            )));
+        return;
+    }
+    app.state.dialogs.command_palette.open_routed();
+}
+
+fn open_help_center(app: &mut RSpiceApp, page: crate::workbench::app::HelpCenterPage) {
+    let route = super::SurfaceRoute::surface(super::SurfaceId::HelpCenter);
+    if app.state.workbench.current_route() != route
+        && let Err(error) = app
+            .state
+            .workbench
+            .navigate(route, super::RouteTransitionSource::User)
+    {
+        app.state
+            .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
+                "The Help Center could not be opened: {error}"
+            )));
+        return;
+    }
+    app.state.dialogs.help_center.open_routed(page);
 }
 
 /// Whether the netlist document — not merely the workspace that hosts it — is

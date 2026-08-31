@@ -122,14 +122,26 @@ impl RSpiceApp {
                 }
             }
             _ => {
-                self.state.dialogs.help_center.close();
+                self.close_help_center_route();
                 return;
             }
         }
 
         if let Some(HelpAction::Command(command)) = action {
-            self.state.dialogs.help_center.close();
+            self.close_help_center_route();
             command.execute(self);
+        }
+    }
+
+    fn close_help_center_route(&mut self) {
+        let route_owned = self.state.dialogs.help_center.route_owned;
+        self.state.dialogs.help_center.close();
+        if route_owned {
+            crate::workbench::app::close_route_owned_transient(
+                &mut self.state,
+                crate::workbench::SurfaceId::HelpCenter,
+                "Help Center",
+            );
         }
     }
 

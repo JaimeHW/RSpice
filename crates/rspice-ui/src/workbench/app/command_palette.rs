@@ -1048,11 +1048,19 @@ impl RSpiceApp {
 
         let close = keys.close || run.is_some();
         if close {
-            self.state.dialogs.command_palette.open = false;
+            let route_owned = self.state.dialogs.command_palette.route_owned;
+            self.state.dialogs.command_palette.close();
             ctx.data_mut(|data| {
                 data.remove_temp::<PaletteScope>(scope_state_id);
             });
             restore_focus(ctx, focus_state_id, search_id(), modal_layer);
+            if route_owned {
+                crate::workbench::app::close_route_owned_transient(
+                    &mut self.state,
+                    crate::workbench::SurfaceId::CommandPalette,
+                    "Command Palette",
+                );
+            }
         }
 
         if let Some(entry) = run {

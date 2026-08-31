@@ -336,6 +336,10 @@ pub struct CommandPaletteState {
     /// Commands run from the palette, newest first — leads the empty-query
     /// list under a RECENT header. Survives close/reopen, capped at five.
     pub(crate) recent: Vec<crate::workbench::commands::vocabulary::Command>,
+    /// Whether the palette owns the canonical `?surface=command-palette`
+    /// route. Contextual test and embedded hosts may still render the palette
+    /// without changing application navigation.
+    pub(crate) route_owned: bool,
 }
 
 /// Retained draft for the mockup-owned project technology transaction.
@@ -408,6 +412,16 @@ impl CommandPaletteState {
         self.selected = 0;
         self.want_focus = true;
         self.initial_scope = None;
+    }
+
+    pub(crate) fn open_routed(&mut self) {
+        self.open();
+        self.route_owned = true;
+    }
+
+    pub(crate) fn close(&mut self) {
+        self.open = false;
+        self.route_owned = false;
     }
 
     pub(crate) fn open_in_scope(&mut self, scope: &str) {
@@ -1969,6 +1983,8 @@ pub(crate) struct HelpCenterDialogState {
     pub(crate) query: String,
     pub(crate) include_session_log: bool,
     pub(crate) disclosure_reviewed: bool,
+    /// Whether this dialog owns the canonical `?surface=help-center` route.
+    pub(crate) route_owned: bool,
 }
 
 impl Default for HelpCenterDialogState {
@@ -1979,6 +1995,7 @@ impl Default for HelpCenterDialogState {
             query: String::new(),
             include_session_log: true,
             disclosure_reviewed: false,
+            route_owned: false,
         }
     }
 }
@@ -1992,10 +2009,16 @@ impl HelpCenterDialogState {
         }
     }
 
+    pub(crate) fn open_routed(&mut self, page: HelpCenterPage) {
+        self.open(page);
+        self.route_owned = true;
+    }
+
     pub(crate) fn close(&mut self) {
         self.open = false;
         self.query.clear();
         self.disclosure_reviewed = false;
+        self.route_owned = false;
     }
 }
 

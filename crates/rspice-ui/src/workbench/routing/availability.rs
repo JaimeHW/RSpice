@@ -153,6 +153,37 @@ pub const fn surface_availability(surface: SurfaceId) -> SurfaceExecutionAvailab
             executor: "rspice-ui capability and platform matrix manager",
             evidence_boundary: "Read-only disclosure executor present; bundled design fixtures are not product readiness evidence.",
         },
+        SurfaceId::CommandPalette => SurfaceExecutionAvailability::Available {
+            executor: "rspice-ui route-owned command palette overlay",
+            evidence_boundary: "Canonical deep links, browser history, keyboard focus restoration, scoped command search, availability disclosure, and execution through the typed command registry are executable.",
+        },
+        SurfaceId::HelpCenter => SurfaceExecutionAvailability::Available {
+            executor: "rspice-ui route-owned help and diagnostics manager",
+            evidence_boundary: "Canonical deep links, browser history, versioned guidance, release and migration notes, diagnostics, support-bundle disclosure, and legal/privacy notices are executable. External support delivery is not implied.",
+        },
+        SurfaceId::MultiTestStudio
+        | SurfaceId::RfDataDisplayWorkbench
+        | SurfaceId::StatisticalVisualizationWorkbench
+        | SurfaceId::JobDiagnostics
+        | SurfaceId::CliBatchWorkbench
+        | SurfaceId::DeckCompatibilityCenter => SurfaceExecutionAvailability::Unavailable {
+            reason: "This specialist workspace is a governed design specification, but this build does not ship its complete Rust document and interaction executor. Use its owning primary workspace for currently implemented tasks.",
+        },
+        SurfaceId::WorkflowDialog => SurfaceExecutionAvailability::Unavailable {
+            reason: "Transactional workflow dialogs are available only from the command or object that supplies their required draft context; the generic catalog identity is not a standalone destination.",
+        },
+        SurfaceId::MobileNavigation => SurfaceExecutionAvailability::Unavailable {
+            reason: "Compact task navigation is exposed automatically by the responsive workbench at supported viewport and input sizes; the contextual drawer is not a standalone destination.",
+        },
+        SurfaceId::MobileTaskHandoff => SurfaceExecutionAvailability::Unavailable {
+            reason: "Qualified-target handoff is not implemented in this build, so no navigation action or deep link is offered.",
+        },
+        SurfaceId::SurfaceContextMenu => SurfaceExecutionAvailability::Unavailable {
+            reason: "Selection context menus are opened only for an exact active selection and document owner; the generic catalog identity is not a standalone destination.",
+        },
+        SurfaceId::DockedTool => SurfaceExecutionAvailability::Unavailable {
+            reason: "Docked tools are opened by their owning document with a concrete tool identity; the generic catalog identity is not a standalone destination.",
+        },
         _ => SurfaceExecutionAvailability::Unavailable {
             reason: "A canonical GUI design exists, but no complete Rust route executor is registered for this surface.",
         },
@@ -180,6 +211,7 @@ pub fn require_available(route: SurfaceRoute) -> Result<(), SurfaceRouteUnavaila
 mod tests {
     use super::*;
     use crate::product::{ObjectRef, ProductObjectKind};
+    use crate::workbench::routing::surface_catalog::ReleaseStatus;
     use uuid::Uuid;
 
     #[test]
@@ -208,12 +240,48 @@ mod tests {
                 SurfaceId::Preferences,
                 SurfaceId::DesignManagement,
                 SurfaceId::AccountOrganization,
+                SurfaceId::CommandPalette,
                 SurfaceId::JobsManager,
                 SurfaceId::NotificationCenter,
+                SurfaceId::HelpCenter,
                 SurfaceId::FeatureAvailability,
                 SurfaceId::SpecialistToolBrowser,
             ]
         );
+    }
+
+    #[test]
+    fn every_release_scope_surface_has_a_registered_route_executor() {
+        let missing = SurfaceId::ALL
+            .into_iter()
+            .filter(|surface| surface.release_status() == ReleaseStatus::ReleaseScope)
+            .filter(|surface| !surface_availability(*surface).can_open())
+            .collect::<Vec<_>>();
+        assert!(
+            missing.is_empty(),
+            "release-scope surfaces without route executors: {missing:?}"
+        );
+    }
+
+    #[test]
+    fn contextual_and_unimplemented_catalog_routes_fail_with_specific_guidance() {
+        let cases = [
+            (SurfaceId::MultiTestStudio, "owning primary workspace"),
+            (SurfaceId::WorkflowDialog, "required draft context"),
+            (SurfaceId::MobileNavigation, "responsive workbench"),
+            (SurfaceId::MobileTaskHandoff, "not implemented"),
+            (SurfaceId::SurfaceContextMenu, "exact active selection"),
+            (SurfaceId::DockedTool, "concrete tool identity"),
+        ];
+        for (surface, expected) in cases {
+            let error = require_available(SurfaceRoute::surface(surface))
+                .expect_err("catalog-only route must fail closed");
+            assert!(
+                error.reason.contains(expected),
+                "{surface} did not explain its unavailable route: {}",
+                error.reason
+            );
+        }
     }
 
     #[test]

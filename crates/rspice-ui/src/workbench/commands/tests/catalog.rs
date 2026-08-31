@@ -140,3 +140,35 @@ fn protected_commands_keep_the_exact_mockup_action_ids() {
         "Model & library catalog"
     );
 }
+
+#[test]
+fn command_palette_and_help_commands_own_canonical_routes() {
+    let mut palette = RSpiceApp::test_instance();
+    let palette_source = palette.state.workbench.current_route();
+    Command::CommandPalette.execute(&mut palette);
+    assert_eq!(
+        palette.state.workbench.current_route(),
+        crate::workbench::SurfaceRoute::surface(crate::workbench::SurfaceId::CommandPalette)
+    );
+    assert!(palette.state.dialogs.command_palette.open);
+    assert!(palette.state.dialogs.command_palette.route_owned);
+    assert_eq!(
+        palette.state.workbench.previous_route(),
+        Some(palette_source)
+    );
+
+    let mut help = RSpiceApp::test_instance();
+    let help_source = help.state.workbench.current_route();
+    Command::ReleaseNotes.execute(&mut help);
+    assert_eq!(
+        help.state.workbench.current_route(),
+        crate::workbench::SurfaceRoute::surface(crate::workbench::SurfaceId::HelpCenter)
+    );
+    assert!(help.state.dialogs.help_center.open);
+    assert!(help.state.dialogs.help_center.route_owned);
+    assert_eq!(
+        help.state.dialogs.help_center.page,
+        crate::workbench::app::HelpCenterPage::ReleaseNotes
+    );
+    assert_eq!(help.state.workbench.previous_route(), Some(help_source));
+}
