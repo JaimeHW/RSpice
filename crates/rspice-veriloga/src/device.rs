@@ -2324,15 +2324,21 @@ impl VerilogADevice {
             not(feature = "native"),
             not(all(feature = "wasm-jit", target_arch = "wasm32"))
         ))]
-        if model.noise_process_schema >= 1 {
-            Self::validate_portable_noise_assignment_split(&model)?;
+        if let Some(artifact) = canonical_artifact {
+            crate::canonical_compat::validate_canonical_artifact_identity_for_model(
+                &model, artifact,
+            )
+            .map_err(|detail| {
+                VmError::InvalidModel(format!("canonical artifact/model mismatch: {detail}"))
+            })?;
         }
-
         #[cfg(all(
             not(feature = "native"),
             not(all(feature = "wasm-jit", target_arch = "wasm32"))
         ))]
-        let _ = canonical_artifact;
+        if model.noise_process_schema >= 1 {
+            Self::validate_portable_noise_assignment_split(&model)?;
+        }
 
         let num_terminals = model.num_terminals;
         let supplied_terminals = nodes.len().min(num_terminals);

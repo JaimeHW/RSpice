@@ -414,6 +414,90 @@ endmodule
     }
 
     #[test]
+    fn canonical_validator_rejects_corrupt_grounded_current_stamp_endpoints() {
+        use rspice_veriloga::codegen::StampIndex;
+
+        fn compile_pair(
+            source: &str,
+        ) -> (
+            rspice_veriloga::CompiledModel,
+            rspice_veriloga::canonical_ir::CanonicalIrArtifact,
+        ) {
+            let compiler =
+                rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions::default());
+            (
+                compiler
+                    .compile(source)
+                    .expect("grounded current model compiles"),
+                compiler
+                    .compile_canonical_ir(source)
+                    .expect("grounded current canonical IR compiles"),
+            )
+        }
+
+        for (module_name, contribution) in [
+            ("current_to_ground", "I(p, 0) <+ V(p, 0)"),
+            ("current_from_ground", "I(0, p) <+ V(p, 0)"),
+        ] {
+            let source = format!(
+                "module {module_name}(p, spare); inout p, spare; electrical p, spare; analog {contribution}; endmodule"
+            );
+            let (model, canonical) = compile_pair(&source);
+            VerilogADevice::try_new_with_canonical_ir(
+                "Avalid",
+                Arc::new(model.clone()),
+                &canonical,
+                &[1, 2],
+            )
+            .expect("valid grounded current stamp matches canonical endpoints");
+
+            let source_row = model.stamp_programs[0]
+                .stamp_locations
+                .iter()
+                .position(|location| !matches!(location.row, StampIndex::Ground))
+                .expect("grounded current stamp has one circuit row");
+
+            for corrupt_row in [
+                StampIndex::Terminal(1),
+                StampIndex::Terminal(usize::MAX),
+                StampIndex::Branch(0),
+            ] {
+                let mut corrupt = model.clone();
+                corrupt.stamp_programs[0].stamp_locations[source_row].row = corrupt_row;
+                let error = VerilogADevice::try_new_with_canonical_ir(
+                    "Acorrupt",
+                    Arc::new(corrupt),
+                    &canonical,
+                    &[1, 2],
+                )
+                .expect_err("corrupt grounded current endpoint must be rejected");
+                let message = error.to_string();
+                assert!(
+                    message.contains("artifact/model mismatch")
+                        || message.contains("invalid canonical IR"),
+                    "{error}"
+                );
+            }
+
+            let mut reversed = model;
+            reversed.stamp_programs[0].stamp_locations[source_row].sign *= -1.0;
+            let error = VerilogADevice::try_new_with_canonical_ir(
+                "Areversed",
+                Arc::new(reversed),
+                &canonical,
+                &[1, 2],
+            )
+            .expect_err("reversed grounded current endpoint must be rejected");
+            let message = error.to_string();
+            assert!(
+                message.contains("artifact/model mismatch")
+                    || message.contains("invalid canonical IR"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
     fn contribution_current_suffix_required_by_stamp_fails_closed() {
         let source = r#"
 module current_suffix_cycle(p, n);

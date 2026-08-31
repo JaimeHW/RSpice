@@ -27,6 +27,19 @@ pub(crate) fn validate_canonical_artifact_identity_for_model(
             artifact.mir.module_name, model.name
         ));
     }
+    if artifact.hir.ports.len() != model.num_terminals
+        || artifact
+            .hir
+            .ports
+            .iter()
+            .zip(&model.terminal_names)
+            .any(|(canonical, compiled)| canonical.name != *compiled)
+    {
+        return Err(format!(
+            "canonical terminal layout does not match compiled model '{}'",
+            model.name
+        ));
+    }
     if artifact.mir.equations.len() != model.stamp_programs.len() {
         return Err(format!(
             "canonical equation count {} does not match stamp program count {}",
@@ -218,14 +231,12 @@ fn validate_equation_matches_stamp(
     let canonical_pos = canonical_branch_endpoint(model, mir, equation.branch.pos_node)?;
     let canonical_neg = canonical_branch_endpoint(model, mir, equation.branch.neg_node)?;
     let compiled_pair = match expected_kind {
-        MirEquationKind::Current => infer_current_unified_pair(model, stamp),
+        MirEquationKind::Current => infer_current_unified_pair(model, stamp, index)?,
         MirEquationKind::Potential | MirEquationKind::Indirect => {
-            Some(compiled_branch_pair_for_stamp(model, stamp, index)?)
+            compiled_branch_pair_for_stamp(model, stamp, index)?
         }
     };
-    let Some((compiled_pos, compiled_neg)) = compiled_pair else {
-        return Ok(());
-    };
+    let (compiled_pos, compiled_neg) = compiled_pair;
     let matches = match expected_kind {
         MirEquationKind::Current => (canonical_pos, canonical_neg) == (compiled_pos, compiled_neg),
         MirEquationKind::Potential | MirEquationKind::Indirect => {
@@ -275,33 +286,75 @@ fn compiled_branch_pair_for_stamp(
 fn infer_current_unified_pair(
     model: &CompiledModel,
     program: &StampProgram,
-) -> Option<(usize, usize)> {
+    stamp_index: usize,
+) -> Result<(usize, usize), String> {
     let mut pos_endpoint = None;
     let mut neg_endpoint = None;
     for location in &program.stamp_locations {
-        let endpoint = stamp_row_unified_endpoint(model, &location.row)?;
-        if location.sign < 0.0 {
+        if !matches!(location.col, StampIndex::Ground) {
+            return Err(format!(
+                "compiled current stamp {stamp_index} has non-ground source column {:?}",
+                location.col
+            ));
+        }
+        let endpoint = stamp_row_unified_endpoint(model, &location.row).map_err(|detail| {
+            format!("compiled current stamp {stamp_index} has invalid source row: {detail}")
+        })?;
+        if location.sign == -1.0 {
             if pos_endpoint.replace(endpoint).is_some() {
-                return None;
+                return Err(format!(
+                    "compiled current stamp {stamp_index} has duplicate positive-endpoint rows"
+                ));
             }
-        } else if location.sign > 0.0 && neg_endpoint.replace(endpoint).is_some() {
-            return None;
+        } else if location.sign == 1.0 {
+            if neg_endpoint.replace(endpoint).is_some() {
+                return Err(format!(
+                    "compiled current stamp {stamp_index} has duplicate negative-endpoint rows"
+                ));
+            }
+        } else {
+            return Err(format!(
+                "compiled current stamp {stamp_index} source-row sign must be -1 or +1, got {}",
+                location.sign
+            ));
         }
     }
-    match (pos_endpoint, neg_endpoint) {
-        (Some(pos), Some(neg)) if pos != neg => Some((pos, neg)),
-        _ => None,
+    let pair = match (pos_endpoint, neg_endpoint) {
+        (Some(pos), Some(neg)) => (pos, neg),
+        (Some(pos), None) if pos != GROUND_ENDPOINT => (pos, GROUND_ENDPOINT),
+        (None, Some(neg)) if neg != GROUND_ENDPOINT => (GROUND_ENDPOINT, neg),
+        _ => {
+            return Err(format!(
+                "compiled current stamp {stamp_index} does not identify one positive and one negative endpoint"
+            ));
+        }
+    };
+    if pair.0 == pair.1 {
+        return Err(format!(
+            "compiled current stamp {stamp_index} connects an endpoint to itself"
+        ));
     }
+    Ok(pair)
 }
 
-fn stamp_row_unified_endpoint(model: &CompiledModel, index: &StampIndex) -> Option<usize> {
+fn stamp_row_unified_endpoint(model: &CompiledModel, index: &StampIndex) -> Result<usize, String> {
     match index {
-        StampIndex::Terminal(terminal) if *terminal < model.num_terminals => Some(*terminal),
+        StampIndex::Terminal(terminal) if *terminal < model.num_terminals => Ok(*terminal),
+        StampIndex::Terminal(terminal) => Err(format!(
+            "terminal {terminal} exceeds terminal count {}",
+            model.num_terminals
+        )),
         StampIndex::Internal(internal) if *internal < model.internal_nodes => {
-            Some(model.num_terminals + *internal)
+            Ok(model.num_terminals + *internal)
         }
-        StampIndex::Ground => Some(GROUND_ENDPOINT),
-        _ => None,
+        StampIndex::Internal(internal) => Err(format!(
+            "internal node {internal} exceeds internal node count {}",
+            model.internal_nodes
+        )),
+        StampIndex::Ground => Ok(GROUND_ENDPOINT),
+        StampIndex::Branch(branch) => Err(format!(
+            "source row unexpectedly references branch {branch}"
+        )),
     }
 }
 
