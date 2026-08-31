@@ -912,7 +912,7 @@ impl Instance {
 	pub const IDT_STATE_COUNT: usize = 0;
 	pub const EVENT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "0478736e86b7e9346efc97838aa869b44356e1d7c314bc70ec23158b58a5815d";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "250efecd97386b8e46119f7e6ec7b78c4d7c75df380205cc8884315473d43a20";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
 	pub fn new(nodes: &[usize]) -> Self {
@@ -1407,4 +1407,10 @@ impl Instance {
 	pub fn limiter_converged(&self) -> bool {
 		true
 	}
+	#[inline]
+pub fn transient_event_refinement_time(&self) -> Option<f64> { None }
+	#[inline]
+pub fn transient_timer_event_time(&self) -> Option<f64> { None }
+#[inline]
+pub fn transient_timer_step_bound(&self) -> Option<f64> { None }
 }

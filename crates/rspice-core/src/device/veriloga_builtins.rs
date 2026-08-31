@@ -355,6 +355,40 @@ impl BuiltinVerilogADevices {
             .all(|device| device.kind.one_step_dae_split_safe())
     }
 
+    /// Earliest interior `cross`/`above` root produced by the latest complete
+    /// generated-model evaluation.
+    #[inline]
+    pub(crate) fn transient_event_refinement_time(&self) -> Option<Value> {
+        self.devices
+            .iter()
+            .filter_map(|device| device.kind.transient_event_refinement_time())
+            .reduce(Value::min)
+    }
+
+    /// Earliest absolute timer event produced by the latest accepted
+    /// generated-model evaluation.
+    ///
+    /// The target stays absolute here because generated instance time is
+    /// evaluation context, not persistent checkpoint state. A resumed
+    /// transient must therefore compare this value with the checkpoint's
+    /// accepted time rather than reconstructing it from a relative bound.
+    pub(crate) fn transient_timer_event_time(&self) -> Result<Option<Value>, String> {
+        let mut earliest: Option<Value> = None;
+        for device in &self.devices {
+            let Some(target) = device.kind.transient_timer_event_time() else {
+                continue;
+            };
+            if !target.is_finite() || target <= 0.0 {
+                return Err(format!(
+                    "generated Verilog-A instance '{}' ({}) requested invalid absolute timer event {target}",
+                    device.instance_name, device.model_name
+                ));
+            }
+            earliest = Some(earliest.map_or(target, |current| current.min(target)));
+        }
+        Ok(earliest)
+    }
+
     #[inline]
     pub(crate) fn iter(&self) -> impl Iterator<Item = &BuiltinVerilogAInstance> {
         self.devices.iter()

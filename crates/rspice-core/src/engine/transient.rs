@@ -174,6 +174,60 @@ fn canonical_transient_step_time(current_time: Value, dt: Value, stop_time: Valu
     }
 }
 
+/// Preserve the exact absolute time requested by an accepted Verilog-A event.
+/// Floating-point subtraction followed by addition is not an identity for
+/// every pair, so the event target must remain authoritative while `dt`
+/// separately supplies integration coefficients.
+#[inline]
+fn canonical_transient_step_time_with_device_event(
+    current_time: Value,
+    dt: Value,
+    stop_time: Value,
+    exact_device_event_time: Option<Value>,
+) -> Value {
+    exact_device_event_time
+        .unwrap_or_else(|| canonical_transient_step_time(current_time, dt, stop_time))
+}
+
+fn accepted_generated_veriloga_timer_event_time(
+    circuit: &crate::circuit::CircuitData,
+    accepted_time: Value,
+    hard_min_dt: Value,
+) -> Result<Option<Value>, SimulationError> {
+    let Some(target) = circuit
+        .generated_veriloga_timer_event_time(accepted_time)
+        .map_err(SimulationError::Circuit)?
+    else {
+        return Ok(None);
+    };
+    validate_generated_veriloga_timer_interval(target, accepted_time, hard_min_dt)?;
+    Ok(Some(target))
+}
+
+fn validate_generated_veriloga_timer_interval(
+    target: Value,
+    accepted_time: Value,
+    hard_min_dt: Value,
+) -> Result<(), SimulationError> {
+    if !hard_min_dt.is_finite() || hard_min_dt <= 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "generated Verilog-A timer scheduling received invalid solver hard minimum {hard_min_dt}"
+        )));
+    }
+    let event_dt = target - accepted_time;
+    if !event_dt.is_finite() {
+        return Err(SimulationError::Circuit(format!(
+            "generated Verilog-A timer event {target} has an invalid interval from accepted time {accepted_time}"
+        )));
+    }
+    if event_dt < hard_min_dt {
+        return Err(SimulationError::Circuit(format!(
+            "generated Verilog-A timer event at t={target:.16e}s requires dt={event_dt:.16e}s below the solver hard minimum {hard_min_dt:.16e}s from accepted time {accepted_time:.16e}s"
+        )));
+    }
+    Ok(())
+}
+
 #[inline]
 const fn accepted_step_hits_breakpoint(
     landed_device_event: bool,
@@ -3331,6 +3385,10 @@ impl Engine {
         if resume_continuation.is_some() {
             timestep.set_max_dt(startup_raw_max_dt);
         }
+        // Accepted generated timer state owns an exact absolute event target.
+        // It is reconstructed from t=0/checkpoint state below and replaced
+        // only after another atomic Verilog-A acceptance.
+        let mut pending_veriloga_event_time: Option<Value> = None;
         let mut dynamic_tline_breakpoints_added = resume
             .map(TransientCheckpoint::dynamic_tline_breakpoints_added)
             .unwrap_or(0);
@@ -3574,6 +3632,11 @@ impl Engine {
                 circuit
                     .accept_all_veriloga_timestep()
                     .map_err(SimulationError::Circuit)?;
+                pending_veriloga_event_time = accepted_generated_veriloga_timer_event_time(
+                    &circuit,
+                    resume_time,
+                    timestep.hard_min_dt(),
+                )?;
                 #[cfg(feature = "veriloga")]
                 if circuit.has_veriloga_devices()
                     && let Some(bound) = circuit
@@ -3959,6 +4022,11 @@ impl Engine {
             checkpoint
                 .inject(&mut circuit)
                 .map_err(SimulationError::Circuit)?;
+            pending_veriloga_event_time = accepted_generated_veriloga_timer_event_time(
+                &circuit,
+                resume_time,
+                timestep.hard_min_dt(),
+            )?;
             #[cfg(feature = "veriloga")]
             if circuit.has_veriloga_devices()
                 && let Some(bound) = circuit
@@ -4127,9 +4195,6 @@ impl Engine {
 
         // Main transient loop
         let mut retry_count = 0;
-        #[cfg(feature = "veriloga")]
-        let mut pending_veriloga_event_time: Option<Value> = None;
-        #[cfg(feature = "veriloga")]
         let mut veriloga_event_refinement_count = 0_usize;
         // Xyce's OneStep/Gear12 `nef_` counts every rejected attempt, including
         // Newton failures and LTE failures, and is reset only after a point is
@@ -4142,7 +4207,6 @@ impl Engine {
         let mut trap_order = native_order_after_restart(current_integration_method(&trapgear));
         // Xyce OneStep/Gear12 start at order 1; every native Gear2 path remains order 2.
         const MAX_RETRIES: usize = 200; // Maximum recovery retries per timepoint
-        #[cfg(feature = "veriloga")]
         const MAX_VERILOGA_EVENT_REFINEMENTS: usize = 64;
         const FORCE_ACCEPT_COOLDOWN_RETRIES: usize = 2;
         const LINEARIZED_STARTUP_RECOVERY_POINTS: usize = 96;
@@ -4552,6 +4616,20 @@ impl Engine {
                     .current_sources
                     .set_xyce_breakpoint_tolerance(breakpoint_tolerance);
             }
+            if let Some(target) = pending_veriloga_event_time {
+                let event_dt = target - t;
+                if !target.is_finite() || target <= t || !event_dt.is_finite() {
+                    return Err(SimulationError::Circuit(format!(
+                        "Verilog-A event target {target} is not strictly after accepted transient time {t}"
+                    )));
+                }
+                if event_dt < timestep.hard_min_dt() {
+                    return Err(SimulationError::Circuit(format!(
+                        "Verilog-A event at t={target:.16e}s requires dt={event_dt:.16e}s below the solver hard minimum {:.16e}s from accepted time {t:.16e}s",
+                        timestep.hard_min_dt()
+                    )));
+                }
+            }
             // Progress logging every 2 seconds
             if last_progress_log
                 .as_ref()
@@ -4678,12 +4756,13 @@ impl Engine {
                 None => breakpoints.limit_step(t, timestep.dt()),
             };
             dt = dt.min(tstop - t); // Don't overshoot tstop
-            #[cfg(feature = "veriloga")]
+            let mut exact_veriloga_event_time = None;
             if let Some(target) = pending_veriloga_event_time
                 && target > t
                 && target <= canonical_transient_step_time(t, dt, tstop)
             {
                 dt = target - t;
+                exact_veriloga_event_time = Some(target);
                 at_breakpoint = true;
                 locked_step_lands_on_grid = locked_grid
                     .as_ref()
@@ -4700,16 +4779,7 @@ impl Engine {
                 )
             });
             if locked_grid.is_some()
-                && {
-                    #[cfg(feature = "veriloga")]
-                    {
-                        pending_veriloga_event_time.is_none()
-                    }
-                    #[cfg(not(feature = "veriloga"))]
-                    {
-                        true
-                    }
-                }
+                && pending_veriloga_event_time.is_none()
                 && (retry_count > 0 || locked_contraction_replay)
                 && let (Some(grid), Some(steps)) =
                     (locked_grid.as_ref(), locked_step_sizes.as_ref())
@@ -4733,7 +4803,12 @@ impl Engine {
                 dt = timestep.dt().min(max_step).min(tstop - t);
                 locked_replay_hidden_attempt = dt > scheduled_dt;
             }
-            let mut candidate_step_time = canonical_transient_step_time(t, dt, tstop);
+            let mut candidate_step_time = canonical_transient_step_time_with_device_event(
+                t,
+                dt,
+                tstop,
+                exact_veriloga_event_time,
+            );
             let mut expected_source_delta =
                 Self::max_expected_source_delta(&circuit, t, candidate_step_time);
             if locked_grid.is_none() {
@@ -4759,6 +4834,7 @@ impl Engine {
                 );
                 if biased_dt + 1e-30 < dt {
                     dt = biased_dt;
+                    exact_veriloga_event_time = None;
                     candidate_step_time = canonical_transient_step_time(t, dt, tstop);
                     at_breakpoint = breakpoints.at_breakpoint(candidate_step_time);
                     expected_source_delta =
@@ -4770,12 +4846,13 @@ impl Engine {
             } else if let Some(method) = fixed_method {
                 trapgear.force_method(method);
             }
-            let step_time = canonical_transient_step_time(t, dt, tstop);
-            #[cfg(feature = "veriloga")]
-            let landed_veriloga_event =
-                pending_veriloga_event_time.is_some_and(|event_time| step_time >= event_time);
-            #[cfg(not(feature = "veriloga"))]
-            let landed_veriloga_event = false;
+            let step_time = canonical_transient_step_time_with_device_event(
+                t,
+                dt,
+                tstop,
+                exact_veriloga_event_time,
+            );
+            let landed_veriloga_event = exact_veriloga_event_time.is_some();
             let analysis_initial_step = uic_requested && accepted_interval_count == 0;
             let analysis_final_step = step_time == tstop;
             let retry_floor_source_activity_delta =
@@ -4971,11 +5048,22 @@ impl Engine {
             }
             macro_rules! reject_for_veriloga_event_refinement {
                 ($candidate_solution:expr, $candidate_time:expr, $phase_start:expr) => {{
-                    #[cfg(feature = "veriloga")]
-                    if circuit.has_veriloga_devices() {
+                    if circuit.has_any_veriloga_devices() {
+                        #[cfg(feature = "veriloga")]
+                        if circuit.has_veriloga_devices() {
                         circuit
                             .evaluate_veriloga_timepoint($candidate_solution)
                             .map_err(SimulationError::Circuit)?;
+                        }
+                        #[cfg(feature = "veriloga-builtins-base")]
+                        if circuit.has_generated_veriloga_devices() {
+                            circuit
+                                .evaluate_generated_veriloga_timepoint(
+                                    &mut matrix,
+                                    $candidate_solution,
+                                )
+                                .map_err(SimulationError::Circuit)?;
+                        }
                         if let Some(target) = circuit
                             .veriloga_event_refinement_time()
                             .map_err(SimulationError::Circuit)?
@@ -5020,13 +5108,10 @@ impl Engine {
                             continue;
                         }
                         // Any accepted point changes the interpolation lower
-                        // endpoint. Discard an older secant target even when
-                        // another breakpoint or device limit landed first;
-                        // the next genuine bracket will derive a fresh root.
-                        if pending_veriloga_event_time.is_some() {
-                            pending_veriloga_event_time = None;
-                            veriloga_event_refinement_count = 0;
-                        }
+                        // endpoint. The acceptance path below replaces an old
+                        // secant target with the next accepted timer target (or
+                        // `None`) after it commits the Verilog-A state.
+                        veriloga_event_refinement_count = 0;
                     }
                 }};
             }
@@ -7575,6 +7660,11 @@ impl Engine {
                             .accept_all_veriloga_timestep()
                             .map_err(SimulationError::Circuit)?;
                     }
+                    pending_veriloga_event_time = accepted_generated_veriloga_timer_event_time(
+                        &circuit,
+                        t,
+                        timestep.hard_min_dt(),
+                    )?;
 
                     // XSPICE voltage outputs are projected only when their
                     // model state is accepted. Commit controller histories
@@ -8036,6 +8126,8 @@ impl Engine {
             } else {
                 false
             };
+            pending_veriloga_event_time =
+                accepted_generated_veriloga_timer_event_time(&circuit, t, timestep.hard_min_dt())?;
             #[cfg(not(feature = "veriloga"))]
             let _ = veriloga_discontinuity;
 
@@ -8824,6 +8916,45 @@ mod tests {
             STOP_TIME.to_bits(),
             "a step that consumes the remaining interval must use the exact requested horizon"
         );
+    }
+
+    #[test]
+    fn exact_veriloga_event_time_survives_subtraction_addition_round_trip() {
+        const CURRENT_TIME: Value = Value::from_bits(0x3e02_db21_7f74_4098);
+        const EVENT_TIME: Value = Value::from_bits(0x3e42_ffcc_ca47_13bf);
+        let dt = EVENT_TIME - CURRENT_TIME;
+        let stop_time = EVENT_TIME * 2.0;
+
+        assert_ne!(
+            canonical_transient_step_time(CURRENT_TIME, dt, stop_time).to_bits(),
+            EVENT_TIME.to_bits(),
+            "the oracle must miss the interior event by one ULP without its absolute target"
+        );
+        assert_eq!(
+            canonical_transient_step_time_with_device_event(
+                CURRENT_TIME,
+                dt,
+                stop_time,
+                Some(EVENT_TIME),
+            )
+            .to_bits(),
+            EVENT_TIME.to_bits()
+        );
+        assert!(accepted_step_hits_breakpoint(true, false, false));
+    }
+
+    #[test]
+    fn generated_timer_interval_validation_fails_closed_below_hard_minimum() {
+        validate_generated_veriloga_timer_interval(1.25, 1.0, 0.25)
+            .expect("an event exactly at the hard minimum must be schedulable");
+
+        let error = validate_generated_veriloga_timer_interval(1.25, 1.0, 0.250_000_000_000_000_1)
+            .expect_err("a generated timer below the hard minimum must fail closed");
+        assert!(error.to_string().contains("below the solver hard minimum"));
+
+        let error = validate_generated_veriloga_timer_interval(1.25, 1.0, Value::NAN)
+            .expect_err("an invalid hard minimum must fail closed");
+        assert!(error.to_string().contains("invalid solver hard minimum"));
     }
 
     #[test]

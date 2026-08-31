@@ -201,6 +201,9 @@ fn generated_dependent_parameter_defaults_use_bounded_ordered_helpers() {
     let body = r#"
 let instance = device::state::Instance::new(&[0, 1]);
 assert_eq!(instance.params.values[17], 18.0, "dependent defaults must finalize in source order across helper boundaries");
+assert_eq!(instance.transient_event_refinement_time(), None);
+assert_eq!(instance.transient_timer_event_time(), None);
+assert_eq!(instance.transient_timer_step_bound(), None);
 "#;
     run_generated_main("bounded dependent defaults", &state, &stamp, &noise, body)
         .unwrap_or_else(|report| panic!("generated bounded dependent defaults failed:\n{report}"));
@@ -1516,6 +1519,8 @@ instance.set_timepoint(0.0, 0.0, inactive);
 instance.begin_stateful_evaluation();
 assert_eq!(stamp(&mut instance, -1.0), 0.0);
 assert_eq!(instance.transient_event_refinement_time(), None);
+assert_eq!(instance.transient_timer_event_time(), None,
+    "a speculative timer target must not become externally schedulable before acceptance");
 assert_eq!(instance.transient_timer_step_bound(), Some(1.0));
 let speculative_initial = instance.capture_persistent_state();
 assert_eq!(speculative_initial.event_variables[0], 0.0);
@@ -1526,6 +1531,7 @@ instance.apply_validated_advance_state();
 let accepted_initial = instance.capture_persistent_state();
 assert_eq!(accepted_initial.event_variables[0], 0.0);
 assert_eq!(*accepted_initial.event_variables.last().unwrap(), 1.0);
+assert_eq!(instance.transient_timer_event_time(), Some(1.0));
 
 // A malformed detector lane is rejected with its generated slot provenance.
 let mut malformed_side = accepted_initial.clone();
@@ -1547,6 +1553,8 @@ let accepted_endpoint = instance.capture_rollback_state();
 assert_eq!(stamp(&mut instance, 1.0), 111.0);
 let refinement = f64::from_bits(0.5f64.to_bits() + 1);
 assert_eq!(instance.transient_event_refinement_time(), Some(refinement));
+assert_eq!(instance.transient_timer_event_time(), Some(1.0),
+    "a trial endpoint must not replace the accepted absolute timer target");
 assert_eq!(instance.transient_timer_step_bound(), Some(2.0));
 let positive_trial = instance.capture_rollback_state();
 assert_eq!(instance.capture_persistent_state(), accepted_initial,
@@ -1596,6 +1604,8 @@ assert_eq!(*accepted.event_variables.last().unwrap(), 3.0);
 let accepted_rollback = instance.capture_rollback_state();
 let mut restored = device::state::Instance::new(&[0, 1]);
 restored.restore_persistent_state(&accepted).unwrap();
+assert_eq!(restored.transient_timer_event_time(), Some(3.0),
+    "the persisted absolute timer target must be usable before evaluation time is re-primed on resume");
 restored.set_timepoint(1.0, 0.0, inactive);
 assert_eq!(restored.transient_timer_step_bound(), Some(2.0));
 assert_eq!(restored.capture_persistent_state(), accepted);

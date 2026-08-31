@@ -2256,22 +2256,73 @@ impl CircuitData {
     /// Earliest interior `cross`/`above` root requested by the latest final
     /// Verilog-A evaluation. The transient engine must reject the current
     /// endpoint before any device or integration history is committed.
-    #[cfg(feature = "veriloga")]
     pub(crate) fn veriloga_event_refinement_time(&self) -> Result<Option<Value>, String> {
-        let mut earliest: Option<Value> = None;
-        for device in self.veriloga_devices.iter() {
-            let instance = device.name.clone();
-            let Some(target) = device
-                .try_transient_event_refinement_time()
-                .map_err(|error| {
-                    format!("Verilog-A device '{instance}' event refinement failed: {error}")
-                })?
-            else {
-                continue;
-            };
-            earliest = Some(earliest.map_or(target, |current| current.min(target)));
+        #[cfg(not(any(feature = "veriloga", feature = "veriloga-builtins-base")))]
+        return Ok(None);
+
+        #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+        {
+            let mut earliest: Option<Value> = None;
+            #[cfg(feature = "veriloga")]
+            for device in self.veriloga_devices.iter() {
+                let instance = device.name.clone();
+                let Some(target) =
+                    device
+                        .try_transient_event_refinement_time()
+                        .map_err(|error| {
+                            format!(
+                                "Verilog-A device '{instance}' event refinement failed: {error}"
+                            )
+                        })?
+                else {
+                    continue;
+                };
+                earliest = Some(earliest.map_or(target, |current| current.min(target)));
+            }
+            #[cfg(feature = "veriloga-builtins-base")]
+            if let Some(target) = self
+                .generated_veriloga_devices
+                .transient_event_refinement_time()
+            {
+                earliest = Some(earliest.map_or(target, |current| current.min(target)));
+            }
+            Ok(earliest)
         }
-        Ok(earliest)
+    }
+
+    /// Earliest exact absolute timer event requested by accepted generated
+    /// Verilog-A state. Runtime-compiled timer/zi requests remain part of
+    /// `veriloga_timestep_bound`; generated state exposes its absolute target
+    /// so checkpoint resume never depends on non-persistent instance time.
+    pub(crate) fn generated_veriloga_timer_event_time(
+        &self,
+        accepted_time: Value,
+    ) -> Result<Option<Value>, String> {
+        #[cfg(feature = "veriloga-builtins-base")]
+        {
+            let Some(target) = self
+                .generated_veriloga_devices
+                .transient_timer_event_time()?
+            else {
+                return Ok(None);
+            };
+            if !accepted_time.is_finite() || accepted_time < 0.0 {
+                return Err(format!(
+                    "generated Verilog-A timer scheduling received invalid accepted time {accepted_time}"
+                ));
+            }
+            if target <= accepted_time {
+                return Err(format!(
+                    "generated Verilog-A timer event {target} is not strictly after accepted time {accepted_time}"
+                ));
+            }
+            Ok(Some(target))
+        }
+        #[cfg(not(feature = "veriloga-builtins-base"))]
+        {
+            let _ = accepted_time;
+            Ok(None)
+        }
     }
 
     /// Check if all XSPICE instances have converged

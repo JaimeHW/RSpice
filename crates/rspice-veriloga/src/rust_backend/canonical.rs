@@ -3173,9 +3173,6 @@ impl ModelPlan {
     fn push_event_control_state_fields(&self, extensions: &mut state_file::StateFileExtensions) {
         let cross_count = self.cross_slots.len();
         let has_timer = !self.timer_slots.is_empty();
-        if cross_count == 0 && !has_timer {
-            return;
-        }
 
         if cross_count > 0 {
             extensions.uses_cross_event_state = true;
@@ -3354,6 +3351,10 @@ impl ModelPlan {
         if has_timer {
             extensions.impl_methods.push_str(
                 "    #[inline]\n\
+                     pub fn transient_timer_event_time(&self) -> Option<f64> {\n\
+                         (self.timer_event_bound_accepted != f64::INFINITY).then_some(self.timer_event_bound_accepted)\n\
+                     }\n\
+                     #[inline]\n\
                      pub fn transient_timer_step_bound(&self) -> Option<f64> {\n\
                          let bound = self.timer_event_bound_candidate - self.time;\n\
                          (bound.is_finite() && bound > 0.0).then_some(bound)\n\
@@ -3362,6 +3363,8 @@ impl ModelPlan {
         } else {
             extensions.impl_methods.push_str(
                 "    #[inline]\n\
+                     pub fn transient_timer_event_time(&self) -> Option<f64> { None }\n\
+                     #[inline]\n\
                      pub fn transient_timer_step_bound(&self) -> Option<f64> { None }\n",
             );
         }
