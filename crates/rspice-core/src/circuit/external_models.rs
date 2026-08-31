@@ -2606,39 +2606,56 @@ impl CircuitData {
         }
     }
 
-    /// Earliest exact absolute timer event requested by accepted generated
-    /// Verilog-A state. Runtime-compiled timer/zi requests remain part of
-    /// `veriloga_timestep_bound`; generated state exposes its absolute target
-    /// so checkpoint resume never depends on non-persistent instance time.
-    pub(crate) fn generated_veriloga_timer_event_time(
+    /// Earliest exact absolute event requested by accepted Verilog-A state.
+    /// Runtime timer, sampled-filter, and slew corners participate alongside
+    /// generated-model timers so locked grids and checkpoint resume preserve
+    /// the authoritative target rather than reconstructing it from a relative
+    /// step bound.
+    pub(crate) fn veriloga_transient_event_time(
         &self,
         accepted_time: Value,
     ) -> Result<Option<Value>, String> {
-        #[cfg(feature = "veriloga-builtins-base")]
-        {
-            let Some(target) = self
-                .generated_veriloga_devices
-                .transient_timer_event_time()?
+        if !accepted_time.is_finite() || accepted_time < 0.0 {
+            return Err(format!(
+                "Verilog-A event scheduling received invalid accepted time {accepted_time}"
+            ));
+        }
+
+        #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+        let mut earliest: Option<Value> = None;
+        #[cfg(not(any(feature = "veriloga", feature = "veriloga-builtins-base")))]
+        let earliest: Option<Value> = None;
+        #[cfg(feature = "veriloga")]
+        for device in self.veriloga_devices.iter() {
+            let instance = device.name.clone();
+            let Some(target) = device.try_transient_event_time().map_err(|error| {
+                format!("Verilog-A device '{instance}' event scheduling failed: {error}")
+            })?
             else {
-                return Ok(None);
+                continue;
             };
-            if !accepted_time.is_finite() || accepted_time < 0.0 {
+            if !target.is_finite() || target <= accepted_time {
                 return Err(format!(
-                    "generated Verilog-A timer scheduling received invalid accepted time {accepted_time}"
+                    "Verilog-A device '{instance}' event {target} is not strictly after accepted time {accepted_time}"
                 ));
             }
-            if target <= accepted_time {
+            earliest = Some(earliest.map_or(target, |current| current.min(target)));
+        }
+
+        #[cfg(feature = "veriloga-builtins-base")]
+        if let Some(target) = self
+            .generated_veriloga_devices
+            .transient_timer_event_time()?
+        {
+            if !target.is_finite() || target <= accepted_time {
                 return Err(format!(
                     "generated Verilog-A timer event {target} is not strictly after accepted time {accepted_time}"
                 ));
             }
-            Ok(Some(target))
+            earliest = Some(earliest.map_or(target, |current| current.min(target)));
         }
-        #[cfg(not(feature = "veriloga-builtins-base"))]
-        {
-            let _ = accepted_time;
-            Ok(None)
-        }
+
+        Ok(earliest)
     }
 
     /// Check if all XSPICE instances have converged

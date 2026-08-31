@@ -79,6 +79,33 @@ fn models_without_bound_step_report_none() {
     assert!(!device.discontinuity_pending());
 }
 
+const PARAMETERIZED_BOUND: &str = r#"
+`include "disciplines.vams"
+module requested_bound(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real limit = 0.0;
+    analog begin
+        $bound_step(limit);
+        I(p, n) <+ V(p, n) * 1.0e-3;
+    end
+endmodule
+"#;
+
+#[test]
+fn zero_bound_requests_the_solver_minimum_and_invalid_bounds_fail_closed() {
+    let mut device = compile_device("BZERO", PARAMETERIZED_BOUND);
+    stamp_once(&mut device, &[0.0]);
+    assert_eq!(device.try_transient_bound_step().unwrap(), Some(0.0));
+
+    assert!(device.try_set_parameter("limit", -1.0).unwrap());
+    stamp_once(&mut device, &[0.0]);
+    let error = device
+        .try_transient_bound_step()
+        .expect_err("negative $bound_step requests must fail closed");
+    assert!(error.to_string().contains("$bound_step"), "{error}");
+}
+
 const DISCONTINUOUS: &str = r#"
 `include "disciplines.vams"
 module disco(p, n);

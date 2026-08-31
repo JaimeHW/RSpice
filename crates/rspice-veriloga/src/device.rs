@@ -83,11 +83,13 @@ mod runtime_checkpoint_codec_tests {
                     SlewCheckpoint {
                         output: -0.0,
                         prev_time: 1.25,
+                        next_corner_time: None,
                         initialized: false,
                     },
                     SlewCheckpoint {
                         output: 3.5,
                         prev_time: 2.5,
+                        next_corner_time: Some(4.0),
                         initialized: true,
                     },
                 ],
@@ -139,6 +141,7 @@ mod runtime_checkpoint_codec_tests {
         assert_eq!(decoded, checkpoint);
         assert!(!decoded.accepted.slew_filters[0].initialized);
         assert!(decoded.accepted.slew_filters[1].initialized);
+        assert_eq!(decoded.accepted.slew_filters[1].next_corner_time, Some(4.0));
 
         let mut trailing = words;
         trailing.push(0);
@@ -161,18 +164,19 @@ mod runtime_checkpoint_codec_tests {
         let words = checkpoint.to_words();
 
         let first_slew_initialized = words
-            .windows(4)
+            .windows(5)
             .position(|window| {
                 window
                     == [
                         2,
                         (-0.0_f64).to_bits(),
                         1.25_f64.to_bits(),
+                        0,
                         u64::from(false),
                     ]
             })
             .expect("first slew entry has a unique serialized prefix")
-            + 3;
+            + 4;
         let mut malformed = words.clone();
         malformed[first_slew_initialized] = 2;
         assert!(
@@ -187,16 +191,16 @@ mod runtime_checkpoint_codec_tests {
             .contains("slew 0 initialized boolean tag 2 is invalid")
         );
 
-        let slew_count = first_slew_initialized - 3;
+        let slew_count = first_slew_initialized - 4;
         assert!(
             VerilogADeviceCheckpoint::from_words(
                 checkpoint.instance_name,
                 checkpoint.model_name,
                 checkpoint.source_digest,
                 checkpoint.shape_identity,
-                &words[..slew_count + 3],
+                &words[..slew_count + 4],
             )
-            .expect_err("truncated three-word slew entry must fail closed")
+            .expect_err("truncated slew entry must fail closed")
             .contains("slew filters declares 2 entries")
         );
     }
@@ -237,8 +241,7 @@ mod runtime_checkpoint_codec_tests {
     #[test]
     fn legacy_v2_payload_is_fully_validated_without_migrating_idtmod_history() {
         let checkpoint = checkpoint_with_slew_entries();
-        let mut words = checkpoint.to_words();
-        words[0] = 2;
+        let words = checkpoint.to_legacy_v2_words_for_test();
 
         VerilogADeviceCheckpoint::validate_legacy_v2_words(&words)
             .expect("complete legacy common-format payload validates");
@@ -268,6 +271,25 @@ mod runtime_checkpoint_codec_tests {
             VerilogADeviceCheckpoint::validate_legacy_v2_words(&trailing)
                 .expect_err("legacy v2 trailing words must fail closed")
                 .contains("trailing words")
+        );
+    }
+
+    #[test]
+    fn legacy_v3_payload_is_validated_without_inventing_slew_corners() {
+        let checkpoint = checkpoint_with_slew_entries();
+        let words = checkpoint.to_legacy_v3_words_for_test();
+        VerilogADeviceCheckpoint::validate_legacy_v3_words(&words)
+            .expect("complete legacy v3 payload validates");
+        assert!(
+            VerilogADeviceCheckpoint::from_words(
+                checkpoint.instance_name,
+                checkpoint.model_name,
+                checkpoint.source_digest,
+                checkpoint.shape_identity,
+                &words,
+            )
+            .expect_err("v3 cannot resume without its accepted slew corner")
+            .contains("unsupported runtime Verilog-A state version 3")
         );
     }
 }
@@ -677,7 +699,7 @@ pub struct VerilogADevice {
     prev_discontinuity: bool,
 }
 
-pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 3;
+pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 4;
 
 /// Versioned accepted runtime state for one compiled Verilog-A instance.
 /// Compiled programs, topology, and solver caches are intentionally absent.
@@ -697,8 +719,12 @@ impl VerilogADeviceCheckpoint {
     /// portable checkpoint format. Floating-point values are stored by IEEE
     /// bits, preserving signed zero and every accepted finite value exactly.
     pub fn to_words(&self) -> Vec<u64> {
+        self.to_words_with_format(self.state_version, true)
+    }
+
+    fn to_words_with_format(&self, state_version: u32, include_slew_corners: bool) -> Vec<u64> {
         let mut encoder = CheckpointWordEncoder::default();
-        encoder.word(u64::from(self.state_version));
+        encoder.word(u64::from(state_version));
         encoder.boolean(self.prev_discontinuity);
         encoder.float(self.accepted.time);
         encoder.floats(&self.accepted.variables);
@@ -726,6 +752,9 @@ impl VerilogADeviceCheckpoint {
         for state in &self.accepted.slew_filters {
             encoder.float(state.output);
             encoder.float(state.prev_time);
+            if include_slew_corners {
+                encoder.optional_float(state.next_corner_time);
+            }
             encoder.boolean(state.initialized);
         }
         encoder.word(self.accepted.cross_detectors.len() as u64);
@@ -838,12 +867,18 @@ impl VerilogADeviceCheckpoint {
             });
         }
 
-        let slew_count = decoder.length("slew filters", 3)?;
+        let slew_has_corners = state_version >= 4;
+        let slew_count = decoder.length("slew filters", if slew_has_corners { 4 } else { 3 })?;
         let mut slew_filters = Vec::with_capacity(slew_count);
         for index in 0..slew_count {
             slew_filters.push(SlewCheckpoint {
                 output: decoder.float(&format!("slew {index} output"))?,
                 prev_time: decoder.float(&format!("slew {index} previous time"))?,
+                next_corner_time: if slew_has_corners {
+                    decoder.optional_float(&format!("slew {index} catch-up corner"))?
+                } else {
+                    None
+                },
                 initialized: decoder.boolean(&format!("slew {index} initialized"))?,
             });
         }
@@ -1016,7 +1051,7 @@ impl VerilogADeviceCheckpoint {
     /// Version 2 serialized `idtmod` accepted lanes without recording whether
     /// the older lane shared the previous lane's modulo branch. Its word shape
     /// otherwise matches the current payload, so decode it strictly but never
-    /// expose the result as restart-authoritative version-3 state.
+    /// expose the result as restart-authoritative current state.
     pub fn validate_legacy_v2_words(words: &[u64]) -> Result<(), String> {
         Self::from_words_with_expected_version(
             SmolStr::new_inline("legacy"),
@@ -1027,6 +1062,31 @@ impl VerilogADeviceCheckpoint {
             2,
         )
         .map(drop)
+    }
+
+    /// Validate and consume a complete legacy version-3 runtime payload.
+    /// Version 3 predates persisted exact `slew` catch-up corners, so it can
+    /// be inspected for corruption but cannot be resumed exactly.
+    pub fn validate_legacy_v3_words(words: &[u64]) -> Result<(), String> {
+        Self::from_words_with_expected_version(
+            SmolStr::new_inline("legacy"),
+            SmolStr::new_inline("legacy"),
+            SmolStr::new_inline("legacy"),
+            SmolStr::new_inline("legacy"),
+            words,
+            3,
+        )
+        .map(drop)
+    }
+
+    #[cfg(test)]
+    fn to_legacy_v2_words_for_test(&self) -> Vec<u64> {
+        self.to_words_with_format(2, false)
+    }
+
+    #[cfg(test)]
+    fn to_legacy_v3_words_for_test(&self) -> Vec<u64> {
+        self.to_words_with_format(3, false)
     }
 
     pub fn retained_value_count(&self) -> usize {
@@ -1754,7 +1814,8 @@ impl VerilogADevice {
     }
 
     /// Maximum next transient step requested by `$bound_step` or a scheduled
-    /// timer/zi sample event during the latest evaluation.
+    /// timer, sampled-filter, or slew catch-up event during the latest
+    /// evaluation.
     pub fn transient_bound_step(&self) -> Option<f64> {
         self.try_transient_bound_step().unwrap_or_else(|error| {
             panic!(
@@ -1767,15 +1828,29 @@ impl VerilogADevice {
     /// Checked transient bound for callers that surface event-scheduling
     /// errors instead of panicking.
     pub fn try_transient_bound_step(&self) -> Result<Option<f64>, VmError> {
-        let model_bound = self
-            .variable("$bound_step")
+        let model_bound = match self.variable("$bound_step") {
+            None | Some(f64::INFINITY) => None,
+            Some(bound) if bound.is_finite() && bound >= 0.0 => Some(bound),
+            Some(bound) => {
+                return Err(VmError::InvalidNumericResult(format!(
+                    "$bound_step request must be finite and non-negative (or the internal +inf sentinel), got {bound}"
+                )));
+            }
+        };
+        let event_bound = self
+            .context
+            .transient_event_time()?
+            .map(|target| target - self.context.time)
             .filter(|bound| bound.is_finite() && *bound > 0.0);
-        let timer_bound = self.context.timer_event_step_bound();
-        let zi_bound = self.context.zi_filter_step_bound()?;
-        Ok([model_bound, timer_bound, zi_bound]
+        Ok([model_bound, event_bound]
             .into_iter()
             .flatten()
             .reduce(f64::min))
+    }
+
+    /// Earliest exact absolute runtime event owned by accepted operator state.
+    pub fn try_transient_event_time(&self) -> Result<Option<f64>, VmError> {
+        self.context.transient_event_time()
     }
 
     /// Earliest interior `cross`/`above` root requested by the latest complete

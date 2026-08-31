@@ -562,6 +562,71 @@ mod tests {
     }
 
     #[test]
+    fn slew_persists_exact_rising_and_falling_catch_up_corners() {
+        let mut slew = SlewFilter::default();
+        slew.eval_operating_point(0.0, 0.0);
+        slew.promote_operating_point_candidate();
+
+        assert_eq!(slew.eval(2.0, 1.0, TEST_SLEW_RATES), 0.5);
+        assert_eq!(slew.next_corner_time(1.0), None, "candidate is speculative");
+        slew.validate_commit(1.0).unwrap();
+        slew.commit();
+        assert_eq!(slew.next_corner_time(1.0), Some(4.0));
+
+        assert_eq!(slew.eval(-1.0, 2.0, TEST_SLEW_RATES), 0.0);
+        slew.validate_commit(2.0).unwrap();
+        slew.commit();
+        assert_eq!(slew.next_corner_time(2.0), Some(4.0));
+    }
+
+    #[test]
+    fn slew_exact_corner_makes_long_and_split_steps_identical() {
+        let seeded = || {
+            let mut slew = SlewFilter::default();
+            slew.eval_operating_point(0.0, 0.0);
+            slew.promote_operating_point_candidate();
+            slew
+        };
+
+        let mut long = seeded();
+        assert_eq!(long.eval(1.0, 2.0, TEST_SLEW_RATES), 1.0);
+
+        let mut split = seeded();
+        assert_eq!(split.eval(1.0, 1.0, TEST_SLEW_RATES), 0.5);
+        split.commit();
+        assert_eq!(split.next_corner_time(1.0), Some(2.0));
+        assert_eq!(split.eval(1.0, 2.0, TEST_SLEW_RATES), 1.0);
+
+        assert_eq!(
+            long.candidate.output.to_bits(),
+            split.candidate.output.to_bits()
+        );
+        assert_eq!(long.candidate.next_corner_time, None);
+        assert_eq!(split.candidate.next_corner_time, None);
+    }
+
+    #[test]
+    fn slew_rejected_candidate_and_checkpoint_restore_preserve_accepted_corner() {
+        let mut slew = SlewFilter::default();
+        slew.eval_operating_point(0.0, 0.0);
+        slew.promote_operating_point_candidate();
+        slew.eval(1.0, 1.0, TEST_SLEW_RATES);
+        slew.commit();
+        let accepted = slew.checkpoint();
+        assert_eq!(accepted.next_corner_time, Some(2.0));
+
+        slew.begin_evaluation();
+        slew.eval(-10.0, 1.5, TEST_SLEW_RATES);
+        assert_eq!(slew.next_corner_time(1.0), Some(2.0));
+        slew.begin_evaluation();
+
+        let mut restored = SlewFilter::default();
+        restored.restore_checkpoint(&accepted);
+        assert_eq!(restored.next_corner_time(1.0), Some(2.0));
+        assert_eq!(restored.checkpoint(), accepted);
+    }
+
+    #[test]
     fn slew_derivative_is_branch_exact_and_read_only() {
         let mut slew = SlewFilter::default();
         slew.eval_operating_point(0.0, 0.0);
@@ -939,6 +1004,11 @@ impl TransitionFilter {
 struct SlewState {
     output: f64,
     prev_time: f64,
+    /// Exact future time at which a rate-limited segment reaches the input
+    /// accepted at `prev_time`.  The transient engine must not step over this
+    /// corner: doing so extends the saturated slope beyond its target and
+    /// makes the result depend on the solver's otherwise-unrelated step size.
+    next_corner_time: Option<f64>,
     initialized: bool,
 }
 
@@ -946,6 +1016,7 @@ struct SlewState {
 pub struct SlewCheckpoint {
     pub output: f64,
     pub prev_time: f64,
+    pub next_corner_time: Option<f64>,
     pub initialized: bool,
 }
 
@@ -992,6 +1063,7 @@ impl SlewFilter {
             state = SlewState {
                 output: input,
                 prev_time: time,
+                next_corner_time: None,
                 initialized: true,
             };
             return (
@@ -1027,6 +1099,15 @@ impl SlewFilter {
 
         state.output += limited_rate * dt;
         state.prev_time = time;
+        state.next_corner_time = if input_coefficient == 0.0 && state.output != input {
+            // Keep a malformed/overflowed result visible to acceptance
+            // validation instead of silently dropping an exact breakpoint.
+            // Normalized slew magnitudes are finite and strictly positive.
+            let remaining_time = (input - state.output).abs() / limited_rate.abs();
+            Some(time + remaining_time)
+        } else {
+            None
+        };
         state.initialized = true;
         (
             state,
@@ -1072,6 +1153,7 @@ impl SlewFilter {
         self.candidate = SlewState {
             output: input,
             prev_time: time,
+            next_corner_time: None,
             initialized: true,
         };
         self.candidate_valid = true;
@@ -1109,6 +1191,7 @@ impl SlewFilter {
         Self::validate_checkpoint(&SlewCheckpoint {
             output: self.candidate.output,
             prev_time: self.candidate.prev_time,
+            next_corner_time: self.candidate.next_corner_time,
             initialized: self.candidate.initialized,
         })?;
         if self.candidate.prev_time != accepted_time {
@@ -1129,8 +1212,17 @@ impl SlewFilter {
         SlewCheckpoint {
             output: self.committed.output,
             prev_time: self.committed.prev_time,
+            next_corner_time: self.committed.next_corner_time,
             initialized: self.committed.initialized,
         }
+    }
+
+    /// Exact accepted catch-up corner strictly after `time`, if the latest
+    /// accepted slew segment is still rate limited.
+    pub(crate) fn next_corner_time(&self, time: f64) -> Option<f64> {
+        self.committed
+            .next_corner_time
+            .filter(|corner| corner.is_finite() && *corner > time)
     }
 
     pub(crate) fn validate_checkpoint_ready(&self) -> Result<(), String> {
@@ -1144,6 +1236,13 @@ impl SlewFilter {
         if !checkpoint.output.is_finite() || !checkpoint.prev_time.is_finite() {
             return Err("slew accepted state is not finite".into());
         }
+        if checkpoint.next_corner_time.is_some_and(|corner| {
+            !corner.is_finite() || corner <= checkpoint.prev_time || !checkpoint.initialized
+        }) {
+            return Err(
+                "slew catch-up corner must be finite, initialized, and strictly future".into(),
+            );
+        }
         Ok(())
     }
 
@@ -1151,6 +1250,7 @@ impl SlewFilter {
         self.committed = SlewState {
             output: checkpoint.output,
             prev_time: checkpoint.prev_time,
+            next_corner_time: checkpoint.next_corner_time,
             initialized: checkpoint.initialized,
         };
         self.candidate = self.committed;

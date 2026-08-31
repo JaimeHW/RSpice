@@ -303,6 +303,55 @@ endmodule
 }
 
 #[test]
+fn veriloga_slew_lands_on_the_exact_accepted_catch_up_corner() {
+    let model = write_model(
+        "slew_corner",
+        r#"
+`include "disciplines.vams"
+module va_slew_corner(p, n);
+    inout p, n;
+    electrical p, n;
+    analog V(p, n) <+ slew($abstime > 0.0 ? 1.0 : 0.0, 1.0e6, -1.0e6);
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* Slew catch-up scheduling\n\
+         X1 out 0 va_slew_corner\n\
+         .va \"{}\" va_slew_corner\n\
+         .end\n",
+        deck_path(&model)
+    );
+    let netlist = Netlist::parse(&deck).expect("parse slew-corner deck");
+    let result = Engine::new(SimulationConfig {
+        transient_initial_timestep: Some(0.4e-6),
+        locked_time_grid: Some(Arc::new(vec![0.0, 0.4e-6, 2.0e-6])),
+        ..SimulationConfig::default()
+    })
+    .run_tran(&netlist, 2.0e-6, 2.0e-6)
+    .expect("slew transient lands on its accepted catch-up corner");
+    let out = node_series(&result.node_names, &result.voltages, "out");
+
+    let ramp_index = result
+        .time
+        .iter()
+        .position(|time| (*time - 0.4e-6).abs() <= 1.0e-18)
+        .expect("locked ramp point");
+    assert!((out[ramp_index] - 0.4).abs() < 1.0e-12, "{out:?}");
+
+    let corner_index = result
+        .time
+        .iter()
+        .position(|time| (*time - 1.0e-6).abs() <= 2.0e-18)
+        .unwrap_or_else(|| panic!("accepted slew corner is missing: {:?}", result.time));
+    assert!((out[corner_index] - 1.0).abs() < 1.0e-12, "{out:?}");
+    assert_eq!(result.time.last().copied(), Some(2.0e-6));
+    assert!(result.time.windows(2).all(|times| times[0] < times[1]));
+
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
 fn veriloga_zi_iir_checkpoint_resume_is_bit_identical_on_and_between_edges() {
     let model = write_model(
         "zi_checkpoint",

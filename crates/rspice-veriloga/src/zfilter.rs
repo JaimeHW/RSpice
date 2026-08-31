@@ -662,6 +662,18 @@ impl ZiFilter {
     /// When `time` is the current edge, the following edge is returned so a
     /// just-evaluated point never asks the solver for a zero timestep.
     pub fn next_sample_step_bound(&self, time: f64) -> Result<f64, ZiFilterError> {
+        let target = self.next_event_time(time)?;
+        let bound = target - time;
+        if !bound.is_finite() || bound <= 0.0 {
+            return Err(ZiFilterError::InvalidEvaluation(format!(
+                "next sample edge {target} is not representably after time {time}"
+            )));
+        }
+        Ok(bound)
+    }
+
+    /// Exact absolute time of the next sample edge or visible ramp corner.
+    pub(crate) fn next_event_time(&self, time: f64) -> Result<f64, ZiFilterError> {
         if !time.is_finite() || time < 0.0 {
             return Err(ZiFilterError::InvalidEvaluation(format!(
                 "sample breakpoint requested at invalid simulation time {time}"
@@ -675,13 +687,12 @@ impl ZiFilter {
         };
         let ramp_target = self.next_ramp_corner_after(time);
         let target = ramp_target.map_or(sample_target, |corner| corner.min(sample_target));
-        let bound = target - time;
-        if !bound.is_finite() || bound <= 0.0 {
+        if !target.is_finite() || target <= time {
             return Err(ZiFilterError::InvalidEvaluation(format!(
                 "next sample edge {target} is not representably after time {time}"
             )));
         }
-        Ok(bound)
+        Ok(target)
     }
 
     /// Commit the latest in-flight candidate after the engine accepts the

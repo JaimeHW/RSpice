@@ -96,12 +96,16 @@ use super::{
 /// branch representation so Trap/Gear continuation remains exact across wraps.
 /// Version 25 adds exact generated-device accepted terminal currents. Version
 /// 26 adds accepted ordinary variables written by generated event controls.
-const FORMAT_VERSION: u32 = 26;
+/// Version 27 persists exact accepted runtime Verilog-A `slew` catch-up
+/// corners so checkpoint resume cannot step over a rate-limit endpoint.
+const FORMAT_VERSION: u32 = 27;
 const RUNTIME_VERILOGA_FORMAT_VERSION: u32 = 17;
 #[cfg(feature = "veriloga")]
 const RUNTIME_VERILOGA_SLEW_INITIALIZATION_FORMAT_VERSION: u32 = 23;
 #[cfg(feature = "veriloga")]
 const RUNTIME_VERILOGA_IDTMOD_COMMON_BRANCH_FORMAT_VERSION: u32 = 24;
+#[cfg(feature = "veriloga")]
+const RUNTIME_VERILOGA_SLEW_CORNER_FORMAT_VERSION: u32 = 27;
 const CONTROLLER_PHASE_FORMAT_VERSION: u32 = 18;
 const NATIVE_NONLINEAR_FORMAT_VERSION: u32 = 19;
 const ACCEPTED_JUNCTION_HISTORY_FORMAT_VERSION: u32 = 20;
@@ -2819,6 +2823,8 @@ fn read_runtime_veriloga_states(
             Some(1)
         } else if checkpoint_version < RUNTIME_VERILOGA_IDTMOD_COMMON_BRANCH_FORMAT_VERSION {
             Some(2)
+        } else if checkpoint_version < RUNTIME_VERILOGA_SLEW_CORNER_FORMAT_VERSION {
+            Some(3)
         } else {
             None
         };
@@ -2903,6 +2909,7 @@ fn read_runtime_veriloga_states(
             match expected_legacy_version {
                 1 => VerilogADeviceCheckpoint::validate_legacy_v1_words(&words),
                 2 => VerilogADeviceCheckpoint::validate_legacy_v2_words(&words),
+                3 => VerilogADeviceCheckpoint::validate_legacy_v3_words(&words),
                 _ => unreachable!("known legacy runtime Verilog-A state version"),
             }
             .map_err(|error| {
@@ -2926,9 +2933,10 @@ fn read_runtime_veriloga_states(
         states.push(state);
     }
     // Runtime state v1 omitted slew initialization and v2 could not identify
-    // the modulo branch shared by accepted `idtmod` history lanes. Both remain
-    // fully parseable for diagnostics but cannot be promoted into exact
-    // version-3 accepted state.
+    // the modulo branch shared by accepted `idtmod` history lanes, and v3
+    // omitted exact accepted `slew` catch-up corners. All remain fully
+    // parseable for diagnostics but cannot be promoted into exact current
+    // accepted state.
     Ok((states, legacy_state_version.is_some() && count != 0))
 }
 
@@ -8155,6 +8163,9 @@ mod tests {
             accepted_time.to_bits(),
         ];
         if let Some(initialized) = initialized {
+            if state_version >= 4 {
+                words.push(0); // optional slew catch-up corner
+            }
             words.push(u64::from(initialized));
         }
         words.extend([
@@ -9429,7 +9440,9 @@ mod tests {
         for (outer_version, inner_version, expected) in [
             (23, 1, "expected legacy version 2"),
             (23, 3, "expected legacy version 2"),
-            (24, 2, "unsupported runtime Verilog-A state version 2"),
+            (24, 2, "expected legacy version 3"),
+            (26, 4, "expected legacy version 3"),
+            (27, 3, "unsupported runtime Verilog-A state version 3"),
         ] {
             let words = runtime_veriloga_idtmod_words(inner_version, checkpoint.time);
             let fixture = replace_empty_runtime_veriloga_tail(
@@ -9448,7 +9461,20 @@ mod tests {
 
     #[cfg(feature = "veriloga")]
     #[test]
-    fn v24_runtime_veriloga_slew_initialization_round_trips_exactly() {
+    fn v26_runtime_veriloga_rows_without_slew_corners_are_validated_then_discarded() {
+        let checkpoint = sample();
+        let words = runtime_veriloga_idtmod_words(3, checkpoint.time);
+        let fixture = replace_empty_runtime_veriloga_tail(legacy_text(&checkpoint, 26), 3, &words);
+
+        let restored = TransientCheckpoint::from_text(&fixture)
+            .expect("v26 runtime Verilog-A v3 payload remains parseable");
+        assert!(!restored.runtime_veriloga_state_available);
+        assert!(restored.runtime_veriloga_instance_states.is_empty());
+    }
+
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn current_runtime_veriloga_slew_initialization_round_trips_exactly() {
         let checkpoint = sample();
         for initialized in [false, true] {
             let state_version = rspice_veriloga::device::RUNTIME_CHECKPOINT_STATE_VERSION;
@@ -9457,21 +9483,22 @@ mod tests {
             let fixture =
                 replace_empty_runtime_veriloga_tail(checkpoint.to_text(), state_version, &words);
 
-            let restored = TransientCheckpoint::from_text(&fixture)
-                .unwrap_or_else(|error| panic!("v24 initialized={initialized} failed: {error}"));
+            let restored = TransientCheckpoint::from_text(&fixture).unwrap_or_else(|error| {
+                panic!("current initialized={initialized} failed: {error}")
+            });
             assert!(restored.runtime_veriloga_state_available);
             assert_eq!(restored.runtime_veriloga_instance_states.len(), 1);
             assert_eq!(
                 restored.to_text(),
                 fixture,
-                "v24 initialized={initialized} must preserve every nested payload word"
+                "current initialized={initialized} must preserve every nested payload word"
             );
         }
     }
 
     #[cfg(feature = "veriloga")]
     #[test]
-    fn v24_runtime_veriloga_common_branch_history_round_trips_exactly() {
+    fn current_runtime_veriloga_common_branch_history_round_trips_exactly() {
         let checkpoint = sample();
         let state_version = rspice_veriloga::device::RUNTIME_CHECKPOINT_STATE_VERSION;
         let words = runtime_veriloga_idtmod_words(state_version, checkpoint.time);
@@ -9479,7 +9506,7 @@ mod tests {
             replace_empty_runtime_veriloga_tail(checkpoint.to_text(), state_version, &words);
 
         let restored = TransientCheckpoint::from_text(&fixture)
-            .expect("v24 common-branch idtmod history must parse");
+            .expect("current common-branch idtmod history must parse");
         assert!(restored.runtime_veriloga_state_available);
         let state = &restored.runtime_veriloga_instance_states[0].accepted;
         assert_eq!(state.state_values_prev, vec![0.2]);

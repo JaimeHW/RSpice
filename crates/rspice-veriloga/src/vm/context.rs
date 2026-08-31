@@ -1196,6 +1196,7 @@ impl VmContext {
     }
 
     /// Tightest exact sampled-filter edge after the current time.
+    #[cfg(test)]
     pub(crate) fn zi_filter_step_bound(&self) -> Result<Option<f64>, VmError> {
         self.zi_filters
             .iter()
@@ -1214,6 +1215,37 @@ impl VmContext {
                     minimum.map_or(bound, |current: f64| current.min(bound)),
                 ))
             })
+    }
+
+    /// Earliest exact timer, sampled-filter, or slew catch-up event owned by
+    /// the latest accepted runtime state.
+    pub(crate) fn transient_event_time(&self) -> Result<Option<f64>, VmError> {
+        let slew = self
+            .slew_filters
+            .iter()
+            .filter_map(|filter| filter.next_corner_time(self.time))
+            .reduce(f64::min);
+        let zi = self
+            .zi_filters
+            .iter()
+            .enumerate()
+            .filter(|(_, filter)| filter.participates_in_transient_schedule())
+            .map(|(filter_id, filter)| {
+                filter.next_event_time(self.time).map_err(|error| {
+                    VmError::InvalidNumericResult(format!(
+                        "zi filter {filter_id} event target failed: {error}"
+                    ))
+                })
+            })
+            .try_fold(None, |minimum, target| {
+                let target = target?;
+                Ok(Some(
+                    minimum.map_or(target, |current: f64| current.min(target)),
+                ))
+            })?;
+        let timer = (self.timer_event_bound.is_finite() && self.timer_event_bound > self.time)
+            .then_some(self.timer_event_bound);
+        Ok([timer, zi, slew].into_iter().flatten().reduce(f64::min))
     }
 
     /// Earliest interior zero-crossing target produced by the latest complete
