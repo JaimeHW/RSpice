@@ -1547,7 +1547,7 @@ impl Engine {
         }
 
         #[cfg(not(any(feature = "veriloga", feature = "veriloga-builtins-base")))]
-        let _ = (circuit, dc_solution);
+        let _ = (circuit, dc_solution, &mut noise_sources);
 
         Ok(noise_sources)
     }
@@ -1574,7 +1574,7 @@ impl Engine {
         dialect: crate::engine::SpiceDialect,
     ) -> Result<(Vec<NoiseSource>, Vec<Option<Value>>), SimulationError> {
         debug_assert_eq!(base_sources.len(), base_absolute_temperatures.len());
-        let mut veriloga_device_names = HashSet::new();
+        let mut veriloga_device_names: HashSet<String> = HashSet::new();
         #[cfg(feature = "veriloga")]
         veriloga_device_names.extend(
             circuit
@@ -1589,6 +1589,8 @@ impl Engine {
                 .iter()
                 .map(|device| device.instance_name.to_ascii_lowercase()),
         );
+        #[cfg(not(any(feature = "veriloga", feature = "veriloga-builtins-base")))]
+        let _ = &mut veriloga_device_names;
         if veriloga_device_names.is_empty() {
             return Ok((base_sources.to_vec(), base_absolute_temperatures.to_vec()));
         }
