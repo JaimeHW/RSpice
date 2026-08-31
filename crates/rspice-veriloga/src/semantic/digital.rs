@@ -41,11 +41,22 @@ pub struct AnalyzedDigital {
     pub processes: Vec<AnalyzedDigitalProcess>,
     /// Continuous assignments, in declaration order.
     pub continuous_assigns: Vec<AnalyzedContinuousAssign>,
+    /// Instantiated child modules, elaborated flat into this module's scope.
+    ///
+    /// Empty as the analyzer leaves it — a module is analyzed on its own and
+    /// knows nothing about what it instantiates. Hierarchy elaboration fills
+    /// this in on the module it selects, depth-first in instance-declaration
+    /// order, and every entry is already resolved against the scope it was
+    /// instantiated in; see [`crate::semantic::digital_elaborate`].
+    pub instances: Vec<ElaboratedDigitalInstance>,
 }
 
 impl AnalyzedDigital {
     pub fn is_empty(&self) -> bool {
-        self.signals.is_empty() && self.processes.is_empty() && self.continuous_assigns.is_empty()
+        self.signals.is_empty()
+            && self.processes.is_empty()
+            && self.continuous_assigns.is_empty()
+            && self.instances.is_empty()
     }
 
     /// The first discrete-domain construct a backend would have to execute.
@@ -71,6 +82,18 @@ impl AnalyzedDigital {
                 keyword: process.kind.keyword(),
                 detail: format!("process {}", process.id),
                 span: process.span,
+            }),
+            // An elaborated child instance is discrete-domain content of this
+            // module as surely as a `reg` is. Without this arm a module whose
+            // only digital content came from a child would report nothing here
+            // and compile into a device silently missing the whole hierarchy.
+            self.instances.first().map(|instance| DigitalConstruct {
+                keyword: "instance",
+                detail: format!(
+                    "digital instance `{}` of module `{}`",
+                    instance.path, instance.module
+                ),
+                span: instance.span,
             }),
         ];
         candidates
@@ -223,6 +246,60 @@ pub struct AnalyzedContinuousAssign {
     pub span: Span,
 }
 
+/// One instantiated digital module, elaborated into the compiled module.
+///
+/// A frame, not a tree: hierarchy elaboration walks the instance tree once and
+/// emits one of these per instance, depth-first in declaration order, each
+/// already resolved against the scope it was instantiated in. Two instances of
+/// one child module are two frames that share nothing, which is what makes
+/// their processes and drivers separately addressable.
+#[derive(Debug, Clone)]
+pub struct ElaboratedDigitalInstance {
+    /// Instance path below the compiled module: `g1`, or `u1.g2` when nested.
+    ///
+    /// The IEEE 1364-2005 section 12.4 hierarchical name, minus the top
+    /// module. A `.` cannot occur in an identifier, so a path can never
+    /// collide with a name the author wrote.
+    pub path: SmolStr,
+    /// The instantiated module's name, for diagnostics.
+    pub module: SmolStr,
+    /// The instance's own nets and variables, in declaration order.
+    pub signals: Vec<ElaboratedDigitalSignal>,
+    /// The instance's processes, in declaration order.
+    ///
+    /// Each carries the process id its *source module* was given, which two
+    /// instances of one module therefore share. Lowering allocates a fresh id
+    /// per frame; the one here is never used as an identity.
+    pub processes: Vec<AnalyzedDigitalProcess>,
+    /// The instance's continuous assignments, in declaration order.
+    pub continuous_assigns: Vec<AnalyzedContinuousAssign>,
+    /// The implicit continuous assignments of this instance's variable output
+    /// ports (IEEE 1364-2005 section 12.3.9.2), in port-declaration order.
+    ///
+    /// Written in *elaborated* names, not the instance's own: the target is
+    /// the connected net as the connecting scope knows it, and the source is
+    /// this instance's variable. They are the one construct here that is not
+    /// something the author wrote.
+    pub port_drivers: Vec<AnalyzedContinuousAssign>,
+    /// The instance statement, for diagnostics.
+    pub span: Span,
+}
+
+/// One signal of an elaborated instance, with the name it takes in the flat
+/// scope.
+#[derive(Debug, Clone)]
+pub struct ElaboratedDigitalSignal {
+    /// The declaration as the instantiated module wrote it.
+    pub declared: AnalyzedDigitalSignal,
+    /// The name this signal has in the elaborated scope.
+    ///
+    /// Ordinarily `path.name`. A net port that collapsed onto the net it is
+    /// connected to carries *that net's* elaborated name instead — which is
+    /// what collapsing is, stated as a name rather than as a flag: the two
+    /// declarations name one signal, so the elaborated plan has one.
+    pub name: SmolStr,
+}
+
 // ============================================================================
 // Analysis
 // ============================================================================
@@ -362,6 +439,10 @@ impl SemanticAnalyzer {
             signals,
             processes,
             continuous_assigns,
+            // A module is analyzed on its own, so it knows nothing yet about
+            // what it instantiates; hierarchy elaboration fills this in on the
+            // module it selects.
+            instances: Vec::new(),
         };
     }
 
