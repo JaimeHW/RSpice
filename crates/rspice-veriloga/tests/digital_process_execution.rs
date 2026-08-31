@@ -480,6 +480,264 @@ fn a_concatenation_target_extends_the_same_way_nonblocking() {
 }
 
 // ===========================================================================
+// Context-determined expression width (IEEE 1364-2005 section 5.4.1)
+// ===========================================================================
+//
+// Section 5.2.1's resize, above, is the *last* step. Section 5.4.1 is the one
+// before it, and the two are easy to confuse into a wrong answer: the
+// assignment's left-hand side is part of the expression's context, so the
+// operands of a context-determined operator are extended to the width of the
+// largest expression *including the target* and the operation is performed at
+// that width. Computing at the operand width and widening afterwards loses the
+// bits the wider target was written to hold — which is a wrong number rather
+// than a refused one, and is what every test in this section pins.
+
+/// The headline case. `4'b1111 * 4'b1111` is 225, which needs eight bits; the
+/// target has eight, so section 5.4.1 makes the multiplication eight bits wide
+/// and the answer is `8'b11100001`.
+///
+/// Multiplying at the operand width first gives `225 mod 16 = 1`, then widens
+/// that to `8'b00000001`. The two readings differ in every bit above the
+/// bottom nibble, which is what makes this the clearest statement of the rule.
+#[test]
+fn a_product_is_computed_at_the_width_of_its_assignment_target() {
+    let mut harness = Harness::new(
+        "    reg [3:0] a, b;\n\
+     \x20   reg [7:0] p;\n\
+     \x20   initial p = a * b;",
+    );
+    harness.set("a", "1111");
+    harness.set("b", "1111");
+
+    expect_finished(harness.run());
+    // 15 * 15 = 225 = 0xE1.
+    assert_eq!(harness.get("p"), "11100001");
+}
+
+/// One bit of target beyond the operands is enough: `15 + 15 = 30` needs five,
+/// and a five-bit target gives the addition five bits, so the carry survives.
+#[test]
+fn an_addition_keeps_the_carry_the_wider_target_has_room_for() {
+    let mut harness = Harness::new(
+        "    reg [3:0] a, b;\n\
+     \x20   reg [4:0] p;\n\
+     \x20   initial p = a + b;",
+    );
+    harness.set("a", "1111");
+    harness.set("b", "1111");
+
+    expect_finished(harness.run());
+    // 15 + 15 = 30 = 5'b11110. Adding at four bits gives 14, then zero-extends
+    // to `5'b01110` — the dropped carry.
+    assert_eq!(harness.get("p"), "11110");
+}
+
+/// Table 5-22 gives `<<` a result the size of its *left* operand, and the left
+/// operand is context-determined. So an eight-bit target makes `a` eight bits
+/// before the shift, and a bit shifted past bit 3 is still there.
+///
+/// The right operand is self-determined and takes no part in this; the shift
+/// count is a number of positions, not a value being combined.
+#[test]
+fn a_left_shift_happens_at_the_target_width_not_the_operand_width() {
+    let mut harness = Harness::new(
+        "    reg [3:0] a;\n\
+     \x20   reg [7:0] p;\n\
+     \x20   initial p = a << 5;",
+    );
+    harness.set("a", "0001");
+
+    expect_finished(harness.run());
+    // Bit 0 moves to bit 5. Shifting a four-bit `a` first shifts every bit out
+    // and leaves `4'b0000`, which widens to zero.
+    assert_eq!(harness.get("p"), "00100000");
+}
+
+/// The classic pin on the other side of the rule: section 5.4.1 makes *every*
+/// operand of a concatenation self-determined, so the outer context does not
+/// reach into one. `b + c` inside `{a, b + c}` is four bits wide whatever the
+/// target is, and the sum wraps.
+///
+/// This is the test that fails if "context" is implemented as a width pushed
+/// down the whole tree rather than one stopped at the operators that stop it.
+#[test]
+fn a_concatenation_operand_is_self_determined_and_wraps() {
+    let mut harness = Harness::new(
+        "    reg [3:0] a, b, c;\n\
+     \x20   reg [15:0] p;\n\
+     \x20   initial p = {a, b + c};",
+    );
+    harness.set("a", "1010");
+    harness.set("b", "1111");
+    harness.set("c", "0001");
+
+    expect_finished(harness.run());
+    // `b + c` is `16 mod 16 = 0` at four bits. The concatenation is eight bits
+    // wide, and section 5.2.1 zero-extends it into the sixteen-bit target.
+    assert_eq!(harness.get("p"), "0000000010100000");
+}
+
+/// A comparison's operands form their own context: they are sized to each
+/// other and to nothing else, and the one-bit result is self-determined.
+///
+/// `a == b` with a four-bit `a` and an eight-bit `b` compares them at eight
+/// bits — so a `b` whose high nibble is set is *not* equal to any `a` — and a
+/// sixteen-bit target changes neither the comparison nor the width of its
+/// answer.
+#[test]
+fn a_comparison_sizes_its_operands_to_each_other_only() {
+    let mut harness = Harness::new(
+        "    reg [3:0] a;\n\
+     \x20   reg [7:0] b;\n\
+     \x20   reg [15:0] p;\n\
+     \x20   initial p = a == b;",
+    );
+    harness.set("a", "1111");
+    harness.set("b", "00001111");
+
+    expect_finished(harness.run());
+    assert_eq!(harness.get("p"), "0000000000000001", "equal at eight bits");
+
+    harness.set("b", "10001111");
+    expect_finished(harness.run());
+    assert_eq!(
+        harness.get("p"),
+        "0000000000000000",
+        "the high nibble of `b` is part of the comparison"
+    );
+}
+
+/// Section 5.4.1: an unsized literal is at least 32 bits, and takes the context
+/// size when the context is larger.
+///
+/// `1 << 35` is the smallest expression that tells the two readings apart. The
+/// literal is the shift's left operand, which is context-determined, so a
+/// 40-bit target makes it forty bits and bit 0 survives its journey to bit 35.
+/// A literal frozen at thirty-two bits shifts every bit out and leaves zero.
+#[test]
+fn an_unsized_literal_takes_a_context_wider_than_thirty_two_bits() {
+    let mut harness = Harness::new(
+        "    reg [39:0] p;\n\
+     \x20   initial p = 1 << 35;",
+    );
+
+    expect_finished(harness.run());
+    let mut expected = String::from("0000");
+    expected.push('1');
+    expected.push_str(&"0".repeat(35));
+    assert_eq!(expected.len(), 40);
+    assert_eq!(harness.get("p"), expected, "bit 35 is set and nothing else");
+}
+
+/// The floor is still thirty-two: a concatenation's operands are
+/// self-determined, so the same literal inside one is exactly thirty-two bits
+/// wide however wide the target is.
+///
+/// Together with the test above this pins both halves of section 5.4.1's
+/// unsized-literal rule — the 32-bit minimum, and the context taking over
+/// above it — and neither reading satisfies both.
+#[test]
+fn an_unsized_literal_in_a_concatenation_is_exactly_thirty_two_bits() {
+    let mut harness = Harness::new(
+        "    reg [3:0] a;\n\
+     \x20   reg [35:0] p;\n\
+     \x20   initial p = {a, 1};",
+    );
+    harness.set("a", "1010");
+
+    expect_finished(harness.run());
+    let mut expected = String::from("1010");
+    expected.push_str(&"0".repeat(31));
+    expected.push('1');
+    assert_eq!(expected.len(), 36);
+    assert_eq!(harness.get("p"), expected, "`a` sits above a 32-bit one");
+}
+
+/// Table 5-22 gives `~i` the size of `i`, and makes `i` context-determined.
+/// So `~(a == b)` in an eight-bit target is a comparison producing one bit,
+/// zero-extended to eight, and *then* inverted — `8'b11111110`, not the
+/// `8'b00000000` that inverting one bit and widening afterwards gives.
+///
+/// The distinction is invisible for a wide operand and total for a narrow one,
+/// which is why the operand here is a comparison rather than a register.
+#[test]
+fn a_bitwise_not_inverts_at_the_context_width() {
+    let mut harness = Harness::new(
+        "    reg [3:0] a, b;\n\
+     \x20   reg [7:0] p;\n\
+     \x20   initial p = ~(a == b);",
+    );
+    harness.set("a", "0110");
+    harness.set("b", "0110");
+
+    expect_finished(harness.run());
+    assert_eq!(harness.get("p"), "11111110");
+}
+
+/// Both arms of `?:` are context-determined and the condition is not. The
+/// selected arm is therefore computed at the target's width, which is the same
+/// rule as the bare operator — a conditional does not become a place where the
+/// context is dropped.
+#[test]
+fn both_arms_of_a_conditional_take_the_context_width() {
+    let mut harness = Harness::new(
+        "    reg [3:0] a, b;\n\
+     \x20   reg sel;\n\
+     \x20   reg [7:0] p;\n\
+     \x20   initial p = sel ? a * b : a + b;",
+    );
+    harness.set("a", "1111");
+    harness.set("b", "1111");
+    harness.set("sel", "1");
+
+    expect_finished(harness.run());
+    assert_eq!(harness.get("p"), "11100001", "225 at eight bits");
+
+    harness.set("sel", "0");
+    expect_finished(harness.run());
+    assert_eq!(harness.get("p"), "00011110", "30 at eight bits");
+}
+
+/// A continuous assignment carries the same context as a procedural one: the
+/// driver's target is its left-hand side, and section 5.4.1 does not
+/// distinguish the two forms.
+#[test]
+fn a_continuous_assignment_sizes_its_expression_to_the_driven_net() {
+    let mut harness = Harness::new(
+        "    reg [3:0] a, b;\n\
+     \x20   wire [7:0] p;\n\
+     \x20   assign p = a * b;",
+    );
+    harness.set("a", "1111");
+    harness.set("b", "1111");
+
+    // The driver evaluates before it waits, so the contribution is already
+    // published when the process suspends on its operands.
+    expect_suspended(harness.start(0));
+    harness.resolve_drivers();
+    assert_eq!(harness.get("p"), "11100001");
+}
+
+/// A narrower target still truncates, which is section 5.2.1's step surviving
+/// underneath section 5.4.1's. The expression is sized to the *largest* of the
+/// operands and the target, so a two-bit target does not shrink a four-bit
+/// addition — it takes the low two bits of it.
+#[test]
+fn a_narrower_target_truncates_a_wider_expression() {
+    let mut harness = Harness::new(
+        "    reg [3:0] a, b;\n\
+     \x20   reg [1:0] p;\n\
+     \x20   initial p = a + b;",
+    );
+    harness.set("a", "1111");
+    harness.set("b", "0011");
+
+    expect_finished(harness.run());
+    // 15 + 3 = 18, which is `4'b0010` at four bits; the low two bits are `10`.
+    assert_eq!(harness.get("p"), "10");
+}
+
+// ===========================================================================
 // Unknown propagation (IEEE 1364-2005 section 4.1)
 // ===========================================================================
 
@@ -1140,6 +1398,14 @@ fn a_constant_driver_finishes_after_driving_once() {
 /// Each element of a concatenation target is its own driver: two nets, each
 /// driven by one expression. The right-hand side is resized to the total width
 /// first, exactly as a procedural concatenation target is.
+///
+/// It is also *sized* to that total width, which is what makes this the
+/// carry-out idiom rather than a spelling of it. IEEE 1364-2005 section 5.4.1
+/// puts the whole left-hand side in the addition's context, so `{cout, sum}`
+/// makes `a + b` three bits and the carry out of the two-bit sum lands in
+/// `cout`. Adding at the operand width and zero-extending afterwards gives a
+/// `cout` that is always 0 — a carry-out net that never carries, which is the
+/// defect this fixture is now the closest unit statement of.
 #[test]
 fn a_concatenation_target_becomes_one_driver_per_element() {
     let mut harness = Harness::new(
@@ -1165,10 +1431,10 @@ fn a_concatenation_target_becomes_one_driver_per_element() {
     harness.set("sum", "xx");
     expect_suspended(harness.run());
     harness.resolve_drivers();
-    // `11 + 01` is two bits wide, so it wraps to `00` and the carry the
-    // three-bit target asks for is a zero-extension, not a third result bit.
+    // `3 + 1 = 4`, computed at the three bits the target asks for: `3'b100`.
+    // The concatenation then distributes it most significant part first.
     assert_eq!(harness.get("sum"), "00");
-    assert_eq!(harness.get("cout"), "0");
+    assert_eq!(harness.get("cout"), "1");
 }
 
 /// Two drivers on one net produce two driver identities, each with its own

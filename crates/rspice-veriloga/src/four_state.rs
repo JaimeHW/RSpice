@@ -79,11 +79,15 @@ impl FourStateBit {
 /// unbounded allocation driven by source text.
 pub const MAX_FOUR_STATE_WIDTH: u32 = 65_536;
 
-/// Width given to an unsized four-state literal (`'bx`).
+/// Width given to an unsized four-state literal (`'bx`) when nothing wider
+/// asks for it.
 ///
-/// IEEE 1364-2005 section 3.5.1 gives an unsized literal at least 32 bits;
-/// this front end does not yet propagate a context width, so 32 is used
-/// verbatim and the absence of an explicit width is retained separately.
+/// IEEE 1364-2005 section 3.5.1 gives an unsized literal *at least* 32 bits,
+/// and section 5.4.1 gives it the size of its context when that is larger. So
+/// this is a floor rather than a width: decoding uses it because decoding has
+/// no context to consult, and the discrete-domain lowering — which does — asks
+/// for [`FourStateLiteral::bits_at`] instead. The absence of an explicit width
+/// is retained separately, because only an unsized literal may grow this way.
 pub const UNSIZED_FOUR_STATE_WIDTH: u32 = 32;
 
 /// A decoded four-state literal.
@@ -120,6 +124,25 @@ impl FourStateLiteral {
     /// Canonical `width'base` prefix used by diagnostics.
     pub fn spelling(&self) -> String {
         self.raw.to_string()
+    }
+
+    /// This literal's bits at `width`, padded by the section 3.5.1 rule.
+    ///
+    /// For an *unsized* literal only. Section 5.4.1 gives one the size of its
+    /// context whenever that exceeds the 32-bit floor, and section 3.5.1 says
+    /// what fills the positions it gains: a leading `x` or `z` extends with
+    /// itself, anything else with zero. `'bx` in a 40-bit context is forty
+    /// `x`s, not eight zeros above thirty-two of them.
+    ///
+    /// A *sized* literal is exactly as wide as its author wrote it and must
+    /// not come through here. It reaches a wider context as an ordinary
+    /// unsigned operand, which section 5.4.1 zero-extends — so `4'bxxxx` in an
+    /// eight-bit context is `8'b0000xxxx`, and the two rules disagree by
+    /// design.
+    pub fn bits_at(&self, width: u32) -> Vec<FourStateBit> {
+        let mut bits = self.bits.clone();
+        resize(&mut bits, width);
+        bits
     }
 }
 

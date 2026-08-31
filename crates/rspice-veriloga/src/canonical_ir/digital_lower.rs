@@ -330,7 +330,11 @@ fn lower_continuous_assign(
     }
 
     let entry = lowerer.builder.create_block();
-    let value = lowerer.expression(entry, &assignment.assignment.value);
+    // The driven net is the assignment's left-hand side, and section 5.4.1
+    // does not distinguish a continuous assignment from a procedural one:
+    // `assign p = a * b;` with an eight-bit `p` multiplies at eight bits.
+    let context = lowerer.lvalue_width(&assignment.assignment.target);
+    let value = lowerer.sized(entry, &assignment.assignment.value, context);
     lowerer.drive(entry, &assignment.assignment.target, value, id, drivers);
 
     let mut reads = BTreeSet::new();
@@ -740,7 +744,12 @@ impl ProcessLowerer<'_> {
                     );
                     continue;
                 }
-                let initial = item.init.as_ref().map(|init| self.expression(block, init));
+                // The declared variable is the assignment's target, so it seeds
+                // the context exactly as an ordinary assignment's does.
+                let initial = item
+                    .init
+                    .as_ref()
+                    .map(|init| self.sized(block, init, width));
                 self.declare_local(block, Some(item.name.clone()), width, item.span, initial);
             }
         }
@@ -771,7 +780,10 @@ impl ProcessLowerer<'_> {
                     );
                     continue;
                 }
-                let initial = item.init.as_ref().map(|init| self.expression(block, init));
+                let initial = item
+                    .init
+                    .as_ref()
+                    .map(|init| self.sized(block, init, width));
                 self.declare_local(block, Some(item.name.clone()), width, item.span, initial);
             }
         }
@@ -1079,7 +1091,13 @@ impl ProcessLowerer<'_> {
     /// which is why the value node is emitted into the current block and only
     /// the write lands after the wait.
     fn assign(&mut self, block: BlockId, assign: &DigitalAssign, nonblocking: bool) -> BlockId {
-        let mut carried = [self.expression(block, &assign.value)];
+        // IEEE 1364-2005 section 5.4.1 makes the left-hand side part of the
+        // right-hand side's context, so the target's width is what seeds the
+        // sizing. Section 5.2.1's resize is still applied afterwards, at the
+        // write; with the context right it is usually a no-op, and it is not
+        // one for a narrowing assignment or a concatenation target.
+        let context = self.lvalue_width(&assign.target);
+        let mut carried = [self.sized(block, &assign.value, context)];
         let block = match &assign.timing {
             // The value crosses the suspension as a resume argument; without
             // that the write would read a value the interpreter no longer has.
@@ -1508,10 +1526,80 @@ impl ProcessLowerer<'_> {
         )
     }
 
+    /// Lower an expression that no outer expression sizes.
+    ///
+    /// The self-determined case of [`Self::sized`], and the only one a caller
+    /// outside the expression machinery wants: a `case` selector, a branch
+    /// condition, a `repeat` count and an event term are all self-determined
+    /// per IEEE 1364-2005 table 5-22. An assignment's right-hand side is not —
+    /// see [`Self::sized`] — and goes through `sized` with the target's width.
     fn expression(&mut self, block: BlockId, expression: &Expression) -> ValueId {
+        self.sized(block, expression, 0)
+    }
+
+    /// Lower `expression` under an outer context of `context` bits, IEEE
+    /// 1364-2005 section 5.4.1.
+    ///
+    /// # The rule this implements
+    ///
+    /// Sizing an expression is two passes over one tree, and doing it in one
+    /// is the defect this exists to prevent. The first pass is bottom-up:
+    /// [`Self::self_width`] gives every expression its *self-determined* size
+    /// from its operands alone. The second is top-down and is this function:
+    /// the context size is the larger of the self-determined size and whatever
+    /// the enclosing expression asks for, and it is pushed back down into the
+    /// operands the standard calls *context-determined*, which are extended to
+    /// it **before** the operation runs.
+    ///
+    /// Section 5.4.1 puts the assignment's left-hand side in that context. So
+    /// `p = a * b` with four-bit operands and an eight-bit `p` multiplies at
+    /// eight bits and yields 225, where multiplying at the operand width and
+    /// widening the product afterwards yields 1. Both are total answers; only
+    /// one is the language's.
+    ///
+    /// # What is returned
+    ///
+    /// A value of exactly `max(self_width(expression), context)` bits when the
+    /// expression is context-determined, and of exactly `self_width` when it is
+    /// not. A self-determined expression is *not* padded here: whether its
+    /// value needs extending depends on what consumes it, and the consumer that
+    /// needs it — a context-determined operator — does it through
+    /// [`Self::operand`]. An assignment does not need it, because section
+    /// 5.2.1's resize at the write is still the last step and does the same job
+    /// without a node.
+    ///
+    /// # The classification (table 5-22)
+    ///
+    /// Context-determined operands, which receive `width`: both sides of
+    /// `+ - * / %`, of the bitwise `& | ^ ~^`, the operand of unary `~ + -`,
+    /// the *left* operand of `<< >>`, and both arms of `?:`. Each of those
+    /// operators takes the context size as its result size.
+    ///
+    /// Self-determined, which receive nothing: the right operand of `<< >>`,
+    /// every operand of a concatenation and its replication count, a reduction
+    /// operand, the condition of `?:`, and both operands of a logical
+    /// `&& || !`. A comparison's two operands size to each other and to nothing
+    /// outside; the result of a comparison, a logical operator or a reduction
+    /// is one bit whatever surrounds it.
+    ///
+    /// A comparison's operands are lowered self-determined and are *not*
+    /// resized to each other here, because they need no node to be: section
+    /// 4.1.7's equality, section 9.5's identity comparison and section 4.1.6's
+    /// relational operators each extend the narrower operand themselves, and
+    /// zero-extending an unsigned operand cannot change any of their answers.
+    /// Emitting the resize would state the rule twice and mean it once.
+    fn sized(&mut self, block: BlockId, expression: &Expression, context: u32) -> ValueId {
+        let width = self.self_width(expression).max(context);
         match expression {
             Expression::Digital(crate::ast::DigitalExpr::FourState(literal)) => {
-                let value = FourStateValue::from_literal(&literal.value);
+                // A sized literal keeps the width its author wrote and is
+                // extended, if at all, as an ordinary operand. An unsized one
+                // takes the context, padded by section 3.5.1's rule rather than
+                // with zeros — `'bx` in a wide context is wide `x`.
+                let value = match literal.value.declared_width {
+                    Some(_) => FourStateValue::from_literal(&literal.value),
+                    None => FourStateValue::from_bits_msb_first(&literal.value.bits_at(width)),
+                };
                 let width = value.width();
                 self.builder.push_leaf(
                     CfgValueType::FourState { width },
@@ -1530,9 +1618,8 @@ impl ProcessLowerer<'_> {
                 )
             }
             Expression::Digital(crate::ast::DigitalExpr::Xnor(xnor)) => {
-                let left = self.expression(block, &xnor.left);
-                let right = self.expression(block, &xnor.right);
-                let width = self.value_width(left).max(self.value_width(right));
+                let left = self.operand(block, &xnor.left, width);
+                let right = self.operand(block, &xnor.right, width);
                 self.builder.push(
                     block,
                     CfgValueType::FourState { width },
@@ -1552,8 +1639,8 @@ impl ProcessLowerer<'_> {
             Expression::Number(number) => {
                 // IEEE 1364-2005 section 3.5.1: a *sized* literal is exactly as
                 // wide as its author wrote it, and an unsized one is at least
-                // 32 bits — which is what this front end gives it, having no
-                // context width to narrow it with.
+                // 32 bits — and section 5.4.1 gives it the context's width when
+                // that is larger, which is what `width` already is.
                 //
                 // The size is recovered from the literal's own source spelling,
                 // because that is the only place it survives: the lexer routes a
@@ -1566,7 +1653,10 @@ impl ProcessLowerer<'_> {
                 // concatenation holding a 32-bit `1` is thirty-five, whose low
                 // four bits are a different value entirely.
                 if let Ok(literal) = crate::four_state::decode(&number.raw) {
-                    let value = FourStateValue::from_literal(&literal);
+                    let value = match literal.declared_width {
+                        Some(_) => FourStateValue::from_literal(&literal),
+                        None => FourStateValue::from_bits_msb_first(&literal.bits_at(width)),
+                    };
                     let width = value.width();
                     return self.builder.push_leaf(
                         CfgValueType::FourState { width },
@@ -1574,8 +1664,7 @@ impl ProcessLowerer<'_> {
                     );
                 }
                 // A plain decimal with no base marker. Section 3.5.1 sizes one
-                // as an unsized literal.
-                let width = crate::four_state::UNSIZED_FOUR_STATE_WIDTH;
+                // as an unsized literal, so it too takes a wider context.
                 let bits = if number.value < 0.0 || number.value.fract() != 0.0 {
                     self.error(
                         "only a non-negative whole number is a discrete-domain \
@@ -1607,6 +1696,12 @@ impl ProcessLowerer<'_> {
                     },
                 )
             }
+            // Section 5.4.1 makes every operand of a concatenation
+            // self-determined, and the concatenation's own size the sum of
+            // them. The context stops here: in `{a, b + c}` the sum is as wide
+            // as `b` and `c`, and wraps, however wide the target is. This is
+            // the operator the whole rule is usually got wrong on, because
+            // pushing the context through it looks like the same thing.
             Expression::ArrayLiteral(literal) => {
                 let mut parts = Vec::new();
                 for element in &literal.elements {
@@ -1619,13 +1714,13 @@ impl ProcessLowerer<'_> {
                     CfgValueKind::DigitalConcat { parts },
                 )
             }
+            // Both arms are context-determined; the condition is not. A `?:`
+            // is therefore not a place the context is dropped — `p = s ? a*b :
+            // a+b` computes both at `p`'s width.
             Expression::Conditional(conditional) => {
                 let condition = self.condition(block, &conditional.condition);
-                let then_value = self.expression(block, &conditional.then_expr);
-                let else_value = self.expression(block, &conditional.else_expr);
-                let width = self
-                    .value_width(then_value)
-                    .max(self.value_width(else_value));
+                let then_value = self.operand(block, &conditional.then_expr, width);
+                let else_value = self.operand(block, &conditional.else_expr, width);
                 self.builder.push(
                     block,
                     CfgValueType::FourState { width },
@@ -1636,14 +1731,145 @@ impl ProcessLowerer<'_> {
                     },
                 )
             }
-            Expression::Unary(unary) => self.unary(block, unary),
-            Expression::Binary(binary) => self.binary(block, binary),
+            Expression::Unary(unary) => self.unary(block, unary, width),
+            Expression::Binary(binary) => self.binary(block, binary, width),
             other => {
                 self.error(
                     "this expression form has no discrete-domain lowering",
                     other.span(),
                 );
                 self.unknown(1)
+            }
+        }
+    }
+
+    /// Lower a context-determined operand and extend it to `width`.
+    ///
+    /// The extension is section 5.4.1's, which happens *before* the operator
+    /// runs — the whole point of the pass. It zero-fills, because this front
+    /// end computes on unsigned values throughout; section 5.4.2's
+    /// sign-extension has nothing to apply to until a signed type exists.
+    ///
+    /// [`Self::sized`] already returns `width` bits for a context-determined
+    /// operand, so the resize is a no-op for one and a real extension only for
+    /// a self-determined operand — a comparison, a reduction, a concatenation,
+    /// a register narrower than the context.
+    fn operand(&mut self, block: BlockId, expression: &Expression, width: u32) -> ValueId {
+        let value = self.sized(block, expression, width);
+        self.resize(block, value, width)
+    }
+
+    /// The self-determined size of an expression, IEEE 1364-2005 table 5-22.
+    ///
+    /// The bottom-up half of the sizing, and pure: it reads declarations and
+    /// literals and emits nothing, so it can be asked before a single node
+    /// exists. [`Self::sized`] consults it for every expression it lowers,
+    /// which is what keeps the two halves from disagreeing — the width a node
+    /// is emitted at is `max(self_width, context)` by construction rather than
+    /// by a second derivation that happens to match.
+    ///
+    /// A form this cannot size is one that does not lower either; each such
+    /// arm answers 1, which is the width of the all-`x` placeholder
+    /// [`Self::unknown`] leaves behind after the refusal.
+    fn self_width(&self, expression: &Expression) -> u32 {
+        match expression {
+            // Sized literals keep their written width; unsized ones report the
+            // 32-bit floor, and grow past it only through the context.
+            Expression::Digital(crate::ast::DigitalExpr::FourState(literal)) => {
+                literal.value.width()
+            }
+            Expression::Digital(crate::ast::DigitalExpr::PartSelect(select)) => {
+                match (self.constant(&select.msb), self.constant(&select.lsb)) {
+                    (Some(msb), Some(lsb)) => msb.abs_diff(lsb) as u32 + 1,
+                    // Refused when lowered, and one bit of `x` when it is.
+                    _ => 1,
+                }
+            }
+            Expression::Digital(crate::ast::DigitalExpr::Xnor(xnor)) => self
+                .self_width(&xnor.left)
+                .max(self.self_width(&xnor.right)),
+            // Section 4.1.8: an identity comparison is one bit, and so is a
+            // reduction of section 4.1.10.
+            Expression::Digital(crate::ast::DigitalExpr::CaseEquality(_))
+            | Expression::Digital(crate::ast::DigitalExpr::Reduction(_)) => 1,
+            Expression::Number(number) => match crate::four_state::decode(&number.raw) {
+                Ok(literal) => literal.width(),
+                Err(_) => crate::four_state::UNSIZED_FOUR_STATE_WIDTH,
+            },
+            Expression::Identifier(identifier) => match self.lookup_local(&identifier.name) {
+                Some(local) => self.local_width(local),
+                None => self
+                    .index
+                    .get(identifier.name.as_str())
+                    .map_or(1, |signal| self.width_of(*signal)),
+            },
+            Expression::ArrayAccess(_) => 1,
+            Expression::ArrayLiteral(literal) => literal
+                .elements
+                .iter()
+                .map(|element| self.element_width(element))
+                .sum(),
+            Expression::Conditional(conditional) => self
+                .self_width(&conditional.then_expr)
+                .max(self.self_width(&conditional.else_expr)),
+            Expression::Unary(unary) => match unary.op {
+                // Section 4.1.8: logical negation is one bit.
+                UnaryOp::Not => 1,
+                UnaryOp::BitNot | UnaryOp::Pos | UnaryOp::Neg => self.self_width(&unary.operand),
+            },
+            Expression::Binary(binary) => match binary.op {
+                BinaryOp::BitAnd
+                | BinaryOp::BitOr
+                | BinaryOp::BitXor
+                | BinaryOp::Add
+                | BinaryOp::Sub
+                | BinaryOp::Mul
+                | BinaryOp::Div
+                | BinaryOp::Mod
+                | BinaryOp::Pow => self
+                    .self_width(&binary.left)
+                    .max(self.self_width(&binary.right)),
+                // Sections 4.1.6, 4.1.7 and 4.1.8: one bit, and the operands'
+                // widths take no part in it.
+                BinaryOp::And
+                | BinaryOp::Or
+                | BinaryOp::Eq
+                | BinaryOp::Ne
+                | BinaryOp::Lt
+                | BinaryOp::Le
+                | BinaryOp::Gt
+                | BinaryOp::Ge => 1,
+                // Section 4.1.12 and table 5-22: a shift is as wide as the
+                // value being shifted. The count is self-determined and does
+                // not enter.
+                BinaryOp::Shl | BinaryOp::Shr => self.self_width(&binary.left),
+            },
+            _ => 1,
+        }
+    }
+
+    /// The self-determined width one concatenation element contributes.
+    ///
+    /// A replication contributes its count times the width of what it repeats,
+    /// and nothing when the count is not the constant section 4.1.14 requires
+    /// — which is what the lowering contributes too, having refused it.
+    fn element_width(&self, element: &ArrayLiteralElement) -> u32 {
+        match element {
+            ArrayLiteralElement::Value(expression) => self.self_width(expression),
+            ArrayLiteralElement::Replication(replication) => {
+                let Some(count) = self
+                    .constant(&replication.count)
+                    .filter(|count| *count >= 0)
+                    .and_then(|count| u32::try_from(count).ok())
+                else {
+                    return 0;
+                };
+                let inner: u32 = replication
+                    .elements
+                    .iter()
+                    .map(|element| self.element_width(element))
+                    .sum();
+                count.saturating_mul(inner)
             }
         }
     }
@@ -1795,22 +2021,45 @@ impl ProcessLowerer<'_> {
         )
     }
 
-    fn unary(&mut self, block: BlockId, unary: &crate::ast::UnaryExpr) -> ValueId {
-        let input = self.expression(block, &unary.operand);
-        let width = self.value_width(input);
-        let (result_width, kind) = match unary.op {
-            UnaryOp::Not => (1, CfgValueKind::DigitalLogicalNot { input }),
-            UnaryOp::BitNot => (width, CfgValueKind::DigitalBitwiseNot { input }),
-            UnaryOp::Pos => return input,
+    /// Lower a unary operator at the context width `width`.
+    ///
+    /// Table 5-22 splits the four: `!` is one bit and its operand is
+    /// self-determined, while `~`, `+` and `-` take the context size and pass
+    /// it to their operand. The difference is observable — `~(a == b)` in an
+    /// eight-bit context inverts a zero-extended one bit and yields
+    /// `8'b11111110`, not the `8'b00000000` that inverting first would give.
+    fn unary(&mut self, block: BlockId, unary: &crate::ast::UnaryExpr, width: u32) -> ValueId {
+        match unary.op {
+            UnaryOp::Not => {
+                let input = self.expression(block, &unary.operand);
+                self.builder.push(
+                    block,
+                    CfgValueType::FourState { width: 1 },
+                    CfgValueKind::DigitalLogicalNot { input },
+                )
+            }
+            UnaryOp::BitNot => {
+                let input = self.operand(block, &unary.operand, width);
+                self.builder.push(
+                    block,
+                    CfgValueType::FourState { width },
+                    CfgValueKind::DigitalBitwiseNot { input },
+                )
+            }
+            // Unary `+` is the identity on an unsigned operand, so the operand
+            // already sized to the context *is* the result.
+            UnaryOp::Pos => self.operand(block, &unary.operand, width),
             UnaryOp::Neg => {
-                // `-x` is `0 - x` at the operand width, which is what makes it
+                // `-x` is `0 - x` at the context width, which is what makes it
                 // wrap rather than go negative.
+                let input = self.operand(block, &unary.operand, width);
                 let zero = self.builder.push_leaf(
                     CfgValueType::FourState { width },
                     CfgValueKind::FourStateConstant(FourStateValue::zero(width)),
                 );
-                (
-                    width,
+                self.builder.push(
+                    block,
+                    CfgValueType::FourState { width },
                     CfgValueKind::DigitalArithmetic {
                         op: ArithmeticOp::Sub,
                         left: zero,
@@ -1818,100 +2067,35 @@ impl ProcessLowerer<'_> {
                     },
                 )
             }
-        };
-        self.builder.push(
-            block,
-            CfgValueType::FourState {
-                width: result_width,
-            },
-            kind,
-        )
+        }
     }
 
-    fn binary(&mut self, block: BlockId, binary: &crate::ast::BinaryExpr) -> ValueId {
-        let left = self.expression(block, &binary.left);
-        let right = self.expression(block, &binary.right);
-        let widest = self.value_width(left).max(self.value_width(right));
-        let (width, kind) = match binary.op {
-            BinaryOp::BitAnd => (
-                widest,
-                CfgValueKind::DigitalBitwise {
-                    op: BitwiseOp::And,
-                    left,
-                    right,
-                },
-            ),
-            BinaryOp::BitOr => (
-                widest,
-                CfgValueKind::DigitalBitwise {
-                    op: BitwiseOp::Or,
-                    left,
-                    right,
-                },
-            ),
-            BinaryOp::BitXor => (
-                widest,
-                CfgValueKind::DigitalBitwise {
-                    op: BitwiseOp::Xor,
-                    left,
-                    right,
-                },
-            ),
-            BinaryOp::And => (
-                1,
-                CfgValueKind::DigitalLogical {
-                    op: LogicalOp::And,
-                    left,
-                    right,
-                },
-            ),
-            BinaryOp::Or => (
-                1,
-                CfgValueKind::DigitalLogical {
-                    op: LogicalOp::Or,
-                    left,
-                    right,
-                },
-            ),
-            BinaryOp::Eq => (
-                1,
-                CfgValueKind::DigitalEquality {
-                    left,
-                    right,
-                    negate: false,
-                },
-            ),
-            BinaryOp::Ne => (
-                1,
-                CfgValueKind::DigitalEquality {
-                    left,
-                    right,
-                    negate: true,
-                },
-            ),
-            BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
+    /// Lower a binary operator at the context width `width`.
+    ///
+    /// Three groups, and which group an operator is in is the whole of table
+    /// 5-22 for the binary forms:
+    ///
+    /// * **arithmetic and bitwise** — both operands context-determined, result
+    ///   `width`. This is where the context has to reach or the operation runs
+    ///   narrow and the answer is wrong rather than merely narrow.
+    /// * **logical and comparison** — one bit of result, operands
+    ///   self-determined. A comparison's two operands size to each other, which
+    ///   the operators themselves do (see [`Self::sized`]); the outer context
+    ///   reaches neither.
+    /// * **shift** — the left operand is context-determined and carries the
+    ///   result size; the right is self-determined, being a number of positions
+    ///   rather than a value combined with anything.
+    fn binary(&mut self, block: BlockId, binary: &crate::ast::BinaryExpr, width: u32) -> ValueId {
+        let kind = match binary.op {
+            BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor => {
                 let op = match binary.op {
-                    BinaryOp::Lt => RelationalOp::Lt,
-                    BinaryOp::Le => RelationalOp::Le,
-                    BinaryOp::Gt => RelationalOp::Gt,
-                    _ => RelationalOp::Ge,
+                    BinaryOp::BitAnd => BitwiseOp::And,
+                    BinaryOp::BitOr => BitwiseOp::Or,
+                    _ => BitwiseOp::Xor,
                 };
-                (1, CfgValueKind::DigitalRelational { op, left, right })
-            }
-            BinaryOp::Shl | BinaryOp::Shr => {
-                let op = if matches!(binary.op, BinaryOp::Shl) {
-                    ShiftOp::Left
-                } else {
-                    ShiftOp::Right
-                };
-                (
-                    self.value_width(left),
-                    CfgValueKind::DigitalShift {
-                        op,
-                        value: left,
-                        count: right,
-                    },
-                )
+                let left = self.operand(block, &binary.left, width);
+                let right = self.operand(block, &binary.right, width);
+                CfgValueKind::DigitalBitwise { op, left, right }
             }
             BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
                 let op = match binary.op {
@@ -1921,14 +2105,69 @@ impl ProcessLowerer<'_> {
                     BinaryOp::Div => ArithmeticOp::Div,
                     _ => ArithmeticOp::Mod,
                 };
-                (widest, CfgValueKind::DigitalArithmetic { op, left, right })
+                let left = self.operand(block, &binary.left, width);
+                let right = self.operand(block, &binary.right, width);
+                CfgValueKind::DigitalArithmetic { op, left, right }
+            }
+            BinaryOp::And | BinaryOp::Or => {
+                let op = if matches!(binary.op, BinaryOp::And) {
+                    LogicalOp::And
+                } else {
+                    LogicalOp::Or
+                };
+                let left = self.expression(block, &binary.left);
+                let right = self.expression(block, &binary.right);
+                return self.builder.push(
+                    block,
+                    CfgValueType::FourState { width: 1 },
+                    CfgValueKind::DigitalLogical { op, left, right },
+                );
+            }
+            BinaryOp::Eq | BinaryOp::Ne => {
+                let negate = matches!(binary.op, BinaryOp::Ne);
+                let left = self.expression(block, &binary.left);
+                let right = self.expression(block, &binary.right);
+                return self.builder.push(
+                    block,
+                    CfgValueType::FourState { width: 1 },
+                    CfgValueKind::DigitalEquality {
+                        left,
+                        right,
+                        negate,
+                    },
+                );
+            }
+            BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
+                let op = match binary.op {
+                    BinaryOp::Lt => RelationalOp::Lt,
+                    BinaryOp::Le => RelationalOp::Le,
+                    BinaryOp::Gt => RelationalOp::Gt,
+                    _ => RelationalOp::Ge,
+                };
+                let left = self.expression(block, &binary.left);
+                let right = self.expression(block, &binary.right);
+                return self.builder.push(
+                    block,
+                    CfgValueType::FourState { width: 1 },
+                    CfgValueKind::DigitalRelational { op, left, right },
+                );
+            }
+            BinaryOp::Shl | BinaryOp::Shr => {
+                let op = if matches!(binary.op, BinaryOp::Shl) {
+                    ShiftOp::Left
+                } else {
+                    ShiftOp::Right
+                };
+                let value = self.operand(block, &binary.left, width);
+                let count = self.expression(block, &binary.right);
+                CfgValueKind::DigitalShift { op, value, count }
             }
             BinaryOp::Pow => {
                 self.error(
                     "`**` has no discrete-domain lowering in this wave",
                     binary.span,
                 );
-                return self.unknown(widest);
+                return self.unknown(width);
             }
         };
         self.builder
