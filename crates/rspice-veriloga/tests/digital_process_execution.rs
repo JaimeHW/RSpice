@@ -1218,6 +1218,341 @@ fn a_net_declaration_assignment_is_a_driver() {
 }
 
 // ===========================================================================
+// Bitwise XNOR (IEEE 1364-2005 section 4.1.9)
+// ===========================================================================
+
+/// `~^` runs the section 4.1.9 XNOR table elementwise, and both spellings of
+/// the operator are the same operator.
+///
+/// The expected value is read off the table: `1~^1` is `1`, `0~^0` is `1`,
+/// and a `x` or `z` on either side makes the position `x` — XNOR has no
+/// controlling value, so nothing settles a position with an unknown in it.
+#[test]
+fn xnor_runs_the_table_elementwise_in_both_spellings() {
+    for spelling in ["~^", "^~"] {
+        let mut harness = Harness::new(&format!(
+            "    wire [3:0] a, b;\n\
+         \x20   wire [3:0] y;\n\
+         \x20   assign y = a {spelling} b;"
+        ));
+        harness.set("a", "1100");
+        harness.set("b", "1x0z");
+        harness.set("y", "xxxx");
+        expect_suspended(harness.run());
+        harness.resolve_drivers();
+        assert_eq!(harness.get("y"), "1x1x", "spelled `{spelling}`");
+    }
+}
+
+/// XNOR is the complement of XOR at every position, which is what makes
+/// `a ~^ b` and `~(a ^ b)` the same value — the reading the lexer's maximal
+/// munch has to be safe under.
+#[test]
+fn xnor_agrees_with_the_negation_of_xor() {
+    let mut harness = Harness::new(
+        "    wire [3:0] a, b;\n\
+     \x20   wire [3:0] direct, composed;\n\
+     \x20   assign direct = a ~^ b;\n\
+     \x20   assign composed = ~(a ^ b);",
+    );
+    harness.set("a", "10xz");
+    harness.set("b", "1x0z");
+    harness.set("direct", "xxxx");
+    harness.set("composed", "xxxx");
+    expect_suspended(harness.start(0));
+    expect_suspended(harness.start(1));
+    harness.resolve_drivers();
+    assert_eq!(harness.get("direct"), harness.get("composed"));
+    assert_eq!(harness.get("direct"), "1xxx");
+}
+
+/// `~^` sits on XOR's tier of table 4-2, which puts it *below* `&` and *above*
+/// `|`. So `a & b ~^ c` groups as `(a & b) ~^ c`, and `a ~^ b | c` as
+/// `(a ~^ b) | c`.
+///
+/// Both operand sets are chosen so the two candidate groupings disagree, which
+/// is the only thing that makes a precedence test worth running:
+///
+/// * `0 & 0 ~^ 0` — correct `(0 & 0) ~^ 0` is `0 ~^ 0` = 1; the misgrouping
+///   `0 & (0 ~^ 0)` is `0 & 1` = 0.
+/// * `0 ~^ 0 | 0` — correct `(0 ~^ 0) | 0` is `1 | 0` = 1; the misgrouping
+///   `0 ~^ (0 | 0)` is `0 ~^ 0` = 1 as well, so that one is separated with
+///   `c = 1`: correct is `1 | 1` = 1 and the misgrouping is `0 ~^ 1` = 0.
+#[test]
+fn xnor_binds_below_bitwise_and_and_above_bitwise_or() {
+    let mut harness = Harness::new(
+        "    wire a, b, c;\n\
+     \x20   wire tighter, looser;\n\
+     \x20   assign tighter = a & b ~^ c;\n\
+     \x20   assign looser  = a ~^ b | c;",
+    );
+    harness.set("a", "0");
+    harness.set("b", "0");
+    harness.set("c", "1");
+    harness.set("tighter", "x");
+    harness.set("looser", "x");
+    expect_suspended(harness.start(0));
+    expect_suspended(harness.start(1));
+    harness.resolve_drivers();
+    // `(0 & 0) ~^ 1` = `0 ~^ 1` = 0; misgrouped `0 & (0 ~^ 1)` = `0 & 0` = 0.
+    // Equal here, so `c` is flipped below for the `&` half.
+    assert_eq!(harness.get("looser"), "1", "(0 ~^ 0) | 1");
+
+    harness.set("c", "0");
+    harness.set("tighter", "x");
+    expect_suspended(harness.start(0));
+    harness.resolve_drivers();
+    assert_eq!(harness.get("tighter"), "1", "(0 & 0) ~^ 0");
+}
+
+// ===========================================================================
+// Reduction operators (IEEE 1364-2005 section 4.1.10)
+// ===========================================================================
+
+/// Every reduction operator against the value section 4.1.10 gives it.
+///
+/// Each expectation is the section's own definition applied by hand: the
+/// bitwise operator of section 4.1.9 folded across the operand's bits, with the
+/// `nand`/`nor`/`xnor` forms inverting the single-bit result at the end.
+///
+/// The `x` rows are the ones worth reading. A reduction is *not* poisoned by an
+/// unknown bit in general: `&2'b0x` is `0` because `0` is AND's controlling
+/// value and `|2'b1x` is `1` because `1` is OR's, while `^2'b0x` is `x` because
+/// XOR has no controlling value at all. An implementation that poisoned the
+/// result whenever any operand bit was unknown would get the first two wrong,
+/// and one that ignored unknown bits would get the third wrong.
+#[test]
+fn reduction_operators_fold_the_bitwise_tables() {
+    let cases = [
+        ("&", "1111", "1"),
+        ("&", "1101", "0"),
+        ("&", "0x", "0"),
+        ("&", "1x", "x"),
+        ("&", "1z", "x"),
+        ("~&", "1111", "0"),
+        ("~&", "1101", "1"),
+        ("~&", "0x", "1"),
+        ("~&", "1x", "x"),
+        ("|", "0000", "0"),
+        ("|", "0010", "1"),
+        ("|", "1x", "1"),
+        ("|", "0x", "x"),
+        ("~|", "0000", "1"),
+        ("~|", "0010", "0"),
+        ("~|", "1x", "0"),
+        ("~|", "0x", "x"),
+        // Parity: an even number of ones is 0, an odd number is 1.
+        ("^", "1010", "0"),
+        ("^", "1110", "1"),
+        ("^", "0x", "x"),
+        ("^", "1x", "x"),
+        ("~^", "1010", "1"),
+        ("~^", "1110", "0"),
+        ("~^", "0x", "x"),
+        // `^~` is the same operator as `~^`.
+        ("^~", "1010", "1"),
+    ];
+    for (operator, operand, expected) in cases {
+        let width = operand.len();
+        let mut harness = Harness::new(&format!(
+            "    wire [{}:0] a;\n\
+         \x20   wire y;\n\
+         \x20   assign y = {operator}a;",
+            width - 1
+        ));
+        harness.set("a", operand);
+        harness.set("y", "x");
+        expect_suspended(harness.run());
+        harness.resolve_drivers();
+        assert_eq!(harness.get("y"), expected, "{operator}{width}'b{operand}");
+    }
+}
+
+/// A reduction over a concatenation, which is the form that cannot be
+/// desugared before the operand's width is known: `{a, b, c}` names no signal
+/// to bit-select out of, so the fold has to happen where the concatenation is
+/// already a value.
+#[test]
+fn a_reduction_folds_a_concatenation() {
+    let mut harness = Harness::new(
+        "    wire a, b, c;\n\
+     \x20   wire y;\n\
+     \x20   assign y = ^{a, b, c};",
+    );
+    for (a, b, c, expected) in [
+        ("0", "0", "0", "0"),
+        ("0", "0", "1", "1"),
+        ("0", "1", "1", "0"),
+        ("1", "1", "1", "1"),
+        ("1", "1", "0", "0"),
+    ] {
+        harness.set("a", a);
+        harness.set("b", b);
+        harness.set("c", c);
+        harness.set("y", "x");
+        expect_suspended(harness.start(0));
+        harness.resolve_drivers();
+        assert_eq!(harness.get("y"), expected, "^{{{a},{b},{c}}}");
+    }
+}
+
+/// A one-bit operand reduces to itself: a fold with nothing to fold against.
+#[test]
+fn a_one_bit_reduction_is_the_bit_itself() {
+    for (operator, input, expected) in [
+        ("&", "1", "1"),
+        ("|", "0", "0"),
+        ("^", "x", "x"),
+        ("~&", "1", "0"),
+        ("~^", "0", "1"),
+    ] {
+        let mut harness = Harness::new(&format!(
+            "    wire a;\n\
+         \x20   wire y;\n\
+         \x20   assign y = {operator}a;"
+        ));
+        harness.set("a", input);
+        harness.set("y", "x");
+        expect_suspended(harness.run());
+        harness.resolve_drivers();
+        assert_eq!(harness.get("y"), expected, "{operator}{input}");
+    }
+}
+
+/// A reduction's operand is in the driver's sensitivity list.
+///
+/// The read set of a discrete-domain expression form is collected through one
+/// generic walk, and the walk's catch-all is silent: a form it did not descend
+/// into would contribute no reads, the driver would get an empty sensitivity
+/// list, and it would evaluate once at time zero and then never again. That is
+/// a stuck output rather than a refusal, so it is pinned here.
+#[test]
+fn a_reduction_operand_reaches_the_sensitivity_list() {
+    let mut harness = Harness::new(
+        "    wire [1:0] a;\n\
+     \x20   wire y;\n\
+     \x20   assign y = |a;",
+    );
+    harness.set("a", "00");
+    harness.set("y", "x");
+    let suspension = expect_suspended(harness.run());
+    let DigitalWaitRequest::Event(terms) = suspension.wait() else {
+        panic!("a driver waits on an event");
+    };
+    let signal = harness.signal("a");
+    assert!(any_term_is_satisfied(
+        terms,
+        signal,
+        &parse_value("00"),
+        &parse_value("01")
+    ));
+}
+
+// ===========================================================================
+// Case equality (IEEE 1364-2005 section 4.1.8)
+// ===========================================================================
+
+/// `===` compares `x` and `z` as ordinary values and always answers with a
+/// definite bit; `==` answers `x` as soon as either operand has one. Confusing
+/// the two is how an unknown leaks into control flow, so the divergence is
+/// pinned on the same operands.
+#[test]
+fn case_equality_is_defined_where_logical_equality_is_not() {
+    let mut harness = Harness::new(
+        "    wire [3:0] a, b;\n\
+     \x20   wire strict, loose, differs;\n\
+     \x20   assign strict  = (a === b);\n\
+     \x20   assign loose   = (a ==  b);\n\
+     \x20   assign differs = (a !== b);",
+    );
+
+    // Identical, unknown bits included: `===` says 1, `==` says x.
+    harness.set("a", "10xz");
+    harness.set("b", "10xz");
+    for index in 0..3 {
+        expect_suspended(harness.start(index));
+    }
+    harness.resolve_drivers();
+    assert_eq!(harness.get("strict"), "1");
+    assert_eq!(harness.get("loose"), "x");
+    assert_eq!(harness.get("differs"), "0");
+
+    // Differing only in a state `==` cannot see: `x` against `z`.
+    harness.set("b", "10zz");
+    for index in 0..3 {
+        expect_suspended(harness.start(index));
+    }
+    harness.resolve_drivers();
+    assert_eq!(
+        harness.get("strict"),
+        "0",
+        "`x` and `z` are not the same bit"
+    );
+    assert_eq!(harness.get("loose"), "x");
+    assert_eq!(harness.get("differs"), "1");
+
+    // Two-state operands: the two operators agree.
+    harness.set("a", "1010");
+    harness.set("b", "1010");
+    for index in 0..3 {
+        expect_suspended(harness.start(index));
+    }
+    harness.resolve_drivers();
+    assert_eq!(harness.get("strict"), "1");
+    assert_eq!(harness.get("loose"), "1");
+    assert_eq!(harness.get("differs"), "0");
+}
+
+/// Unequal widths are compared with the shorter one zero-filled, per section
+/// 4.1.8 — the same extension section 9.5 gives a case item.
+#[test]
+fn case_equality_zero_fills_the_narrower_operand() {
+    let mut harness = Harness::new(
+        "    wire [3:0] wide;\n\
+     \x20   wire [1:0] narrow;\n\
+     \x20   wire y;\n\
+     \x20   assign y = (wide === narrow);",
+    );
+    harness.set("wide", "0011");
+    harness.set("narrow", "11");
+    harness.set("y", "x");
+    expect_suspended(harness.run());
+    harness.resolve_drivers();
+    assert_eq!(harness.get("y"), "1");
+
+    harness.set("wide", "1011");
+    expect_suspended(harness.start(0));
+    harness.resolve_drivers();
+    assert_eq!(harness.get("y"), "0", "the filled bits are compared too");
+}
+
+/// `!==` is the complement of `===`, and can be one safely because `===` never
+/// yields `x` for the negation to invert into something the standard does not
+/// define.
+#[test]
+fn case_inequality_is_the_exact_complement() {
+    let mut harness = Harness::new(
+        "    wire [1:0] a, b;\n\
+     \x20   wire same, different;\n\
+     \x20   assign same      = (a === b);\n\
+     \x20   assign different = (a !== b);",
+    );
+    for (left, right) in [("0x", "0x"), ("0x", "00"), ("zz", "xx"), ("10", "10")] {
+        harness.set("a", left);
+        harness.set("b", right);
+        harness.set("same", "x");
+        harness.set("different", "x");
+        expect_suspended(harness.start(0));
+        expect_suspended(harness.start(1));
+        harness.resolve_drivers();
+        let same = harness.get("same");
+        let different = harness.get("different");
+        assert!(same == "0" || same == "1", "`===` never yields `{same}`");
+        assert_ne!(same, different, "`{left}` vs `{right}`");
+    }
+}
+
+// ===========================================================================
 // What still refuses
 // ===========================================================================
 

@@ -125,9 +125,9 @@ pub const XOR_TABLE: [[FourStateBit; 4]; 4] = [
 
 /// Bitwise XNOR (`~^` / `^~`), IEEE 1364-2005 section 4.1.9.
 ///
-/// Retained even though this wave's grammar has no `~^` token, because it is
-/// the exact complement of [`XOR_TABLE`] and the table test proves it. A later
-/// wave that adds the token gets the semantics already pinned.
+/// The exact complement of [`XOR_TABLE`], which the table test proves rather
+/// than assumes — so `a ~^ b` and `~(a ^ b)` cannot disagree, whichever way a
+/// source spells it and whichever way the lexer munches it.
 pub const XNOR_TABLE: [[FourStateBit; 4]; 4] = [
     //        0  1  x  z
     /* 0 */ [O, Z, X, X],
@@ -460,8 +460,8 @@ pub fn one_bit(bit: FourStateBit) -> FourStateValue {
 ///
 /// The result is `x` if either operand has any `x` or `z` bit. This is the
 /// rule that makes `==` unusable for testing whether a signal is unknown, and
-/// the reason the standard also defines `===`; that operator is not in this
-/// wave's grammar, so it is not implemented here.
+/// the reason the standard also defines `===` — which is [`case_match`] with
+/// [`DigitalCaseMatch::Exact`], not a variant of this function.
 pub fn equality(left: &FourStateValue, right: &FourStateValue, negate: bool) -> FourStateValue {
     if left.has_unknown() || right.has_unknown() {
         return one_bit(FourStateBit::Unknown);
@@ -514,13 +514,19 @@ impl DigitalCaseMatch {
 }
 
 /// Match a `case` item against the selector, IEEE 1364-2005 sections 9.5 and
-/// 9.5.1.
+/// 9.5.1 — and, with [`DigitalCaseMatch::Exact`], the `===` operator of
+/// section 4.1.8.
 ///
 /// One bit, and never an unknown one: a case item either matches or does not,
 /// which is what makes `case` usable where `==` is not. The comparison is an
 /// identity comparison at the wider of the two widths — section 9.5 extends
-/// every case expression to the width of the widest, and section 5.2.1's
-/// zero-fill is what that extension does.
+/// every case expression to the width of the widest, section 4.1.8 zero-fills
+/// the shorter operand of a `===`, and section 5.2.1's zero-fill is what both
+/// extensions do.
+///
+/// `===` and an exact `case` arm being one function is not a shortcut. They are
+/// the same comparison in the standard, and giving each its own transcription
+/// would give a compiler two chances to disagree about `4'b10xz === 4'b10xz`.
 pub fn case_match(
     kind: DigitalCaseMatch,
     selector: &FourStateValue,

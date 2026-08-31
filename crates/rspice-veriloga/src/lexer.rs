@@ -222,6 +222,14 @@ pub enum TokenKind {
     // === Operators - Comparison ===
     Eq, // ==
     Ne, // !=
+    /// `===`, the case-equality operator of IEEE 1364-2005 section 4.1.8.
+    ///
+    /// A different operator from [`TokenKind::Eq`], not a spelling of it: `===`
+    /// compares `x` and `z` as ordinary values and always yields a definite
+    /// bit, where `==` yields `x` as soon as either operand has one.
+    CaseEq, // ===
+    /// `!==`, the negation of [`TokenKind::CaseEq`].
+    CaseNe, // !==
     Lt, // <
     Le, // <=
     Gt, // >
@@ -236,6 +244,12 @@ pub enum TokenKind {
     BitAnd, // &
     BitOr,  // |
     BitXor, // ^
+    /// `~^` or `^~`, the bitwise XNOR of IEEE 1364-2005 section 4.1.9.
+    ///
+    /// One kind for both spellings because the standard defines them as one
+    /// operator; the source text stays on the token for a diagnostic that has
+    /// to quote what the author wrote.
+    BitXnor,
     BitNot, // ~
     Shl,    // <<
     Shr,    // >>
@@ -568,6 +582,16 @@ impl<'a> Lexer<'a> {
             '@' => TokenKind::At,
             '?' => TokenKind::Question,
             ':' => TokenKind::Colon,
+            // IEEE 1364-2005 annex A lexes by maximal munch, so `~^` is the
+            // XNOR operator rather than a negation applied to an XOR. The two
+            // readings agree for every four-state operand — `~(a ^ b)` and
+            // `a ~^ b` run complementary tables — so nothing observable turns
+            // on the choice; following the standard is what keeps a source
+            // written for another tool reading the same way here.
+            '~' if self.peek_char() == Some('^') => {
+                self.advance();
+                TokenKind::BitXnor
+            }
             '~' => TokenKind::BitNot,
             '%' => TokenKind::Percent,
 
@@ -586,7 +610,12 @@ impl<'a> Lexer<'a> {
             '=' => {
                 if self.peek_char() == Some('=') {
                     self.advance();
-                    TokenKind::Eq
+                    if self.peek_char() == Some('=') {
+                        self.advance();
+                        TokenKind::CaseEq
+                    } else {
+                        TokenKind::Eq
+                    }
                 } else {
                     TokenKind::Assign_
                 }
@@ -594,7 +623,12 @@ impl<'a> Lexer<'a> {
             '!' => {
                 if self.peek_char() == Some('=') {
                     self.advance();
-                    TokenKind::Ne
+                    if self.peek_char() == Some('=') {
+                        self.advance();
+                        TokenKind::CaseNe
+                    } else {
+                        TokenKind::Ne
+                    }
                 } else {
                     TokenKind::Not
                 }
@@ -640,7 +674,14 @@ impl<'a> Lexer<'a> {
                     TokenKind::BitOr
                 }
             }
-            '^' => TokenKind::BitXor,
+            '^' => {
+                if self.peek_char() == Some('~') {
+                    self.advance();
+                    TokenKind::BitXnor
+                } else {
+                    TokenKind::BitXor
+                }
+            }
             '#' => {
                 if self.peek_char() == Some('#') {
                     self.advance();

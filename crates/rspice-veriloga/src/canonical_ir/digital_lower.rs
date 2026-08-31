@@ -55,9 +55,9 @@
 //! - `**`, a non-constant delay, and a non-constant select bound.
 //!
 //! Refused before this pass, and still refused: tasks and functions,
-//! `generate`, primitives, `===` and `!==`, `fork`/`join`, `wait`, `disable`,
-//! and `force`/`release` — the parser stops each on its own keyword, so none of
-//! them reaches a lowering decision.
+//! `generate`, `fork`/`join`, `wait`, `disable`, and `force`/`release` — the
+//! parser stops each on its own keyword, so none of them reaches a lowering
+//! decision.
 //!
 //! # Hierarchy
 //!
@@ -88,7 +88,7 @@ use super::ids::{BlockId, DigitalLocalId, DigitalProcessId, DigitalSignalId, Val
 use crate::ast::DigitalProcessKind as AstKind;
 use crate::ast::{
     ArrayLiteralElement, BinaryOp, DigitalAssign, DigitalCase, DigitalLValue, DigitalStatement,
-    EdgeKind, Expression, TimingControl, UnaryOp,
+    EdgeKind, Expression, ReductionOp, TimingControl, UnaryOp,
 };
 use crate::four_state::FourStateBit;
 use crate::semantic::{AnalyzedDigital, AnalyzedDigitalProcess, AnalyzedDigitalSignal};
@@ -1519,6 +1519,26 @@ impl ProcessLowerer<'_> {
                     CfgValueKind::DigitalPartSelect { input, msb, lsb },
                 )
             }
+            Expression::Digital(crate::ast::DigitalExpr::Xnor(xnor)) => {
+                let left = self.expression(block, &xnor.left);
+                let right = self.expression(block, &xnor.right);
+                let width = self.value_width(left).max(self.value_width(right));
+                self.builder.push(
+                    block,
+                    CfgValueType::FourState { width },
+                    CfgValueKind::DigitalBitwise {
+                        op: BitwiseOp::Xnor,
+                        left,
+                        right,
+                    },
+                )
+            }
+            Expression::Digital(crate::ast::DigitalExpr::CaseEquality(equality)) => {
+                self.case_equality(block, equality)
+            }
+            Expression::Digital(crate::ast::DigitalExpr::Reduction(reduction)) => {
+                self.reduction(block, reduction)
+            }
             Expression::Number(number) => {
                 // IEEE 1364-2005 section 3.5.1 gives an unsized literal at
                 // least 32 bits, and this front end has no context width to
@@ -1627,6 +1647,120 @@ impl ProcessLowerer<'_> {
                 }
             }
         }
+    }
+
+    /// Lower `a === b` / `a !== b`, IEEE 1364-2005 section 4.1.8.
+    ///
+    /// Onto the node `case` already uses, because they are the same operator:
+    /// section 9.5's case comparison is an identity comparison over all four
+    /// states, which is exactly what `===` is, and
+    /// [`DigitalCaseMatch::Exact`](super::digital_value::DigitalCaseMatch::Exact)
+    /// is that comparison. Giving `===` a node of its own would put a second
+    /// transcription of one rule into the interpreter, with the usual two
+    /// chances to disagree about `4'b10xz === 4'b10xz`.
+    ///
+    /// `!==` is the complement, and can be one safely: `===` yields a definite
+    /// bit for every pair of operands, so negating it cannot manufacture the
+    /// `x` that `!=` would have produced.
+    fn case_equality(
+        &mut self,
+        block: BlockId,
+        equality: &crate::ast::CaseEqualityExpr,
+    ) -> ValueId {
+        let selector = self.expression(block, &equality.left);
+        let label = self.expression(block, &equality.right);
+        let matched = self.builder.push(
+            block,
+            CfgValueType::FourState { width: 1 },
+            CfgValueKind::DigitalCaseMatch {
+                selector,
+                label,
+                kind: DigitalCaseMatch::Exact,
+            },
+        );
+        if !equality.negate {
+            return matched;
+        }
+        self.builder.push(
+            block,
+            CfgValueType::FourState { width: 1 },
+            CfgValueKind::DigitalLogicalNot { input: matched },
+        )
+    }
+
+    /// Lower a reduction operator, IEEE 1364-2005 section 4.1.10.
+    ///
+    /// # Why this is a desugaring rather than a node
+    ///
+    /// Section 4.1.10 does not define reduction as a new function. It defines
+    /// it as *the section 4.1.9 bitwise operator applied successively across
+    /// the bits of one operand*, and the `nand`/`nor`/`xnor` forms as the
+    /// `and`/`or`/`xor` fold with the single-bit result inverted. So the
+    /// faithful lowering is that iteration written out — one bit select per
+    /// bit, one existing binary node per step — and a `CfgValueKind` of its own
+    /// would be a second place to state a rule the tables already state.
+    ///
+    /// That is not merely cheaper. A new kind is four edits that must land
+    /// together (`leaf_class`, the `is_digital` anchor, the AD guard, and the
+    /// interpreter), and `leaf_class`'s catch-all would cache a reduction at
+    /// module scope if the arm were missed — a defect no type error catches.
+    ///
+    /// # What it does to `x` and `z`
+    ///
+    /// Exactly what the tables do, which is the whole reason to build it out of
+    /// them. `&{1'b0, 1'bx}` is `0`, not `x`, because `0` is AND's controlling
+    /// value; `^{1'b0, 1'bx}` is `x`, because XOR has none. A lowering that
+    /// poisoned the result whenever any operand bit was unknown would get the
+    /// first of those wrong.
+    ///
+    /// A one-bit operand reduces to itself (with the inversion, for the
+    /// complemented forms), which is what a fold with no second element is.
+    fn reduction(&mut self, block: BlockId, reduction: &crate::ast::ReductionExpr) -> ValueId {
+        let input = self.expression(block, &reduction.operand);
+        let width = self.value_width(input);
+        let op = match reduction.op {
+            ReductionOp::And | ReductionOp::Nand => BitwiseOp::And,
+            ReductionOp::Or | ReductionOp::Nor => BitwiseOp::Or,
+            ReductionOp::Xor | ReductionOp::Xnor => BitwiseOp::Xor,
+        };
+
+        let bit = |lowerer: &mut Self, index: u32| {
+            lowerer.builder.push(
+                block,
+                CfgValueType::FourState { width: 1 },
+                CfgValueKind::DigitalPartSelect {
+                    input,
+                    msb: i64::from(index),
+                    lsb: i64::from(index),
+                },
+            )
+        };
+
+        // Least significant bit first, so the fold reads the way the value is
+        // indexed. The operators are associative and commutative over the
+        // section 4.1.9 tables, so the direction is a readability choice.
+        let mut folded = bit(self, 0);
+        for index in 1..width {
+            let next = bit(self, index);
+            folded = self.builder.push(
+                block,
+                CfgValueType::FourState { width: 1 },
+                CfgValueKind::DigitalBitwise {
+                    op,
+                    left: folded,
+                    right: next,
+                },
+            );
+        }
+
+        if !reduction.op.inverts() {
+            return folded;
+        }
+        self.builder.push(
+            block,
+            CfgValueType::FourState { width: 1 },
+            CfgValueKind::DigitalBitwiseNot { input: folded },
+        )
     }
 
     fn unary(&mut self, block: BlockId, unary: &crate::ast::UnaryExpr) -> ValueId {
@@ -1971,10 +2105,20 @@ fn collect_expression_reads(expression: &Expression, reads: &mut BTreeSet<String
             reads.insert(access.array.to_string());
             collect_expression_reads(&access.index, reads);
         }
-        Expression::Digital(crate::ast::DigitalExpr::PartSelect(select)) => {
-            reads.insert(select.name.to_string());
-            collect_expression_reads(&select.msb, reads);
-            collect_expression_reads(&select.lsb, reads);
+        // Every discrete-domain form at once, through the two accessors on
+        // `DigitalExpr`, rather than one arm per variant. The catch-all below
+        // is what makes that matter: a form this function forgot would
+        // contribute no reads, and a continuous assignment with an empty read
+        // set gets no sensitivity list at all — it would evaluate once at time
+        // zero and never again, which is a wrong waveform rather than a
+        // refusal.
+        Expression::Digital(digital) => {
+            if let Some(name) = digital.base_name() {
+                reads.insert(name.to_string());
+            }
+            for child in digital.children() {
+                collect_expression_reads(child, reads);
+            }
         }
         Expression::Binary(binary) => {
             collect_expression_reads(&binary.left, reads);

@@ -1985,19 +1985,37 @@ impl<'a> Parser<'a> {
         Ok(left)
     }
 
-    /// Parse bitwise xor (^)
+    /// Parse bitwise xor and xnor (`^`, `~^`, `^~`)
+    ///
+    /// One tier, because IEEE 1364-2005 table 4-2 gives XOR and XNOR the same
+    /// precedence, and left-associative like every other binary tier here.
     fn parse_bit_xor(&mut self) -> Result<Expression, ParseError> {
         let start = self.current_span();
         let mut left = self.parse_bit_and()?;
 
-        while self.match_token(TokenKind::BitXor) {
+        loop {
+            let xnor = match self.current().kind {
+                TokenKind::BitXor => false,
+                TokenKind::BitXnor => true,
+                _ => break,
+            };
+            self.advance();
             let right = self.parse_bit_and()?;
-            left = Expression::Binary(BinaryExpr {
-                op: BinaryOp::BitXor,
-                left: Box::new(left),
-                right: Box::new(right),
-                span: start.extend(self.previous_span()),
-            });
+            let span = start.extend(self.previous_span());
+            left = if xnor {
+                Expression::Digital(DigitalExpr::Xnor(XnorExpr {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                    span,
+                }))
+            } else {
+                Expression::Binary(BinaryExpr {
+                    op: BinaryOp::BitXor,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                    span,
+                })
+            };
         }
 
         Ok(left)
@@ -2021,31 +2039,43 @@ impl<'a> Parser<'a> {
         Ok(left)
     }
 
-    /// Parse equality (`==`, `!=`) below relational comparisons.
+    /// Parse equality (`==`, `!=`, `===`, `!==`) below relational comparisons.
+    ///
+    /// All four share one precedence tier, which is what IEEE 1364-2005 table
+    /// 4-2 gives them. The case forms are a different *operator*, not a
+    /// different tier: `a === b == c` groups left exactly as `a == b == c`
+    /// does.
     fn parse_equality(&mut self) -> Result<Expression, ParseError> {
         let start = self.current_span();
         let mut left = self.parse_relational()?;
 
         loop {
+            // `None` is a case-equality operator, carrying its sense.
             let op = match self.current().kind {
-                TokenKind::Eq => {
-                    self.advance();
-                    BinaryOp::Eq
-                }
-                TokenKind::Ne => {
-                    self.advance();
-                    BinaryOp::Ne
-                }
+                TokenKind::Eq => Some(BinaryOp::Eq),
+                TokenKind::Ne => Some(BinaryOp::Ne),
+                TokenKind::CaseEq | TokenKind::CaseNe => None,
                 _ => break,
             };
+            let negate = self.check(TokenKind::CaseNe);
+            self.advance();
 
             let right = self.parse_relational()?;
-            left = Expression::Binary(BinaryExpr {
-                op,
-                left: Box::new(left),
-                right: Box::new(right),
-                span: start.extend(self.previous_span()),
-            });
+            let span = start.extend(self.previous_span());
+            left = match op {
+                Some(op) => Expression::Binary(BinaryExpr {
+                    op,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                    span,
+                }),
+                None => Expression::Digital(DigitalExpr::CaseEquality(CaseEqualityExpr {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                    negate,
+                    span,
+                })),
+            };
         }
 
         Ok(left)
@@ -2201,9 +2231,18 @@ impl<'a> Parser<'a> {
         Ok(left)
     }
 
-    /// Parse unary (- ! ~)
+    /// Parse unary (`-` `+` `!` `~`) and the reduction operators.
     fn parse_unary(&mut self) -> Result<Expression, ParseError> {
         let start = self.current_span();
+
+        if let Some(op) = self.reduction_operator() {
+            let operand = self.parse_unary()?;
+            return Ok(Expression::Digital(DigitalExpr::Reduction(ReductionExpr {
+                op,
+                operand: Box::new(operand),
+                span: start.extend(self.previous_span()),
+            })));
+        }
 
         let op = match self.current().kind {
             TokenKind::Minus => {
@@ -2235,6 +2274,49 @@ impl<'a> Parser<'a> {
         }
 
         self.parse_primary()
+    }
+
+    /// Consume a reduction operator if one opens the expression under the
+    /// cursor, IEEE 1364-2005 section 4.1.10.
+    ///
+    /// Every one of these spellings is also a *binary* operator, so the
+    /// distinction is entirely positional: a reduction is what the token is
+    /// when nothing precedes it that could be a left operand. That is exactly
+    /// the position this function is called from — the head of a unary
+    /// expression — so no lookahead is needed, and the binary tiers above never
+    /// reach here with an operand pending.
+    ///
+    /// `~&` and `~|` stay two tokens and are recognized as a pair here rather
+    /// than munched in the lexer, because `~` is also the bitwise negation of
+    /// section 4.1.9 and the lexer has no idea whether it is in a unary
+    /// position. Reading the pair here is unambiguous *and* harmless: in a
+    /// unary position `&` has no reading but a reduction, so `~&a` can only be
+    /// reduction NAND — and `~(&a)`, the reading that would result from not
+    /// pairing them, is the same one-bit value by section 4.1.10's own
+    /// definition of the operator.
+    fn reduction_operator(&mut self) -> Option<ReductionOp> {
+        let op = match self.current().kind {
+            TokenKind::BitAnd => ReductionOp::And,
+            TokenKind::BitOr => ReductionOp::Or,
+            TokenKind::BitXor => ReductionOp::Xor,
+            // `~^` and `^~` both lex to one token, so reduction XNOR needs no
+            // pair.
+            TokenKind::BitXnor => ReductionOp::Xnor,
+            TokenKind::BitNot => match self.tokens.get(self.pos + 1).map(|token| token.kind) {
+                Some(TokenKind::BitAnd) => {
+                    self.advance();
+                    ReductionOp::Nand
+                }
+                Some(TokenKind::BitOr) => {
+                    self.advance();
+                    ReductionOp::Nor
+                }
+                _ => return None,
+            },
+            _ => return None,
+        };
+        self.advance();
+        Some(op)
     }
 
     /// Parse primary expression

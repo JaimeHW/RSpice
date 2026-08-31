@@ -717,6 +717,21 @@ pub enum DigitalExpr {
     /// The indexed forms `bus[base +: width]` and `bus[base -: width]` are not
     /// part of this wave and are refused by name.
     PartSelect(PartSelectExpr),
+    /// Bitwise XNOR: `a ~^ b`, `a ^~ b` (IEEE 1364-2005 section 4.1.9).
+    ///
+    /// Here rather than as a [`BinaryOp`] because the continuous half of the
+    /// language has no XNOR: its bitwise operators run on machine integers and
+    /// reach a bytecode instruction, a native x86-64 encoding, and a WebAssembly
+    /// opcode, none of which has one. A [`BinaryOp`] variant would therefore
+    /// have to be given a continuous-domain meaning in four backends to gain a
+    /// discrete-domain one here, and the standard's own answer — `~(a ^ b)` — is
+    /// already spellable there.
+    Xnor(XnorExpr),
+    /// Case equality: `a === b`, `a !== b` (section 4.1.8).
+    CaseEquality(CaseEqualityExpr),
+    /// A reduction operator: `&a`, `~&a`, `|a`, `~|a`, `^a`, `~^a` (section
+    /// 4.1.10).
+    Reduction(ReductionExpr),
 }
 
 impl DigitalExpr {
@@ -724,6 +739,9 @@ impl DigitalExpr {
         match self {
             Self::FourState(literal) => literal.span,
             Self::PartSelect(select) => select.span,
+            Self::Xnor(xnor) => xnor.span,
+            Self::CaseEquality(equality) => equality.span,
+            Self::Reduction(reduction) => reduction.span,
         }
     }
 
@@ -732,6 +750,9 @@ impl DigitalExpr {
         match self {
             Self::FourState(_) => "four-state literal",
             Self::PartSelect(_) => "part-select",
+            Self::Xnor(_) => "bitwise XNOR operator",
+            Self::CaseEquality(_) => "case equality operator",
+            Self::Reduction(_) => "reduction operator",
         }
     }
 
@@ -741,15 +762,85 @@ impl DigitalExpr {
         match self {
             Self::FourState(_) => Vec::new(),
             Self::PartSelect(select) => vec![&select.msb, &select.lsb],
+            Self::Xnor(xnor) => vec![&xnor.left, &xnor.right],
+            Self::CaseEquality(equality) => vec![&equality.left, &equality.right],
+            Self::Reduction(reduction) => vec![&reduction.operand],
         }
     }
 
     /// The signal this expression reads, when it names one.
+    ///
+    /// Only a part-select does. The operators name no signal of their own —
+    /// whatever they read is in [`Self::children`], which is where a walk that
+    /// wants every read has to look.
     pub fn base_name(&self) -> Option<&SmolStr> {
         match self {
-            Self::FourState(_) => None,
+            Self::FourState(_) | Self::Xnor(_) | Self::CaseEquality(_) | Self::Reduction(_) => None,
             Self::PartSelect(select) => Some(&select.name),
         }
+    }
+}
+
+/// Bitwise XNOR: `a ~^ b` or `a ^~ b`.
+#[derive(Debug, Clone)]
+pub struct XnorExpr {
+    pub left: Box<Expression>,
+    pub right: Box<Expression>,
+    pub span: Span,
+}
+
+/// Case equality: `a === b`, or its negation `a !== b`.
+#[derive(Debug, Clone)]
+pub struct CaseEqualityExpr {
+    pub left: Box<Expression>,
+    pub right: Box<Expression>,
+    /// `true` for `!==`. Carried as a flag rather than as two variants because
+    /// section 4.1.8 defines `!==` as the complement of `===` and nothing but
+    /// the sense differs.
+    pub negate: bool,
+    pub span: Span,
+}
+
+/// A reduction operator applied to one operand.
+#[derive(Debug, Clone)]
+pub struct ReductionExpr {
+    pub op: ReductionOp,
+    pub operand: Box<Expression>,
+    pub span: Span,
+}
+
+/// Which reduction operator, IEEE 1364-2005 section 4.1.10.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReductionOp {
+    And,
+    Nand,
+    Or,
+    Nor,
+    Xor,
+    Xnor,
+}
+
+impl ReductionOp {
+    /// The operator as the source spells it.
+    pub const fn symbol(self) -> &'static str {
+        match self {
+            Self::And => "&",
+            Self::Nand => "~&",
+            Self::Or => "|",
+            Self::Nor => "~|",
+            Self::Xor => "^",
+            Self::Xnor => "~^",
+        }
+    }
+
+    /// Whether the folded result is inverted on the way out.
+    ///
+    /// Section 4.1.10: "The reduction nand, reduction nor, and reduction xnor
+    /// operators shall be computed as the reduction and, reduction or, and
+    /// reduction xor operators, respectively, followed by inverting the
+    /// single-bit result."
+    pub const fn inverts(self) -> bool {
+        matches!(self, Self::Nand | Self::Nor | Self::Xnor)
     }
 }
 

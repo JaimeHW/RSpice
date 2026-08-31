@@ -60,6 +60,14 @@ fn compile_error(source: &str, module: Option<&str>) -> CompileError {
         .expect_err("a module with digital content must not compile")
 }
 
+/// The one module a single-module fixture parsed to.
+fn parsed_module(file: &SourceFile) -> &Module {
+    let Item::Module(module) = &file.items[0] else {
+        panic!("expected a module as the first item");
+    };
+    module
+}
+
 fn only_module(analyzed: &AnalyzedFile) -> &rspice_veriloga::semantic::AnalyzedModule {
     assert_eq!(analyzed.modules.len(), 1, "expected exactly one module");
     analyzed.modules.values().next().expect("one module")
@@ -784,6 +792,180 @@ fn part_selects_are_refused_in_the_continuous_domain() {
         message.contains("part-select") && message.contains("continuous (analog) domain"),
         "expected a part-select domain diagnostic, got {message:?}"
     );
+}
+
+/// The three operators this wave added are discrete-domain forms, so the
+/// continuous domain refuses each by name rather than by token.
+///
+/// Before they lexed at all, `a ~^ b` died as an unexpected `~` and `a === b`
+/// as an invalid expression — diagnostics that blamed a character rather than
+/// the construct. What the analog half must say now is which operator it is and
+/// that the discrete half is where it belongs.
+#[test]
+fn the_new_discrete_operators_are_refused_in_the_continuous_domain() {
+    for (expression, construct) in [
+        ("(a ~^ b)", "bitwise XNOR operator"),
+        ("(a ^~ b)", "bitwise XNOR operator"),
+        ("(a === b)", "case equality operator"),
+        ("(a !== b)", "case equality operator"),
+        ("(&a)", "reduction operator"),
+        ("(~&a)", "reduction operator"),
+        ("(|a)", "reduction operator"),
+        ("(~|a)", "reduction operator"),
+        ("(^a)", "reduction operator"),
+        ("(~^a)", "reduction operator"),
+    ] {
+        let message = analyze_error(&format!(
+            "module analog_operator(p, n);\n\
+             \x20   inout p, n;\n\
+             \x20   electrical p, n;\n\
+             \x20   integer a, b;\n\
+             \x20   real gain;\n\
+             \x20   analog begin\n\
+             \x20       a = 1; b = 2;\n\
+             \x20       gain = {expression};\n\
+             \x20       I(p, n) <+ gain * V(p, n);\n\
+             \x20   end\n\
+             endmodule\n"
+        ));
+        assert!(
+            message.contains(construct) && message.contains("continuous (analog) domain"),
+            "expected `{expression}` to be refused as a {construct}, got {message:?}"
+        );
+    }
+}
+
+/// `~^` and `^~` are one operator with two spellings, sitting on XOR's tier of
+/// IEEE 1364-2005 table 4-2: tighter than `|`, looser than `&`.
+///
+/// Pinned on the tree rather than on a value, because a precedence defect that
+/// happens to produce the right answer for one operand pair is still a
+/// precedence defect.
+#[test]
+fn xnor_parses_at_the_xor_precedence_tier() {
+    for spelling in ["~^", "^~"] {
+        let file = parse(&digital_module(&format!(
+            "    wire a, b, c;\n\
+         \x20   wire y;\n\
+         \x20   assign y = a & b {spelling} c | a;"
+        )));
+        let module = parsed_module(&file);
+        let value = &module.continuous_assigns[0].value;
+
+        // The outermost operator is `|`, the loosest of the three.
+        let Expression::Binary(or) = value else {
+            panic!("expected `|` outermost, got {value:?}");
+        };
+        assert_eq!(or.op, BinaryOp::BitOr);
+
+        // Its left operand is the XNOR, whose own left operand is the `&`.
+        let Expression::Digital(DigitalExpr::Xnor(xnor)) = &*or.left else {
+            panic!("expected XNOR under `|`, got {:?}", or.left);
+        };
+        let Expression::Binary(and) = &*xnor.left else {
+            panic!("expected `&` under XNOR, got {:?}", xnor.left);
+        };
+        assert_eq!(and.op, BinaryOp::BitAnd);
+    }
+}
+
+/// `===` and `!==` share the tier of `==` and `!=`, so a chain of them groups
+/// left exactly as a chain of the logical forms does.
+#[test]
+fn case_equality_parses_on_the_equality_tier() {
+    let file = parse(&digital_module(
+        "    wire a, b, c;\n\
+     \x20   wire y, z;\n\
+     \x20   assign y = a === b == c;\n\
+     \x20   assign z = a !== b;",
+    ));
+    let module = parsed_module(&file);
+
+    // `a === b == c` is `(a === b) == c`: same tier, left associative.
+    let Expression::Binary(outer) = &module.continuous_assigns[0].value else {
+        panic!("expected `==` outermost");
+    };
+    assert_eq!(outer.op, BinaryOp::Eq);
+    let Expression::Digital(DigitalExpr::CaseEquality(inner)) = &*outer.left else {
+        panic!("expected `===` under `==`, got {:?}", outer.left);
+    };
+    assert!(!inner.negate);
+
+    let Expression::Digital(DigitalExpr::CaseEquality(negated)) =
+        &module.continuous_assigns[1].value
+    else {
+        panic!("expected `!==`");
+    };
+    assert!(negated.negate, "`!==` is `===` with the sense inverted");
+}
+
+/// Every reduction spelling parses to the operator it names, including over a
+/// concatenation — the form that has no signal to bit-select out of.
+#[test]
+fn reduction_operators_parse_in_every_spelling() {
+    for (source, expected) in [
+        ("&a", ReductionOp::And),
+        ("~&a", ReductionOp::Nand),
+        ("|a", ReductionOp::Or),
+        ("~|a", ReductionOp::Nor),
+        ("^a", ReductionOp::Xor),
+        ("~^a", ReductionOp::Xnor),
+        ("^~a", ReductionOp::Xnor),
+        ("^{a, b}", ReductionOp::Xor),
+    ] {
+        let file = parse(&digital_module(&format!(
+            "    wire a, b;\n\
+         \x20   wire y;\n\
+         \x20   assign y = {source};"
+        )));
+        let value = &parsed_module(&file).continuous_assigns[0].value;
+        let Expression::Digital(DigitalExpr::Reduction(reduction)) = value else {
+            panic!("expected a reduction for `{source}`, got {value:?}");
+        };
+        assert_eq!(reduction.op, expected, "{source}");
+    }
+}
+
+/// A `~` that is not followed by `&` or `|` is still the bitwise negation of
+/// section 4.1.9, and a `&` that follows an operand is still the binary form.
+///
+/// The reduction operators reuse every one of their spellings from the binary
+/// operators, so the only thing keeping them apart is position. This is the
+/// pin on that: if the parser started reading `a & b` as `a` followed by a
+/// reduction, or `~a` as a malformed reduction, the whole language would shift
+/// underneath every existing model.
+#[test]
+fn the_binary_and_unary_readings_of_the_shared_spellings_survive() {
+    let file = parse(&digital_module(
+        "    wire [1:0] a, b;\n\
+     \x20   wire [1:0] w, x;\n\
+     \x20   wire y;\n\
+     \x20   assign w = ~a;\n\
+     \x20   assign x = a & b;\n\
+     \x20   assign y = a & &b;",
+    ));
+    let assigns = &parsed_module(&file).continuous_assigns;
+
+    let Expression::Unary(negation) = &assigns[0].value else {
+        panic!("`~a` is a bitwise negation, got {:?}", assigns[0].value);
+    };
+    assert_eq!(negation.op, UnaryOp::BitNot);
+
+    let Expression::Binary(and) = &assigns[1].value else {
+        panic!("`a & b` is a binary AND, got {:?}", assigns[1].value);
+    };
+    assert_eq!(and.op, BinaryOp::BitAnd);
+
+    // `a & &b` is a binary AND whose right operand is a reduction: the second
+    // `&` is in a unary position and the first is not.
+    let Expression::Binary(mixed) = &assigns[2].value else {
+        panic!("`a & &b` is a binary AND, got {:?}", assigns[2].value);
+    };
+    assert_eq!(mixed.op, BinaryOp::BitAnd);
+    let Expression::Digital(DigitalExpr::Reduction(reduction)) = &*mixed.right else {
+        panic!("expected a reduction on the right, got {:?}", mixed.right);
+    };
+    assert_eq!(reduction.op, ReductionOp::And);
 }
 
 /// A malformed four-state literal still stops at the lexer, because there is
