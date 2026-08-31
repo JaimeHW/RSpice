@@ -105,6 +105,15 @@ pub enum TokenKind {
     Wire,
     /// `reg`: the IEEE 1364-2005 procedural variable type.
     Reg,
+    /// A real-net type keyword: `wreal`, or one of the four resolved
+    /// spellings.
+    ///
+    /// One kind for all five, because the grammar after them is identical —
+    /// Verilog-AMS LRM 2.4 Syntax 3-8 — and which one was written is read back
+    /// from the token's `text`. Splitting them into five kinds would put the
+    /// same production in five places and give a reader five chances to find
+    /// them disagreeing.
+    Wreal,
     Ground,
     Electrical, // Common discipline
     Voltage,    // Common discipline
@@ -333,6 +342,12 @@ impl TokenKind {
             // Nets
             "wire" => TokenKind::Wire,
             "reg" => TokenKind::Reg,
+            // Verilog-AMS LRM 2.4 section 3.7's real net, and the four
+            // resolved spellings RSpice implements beside it as a named
+            // extension. `wreal4state` is deliberately absent: it stays an
+            // `AmsDigital` refusal below, because a four-state real net is a
+            // different type and not a resolution of this one.
+            "wreal" | "wrealsum" | "wrealavg" | "wrealmin" | "wrealmax" => TokenKind::Wreal,
             "signed" => TokenKind::Signed,
             "unsigned" => TokenKind::Unsigned,
             "ground" => TokenKind::Ground,
@@ -433,7 +448,11 @@ impl TokenKind {
             "wait" => TokenKind::AmsDigital,
             "wand" => TokenKind::AmsDigital,
             "wor" => TokenKind::AmsDigital,
-            "wreal" => TokenKind::AmsDigital,
+            // A four-state real net: a real value that can also be `x` or `z`.
+            // Not a resolution of `wreal` but a different type, with no
+            // Accellera definition to implement, so it is refused by name
+            // rather than treated as one of the resolved spellings.
+            "wreal4state" => TokenKind::AmsDigital,
 
             _ => return None,
         })

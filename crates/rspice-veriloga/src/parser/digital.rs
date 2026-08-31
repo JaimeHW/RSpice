@@ -194,8 +194,15 @@ impl Parser<'_> {
     }
 
     /// `wire [signed] [range] name [= expr] [, ...] ;`
+    ///
+    /// and Verilog-AMS LRM 2.4 Syntax 3-8's real net,
+    /// `wreal [discipline] [range] name [= expr] [, ...] ;`, which differs only
+    /// in the keyword and in the discipline the standard lets one carry.
     pub(super) fn parse_digital_net_decl(&mut self) -> Result<DigitalNetDecl, ParseError> {
         let start = self.current_span();
+        if self.check(TokenKind::Wreal) {
+            return self.parse_wreal_net_decl();
+        }
         self.expect(TokenKind::Wire)?;
         let signedness = self.parse_signedness();
         let range = self.parse_optional_vector_range()?;
@@ -207,6 +214,87 @@ impl Parser<'_> {
             items,
             span: start.extend(self.previous_span()),
         })
+    }
+
+    /// `wreal [discipline_identifier] [range] name [= expr] [, ...] ;`
+    ///
+    /// Verilog-AMS LRM 2.4 Syntax 3-8, plus the four resolved net-type
+    /// spellings [`WrealResolution`] documents. Which one was written is read
+    /// back off the keyword token's text, because all five share this one
+    /// production and splitting them would put it in five places.
+    ///
+    /// The `signed` qualifier is *not* in Syntax 3-8 and is not read here: a
+    /// real has no sign bit to declare, and `wreal signed;` is therefore a net
+    /// called `signed`, exactly as `real signed;` has always been a variable
+    /// called `signed`.
+    fn parse_wreal_net_decl(&mut self) -> Result<DigitalNetDecl, ParseError> {
+        let start = self.current_span();
+        let resolution = self.wreal_resolution();
+        self.advance(); // consume the net-type keyword
+        self.parse_wreal_discipline()?;
+        let range = self.parse_optional_vector_range()?;
+        let items = self.parse_digital_decl_items()?;
+        Ok(DigitalNetDecl {
+            kind: DigitalNetKind::Wreal(resolution),
+            signedness: Signedness::Unsigned,
+            range,
+            items,
+            span: start.extend(self.previous_span()),
+        })
+    }
+
+    /// The resolution the real-net keyword under the cursor names.
+    ///
+    /// The lexer gave all five spellings one kind and kept the text, so this
+    /// reads the text back. A token that somehow carries none is the plain
+    /// `wreal`, which is the reading that refuses a second driver rather than
+    /// combining one.
+    pub(super) fn wreal_resolution(&self) -> WrealResolution {
+        self.current()
+            .text
+            .as_deref()
+            .and_then(WrealResolution::from_keyword)
+            .unwrap_or(WrealResolution::Single)
+    }
+
+    /// Read the optional discipline identifier of a `wreal` declaration.
+    ///
+    /// Verilog-AMS LRM 2.4 Syntax 3-8 permits one, and section 3.11's Discrete
+    /// Domain Rule says which ones are compatible: a real net's discipline must
+    /// have a discrete domain. `ddiscrete` is the standard discrete discipline
+    /// and the only one this compiler implements; any other name is refused
+    /// here rather than accepted and ignored, because a discipline that was
+    /// read and dropped would silently place the net in a domain nothing
+    /// afterwards honours.
+    ///
+    /// A discipline is distinguished from the net's own name the way the port
+    /// grammar distinguishes them: two adjacent identifiers, or an identifier
+    /// followed by a range. `wreal w;` declares `w`; `wreal ddiscrete w;`
+    /// declares `w` in `ddiscrete`.
+    fn parse_wreal_discipline(&mut self) -> Result<(), ParseError> {
+        let followed_by_declaration = matches!(
+            self.tokens.get(self.pos + 1).map(|token| token.kind),
+            Some(TokenKind::Identifier | TokenKind::EscapedIdentifier | TokenKind::LBracket)
+        );
+        if !(self.check(TokenKind::Identifier) && followed_by_declaration) {
+            return Ok(());
+        }
+        let span = self.current_span();
+        let name = self.expect_identifier("discipline")?;
+        if name != "ddiscrete" {
+            return Err(ParseError::new(
+                ParseErrorKind::UnsupportedConstruct {
+                    context: "`wreal` declaration".to_string(),
+                    found: format!(
+                        "the discipline `{name}`; Verilog-AMS LRM 2.4 section 3.11's Discrete \
+                         Domain Rule makes a real net's discipline a discrete-domain one, and \
+                         `ddiscrete` is the only one this compiler implements"
+                    ),
+                },
+                span,
+            ));
+        }
+        Ok(())
     }
 
     /// `reg [signed] [range] name [unpacked dims] [, ...] ;`

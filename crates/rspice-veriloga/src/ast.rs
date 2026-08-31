@@ -288,6 +288,10 @@ pub enum PortNetType {
     Wire,
     /// `output reg [3:0] q;`
     Reg,
+    /// `input wreal in;` — Verilog-AMS LRM 2.4 section 6.5.3's real-valued
+    /// port, whose syntax (section 6.5.2) admits `wreal` wherever a net type
+    /// may be written.
+    Wreal(WrealResolution),
 }
 
 /// Port direction
@@ -1578,17 +1582,103 @@ pub struct DigitalDeclItem {
     pub span: Span,
 }
 
-/// Net type keyword. Only `wire` has a production in this wave; the remaining
-/// IEEE 1364 net types are still refused by name at the keyword.
+/// How a net with more than one driver combines their contributions.
+///
+/// Verilog-AMS LRM 2.4 section 6.5.3 says of a real-valued net that "there can
+/// be a maximum of one driver of a real-valued net", and section 3.7 gives no
+/// resolution function for one — the LRM has none to give. So [`Self::Single`]
+/// is the standard's own reading and the only one a `wreal` declaration
+/// selects: a second driver on such a net is refused rather than combined.
+///
+/// The other four spellings are **not** Accellera's. `wrealsum`, `wrealavg`,
+/// `wrealmin` and `wrealmax` are the de facto real-number-modelling extension
+/// that Cadence AMS Designer introduced and that RNM libraries are written
+/// against; RSpice implements them under those names, opt-in at the
+/// declaration, so that a design which asks for a resolution gets the one it
+/// named and a design which does not gets the LRM's refusal. Nothing here is
+/// reached by writing `wreal`.
+///
+/// The spelling mechanism is the **net type keyword**, and only that. The
+/// alternative — selecting a resolution through a discipline attribute — is
+/// refused by name at the declaration, because a design that could say the same
+/// thing two ways can say two different things in one place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WrealResolution {
+    /// `wreal`: one driver, per LRM 2.4 section 6.5.3.
+    Single,
+    /// `wrealsum`: the sum of every driver's contribution.
+    Sum,
+    /// `wrealavg`: the sum divided by the number of drivers the net has.
+    Average,
+    /// `wrealmin`: the least contribution.
+    Minimum,
+    /// `wrealmax`: the greatest contribution.
+    Maximum,
+}
+
+impl WrealResolution {
+    /// The net-type keyword that selects this resolution.
+    pub const fn keyword(self) -> &'static str {
+        match self {
+            Self::Single => "wreal",
+            Self::Sum => "wrealsum",
+            Self::Average => "wrealavg",
+            Self::Minimum => "wrealmin",
+            Self::Maximum => "wrealmax",
+        }
+    }
+
+    /// The resolution a net-type keyword names, if it names one.
+    pub fn from_keyword(keyword: &str) -> Option<Self> {
+        Some(match keyword {
+            "wreal" => Self::Single,
+            "wrealsum" => Self::Sum,
+            "wrealavg" => Self::Average,
+            "wrealmin" => Self::Minimum,
+            "wrealmax" => Self::Maximum,
+            _ => return None,
+        })
+    }
+
+    /// Whether more than one driver on such a net is well formed.
+    ///
+    /// False for `wreal` alone: LRM 2.4 section 6.5.3 permits one driver, and
+    /// combining two would be inventing a rule the standard declined to state.
+    pub const fn admits_multiple_drivers(self) -> bool {
+        !matches!(self, Self::Single)
+    }
+}
+
+/// Net type keyword.
+///
+/// `wire` is IEEE 1364-2005's; [`Self::Wreal`] is Verilog-AMS LRM 2.4 section
+/// 3.7's real net. The remaining IEEE 1364 net types are still refused by name
+/// at the keyword.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DigitalNetKind {
     Wire,
+    /// A real-valued net: `wreal`, and the four resolved spellings.
+    Wreal(WrealResolution),
 }
 
 impl DigitalNetKind {
     pub const fn keyword(self) -> &'static str {
         match self {
             Self::Wire => "wire",
+            Self::Wreal(resolution) => resolution.keyword(),
+        }
+    }
+
+    /// Whether the net carries a real value rather than four-state bits.
+    pub const fn is_real(self) -> bool {
+        matches!(self, Self::Wreal(_))
+    }
+
+    /// How the net combines its drivers, for a real net.
+    pub const fn resolution(self) -> Option<WrealResolution> {
+        match self {
+            Self::Wire => None,
+            Self::Wreal(resolution) => Some(resolution),
         }
     }
 }

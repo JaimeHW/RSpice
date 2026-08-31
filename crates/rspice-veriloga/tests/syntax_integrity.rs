@@ -138,7 +138,11 @@ fn module_with_statement(statement: &str) -> String {
 fn verilog_ams_digital_constructs_are_refused_by_name() {
     // Declarations, in module-item position.
     for (keyword, item) in [
-        ("wreal", "wreal w;"),
+        // `wreal` itself has a production now (Verilog-AMS LRM 2.4 section
+        // 3.7) and is pinned by `tests/digital_grammar.rs`. `wreal4state` does
+        // not: a real net that can also hold `x` and `z` is a different type
+        // with no Accellera definition, so it stays refused by name.
+        ("wreal4state", "wreal4state w;"),
         ("wand", "wand w;"),
         ("wor", "wor w;"),
         ("tri", "tri t;"),

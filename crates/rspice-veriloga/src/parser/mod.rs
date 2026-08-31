@@ -189,6 +189,13 @@ impl<'a> Parser<'a> {
                             self.advance();
                             Some(PortNetType::Reg)
                         }
+                        // Verilog-AMS LRM 2.4 section 6.5.2 puts `wreal`
+                        // exactly where a 1364 net type goes.
+                        TokenKind::Wreal => {
+                            let resolution = self.wreal_resolution();
+                            self.advance();
+                            Some(PortNetType::Wreal(resolution))
+                        }
                         _ => None,
                     };
                     let discipline: Option<SmolStr> = if self.is_discipline_keyword()
@@ -370,7 +377,7 @@ impl<'a> Parser<'a> {
             // The discrete half of Verilog-AMS. These keywords were refused by
             // name until the digital grammar existed; each one that gained a
             // production moved here.
-            TokenKind::Wire => {
+            TokenKind::Wire | TokenKind::Wreal => {
                 let net = self.parse_digital_net_decl()?;
                 module.digital_nets.push(net);
             }
@@ -736,6 +743,14 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Some(PortNetType::Reg)
             }
+            // Verilog-AMS LRM 2.4 section 6.5.2's port grammar reads
+            // `[discipline_identifier] [net_type | wreal]`, so a real-valued
+            // port declares its type here like any other.
+            TokenKind::Wreal => {
+                let resolution = self.wreal_resolution();
+                self.advance();
+                Some(PortNetType::Wreal(resolution))
+            }
             _ => None,
         };
 
@@ -800,6 +815,16 @@ impl<'a> Parser<'a> {
             PortNetType::Wire => module.digital_nets.push(DigitalNetDecl {
                 kind: DigitalNetKind::Wire,
                 signedness: declaration.signedness,
+                range: declaration.range.clone(),
+                items,
+                span: declaration.span,
+            }),
+            // `input wreal in;` stands for `input in; wreal in;` the same way
+            // `output reg q;` stands for its pair, so it expands into the
+            // declaration the rest of the compiler already reads.
+            PortNetType::Wreal(resolution) => module.digital_nets.push(DigitalNetDecl {
+                kind: DigitalNetKind::Wreal(resolution),
+                signedness: Signedness::Unsigned,
                 range: declaration.range.clone(),
                 items,
                 span: declaration.span,
@@ -2894,6 +2919,7 @@ impl<'a> Parser<'a> {
                 | TokenKind::Specify
                 | TokenKind::Task
                 | TokenKind::Wire
+                | TokenKind::Wreal
         )
     }
 
@@ -2908,6 +2934,10 @@ impl<'a> Parser<'a> {
         match kind {
             TokenKind::Reg => Some("reg"),
             TokenKind::Always => Some("always"),
+            // `wreal` and its resolved spellings were `AmsDigital` refusals
+            // before section 3.7 had a production, so none of them has ever
+            // been usable as a name either.
+            TokenKind::Wreal => Some("wreal"),
             _ => None,
         }
     }
