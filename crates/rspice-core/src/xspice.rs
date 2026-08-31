@@ -65,6 +65,12 @@ mod registry;
 // an upward edge from both.
 pub(crate) mod settle_cost;
 mod traits;
+// Native execution of digital IEEE 1364-2005 Verilog. Not a code model: it
+// sits here because it is built on `event_scheduler`, and rank 9 is the only
+// rank that can name the kernel without an upward edge. Its own module
+// documentation makes the argument.
+#[cfg(feature = "veriloga")]
+pub mod verilog;
 
 // Built-in code models
 pub mod models;
