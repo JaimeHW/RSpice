@@ -47,9 +47,11 @@ pub use rspice_veriloga_runtime::{
     GeneratedVerilogAParameterBound, GeneratedVerilogAParameterDescriptor,
     GeneratedVerilogAParameterScope, GeneratedVerilogAPersistentState,
     GeneratedVerilogARollbackState, GeneratedVerilogATerminalDescriptor,
-    GeneratedVerilogATerminalDirection, Value, generated_veriloga_checkpoint_compatibility_entry,
-    generated_veriloga_compatibility_entry, generated_veriloga_v26_compatibility_entry,
-    generated_veriloga_wire_compatibility_entry, validate_generated_veriloga_compatibility_catalog,
+    GeneratedVerilogATerminalDirection, Value,
+    generated_veriloga_accepted_state_shape_is_compatible,
+    generated_veriloga_checkpoint_compatibility_entry, generated_veriloga_compatibility_entry,
+    generated_veriloga_v26_compatibility_entry, generated_veriloga_wire_compatibility_entry,
+    validate_generated_veriloga_compatibility_catalog,
 };
 #[cfg(feature = "veriloga-builtins-base")]
 use rspice_veriloga_runtime::{GeneratedParameterAssignment, GeneratedParameterOrigin};
@@ -856,7 +858,16 @@ impl BuiltinVerilogAInstance {
                 descriptor.checkpoint_identity,
             ));
         }
-        if checkpoint.accepted_state_shape_identity != descriptor.accepted_state_shape_identity {
+        if checkpoint.accepted_state_shape_identity != descriptor.accepted_state_shape_identity
+            && !generated_veriloga_accepted_state_shape_is_compatible(
+                self.model_name,
+                descriptor.source_identity,
+                descriptor.checkpoint_identity,
+                &checkpoint.accepted_state_shape_identity.to_string(),
+                &descriptor.accepted_state_shape_identity.to_string(),
+            )
+            .map_err(|error| format!("generated compatibility catalog is malformed: {error}"))?
+        {
             return Err(format!(
                 "generated accepted-state shape identity mismatch for '{}' ({}): captured '{}', circuit has '{}'",
                 self.instance_name,
@@ -2052,8 +2063,9 @@ mod tests {
 
     #[cfg(feature = "veriloga-builtins-base")]
     use super::{
-        BuiltinVerilogADevices, BuiltinVerilogAInstance, GeneratedNoiseProcessDescriptor,
-        GeneratedVerilogAAcceptedStateShapeIdentity, instantiate_builtin,
+        BuiltinVerilogADevices, BuiltinVerilogAInstance, GENERATED_VERILOGA_COMPATIBILITY_CATALOG,
+        GeneratedNoiseProcessDescriptor, GeneratedVerilogAAcceptedStateShapeIdentity,
+        instantiate_builtin,
     };
 
     /// An `OFF` instance is evaluated at its cut-off state until Newton moves.
@@ -2421,6 +2433,25 @@ mod tests {
         assert_eq!(devices.checkpoint_states(), accepted);
 
         let baseline = devices.checkpoint_states();
+        let diode_catalog = GENERATED_VERILOGA_COMPATIBILITY_CATALOG
+            .iter()
+            .find(|entry| entry.public_model_name == "DIODE_CMC")
+            .expect("DIODE_CMC compatibility entry");
+        let mut previous_shape = baseline.clone();
+        previous_shape[0].accepted_state_shape_identity =
+            GeneratedVerilogAAcceptedStateShapeIdentity::from_hex(
+                diode_catalog.accepted_state_shape_identity_aliases[0],
+            )
+            .expect("audited previous DIODE_CMC shape");
+        devices
+            .restore_checkpoint_states(&previous_shape)
+            .expect("authenticated payload-compatible shape alias restores");
+        assert_eq!(
+            devices.checkpoint_states()[0].state,
+            previous_shape[0].state,
+            "shape migration preserves the complete accepted payload"
+        );
+
         let mut invalid_cases = Vec::new();
         invalid_cases.push(Vec::new());
 

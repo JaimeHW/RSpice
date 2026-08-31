@@ -22,9 +22,11 @@ mod compatibility_catalog;
 
 pub use compatibility_catalog::{
     GENERATED_VERILOGA_COMPATIBILITY_CATALOG, GENERATED_VERILOGA_V27_COMBINED_IDENTITY_ALIASES,
-    GeneratedVerilogACompatibilityCatalogEntry, generated_veriloga_checkpoint_compatibility_entry,
-    generated_veriloga_compatibility_entry, generated_veriloga_v26_compatibility_entry,
-    generated_veriloga_wire_compatibility_entry, validate_generated_veriloga_compatibility_catalog,
+    GeneratedVerilogACompatibilityCatalogEntry,
+    generated_veriloga_accepted_state_shape_is_compatible,
+    generated_veriloga_checkpoint_compatibility_entry, generated_veriloga_compatibility_entry,
+    generated_veriloga_v26_compatibility_entry, generated_veriloga_wire_compatibility_entry,
+    validate_generated_veriloga_compatibility_catalog,
 };
 
 pub type Value = f64;
@@ -7683,6 +7685,29 @@ mod fixed_lane_tests {
         assert_eq!(
             generated_veriloga_compatibility_entry(retained.module_name, retained.source_identity,),
             Ok(Some(retained)),
+        );
+        let previous_shape = retained.accepted_state_shape_identity_aliases[0];
+        assert!(
+            generated_veriloga_accepted_state_shape_is_compatible(
+                retained.public_model_name,
+                retained.source_identity,
+                retained.semantic_identity,
+                previous_shape,
+                retained.accepted_state_shape_identity,
+            )
+            .expect("valid shape alias"),
+            "the exact authenticated previous shape must migrate"
+        );
+        assert!(
+            !generated_veriloga_accepted_state_shape_is_compatible(
+                retained.public_model_name,
+                retained.source_identity,
+                retained.semantic_identity,
+                retained.accepted_state_shape_identity,
+                retained.accepted_state_shape_identity,
+            )
+            .expect("valid catalog"),
+            "the current identity is not a migration alias"
         );
         assert!(
             generated_veriloga_compatibility_entry("VBIC13", retained.source_identity,)

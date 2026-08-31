@@ -1277,7 +1277,6 @@ impl ModelPlan {
             shape.operator(
                 "ddt",
                 slot,
-                operator,
                 expression.span,
                 None,
                 &[
@@ -1296,7 +1295,6 @@ impl ModelPlan {
             shape.operator(
                 "idt",
                 slot,
-                operator,
                 expression.span,
                 None,
                 &[
@@ -1326,7 +1324,6 @@ impl ModelPlan {
             shape.operator(
                 "limit",
                 slot,
-                operator,
                 expression.span,
                 Some(selector),
                 &["anchor:f64:finite", "initialized:bool"],
@@ -1362,7 +1359,6 @@ impl ModelPlan {
             shape.runtime_operator(
                 family,
                 slot,
-                operator,
                 expression.span,
                 None,
                 &rspice_veriloga_runtime::GeneratedCrossState::CHECKPOINT_SCHEMA,
@@ -1455,7 +1451,11 @@ struct AcceptedStateShapeHasher(blake3::Hasher);
 impl AcceptedStateShapeHasher {
     fn new() -> Self {
         let mut hasher = blake3::Hasher::new();
-        hasher.update(b"rspice-generated-accepted-state-schema-v2\0");
+        // V3 identifies an accepted-state slot by its stable source location,
+        // family, order, selector, and lane schema. Canonical HIR expression
+        // numbers are intentionally excluded: inserting an unrelated
+        // expression can renumber them without changing persisted state.
+        hasher.update(b"rspice-generated-accepted-state-schema-v3\0");
         Self(hasher)
     }
 
@@ -1469,12 +1469,11 @@ impl AcceptedStateShapeHasher {
         &mut self,
         family: &str,
         slot: usize,
-        operator: ExprId,
         span: SourceSpanRef,
         selector: Option<&str>,
         lanes: &[&str],
     ) {
-        self.operator_header(family, slot, operator, span, selector);
+        self.operator_header(family, slot, span, selector);
         self.u64(lanes.len() as u64);
         for lane in lanes {
             self.field(lane.as_bytes());
@@ -1485,12 +1484,11 @@ impl AcceptedStateShapeHasher {
         &mut self,
         family: &str,
         slot: usize,
-        operator: ExprId,
         span: SourceSpanRef,
         selector: Option<&str>,
         lanes: &[rspice_veriloga_runtime::GeneratedCheckpointLaneDescriptor],
     ) {
-        self.operator_header(family, slot, operator, span, selector);
+        self.operator_header(family, slot, span, selector);
         self.u64(lanes.len() as u64);
         for lane in lanes {
             self.field(lane.name.as_bytes());
@@ -1502,14 +1500,12 @@ impl AcceptedStateShapeHasher {
         &mut self,
         family: &str,
         slot: usize,
-        operator: ExprId,
         span: SourceSpanRef,
         selector: Option<&str>,
     ) {
         self.record("operator");
         self.field(family.as_bytes());
         self.u64(slot as u64);
-        self.u64(operator.index() as u64);
         self.u64(u64::from(span.source_file_id));
         self.u64(u64::from(span.start));
         self.u64(u64::from(span.end));
@@ -4868,22 +4864,8 @@ mod accepted_state_shape_tests {
     fn two_operator_shape(first_family: &str, second_family: &str) -> [u8; 32] {
         let mut shape = AcceptedStateShapeHasher::new();
         shape.section("event_detectors", 2);
-        shape.operator(
-            first_family,
-            0,
-            ExprId::from(3usize),
-            SPAN_A,
-            None,
-            &["value:f64"],
-        );
-        shape.operator(
-            second_family,
-            1,
-            ExprId::from(9usize),
-            SPAN_B,
-            None,
-            &["value:f64"],
-        );
+        shape.operator(first_family, 0, SPAN_A, None, &["value:f64"]);
+        shape.operator(second_family, 1, SPAN_B, None, &["value:f64"]);
         shape.finish()
     }
 
@@ -4909,7 +4891,7 @@ mod accepted_state_shape_tests {
         let digest = |lanes: &[GeneratedCheckpointLaneDescriptor]| {
             let mut shape = AcceptedStateShapeHasher::new();
             shape.section("probe", 1);
-            shape.runtime_operator("cross", 0, ExprId::from(3usize), SPAN_A, None, lanes);
+            shape.runtime_operator("cross", 0, SPAN_A, None, lanes);
             shape.finish()
         };
 
