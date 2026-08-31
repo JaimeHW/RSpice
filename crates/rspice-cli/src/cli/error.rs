@@ -187,6 +187,13 @@ pub enum CliError {
     #[error("Format conversion failed: {message}")]
     ConversionError { message: String },
 
+    #[error("Resource limit exceeded while reading {path}: {source}")]
+    ResourceLimit {
+        path: PathBuf,
+        #[source]
+        source: rspice_core::ResourceLimitError,
+    },
+
     #[error("Internal error: {message}")]
     InternalError { message: String },
 }
@@ -212,6 +219,7 @@ impl CliError {
             CliError::CoreConfigError { .. } => ExitCode::ConfigError,
             CliError::VerilogAError { .. } => ExitCode::GeneralError,
             CliError::ConversionError { .. } => ExitCode::GeneralError,
+            CliError::ResourceLimit { .. } => ExitCode::InputError,
             CliError::InternalError { .. } => ExitCode::InternalError,
         }
     }
@@ -291,6 +299,13 @@ impl CliError {
             Self::VerilogAError { .. } => ErrorDetails::new("veriloga_error", "compilation", false),
             Self::ConversionError { .. } => {
                 ErrorDetails::new("conversion_error", "conversion", false)
+            }
+            Self::ResourceLimit { source, .. } => {
+                let mut details = ErrorDetails::new("resource_limit", "resource_limit", false);
+                details.resource = Some(source.resource.as_str());
+                details.requested = Some(source.requested);
+                details.limit = Some(source.limit);
+                details
             }
             Self::InternalError { .. } => ErrorDetails::new("internal_error", "internal", false),
         }

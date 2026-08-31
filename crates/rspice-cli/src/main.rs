@@ -129,7 +129,7 @@ fn main() -> ExitCode {
         Commands::Models(args) => commands::models(args, cli.verbose, cli.quiet),
         Commands::CompileVa(args) => commands::compile_va(args, &config, cli.verbose, cli.quiet),
         Commands::Check(args) => commands::check(args, &config, cli.verbose, cli.quiet),
-        Commands::Convert(args) => commands::convert(args, cli.verbose, cli.quiet),
+        Commands::Convert(args) => commands::convert(args, &config, cli.verbose, cli.quiet),
         Commands::Completions(args) => {
             use clap::CommandFactory;
             clap_complete::generate(
@@ -158,7 +158,7 @@ fn main() -> ExitCode {
                 bless: args.bless,
                 interpolate: args.interpolate,
             };
-            commands::compare::execute(compare_args, cli.verbose, cli.quiet)
+            commands::compare::execute(compare_args, &config, cli.verbose, cli.quiet)
         }
     };
 

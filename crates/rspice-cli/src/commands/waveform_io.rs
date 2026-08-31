@@ -6,6 +6,7 @@
 use crate::cli::{CliError, OutputFormat};
 use crate::commands::export_table::{ColumnData, ExportColumn, ExportTable};
 use crate::hdf5::read_hdf5;
+use std::io::Read;
 use std::path::Path;
 
 /// Guess a format from the file extension; rawfile when unknown.
@@ -25,15 +26,19 @@ pub(crate) fn detect_format(path: &Path) -> OutputFormat {
 }
 
 /// Load a result file into a table.
-pub(crate) fn load_table(path: &Path, format: OutputFormat) -> Result<ExportTable, CliError> {
+pub(crate) fn load_table(
+    path: &Path,
+    format: OutputFormat,
+    resource_limits: rspice_core::ResourceLimits,
+) -> Result<ExportTable, CliError> {
     let table = match format {
-        OutputFormat::Raw | OutputFormat::RawAscii => load_rawfile(path),
-        OutputFormat::Csv => load_delimited(path, ','),
-        OutputFormat::Tsv => load_delimited(path, '\t'),
-        OutputFormat::Json => load_json(path),
-        OutputFormat::Hdf5 => load_hdf5(path),
+        OutputFormat::Raw | OutputFormat::RawAscii => load_rawfile(path, resource_limits),
+        OutputFormat::Csv => load_delimited(path, ',', resource_limits),
+        OutputFormat::Tsv => load_delimited(path, '\t', resource_limits),
+        OutputFormat::Json => load_json(path, resource_limits),
+        OutputFormat::Hdf5 => load_hdf5(path, resource_limits),
     }?;
-    validate_table_shape(path, table)
+    validate_table_shape(path, table, resource_limits)
 }
 
 fn conversion_error(path: &Path, message: impl std::fmt::Display) -> CliError {
@@ -42,7 +47,102 @@ fn conversion_error(path: &Path, message: impl std::fmt::Display) -> CliError {
     }
 }
 
-fn validate_table_shape(path: &Path, table: ExportTable) -> Result<ExportTable, CliError> {
+fn resource_limit_error(
+    path: &Path,
+    resource: rspice_core::ResourceKind,
+    requested: usize,
+    limit: usize,
+) -> CliError {
+    CliError::ResourceLimit {
+        path: path.to_path_buf(),
+        source: rspice_core::ResourceLimitError {
+            resource,
+            requested,
+            limit,
+        },
+    }
+}
+
+fn enforce_resource_limit(
+    path: &Path,
+    resource: rspice_core::ResourceKind,
+    requested: usize,
+    limit: usize,
+) -> Result<(), CliError> {
+    if requested <= limit {
+        Ok(())
+    } else {
+        Err(resource_limit_error(path, resource, requested, limit))
+    }
+}
+
+fn read_utf8_input_limited(path: &Path, limit: usize) -> Result<String, CliError> {
+    let file = std::fs::File::open(path).map_err(|source| CliError::InputReadError {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let metadata_bytes = usize::try_from(
+        file.metadata()
+            .map_err(|source| CliError::InputReadError {
+                path: path.to_path_buf(),
+                source,
+            })?
+            .len(),
+    )
+    .unwrap_or(usize::MAX);
+    enforce_resource_limit(
+        path,
+        rspice_core::ResourceKind::ExternalDataBytes,
+        metadata_bytes,
+        limit,
+    )?;
+
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(metadata_bytes)
+        .map_err(|error| CliError::InputReadError {
+            path: path.to_path_buf(),
+            source: std::io::Error::other(format!(
+                "unable to reserve {metadata_bytes} bytes for input: {error}"
+            )),
+        })?;
+    let read_limit = u64::try_from(limit).unwrap_or(u64::MAX).saturating_add(1);
+    file.take(read_limit)
+        .read_to_end(&mut bytes)
+        .map_err(|source| CliError::InputReadError {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    enforce_resource_limit(
+        path,
+        rspice_core::ResourceKind::ExternalDataBytes,
+        bytes.len(),
+        limit,
+    )?;
+    String::from_utf8(bytes).map_err(|error| CliError::InputReadError {
+        path: path.to_path_buf(),
+        source: std::io::Error::new(std::io::ErrorKind::InvalidData, error.utf8_error()),
+    })
+}
+
+fn validate_table_shape(
+    path: &Path,
+    table: ExportTable,
+    resource_limits: rspice_core::ResourceLimits,
+) -> Result<ExportTable, CliError> {
+    let mut retained_values = table.scale.len();
+    for column in &table.columns {
+        retained_values = retained_values.saturating_add(match &column.data {
+            ColumnData::Real(values) => values.len(),
+            ColumnData::Complex { real, imag } => real.len().saturating_add(imag.len()),
+        });
+    }
+    enforce_resource_limit(
+        path,
+        rspice_core::ResourceKind::ExternalDataValues,
+        retained_values,
+        resource_limits.max_external_data_values,
+    )?;
     validate_values(path, &table.scale_name, "scale", &table.scale)?;
     let expected = table.scale.len();
     for column in &table.columns {
@@ -98,8 +198,12 @@ fn validate_values(path: &Path, signal: &str, part: &str, values: &[f64]) -> Res
     Ok(())
 }
 
-fn load_rawfile(path: &Path) -> Result<ExportTable, CliError> {
-    let data = rspice_core::io::parse_raw_file(path).map_err(|e| conversion_error(path, e))?;
+fn load_rawfile(
+    path: &Path,
+    resource_limits: rspice_core::ResourceLimits,
+) -> Result<ExportTable, CliError> {
+    let data = rspice_core::io::parse_raw_file_with_limits(path, resource_limits)
+        .map_err(|e| conversion_error(path, e))?;
 
     let mut waveforms = data.waveforms.into_iter();
     let Some(scale) = waveforms.next() else {
@@ -138,11 +242,12 @@ fn load_rawfile(path: &Path) -> Result<ExportTable, CliError> {
     })
 }
 
-fn load_delimited(path: &Path, separator: char) -> Result<ExportTable, CliError> {
-    let content = std::fs::read_to_string(path).map_err(|e| CliError::InputReadError {
-        path: path.to_path_buf(),
-        source: e,
-    })?;
+fn load_delimited(
+    path: &Path,
+    separator: char,
+    resource_limits: rspice_core::ResourceLimits,
+) -> Result<ExportTable, CliError> {
+    let content = read_utf8_input_limited(path, resource_limits.max_external_data_bytes)?;
 
     let mut lines = content.lines().filter(|line| !line.trim().is_empty());
     let header = parse_delimited_record(
@@ -155,9 +260,16 @@ fn load_delimited(path: &Path, separator: char) -> Result<ExportTable, CliError>
     if header.is_empty() {
         return Err(conversion_error(path, "missing header row"));
     }
+    enforce_resource_limit(
+        path,
+        rspice_core::ResourceKind::ExternalDataValues,
+        header.len(),
+        resource_limits.max_external_data_values,
+    )?;
 
     let mut scale = Vec::new();
     let mut series: Vec<Vec<f64>> = vec![Vec::new(); header.len().saturating_sub(1)];
+    let mut parsed_values = 0_usize;
     for (row, line) in lines.enumerate() {
         let line_number = row + 2;
         let fields = parse_delimited_record(line, separator)
@@ -196,6 +308,14 @@ fn load_delimited(path: &Path, separator: char) -> Result<ExportTable, CliError>
                 ),
             ));
         }
+
+        parsed_values = parsed_values.saturating_add(fields.len());
+        enforce_resource_limit(
+            path,
+            rspice_core::ResourceKind::ExternalDataValues,
+            parsed_values,
+            resource_limits.max_external_data_values,
+        )?;
 
         scale.push(parse(&fields[0], &header[0])?);
         for (i, field) in fields.iter().skip(1).enumerate() {
@@ -291,18 +411,28 @@ fn finish_delimited_field(field: &str, quoted: bool) -> String {
     }
 }
 
-fn load_json(path: &Path) -> Result<ExportTable, CliError> {
-    let content = std::fs::read_to_string(path).map_err(|e| CliError::InputReadError {
-        path: path.to_path_buf(),
-        source: e,
-    })?;
+fn load_json(
+    path: &Path,
+    resource_limits: rspice_core::ResourceLimits,
+) -> Result<ExportTable, CliError> {
+    let content = read_utf8_input_limited(path, resource_limits.max_external_data_bytes)?;
     let value: serde_json::Value =
         serde_json::from_str(&content).map_err(|e| conversion_error(path, e))?;
 
+    let parsed_values = std::cell::Cell::new(0_usize);
     let to_f64_vec = |value: &serde_json::Value, what: &str| -> Result<Vec<f64>, CliError> {
-        value
+        let values = value
             .as_array()
-            .ok_or_else(|| conversion_error(path, format!("'{}' is not an array", what)))?
+            .ok_or_else(|| conversion_error(path, format!("'{}' is not an array", what)))?;
+        let requested = parsed_values.get().saturating_add(values.len());
+        enforce_resource_limit(
+            path,
+            rspice_core::ResourceKind::ExternalDataValues,
+            requested,
+            resource_limits.max_external_data_values,
+        )?;
+        parsed_values.set(requested);
+        values
             .iter()
             .map(|v| {
                 v.as_f64().ok_or_else(|| {
@@ -382,7 +512,25 @@ fn load_json(path: &Path) -> Result<ExportTable, CliError> {
     ))
 }
 
-fn load_hdf5(path: &Path) -> Result<ExportTable, CliError> {
+fn load_hdf5(
+    path: &Path,
+    resource_limits: rspice_core::ResourceLimits,
+) -> Result<ExportTable, CliError> {
+    let metadata_bytes = usize::try_from(
+        std::fs::metadata(path)
+            .map_err(|source| CliError::InputReadError {
+                path: path.to_path_buf(),
+                source,
+            })?
+            .len(),
+    )
+    .unwrap_or(usize::MAX);
+    enforce_resource_limit(
+        path,
+        rspice_core::ResourceKind::ExternalDataBytes,
+        metadata_bytes,
+        resource_limits.max_external_data_bytes,
+    )?;
     let data = read_hdf5(path).map_err(|e| conversion_error(path, e))?;
 
     let from_section = |section: crate::hdf5::Hdf5WaveformSection, analysis: &str| ExportTable {
@@ -483,5 +631,98 @@ fn scale_var_type(name: &str) -> String {
         "frequency".to_string()
     } else {
         "time".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TempInput(std::path::PathBuf);
+
+    impl TempInput {
+        fn new(extension: &str, contents: &str) -> Self {
+            let nonce = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock follows Unix epoch")
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "rspice-waveform-limit-{}-{nonce}.{extension}",
+                std::process::id()
+            ));
+            std::fs::write(&path, contents).expect("write bounded waveform fixture");
+            Self(path)
+        }
+    }
+
+    impl Drop for TempInput {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    fn limits(bytes: usize, values: usize) -> rspice_core::ResourceLimits {
+        let mut limits = rspice_core::ResourceLimits::default();
+        limits.max_external_data_bytes = bytes;
+        limits.max_external_data_values = values;
+        limits
+    }
+
+    fn assert_limit(
+        error: CliError,
+        resource: rspice_core::ResourceKind,
+        requested: usize,
+        limit: usize,
+    ) {
+        let CliError::ResourceLimit { source, .. } = error else {
+            panic!("expected a structured resource-limit error, got {error}");
+        };
+        assert_eq!(source.resource, resource);
+        assert_eq!(source.requested, requested);
+        assert_eq!(source.limit, limit);
+    }
+
+    #[test]
+    fn text_waveform_inputs_enforce_the_configured_byte_limit() {
+        for (extension, format, contents) in [
+            ("csv", OutputFormat::Csv, "time,out\n0,1\n"),
+            (
+                "json",
+                OutputFormat::Json,
+                r#"{"scale":{"name":"time","values":[0]},"signals":[]}"#,
+            ),
+        ] {
+            let input = TempInput::new(extension, contents);
+            let limit = contents.len() - 1;
+            let error = match load_table(&input.0, format, limits(limit, usize::MAX)) {
+                Err(error) => error,
+                Ok(_) => panic!("oversized text waveform must fail before parsing"),
+            };
+            assert_limit(
+                error,
+                rspice_core::ResourceKind::ExternalDataBytes,
+                contents.len(),
+                limit,
+            );
+        }
+    }
+
+    #[test]
+    fn text_waveform_inputs_enforce_the_configured_value_limit() {
+        for (extension, format, contents) in [
+            ("csv", OutputFormat::Csv, "time,out\n0,1\n1,2\n"),
+            (
+                "json",
+                OutputFormat::Json,
+                r#"{"scale":{"name":"time","values":[0,1]},"signals":[{"name":"out","values":[1,2]}]}"#,
+            ),
+        ] {
+            let input = TempInput::new(extension, contents);
+            let error = match load_table(&input.0, format, limits(contents.len(), 3)) {
+                Err(error) => error,
+                Ok(_) => panic!("four waveform values must exceed a three-value budget"),
+            };
+            assert_limit(error, rspice_core::ResourceKind::ExternalDataValues, 4, 3);
+        }
     }
 }

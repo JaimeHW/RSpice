@@ -5,13 +5,18 @@
 //! data survives every round trip; `--variables`, `--start`, and `--stop`
 //! select a subset of the data.
 
-use crate::cli::{CliError, ConvertArgs, OutputFormat};
+use crate::cli::{CliError, Config, ConvertArgs, OutputFormat};
 use crate::commands::export_table::{ColumnData, ExportTable};
 use crate::commands::waveform_io::{detect_format, load_table};
 use crate::hdf5::{Hdf5AcSection, Hdf5SimulationData, Hdf5WaveformSection, write_hdf5};
 
 /// Execute the convert command
-pub fn execute(args: ConvertArgs, _verbose: bool, quiet: bool) -> Result<(), CliError> {
+pub fn execute(
+    args: ConvertArgs,
+    config: &Config,
+    _verbose: bool,
+    quiet: bool,
+) -> Result<(), CliError> {
     if !args.input.exists() {
         return Err(CliError::InputNotFound {
             path: args.input.clone(),
@@ -29,7 +34,7 @@ pub fn execute(args: ConvertArgs, _verbose: bool, quiet: bool) -> Result<(), Cli
     }
 
     let from_format = args.from.unwrap_or_else(|| detect_format(&args.input));
-    let mut table = load_table(&args.input, from_format)?;
+    let mut table = load_table(&args.input, from_format, config.resources.limits())?;
 
     table.select_variables(&args.variables)?;
     table.clip_scale_range(args.start, args.stop);

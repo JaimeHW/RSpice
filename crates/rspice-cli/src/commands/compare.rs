@@ -5,7 +5,7 @@
 //! JSON, HDF5 — auto-detected by extension), with configurable absolute
 //! and relative tolerances.
 
-use crate::cli::{CliError, OutputFormat};
+use crate::cli::{CliError, Config, OutputFormat};
 use crate::commands::waveform_io::{detect_format, load_table};
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -96,7 +96,12 @@ pub struct Difference {
 }
 
 /// Execute the compare command
-pub fn execute(args: CompareArgs, _verbose: bool, quiet: bool) -> Result<(), CliError> {
+pub fn execute(
+    args: CompareArgs,
+    config: &Config,
+    _verbose: bool,
+    quiet: bool,
+) -> Result<(), CliError> {
     validate_compare_tolerance("--abstol", args.abstol)?;
     validate_compare_tolerance("--reltol", args.reltol)?;
 
@@ -112,7 +117,7 @@ pub fn execute(args: CompareArgs, _verbose: bool, quiet: bool) -> Result<(), Cli
             // Missing-golden bootstrap is still a promotion of a result
             // artifact. Validate the result before copying so malformed CSV,
             // JSON, RAW, etc. cannot become the accepted baseline.
-            let _ = load_waveform_data(&args.result)?;
+            let _ = load_waveform_data(&args.result, config.resources.limits())?;
             bless_golden(&args.result, &args.golden, quiet, "no golden file yet")?;
             return Ok(());
         }
@@ -135,8 +140,8 @@ pub fn execute(args: CompareArgs, _verbose: bool, quiet: bool) -> Result<(), Cli
     }
 
     // Load and parse files
-    let result_data = load_waveform_data(&args.result)?;
-    let golden_data = load_waveform_data(&args.golden)?;
+    let result_data = load_waveform_data(&args.result, config.resources.limits())?;
+    let golden_data = load_waveform_data(&args.golden, config.resources.limits())?;
 
     let result_data = if args.interpolate {
         resample_onto_golden(result_data, &golden_data)?
@@ -265,8 +270,11 @@ fn find_variable_index(variables: &[String], requested: &str) -> Option<usize> {
 ///
 /// The scale becomes the first compared series; complex signals expand to
 /// `Re(name)` / `Im(name)` so AC results compare value-for-value.
-fn load_waveform_data(path: &std::path::Path) -> Result<WaveformData, CliError> {
-    let table = load_table(path, detect_format(path))?;
+fn load_waveform_data(
+    path: &std::path::Path,
+    resource_limits: rspice_core::ResourceLimits,
+) -> Result<WaveformData, CliError> {
+    let table = load_table(path, detect_format(path), resource_limits)?;
     let (variables, values) = table.to_real_series().into_iter().unzip();
     Ok(WaveformData { variables, values })
 }
