@@ -1147,6 +1147,46 @@ impl<'a> AdBuilder<'a> {
                     (None, None) => None,
                 }
             }
+            // `(a da + b db) / hypot(a, b)`: the gradient is the unit vector
+            // along the operands, and dividing once at the end keeps the same
+            // overflow headroom the operation itself was chosen for.
+            CfgBinaryOp::Hypot => {
+                let numerator = match (d_left, d_right) {
+                    (Some(d_left), Some(d_right)) => {
+                        let first = self.scale(d_left, left);
+                        let second = self.scale(d_right, right);
+                        self.lane_binary(CfgBinaryOp::Add, first, second, target)
+                    }
+                    (Some(d_left), None) => self.scale(d_left, left),
+                    (None, Some(d_right)) => self.scale(d_right, right),
+                    (None, None) => return None,
+                };
+                let magnitude = self.push_binary(CfgBinaryOp::Hypot, left, right);
+                Some(self.lane_scalar(CfgBinaryOp::Div, numerator, magnitude))
+            }
+            // `(x dy - y dx) / (x² + y²)` for `atan2(y, x)`. The quadrant offset
+            // the operation carries is piecewise constant, so it differentiates
+            // to nothing and the ordinary arctangent rule is the whole answer
+            // away from the branch cut.
+            CfgBinaryOp::Atan2 => {
+                let numerator = match (d_left, d_right) {
+                    (Some(d_left), Some(d_right)) => {
+                        let from_ordinate = self.scale(d_left, right);
+                        let from_abscissa = self.scale(d_right, left);
+                        self.lane_binary(CfgBinaryOp::Sub, from_ordinate, from_abscissa, target)
+                    }
+                    (Some(d_left), None) => self.scale(d_left, right),
+                    (None, Some(d_right)) => {
+                        let from_abscissa = self.scale(d_right, left);
+                        self.negate(from_abscissa)
+                    }
+                    (None, None) => return None,
+                };
+                let ordinate = self.push_binary(CfgBinaryOp::Mul, left, left);
+                let abscissa = self.push_binary(CfgBinaryOp::Mul, right, right);
+                let denominator = self.push_binary(CfgBinaryOp::Add, ordinate, abscissa);
+                Some(self.lane_scalar(CfgBinaryOp::Div, numerator, denominator))
+            }
             other => {
                 debug_assert!(is_predicate(other), "unhandled binary derivative rule");
                 None
@@ -1168,6 +1208,15 @@ impl<'a> AdBuilder<'a> {
             CfgUnaryOp::Ln => {
                 let one = self.one;
                 self.push_binary(CfgBinaryOp::Div, one, input)
+            }
+            // `1 / (x ln 10)`, with the constant folded once rather than
+            // written as `log10(e) / x`: both are one division, and this one
+            // needs no second transcendental constant to be named.
+            CfgUnaryOp::Log10 => {
+                let ln_ten = self.constant(std::f64::consts::LN_10);
+                let denominator = self.push_binary(CfgBinaryOp::Mul, input, ln_ten);
+                let one = self.one;
+                self.push_binary(CfgBinaryOp::Div, one, denominator)
             }
             CfgUnaryOp::Sqrt => {
                 let root = self.push_unary(CfgUnaryOp::Sqrt, input);
@@ -1206,6 +1255,19 @@ impl<'a> AdBuilder<'a> {
                 let one = self.one;
                 self.push_binary(CfgBinaryOp::Sub, one, squared)
             }
+            // `1 / sqrt(1 - x²)`, shared with `acos` up to the sign.
+            CfgUnaryOp::Asin | CfgUnaryOp::Acos => {
+                let squared = self.push_binary(CfgBinaryOp::Mul, input, input);
+                let one = self.one;
+                let difference = self.push_binary(CfgBinaryOp::Sub, one, squared);
+                let root = self.push_unary(CfgUnaryOp::Sqrt, difference);
+                let numerator = if matches!(op, CfgUnaryOp::Acos) {
+                    self.constant(-1.0)
+                } else {
+                    one
+                };
+                self.push_binary(CfgBinaryOp::Div, numerator, root)
+            }
             CfgUnaryOp::Atan => {
                 let squared = self.push_binary(CfgBinaryOp::Mul, input, input);
                 let one = self.one;
@@ -1218,6 +1280,21 @@ impl<'a> AdBuilder<'a> {
                 let sum = self.push_binary(CfgBinaryOp::Add, one, squared);
                 let root = self.push_unary(CfgUnaryOp::Sqrt, sum);
                 self.push_binary(CfgBinaryOp::Div, one, root)
+            }
+            // `1 / sqrt(x² - 1)`, the same shape with the subtraction the other
+            // way round — which is also where its domain differs.
+            CfgUnaryOp::Acosh => {
+                let squared = self.push_binary(CfgBinaryOp::Mul, input, input);
+                let one = self.one;
+                let difference = self.push_binary(CfgBinaryOp::Sub, squared, one);
+                let root = self.push_unary(CfgUnaryOp::Sqrt, difference);
+                self.push_binary(CfgBinaryOp::Div, one, root)
+            }
+            CfgUnaryOp::Atanh => {
+                let squared = self.push_binary(CfgBinaryOp::Mul, input, input);
+                let one = self.one;
+                let denominator = self.push_binary(CfgBinaryOp::Sub, one, squared);
+                self.push_binary(CfgBinaryOp::Div, one, denominator)
             }
             // Piecewise constant, so zero away from the steps. `differentiable`
             // keeps these out, and this arm exists so adding a unary op cannot

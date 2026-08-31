@@ -9,7 +9,7 @@
 //! (`design/VERILOGA_BACKEND_PLAN.md`) is mid-flight, and a number that can only
 //! go up is what keeps it honest while it is.
 
-use rspice_veriloga::canonical_ir::cfg::{CfgTerminator, CfgValueKind};
+use rspice_veriloga::canonical_ir::cfg::{CfgBinaryOp, CfgTerminator, CfgUnaryOp, CfgValueKind};
 use rspice_veriloga::canonical_ir::cfg_lower::CfgModel;
 use rspice_veriloga::canonical_ir::{
     CanonicalIrArtifact, CfgEvalInputs, IrDiagnostic, evaluate_cfg,
@@ -463,6 +463,70 @@ endmodule
         &model.function.value(direction).kind,
         CfgValueKind::RealConstant(0.0)
     ));
+}
+
+/// Every standard math function the executable backends lower must lower here
+/// too.
+///
+/// The CFG is meant to become the only level a backend reads, and a level that
+/// cannot spell `asin` cannot replace one that can. These are exactly the names
+/// `native/expr.rs` maps to a `NativeOp` and this level used to refuse; keeping
+/// the list here means a future addition to one side shows up as a failure on
+/// the other rather than as a model that quietly stops compiling.
+#[test]
+fn every_math_intrinsic_the_executable_backends_lower_also_lowers_here() {
+    // `0.31 * V` keeps the inverse circular functions inside their domain at
+    // any bias the fixtures use, and `acosh` is given the other side of one.
+    let model = lower(
+        r#"
+module intrinsics(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real g = 1.0e-3;
+    analog begin
+        I(p, n) <+ g * (exp(V(p, n)) + ln(2.0 + V(p, n)) + log10(2.0 + V(p, n)))
+                 + g * (sqrt(1.0 + abs(V(p, n))) + floor(V(p, n)) + ceil(V(p, n)))
+                 + g * (sin(V(p, n)) + cos(V(p, n)) + tan(V(p, n)))
+                 + g * (sinh(V(p, n)) + cosh(V(p, n)) + tanh(V(p, n)))
+                 + g * (asin(0.31 * V(p, n)) + acos(0.31 * V(p, n)) + atan(V(p, n)))
+                 + g * (asinh(V(p, n)) + acosh(1.5 + V(p, n) * V(p, n)))
+                 + g * atanh(0.31 * V(p, n))
+                 + g * (min(V(p, n), 1.0) + max(V(p, n), -1.0) + pow(2.0 + V(p, n), 1.5))
+                 + g * (hypot(V(p, n), 1.0) + atan2(V(p, n), 1.0));
+    end
+endmodule
+"#,
+    );
+    let unary: HashSet<CfgUnaryOp> = model
+        .function
+        .values
+        .iter()
+        .filter_map(|value| match value.kind {
+            CfgValueKind::Unary { op, .. } => Some(op),
+            _ => None,
+        })
+        .collect();
+    for op in [
+        CfgUnaryOp::Log10,
+        CfgUnaryOp::Asin,
+        CfgUnaryOp::Acos,
+        CfgUnaryOp::Acosh,
+        CfgUnaryOp::Atanh,
+    ] {
+        assert!(unary.contains(&op), "{op:?} did not survive lowering");
+    }
+    let binary: HashSet<CfgBinaryOp> = model
+        .function
+        .values
+        .iter()
+        .filter_map(|value| match value.kind {
+            CfgValueKind::Binary { op, .. } => Some(op),
+            _ => None,
+        })
+        .collect();
+    for op in [CfgBinaryOp::Hypot, CfgBinaryOp::Atan2] {
+        assert!(binary.contains(&op), "{op:?} did not survive lowering");
+    }
 }
 
 #[test]

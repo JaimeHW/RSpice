@@ -413,6 +413,42 @@ module source(p, n);
 endmodule
 "#,
         ),
+        // The intrinsics whose derivative rules the CFG level gained last, each
+        // written so the fixture bias lands inside its domain: the inverse
+        // circular functions need |x| < 1, and `acosh` needs the other side of
+        // one. Their rules are all quotients by a root, which is the family a
+        // sign error hides in longest.
+        (
+            "inverse elementary functions",
+            r#"
+module inverses(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real g = 1.0e-3;
+    analog begin
+        I(p, n) <+ g * asin(0.5 * V(p, n))
+                 + g * acos(0.5 * V(p, n))
+                 + g * atanh(0.5 * V(p, n))
+                 + g * acosh(1.5 + V(p, n) * V(p, n))
+                 + g * log10(2.0 + V(p, n));
+    end
+endmodule
+"#,
+        ),
+        (
+            "two-argument intrinsics",
+            r#"
+module planar(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real g = 1.0e-3;
+    analog begin
+        I(p, n) <+ g * hypot(V(p, n), 0.25 + V(p, n))
+                 + g * atan2(V(p, n), 0.75 - V(p, n));
+    end
+endmodule
+"#,
+        ),
     ]
 }
 

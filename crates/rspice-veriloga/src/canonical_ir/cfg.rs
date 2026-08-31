@@ -83,6 +83,7 @@ pub enum CfgUnaryOp {
     /// `d/dx` of [`Self::LimitedExp`], which is not itself expressible as one.
     LimitedExpDerivative,
     Ln,
+    Log10,
     Sqrt,
     Abs,
     Sin,
@@ -91,8 +92,12 @@ pub enum CfgUnaryOp {
     Sinh,
     Cosh,
     Tanh,
+    Asin,
+    Acos,
     Atan,
     Asinh,
+    Acosh,
+    Atanh,
     Floor,
     Ceil,
 }
@@ -111,6 +116,13 @@ pub enum CfgBinaryOp {
     /// diamond would cost more blocks than the whole rest of the module.
     Min,
     Max,
+    /// `hypot(x, y)`, kept as one operation because it is the numerically
+    /// careful form the library provides and squaring the operands to rebuild
+    /// it would overflow exactly where it exists to not.
+    Hypot,
+    /// `atan2(y, x)`, left as its own operation for the same reason `hypot` is:
+    /// the quadrant is part of the answer, and a quotient loses it.
+    Atan2,
     Eq,
     Ne,
     Lt,

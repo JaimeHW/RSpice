@@ -118,12 +118,42 @@ impl CfgScalar for ComplexStep {
         self.logarithm().mul(rhs).exponential()
     }
 
+    /// `sqrt(x² + y²)` in complex arithmetic rather than the library's
+    /// `f64::hypot`. The library form exists to avoid squaring, and squaring is
+    /// exactly what carries the perturbation here; the oracle runs at drawn
+    /// bias points, not at the ends of the exponent range.
+    fn hypot(self, rhs: Self) -> Self {
+        self.mul(self).add(rhs.mul(rhs)).sqrt()
+    }
+
+    /// `2 atan(y / (hypot(y, x) + x))`, the half-angle form.
+    ///
+    /// Not `atan(y/x)` plus a quadrant offset: that is singular on the whole
+    /// `x = 0` line, where `atan2` itself is perfectly smooth and its `x`
+    /// derivative is `-1/y`. This form is singular only on the negative real
+    /// axis, which is the branch cut the function really has.
+    fn atan2(self, rhs: Self) -> Self {
+        let denominator = self.hypot(rhs).add(rhs);
+        if denominator.re == 0.0 {
+            // The cut itself: `atan2(0, x<0)` is π from one side and −π from
+            // the other, so there is no derivative to report, only the value.
+            return Self::from_f64(self.re.atan2(rhs.re));
+        }
+        let half = self.div(denominator).atan();
+        half.add(half)
+    }
+
     fn exp(self) -> Self {
         self.exponential()
     }
 
     fn ln(self) -> Self {
         self.logarithm()
+    }
+
+    fn log10(self) -> Self {
+        self.logarithm()
+            .div(Self::from_f64(std::f64::consts::LN_10))
     }
 
     fn sqrt(self) -> Self {
@@ -200,10 +230,45 @@ impl CfgScalar for ComplexStep {
         Self::new(real, imaginary)
     }
 
+    /// `asin z = atan(z / sqrt(1 − z²))`, routed through [`Self::atan`] for the
+    /// reason that function is written the way it is.
+    ///
+    /// The textbook `−i ln(iz + sqrt(1 − z²))` adds the perturbation to a real
+    /// part of order one and loses it there; here every perturbation stays in
+    /// an imaginary component of its own until the arctangent resolves it.
+    fn asin(self) -> Self {
+        let one = Self::from_f64(1.0);
+        let root = one.sub(self.mul(self)).sqrt();
+        self.div(root).atan()
+    }
+
+    /// `acos z = π/2 − asin z`. Subtracting a real constant leaves the
+    /// perturbation exactly where `asin` put it.
+    fn acos(self) -> Self {
+        Self::from_f64(std::f64::consts::FRAC_PI_2).sub(self.asin())
+    }
+
     /// `asinh z = ln(z + sqrt(z² + 1))`.
     fn asinh(self) -> Self {
         let inner = self.mul(self).add(Self::from_f64(1.0)).sqrt();
         self.add(inner).logarithm()
+    }
+
+    /// `acosh z = ln(z + sqrt(z² − 1))`.
+    ///
+    /// Safe as written, unlike `asin`: the answer is the logarithm's argument
+    /// angle, and the perturbation reaches it as the imaginary part of a sum
+    /// whose real part is order one — which is what `argument` divides by.
+    fn acosh(self) -> Self {
+        let inner = self.mul(self).sub(Self::from_f64(1.0)).sqrt();
+        self.add(inner).logarithm()
+    }
+
+    /// `atanh z = ½ ln((1 + z)/(1 − z))`.
+    fn atanh(self) -> Self {
+        let one = Self::from_f64(1.0);
+        let quotient = one.add(self).div(one.sub(self));
+        quotient.logarithm().mul(Self::from_f64(0.5))
     }
 
     fn floor(self) -> Self {
@@ -275,6 +340,14 @@ mod tests {
             ("atan", CfgScalar::atan, 1.0 / (1.0 + x * x)),
             ("asinh", CfgScalar::asinh, 1.0 / (1.0 + x * x).sqrt()),
             ("abs", CfgScalar::abs, 1.0),
+            (
+                "log10",
+                CfgScalar::log10,
+                1.0 / (x * std::f64::consts::LN_10),
+            ),
+            ("asin", CfgScalar::asin, 1.0 / (1.0 - x * x).sqrt()),
+            ("acos", CfgScalar::acos, -1.0 / (1.0 - x * x).sqrt()),
+            ("atanh", CfgScalar::atanh, 1.0 / (1.0 - x * x)),
         ];
         for (name, function, expected) in cases {
             let actual = function(ComplexStep::seed(x)).derivative();
@@ -283,6 +356,53 @@ mod tests {
                 "{name}' is {actual}, expected {expected}"
             );
         }
+    }
+
+    /// `acosh` needs an argument above one, so it is checked on its own domain
+    /// rather than folded into the table above.
+    #[test]
+    fn the_inverse_hyperbolic_cosine_reproduces_its_derivative() {
+        let x = 1.83;
+        let actual = CfgScalar::acosh(ComplexStep::seed(x)).derivative();
+        let expected = 1.0 / (x * x - 1.0).sqrt();
+        assert!(
+            (actual - expected).abs() <= 1.0e-12 * expected.abs(),
+            "acosh' is {actual}, expected {expected}"
+        );
+    }
+
+    /// Both operands, because the two-argument functions have a gradient rather
+    /// than a derivative and a form that is right in one argument can still be
+    /// wrong in the other.
+    #[test]
+    fn the_two_argument_functions_reproduce_both_partials() {
+        let (a, b) = (1.31, -0.77);
+        let magnitude = a.hypot(b);
+
+        let by_first =
+            CfgScalar::hypot(ComplexStep::seed(a), ComplexStep::from_f64(b)).derivative();
+        let by_second =
+            CfgScalar::hypot(ComplexStep::from_f64(a), ComplexStep::seed(b)).derivative();
+        assert!((by_first - a / magnitude).abs() <= 1.0e-12);
+        assert!((by_second - b / magnitude).abs() <= 1.0e-12);
+
+        let squared = a * a + b * b;
+        let by_ordinate =
+            CfgScalar::atan2(ComplexStep::seed(a), ComplexStep::from_f64(b)).derivative();
+        let by_abscissa =
+            CfgScalar::atan2(ComplexStep::from_f64(a), ComplexStep::seed(b)).derivative();
+        assert!((by_ordinate - b / squared).abs() <= 1.0e-12);
+        assert!((by_abscissa + a / squared).abs() <= 1.0e-12);
+    }
+
+    /// The half-angle form exists for this: `atan(y/x)` plus an offset is
+    /// singular along the whole `x = 0` line, where `atan2` is smooth.
+    #[test]
+    fn the_arctangent_of_two_arguments_differentiates_across_the_ordinate_axis() {
+        let y = 0.94;
+        let derivative = CfgScalar::atan2(ComplexStep::from_f64(y), ComplexStep::seed(0.0));
+        assert!((derivative.derivative() + 1.0 / y).abs() <= 1.0e-12);
+        assert!((derivative.re - std::f64::consts::FRAC_PI_2).abs() <= 1.0e-12);
     }
 
     #[test]

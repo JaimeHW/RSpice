@@ -470,6 +470,29 @@ module diode(a, c);
 endmodule
 "#,
         ),
+        // The intrinsics the level gained last. Emission is where a name that
+        // lowers can still be wrong — `atan2`'s operand order is the whole
+        // difference between an angle and its complement, and no shape check
+        // upstream of here would see it.
+        (
+            "inverse and two-argument intrinsics",
+            r#"
+module intrinsics(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real g = 1.0e-3;
+    analog begin
+        I(p, n) <+ g * asin(0.31 * V(p, n))
+                 + g * acos(0.31 * V(p, n))
+                 + g * atanh(0.31 * V(p, n))
+                 + g * acosh(1.5 + V(p, n) * V(p, n))
+                 + g * log10(2.0 + V(p, n))
+                 + g * hypot(V(p, n), 0.25 + V(p, n))
+                 + g * atan2(V(p, n), 0.75 - V(p, n));
+    end
+endmodule
+"#,
+        ),
         (
             "guarded",
             r#"

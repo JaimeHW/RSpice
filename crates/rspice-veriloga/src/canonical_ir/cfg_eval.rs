@@ -39,9 +39,13 @@ pub trait CfgScalar: Copy {
     fn div(self, rhs: Self) -> Self;
     fn rem(self, rhs: Self) -> Self;
     fn powf(self, rhs: Self) -> Self;
+    fn hypot(self, rhs: Self) -> Self;
+    /// `self.atan2(rhs)`, with `self` the ordinate and `rhs` the abscissa.
+    fn atan2(self, rhs: Self) -> Self;
 
     fn exp(self) -> Self;
     fn ln(self) -> Self;
+    fn log10(self) -> Self;
     fn sqrt(self) -> Self;
     fn abs(self) -> Self;
     fn sin(self) -> Self;
@@ -50,8 +54,12 @@ pub trait CfgScalar: Copy {
     fn sinh(self) -> Self;
     fn cosh(self) -> Self;
     fn tanh(self) -> Self;
+    fn asin(self) -> Self;
+    fn acos(self) -> Self;
     fn atan(self) -> Self;
     fn asinh(self) -> Self;
+    fn acosh(self) -> Self;
+    fn atanh(self) -> Self;
     fn floor(self) -> Self;
     fn ceil(self) -> Self;
 
@@ -122,11 +130,20 @@ impl CfgScalar for f64 {
     fn powf(self, rhs: Self) -> Self {
         self.powf(rhs)
     }
+    fn hypot(self, rhs: Self) -> Self {
+        f64::hypot(self, rhs)
+    }
+    fn atan2(self, rhs: Self) -> Self {
+        f64::atan2(self, rhs)
+    }
     fn exp(self) -> Self {
         f64::exp(self)
     }
     fn ln(self) -> Self {
         f64::ln(self)
+    }
+    fn log10(self) -> Self {
+        f64::log10(self)
     }
     fn sqrt(self) -> Self {
         f64::sqrt(self)
@@ -152,11 +169,23 @@ impl CfgScalar for f64 {
     fn tanh(self) -> Self {
         f64::tanh(self)
     }
+    fn asin(self) -> Self {
+        f64::asin(self)
+    }
+    fn acos(self) -> Self {
+        f64::acos(self)
+    }
     fn atan(self) -> Self {
         f64::atan(self)
     }
     fn asinh(self) -> Self {
         f64::asinh(self)
+    }
+    fn acosh(self) -> Self {
+        f64::acosh(self)
+    }
+    fn atanh(self) -> Self {
+        f64::atanh(self)
     }
     fn floor(self) -> Self {
         f64::floor(self)
@@ -659,6 +688,7 @@ pub(super) fn apply_unary<S: CfgScalar>(op: CfgUnaryOp, input: S) -> S {
         CfgUnaryOp::LimitedExp => input.limited_exp(),
         CfgUnaryOp::LimitedExpDerivative => input.limited_exp_derivative(),
         CfgUnaryOp::Ln => input.ln(),
+        CfgUnaryOp::Log10 => input.log10(),
         CfgUnaryOp::Sqrt => input.sqrt(),
         CfgUnaryOp::Abs => input.abs(),
         CfgUnaryOp::Sin => input.sin(),
@@ -667,8 +697,12 @@ pub(super) fn apply_unary<S: CfgScalar>(op: CfgUnaryOp, input: S) -> S {
         CfgUnaryOp::Sinh => input.sinh(),
         CfgUnaryOp::Cosh => input.cosh(),
         CfgUnaryOp::Tanh => input.tanh(),
+        CfgUnaryOp::Asin => input.asin(),
+        CfgUnaryOp::Acos => input.acos(),
         CfgUnaryOp::Atan => input.atan(),
         CfgUnaryOp::Asinh => input.asinh(),
+        CfgUnaryOp::Acosh => input.acosh(),
+        CfgUnaryOp::Atanh => input.atanh(),
         CfgUnaryOp::Floor => input.floor(),
         CfgUnaryOp::Ceil => input.ceil(),
     }
@@ -683,6 +717,8 @@ pub(super) fn apply_binary<S: CfgScalar>(op: CfgBinaryOp, left: S, right: S) -> 
         CfgBinaryOp::Div => left.div(right),
         CfgBinaryOp::Mod => left.rem(right),
         CfgBinaryOp::Pow => left.powf(right),
+        CfgBinaryOp::Hypot => left.hypot(right),
+        CfgBinaryOp::Atan2 => left.atan2(right),
         // Selecting rather than computing keeps the derivative on the operand
         // that actually won, which is what a hand-written `fmin` does too.
         CfgBinaryOp::Min => {

@@ -1962,10 +1962,8 @@ impl<'a> CfgLowerer<'a> {
                     "min" => CfgBinaryOp::Min,
                     "max" => CfgBinaryOp::Max,
                     "pow" | "fpow" => CfgBinaryOp::Pow,
-                    _ => {
-                        self.unsupported(span, format!("function '{name}'"));
-                        return self.real_constant(0.0);
-                    }
+                    "hypot" => CfgBinaryOp::Hypot,
+                    _ => CfgBinaryOp::Atan2,
                 };
                 let left = self.expr(args[0]);
                 let right = self.expr(args[1]);
@@ -2286,6 +2284,7 @@ fn unary_intrinsic(name: &str) -> Option<CfgUnaryOp> {
         "limexp" => CfgUnaryOp::LimExp,
         "__rspice_limited_exp" => CfgUnaryOp::LimitedExp,
         "ln" | "log" => CfgUnaryOp::Ln,
+        "log10" => CfgUnaryOp::Log10,
         "sqrt" => CfgUnaryOp::Sqrt,
         "abs" | "fabs" => CfgUnaryOp::Abs,
         "sin" => CfgUnaryOp::Sin,
@@ -2294,8 +2293,12 @@ fn unary_intrinsic(name: &str) -> Option<CfgUnaryOp> {
         "sinh" => CfgUnaryOp::Sinh,
         "cosh" => CfgUnaryOp::Cosh,
         "tanh" => CfgUnaryOp::Tanh,
+        "asin" => CfgUnaryOp::Asin,
+        "acos" => CfgUnaryOp::Acos,
         "atan" => CfgUnaryOp::Atan,
         "asinh" => CfgUnaryOp::Asinh,
+        "acosh" => CfgUnaryOp::Acosh,
+        "atanh" => CfgUnaryOp::Atanh,
         "floor" => CfgUnaryOp::Floor,
         "ceil" => CfgUnaryOp::Ceil,
         _ => return None,

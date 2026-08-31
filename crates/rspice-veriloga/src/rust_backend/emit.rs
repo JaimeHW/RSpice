@@ -2017,6 +2017,7 @@ fn unary(op: CfgUnaryOp, input: &str) -> String {
         CfgUnaryOp::LimitedExp => format!("rspice_limited_exp({input})"),
         CfgUnaryOp::LimitedExpDerivative => format!("rspice_limited_exp_derivative({input})"),
         CfgUnaryOp::Ln => format!("{input}.ln()"),
+        CfgUnaryOp::Log10 => format!("{input}.log10()"),
         CfgUnaryOp::Sqrt => format!("{input}.sqrt()"),
         CfgUnaryOp::Abs => format!("{input}.abs()"),
         CfgUnaryOp::Sin => format!("{input}.sin()"),
@@ -2025,8 +2026,12 @@ fn unary(op: CfgUnaryOp, input: &str) -> String {
         CfgUnaryOp::Sinh => format!("{input}.sinh()"),
         CfgUnaryOp::Cosh => format!("{input}.cosh()"),
         CfgUnaryOp::Tanh => format!("{input}.tanh()"),
+        CfgUnaryOp::Asin => format!("{input}.asin()"),
+        CfgUnaryOp::Acos => format!("{input}.acos()"),
         CfgUnaryOp::Atan => format!("{input}.atan()"),
         CfgUnaryOp::Asinh => format!("{input}.asinh()"),
+        CfgUnaryOp::Acosh => format!("{input}.acosh()"),
+        CfgUnaryOp::Atanh => format!("{input}.atanh()"),
         CfgUnaryOp::Floor => format!("{input}.floor()"),
         CfgUnaryOp::Ceil => format!("{input}.ceil()"),
     }
@@ -2040,6 +2045,8 @@ fn binary(op: CfgBinaryOp, left: &str, right: &str) -> String {
         CfgBinaryOp::Div => format!("{left} / {right}"),
         CfgBinaryOp::Mod => format!("{left} % {right}"),
         CfgBinaryOp::Pow => format!("{left}.powf({right})"),
+        CfgBinaryOp::Hypot => format!("{left}.hypot({right})"),
+        CfgBinaryOp::Atan2 => format!("{left}.atan2({right})"),
         // Written out rather than `f64::min`, which disagrees with the
         // interpreter when one operand is NaN: it returns the other, this
         // returns whichever the comparison selects. Two backends that differ on
