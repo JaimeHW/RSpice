@@ -645,6 +645,47 @@ fn an_executing_event_cannot_schedule_into_the_past() {
     );
 }
 
+#[test]
+fn the_last_representable_tick_is_scheduled_into_the_future_tier() {
+    // A sentinel tick standing in for "no slot is open" would route an event
+    // scheduled at that tick into whichever slot was running. `u64::MAX` is a
+    // schedulable tick, so it must reach the future tier like any other.
+    let mut scheduler = scheduler();
+    scheduler
+        .schedule_at(
+            u64::MAX,
+            SchedulerRegion::Active,
+            target("dut", "far", 1, 0),
+            digital(1),
+        )
+        .expect("schedule");
+    scheduler
+        .schedule_at(
+            1,
+            SchedulerRegion::Active,
+            target("dut", "near", 1, 0),
+            digital(1),
+        )
+        .expect("schedule");
+
+    assert_eq!(scheduler.next_tick(), Some(1));
+
+    let mut order = Vec::new();
+    while scheduler
+        .run_time_slot(|event, _| order.push((event.tick, event.target.port_name.clone())))
+        .expect("slots settle")
+        .is_some()
+    {}
+
+    assert_eq!(
+        order,
+        vec![(1, "near".to_string()), (u64::MAX, "far".to_string())]
+    );
+    // The far tick has no exact seconds image, which is a conversion concern
+    // and not a scheduling one: it still orders correctly.
+    assert!(scheduler.resolution().ticks_to_seconds(u64::MAX).is_err());
+}
+
 //=============================================================================
 // Determinism
 //=============================================================================

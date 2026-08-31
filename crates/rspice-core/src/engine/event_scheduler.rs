@@ -401,11 +401,13 @@ struct EventQueues {
 impl EventQueues {
     /// Place an event, routing it to the current slot or the future tier.
     ///
-    /// `current_tick` is the tick whose slot is open; equal ticks land in the
-    /// slot so a delta event joins the tick already running.
+    /// `open_slot` is the tick whose slot is running, if one is; an event at
+    /// that same tick joins it as a delta event. It is an `Option` rather than
+    /// a sentinel tick because `u64::MAX` is a schedulable tick, and a sentinel
+    /// would route an event scheduled there into whatever slot was open.
     fn insert(
         &mut self,
-        current_tick: u64,
+        open_slot: Option<u64>,
         tick: u64,
         region: SchedulerRegion,
         target: EventTarget,
@@ -420,7 +422,7 @@ impl EventQueues {
             target,
             value,
         };
-        if tick == current_tick {
+        if open_slot == Some(tick) {
             self.slot[region.index()].insert(sequence, event);
         } else {
             self.future.insert((tick, region, sequence), event);
@@ -547,10 +549,9 @@ impl EventScheduler {
                 requested_tick: tick,
             });
         }
-        // Outside a slot nothing is open, so everything lands in the future
-        // tier; `u64::MAX` can never equal a real current tick here because a
-        // slot at that tick would have to be running.
-        Ok(self.queues.insert(u64::MAX, tick, region, target, value))
+        // No slot is open outside `run_time_slot`, so everything lands in the
+        // future tier and is picked up when its tick opens.
+        Ok(self.queues.insert(None, tick, region, target, value))
     }
 
     /// Run the next tick that has events, to quiescence.
@@ -689,7 +690,7 @@ impl SchedulerContext<'_> {
         }
         Ok(self
             .queues
-            .insert(self.current_tick, tick, region, target, value))
+            .insert(Some(self.current_tick), tick, region, target, value))
     }
 
     /// Schedule `delay` ticks from the running tick. A zero delay is a delta
