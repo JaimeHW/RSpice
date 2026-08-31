@@ -3085,6 +3085,15 @@ const RUNTIME_STUB: &str = r#"
 pub mod runtime {
     pub type Value = f64;
 
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+    pub struct GeneratedVerilogAAcceptedStateShapeIdentity([u8; 32]);
+
+    impl GeneratedVerilogAAcceptedStateShapeIdentity {
+        pub const fn from_bytes(bytes: [u8; 32]) -> Self {
+            Self(bytes)
+        }
+    }
+
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum GeneratedParameterOrigin {
         DeclaredScope,
