@@ -74,3 +74,9 @@ id_type!(ValueId);
 id_type!(ScheduleId);
 id_type!(BlockId);
 id_type!(ShapeId);
+// `DigitalSignalId` indexes a declared discrete-domain net or variable in
+// declaration order. `DigitalProcessId` carries the same number as the front
+// end's process id, so a process keeps one identity from the parser through to
+// the schedule.
+id_type!(DigitalSignalId);
+id_type!(DigitalProcessId);

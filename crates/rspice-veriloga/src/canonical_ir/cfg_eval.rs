@@ -275,6 +275,16 @@ pub enum CfgEvalError {
     /// The path did not reach a `Return` within the step budget, which for a
     /// well-formed model means a loop whose condition never falsifies.
     StepLimitExceeded(usize),
+    /// A discrete-domain construct reached the analog interpreter.
+    ///
+    /// This interpreter evaluates one analog body to a number. A process is
+    /// not that: it suspends, it reads signals that change while it is
+    /// suspended, and it has no single value to return. Running one needs the
+    /// event kernel, so meeting one here is a routing bug rather than a model
+    /// the interpreter merely does not support, and it says so.
+    DigitalConstructInAnalogEvaluation {
+        what: &'static str,
+    },
 }
 
 impl std::fmt::Display for CfgEvalError {
@@ -289,6 +299,11 @@ impl std::fmt::Display for CfgEvalError {
             Self::StepLimitExceeded(limit) => {
                 write!(f, "evaluation did not return within {limit} blocks")
             }
+            Self::DigitalConstructInAnalogEvaluation { what } => write!(
+                f,
+                "{what} is a discrete-domain construct and cannot be evaluated \
+                 as part of an analog body"
+            ),
         }
     }
 }
@@ -377,6 +392,11 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             match &function.block(block).terminator {
                 CfgTerminator::Return => return Ok(()),
                 CfgTerminator::Unset => return Err(CfgEvalError::UnterminatedBlock(block)),
+                CfgTerminator::Wait { .. } => {
+                    return Err(CfgEvalError::DigitalConstructInAnalogEvaluation {
+                        what: "a process suspension",
+                    });
+                }
                 CfgTerminator::Jump { target, args } => {
                     self.pass_arguments(*target, args)?;
                     block = *target;
@@ -669,6 +689,32 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             | CfgValueKind::LaneWiden { .. }
             | CfgValueKind::LaneBinary { .. }
             | CfgValueKind::LaneScalar { .. } => return Err(CfgEvalError::UndefinedValue(id)),
+
+            // Discrete-domain kinds. `CfgScalar` is a real-arithmetic trait —
+            // it has `exp`, `ln`, and a chain rule — and there is no honest
+            // mapping from a four-state value onto it. Refusing by name is the
+            // whole point: an `x` silently becoming `0.0` here would be a
+            // wrong waveform rather than an error.
+            CfgValueKind::FourStateConstant(_)
+            | CfgValueKind::IntegerConstant(_)
+            | CfgValueKind::DigitalSignalRead { .. }
+            | CfgValueKind::DigitalBitwise { .. }
+            | CfgValueKind::DigitalBitwiseNot { .. }
+            | CfgValueKind::DigitalLogical { .. }
+            | CfgValueKind::DigitalLogicalNot { .. }
+            | CfgValueKind::DigitalEquality { .. }
+            | CfgValueKind::DigitalRelational { .. }
+            | CfgValueKind::DigitalArithmetic { .. }
+            | CfgValueKind::DigitalShift { .. }
+            | CfgValueKind::DigitalPartSelect { .. }
+            | CfgValueKind::DigitalConcat { .. }
+            | CfgValueKind::DigitalSelect { .. }
+            | CfgValueKind::DigitalBlockingWrite { .. }
+            | CfgValueKind::DigitalNonblockingWrite { .. } => {
+                return Err(CfgEvalError::DigitalConstructInAnalogEvaluation {
+                    what: "a four-state or integer value",
+                });
+            }
         })
     }
 }

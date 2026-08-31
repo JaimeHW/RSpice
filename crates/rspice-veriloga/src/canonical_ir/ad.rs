@@ -498,6 +498,14 @@ fn outgoing(block: &CfgBlock) -> Vec<(BlockId, Vec<ValueId>)> {
             (*then_target, then_args.clone()),
             (*else_target, else_args.clone()),
         ],
+        // Not reachable from an analog body, which never suspends, but the
+        // edge is reported correctly rather than as "no successors" — a graph
+        // utility that lies about its edges is worse than one that refuses.
+        CfgTerminator::Wait {
+            resume,
+            resume_args,
+            ..
+        } => vec![(*resume, resume_args.clone())],
         CfgTerminator::Return | CfgTerminator::Unset => Vec::new(),
     }
 }
@@ -526,6 +534,19 @@ pub(crate) fn differentiate_with_control(
     lanes: &[AdSeed],
     control: &dyn PipelineControl,
 ) -> Result<AdFunction, DifferentiationError> {
+    // Refuse a discrete-domain value up front rather than letting one fall
+    // through `differentiable`'s catch-all, which would report `false` and
+    // leave a silent zero where a derivative should be. The check is one pass
+    // over the value table and runs before anything is allocated.
+    if let Some(value) = function
+        .values
+        .iter()
+        .find(|value| value.value_type.is_digital())
+    {
+        return Err(DifferentiationError::Validation(
+            CfgValidationError::DigitalValueInDerivative(value.id),
+        ));
+    }
     let live = lane_liveness_with_control(function, lanes, control)
         .map_err(DifferentiationError::Cancelled)?;
     let mut builder =

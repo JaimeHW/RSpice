@@ -43,9 +43,11 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+use super::digital::{DigitalSchedulingRegion, DigitalSensitivityTerm, DigitalWriteTarget};
+use super::digital_value;
 use super::{
-    BlockId, BranchId, BranchUnknownId, ContributionId, ExprId, NodeId, ParamId, ShapeId, ValueId,
-    VariableId,
+    BlockId, BranchId, BranchUnknownId, ContributionId, DigitalSignalId, ExprId, NodeId, ParamId,
+    ShapeId, ValueId, VariableId,
 };
 
 /// What SSA tracks a definition for.
@@ -315,6 +317,117 @@ pub enum CfgValueKind {
     Staged {
         slot: u32,
     },
+
+    // ---- Discrete domain ---------------------------------------------------
+    //
+    // These appear only in a digital process function. None of them is
+    // differentiable, none is a function of a solver unknown, and none may
+    // reach a residual — see `CfgValueType::is_digital`, which is what the
+    // analog passes assert against.
+    //
+    // The operators are not folded into `Binary`. `CfgBinaryOp::Add` is
+    // addition on the reals; four-state addition is a different function with
+    // a different domain, whose answer to `1 + x` is `x` rather than a number.
+    // One enum for both would put that distinction behind an operand type
+    // check in every consumer.
+    /// A four-state literal, already decoded to its planes.
+    FourStateConstant(digital_value::FourStateValue),
+    /// A signed 32-bit integer constant.
+    IntegerConstant(i32),
+    /// The current value of a declared net or variable.
+    ///
+    /// A leaf: within one process function a signal has no derivation. Two
+    /// reads of the same signal on either side of a `Wait` are two of these
+    /// and may differ, which is why they are not common-subexpressioned.
+    DigitalSignalRead {
+        signal: DigitalSignalId,
+    },
+    /// Elementwise bitwise operator over four-state values.
+    DigitalBitwise {
+        op: digital_value::BitwiseOp,
+        left: ValueId,
+        right: ValueId,
+    },
+    /// Bitwise negation (`~`).
+    DigitalBitwiseNot {
+        input: ValueId,
+    },
+    /// Logical operator (`&&`, `||`), yielding one bit.
+    DigitalLogical {
+        op: digital_value::LogicalOp,
+        left: ValueId,
+        right: ValueId,
+    },
+    /// Logical negation (`!`), yielding one bit.
+    DigitalLogicalNot {
+        input: ValueId,
+    },
+    /// Logical equality (`==`) or inequality (`!=`), yielding one bit, unknown
+    /// if either operand has an `x`/`z` bit.
+    DigitalEquality {
+        left: ValueId,
+        right: ValueId,
+        negate: bool,
+    },
+    /// Relational comparison, yielding one bit.
+    DigitalRelational {
+        op: digital_value::RelationalOp,
+        left: ValueId,
+        right: ValueId,
+    },
+    /// Arithmetic on four-state values, all-unknown if any operand bit is.
+    DigitalArithmetic {
+        op: digital_value::ArithmeticOp,
+        left: ValueId,
+        right: ValueId,
+    },
+    /// Logical shift, keeping the shifted value's width.
+    DigitalShift {
+        op: digital_value::ShiftOp,
+        value: ValueId,
+        count: ValueId,
+    },
+    /// A constant bit or part select. Bounds are as written, so `[0:7]` and
+    /// `[7:0]` select the same bits of differently declared signals.
+    DigitalPartSelect {
+        input: ValueId,
+        msb: i64,
+        lsb: i64,
+    },
+    /// Concatenation. The first part supplies the most significant bits.
+    DigitalConcat {
+        parts: Vec<ValueId>,
+    },
+    /// `condition ? then_value : else_value` as a value rather than a branch.
+    ///
+    /// A conditional *expression* does not suspend, so making it a branch
+    /// would split a block for no reason and force the result through a block
+    /// parameter. Conditional *statements* still lower to real branches.
+    DigitalSelect {
+        condition: ValueId,
+        then_value: ValueId,
+        else_value: ValueId,
+    },
+    /// A blocking write (`=`), visible to the next instruction.
+    DigitalBlockingWrite {
+        target: DigitalWriteTarget,
+        value: ValueId,
+    },
+    /// A nonblocking write (`<=`), deferred to a later scheduling region.
+    ///
+    /// Kept a separate kind from the blocking write rather than a flag on one.
+    /// The two have different execution semantics and different visibility,
+    /// and every consumer has to treat them differently; a shared kind would
+    /// make "did you check the flag?" a review question on each one.
+    DigitalNonblockingWrite {
+        target: DigitalWriteTarget,
+        value: ValueId,
+        /// Where the update lands. Always
+        /// [`DigitalSchedulingRegion::NonBlockingAssign`] for a `<=` written
+        /// in source; carried explicitly so the region is read off the node
+        /// rather than assumed from the kind.
+        region: DigitalSchedulingRegion,
+    },
 }
 
 impl CfgValueKind {
@@ -366,6 +479,25 @@ impl CfgValueKind {
                 candidate,
                 ..
             } => vec![*proposed, *candidate],
+
+            Self::DigitalBitwiseNot { input }
+            | Self::DigitalLogicalNot { input }
+            | Self::DigitalPartSelect { input, .. } => vec![*input],
+            Self::DigitalBitwise { left, right, .. }
+            | Self::DigitalLogical { left, right, .. }
+            | Self::DigitalEquality { left, right, .. }
+            | Self::DigitalRelational { left, right, .. }
+            | Self::DigitalArithmetic { left, right, .. } => vec![*left, *right],
+            Self::DigitalShift { value, count, .. } => vec![*value, *count],
+            Self::DigitalConcat { parts } => parts.clone(),
+            Self::DigitalSelect {
+                condition,
+                then_value,
+                else_value,
+            } => vec![*condition, *then_value, *else_value],
+            Self::DigitalBlockingWrite { value, .. }
+            | Self::DigitalNonblockingWrite { value, .. } => vec![*value],
+
             _ => Vec::new(),
         }
     }
@@ -439,6 +571,39 @@ impl CfgValueKind {
                 *proposed = map(*proposed);
                 *candidate = map(*candidate);
             }
+
+            Self::DigitalBitwiseNot { input }
+            | Self::DigitalLogicalNot { input }
+            | Self::DigitalPartSelect { input, .. } => *input = map(*input),
+            Self::DigitalBitwise { left, right, .. }
+            | Self::DigitalLogical { left, right, .. }
+            | Self::DigitalEquality { left, right, .. }
+            | Self::DigitalRelational { left, right, .. }
+            | Self::DigitalArithmetic { left, right, .. } => {
+                *left = map(*left);
+                *right = map(*right);
+            }
+            Self::DigitalShift { value, count, .. } => {
+                *value = map(*value);
+                *count = map(*count);
+            }
+            Self::DigitalConcat { parts } => {
+                for part in parts {
+                    *part = map(*part);
+                }
+            }
+            Self::DigitalSelect {
+                condition,
+                then_value,
+                else_value,
+            } => {
+                *condition = map(*condition);
+                *then_value = map(*then_value);
+                *else_value = map(*else_value);
+            }
+            Self::DigitalBlockingWrite { value, .. }
+            | Self::DigitalNonblockingWrite { value, .. } => *value = map(*value),
+
             _ => {}
         }
     }
@@ -450,13 +615,60 @@ pub enum CfgValueType {
     Boolean,
     /// A packed derivative, one `f64` per unknown in the named shape.
     Lanes(ShapeId),
+    /// A signed 32-bit two's-complement integer.
+    ///
+    /// Distinct from [`Self::Real`] rather than tunnelled through it. The
+    /// analog half does carry `integer` in an `f64` — that ABI is frozen and
+    /// is not what this is — but a discrete-domain index, shift count, or
+    /// delay is an integer whose wrapping and division behaviour is defined,
+    /// and rounding it out of a float at each use is how those definitions get
+    /// lost.
+    Integer,
+    /// A four-state value of a fixed width, held as `aval`/`bval` planes.
+    ///
+    /// The width is part of the type because almost every IEEE 1364-2005
+    /// operator is width-sensitive: an assignment truncates or zero-extends to
+    /// the target's width, and arithmetic that overflows the operand width
+    /// wraps within it. A four-state value whose width is not known statically
+    /// is not something this IR can represent, which is deliberate.
+    FourState { width: u32 },
+    /// Carries ordering, not data.
+    ///
+    /// The type of a signal write. A write has to sit in the instruction
+    /// stream — its position is its execution order — but nothing may read
+    /// what it "produces", and giving it the written value's type would invite
+    /// exactly that. A nonblocking write in particular has no readable result
+    /// at the point it appears: its update is not visible until the
+    /// nonblocking region flushes.
+    Effect,
 }
 
 impl CfgValueType {
     pub fn shape(self) -> Option<ShapeId> {
         match self {
             Self::Lanes(shape) => Some(shape),
-            Self::Real | Self::Boolean => None,
+            Self::Real
+            | Self::Boolean
+            | Self::Integer
+            | Self::FourState { .. }
+            | Self::Effect => None,
+        }
+    }
+
+    /// Whether this type belongs to the discrete-domain half of the language.
+    ///
+    /// The analog solver has no representation for any of these, so a value
+    /// carrying one reaching a residual, a Jacobian lane, or a stage cache is
+    /// a compiler bug rather than an unsupported model.
+    pub const fn is_digital(self) -> bool {
+        matches!(self, Self::Integer | Self::FourState { .. } | Self::Effect)
+    }
+
+    /// Declared width in bits, for the types that have one.
+    pub const fn width(self) -> Option<u32> {
+        match self {
+            Self::FourState { width } => Some(width),
+            _ => None,
         }
     }
 }
@@ -488,9 +700,72 @@ pub enum CfgTerminator {
         else_args: Vec<ValueId>,
     },
     Return,
+    /// Suspend a digital process here and resume into `resume` when the wait
+    /// is satisfied.
+    ///
+    /// The suspension point the author wrote, in the position they wrote it.
+    /// Resuming is a `Jump`: `resume_args` bind to `resume`'s block
+    /// parameters, so whatever the process needs to survive the suspension
+    /// travels through parameters like any other cross-block value, and no
+    /// pass has to know that a process has state.
+    ///
+    /// Appears only in a digital process function. The analog body never
+    /// suspends — a Newton iteration runs to completion or fails — so every
+    /// analog pass treats this as unreachable rather than handling it.
+    Wait {
+        wait: DigitalWait,
+        resume: BlockId,
+        resume_args: Vec<ValueId>,
+    },
     /// Placeholder while a block is under construction. Never present in a
     /// finished function; [`CfgFunction::validate`] rejects it.
     Unset,
+}
+
+/// What a suspended process is waiting for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DigitalWait {
+    /// `@(...)`: resume when any listed event occurs.
+    ///
+    /// An empty list would be a process that can never resume; the lowering
+    /// refuses one rather than emitting it.
+    Event(Vec<DigitalSensitivityTerm>),
+    /// `#delay`: resume after this many time units have elapsed.
+    ///
+    /// The operand is an [`CfgValueType::Integer`] value, evaluated when the
+    /// wait is reached rather than when the process starts — `#(n)` where `n`
+    /// is a variable waits for its value at that moment.
+    Delay(ValueId),
+}
+
+impl DigitalWait {
+    /// Values this wait reads.
+    pub fn operands(&self) -> Vec<ValueId> {
+        match self {
+            Self::Event(_) => Vec::new(),
+            Self::Delay(delay) => vec![*delay],
+        }
+    }
+
+    /// Rewrite the values this wait reads.
+    ///
+    /// The mutable twin of [`Self::operands`]. Every renumbering pass has to
+    /// call it or a delay operand survives a compaction pointing at whatever
+    /// value took its old index.
+    pub fn map_operands(&mut self, mut map: impl FnMut(ValueId) -> ValueId) {
+        match self {
+            Self::Event(_) => {}
+            Self::Delay(delay) => *delay = map(*delay),
+        }
+    }
+
+    /// The signals whose events can resume the process.
+    pub fn sensitivity(&self) -> &[DigitalSensitivityTerm] {
+        match self {
+            Self::Event(terms) => terms,
+            Self::Delay(_) => &[],
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -690,6 +965,16 @@ fn is_leaf(kind: &CfgValueKind) -> bool {
             | CfgValueKind::BranchUnknownFlow(_)
             | CfgValueKind::LaneSplat(_)
             | CfgValueKind::Staged { .. }
+            // Digital constants are leaves for the same reason a real constant
+            // is: they read nothing and rebuilding one is free.
+            //
+            // `DigitalSignalRead` is deliberately *not* here. It reads nothing
+            // in the operand sense, but it is not a constant — its value is
+            // whatever the signal holds when the node runs, and two reads on
+            // either side of a `Wait` are meant to differ. It has to stay
+            // pinned to a block so that ordering survives.
+            | CfgValueKind::FourStateConstant(_)
+            | CfgValueKind::IntegerConstant(_)
     )
 }
 
@@ -708,6 +993,10 @@ impl CfgBlock {
                     vec![*then_target, *else_target]
                 }
             }
+            // A suspension is an edge like any other. The process resumes into
+            // `resume`, and every pass that walks the graph has to see that or
+            // it will call the resumed half unreachable and delete it.
+            CfgTerminator::Wait { resume, .. } => vec![*resume],
             CfgTerminator::Return | CfgTerminator::Unset => Vec::new(),
         }
     }
@@ -725,6 +1014,13 @@ impl CfgBlock {
                 else_args,
                 ..
             } if *else_target == successor => Some(else_args),
+            // Resuming passes arguments exactly as a jump does, so a block
+            // parameter filled in on sealing finds them here.
+            CfgTerminator::Wait {
+                resume,
+                resume_args,
+                ..
+            } if *resume == successor => Some(resume_args),
             _ => None,
         }
     }
@@ -746,6 +1042,11 @@ impl CfgBlock {
                     else_args.push(value);
                 }
             }
+            CfgTerminator::Wait {
+                resume,
+                resume_args,
+                ..
+            } if *resume == successor => resume_args.push(value),
             _ => {}
         }
     }
@@ -763,6 +1064,15 @@ pub enum CfgValidationError {
     UndefinedValue(ValueId),
     MultiplyDefinedValue(ValueId),
     LaneShapeMismatch(ValueId),
+    /// A discrete-domain value reached the derivative pass.
+    ///
+    /// Not an unsupported model — a compiler bug. Nothing in a four-state
+    /// value is differentiable: it has no neighbourhood, and `x` is not a
+    /// point you can perturb. The derivative pass runs on the analog body, so
+    /// one of these arriving means a process function was handed to it, and
+    /// the pass says so instead of quietly contributing a zero row to the
+    /// Jacobian.
+    DigitalValueInDerivative(ValueId),
 }
 
 impl std::fmt::Display for CfgValidationError {
@@ -783,6 +1093,10 @@ impl std::fmt::Display for CfgValidationError {
             Self::LaneShapeMismatch(value) => {
                 write!(f, "{value} does not carry the lanes its operands do")
             }
+            Self::DigitalValueInDerivative(value) => write!(
+                f,
+                "{value} is a discrete-domain value and cannot be differentiated"
+            ),
         }
     }
 }
@@ -911,6 +1225,7 @@ impl SsaBuilder {
                 else_target,
                 ..
             } => vec![*then_target, *else_target],
+            CfgTerminator::Wait { resume, .. } => vec![*resume],
             CfgTerminator::Return | CfgTerminator::Unset => Vec::new(),
         };
         for successor in successors {
@@ -1143,6 +1458,14 @@ impl SsaBuilder {
                         *arg = translate(*arg);
                     }
                 }
+                CfgTerminator::Wait {
+                    wait, resume_args, ..
+                } => {
+                    wait.map_operands(translate);
+                    for arg in resume_args {
+                        *arg = translate(*arg);
+                    }
+                }
                 CfgTerminator::Return | CfgTerminator::Unset => {}
             }
         }
@@ -1290,6 +1613,16 @@ impl SsaBuilder {
                         mark(*arg, &mut live, &mut worklist);
                     }
                 }
+                CfgTerminator::Wait {
+                    wait, resume_args, ..
+                } => {
+                    for operand in wait.operands() {
+                        mark(operand, &mut live, &mut worklist);
+                    }
+                    for arg in resume_args {
+                        mark(*arg, &mut live, &mut worklist);
+                    }
+                }
                 CfgTerminator::Return | CfgTerminator::Unset => {}
             }
         }
@@ -1344,6 +1677,14 @@ impl SsaBuilder {
                 } => {
                     *condition = translate(*condition);
                     for arg in then_args.iter_mut().chain(else_args.iter_mut()) {
+                        *arg = translate(*arg);
+                    }
+                }
+                CfgTerminator::Wait {
+                    wait, resume_args, ..
+                } => {
+                    wait.map_operands(translate);
+                    for arg in resume_args {
                         *arg = translate(*arg);
                     }
                 }

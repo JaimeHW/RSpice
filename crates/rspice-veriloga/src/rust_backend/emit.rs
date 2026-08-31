@@ -139,6 +139,14 @@ pub enum EmitError {
     UnstructuredControlFlow(BlockId),
     /// A `ddx` that the derivative pass should have resolved.
     UnresolvedDdx(ValueId),
+    /// A discrete-domain value reached the analog emitter.
+    ///
+    /// This emitter writes `f64` arithmetic against the solver's ABI. A
+    /// four-state value has no `f64` that means the same thing, so there is
+    /// nothing to emit and emitting anything would be a wrong number rather
+    /// than a missing feature. `ModelPlan::build` refuses a module carrying a
+    /// process before it reaches here; this is the backstop.
+    DigitalValueInAnalogEmitter(ValueId),
 }
 
 impl std::fmt::Display for EmitError {
@@ -153,6 +161,10 @@ impl std::fmt::Display for EmitError {
             Self::UnresolvedDdx(value) => {
                 write!(f, "{value} is a ddx the derivative pass did not resolve")
             }
+            Self::DigitalValueInAnalogEmitter(value) => write!(
+                f,
+                "{value} is a discrete-domain value and has no analog form to emit"
+            ),
         }
     }
 }
@@ -562,7 +574,7 @@ impl Emitter<'_> {
                 }
                 // Reaching a function exit before the proposed join changes
                 // control behavior and is never an empty region.
-                CfgTerminator::Return | CfgTerminator::Unset => return true,
+                CfgTerminator::Return | CfgTerminator::Wait { .. } | CfgTerminator::Unset => return true,
             }
         }
         false
@@ -660,7 +672,7 @@ impl Emitter<'_> {
                         must_bind[usize::from(*arg)] = true;
                     }
                 }
-                CfgTerminator::Return | CfgTerminator::Unset => {}
+                CfgTerminator::Return | CfgTerminator::Wait { .. } | CfgTerminator::Unset => {}
             }
         }
         // An output is read by the caller, which no operand list records.
@@ -829,7 +841,7 @@ impl Emitter<'_> {
 
             self.instructions(current, depth)?;
             match &self.function.block(current).terminator {
-                CfgTerminator::Return | CfgTerminator::Unset => return Ok(()),
+                CfgTerminator::Return | CfgTerminator::Wait { .. } | CfgTerminator::Unset => return Ok(()),
                 CfgTerminator::Jump { target, args } => {
                     let (target, args) = (*target, args.clone());
                     if self.loop_headers.contains(&target) {
@@ -1389,6 +1401,13 @@ impl Emitter<'_> {
                 self.numeric_operand(value)
             }
             CfgValueType::Real | CfgValueType::Lanes(_) => self.operand(value),
+            // No coercion exists. This emitter produces `f64` arithmetic, and
+            // a four-state value has no `f64` that means the same thing;
+            // `ModelPlan::build` refuses a module carrying one before any of
+            // it is emitted, so reaching here is a routing bug.
+            CfgValueType::Integer | CfgValueType::FourState { .. } | CfgValueType::Effect => {
+                self.operand(value)
+            }
         }
     }
 
@@ -1730,6 +1749,25 @@ impl Emitter<'_> {
                     staged
                 }
             }
+
+            CfgValueKind::FourStateConstant(_)
+            | CfgValueKind::IntegerConstant(_)
+            | CfgValueKind::DigitalSignalRead { .. }
+            | CfgValueKind::DigitalBitwise { .. }
+            | CfgValueKind::DigitalBitwiseNot { .. }
+            | CfgValueKind::DigitalLogical { .. }
+            | CfgValueKind::DigitalLogicalNot { .. }
+            | CfgValueKind::DigitalEquality { .. }
+            | CfgValueKind::DigitalRelational { .. }
+            | CfgValueKind::DigitalArithmetic { .. }
+            | CfgValueKind::DigitalShift { .. }
+            | CfgValueKind::DigitalPartSelect { .. }
+            | CfgValueKind::DigitalConcat { .. }
+            | CfgValueKind::DigitalSelect { .. }
+            | CfgValueKind::DigitalBlockingWrite { .. }
+            | CfgValueKind::DigitalNonblockingWrite { .. } => {
+                return Err(EmitError::DigitalValueInAnalogEmitter(value));
+            }
         })
     }
 
@@ -1920,7 +1958,7 @@ fn incoming_block_arguments(function: &CfgFunction) -> Vec<Vec<ValueId>> {
                 record(*then_target, then_args);
                 record(*else_target, else_args);
             }
-            CfgTerminator::Return | CfgTerminator::Unset => {}
+            CfgTerminator::Return | CfgTerminator::Wait { .. } | CfgTerminator::Unset => {}
         }
     }
     incoming

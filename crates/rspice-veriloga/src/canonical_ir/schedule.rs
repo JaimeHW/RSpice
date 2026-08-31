@@ -902,7 +902,7 @@ pub fn split(
                     }
                 }
             }
-            CfgTerminator::Return | CfgTerminator::Unset => {}
+            CfgTerminator::Return | CfgTerminator::Wait { .. } | CfgTerminator::Unset => {}
         }
     }
     // An output is read by whoever called `split`, and that read happens after
@@ -1039,7 +1039,7 @@ fn build_stage(
                     roots.extend(arguments(*else_target, else_args));
                 }
             }
-            CfgTerminator::Return | CfgTerminator::Unset => {}
+            CfgTerminator::Return | CfgTerminator::Wait { .. } | CfgTerminator::Unset => {}
         }
     }
     roots.extend(
@@ -1206,7 +1206,7 @@ fn build_stage(
                     }
                 }
             }
-            CfgTerminator::Return | CfgTerminator::Unset => CfgTerminator::Jump {
+            CfgTerminator::Return | CfgTerminator::Wait { .. } | CfgTerminator::Unset => CfgTerminator::Jump {
                 target: exit,
                 args: Vec::new(),
             },
@@ -1314,6 +1314,7 @@ fn build_stage(
                                     schedule.values[usize::from(*condition)]
                                 ),
                                 CfgTerminator::Return => "return".to_string(),
+                                CfgTerminator::Wait { .. } => "wait".to_string(),
                                 CfgTerminator::Unset => "unset".to_string(),
                             },
                         )
@@ -1392,7 +1393,7 @@ fn describe(
                 else_args,
                 ..
             } => *condition == value || then_args.contains(&value) || else_args.contains(&value),
-            CfgTerminator::Return | CfgTerminator::Unset => false,
+            CfgTerminator::Return | CfgTerminator::Wait { .. } | CfgTerminator::Unset => false,
         };
         if mentioned {
             carried.push(block.id);
@@ -1480,7 +1481,7 @@ fn compact_values(
                     demand(*arg, &mut keep, &mut stack);
                 }
             }
-            CfgTerminator::Return | CfgTerminator::Unset => {}
+            CfgTerminator::Return | CfgTerminator::Wait { .. } | CfgTerminator::Unset => {}
         }
     }
     while let Some(value) = stack.pop() {
@@ -1529,7 +1530,7 @@ fn compact_values(
                     *arg = translate(*arg);
                 }
             }
-            CfgTerminator::Return | CfgTerminator::Unset => {}
+            CfgTerminator::Return | CfgTerminator::Wait { .. } | CfgTerminator::Unset => {}
         }
     }
     // Exports and outputs are read out of `mapped` after this, so it has to
@@ -1677,7 +1678,7 @@ fn prune_blocks(mut blocks: Vec<CfgBlock>, entry: BlockId) -> (Vec<CfgBlock>, Bl
                     *then_target = resolve(*then_target);
                     *else_target = resolve(*else_target);
                 }
-                CfgTerminator::Return | CfgTerminator::Unset => {}
+                CfgTerminator::Return | CfgTerminator::Wait { .. } | CfgTerminator::Unset => {}
             }
         }
         for block in &mut blocks {
@@ -1735,7 +1736,7 @@ fn prune_blocks(mut blocks: Vec<CfgBlock>, entry: BlockId) -> (Vec<CfgBlock>, Bl
                 *else_target =
                     renumber[usize::from(*else_target)].expect("a reachable target is kept");
             }
-            CfgTerminator::Return | CfgTerminator::Unset => {}
+            CfgTerminator::Return | CfgTerminator::Wait { .. } | CfgTerminator::Unset => {}
         }
     }
     let entry = renumber[usize::from(entry)].expect("the entry is reachable from itself");
@@ -1815,6 +1816,36 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
             }
         }
 
+        // Discrete-domain kinds, listed rather than left to the catch-all.
+        //
+        // They cannot reach this function: the analog scheduler runs over the
+        // analog body, and a process is a separate function that is never
+        // handed to it. The arm exists because of what the catch-all below
+        // would otherwise do — classify a signal read as `Model`, the coarsest
+        // class, and hoist it into the once-per-model-card stage. A value that
+        // is supposed to change every time the process runs would then be
+        // computed once and cached forever, and nothing would say so.
+        //
+        // `Newton` is the finest class, so if one ever did arrive the result
+        // would be recomputed rather than wrongly reused. A wrong answer that
+        // is merely slow beats a wrong answer that is silent.
+        CfgValueKind::FourStateConstant(_)
+        | CfgValueKind::IntegerConstant(_)
+        | CfgValueKind::DigitalSignalRead { .. }
+        | CfgValueKind::DigitalBitwise { .. }
+        | CfgValueKind::DigitalBitwiseNot { .. }
+        | CfgValueKind::DigitalLogical { .. }
+        | CfgValueKind::DigitalLogicalNot { .. }
+        | CfgValueKind::DigitalEquality { .. }
+        | CfgValueKind::DigitalRelational { .. }
+        | CfgValueKind::DigitalArithmetic { .. }
+        | CfgValueKind::DigitalShift { .. }
+        | CfgValueKind::DigitalPartSelect { .. }
+        | CfgValueKind::DigitalConcat { .. }
+        | CfgValueKind::DigitalSelect { .. }
+        | CfgValueKind::DigitalBlockingWrite { .. }
+        | CfgValueKind::DigitalNonblockingWrite { .. } => InvalidationClass::Newton,
+
         _ => InvalidationClass::Model,
     }
 }
@@ -1854,7 +1885,7 @@ fn incoming_values(function: &CfgFunction) -> Vec<Vec<(BlockId, ValueId)>> {
                 record(*then_target, then_args);
                 record(*else_target, else_args);
             }
-            CfgTerminator::Return | CfgTerminator::Unset => {}
+            CfgTerminator::Return | CfgTerminator::Wait { .. } | CfgTerminator::Unset => {}
         }
     }
     incoming

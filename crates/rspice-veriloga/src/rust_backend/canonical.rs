@@ -469,6 +469,45 @@ fn kernel_region_metrics(
                 write!(out, "lane-extract:{}", lane_signature(*lane))
             }
             CfgValueKind::Staged { slot } => write!(out, "staged:{}", staged_indices[slot]),
+
+            // A digital value never reaches an emitted analog device — the
+            // backend refuses a module with processes before it gets here —
+            // but the signature is defined anyway, so that a future artifact
+            // carrying one hashes to something rather than panicking.
+            CfgValueKind::FourStateConstant(value) => {
+                write!(out, "four-state:{}", value.spelling())
+            }
+            CfgValueKind::IntegerConstant(value) => write!(out, "integer:{value}"),
+            CfgValueKind::DigitalSignalRead { signal } => {
+                write!(out, "digital-read:{signal}")
+            }
+            CfgValueKind::DigitalBitwise { op, .. } => write!(out, "digital-bitwise:{op:?}"),
+            CfgValueKind::DigitalBitwiseNot { .. } => write!(out, "digital-bitwise-not"),
+            CfgValueKind::DigitalLogical { op, .. } => write!(out, "digital-logical:{op:?}"),
+            CfgValueKind::DigitalLogicalNot { .. } => write!(out, "digital-logical-not"),
+            CfgValueKind::DigitalEquality { negate, .. } => {
+                write!(out, "digital-equality:{negate}")
+            }
+            CfgValueKind::DigitalRelational { op, .. } => {
+                write!(out, "digital-relational:{op:?}")
+            }
+            CfgValueKind::DigitalArithmetic { op, .. } => {
+                write!(out, "digital-arithmetic:{op:?}")
+            }
+            CfgValueKind::DigitalShift { op, .. } => write!(out, "digital-shift:{op:?}"),
+            CfgValueKind::DigitalPartSelect { msb, lsb, .. } => {
+                write!(out, "digital-part-select:{msb}:{lsb}")
+            }
+            CfgValueKind::DigitalConcat { parts } => {
+                write!(out, "digital-concat:{}", parts.len())
+            }
+            CfgValueKind::DigitalSelect { .. } => write!(out, "digital-select"),
+            CfgValueKind::DigitalBlockingWrite { target, .. } => {
+                write!(out, "digital-blocking-write:{target:?}")
+            }
+            CfgValueKind::DigitalNonblockingWrite { target, region, .. } => {
+                write!(out, "digital-nonblocking-write:{target:?}:{}", region.name())
+            }
         }
         .expect("write value signature");
         out
@@ -508,6 +547,7 @@ fn kernel_region_metrics(
                 CfgTerminator::Jump { .. } => "jump",
                 CfgTerminator::Branch { .. } => "branch",
                 CfgTerminator::Return => "return",
+                CfgTerminator::Wait { .. } => "wait",
                 CfgTerminator::Unset => "unset",
             };
             format!(
@@ -545,6 +585,24 @@ fn kernel_region_metrics(
                 for argument in then_args.iter().chain(else_args) {
                     write!(signature, "{},", operand_signature(block_index, *argument))
                         .expect("write branch argument signature");
+                }
+                signature.push(')');
+            }
+            CfgTerminator::Wait {
+                wait,
+                resume,
+                resume_args,
+            } => {
+                write!(
+                    signature,
+                    "wait:{:?}:{}(",
+                    wait,
+                    target_signature(*resume)
+                )
+                .expect("write wait signature");
+                for argument in resume_args {
+                    write!(signature, "{},", operand_signature(block_index, *argument))
+                        .expect("write wait argument signature");
                 }
                 signature.push(')');
             }
@@ -1542,7 +1600,7 @@ fn share_noise_preprocessing(
                 retain_arguments(*then_target, then_args);
                 retain_arguments(*else_target, else_args);
             }
-            CfgTerminator::Return | CfgTerminator::Unset => {}
+            CfgTerminator::Return | CfgTerminator::Wait { .. } | CfgTerminator::Unset => {}
         }
     }
     for value in &mut function.values {
@@ -3910,7 +3968,7 @@ fn retain_reachable_blocks(function: &mut CfgFunction) {
                 *else_target =
                     remap[usize::from(*else_target)].expect("a reachable target is remapped");
             }
-            CfgTerminator::Return | CfgTerminator::Unset => {}
+            CfgTerminator::Return | CfgTerminator::Wait { .. } | CfgTerminator::Unset => {}
         }
     }
     function.entry = remap[usize::from(function.entry)].expect("the entry is reachable");
@@ -4011,7 +4069,7 @@ fn collapse_single_predecessor_parameters(function: &mut CfgFunction, outputs: &
                     }
                 }
             }
-            CfgTerminator::Return | CfgTerminator::Unset => {}
+            CfgTerminator::Return | CfgTerminator::Wait { .. } | CfgTerminator::Unset => {}
         }
     }
 }
@@ -4244,6 +4302,13 @@ fn outgoing_edges(block: &crate::canonical_ir::cfg::CfgBlock) -> Vec<(BlockId, V
             (*then_target, then_args.clone()),
             (*else_target, else_args.clone()),
         ],
+        // See `canonical_ir::ad::outgoing`: the edge is reported, even though
+        // this backend refuses a process before it can walk one.
+        CfgTerminator::Wait {
+            resume,
+            resume_args,
+            ..
+        } => vec![(*resume, resume_args.clone())],
         CfgTerminator::Return | CfgTerminator::Unset => Vec::new(),
     }
 }

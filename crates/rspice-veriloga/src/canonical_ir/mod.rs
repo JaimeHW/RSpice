@@ -24,6 +24,7 @@ pub mod cfg_eval;
 pub mod cfg_lower;
 pub mod cfg_opt;
 pub mod diagnostic;
+pub mod digital;
 pub mod digital_value;
 pub mod hir;
 pub mod ids;
@@ -37,7 +38,7 @@ pub use ad::{AdFunction, AdSeed, differentiate};
 pub use artifact::CanonicalIrArtifact;
 pub use cfg::{
     CfgBinaryOp, CfgBlock, CfgFunction, CfgInstruction, CfgTerminator, CfgUnaryOp,
-    CfgValidationError, CfgValue, CfgValueKind, CfgValueType, CfgVariable, SsaBuilder,
+    CfgValidationError, CfgValue, CfgValueKind, CfgValueType, CfgVariable, DigitalWait, SsaBuilder,
 };
 pub use cfg_complex::{COMPLEX_STEP, ComplexStep};
 pub use cfg_eval::{
@@ -54,10 +55,16 @@ pub use hir::{
     HirInternalNode, HirLaplaceKind, HirLimiterArgument, HirLoop, HirModel, HirParamRange,
     HirParameter, HirParameterDimension, HirPort, HirStatement, HirVariable, HirZiKind,
 };
+pub use digital::{
+    CanonicalDigitalPlan, CfgDigitalProcess, DigitalEdge, DigitalProcessKind,
+    DigitalSchedulingRegion, DigitalSensitivityOrigin, DigitalSensitivityTerm, DigitalSignal,
+    DigitalStaticSensitivity, DigitalWriteSelect, DigitalWriteTarget,
+};
+pub use digital_value::FourStateValue;
 pub use ids::{
-    ArrayId, BlockId, BranchId, BranchUnknownId, ContributionId, DisciplineId, EquationId, ExprId,
-    ModuleId, NodeId, NoiseSourceId, ParamId, PortId, RegionId, ScheduleId, ShapeId, SourceId,
-    StateId, SymbolId, ValueId, VariableId,
+    ArrayId, BlockId, BranchId, BranchUnknownId, ContributionId, DigitalProcessId, DigitalSignalId,
+    DisciplineId, EquationId, ExprId, ModuleId, NodeId, NoiseSourceId, ParamId, PortId, RegionId,
+    ScheduleId, ShapeId, SourceId, StateId, SymbolId, ValueId, VariableId,
 };
 pub use metadata::{CANONICAL_IR_SCHEMA_VERSION, CanonicalMetadata, StableDigest, source_identity};
 pub use mir::{

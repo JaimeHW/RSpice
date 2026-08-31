@@ -531,7 +531,7 @@ impl Optimizer {
                         *arg = translate(*arg);
                     }
                 }
-                CfgTerminator::Return | CfgTerminator::Unset => {}
+                CfgTerminator::Return | CfgTerminator::Wait { .. } | CfgTerminator::Unset => {}
             }
         }
         for output in &mut self.outputs {
@@ -664,7 +664,7 @@ impl Optimizer {
                     retain_by(&kept[usize::from(*then_target)], then_args);
                     retain_by(&kept[usize::from(*else_target)], else_args);
                 }
-                CfgTerminator::Return | CfgTerminator::Unset => {}
+                CfgTerminator::Return | CfgTerminator::Wait { .. } | CfgTerminator::Unset => {}
             }
         }
 
@@ -724,7 +724,7 @@ impl Optimizer {
                         *arg = translate(*arg);
                     }
                 }
-                CfgTerminator::Return | CfgTerminator::Unset => {}
+                CfgTerminator::Return | CfgTerminator::Wait { .. } | CfgTerminator::Unset => {}
             }
         }
         self.values = compacted;

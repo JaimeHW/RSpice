@@ -63,6 +63,8 @@ const fn table_index(bit: FourStateBit) -> usize {
     }
 }
 
+/// The inverse of [`table_index`], used to check the alignment holds both ways.
+#[cfg(test)]
 const fn from_table_index(index: usize) -> FourStateBit {
     match index {
         0 => FourStateBit::Zero,
@@ -334,7 +336,7 @@ impl FourStateValue {
 // ============================================================================
 
 /// A bitwise operator over four-state values.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BitwiseOp {
     And,
     Or,
@@ -403,7 +405,7 @@ pub fn truth(value: &FourStateValue) -> FourStateBit {
 }
 
 /// A logical operator, which yields a one-bit result.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum LogicalOp {
     And,
     Or,
@@ -456,7 +458,7 @@ pub fn equality(left: &FourStateValue, right: &FourStateValue, negate: bool) -> 
 }
 
 /// A relational operator.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum RelationalOp {
     Lt,
     Le,
@@ -489,7 +491,7 @@ pub fn relational(
 }
 
 /// An arithmetic operator over four-state values.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ArithmeticOp {
     Add,
     Sub,
@@ -530,7 +532,7 @@ pub fn arithmetic(
 }
 
 /// Shift direction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ShiftOp {
     Left,
     Right,
