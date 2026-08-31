@@ -20558,7 +20558,7 @@ unqualified NPN model parameter
 VCC c 0 5
 VB b 0 .7
 Q1 c b 0 QN
-.MODEL QN NPN (BF=100 IRB=.001)
+.MODEL QN NPN (BF=100 ISS=1e-15)
 .TRAN 1n 10n
 .PRINT TRAN V(c)
 .END
