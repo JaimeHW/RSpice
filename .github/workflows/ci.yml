@@ -161,10 +161,19 @@ jobs:
         # binaries is what makes it a real conformance step, and the step to
         # pair with that is setting RSPICE_VERILOG_ORACLES_REQUIRED=1 so a
         # later disappearance fails instead of silently going back to skipping.
+        #
+        # `verilog_scale` runs in the same tier and for the same reason. It is
+        # the gate-level scale suite: twelve generated circuits from 208 to
+        # 3140 gates, driven through RSpice against reference models. The whole
+        # of it is about twenty seconds in a debug build with the array
+        # multiplier — the deepest circuit, and half the total on its own —
+        # dominating. That is measured rather than assumed, and if it grows
+        # past a minute the multiplier is the case to move to nightly, not the
+        # suite.
         run: >-
           cargo test --locked -p rspice-conformance --lib
           --test ngspice_oracle_audit --test y_device_policy
-          --test verilog_oracles
+          --test verilog_oracles --test verilog_scale
       - name: Oracle-free corpora (routine tier)
         # The execution corpora are cheap here only because the expensive
         # decks opt out: every ISCAS85 deck is marked `!extended` and is

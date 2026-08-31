@@ -490,6 +490,25 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("cargo test --locked -p rspice-core --lib", ci_workflow)
         self.assertIn("cargo test --locked -p rspice-core --lib --release", nightly_workflow)
 
+    def test_digital_verilog_suites_are_named_in_the_fast_tier(self) -> None:
+        """Both digital Verilog conformance targets run on every push.
+
+        The conformance step names its test targets explicitly rather than
+        using `--tests`, so a new target that nobody adds here is a suite that
+        exists and never runs. Two of them are digital: `verilog_oracles` is
+        the language corpus and `verilog_scale` is the gate-level scale suite,
+        and neither needs an external simulator installed to be worth running
+        — each checks its designs against expectations derived without one.
+        """
+        workflow = read_text(".github/workflows/ci.yml")
+        step = workflow.split("- name: Conformance suite unit tests", 1)[1].split(
+            "- name:", 1
+        )[0]
+
+        for target in ("--test verilog_oracles", "--test verilog_scale"):
+            self.assertIn(target, step)
+        self.assertEqual(step.count("--test verilog_scale"), 1)
+
     def test_nightly_qualifies_shipped_models_through_native_x64(self) -> None:
         nightly_workflow = read_text(".github/workflows/nightly.yml")
 
