@@ -37,11 +37,15 @@ pub(crate) fn elaborate_executable_module<'a>(
     // it emits a device the solver calls rather than a coroutine the event
     // kernel resumes.
     //
-    // A *child* instance is still refused, below. Flattening a hierarchy
-    // rewrites the analog body into the parent's scope, and there is no such
-    // rewrite for a process: its sensitivity list names signals that would
-    // have to be re-homed, and dropping it silently is exactly what this
-    // refusal exists to prevent.
+    // A *digital child* instance is no longer refused either: it is elaborated
+    // by [`digital_elaborate`](super::digital_elaborate), which runs first so
+    // that its refusals reach the author before any analog one. The two passes
+    // partition the instance tree with one shared predicate — a child with
+    // discrete-domain content belongs to that pass and to this one otherwise —
+    // so no instance can be claimed by both, and none by neither. Below the
+    // compiled module the analog flattening owns everything, and a digital
+    // module found there is refused as it always was, because a mixed-signal
+    // hierarchy has no elaborated form yet.
     let source_modules = source_modules(analyzed)?;
     let root = source_modules.get(&selected.name).copied().ok_or_else(|| {
         internal_error(format!(
@@ -53,10 +57,24 @@ pub(crate) fn elaborate_executable_module<'a>(
         return Ok(Cow::Borrowed(selected));
     }
 
+    let digital_instances = super::digital_elaborate::elaborate_digital_hierarchy(
+        analyzed,
+        &source_modules,
+        root,
+        selected,
+    )?;
+
     let mut elaborator = HierarchyElaborator::new(analyzed, source_modules, selected.clone());
+    elaborator.flattened.digital.instances = digital_instances;
     let root_scope = ScopeMap::for_root(selected);
     let mut module_stack = vec![selected.name.clone()];
-    elaborator.append_instances(root, &root_scope, &mut module_stack, selected.name.as_str())?;
+    elaborator.append_instances(
+        root,
+        &root_scope,
+        &mut module_stack,
+        selected.name.as_str(),
+        true,
+    )?;
     Ok(Cow::Owned(elaborator.finish()))
 }
 
@@ -202,12 +220,21 @@ impl<'a> HierarchyElaborator<'a> {
         self.flattened
     }
 
+    /// Flatten one module's instances.
+    ///
+    /// `digital_children_elaborated` says whether a child with discrete-domain
+    /// content is one [`super::digital_elaborate`] has already taken. It is
+    /// true only for the compiled module's own instances — that pass walks the
+    /// digital tree from there — and false everywhere below, where a digital
+    /// module is refused rather than skipped, because nothing would elaborate
+    /// it and skipping it would drop it.
     fn append_instances(
         &mut self,
         source_module: &Module,
         parent_scope: &ScopeMap,
         module_stack: &mut Vec<SmolStr>,
         parent_path: &str,
+        digital_children_elaborated: bool,
     ) -> CompileResult<()> {
         let mut instance_names = HashSet::new();
         for instance in &source_module.instances {
@@ -221,7 +248,13 @@ impl<'a> HierarchyElaborator<'a> {
                 ));
             }
             let path = format!("{parent_path}.{}", instance.name);
-            self.append_instance(instance, parent_scope, module_stack, &path)?;
+            self.append_instance(
+                instance,
+                parent_scope,
+                module_stack,
+                &path,
+                digital_children_elaborated,
+            )?;
         }
         Ok(())
     }
@@ -232,6 +265,7 @@ impl<'a> HierarchyElaborator<'a> {
         parent_scope: &ScopeMap,
         module_stack: &mut Vec<SmolStr>,
         path: &str,
+        digital_children_elaborated: bool,
     ) -> CompileResult<()> {
         let child_source = self
             .source_modules
@@ -249,9 +283,16 @@ impl<'a> HierarchyElaborator<'a> {
                 instance.module
             ))
         })?;
-        // A child's digital content is as unexecutable as the root's, and
-        // flattening would otherwise drop it without a word.
-        super::reject_digital_content(child)?;
+        // A digital child of the compiled module belongs to the digital
+        // elaboration, which has already taken it. Anywhere else it is as
+        // unexecutable as it ever was, and flattening would otherwise drop it
+        // without a word.
+        if super::digital_elaborate::is_digital_child(child) {
+            if digital_children_elaborated {
+                return Ok(());
+            }
+            super::reject_digital_content(child)?;
+        }
         if module_stack.contains(&instance.module) {
             let mut cycle = module_stack.iter().map(SmolStr::as_str).collect::<Vec<_>>();
             cycle.push(instance.module.as_str());
@@ -471,7 +512,7 @@ impl<'a> HierarchyElaborator<'a> {
                 .collect::<CompileResult<Vec<_>>>()?,
         );
         module_stack.push(instance.module.clone());
-        let nested = self.append_instances(child_source, &scope, module_stack, path);
+        let nested = self.append_instances(child_source, &scope, module_stack, path, false);
         module_stack.pop();
         nested
     }
