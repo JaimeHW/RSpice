@@ -29,6 +29,27 @@ const XYCE_PROGRESS_INITIAL_DELAY: Duration = Duration::from_secs(2);
 const XYCE_PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
 const XYCE_CLASSIFICATION_REPORT_ENV: &str = "RSPICE_XYCE_CLASSIFICATION_REPORT";
 const XYCE_RETAINED_UPSTREAM_EXCLUSION_COUNT: usize = 1_143;
+const XYCE_GRID_ALIGNMENT_REPORT_ENV: &str = "RSPICE_XYCE_GRID_REPORT";
+const XYCE_GRID_ALIGNMENT_MANIFEST_FILE: &str = "grid-alignment-manifest.tsv";
+
+/// Appended to every grid-alignment failure. Says what moved and what the
+/// deliberate response is, because the failing edit is almost never in this
+/// file or in the deck it names.
+const XYCE_GRID_ALIGNMENT_REBASELINE: &str = "\
+Index alignment is the strictest claim this suite makes about a transient — \
+reference row i against accepted step i, so the engine had to choose the same \
+steps Xyce chose. Interpolating onto the reference times instead is a \
+materially weaker claim, and nothing in a deck, a tolerance, or a contract has \
+to change for a deck to slide from one to the other: it follows from the \
+engine's accepted-step sequence alone. That is why it is pinned.\n\
+To re-baseline, capture a fresh census and rewrite the manifest from it:\n  \
+RSPICE_XYCE_GRID_REPORT=<report.tsv> cargo test --release -p rspice-conformance \\\n    \
+--test xyce_regression test_full_xyce_suite_summary_accounts_for_every_deck\n\
+then copy the report's `index_aligned` rows into \
+tests/xyce/grid-alignment-manifest.tsv, keeping the header. Record in the \
+commit message which engine change moved the grid, and why the weaker \
+comparison is acceptable for every deck that lost the strict one — a manifest \
+regenerated without that judgement is a gate that has been turned off.";
 
 fn run_xyce_case_with_watchdog(
     test_dir: &Path,
@@ -300,6 +321,175 @@ fn write_xyce_classification_report(
         .persist_noclobber(output_path)
         .map_err(|error| error.error)?;
     Ok(())
+}
+
+/// Dump `deck -> comparison geometry` for every deck that reached a transient
+/// reference comparison, when `RSPICE_XYCE_GRID_REPORT` names a destination.
+///
+/// This is the manifest's generator. It runs before the suite's assertions so
+/// a census is still captured on a run the manifest itself fails — otherwise
+/// re-baselining would be impossible by construction.
+fn write_xyce_grid_alignment_report_if_requested(
+    results: &[XyceTestResult],
+) -> io::Result<Option<PathBuf>> {
+    let Some(path) = std::env::var_os(XYCE_GRID_ALIGNMENT_REPORT_ENV).map(PathBuf::from) else {
+        return Ok(None);
+    };
+    if path.as_os_str().is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{XYCE_GRID_ALIGNMENT_REPORT_ENV} must not be empty"),
+        ));
+    }
+    write_xyce_grid_alignment_report(results, &path)?;
+    Ok(Some(path))
+}
+
+fn write_xyce_grid_alignment_report(
+    results: &[XyceTestResult],
+    output_path: &Path,
+) -> io::Result<()> {
+    let mut rows = BTreeSet::new();
+    for result in results {
+        let Some(alignment) = result.transient_grid_alignment else {
+            continue;
+        };
+        validate_xyce_classification_field("relative_path", &result.relative_path)?;
+        if !rows.insert((result.relative_path.clone(), alignment.as_str())) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "grid-alignment report contains a duplicate deck: {}",
+                    result.relative_path
+                ),
+            ));
+        }
+    }
+
+    let mut report = String::from("# relative_path\tgrid_alignment\n");
+    for (relative_path, alignment) in rows {
+        report.push_str(&relative_path);
+        report.push('\t');
+        report.push_str(alignment);
+        report.push('\n');
+    }
+
+    let parent = output_path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+    temporary.write_all(report.as_bytes())?;
+    temporary.flush()?;
+    temporary.as_file().sync_all()?;
+    temporary
+        .persist_noclobber(output_path)
+        .map_err(|error| error.error)?;
+    Ok(())
+}
+
+/// The decks entitled to index-aligned comparison, read from
+/// `tests/xyce/grid-alignment-manifest.tsv`.
+///
+/// Parsing is strict — malformed, unsorted, duplicated, or non-`index_aligned`
+/// rows are failures rather than warnings. A manifest that tolerates junk is a
+/// manifest that can be half-edited without anyone noticing.
+fn read_xyce_grid_alignment_manifest(root: &Path) -> BTreeSet<String> {
+    let path = root.join(XYCE_GRID_ALIGNMENT_MANIFEST_FILE);
+    let content = fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+    let expected_mode = XyceTransientGridAlignment::IndexAligned.as_str();
+    let mut manifest: BTreeSet<String> = BTreeSet::new();
+    let mut previous: Option<String> = None;
+    for (index, raw_line) in content.lines().enumerate() {
+        let line_number = index + 1;
+        let line = raw_line.trim_end_matches('\r');
+        if line.trim().is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((relative_path, mode)) = line.split_once('\t') else {
+            panic!(
+                "{}:{line_number}: expected `<relative_path>\\t{expected_mode}`, got {line:?}",
+                path.display()
+            );
+        };
+        assert_eq!(
+            mode,
+            expected_mode,
+            "{}:{line_number}: the grid-alignment manifest lists only the decks \
+             entitled to index alignment, so `{expected_mode}` is the sole legal \
+             mode; got {mode:?}",
+            path.display()
+        );
+        assert!(
+            !relative_path.is_empty() && !relative_path.contains('\\'),
+            "{}:{line_number}: {relative_path:?} must be a nonempty `/`-separated \
+             path relative to tests/xyce",
+            path.display()
+        );
+        assert!(
+            previous
+                .as_deref()
+                .is_none_or(|earlier| earlier < relative_path),
+            "{}:{line_number}: rows must be sorted and unique; {relative_path:?} \
+             does not follow {previous:?}",
+            path.display()
+        );
+        previous = Some(relative_path.to_string());
+        manifest.insert(relative_path.to_string());
+    }
+    manifest
+}
+
+/// Check the manifest against a census, in both directions.
+///
+/// A manifested deck that has fallen back to interpolation is the regression
+/// this gate exists for. An unmanifested deck that has *started* comparing
+/// index-aligned fails too: an allowlist that only ever grows stale stops
+/// describing anything, and a deck that silently gained the strict mode is a
+/// deck whose new strictness nobody signed off on either.
+fn xyce_grid_alignment_failures(
+    results: &[XyceTestResult],
+    manifest: &BTreeSet<String>,
+) -> Vec<String> {
+    let mut failures = Vec::new();
+    let mut seen = BTreeSet::new();
+    for result in results {
+        seen.insert(result.relative_path.as_str());
+        let manifested = manifest.contains(&result.relative_path);
+        match (manifested, result.transient_grid_alignment) {
+            (true, Some(XyceTransientGridAlignment::IndexAligned)) => {}
+            (false, None | Some(XyceTransientGridAlignment::Interpolated)) => {}
+            (true, Some(XyceTransientGridAlignment::Interpolated)) => failures.push(format!(
+                "{}: manifested as index-aligned, but its transient comparison fell \
+                 back to interpolation.\n{XYCE_GRID_ALIGNMENT_REBASELINE}",
+                result.relative_path
+            )),
+            (true, None) => failures.push(format!(
+                "{}: manifested as index-aligned, but it no longer reaches a \
+                 transient reference comparison at all (contract {:?}). Either the \
+                 deck's contract changed or it stopped executing; both retire a \
+                 pinned strict comparison.\n{XYCE_GRID_ALIGNMENT_REBASELINE}",
+                result.relative_path, result.contract
+            )),
+            (false, Some(XyceTransientGridAlignment::IndexAligned)) => failures.push(format!(
+                "{}: compares index-aligned but is absent from the manifest. A deck \
+                 that gains the strict comparison must be recorded, or the manifest \
+                 stops describing the suite.\n{XYCE_GRID_ALIGNMENT_REBASELINE}",
+                result.relative_path
+            )),
+        }
+    }
+    for relative_path in manifest {
+        if !seen.contains(relative_path.as_str()) {
+            failures.push(format!(
+                "{relative_path}: named by the grid-alignment manifest but not \
+                 discovered in the corpus. Remove the row, or restore the deck.\n\
+                 {XYCE_GRID_ALIGNMENT_REBASELINE}"
+            ));
+        }
+    }
+    failures
 }
 
 fn validate_xyce_classification_field(name: &str, value: &str) -> io::Result<()> {
@@ -662,6 +852,173 @@ fn test_xyce_classification_report_is_deterministic_and_fail_closed() {
     let duplicate_error =
         write_xyce_classification_report(&duplicate, &directory.path().join("duplicate.tsv"))
             .expect_err("case-insensitive duplicate inventory must fail");
+    assert_eq!(duplicate_error.kind(), io::ErrorKind::InvalidData);
+}
+
+#[test]
+fn xyce_grid_alignment_manifest_parses_and_names_real_decks() {
+    let root = get_xyce_tests_dir();
+    let manifest = read_xyce_grid_alignment_manifest(&root);
+    assert!(
+        !manifest.is_empty(),
+        "the grid-alignment manifest is empty: either every deck lost the strict \
+         transient comparison, or the file was truncated. Both need a human.\n\
+         {XYCE_GRID_ALIGNMENT_REBASELINE}"
+    );
+    for relative_path in &manifest {
+        assert!(
+            relative_path.ends_with(".cir"),
+            "{relative_path} is not a deck path"
+        );
+        assert!(
+            root.join(relative_path).is_file(),
+            "{relative_path} is manifested as index-aligned but is not in the corpus"
+        );
+    }
+}
+
+#[test]
+fn xyce_grid_alignment_manifest_is_enforced_in_both_directions() {
+    let result = |relative_path: &str, alignment| XyceTestResult {
+        name: "fixture".to_string(),
+        relative_path: relative_path.to_string(),
+        passed: true,
+        expected_unsupported: false,
+        upstream_excluded: false,
+        upstream_exclusion_source: None,
+        error: None,
+        mismatches: Vec::new(),
+        duration_ms: 1,
+        contract: "fixture".to_string(),
+        transient_grid_alignment: alignment,
+    };
+    let manifest = BTreeSet::from(["Netlists/A/pinned.cir".to_string()]);
+
+    assert!(
+        xyce_grid_alignment_failures(
+            &[
+                result(
+                    "Netlists/A/pinned.cir",
+                    Some(XyceTransientGridAlignment::IndexAligned)
+                ),
+                result(
+                    "Netlists/A/loose.cir",
+                    Some(XyceTransientGridAlignment::Interpolated)
+                ),
+                result("Netlists/A/no_transient.cir", None),
+            ],
+            &manifest
+        )
+        .is_empty(),
+        "a census matching the manifest must not fail"
+    );
+
+    let weakened = xyce_grid_alignment_failures(
+        &[result(
+            "Netlists/A/pinned.cir",
+            Some(XyceTransientGridAlignment::Interpolated),
+        )],
+        &manifest,
+    );
+    assert_eq!(weakened.len(), 1);
+    assert!(
+        weakened[0].starts_with("Netlists/A/pinned.cir: manifested as index-aligned"),
+        "{}",
+        weakened[0]
+    );
+    assert!(weakened[0].contains(XYCE_GRID_ALIGNMENT_REPORT_ENV));
+
+    let retired = xyce_grid_alignment_failures(&[result("Netlists/A/pinned.cir", None)], &manifest);
+    assert_eq!(retired.len(), 1);
+    assert!(
+        retired[0].contains("no longer reaches a transient reference comparison"),
+        "{}",
+        retired[0]
+    );
+
+    let unmanifested = xyce_grid_alignment_failures(
+        &[
+            result(
+                "Netlists/A/pinned.cir",
+                Some(XyceTransientGridAlignment::IndexAligned),
+            ),
+            result(
+                "Netlists/A/newcomer.cir",
+                Some(XyceTransientGridAlignment::IndexAligned),
+            ),
+        ],
+        &manifest,
+    );
+    assert_eq!(unmanifested.len(), 1);
+    assert!(
+        unmanifested[0].starts_with("Netlists/A/newcomer.cir: compares index-aligned"),
+        "{}",
+        unmanifested[0]
+    );
+
+    let vanished = xyce_grid_alignment_failures(&[], &manifest);
+    assert_eq!(vanished.len(), 1);
+    assert!(
+        vanished[0].contains("not discovered in the corpus"),
+        "{}",
+        vanished[0]
+    );
+}
+
+#[test]
+fn xyce_grid_alignment_report_is_sorted_and_fail_closed() {
+    let result = |relative_path: &str, alignment| XyceTestResult {
+        name: "fixture".to_string(),
+        relative_path: relative_path.to_string(),
+        passed: true,
+        expected_unsupported: false,
+        upstream_excluded: false,
+        upstream_exclusion_source: None,
+        error: None,
+        mismatches: Vec::new(),
+        duration_ms: 1,
+        contract: "fixture".to_string(),
+        transient_grid_alignment: alignment,
+    };
+    let results = [
+        result(
+            "Netlists/B/z.cir",
+            Some(XyceTransientGridAlignment::Interpolated),
+        ),
+        result(
+            "Netlists/B/a.cir",
+            Some(XyceTransientGridAlignment::IndexAligned),
+        ),
+        result("Netlists/B/skipped.cir", None),
+    ];
+
+    let directory = tempfile::tempdir().expect("create grid-alignment report directory");
+    let path = directory.path().join("grid.tsv");
+    write_xyce_grid_alignment_report(&results, &path).expect("write grid-alignment report");
+    assert_eq!(
+        fs::read_to_string(&path).expect("read grid-alignment report"),
+        "# relative_path\tgrid_alignment\n\
+         Netlists/B/a.cir\tindex_aligned\n\
+         Netlists/B/z.cir\tinterpolated\n"
+    );
+
+    let overwrite = write_xyce_grid_alignment_report(&results, &path)
+        .expect_err("grid-alignment reports must never overwrite an existing census");
+    assert_eq!(overwrite.kind(), io::ErrorKind::AlreadyExists);
+
+    let duplicate = [
+        result(
+            "Netlists/B/a.cir",
+            Some(XyceTransientGridAlignment::IndexAligned),
+        ),
+        result(
+            "Netlists/B/a.cir",
+            Some(XyceTransientGridAlignment::IndexAligned),
+        ),
+    ];
+    let duplicate_error =
+        write_xyce_grid_alignment_report(&duplicate, &directory.path().join("duplicate.tsv"))
+            .expect_err("a deck may appear in the census once");
     assert_eq!(duplicate_error.kind(), io::ErrorKind::InvalidData);
 }
 
@@ -11877,6 +12234,31 @@ fn test_full_xyce_suite_summary_accounts_for_every_deck() {
         .map(|(index, deck)| run_xyce_case_with_watchdog(&root, &config, deck, index + 1, total))
         .collect::<Vec<_>>();
     XyceTestRunner::print_summary(&results);
+
+    // Before any assertion: this census is what a re-baseline is written from,
+    // and the most likely reason to want one is a run the manifest fails.
+    if let Some(report_path) = write_xyce_grid_alignment_report_if_requested(&results)
+        .expect("write requested Xyce grid-alignment report")
+    {
+        println!("Xyce grid-alignment report: {}", report_path.display());
+    }
+
+    let index_aligned = results
+        .iter()
+        .filter(|result| {
+            result.transient_grid_alignment == Some(XyceTransientGridAlignment::IndexAligned)
+        })
+        .count();
+    let interpolated = results
+        .iter()
+        .filter(|result| {
+            result.transient_grid_alignment == Some(XyceTransientGridAlignment::Interpolated)
+        })
+        .count();
+    println!(
+        "Xyce transient grid alignment: {index_aligned} index-aligned, {interpolated} interpolated"
+    );
+
     let stats = XyceTestRunner::statistics(&results);
 
     assert_eq!(
@@ -11889,11 +12271,26 @@ fn test_full_xyce_suite_summary_accounts_for_every_deck() {
         stats.executed > 0,
         "At least one Xyce deck must run as a numeric comparison"
     );
+    // Checked before the pass/fail census, and deliberately. A comparison's
+    // geometry is decided by the two time axes alone, so it is just as valid on
+    // a deck that then failed on values; and if this ran second, a corpus that
+    // is red for any unrelated reason would take the grid pin offline with it —
+    // which is exactly when a quiet slide from index alignment to interpolation
+    // would go unnoticed.
+    let grid_alignment_failures =
+        xyce_grid_alignment_failures(&results, &read_xyce_grid_alignment_manifest(&root));
+    assert!(
+        grid_alignment_failures.is_empty(),
+        "Xyce grid-alignment manifest disagrees with the suite in {} place(s):\n\n{}",
+        grid_alignment_failures.len(),
+        grid_alignment_failures.join("\n\n")
+    );
     assert_eq!(
         stats.failed, 0,
         "Xyce full suite has {} failing deck(s): {} executed pass, {} expected unsupported, {} upstream excluded",
         stats.failed, stats.passed, stats.expected_unsupported, stats.upstream_excluded
     );
+
     if let Some(report_path) = write_xyce_classification_report_if_requested(&results)
         .expect("write requested clean-HEAD Xyce classification report")
     {

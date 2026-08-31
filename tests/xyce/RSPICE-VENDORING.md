@@ -10,9 +10,9 @@ multi-corpus validation work.
   `C:\Users\James\Desktop\XyceNF-7.10.0\bin\Xyce.exe`
 - Vendored into RSpice on: 2026-06-26
 - Scope: runtime test materials only. RSpice keeps `Netlists/`, `OutputData/`,
-  upstream `README.md`, `COPYING`, this note, and
-  `RSPICE-HARNESS-MANIFEST.tsv` plus
-  `RSPICE-UPSTREAM-EXCLUSIONS.tsv`.
+  upstream `README.md`, `COPYING`, this note,
+  `RSPICE-HARNESS-MANIFEST.tsv`, `RSPICE-UPSTREAM-EXCLUSIONS.tsv`, and
+  `grid-alignment-manifest.tsv`.
 - Trimmed upstream harness material: `TestScripts/`, `.cir.sh` shell wrappers,
   Perl/Python helper scripts, tag/exclude selection files, and upstream
   per-directory `Manifest.txt` runner lists. RSpice discovers retained `.cir`
@@ -45,6 +45,15 @@ had a `.cir.sh` wrapper sidecar. The wrapper scripts themselves are not
 vendored; the manifest is the cross-platform contract the Rust adapter uses to
 report those decks as expected-unsupported until wrapper semantics are
 implemented natively.
+
+`grid-alignment-manifest.tsv` is an RSpice artifact rather than upstream
+material, and unlike the two manifests above it describes RSpice's own
+behavior. It records which decks currently compare their transient output
+against the reference row by row instead of by interpolation. That choice is
+derived from the two time axes rather than declared anywhere, so an engine
+change to the accepted-step sequence could otherwise weaken the strictest
+comparison in this corpus without failing anything. The file's own header
+carries the re-baselining procedure.
 
 `RSPICE-UPSTREAM-EXCLUSIONS.tsv` is the complete, versioned provenance
 manifest for all 1,143 retained decks named by the upstream exclusion files.

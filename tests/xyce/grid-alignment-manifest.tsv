@@ -1,0 +1,95 @@
+# relative_path<TAB>grid_alignment
+#
+# Which decks compare their transient output against the Xyce reference row by
+# row, and which fall back to interpolation.
+#
+# The Xyce suite has two transient comparison geometries and picks between them
+# per deck, from the two time axes alone:
+#
+#   index_aligned   Reference row i is compared against accepted step i of the
+#                   run. Chosen when the run produced exactly as many samples
+#                   as the reference has rows AND no adjacent interval drifts
+#                   outside the ratio window [0.75, 4/3]. This is the strictest
+#                   claim the suite makes about a transient: the engine had to
+#                   choose essentially the same steps Xyce chose.
+#
+#   interpolated    The run is evaluated at each reference time instead. A
+#                   materially weaker claim -- the waveform passes through the
+#                   right points, with nothing said about where the integrator
+#                   put them.
+#
+# Nothing declares the mode. It is derived, so a change to the engine's
+# accepted-step sequence can move a deck from the strict geometry to the
+# lenient one with no edit to the deck, its tolerances, or its contract, and
+# every test still passes while the gate quietly weakens. That is the failure
+# this file exists to make impossible.
+#
+# Every row below names a deck that currently compares index-aligned. The
+# `xyce_regression` suite enforces the list in BOTH directions:
+#
+#   * a manifested deck that falls back to interpolation, or that stops
+#     reaching a transient comparison at all, FAILS; and
+#   * an unmanifested deck that starts comparing index-aligned FAILS too, so
+#     the list cannot rot into a description of a corpus that moved on.
+#
+# Rows are `<relative path under tests/xyce>` TAB `index_aligned`, sorted by
+# path, one deck per row. `index_aligned` is the only legal mode: a deck that
+# interpolates is recorded by its absence.
+#
+# RE-BASELINING
+#
+# Capture a fresh census, which is written before the suite's own assertions so
+# that a run this manifest fails still produces one:
+#
+#   RSPICE_XYCE_GRID_REPORT=<report.tsv> cargo test --release \
+#     -p rspice-conformance --test xyce_regression \
+#     test_full_xyce_suite_summary_accounts_for_every_deck
+#
+# The report lists every deck that reached a transient comparison with the mode
+# it used. Copy its `index_aligned` rows in below this header, then re-run to
+# confirm the suite is green.
+#
+# Record in the commit message which engine change moved the grid and why the
+# weaker comparison is acceptable for every deck that lost the strict one. A
+# manifest regenerated without that judgement is a gate that has been switched
+# off rather than one that has been updated.
+#
+# The census is taken from the default feature set, which is what CI and
+# nightly build. A build selecting additional generated Verilog-A models can
+# execute decks this census recorded as unsupported, and will legitimately
+# disagree with this file.
+Netlists/BUG_1301/rlc_tranline.cir	index_aligned
+Netlists/Certification_Tests/BUG_1145_SON/lotka_volterra.cir	index_aligned
+Netlists/Certification_Tests/BUG_524_SON/cmod_capmod.cir	index_aligned
+Netlists/Certification_Tests/BUG_963_SON/nonzeroInitialValue.cir	index_aligned
+Netlists/Certification_Tests/ISSUE_575/issue575_small.cir	index_aligned
+Netlists/GSWITCH/gswitchHyst1.cir	index_aligned
+Netlists/MINDUCTORS/NonLinInductor.cir	index_aligned
+Netlists/MINDUCTORS/cpldLMIs.cir	index_aligned
+Netlists/MINDUCTORS/cpldLMIs_ic.cir	index_aligned
+Netlists/MINDUCTORS/mutIndPrint2.cir	index_aligned
+Netlists/SUBCKT/subckt_a.cir	index_aligned
+Netlists/SUBCKT/subckt_a0.cir	index_aligned
+Netlists/SUBCKT/subckt_a1.cir	index_aligned
+Netlists/SUBCKT/subckt_a1_dup.cir	index_aligned
+Netlists/SUBCKT/subckt_a2.cir	index_aligned
+Netlists/SUBCKT/subckt_a2_dup.cir	index_aligned
+Netlists/SUBCKT/subckt_a3.cir	index_aligned
+Netlists/SUBCKT/subckt_a3_hs.cir	index_aligned
+Netlists/SUBCKT/subckt_a4.cir	index_aligned
+Netlists/SUBCKT/subckt_a4_hs.cir	index_aligned
+Netlists/SUBCKT/subckt_a5.cir	index_aligned
+Netlists/SUBCKT/subckt_a5_hs.cir	index_aligned
+Netlists/SUBCKT/subckt_e.cir	index_aligned
+Netlists/SUBCKT/subckt_e0.cir	index_aligned
+Netlists/SUBCKT/subckt_e1.cir	index_aligned
+Netlists/SUBCKT/subckt_e2.cir	index_aligned
+Netlists/SUBCKT/subckt_e3.cir	index_aligned
+Netlists/SUBCKT/subckt_g.cir	index_aligned
+Netlists/SUBCKT/subckt_g0.cir	index_aligned
+Netlists/SUBCKT/subckt_g1.cir	index_aligned
+Netlists/SUBCKT/subckt_l.cir	index_aligned
+Netlists/SUBCKT/subckt_l0.cir	index_aligned
+Netlists/SUBCKT/subckt_l1.cir	index_aligned
+Netlists/VCCS/vccs_tran.cir	index_aligned
+Netlists/VCVS/vcvs_trans.cir	index_aligned
