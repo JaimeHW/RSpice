@@ -71,6 +71,11 @@ mod step;
 mod transfer;
 mod transient;
 pub mod waveform;
+// CI ratchets on the XSPICE settle loop's dispatch and copy-on-write cost.
+// Nothing but tests lives here, and it lives at rank 12 because it drives a
+// whole transient run through `Engine` to take its measurement.
+#[cfg(test)]
+mod xspice_settle_ratchet;
 
 pub use crate::config::{
     BypassConfig, ConvergenceConfig, DampingStrategy, JfetLevel2Model, SimulationConfig,
