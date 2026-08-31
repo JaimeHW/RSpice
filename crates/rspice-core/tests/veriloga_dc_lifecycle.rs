@@ -33,6 +33,35 @@ fn node_voltage(result: &rspice_core::solver::SimulationResult, name: &str) -> f
     result.node_voltages[index]
 }
 
+const REBUILT_LIFECYCLE_MODEL: &str = r#"
+`include "disciplines.vams"
+module va_dc_rebuild_lifecycle(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 1.0;
+    real count;
+    analog begin
+        @(initial_step("dc")) count = count + 1.0;
+        @(final_step("dc")) count = count + 10.0;
+        V(p, n) <+ count + 0.0 * gain;
+    end
+endmodule
+"#;
+
+fn assert_rebuilt_lifecycle_values(
+    points: &[(f64, rspice_core::solver::SimulationResult)],
+    expected: &[f64],
+) {
+    assert_eq!(points.len(), expected.len());
+    for (index, ((coordinate, result), expected)) in points.iter().zip(expected).enumerate() {
+        let actual = node_voltage(result, "out");
+        assert!(
+            (actual - expected).abs() < 1.0e-12,
+            "unexpected rebuilt lifecycle value at point {index} ({coordinate}): actual={actual}, expected={expected}"
+        );
+    }
+}
+
 #[test]
 fn forced_initial_conditions_expose_ic_identity_and_boundaries() {
     let model = write_model(
@@ -196,5 +225,81 @@ endmodule
     assert!((observed[1] - 1.0).abs() < 1.0e-12, "{observed:?}");
     assert!((observed[2] - 1.0).abs() < 1.0e-12, "{observed:?}");
 
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn two_rebuilt_temperature_circuits_continue_one_accepted_lifecycle() {
+    let model = write_model("rebuilt_temp", REBUILT_LIFECYCLE_MODEL);
+    let deck = format!(
+        "* rebuilt TEMP sweep lifecycle\n\
+         X1 out 0 va_dc_rebuild_lifecycle\n\
+         .va \"{}\" va_dc_rebuild_lifecycle\n\
+         .end\n",
+        deck_path(&model)
+    );
+    let netlist = Netlist::parse(&deck).expect("parse rebuilt TEMP lifecycle deck");
+    let points = Engine::default()
+        .run_dc_sweep(&netlist, "TEMP", 25.0, 26.0, 1.0)
+        .expect("rebuilt TEMP sweep runs");
+    assert_rebuilt_lifecycle_values(&points, &[1.0, 11.0]);
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn rebuilt_global_parameter_sweep_continues_accepted_veriloga_state() {
+    let model = write_model("rebuilt_global_param", REBUILT_LIFECYCLE_MODEL);
+    let deck = format!(
+        "* rebuilt global parameter lifecycle\n\
+         .param GAIN=1\n\
+         X1 out 0 va_dc_rebuild_lifecycle gain={{GAIN}}\n\
+         .va \"{}\" va_dc_rebuild_lifecycle\n\
+         .end\n",
+        deck_path(&model)
+    );
+    let netlist = Netlist::parse(&deck).expect("parse rebuilt parameter lifecycle deck");
+    let points = Engine::default()
+        .run_dc_sweep(&netlist, "gain", 1.0, 3.0, 1.0)
+        .expect("rebuilt global parameter sweep runs");
+    assert_rebuilt_lifecycle_values(&points, &[1.0, 1.0, 11.0]);
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn rebuilt_device_parameter_sweep_continues_accepted_veriloga_state() {
+    let model = write_model("rebuilt_device_param", REBUILT_LIFECYCLE_MODEL);
+    let deck = format!(
+        "* rebuilt device parameter lifecycle\n\
+         RLOAD sense 0 1k\n\
+         X1 out 0 va_dc_rebuild_lifecycle\n\
+         .va \"{}\" va_dc_rebuild_lifecycle\n\
+         .end\n",
+        deck_path(&model)
+    );
+    let netlist = Netlist::parse(&deck).expect("parse rebuilt device lifecycle deck");
+    let points = Engine::default()
+        .run_dc_sweep(&netlist, "rload:r", 1.0e3, 3.0e3, 1.0e3)
+        .expect("rebuilt device parameter sweep runs");
+    assert_rebuilt_lifecycle_values(&points, &[1.0, 1.0, 11.0]);
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn nested_rebuilt_sweep_uses_flattened_public_point_boundaries() {
+    let model = write_model("rebuilt_nested", REBUILT_LIFECYCLE_MODEL);
+    let deck = format!(
+        "* nested rebuilt lifecycle\n\
+         VSW sense 0 0\n\
+         X1 out 0 va_dc_rebuild_lifecycle\n\
+         .va \"{}\" va_dc_rebuild_lifecycle\n\
+         .end\n",
+        deck_path(&model)
+    );
+    let netlist = Netlist::parse(&deck).expect("parse nested rebuilt lifecycle deck");
+    let outer = rspice_core::netlist::DcSecondSweep::linear("TEMP".to_string(), 25.0, 26.0, 1.0);
+    let points = Engine::default()
+        .run_dc_sweep2_with_abort(&netlist, "VSW", 0.0, 1.0, 1.0, Some(&outer), &NoAbort)
+        .expect("nested rebuilt sweep runs");
+    assert_rebuilt_lifecycle_values(&points, &[1.0, 1.0, 1.0, 11.0]);
     let _ = std::fs::remove_file(model);
 }

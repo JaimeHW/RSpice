@@ -9,7 +9,59 @@
 
 use super::*;
 use crate::xspice::XspiceInstanceCheckpoint;
+#[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+use std::collections::BTreeMap;
 use std::collections::HashMap;
+
+/// Accepted Verilog-A state carried between circuits rebuilt for adjacent DC
+/// sweep points.
+///
+/// The checkpoint payloads contain only accepted operator/event history.  The
+/// accompanying keys deliberately use semantic terminal names rather than
+/// raw node IDs, and omit numeric parameter values, so an otherwise identical
+/// circuit rebuilt after a TEMP or parameter substitution can continue the
+/// same public DC analysis.  Restore validates the complete key set before it
+/// applies any payload, so changed topology, model provenance, or instance
+/// cardinality fails closed.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct VerilogADcAcceptedStateCarrier {
+    #[cfg(feature = "veriloga")]
+    runtime: Vec<RuntimeVerilogADcAcceptedState>,
+    #[cfg(feature = "veriloga-builtins-base")]
+    generated: Vec<GeneratedVerilogADcAcceptedState>,
+}
+
+#[cfg(feature = "veriloga")]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct RuntimeVerilogADcStateKey {
+    instance_name: String,
+    model_name: String,
+    source_digest: String,
+    terminals: Vec<String>,
+}
+
+#[cfg(feature = "veriloga")]
+#[derive(Debug, Clone)]
+struct RuntimeVerilogADcAcceptedState {
+    key: RuntimeVerilogADcStateKey,
+    checkpoint: crate::device::veriloga::VerilogADeviceCheckpoint,
+}
+
+#[cfg(feature = "veriloga-builtins-base")]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct GeneratedVerilogADcStateKey {
+    instance_name: String,
+    model_name: String,
+    model_identity: String,
+    terminals: Vec<String>,
+}
+
+#[cfg(feature = "veriloga-builtins-base")]
+#[derive(Debug, Clone)]
+struct GeneratedVerilogADcAcceptedState {
+    key: GeneratedVerilogADcStateKey,
+    checkpoint: crate::device::veriloga_builtins::GeneratedVerilogAInstanceCheckpoint,
+}
 
 fn apply_xspice_events_at_or_before(
     digital_values: &mut HashMap<NodeId, crate::xspice::DigitalValue>,
@@ -1866,6 +1918,264 @@ impl CircuitData {
         })
     }
 
+    #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+    fn veriloga_dc_terminal_identity(&self, node: NodeId) -> Result<String, String> {
+        if node == 0 {
+            return Ok("0".to_string());
+        }
+        let mut aliases = self
+            .node_map
+            .iter()
+            .filter_map(|(name, &candidate)| (candidate == node).then(|| name.to_ascii_lowercase()))
+            .collect::<Vec<_>>();
+        aliases.sort_unstable();
+        aliases.dedup();
+        if aliases.is_empty() {
+            return Err(format!(
+                "Verilog-A DC state references unknown circuit node ID {node}"
+            ));
+        }
+        Ok(aliases.join("\u{1f}"))
+    }
+
+    #[cfg(feature = "veriloga")]
+    fn runtime_veriloga_dc_state_key(
+        &self,
+        device: &crate::device::veriloga::VerilogADevice,
+        checkpoint: &crate::device::veriloga::VerilogADeviceCheckpoint,
+    ) -> Result<RuntimeVerilogADcStateKey, String> {
+        let terminals = (0..device.num_terminals())
+            .map(|terminal| self.veriloga_dc_terminal_identity(device.node_for_terminal(terminal)))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(RuntimeVerilogADcStateKey {
+            instance_name: checkpoint.instance_name.to_ascii_lowercase(),
+            model_name: checkpoint.model_name.to_string(),
+            source_digest: checkpoint.source_digest.to_string(),
+            terminals,
+        })
+    }
+
+    #[cfg(feature = "veriloga-builtins-base")]
+    fn generated_veriloga_dc_state_key(
+        &self,
+        device: &crate::device::veriloga_builtins::BuiltinVerilogAInstance,
+        checkpoint: &crate::device::veriloga_builtins::GeneratedVerilogAInstanceCheckpoint,
+    ) -> Result<GeneratedVerilogADcStateKey, String> {
+        let descriptor = crate::device::veriloga_builtins::generated_veriloga_model_descriptor(
+            checkpoint.model_name.as_str(),
+        )
+        .ok_or_else(|| {
+            format!(
+                "generated Verilog-A instance '{}' references unavailable model '{}'",
+                checkpoint.instance_name, checkpoint.model_name
+            )
+        })?;
+        let terminals = device
+            .nodes
+            .get(..descriptor.terminals.len())
+            .ok_or_else(|| {
+                format!(
+                    "generated Verilog-A instance '{}' ({}) has {} node mappings for {} external terminals",
+                    checkpoint.instance_name,
+                    checkpoint.model_name,
+                    device.nodes.len(),
+                    descriptor.terminals.len()
+                )
+            })?
+            .iter()
+            .map(|&node| self.veriloga_dc_terminal_identity(node))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(GeneratedVerilogADcStateKey {
+            instance_name: checkpoint.instance_name.to_ascii_lowercase(),
+            model_name: checkpoint.model_name.clone(),
+            model_identity: checkpoint.model_identity.clone(),
+            terminals,
+        })
+    }
+
+    /// Capture accepted Verilog-A history after a public DC sweep point.
+    /// Speculative DDT/IDT or event candidates make checkpoint capture fail,
+    /// so this carrier can never accidentally retain a rejected Newton trial.
+    pub(crate) fn capture_veriloga_dc_accepted_state(
+        &self,
+    ) -> Result<VerilogADcAcceptedStateCarrier, String> {
+        let mut carrier = VerilogADcAcceptedStateCarrier::default();
+        #[cfg(not(any(feature = "veriloga", feature = "veriloga-builtins-base")))]
+        let _ = &mut carrier;
+
+        #[cfg(feature = "veriloga")]
+        {
+            let checkpoints = self.veriloga_devices.checkpoint_states()?;
+            if checkpoints.len() != self.veriloga_devices.len() {
+                return Err("runtime Verilog-A DC state capture shape mismatch".to_string());
+            }
+            carrier.runtime = self
+                .veriloga_devices
+                .iter()
+                .zip(checkpoints)
+                .map(|(device, checkpoint)| {
+                    Ok(RuntimeVerilogADcAcceptedState {
+                        key: self.runtime_veriloga_dc_state_key(device, &checkpoint)?,
+                        checkpoint,
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            carrier
+                .runtime
+                .sort_by(|left, right| left.key.cmp(&right.key));
+            if carrier
+                .runtime
+                .windows(2)
+                .any(|pair| pair[0].key == pair[1].key)
+            {
+                return Err(
+                    "runtime Verilog-A DC state has duplicate case-insensitive instance identity"
+                        .to_string(),
+                );
+            }
+        }
+
+        #[cfg(feature = "veriloga-builtins-base")]
+        {
+            let checkpoints = self
+                .generated_veriloga_devices
+                .accepted_checkpoint_states()?;
+            if checkpoints.len() != self.generated_veriloga_devices.len() {
+                return Err("generated Verilog-A DC state capture shape mismatch".to_string());
+            }
+            carrier.generated = self
+                .generated_veriloga_devices
+                .iter()
+                .zip(checkpoints)
+                .map(|(device, checkpoint)| {
+                    Ok(GeneratedVerilogADcAcceptedState {
+                        key: self.generated_veriloga_dc_state_key(device, &checkpoint)?,
+                        checkpoint,
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            carrier
+                .generated
+                .sort_by(|left, right| left.key.cmp(&right.key));
+            if carrier
+                .generated
+                .windows(2)
+                .any(|pair| pair[0].key == pair[1].key)
+            {
+                return Err(
+                    "generated Verilog-A DC state has duplicate case-insensitive instance identity"
+                        .to_string(),
+                );
+            }
+        }
+
+        Ok(carrier)
+    }
+
+    /// Restore accepted Verilog-A history into a freshly rebuilt DC circuit.
+    ///
+    /// Matching is independent of parameter values and raw node numbering,
+    /// but exact over backend, case-folded instance name, model provenance,
+    /// and semantic external-terminal topology.  The target backend validates
+    /// every persistent-state shape before the first state is installed.
+    pub(crate) fn restore_veriloga_dc_accepted_state(
+        &mut self,
+        _carrier: &VerilogADcAcceptedStateCarrier,
+    ) -> Result<(), String> {
+        #[cfg(feature = "veriloga")]
+        let runtime = {
+            let target_templates = self.veriloga_devices.checkpoint_states()?;
+            let mut captured = _carrier
+                .runtime
+                .iter()
+                .map(|state| (&state.key, &state.checkpoint))
+                .collect::<BTreeMap<_, _>>();
+            if captured.len() != _carrier.runtime.len() {
+                return Err(
+                    "runtime Verilog-A DC state carrier contains duplicate instance identity"
+                        .to_string(),
+                );
+            }
+            let mut normalized = Vec::with_capacity(target_templates.len());
+            for (device, mut target) in self
+                .veriloga_devices
+                .iter()
+                .zip(target_templates.into_iter())
+            {
+                let key = self.runtime_veriloga_dc_state_key(device, &target)?;
+                let source = captured.remove(&key).ok_or_else(|| {
+                    format!(
+                        "runtime Verilog-A DC state has no matching accepted instance '{}'",
+                        target.instance_name
+                    )
+                })?;
+                target.accepted.clone_from(&source.accepted);
+                target.prev_discontinuity = source.prev_discontinuity;
+                normalized.push(target);
+            }
+            if let Some((key, _)) = captured.first_key_value() {
+                return Err(format!(
+                    "runtime Verilog-A DC state contains unmatched accepted instance '{}'",
+                    key.instance_name
+                ));
+            }
+            self.veriloga_devices
+                .validate_checkpoint_states(&normalized)?;
+            normalized
+        };
+
+        #[cfg(feature = "veriloga-builtins-base")]
+        let generated = {
+            let target_templates = self.generated_veriloga_devices.checkpoint_states();
+            let mut captured = _carrier
+                .generated
+                .iter()
+                .map(|state| (&state.key, &state.checkpoint))
+                .collect::<BTreeMap<_, _>>();
+            if captured.len() != _carrier.generated.len() {
+                return Err(
+                    "generated Verilog-A DC state carrier contains duplicate instance identity"
+                        .to_string(),
+                );
+            }
+            let mut normalized = Vec::with_capacity(target_templates.len());
+            for (device, mut target) in self
+                .generated_veriloga_devices
+                .iter()
+                .zip(target_templates.into_iter())
+            {
+                let key = self.generated_veriloga_dc_state_key(device, &target)?;
+                let source = captured.remove(&key).ok_or_else(|| {
+                    format!(
+                        "generated Verilog-A DC state has no matching accepted instance '{}'",
+                        target.instance_name
+                    )
+                })?;
+                target.state.clone_from(&source.state);
+                target
+                    .terminal_currents
+                    .clone_from(&source.terminal_currents);
+                normalized.push(target);
+            }
+            if let Some((key, _)) = captured.first_key_value() {
+                return Err(format!(
+                    "generated Verilog-A DC state contains unmatched accepted instance '{}'",
+                    key.instance_name
+                ));
+            }
+            self.generated_veriloga_devices
+                .validate_checkpoint_states(&normalized)?;
+            normalized
+        };
+
+        #[cfg(feature = "veriloga")]
+        self.veriloga_devices.restore_checkpoint_states(&runtime)?;
+        #[cfg(feature = "veriloga-builtins-base")]
+        self.generated_veriloga_devices
+            .restore_checkpoint_states(&generated)?;
+        Ok(())
+    }
+
     pub(crate) fn generated_veriloga_checkpoint_states(
         &self,
     ) -> Result<Vec<crate::device::veriloga_builtins::GeneratedVerilogAInstanceCheckpoint>, String>
@@ -2433,6 +2743,68 @@ mod tests {
     };
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::sync::{Arc, Mutex};
+
+    #[cfg(feature = "veriloga-model-vbic13")]
+    fn generated_dc_carrier_circuit(
+        instance_name: &str,
+        terminal_names: &[&str],
+        add_unrelated_node_first: bool,
+        temperature: Value,
+    ) -> CircuitData {
+        let descriptor =
+            crate::device::veriloga_builtins::generated_veriloga_model_descriptor("vbic13")
+                .expect("VBIC 1.3 generated descriptor");
+        assert_eq!(terminal_names.len(), descriptor.terminals.len());
+        let mut circuit = CircuitData::new();
+        if add_unrelated_node_first {
+            circuit.get_or_create_node("unrelated");
+        }
+        let mut nodes = terminal_names
+            .iter()
+            .map(|name| circuit.get_or_create_node(name))
+            .collect::<Vec<_>>();
+        nodes.resize(descriptor.total_node_count, 0);
+        let instance = crate::device::veriloga_builtins::BuiltinVerilogAInstance::standalone(
+            "vbic13",
+            instance_name,
+            nodes,
+            vec![0; descriptor.branch_count],
+            temperature,
+            &[],
+        )
+        .expect("generated VBIC carrier instance");
+        circuit.add_generated_veriloga_device(instance);
+        circuit
+    }
+
+    #[cfg(feature = "veriloga-model-vbic13")]
+    #[test]
+    fn generated_dc_carrier_uses_semantic_topology_not_raw_node_ids() {
+        let source = generated_dc_carrier_circuit("QSTATE", &["c", "b", "e"], false, 300.15);
+        let mut carrier = source
+            .capture_veriloga_dc_accepted_state()
+            .expect("capture generated accepted state");
+        carrier.generated[0].checkpoint.state.event_variables[0] = 7.0;
+
+        let mut renumbered = generated_dc_carrier_circuit("qstate", &["c", "b", "e"], true, 350.15);
+        renumbered
+            .restore_veriloga_dc_accepted_state(&carrier)
+            .expect("case-folded instance and semantically identical terminals restore");
+        let restored = renumbered
+            .capture_veriloga_dc_accepted_state()
+            .expect("recapture restored generated state");
+        assert_eq!(
+            restored.generated[0].checkpoint.state.event_variables[0],
+            7.0
+        );
+
+        let mut rewired =
+            generated_dc_carrier_circuit("QSTATE", &["other", "b", "e"], false, 300.15);
+        let error = rewired
+            .restore_veriloga_dc_accepted_state(&carrier)
+            .expect_err("changed external topology must fail closed");
+        assert!(error.contains("no matching accepted instance"), "{error}");
+    }
 
     #[test]
     fn apply_xspice_events_resolves_touched_nodes_from_node_driver_maps() {
