@@ -196,7 +196,10 @@ mod tests {
             .expect("the deck names `out`");
         // The remap moved `dig` down onto the ID `out` used to hold, which is
         // what made a shifted table point at the wrong net.
-        assert!(dig < out, "the remap is expected to renumber `dig` below `out`");
+        assert!(
+            dig < out,
+            "the remap is expected to renumber `dig` below `out`"
+        );
 
         assert_eq!(
             circuit.net_kinds.discrete_nodes().collect::<Vec<NodeId>>(),
