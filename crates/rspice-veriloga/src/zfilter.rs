@@ -17,6 +17,7 @@
 //! [`ZiFilter::next_sample_step_bound`]; a caller that nevertheless crosses an
 //! edge is refused because the input at the missed edge is unknowable.
 
+use num_complex::Complex64;
 use serde::{Deserialize, Deserializer, Serialize};
 
 const TIME_ULPS: f64 = 8.0;
@@ -478,6 +479,71 @@ impl ZiFilter {
     /// DC gain H(1) = Σb / Σa.
     pub fn dc_gain(&self) -> Result<f64, ZiFilterError> {
         coefficient_dc_gain(&self.num, &self.den)
+    }
+
+    /// Rectangular sampled-data frequency response on the unit circle.
+    ///
+    /// Coefficients use ascending powers of `z^-1`, so this evaluates
+    /// `H(exp(j*2*pi*f*T)) = B(exp(-j*2*pi*f*T)) /
+    /// A(exp(-j*2*pi*f*T))`. The accepted transient history and output-ramp
+    /// state do not participate in this read-only small-signal operation.
+    pub fn frequency_response_rectangular(
+        &self,
+        frequency_hz: f64,
+    ) -> Result<(f64, f64), ZiFilterError> {
+        self.validate_integrity()?;
+        if !self.definition_frozen {
+            return Err(ZiFilterError::InvalidEvaluation(
+                "Zi definition must be frozen before frequency-domain evaluation".into(),
+            ));
+        }
+        if !frequency_hz.is_finite() || frequency_hz < 0.0 {
+            return Err(ZiFilterError::InvalidEvaluation(format!(
+                "frequency must be finite and nonnegative, got {frequency_hz}"
+            )));
+        }
+        let cycles = frequency_hz * self.period;
+        if !cycles.is_finite() {
+            return Err(ZiFilterError::InvalidEvaluation(format!(
+                "frequency-period product overflows for {frequency_hz} Hz and period {}",
+                self.period
+            )));
+        }
+        let angle = std::f64::consts::TAU * cycles.rem_euclid(1.0);
+        let z_inverse = Complex64::from_polar(1.0, -angle);
+        let (numerator, numerator_scale) =
+            evaluate_unit_circle_polynomial(&self.num, z_inverse, "numerator")?;
+        let (denominator, denominator_scale) =
+            evaluate_unit_circle_polynomial(&self.den, z_inverse, "denominator")?;
+        if denominator == Complex64::new(0.0, 0.0) {
+            return Err(ZiFilterError::InvalidEvaluation(format!(
+                "Zi frequency response is singular at {frequency_hz} Hz"
+            )));
+        }
+        let normalized = numerator / denominator;
+        if !normalized.re.is_finite() || !normalized.im.is_finite() {
+            return Err(ZiFilterError::InvalidEvaluation(format!(
+                "Zi normalized frequency response is not representable at {frequency_hz} Hz"
+            )));
+        }
+        let real = checked_sum_products_ratio(
+            [(normalized.re, numerator_scale)].into_iter(),
+            [(denominator_scale, 1.0)].into_iter(),
+            "Zi frequency-response real component",
+            false,
+        )?;
+        let imag = checked_sum_products_ratio(
+            [(normalized.im, numerator_scale)].into_iter(),
+            [(denominator_scale, 1.0)].into_iter(),
+            "Zi frequency-response imaginary component",
+            false,
+        )?;
+        if (real == 0.0 && normalized.re != 0.0) || (imag == 0.0 && normalized.im != 0.0) {
+            return Err(ZiFilterError::InvalidEvaluation(format!(
+                "Zi frequency response underflows at {frequency_hz} Hz"
+            )));
+        }
+        Ok((real, imag))
     }
 
     /// Instantaneous feedthrough b0/a0, used by an exact transient Jacobian
@@ -973,6 +1039,30 @@ impl ZiFilter {
             "step to time {time} crossed the required sample edge at {due} (at least {missed:.0} sample instant(s)); limit the step to the reported zi breakpoint"
         ))
     }
+}
+
+fn evaluate_unit_circle_polynomial(
+    coefficients: &[f64],
+    z_inverse: Complex64,
+    role: &str,
+) -> Result<(Complex64, f64), ZiFilterError> {
+    let scale = coefficients
+        .iter()
+        .map(|coefficient| coefficient.abs())
+        .fold(0.0_f64, f64::max);
+    if scale == 0.0 {
+        return Ok((Complex64::new(0.0, 0.0), 1.0));
+    }
+    let mut value = Complex64::new(0.0, 0.0);
+    for coefficient in coefficients.iter().rev() {
+        value = value * z_inverse + Complex64::new(*coefficient / scale, 0.0);
+        if !value.re.is_finite() || !value.im.is_finite() {
+            return Err(ZiFilterError::InvalidEvaluation(format!(
+                "Zi {role} polynomial is not representable on the unit circle"
+            )));
+        }
+    }
+    Ok((value, scale))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2053,6 +2143,58 @@ mod tests {
                 .to_bits(),
             1
         );
+    }
+
+    #[test]
+    fn unit_circle_frequency_response_matches_delay_iir_and_periodicity() {
+        let delay = ZiFilter::new(vec![0.0, 1.0], vec![1.0], 0.25).unwrap();
+        let (real, imag) = delay.frequency_response_rectangular(1.0).unwrap();
+        assert!(real.abs() <= 8.0 * f64::EPSILON, "real={real}");
+        assert!((imag + 1.0).abs() <= 8.0 * f64::EPSILON, "imag={imag}");
+
+        let iir = ZiFilter::new(vec![0.25], vec![1.0, -0.75], 1.0).unwrap();
+        assert_eq!(iir.frequency_response_rectangular(0.0).unwrap(), (1.0, 0.0));
+        let (nyquist_real, nyquist_imag) = iir.frequency_response_rectangular(0.5).unwrap();
+        assert!((nyquist_real - 1.0 / 7.0).abs() <= 8.0 * f64::EPSILON);
+        assert!(nyquist_imag.abs() <= 8.0 * f64::EPSILON);
+
+        let base = iir.frequency_response_rectangular(0.125).unwrap();
+        let periodic = iir.frequency_response_rectangular(1.125).unwrap();
+        assert!((base.0 - periodic.0).abs() <= 16.0 * f64::EPSILON);
+        assert!((base.1 - periodic.1).abs() <= 16.0 * f64::EPSILON);
+    }
+
+    #[test]
+    fn frequency_response_is_read_only_scaled_and_fail_closed() {
+        let mut active = ZiFilter::new(vec![1.0, 0.5], vec![1.0, -0.25], 1.0).unwrap();
+        active.eval(2.0, 0.0, true).unwrap();
+        active.commit(0.0).unwrap();
+        let before = active.checkpoint();
+        let response = active.frequency_response_rectangular(0.25).unwrap();
+        assert!(response.0.is_finite() && response.1.is_finite());
+        assert_eq!(active.checkpoint(), before);
+
+        let scaled = ZiFilter::new(vec![f64::MAX], vec![f64::MAX], 1.0).unwrap();
+        assert_eq!(
+            scaled.frequency_response_rectangular(0.375).unwrap(),
+            (1.0, 0.0)
+        );
+
+        let singular = ZiFilter::new(vec![1.0], vec![1.0, -1.0], 1.0).unwrap();
+        assert!(singular.frequency_response_rectangular(0.0).is_err());
+        assert!(active.frequency_response_rectangular(-1.0).is_err());
+        assert!(
+            active
+                .frequency_response_rectangular(f64::INFINITY)
+                .is_err()
+        );
+
+        let mut unfrozen = ZiFilter::new(vec![1.0], vec![1.0], 1.0).unwrap();
+        unfrozen.invalidate_definition();
+        let error = unfrozen
+            .frequency_response_rectangular(1.0)
+            .expect_err("placeholder definition must not leak into AC");
+        assert!(error.to_string().contains("must be frozen"));
     }
 
     #[test]

@@ -705,8 +705,11 @@ impl StateSpaceFilter {
         Ok(())
     }
 
-    /// Compute frequency response at given frequency (Hz)
-    pub fn frequency_response(&self, freq_hz: f64) -> Result<(f64, f64), LaplaceError> {
+    /// Compute the rectangular frequency response `H(j*2*pi*f)` at `freq_hz`.
+    ///
+    /// Returning the rectangular value directly avoids the avoidable
+    /// magnitude/phase round trip needed by AC matrix stamping.
+    pub fn frequency_response_rectangular(&self, freq_hz: f64) -> Result<(f64, f64), LaplaceError> {
         self.validate_structure()?;
         if !freq_hz.is_finite() || freq_hz < 0.0 {
             return Err(LaplaceError::InvalidEvaluation(format!(
@@ -721,7 +724,7 @@ impl StateSpaceFilter {
         }
 
         if self.order == 0 {
-            return Ok((self.d.abs(), if self.d >= 0.0 { 0.0 } else { PI }));
+            return Ok((self.d, 0.0));
         }
 
         // Evaluate H(jw) = C * (jwI - A)^(-1) * B + D directly from the
@@ -734,11 +737,23 @@ impl StateSpaceFilter {
             response += Complex64::new(c, 0.0) * *state_value;
         }
 
+        if !response.re.is_finite() || !response.im.is_finite() {
+            return Err(LaplaceError::InvalidEvaluation(
+                "frequency response is non-finite".into(),
+            ));
+        }
+        Ok((response.re, response.im))
+    }
+
+    /// Compute frequency-response magnitude and phase at `freq_hz`.
+    pub fn frequency_response(&self, freq_hz: f64) -> Result<(f64, f64), LaplaceError> {
+        let (real, imag) = self.frequency_response_rectangular(freq_hz)?;
+        let response = Complex64::new(real, imag);
         let magnitude = response.norm();
         let phase = response.arg();
         if !magnitude.is_finite() || !phase.is_finite() {
             return Err(LaplaceError::InvalidEvaluation(
-                "frequency response is non-finite".into(),
+                "frequency response magnitude or phase is non-finite".into(),
             ));
         }
         Ok((magnitude, phase))
@@ -1583,6 +1598,24 @@ endmodule
             .frequency_response(f64::MAX)
             .expect_err("2*pi*f overflow must be diagnosed");
         assert!(error.to_string().contains("angular frequency overflows"));
+    }
+
+    #[test]
+    fn rectangular_frequency_response_preserves_phase_without_polar_round_trip() {
+        let filter = StateSpaceFilter::from_transfer_function(&[1.0], &[1.0, 1.0])
+            .expect("unit low-pass filter");
+        let frequency = 1.0 / (2.0 * PI);
+        let (real, imag) = filter
+            .frequency_response_rectangular(frequency)
+            .expect("finite corner response");
+        assert!((real - 0.5).abs() <= 8.0 * f64::EPSILON);
+        assert!((imag + 0.5).abs() <= 8.0 * f64::EPSILON);
+
+        let (magnitude, phase) = filter
+            .frequency_response(frequency)
+            .expect("polar compatibility response");
+        assert!((magnitude - std::f64::consts::FRAC_1_SQRT_2).abs() <= 8.0 * f64::EPSILON);
+        assert!((phase + PI / 4.0).abs() <= 8.0 * f64::EPSILON);
     }
 
     #[test]
