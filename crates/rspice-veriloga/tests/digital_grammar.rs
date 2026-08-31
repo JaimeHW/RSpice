@@ -995,3 +995,342 @@ mod canonical_ir_boundary {
         );
     }
 }
+
+// ===========================================================================
+// Module instantiation (IEEE 1364-2005 sections 12.1.2 and 12.3)
+// ===========================================================================
+
+/// A source with one gate module and a top that instantiates it.
+///
+/// The top keeps the analog body every other fixture here has, because the
+/// module a hierarchy is compiled *for* is still a device the solver calls.
+fn hierarchy(child: &str, top_section: &str) -> String {
+    format!(
+        "{child}\n\
+         module top(p, n);\n\
+         \x20   inout p, n;\n\
+         \x20   electrical p, n;\n\
+         {top_section}\n\
+         \x20   analog I(p, n) <+ V(p, n);\n\
+         endmodule\n"
+    )
+}
+
+/// A two-input NAND with an internal net, so a test can see what hoisting does
+/// to a name that has nowhere else to go.
+const NAND2: &str = "module nand2(y, a, b);\n\
+                     \x20   output y;\n\
+                     \x20   input a, b;\n\
+                     \x20   wire y, a, b, t;\n\
+                     \x20   assign t = a & b;\n\
+                     \x20   assign y = ~t;\n\
+                     endmodule\n";
+
+fn hierarchy_error(source: &str) -> String {
+    VerilogACompiler::new(CompilerOptions::default())
+        .compile_module(source, Some("top"))
+        .expect_err("this hierarchy must be refused")
+        .to_string()
+}
+
+fn top_module(parsed: &SourceFile) -> &Module {
+    parsed
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Item::Module(module) if module.name == "top" => Some(module),
+            _ => None,
+        })
+        .expect("the fixture declares a module named `top`")
+}
+
+/// The ordered form: connections match ports left to right.
+#[test]
+fn an_ordered_port_connection_list_parses_positionally() {
+    let source = hierarchy(NAND2, "    wire a, b, y;\n     nand2 g1(y, a, b);");
+    let parsed = parse(&source);
+    let top = top_module(&parsed);
+    assert_eq!(top.instances.len(), 1);
+    let instance = &top.instances[0];
+    assert_eq!(instance.module, "nand2");
+    assert_eq!(instance.name, "g1");
+    let names: Vec<String> = instance
+        .connections
+        .iter()
+        .map(|connection| match connection {
+            Connection::Ordered {
+                signal: Some(Expression::Identifier(identifier)),
+                ..
+            } => identifier.name.to_string(),
+            other => panic!("expected an ordered identifier connection, got {other:?}"),
+        })
+        .collect();
+    assert_eq!(names, vec!["y", "a", "b"]);
+}
+
+/// The named form: each connection carries the port it binds.
+#[test]
+fn a_named_port_connection_list_parses_with_its_port_names() {
+    let source = hierarchy(
+        NAND2,
+        "    wire a, b, y;\n     nand2 g1(.b(b), .y(y), .a(a));",
+    );
+    let parsed = parse(&source);
+    let pairs: Vec<(String, String)> = top_module(&parsed).instances[0]
+        .connections
+        .iter()
+        .map(|connection| match connection {
+            Connection::Named {
+                port,
+                signal: Some(Expression::Identifier(identifier)),
+                ..
+            } => (port.to_string(), identifier.name.to_string()),
+            other => panic!("expected a named connection, got {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        pairs,
+        vec![
+            ("b".to_string(), "b".to_string()),
+            ("y".to_string(), "y".to_string()),
+            ("a".to_string(), "a".to_string()),
+        ]
+    );
+}
+
+/// IEEE 1364-2005 section 12.1.2 lets a range after the instance name declare
+/// an array of instances. Nothing downstream can be told how many instances
+/// exist, so it is refused on the bracket rather than misreported as a missing
+/// `(`.
+#[test]
+fn an_instance_array_range_is_refused_by_name() {
+    let message = parse_error(&hierarchy(
+        NAND2,
+        "    wire a, b, y;\n     nand2 g[1:0](y, a, b);",
+    ));
+    assert!(
+        message.contains("instance array range") && message.contains("12.1.2"),
+        "{message}"
+    );
+}
+
+/// `defparam` is refused at its own keyword, as every other unimplemented
+/// discrete-domain construct is.
+#[test]
+fn defparam_is_refused_by_name() {
+    let message = parse_error(&hierarchy(
+        NAND2,
+        "    wire a, b, y;\n     nand2 g1(y, a, b);\n     defparam g1.w = 1;",
+    ));
+    assert!(message.contains("defparam"), "{message}");
+}
+
+/// A hierarchy that elaborates is still refused by the bytecode backend, which
+/// has no representation for a process at all. The refusal reaches an instance
+/// too: without that the whole hierarchy would vanish into a device that
+/// compiled.
+#[test]
+fn the_backend_refusal_names_a_digital_instance() {
+    let source = hierarchy(NAND2, "    wire a, b, y;\n     nand2 g1(y, a, b);");
+    let error = compile_error(&source, Some("top"));
+    assert_eq!(
+        error.diagnostic_code(),
+        "VA-CODEGEN-UNSUPPORTED-AMS-DIGITAL"
+    );
+    assert!(
+        error.to_string().contains("Verilog-AMS digital construct"),
+        "{error}"
+    );
+}
+
+/// A top module whose only discrete-domain content is an instance is the case
+/// the instance arm of the refusal exists for: nothing else in the module is
+/// digital, so nothing else could name it, and without the arm the whole
+/// hierarchy would compile into a device silently missing it.
+#[test]
+fn a_module_whose_only_digital_content_is_an_instance_still_refuses() {
+    let source = format!(
+        "{NAND2}\n\
+         module top(p, n);\n\
+         \x20   inout p, n;\n\
+         \x20   electrical p, n;\n\
+         \x20   nand2 g1();\n\
+         \x20   analog I(p, n) <+ V(p, n);\n\
+         endmodule\n"
+    );
+    let message = compile_error(&source, Some("top")).to_string();
+    assert!(
+        message.contains("digital instance `g1` of module `nand2`"),
+        "{message}"
+    );
+}
+
+/// Every construct this wave does not elaborate refuses by name, with the
+/// clause that governs it. Nothing is dropped, and nothing is guessed at.
+#[test]
+fn unelaborated_instance_constructs_refuse_by_name() {
+    let cases: Vec<(&str, String, Vec<&str>)> = vec![
+        (
+            "a parameter override",
+            hierarchy(
+                "module gate(y, a);\n\
+                 \x20   output y;\n     input a;\n     wire y, a;\n\
+                 \x20   assign y = a;\n\
+                 endmodule\n",
+                "    wire x, z;\n     gate #(2) g1(z, x);",
+            ),
+            vec!["overrides a parameter", "12.2"],
+        ),
+        (
+            "a parameter on the instantiated module",
+            hierarchy(
+                "module gate(y, a);\n\
+                 \x20   parameter real w = 1.0;\n\
+                 \x20   output y;\n     input a;\n     wire y, a;\n\
+                 \x20   assign y = a;\n\
+                 endmodule\n",
+                "    wire x, z;\n     gate g1(z, x);",
+            ),
+            vec!["declares the parameter `w`", "12.2"],
+        ),
+        (
+            "an expression in a port connection",
+            hierarchy(NAND2, "    wire a, b, y;\n     nand2 g1(y, a & b, b);"),
+            vec!["connected to an expression", "12.3.9"],
+        ),
+        (
+            "an undeclared connection name",
+            hierarchy(NAND2, "    wire a, b;\n     nand2 g1(y, a, b);"),
+            vec!["not a declared discrete-domain signal", "section 4.5"],
+        ),
+        (
+            "a width mismatch",
+            hierarchy(
+                "module bus1(y, a);\n\
+                 \x20   output y;\n     input [3:0] a;\n\
+                 \x20   wire y;\n     wire [3:0] a;\n\
+                 \x20   assign y = a[0];\n\
+                 endmodule\n",
+                "    wire x, z;\n     bus1 g1(z, x);",
+            ),
+            vec!["4-bit connection", "12.3.9"],
+        ),
+        (
+            "an input port declared a variable",
+            hierarchy(
+                "module gate(y, a);\n\
+                 \x20   output y;\n     input a;\n     wire y;\n     reg a;\n\
+                 \x20   assign y = a;\n\
+                 endmodule\n",
+                "    wire x, z;\n     gate g1(z, x);",
+            ),
+            vec!["only an output port be a variable", "12.3.3"],
+        ),
+        (
+            "an output port connected to a variable",
+            hierarchy(
+                "module gate(y, a);\n\
+                 \x20   output y;\n     input a;\n     wire y, a;\n\
+                 \x20   assign y = a;\n\
+                 endmodule\n",
+                "    wire x;\n     reg z;\n     gate g1(z, x);",
+            ),
+            vec!["connects an output or inout port to a net", "12.3.9.2"],
+        ),
+        (
+            "an instance driving its own input port",
+            hierarchy(
+                "module gate(y, a);\n\
+                 \x20   output y;\n     input a;\n     wire y, a;\n\
+                 \x20   assign y = 1'b0;\n     assign a = y;\n\
+                 endmodule\n",
+                "    wire x, z;\n     gate g1(z, x);",
+            ),
+            vec!["receives through an input port", "12.3.9.1"],
+        ),
+        (
+            "a port with no net declaration",
+            hierarchy(
+                "module gate(y, a);\n\
+                 \x20   output y;\n     input a;\n     wire y;\n\
+                 \x20   assign y = 1'b0;\n\
+                 endmodule\n",
+                "    wire x, z;\n     gate g1(z, x);",
+            ),
+            vec!["has no `wire` or `reg` declaration", "12.3.3"],
+        ),
+        (
+            "an unknown named port",
+            hierarchy(NAND2, "    wire a, b, y;\n     nand2 g1(.q(y));"),
+            vec!["Undeclared symbol: 'q'"],
+        ),
+        (
+            "more ordered connections than ports",
+            hierarchy(NAND2, "    wire a, b, y;\n     nand2 g1(y, a, b, a);"),
+            vec!["at most 3 port connections"],
+        ),
+        (
+            "an instantiation cycle",
+            hierarchy(
+                "module loop(y, a);\n\
+                 \x20   output y;\n     input a;\n     wire y, a, t;\n\
+                 \x20   assign t = a;\n     loop u(y, t);\n\
+                 endmodule\n",
+                "    wire x, z;\n     loop g1(z, x);",
+            ),
+            vec!["Circular dependency", "loop -> loop"],
+        ),
+        (
+            "a continuous-domain module inside a digital one",
+            hierarchy(
+                "module res(p, n);\n\
+                 \x20   inout p, n;\n     electrical p, n;\n\
+                 \x20   analog I(p, n) <+ V(p, n);\n\
+                 endmodule\n\
+                 module gate(y, a);\n\
+                 \x20   output y;\n     input a;\n     wire y, a;\n\
+                 \x20   assign y = a;\n     res r1(y, a);\n\
+                 endmodule\n",
+                "    wire x, z;\n     gate g1(z, x);",
+            ),
+            vec!["inside a discrete-domain module", "mixed-signal"],
+        ),
+    ];
+
+    for (label, source, fragments) in cases {
+        let message = hierarchy_error(&source);
+        for fragment in fragments {
+            assert!(
+                message.contains(fragment),
+                "refusing {label} must mention {fragment:?}, got {message:?}"
+            );
+        }
+    }
+}
+
+/// Both connection forms describe the same design, so they must elaborate to
+/// the same plan — the same nets, the same drivers, the same identities. A
+/// test that only checked one form would not notice a binder that read the
+/// named form's ports in connection order.
+#[cfg(feature = "native")]
+#[test]
+fn the_two_connection_forms_elaborate_to_the_same_plan() {
+    let ordered = VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir_module(
+            &hierarchy(NAND2, "    wire a, b, y;\n     nand2 g1(y, a, b);"),
+            Some("top"),
+        )
+        .expect("the ordered form must elaborate");
+    let named = VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir_module(
+            &hierarchy(
+                NAND2,
+                "    wire a, b, y;\n     nand2 g1(.b(b), .y(y), .a(a));",
+            ),
+            Some("top"),
+        )
+        .expect("the named form must elaborate");
+    assert_eq!(ordered.digital.signals, named.digital.signals);
+    assert_eq!(ordered.digital.drivers, named.digital.drivers);
+    assert_eq!(ordered.digital.processes, named.digital.processes);
+}
