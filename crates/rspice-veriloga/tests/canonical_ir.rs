@@ -3839,3 +3839,114 @@ fn hir_validation_binds_array_accesses_to_array_symbols() {
     unindexed.expressions[access_index].kind = HirExprKind::Identifier { name: "xs".into() };
     assert_validation_message(&unindexed, "array identifier 'xs' requires an index");
 }
+
+/// The flat statement list and the equations are one program, not two views of
+/// one.
+///
+/// A guarded contribution's equation does not carry its guard as a condition.
+/// It reads a `__guard` variable the front end snapshots the condition into,
+/// and the only place that variable is ever assigned is
+/// `HirModel::statements`. The structured body has no assignment to it at all —
+/// it does not need one, because a region tree spells the guard as control
+/// flow.
+///
+/// That is why the flat list cannot be retired from one backend at a time. A
+/// consumer taking its variable assignments from the structured body (or from
+/// the CFG built out of it) and its equations from MIR would evaluate every
+/// equation against a snapshot slot nothing had written. The two
+/// representations are replaced together or not at all, which is a fact about
+/// the artifact rather than about any one backend, so it is pinned here.
+#[test]
+fn a_guarded_equation_reads_a_snapshot_only_the_flat_statement_list_defines() {
+    use rspice_veriloga::canonical_ir::hir::HirRegion;
+
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(
+            r#"
+module guarded(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real g = 1.0e-3;
+    analog begin
+        if (V(p, n) > 0.5) begin
+            I(p, n) <+ g * V(p, n);
+        end
+    end
+endmodule
+"#,
+        )
+        .expect("guarded fixture must compile to canonical IR");
+
+    let snapshot = artifact
+        .hir
+        .variables
+        .iter()
+        .find(|variable| variable.name.starts_with("__guard"))
+        .expect("a non-trivial guard is snapshotted into its own variable");
+
+    let flat_writes = artifact
+        .hir
+        .statements
+        .iter()
+        .filter(|statement| match statement {
+            HirStatement::Assignment(assignment) => assignment.target == snapshot.id,
+            HirStatement::Loop(_) => false,
+        })
+        .count();
+    assert_eq!(
+        flat_writes, 1,
+        "the flat statement list is where the snapshot is assigned"
+    );
+
+    fn region_writes(regions: &[HirRegion], target: VariableId) -> usize {
+        regions
+            .iter()
+            .map(|region| match region {
+                HirRegion::Assignment(assignment) => usize::from(assignment.target == target),
+                HirRegion::Contribution(_) => 0,
+                HirRegion::Conditional {
+                    then_body,
+                    else_body,
+                    ..
+                } => region_writes(then_body, target) + region_writes(else_body, target),
+                HirRegion::Loop { body, .. } => region_writes(body, target),
+            })
+            .sum()
+    }
+    assert_eq!(
+        region_writes(&artifact.hir.body, snapshot.id),
+        0,
+        "the structured body spells the guard as control flow and never assigns the snapshot"
+    );
+
+    fn reads(mir: &MirModel, expression: ExprId, name: &str) -> bool {
+        let Some(expression) = mir.expressions.get(usize::from(expression)) else {
+            return false;
+        };
+        let operands: Vec<ExprId> = match &expression.kind {
+            HirExprKind::Identifier { name: read } => return read == name,
+            HirExprKind::Binary { left, right, .. } => vec![*left, *right],
+            HirExprKind::Unary { operand, .. } => vec![*operand],
+            HirExprKind::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+            } => vec![*condition, *then_expr, *else_expr],
+            HirExprKind::Call { args, .. } | HirExprKind::SystemFunction { args, .. } => {
+                args.clone()
+            }
+            _ => Vec::new(),
+        };
+        operands
+            .into_iter()
+            .any(|operand| reads(mir, operand, name))
+    }
+    assert!(
+        artifact.mir.equations.iter().any(|equation| reads(
+            &artifact.mir,
+            equation.expression.id,
+            snapshot.name.as_str()
+        )),
+        "the guarded equation reads the snapshot slot the flat list defines"
+    );
+}

@@ -465,6 +465,91 @@ endmodule
     ));
 }
 
+/// A guarded event operator is a real difference between the two levels, not a
+/// different spelling of one thing.
+///
+/// The front end refuses a stateful analog operator under a guard whose value
+/// can move during an analysis, so the only guards left are instance-static
+/// ones — and under those the flat form still folds the operator into
+/// `guard ? cross(...) : previous`. Every evaluator of that form computes both
+/// arms, so an `cross` under a false static guard still advances its detector
+/// and still asks the transient engine for the breakpoints it finds. In the
+/// graph the operator is inside the branch and an untaken arm evaluates
+/// nothing.
+///
+/// Which is right is not in question — the graph is. This test exists so the
+/// difference is recorded where a migration will trip over it, rather than
+/// found later as a device whose event list changed when its backend did.
+#[test]
+fn a_statically_guarded_event_operator_is_folded_flat_and_branched_in_the_graph() {
+    let source = r#"
+module gated(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real mode = 1.0;
+    real hit;
+    analog begin
+        hit = 0.0;
+        if (mode > 0.5) begin
+            hit = cross(V(p, n) - 0.5, 0);
+        end
+        I(p, n) <+ 1.0e-3 * (hit + V(p, n));
+    end
+endmodule
+"#;
+    let artifact = artifact(source);
+
+    // The flat form: the guarded write is a select, and the operator sits in
+    // one of its arms.
+    let folded = artifact
+        .hir
+        .statements
+        .iter()
+        .filter_map(|statement| match statement {
+            rspice_veriloga::canonical_ir::HirStatement::Assignment(assignment) => Some(assignment),
+            rspice_veriloga::canonical_ir::HirStatement::Loop(_) => None,
+        })
+        .filter(|assignment| assignment.target_name == "hit")
+        .any(|assignment| {
+            matches!(
+                artifact.mir.expressions[usize::from(assignment.expr.id)].kind,
+                rspice_veriloga::canonical_ir::HirExprKind::Conditional { .. }
+            )
+        });
+    assert!(
+        folded,
+        "the flat form writes the guarded value as a conditional expression"
+    );
+
+    // The graph: the operator is defined in a block the entry only reaches
+    // through its branch.
+    let model = lower(source);
+    let defining = model
+        .function
+        .blocks
+        .iter()
+        .find(|block| {
+            block.instructions.iter().any(|instruction| {
+                matches!(
+                    model.function.value(instruction.result).kind,
+                    CfgValueKind::Cross { .. }
+                )
+            })
+        })
+        .expect("the cross must be in the graph");
+    assert_ne!(
+        defining.id, model.function.entry,
+        "an operator under a guard belongs to the guarded block, not the entry"
+    );
+    assert!(
+        matches!(
+            model.function.block(model.function.entry).terminator,
+            CfgTerminator::Branch { .. }
+        ),
+        "the static guard is a branch here rather than a select"
+    );
+}
+
 /// An operand skipped inside an event operator's argument list means the
 /// default, exactly as leaving it off the end does.
 ///
