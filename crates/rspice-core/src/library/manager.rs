@@ -7,6 +7,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::parser::parse_library_content;
+use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::resource::ResourceLimits;
 
 //=============================================================================
 // Embedded Library Content
@@ -377,19 +379,53 @@ impl LibraryManager {
         path: impl AsRef<std::path::Path>,
         section: Option<&str>,
     ) -> Result<usize, String> {
+        self.load_external_lib_with_limits_and_abort(
+            path,
+            section,
+            ResourceLimits::default(),
+            &NoAbort,
+        )
+    }
+
+    /// Load an external library with explicit resource limits.
+    pub fn load_external_lib_with_limits(
+        &mut self,
+        path: impl AsRef<std::path::Path>,
+        section: Option<&str>,
+        resource_limits: ResourceLimits,
+    ) -> Result<usize, String> {
+        self.load_external_lib_with_limits_and_abort(path, section, resource_limits, &NoAbort)
+    }
+
+    /// Load an external library with explicit ingestion limits and cancellation.
+    ///
+    /// Parsing and definition conversion complete before the manager is
+    /// mutated. Cancellation, resource violations, and parser diagnostics are
+    /// therefore fail-closed and cannot register a partial library.
+    pub fn load_external_lib_with_limits_and_abort(
+        &mut self,
+        path: impl AsRef<std::path::Path>,
+        section: Option<&str>,
+        resource_limits: ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<usize, String> {
         use super::lib_parser::LibParser;
 
         let path = path.as_ref();
         let base_dir = path.parent().unwrap_or(std::path::Path::new("."));
 
-        let mut parser = LibParser::new(base_dir);
-        let result = parser.parse_file(path).map_err(|e| e.to_string())?;
+        let mut parser = LibParser::new(base_dir).with_resource_limits(resource_limits);
+        let result = parser.parse_file_with_abort(path, abort).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::Interrupted {
+                "external library load aborted".to_owned()
+            } else {
+                error.to_string()
+            }
+        })?;
 
         if !result.errors.is_empty() {
             return Err(format_lib_parse_errors(&result.errors));
         }
-
-        let mut count = 0;
 
         // Get library name for display
         let lib_name = path
@@ -397,19 +433,13 @@ impl LibraryManager {
             .and_then(|s| s.to_str())
             .unwrap_or("external.lib");
         let lib_name: Arc<str> = Arc::from(lib_name);
-        // Load models based on section selection
-        if let Some(section_name) = section {
-            // Load only the specified section
+        let definitions = if let Some(section_name) = section {
             if let Some(lib_section) = result.get_section(section_name) {
-                for model in &lib_section.models {
-                    let def = model.to_model_definition(Arc::clone(&lib_name));
-                    self.models_by_type
-                        .entry(def.model_type)
-                        .or_default()
-                        .push(def.name.clone());
-                    self.models.insert(def.name.clone(), def);
-                    count += 1;
-                }
+                lib_section
+                    .models
+                    .iter()
+                    .map(|model| model.to_model_definition(Arc::clone(&lib_name)))
+                    .collect::<Vec<_>>()
             } else {
                 return Err(format!(
                     "Section '{}' not found in library. Available: {:?}",
@@ -418,28 +448,29 @@ impl LibraryManager {
                 ));
             }
         } else {
-            // Load all top-level models and all sections
-            for model in &result.top_level_models {
-                let def = model.to_model_definition(Arc::clone(&lib_name));
-                self.models_by_type
-                    .entry(def.model_type)
-                    .or_default()
-                    .push(def.name.clone());
-                self.models.insert(def.name.clone(), def);
-                count += 1;
-            }
+            result
+                .top_level_models
+                .iter()
+                .chain(
+                    result
+                        .sections
+                        .iter()
+                        .flat_map(|section| section.models.iter()),
+                )
+                .map(|model| model.to_model_definition(Arc::clone(&lib_name)))
+                .collect::<Vec<_>>()
+        };
 
-            for section in &result.sections {
-                for model in &section.models {
-                    let def = model.to_model_definition(Arc::clone(&lib_name));
-                    self.models_by_type
-                        .entry(def.model_type)
-                        .or_default()
-                        .push(def.name.clone());
-                    self.models.insert(def.name.clone(), def);
-                    count += 1;
-                }
-            }
+        if abort.is_aborted() {
+            return Err("external library load aborted".to_owned());
+        }
+        let count = definitions.len();
+        for definition in definitions {
+            self.models_by_type
+                .entry(definition.model_type)
+                .or_default()
+                .push(definition.name.clone());
+            self.models.insert(definition.name.clone(), definition);
         }
 
         Ok(count)
@@ -532,6 +563,46 @@ mod tests {
             manager.get_model("should_not_load").is_none(),
             "partially parsed external models must not be registered"
         );
+
+        fs::remove_dir_all(&dir).expect("temporary directory is removed");
+    }
+
+    #[test]
+    fn external_library_resource_failure_and_abort_are_atomic() {
+        use crate::abort_signal::ImmediateAbort;
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("rspice-library-manager-limit-{unique}"));
+        fs::create_dir_all(&dir).expect("temporary directory is created");
+        let lib_path = dir.join("bounded.lib");
+        fs::write(&lib_path, ".model must_not_load NMOS (LEVEL=1)\n")
+            .expect("external library fixture is written");
+
+        let mut manager = LibraryManager::new();
+        let initial_models = manager.model_count();
+        let mut limits = ResourceLimits::default();
+        limits.max_netlist_bytes = 8;
+        let limit_error = manager
+            .load_external_lib_with_limits_and_abort(&lib_path, None, limits, &NoAbort)
+            .expect_err("resource violation must reject the entire import");
+        assert!(limit_error.contains("netlist_bytes"), "{limit_error}");
+        assert_eq!(manager.model_count(), initial_models);
+        assert!(manager.get_model("must_not_load").is_none());
+
+        let abort_error = manager
+            .load_external_lib_with_limits_and_abort(
+                &lib_path,
+                None,
+                ResourceLimits::default(),
+                &ImmediateAbort,
+            )
+            .expect_err("abort must reject the entire import");
+        assert_eq!(abort_error, "external library load aborted");
+        assert_eq!(manager.model_count(), initial_models);
+        assert!(manager.get_model("must_not_load").is_none());
 
         fs::remove_dir_all(&dir).expect("temporary directory is removed");
     }

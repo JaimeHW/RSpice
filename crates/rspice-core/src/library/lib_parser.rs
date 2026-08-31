@@ -19,12 +19,70 @@
 //! ```
 
 use std::collections::{HashMap, HashSet};
-use std::io;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::manager::{ModelDefinition, ModelType};
+use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::netlist::lexer::parse_spice_value_complete;
+use crate::resource::{
+    ResourceKind, ResourceLimitError, ResourceLimits, ResourceReadError, read_bytes_limited,
+};
+
+/// Maximum distinct source files retained by one external library closure.
+///
+/// The byte and nesting budgets are configurable through [`ResourceLimits`].
+/// This separate structural ceiling prevents tiny include fan-out attacks and
+/// is intentionally far above normal foundry PDK closure sizes.
+pub const DEFAULT_MAX_LIBRARY_SOURCE_FILES: usize = 16_384;
+
+fn ensure_library_parse_not_aborted(abort: &dyn AbortSignal) -> io::Result<()> {
+    if abort.is_aborted() {
+        Err(io::Error::new(
+            io::ErrorKind::Interrupted,
+            "library parsing aborted",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn resource_read_error_to_io(error: ResourceReadError) -> io::Error {
+    match error {
+        ResourceReadError::Io(error) => error,
+        ResourceReadError::ResourceLimit(error) => {
+            io::Error::new(io::ErrorKind::InvalidData, error)
+        }
+    }
+}
+
+struct LibraryAbortReader<'a, R> {
+    inner: R,
+    abort: &'a dyn AbortSignal,
+}
+
+impl<R: Read> Read for LibraryAbortReader<'_, R> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        ensure_library_parse_not_aborted(self.abort)?;
+        self.inner.read(buffer)
+    }
+}
+
+fn read_library_file_bytes_limited(
+    path: &Path,
+    resource: ResourceKind,
+    limit: usize,
+    abort: &dyn AbortSignal,
+) -> io::Result<Vec<u8>> {
+    ensure_library_parse_not_aborted(abort)?;
+    let file = std::fs::File::open(path)?;
+    let metadata_bytes = usize::try_from(file.metadata()?.len()).unwrap_or(usize::MAX);
+    ResourceLimitError::ensure(resource, metadata_bytes, limit)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    read_bytes_limited(LibraryAbortReader { inner: file, abort }, resource, limit)
+        .map_err(resource_read_error_to_io)
+}
 
 //=============================================================================
 // Library Section (Corner)
@@ -261,6 +319,14 @@ pub struct LibParser {
     include_depth: usize,
     /// Maximum include depth
     max_include_depth: usize,
+    /// Configurable byte and include-depth policy for external sources.
+    resource_limits: ResourceLimits,
+    /// Aggregate exact source bytes retained by this parse.
+    retained_source_bytes: usize,
+    /// Aggregate bytes expanded through repeated SPICE dependencies.
+    expanded_source_bytes: usize,
+    /// Maximum distinct source files retained by this parse.
+    max_source_files: usize,
     /// Canonical source stack used for deterministic cycle detection.
     include_stack: Vec<PathBuf>,
     /// Exact UTF-8 contents read during this parse, keyed by canonical path.
@@ -318,6 +384,10 @@ impl LibParser {
             current_file: None,
             include_depth: 0,
             max_include_depth: crate::resource::DEFAULT_MAX_INCLUDE_DEPTH,
+            resource_limits: ResourceLimits::default(),
+            retained_source_bytes: 0,
+            expanded_source_bytes: 0,
+            max_source_files: DEFAULT_MAX_LIBRARY_SOURCE_FILES,
             include_stack: Vec::new(),
             resolved_sources: Vec::new(),
             resolved_source_paths: HashSet::new(),
@@ -332,11 +402,44 @@ impl LibParser {
         }
     }
 
+    /// Apply resource limits to subsequent file and authenticated-closure parses.
+    #[must_use]
+    pub fn with_resource_limits(mut self, limits: ResourceLimits) -> Self {
+        self.resource_limits = limits;
+        self.max_include_depth = limits.max_include_depth;
+        self
+    }
+
+    /// Override the distinct-source ceiling for subsequent parses.
+    #[must_use]
+    pub fn with_max_source_files(mut self, max_source_files: usize) -> Self {
+        self.max_source_files = max_source_files;
+        self
+    }
+
     /// Parse a .lib file and return the result
     pub fn parse_file(&mut self, path: impl AsRef<Path>) -> io::Result<LibParseResult> {
+        self.parse_file_with_abort(path, &NoAbort)
+    }
+
+    /// Parse a `.lib` file with cooperative cancellation.
+    ///
+    /// The parser returns [`io::ErrorKind::Interrupted`] on cancellation and
+    /// never returns a partially parsed result as success.
+    pub fn parse_file_with_abort(
+        &mut self,
+        path: impl AsRef<Path>,
+        abort: &dyn AbortSignal,
+    ) -> io::Result<LibParseResult> {
         self.reset_parse_state();
+        ensure_library_parse_not_aborted(abort)?;
         let path = std::fs::canonicalize(path.as_ref())?;
-        let bytes = std::fs::read(&path)?;
+        let bytes = read_library_file_bytes_limited(
+            &path,
+            ResourceKind::NetlistBytes,
+            self.resource_limits.max_netlist_bytes,
+            abort,
+        )?;
         let content = crate::netlist::decode_source_bytes(&bytes)?;
 
         self.current_file = Some(path.clone());
@@ -347,9 +450,12 @@ impl LibParser {
         // discovery's exact boundary aligned with IncludeProcessor.
         self.include_depth = 1;
         self.include_stack.push(path.clone());
-        self.record_resolved_source(path, &bytes, &content);
+        self.record_resolved_source(path, &bytes, &content)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        self.record_expanded_source_bytes(bytes.len())
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
 
-        self.parse_source_content(&content);
+        self.parse_source_content(&content, abort)?;
         self.include_stack.pop();
 
         Ok(self.build_result())
@@ -358,7 +464,8 @@ impl LibParser {
     /// Parse library content from a string
     pub fn parse_string(&mut self, content: &str) -> LibParseResult {
         self.reset_parse_state();
-        self.parse_source_content(content);
+        self.parse_source_content(content, &NoAbort)
+            .expect("NoAbort cannot cancel string parsing");
         self.build_result()
     }
 
@@ -376,7 +483,27 @@ impl LibParser {
         self.reset_parse_state();
         let root = root.into();
         let mut authenticated_sources = HashMap::new();
+        let mut authenticated_source_bytes = 0usize;
         for (path, bytes) in sources {
+            ResourceLimitError::ensure(
+                ResourceKind::NetlistBytes,
+                bytes.len(),
+                self.resource_limits.max_netlist_bytes,
+            )
+            .map_err(|error| error.to_string())?;
+            authenticated_source_bytes = authenticated_source_bytes.saturating_add(bytes.len());
+            ResourceLimitError::ensure(
+                ResourceKind::DependencySourceBytes,
+                authenticated_source_bytes,
+                self.resource_limits.max_dependency_source_bytes,
+            )
+            .map_err(|error| error.to_string())?;
+            if authenticated_sources.len() >= self.max_source_files {
+                return Err(format!(
+                    "authenticated library closure exceeds the {}-source file limit",
+                    self.max_source_files
+                ));
+            }
             if authenticated_sources
                 .insert(path.clone(), Arc::<[u8]>::from(bytes))
                 .is_some()
@@ -430,8 +557,10 @@ impl LibParser {
         self.root_dir = self.base_dir.clone();
         self.include_depth = 1;
         self.include_stack.push(root.clone());
-        self.record_resolved_source(root, &root_bytes, &content);
-        self.parse_source_content(&content);
+        self.record_resolved_source(root, &root_bytes, &content)?;
+        self.record_expanded_source_bytes(root_bytes.len())?;
+        self.parse_source_content(&content, &NoAbort)
+            .expect("NoAbort cannot cancel authenticated parsing");
         self.include_stack.pop();
         Ok(self.build_result())
     }
@@ -439,6 +568,8 @@ impl LibParser {
     fn reset_parse_state(&mut self) {
         self.current_file = None;
         self.include_depth = 0;
+        self.retained_source_bytes = 0;
+        self.expanded_source_bytes = 0;
         self.include_stack.clear();
         self.resolved_sources.clear();
         self.resolved_source_paths.clear();
@@ -452,14 +583,49 @@ impl LibParser {
         self.authenticated_dependencies = None;
     }
 
-    fn record_resolved_source(&mut self, path: PathBuf, bytes: &[u8], content: &str) {
+    fn record_resolved_source(
+        &mut self,
+        path: PathBuf,
+        bytes: &[u8],
+        content: &str,
+    ) -> Result<(), String> {
         if self.resolved_source_paths.insert(path.clone()) {
+            if self.resolved_sources.len() >= self.max_source_files {
+                self.resolved_source_paths.remove(&path);
+                return Err(format!(
+                    "library closure exceeds the {}-source file limit",
+                    self.max_source_files
+                ));
+            }
+            let requested = self.retained_source_bytes.saturating_add(bytes.len());
+            if let Err(error) = ResourceLimitError::ensure(
+                ResourceKind::DependencySourceBytes,
+                requested,
+                self.resource_limits.max_dependency_source_bytes,
+            ) {
+                self.resolved_source_paths.remove(&path);
+                return Err(error.to_string());
+            }
             self.resolved_sources.push(ResolvedLibSource {
                 path,
                 bytes: Arc::from(bytes),
                 content: Arc::from(content),
             });
+            self.retained_source_bytes = requested;
         }
+        Ok(())
+    }
+
+    fn record_expanded_source_bytes(&mut self, source_bytes: usize) -> Result<(), String> {
+        let requested = self.expanded_source_bytes.saturating_add(source_bytes);
+        ResourceLimitError::ensure(
+            ResourceKind::ExpandedSourceBytes,
+            requested,
+            self.resource_limits.max_expanded_source_bytes,
+        )
+        .map_err(|error| error.to_string())?;
+        self.expanded_source_bytes = requested;
+        Ok(())
     }
 
     fn record_resolved_dependency(
@@ -494,30 +660,35 @@ impl LibParser {
     }
 
     /// Internal parsing implementation
-    fn parse_source_content(&mut self, content: &str) {
+    fn parse_source_content(&mut self, content: &str, abort: &dyn AbortSignal) -> io::Result<()> {
+        ensure_library_parse_not_aborted(abort)?;
         let source_path = self
             .current_file
             .as_deref()
             .unwrap_or_else(|| Path::new(""));
         match super::adapt_spectre_model_library(source_path, content) {
-            Ok(adapted) => self.parse_content(&adapted),
+            Ok(adapted) => self.parse_content(&adapted, abort)?,
             Err(error) => self.errors.push(ParseError {
                 message: error.message,
                 file: self.current_file.clone(),
                 line: Some(error.line),
             }),
         }
+        Ok(())
     }
 
     /// Internal canonical SPICE parsing implementation.
-    fn parse_content(&mut self, content: &str) {
-        let lines = self.preprocess_lines(content);
+    fn parse_content(&mut self, content: &str, abort: &dyn AbortSignal) -> io::Result<()> {
+        let lines = self.preprocess_lines(content, abort)?;
         let mut current_section: Option<LibSection> = None;
         let mut current_section_start_line: Option<usize> = None;
         let mut subckt_content: Option<(ParsedSubcircuit, Vec<String>, usize)> = None;
         let mut last_comment = String::new();
 
-        for (line_number, line) in &lines {
+        for (line_index, (line_number, line)) in lines.iter().enumerate() {
+            if line_index.is_multiple_of(64) {
+                ensure_library_parse_not_aborted(abort)?;
+            }
             let line_number = *line_number;
             let line = line.trim();
             if line.is_empty() {
@@ -543,7 +714,7 @@ impl LibParser {
                 crate::netlist::parse_lib_directive(line)
             {
                 if external_section.is_some() {
-                    self.process_include(&name_or_path, line_number);
+                    self.process_include(&name_or_path, line_number, abort)?;
                     last_comment.clear();
                     continue;
                 }
@@ -576,7 +747,7 @@ impl LibParser {
 
             // Handle .include
             if let Some(include_path) = crate::netlist::parse_include_directive(line) {
-                self.process_include(&include_path, line_number);
+                self.process_include(&include_path, line_number, abort)?;
                 continue;
             }
 
@@ -584,7 +755,11 @@ impl LibParser {
             // authenticated source dependency, but its contents belong to the
             // Verilog-A compiler rather than the SPICE library parser.
             if let Some(include) = crate::netlist::parse_veriloga_source_directive(line) {
-                self.process_veriloga_dependency(&include.file_path.to_string_lossy(), line_number);
+                self.process_veriloga_dependency(
+                    &include.file_path.to_string_lossy(),
+                    line_number,
+                    abort,
+                )?;
                 continue;
             }
 
@@ -704,15 +879,23 @@ impl LibParser {
                 line: start_line,
             });
         }
+        Ok(())
     }
 
     /// Preprocess content: handle line continuations
-    fn preprocess_lines(&self, content: &str) -> Vec<(usize, String)> {
+    fn preprocess_lines(
+        &self,
+        content: &str,
+        abort: &dyn AbortSignal,
+    ) -> io::Result<Vec<(usize, String)>> {
         let mut result = Vec::new();
         let mut current_line = String::new();
         let mut current_line_number = 0;
 
         for (line_index, line) in content.lines().enumerate() {
+            if line_index.is_multiple_of(64) {
+                ensure_library_parse_not_aborted(abort)?;
+            }
             let trimmed = line.trim();
 
             // Line continuation with +
@@ -732,19 +915,29 @@ impl LibParser {
             result.push((current_line_number, current_line));
         }
 
-        result
+        Ok(result)
     }
 
     /// Process an include directive
-    fn process_include(&mut self, include_literal: &str, directive_line: usize) {
-        self.process_dependency(include_literal, directive_line, true);
+    fn process_include(
+        &mut self,
+        include_literal: &str,
+        directive_line: usize,
+        abort: &dyn AbortSignal,
+    ) -> io::Result<()> {
+        self.process_dependency(include_literal, directive_line, true, abort)
     }
 
     /// Retain a Verilog-A dependency without interpreting its contents as
     /// SPICE. The exact bytes and owner-relative resolution edge are still
     /// part of the authenticated closure.
-    fn process_veriloga_dependency(&mut self, include_literal: &str, directive_line: usize) {
-        self.process_dependency(include_literal, directive_line, false);
+    fn process_veriloga_dependency(
+        &mut self,
+        include_literal: &str,
+        directive_line: usize,
+        abort: &dyn AbortSignal,
+    ) -> io::Result<()> {
+        self.process_dependency(include_literal, directive_line, false, abort)
     }
 
     fn process_dependency(
@@ -752,10 +945,16 @@ impl LibParser {
         include_literal: &str,
         directive_line: usize,
         parse_as_spice: bool,
-    ) {
+        abort: &dyn AbortSignal,
+    ) -> io::Result<()> {
+        ensure_library_parse_not_aborted(abort)?;
         if self.authenticated_sources.is_some() {
-            self.process_authenticated_dependency(include_literal, directive_line, parse_as_spice);
-            return;
+            return self.process_authenticated_dependency(
+                include_literal,
+                directive_line,
+                parse_as_spice,
+                abort,
+            );
         }
         if self.include_depth >= self.max_include_depth {
             self.errors.push(ParseError {
@@ -766,7 +965,7 @@ impl LibParser {
                 file: self.current_file.clone(),
                 line: Some(directive_line),
             });
-            return;
+            return Ok(());
         }
 
         let include_path = crate::netlist::source_path_literal_to_host_path(include_literal);
@@ -809,7 +1008,7 @@ impl LibParser {
                     file: self.current_file.clone(),
                     line: Some(directive_line),
                 });
-                return;
+                return Ok(());
             }
         };
         if let Some(owner) = self.current_file.clone() {
@@ -821,7 +1020,7 @@ impl LibParser {
                     file: self.current_file.clone(),
                     line: Some(directive_line),
                 });
-                return;
+                return Ok(());
             }
         }
 
@@ -837,12 +1036,51 @@ impl LibParser {
                 file: self.current_file.clone(),
                 line: Some(directive_line),
             });
-            return;
+            return Ok(());
         }
 
-        match std::fs::read(&canonical_path) {
+        if !self.resolved_source_paths.contains(&canonical_path)
+            && self.resolved_sources.len() >= self.max_source_files
+        {
+            self.errors.push(ParseError {
+                message: format!(
+                    "library closure exceeds the {}-source file limit",
+                    self.max_source_files
+                ),
+                file: self.current_file.clone(),
+                line: Some(directive_line),
+            });
+            return Ok(());
+        }
+
+        match read_library_file_bytes_limited(
+            &canonical_path,
+            ResourceKind::DependencySourceBytes,
+            self.resource_limits.max_netlist_bytes,
+            abort,
+        ) {
             Ok(bytes) => match crate::netlist::decode_source_bytes(&bytes) {
                 Ok(content) => {
+                    if let Err(message) =
+                        self.record_resolved_source(canonical_path.clone(), &bytes, &content)
+                    {
+                        self.errors.push(ParseError {
+                            message,
+                            file: self.current_file.clone(),
+                            line: Some(directive_line),
+                        });
+                        return Ok(());
+                    }
+                    if parse_as_spice
+                        && let Err(message) = self.record_expanded_source_bytes(bytes.len())
+                    {
+                        self.errors.push(ParseError {
+                            message,
+                            file: self.current_file.clone(),
+                            line: Some(directive_line),
+                        });
+                        return Ok(());
+                    }
                     let saved_file = self.current_file.take();
                     let saved_dir = self.base_dir.clone();
 
@@ -853,16 +1091,17 @@ impl LibParser {
                         .to_path_buf();
                     self.include_depth += 1;
                     self.include_stack.push(canonical_path.clone());
-                    self.record_resolved_source(canonical_path.clone(), &bytes, &content);
-
-                    if parse_as_spice {
-                        self.parse_source_content(&content);
-                    }
+                    let parse_result = if parse_as_spice {
+                        self.parse_source_content(&content, abort)
+                    } else {
+                        Ok(())
+                    };
 
                     self.include_stack.pop();
                     self.include_depth -= 1;
                     self.current_file = saved_file;
                     self.base_dir = saved_dir;
+                    parse_result?;
                 }
                 Err(error) => {
                     self.errors.push(ParseError {
@@ -886,6 +1125,7 @@ impl LibParser {
                 });
             }
         }
+        Ok(())
     }
 
     fn process_authenticated_dependency(
@@ -893,7 +1133,9 @@ impl LibParser {
         include_literal: &str,
         directive_line: usize,
         parse_as_spice: bool,
-    ) {
+        abort: &dyn AbortSignal,
+    ) -> io::Result<()> {
+        ensure_library_parse_not_aborted(abort)?;
         if self.include_depth >= self.max_include_depth {
             self.errors.push(ParseError {
                 message: format!(
@@ -903,7 +1145,7 @@ impl LibParser {
                 file: self.current_file.clone(),
                 line: Some(directive_line),
             });
-            return;
+            return Ok(());
         }
         let Some(owner) = self.current_file.clone() else {
             self.errors.push(ParseError {
@@ -911,7 +1153,7 @@ impl LibParser {
                 file: None,
                 line: Some(directive_line),
             });
-            return;
+            return Ok(());
         };
         let requested_path = match crate::netlist::normalize_source_path_literal(include_literal) {
             Ok(path) => path,
@@ -921,7 +1163,7 @@ impl LibParser {
                     file: Some(owner),
                     line: Some(directive_line),
                 });
-                return;
+                return Ok(());
             }
         };
         let target = self
@@ -941,7 +1183,7 @@ impl LibParser {
                 file: Some(owner),
                 line: Some(directive_line),
             });
-            return;
+            return Ok(());
         };
         let bytes = self
             .authenticated_sources
@@ -956,7 +1198,7 @@ impl LibParser {
                 file: Some(owner),
                 line: Some(directive_line),
             });
-            return;
+            return Ok(());
         };
         if let Err(message) =
             self.record_resolved_dependency(owner.clone(), &requested_path, target.clone())
@@ -966,7 +1208,7 @@ impl LibParser {
                 file: Some(owner),
                 line: Some(directive_line),
             });
-            return;
+            return Ok(());
         }
         if self.include_stack.contains(&target) {
             let mut cycle = self
@@ -980,7 +1222,7 @@ impl LibParser {
                 file: Some(owner),
                 line: Some(directive_line),
             });
-            return;
+            return Ok(());
         }
         let content = match crate::netlist::decode_source_bytes(&bytes) {
             Ok(content) => content,
@@ -993,7 +1235,7 @@ impl LibParser {
                     file: Some(owner),
                     line: Some(directive_line),
                 });
-                return;
+                return Ok(());
             }
         };
         let saved_file = self.current_file.replace(target.clone());
@@ -1003,14 +1245,40 @@ impl LibParser {
         );
         self.include_depth += 1;
         self.include_stack.push(target.clone());
-        self.record_resolved_source(target, &bytes, &content);
-        if parse_as_spice {
-            self.parse_source_content(&content);
+        if let Err(message) = self.record_resolved_source(target, &bytes, &content) {
+            self.errors.push(ParseError {
+                message,
+                file: Some(owner),
+                line: Some(directive_line),
+            });
+            self.include_stack.pop();
+            self.include_depth -= 1;
+            self.current_file = saved_file;
+            self.base_dir = saved_dir;
+            return Ok(());
         }
+        if parse_as_spice && let Err(message) = self.record_expanded_source_bytes(bytes.len()) {
+            self.errors.push(ParseError {
+                message,
+                file: Some(owner),
+                line: Some(directive_line),
+            });
+            self.include_stack.pop();
+            self.include_depth -= 1;
+            self.current_file = saved_file;
+            self.base_dir = saved_dir;
+            return Ok(());
+        }
+        let parse_result = if parse_as_spice {
+            self.parse_source_content(&content, abort)
+        } else {
+            Ok(())
+        };
         self.include_stack.pop();
         self.include_depth -= 1;
         self.current_file = saved_file;
         self.base_dir = saved_dir;
+        parse_result
     }
 
     /// Parse .subckt start line
@@ -2495,5 +2763,150 @@ mod tests {
         );
         assert!(result.find_model("nested_n").is_none());
         assert!(!included.exists(), "test must not depend on a host file");
+    }
+
+    #[test]
+    fn file_parser_bounds_root_and_transitive_source_bytes() {
+        let directory = unique_lib_parser_temp_dir("source-byte-limits");
+        std::fs::create_dir_all(&directory).expect("temporary directory is created");
+        let included = directory.join("device.inc");
+        std::fs::write(&included, ".model bounded_n NMOS (LEVEL=1)\n")
+            .expect("included source is written");
+        let root = directory.join("root.lib");
+        std::fs::write(&root, ".include device.inc\n").expect("root library source is written");
+
+        let mut root_limits = ResourceLimits::default();
+        root_limits.max_netlist_bytes = 8;
+        let root_error = LibParser::new(&directory)
+            .with_resource_limits(root_limits)
+            .parse_file(&root)
+            .expect_err("oversized root source must fail before parsing");
+        assert_eq!(root_error.kind(), io::ErrorKind::InvalidData);
+        assert!(root_error.to_string().contains("netlist_bytes"));
+
+        let root_bytes = std::fs::metadata(&root).expect("root metadata").len() as usize;
+        let include_bytes = std::fs::metadata(&included)
+            .expect("include metadata")
+            .len() as usize;
+        assert!(
+            root_bytes < include_bytes,
+            "fixture must isolate include limit"
+        );
+        let mut include_limits = ResourceLimits::default();
+        include_limits.max_netlist_bytes = root_bytes;
+        let include_result = LibParser::new(&directory)
+            .with_resource_limits(include_limits)
+            .parse_file(&root)
+            .expect("bounded root source itself reads");
+        assert!(!include_result.is_ok());
+        assert!(
+            include_result.errors.iter().any(|error| {
+                error.message.contains("dependency_source_bytes")
+                    && error.message.contains(&include_bytes.to_string())
+            }),
+            "{:?}",
+            include_result.errors
+        );
+        assert!(include_result.find_model("bounded_n").is_none());
+
+        let mut closure_limits = ResourceLimits::default();
+        closure_limits.max_dependency_source_bytes = root_bytes;
+        let result = LibParser::new(&directory)
+            .with_resource_limits(closure_limits)
+            .parse_file(&root)
+            .expect("bounded root source itself reads");
+        assert!(!result.is_ok());
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|error| error.message.contains("dependency_source_bytes")),
+            "{:?}",
+            result.errors
+        );
+        assert!(result.find_model("bounded_n").is_none());
+
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn file_parser_bounds_source_count_and_honors_abort() {
+        use crate::abort_signal::{CountingAbort, ImmediateAbort};
+
+        let directory = unique_lib_parser_temp_dir("source-file-limit");
+        std::fs::create_dir_all(&directory).expect("temporary directory is created");
+        std::fs::write(directory.join("one.inc"), ".model one NMOS (LEVEL=1)\n")
+            .expect("first include source is written");
+        std::fs::write(directory.join("two.inc"), ".model two NMOS (LEVEL=1)\n")
+            .expect("second include source is written");
+        let root = directory.join("root.lib");
+        std::fs::write(&root, ".include one.inc\n.include two.inc\n")
+            .expect("root library source is written");
+
+        let result = LibParser::new(&directory)
+            .with_max_source_files(2)
+            .parse_file(&root)
+            .expect("root and first dependency remain readable");
+        assert!(!result.is_ok());
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|error| error.message.contains("source file limit")),
+            "{:?}",
+            result.errors
+        );
+        assert!(result.find_model("one").is_some());
+        assert!(result.find_model("two").is_none());
+
+        let abort_error = LibParser::new(&directory)
+            .parse_file_with_abort(&root, &ImmediateAbort)
+            .expect_err("immediate abort must fail closed");
+        assert_eq!(abort_error.kind(), io::ErrorKind::Interrupted);
+
+        let delayed_abort = CountingAbort::new(2);
+        let abort_error = LibParser::new(&directory)
+            .parse_file_with_abort(&root, &delayed_abort)
+            .expect_err("bounded source reads must poll cancellation");
+        assert_eq!(abort_error.kind(), io::ErrorKind::Interrupted);
+        assert!(delayed_abort.count() >= 3);
+
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn repeated_include_expansion_is_bounded_even_when_source_is_deduplicated() {
+        let directory = unique_lib_parser_temp_dir("repeated-expansion-limit");
+        std::fs::create_dir_all(&directory).expect("temporary directory is created");
+        let included = directory.join("device.inc");
+        std::fs::write(&included, ".model repeated_n NMOS (LEVEL=1)\n")
+            .expect("included source is written");
+        let root = directory.join("root.lib");
+        std::fs::write(&root, ".include device.inc\n.include device.inc\n")
+            .expect("root library source is written");
+
+        let root_bytes = std::fs::metadata(&root).expect("root metadata").len() as usize;
+        let include_bytes = std::fs::metadata(&included)
+            .expect("include metadata")
+            .len() as usize;
+        let mut limits = ResourceLimits::default();
+        limits.max_expanded_source_bytes = root_bytes + include_bytes;
+        let result = LibParser::new(&directory)
+            .with_resource_limits(limits)
+            .parse_file(&root)
+            .expect("individual sources read within their limits");
+
+        assert!(!result.is_ok());
+        assert_eq!(result.resolved_sources.len(), 2);
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|error| error.message.contains("expanded_source_bytes")),
+            "{:?}",
+            result.errors
+        );
+
+        let _ = std::fs::remove_dir_all(directory);
     }
 }

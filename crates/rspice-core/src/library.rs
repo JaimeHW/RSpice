@@ -22,8 +22,9 @@ mod veriloga_discovery;
 
 pub use foundation_defaults::{FoundationDeviceFamily, foundation_card_source};
 pub use lib_parser::{
-    LibParseResult, LibParser, LibSection, LibSectionSummary, ParseError, ParsedModel,
-    ParsedSubcircuit, ResolvedLibDependency, ResolvedLibSource, enumerate_lib_sections,
+    DEFAULT_MAX_LIBRARY_SOURCE_FILES, LibParseResult, LibParser, LibSection, LibSectionSummary,
+    ParseError, ParsedModel, ParsedSubcircuit, ResolvedLibDependency, ResolvedLibSource,
+    enumerate_lib_sections,
 };
 pub use manager::{LibraryManager, ModelDefinition, ModelType, SubcircuitDefinition};
 // The Spectre model-library adapter is source text in, canonical SPICE source
@@ -35,4 +36,8 @@ pub use spice_packs::{
     CatalogDefinitionPreview, CatalogEntry, CatalogSubcircuitInterface, LicenseTier,
     MODELS_DIR_ENV, SpiceLibraryIndex, SpicePack,
 };
-pub use veriloga_discovery::{VerilogAModelEntry, discover_veriloga_models};
+pub use veriloga_discovery::{
+    DEFAULT_MAX_VERILOGA_DISCOVERY_FILES, VerilogADiscoveryLimits, VerilogAModelEntry,
+    discover_veriloga_models, discover_veriloga_models_with_limits,
+    discover_veriloga_models_with_limits_and_abort,
+};
