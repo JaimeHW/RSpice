@@ -174,6 +174,27 @@ impl DigitalSignalClass {
     pub const fn is_variable(self) -> bool {
         matches!(self, Self::Variable(_))
     }
+
+    /// Whether the name carries a real value rather than four-state bits.
+    ///
+    /// Only a `wreal` net does. Verilog-AMS LRM 2.4 section 3.7 gives real
+    /// values to nets and to nothing else in the discrete domain — a `reg` is
+    /// four-state and a process-local `real` is a variable of the process, not
+    /// a signal.
+    pub const fn is_real(self) -> bool {
+        match self {
+            Self::Net(kind) => kind.is_real(),
+            Self::Variable(_) => false,
+        }
+    }
+
+    /// How a real net combines its drivers, if it is one.
+    pub const fn wreal_resolution(self) -> Option<WrealResolution> {
+        match self {
+            Self::Net(kind) => kind.resolution(),
+            Self::Variable(_) => None,
+        }
+    }
 }
 
 /// Resolved packed bounds of a vector.
@@ -211,8 +232,16 @@ pub struct AnalyzedDigitalSignal {
     pub name: SmolStr,
     pub class: DigitalSignalClass,
     pub signedness: Signedness,
-    /// Packed range. `None` is a one-bit scalar.
+    /// Packed range. `None` is a one-bit scalar, and is the only shape a real
+    /// net has — see [`Self::width`].
     pub range: Option<VectorBounds>,
+    /// Declared width in bits.
+    ///
+    /// Zero for a `wreal`, which has no bit width at all: Verilog-AMS LRM 2.4
+    /// section 3.7 makes it a real-valued connection, not a vector of bits.
+    /// The same spelling [`ProcessLocalKind::Real`] already uses, so that "how
+    /// many bits does this carry" has one answer everywhere and `0` means the
+    /// same thing in both places.
     pub width: u32,
     /// Whether the name is also a module port.
     ///
@@ -481,7 +510,28 @@ impl SemanticAnalyzer {
         let mut seen: HashMap<SmolStr, Span> = HashMap::new();
 
         for declaration in &module.digital_nets {
-            let bounds = self.resolve_vector_range(declaration.range.as_ref(), "wire");
+            let keyword = declaration.kind.keyword();
+            // Verilog-AMS LRM 2.4 Syntax 3-8 permits a range on a `wreal`,
+            // which declares a *bus of real nets* — an unpacked array of
+            // reals, not a packed vector of bits. Nothing downstream has an
+            // array of signals, so it is refused by name rather than read as
+            // one net of some width, which is what a range on a `wire` means
+            // and is the one wrong answer available here.
+            let bounds = if declaration.kind.is_real() {
+                if let Some(range) = &declaration.range {
+                    self.record_error_at(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "a range on a `{keyword}` declares a bus of real nets, which is not \
+                             supported yet; Verilog-AMS LRM 2.4 section 3.7 makes each element a \
+                             real-valued net of its own, so declare them separately"
+                        )),
+                        range.span,
+                    );
+                }
+                None
+            } else {
+                self.resolve_vector_range(declaration.range.as_ref(), keyword)
+            };
             for item in &declaration.items {
                 self.push_digital_signal(
                     &mut signals,
@@ -695,7 +745,12 @@ impl SemanticAnalyzer {
             class,
             signedness,
             range,
-            width: range.map_or(1, VectorBounds::width),
+            // A real net has no bits, and says so with zero.
+            width: if class.is_real() {
+                0
+            } else {
+                range.map_or(1, VectorBounds::width)
+            },
             redeclares_port,
             span: item.span,
         });
@@ -847,6 +902,35 @@ impl SemanticAnalyzer {
                 );
                 continue;
             };
+            // IEEE 1364-2005 section 9.7.2 classifies an edge from a scalar
+            // transition, and table 5-2 does so over the four values a bit can
+            // take; an edge on a vector is an edge on its least significant
+            // bit. A `wreal` has no bits, so there is no transition to
+            // classify and no defensible reading of `posedge` on one — a
+            // threshold crossing would be an invented rule, and the value
+            // change the standard *does* define is what a bare term already
+            // asks for.
+            if term.edge.is_some()
+                && index
+                    .get(&name)
+                    .is_some_and(|position| signals[*position].class.is_real())
+            {
+                let keyword = signals[index[&name]].class.keyword();
+                self.record_error_at(
+                    SemanticErrorKind::InvalidExpression(format!(
+                        "`{}` on `{name}`, which is a `{keyword}`; IEEE 1364-2005 section 9.7.2 \
+                         classifies an edge from a bit transition and a real net has no bits, so \
+                         write `@({name})` for the value-change event Verilog-AMS LRM 2.4 \
+                         section 3.7 gives one",
+                        match term.edge {
+                            Some(EdgeKind::Posedge) => "posedge",
+                            _ => "negedge",
+                        }
+                    )),
+                    term.span,
+                );
+                continue;
+            }
             if let Some(previous) = resolved
                 .iter()
                 .find(|entry: &&AnalyzedSensitivity| entry.signal == name)
@@ -1226,6 +1310,22 @@ impl SemanticAnalyzer {
         index: &HashMap<SmolStr, usize>,
     ) {
         let (range, kind) = match self.resolve_digital_name(name, index) {
+            Resolution::Digital(position) if signals[position].class.is_real() => {
+                // Verilog-AMS LRM 2.4 section 3.7 makes a `wreal` a real-valued
+                // connection. It has no bit representation to index into, and
+                // the standard's own answer to "the bits of a real" is the
+                // explicit `$realtobits` of that same clause.
+                self.record_error_at(
+                    SemanticErrorKind::InvalidExpression(format!(
+                        "`{name}` is a `{}`, which carries a real value and has no bits to \
+                         select; Verilog-AMS LRM 2.4 section 3.7 converts one to bits with \
+                         `$realtobits`",
+                        signals[position].class.keyword()
+                    )),
+                    expression.span(),
+                );
+                return;
+            }
             Resolution::Digital(position) => (signals[position].range, None),
             Resolution::ProcessLocal(local) => {
                 if !local.kind.is_selectable() {
