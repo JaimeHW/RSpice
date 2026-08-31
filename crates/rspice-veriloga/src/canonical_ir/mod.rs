@@ -25,6 +25,7 @@ pub mod cfg_lower;
 pub mod cfg_opt;
 pub mod diagnostic;
 pub mod digital;
+pub mod digital_eval;
 pub mod digital_lower;
 pub mod digital_value;
 pub mod hir;
@@ -54,6 +55,12 @@ pub use digital::{
     CanonicalDigitalPlan, CfgDigitalProcess, DigitalEdge, DigitalProcessKind,
     DigitalSchedulingRegion, DigitalSensitivityOrigin, DigitalSensitivityTerm, DigitalSignal,
     DigitalStaticSensitivity, DigitalWriteSelect, DigitalWriteTarget,
+};
+pub use digital_eval::{
+    DigitalDeferredUpdate, DigitalEnvironment, DigitalEvalError, DigitalProcessOutcome,
+    DigitalResumeState, DigitalScalar, DigitalSuspension, DigitalWaitRequest,
+    apply_deferred as apply_deferred_digital_update, classify_edge,
+    resume as resume_digital_process, start as start_digital_process,
 };
 pub use digital_value::FourStateValue;
 pub use hir::{
