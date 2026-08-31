@@ -6,6 +6,7 @@
 //! (jw * dQ/dx) against closed-form single-pole responses.
 #![cfg(feature = "veriloga")]
 
+use rspice_core::engine::SimulationConfig;
 use rspice_core::{Engine, Netlist};
 use std::io::Write;
 use std::path::PathBuf;
@@ -68,6 +69,82 @@ endmodule
             (voltage.re - 0.5).abs() < 1.0e-12 && voltage.im.abs() < 1.0e-12,
             "AC initial_step state was not retained at {} Hz: {voltage}",
             result.frequency
+        );
+    }
+
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn ac_final_step_marks_only_the_global_final_frequency() {
+    let model = write_model(
+        "final_step",
+        r#"
+`include "disciplines.vams"
+module va_ac_final_step(p, n);
+    inout p, n;
+    electrical p, n;
+    real count;
+    analog begin
+        @(initial_step("ac")) count = count + 1.0;
+        @(final_step("ac")) count = count + 1.0;
+        I(p, n) <+ count * 1.0e-3 * V(p, n);
+        I(p, n) <+ ddt(count * 1.0e-9 * V(p, n));
+    end
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* AC final-step lifecycle\n\
+         V1 in 0 DC 0 AC 1\n\
+         R1 in out 1k\n\
+         X1 out 0 va_ac_final_step\n\
+         .va \"{}\" va_ac_final_step\n\
+         .end\n",
+        deck_path(&model)
+    );
+    let netlist = Netlist::parse(&deck).expect("parse AC final-step deck");
+    let frequencies = [
+        10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 1.0e3, 2.0e3, 5.0e3, 1.0e4, 1.0e5, 5.0e5, 1.0e6,
+    ];
+
+    let run = |workers| {
+        let mut config = SimulationConfig::default();
+        config.resource_limits.max_parallel_workers = workers;
+        Engine::new(config)
+            .run_ac(&netlist, &frequencies)
+            .expect("AC final-step sweep runs")
+    };
+    let serial = run(1);
+    let chunk_parallel = run(4);
+    assert_eq!(serial.len(), frequencies.len());
+    assert_eq!(chunk_parallel.len(), frequencies.len());
+    let output = serial[0]
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("out"))
+        .expect("out node");
+
+    for (index, (serial_point, parallel_point)) in serial.iter().zip(&chunk_parallel).enumerate() {
+        let serial_voltage = serial_point.voltages[output];
+        let parallel_voltage = parallel_point.voltages[output];
+        assert_eq!(serial_voltage.re.to_bits(), parallel_voltage.re.to_bits());
+        assert_eq!(serial_voltage.im.to_bits(), parallel_voltage.im.to_bits());
+
+        let count = if index + 1 == frequencies.len() {
+            2.0
+        } else {
+            1.0
+        };
+        let real = 1.0 + count;
+        let imag = 2.0 * std::f64::consts::PI * frequencies[index] * count * 1.0e-6;
+        let denominator = real * real + imag * imag;
+        let expected_re = real / denominator;
+        let expected_im = -imag / denominator;
+        assert!(
+            (serial_voltage.re - expected_re).abs() <= 1.0e-11 * expected_re.abs().max(1.0)
+                && (serial_voltage.im - expected_im).abs() <= 1.0e-11 * expected_im.abs().max(1.0),
+            "AC final_step count at index {index} was not exact: actual={serial_voltage}, expected={expected_re}+j{expected_im}"
         );
     }
 

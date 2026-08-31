@@ -1466,6 +1466,200 @@ impl Engine {
         (collected.elementary, collected.correlated)
     }
 
+    /// Evaluate only runtime-compiled and build-time generated Verilog-A
+    /// noise schedules. Native device noise remains cached at the operating
+    /// point; this narrow surface is what a lifecycle-sensitive final
+    /// frequency refreshes transactionally.
+    fn try_collect_veriloga_noise_sources(
+        circuit: &CircuitData,
+        dc_solution: &[Value],
+    ) -> Result<Vec<NoiseSource>, SimulationError> {
+        let mut noise_sources = Vec::new();
+
+        // Verilog-A white_noise()/flicker_noise() sources, with PSDs
+        // evaluated at the operating point. Potential-contribution noise
+        // arrives as a series EMF on the branch-equation row, which is an
+        // ordinary system unknown here, so both kinds inject the same way.
+        #[cfg(feature = "veriloga")]
+        for device in circuit.veriloga_devices().iter() {
+            let mut probe = device.clone();
+            let instance = probe.name.clone();
+            probe.try_set_analysis_type(3).map_err(|err| {
+                SimulationError::Circuit(format!(
+                    "Verilog-A device '{instance}' noise analysis setup failed: {err}"
+                ))
+            })?;
+            let sources = probe.try_noise_sources(dc_solution).map_err(|err| {
+                SimulationError::Circuit(format!(
+                    "Verilog-A device '{instance}' noise evaluation failed: {err}"
+                ))
+            })?;
+            for source in sources {
+                let mechanism = Self::canonical_veriloga_noise_mechanism(&source.name);
+                let device = instance.to_string();
+                let identity =
+                    crate::analysis::NoiseSourceIdentity::mechanism(device.clone(), mechanism);
+                let noise = match (source.table, source.exponent) {
+                    (Some((points, log_interp)), _) => NoiseSource::tabulated(
+                        device,
+                        source.node_pos,
+                        source.node_neg,
+                        source.psd,
+                        points,
+                        log_interp,
+                    ),
+                    (None, None) => {
+                        NoiseSource::white(device, source.node_pos, source.node_neg, source.psd)
+                    }
+                    (None, Some(ef)) => NoiseSource::flicker_psd(
+                        device,
+                        source.node_pos,
+                        source.node_neg,
+                        source.psd,
+                        ef,
+                    ),
+                };
+                noise_sources.push(noise.with_identity(identity));
+            }
+        }
+
+        #[cfg(feature = "veriloga-builtins-base")]
+        for device in circuit.generated_veriloga_devices().iter() {
+            let evaluated = device
+                .evaluate_noise_sources(
+                    dc_solution,
+                    circuit.num_nodes(),
+                    circuit.generated_simulation_parameters,
+                )
+                .map_err(|err| {
+                    SimulationError::Circuit(format!(
+                        "Generated Verilog-A device '{}' noise evaluation failed: {err}",
+                        device.instance_name
+                    ))
+                })?;
+            for source in evaluated {
+                noise_sources.push(Self::generated_noise_source(
+                    circuit,
+                    &device.instance_name,
+                    source,
+                )?);
+            }
+        }
+
+        #[cfg(not(any(feature = "veriloga", feature = "veriloga-builtins-base")))]
+        let _ = (circuit, dc_solution);
+
+        Ok(noise_sources)
+    }
+
+    fn has_veriloga_noise_devices(circuit: &CircuitData) -> bool {
+        #[cfg(feature = "veriloga")]
+        if circuit.has_veriloga_devices() {
+            return true;
+        }
+        #[cfg(feature = "veriloga-builtins-base")]
+        if circuit.has_generated_veriloga_devices() {
+            return true;
+        }
+        #[cfg(not(any(feature = "veriloga", feature = "veriloga-builtins-base")))]
+        let _ = circuit;
+        false
+    }
+
+    fn try_refresh_veriloga_noise_sources(
+        circuit: &CircuitData,
+        dc_solution: &[Value],
+        base_sources: &[NoiseSource],
+        base_absolute_temperatures: &[Option<Value>],
+        dialect: crate::engine::SpiceDialect,
+    ) -> Result<(Vec<NoiseSource>, Vec<Option<Value>>), SimulationError> {
+        debug_assert_eq!(base_sources.len(), base_absolute_temperatures.len());
+        let mut veriloga_device_names = HashSet::new();
+        #[cfg(feature = "veriloga")]
+        veriloga_device_names.extend(
+            circuit
+                .veriloga_devices()
+                .iter()
+                .map(|device| device.name.to_ascii_lowercase()),
+        );
+        #[cfg(feature = "veriloga-builtins-base")]
+        veriloga_device_names.extend(
+            circuit
+                .generated_veriloga_devices()
+                .iter()
+                .map(|device| device.instance_name.to_ascii_lowercase()),
+        );
+        if veriloga_device_names.is_empty() {
+            return Ok((base_sources.to_vec(), base_absolute_temperatures.to_vec()));
+        }
+        let same_identity =
+            |left: &crate::analysis::NoiseSourceIdentity,
+             right: &crate::analysis::NoiseSourceIdentity| {
+                left.device.eq_ignore_ascii_case(&right.device)
+                    && match (&left.mechanism, &right.mechanism) {
+                        (None, None) => true,
+                        (Some(left), Some(right)) => left.eq_ignore_ascii_case(right),
+                        _ => false,
+                    }
+            };
+
+        let mut veriloga_sources = Self::try_collect_veriloga_noise_sources(circuit, dc_solution)?;
+        Self::configure_noise_physical_constants(&mut veriloga_sources, &mut [], dialect);
+        let mut pending_veriloga_sources =
+            veriloga_sources.into_iter().map(Some).collect::<Vec<_>>();
+        let mut refreshed_sources = Vec::with_capacity(base_sources.len());
+        let mut refreshed_temperatures = Vec::with_capacity(base_absolute_temperatures.len());
+        for (source, &absolute_temperature) in base_sources.iter().zip(base_absolute_temperatures) {
+            if veriloga_device_names.contains(&source.identity.device.to_ascii_lowercase()) {
+                if let Some(position) = pending_veriloga_sources.iter().position(|candidate| {
+                    candidate.as_ref().is_some_and(|candidate| {
+                        same_identity(&source.identity, &candidate.identity)
+                    })
+                }) {
+                    refreshed_sources.push(
+                        pending_veriloga_sources[position]
+                            .take()
+                            .expect("matched Verilog-A noise source remains available"),
+                    );
+                    refreshed_temperatures.push(None);
+                }
+            } else {
+                refreshed_sources.push(source.clone());
+                refreshed_temperatures.push(absolute_temperature);
+            }
+        }
+
+        for source in pending_veriloga_sources.into_iter().flatten() {
+            refreshed_sources.push(source);
+            refreshed_temperatures.push(None);
+        }
+        Ok((refreshed_sources, refreshed_temperatures))
+    }
+
+    fn try_probe_final_veriloga_noise_sources(
+        circuit: &CircuitData,
+        dc_solution: &[Value],
+        base_sources: &[NoiseSource],
+        base_absolute_temperatures: &[Option<Value>],
+        dialect: crate::engine::SpiceDialect,
+    ) -> Result<Option<(Vec<NoiseSource>, Vec<Option<Value>>)>, SimulationError> {
+        if !Self::has_veriloga_noise_devices(circuit) {
+            return Ok(None);
+        }
+        let mut final_probe = circuit.clone();
+        final_probe
+            .prepare_veriloga_frequency_analysis_point(3, true)
+            .map_err(SimulationError::Circuit)?;
+        Self::try_refresh_veriloga_noise_sources(
+            &final_probe,
+            dc_solution,
+            base_sources,
+            base_absolute_temperatures,
+            dialect,
+        )
+        .map(Some)
+    }
+
     pub(in crate::engine) fn try_collect_noise_sources(
         circuit: &CircuitData,
         dc_solution: &[Value],
@@ -1733,83 +1927,10 @@ impl Engine {
             ));
         }
 
-        // Verilog-A white_noise()/flicker_noise() sources, with PSDs
-        // evaluated at the operating point. Potential-contribution noise
-        // arrives as a series EMF on the branch-equation row, which is an
-        // ordinary system unknown here, so both kinds inject the same way.
-        #[cfg(feature = "veriloga")]
-        for device in circuit.veriloga_devices().iter() {
-            let mut probe = device.clone();
-            let instance = probe.name.clone();
-            probe.try_set_analysis_type(3).map_err(|err| {
-                SimulationError::Circuit(format!(
-                    "Verilog-A device '{instance}' noise analysis setup failed: {err}"
-                ))
-            })?;
-            let sources = probe.try_noise_sources(dc_solution).map_err(|err| {
-                SimulationError::Circuit(format!(
-                    "Verilog-A device '{instance}' noise evaluation failed: {err}"
-                ))
-            })?;
-            for source in sources {
-                // The module's own label is the mechanism and the instance is
-                // the device. Folding the two together -- `x1:thermal` as the
-                // device -- is what a `DNO(X1)` probe cannot resolve, and it
-                // left the whole-device query nothing to sum over. The label
-                // arrives as the string literal the model author passed to
-                // `white_noise()`, so it is canonicalized into the shape a
-                // saved result can be written with, which is the shape the code
-                // generator composes the compiled catalog's names in.
-                let mechanism = Self::canonical_veriloga_noise_mechanism(&source.name);
-                let device = instance.to_string();
-                let identity =
-                    crate::analysis::NoiseSourceIdentity::mechanism(device.clone(), mechanism);
-                let noise = match (source.table, source.exponent) {
-                    (Some((points, log_interp)), _) => NoiseSource::tabulated(
-                        device,
-                        source.node_pos,
-                        source.node_neg,
-                        source.psd,
-                        points,
-                        log_interp,
-                    ),
-                    (None, None) => {
-                        NoiseSource::white(device, source.node_pos, source.node_neg, source.psd)
-                    }
-                    (None, Some(ef)) => NoiseSource::flicker_psd(
-                        device,
-                        source.node_pos,
-                        source.node_neg,
-                        source.psd,
-                        ef,
-                    ),
-                };
-                noise_sources.push(noise.with_identity(identity));
-            }
-        }
-
-        #[cfg(feature = "veriloga-builtins-base")]
-        for device in circuit.generated_veriloga_devices().iter() {
-            let evaluated = device
-                .evaluate_noise_sources(
-                    dc_solution,
-                    circuit.num_nodes(),
-                    circuit.generated_simulation_parameters,
-                )
-                .map_err(|err| {
-                    SimulationError::Circuit(format!(
-                        "Generated Verilog-A device '{}' noise evaluation failed: {err}",
-                        device.instance_name
-                    ))
-                })?;
-            for source in evaluated {
-                noise_sources.push(Self::generated_noise_source(
-                    circuit,
-                    &device.instance_name,
-                    source,
-                )?);
-            }
-        }
+        noise_sources.extend(Self::try_collect_veriloga_noise_sources(
+            circuit,
+            dc_solution,
+        )?);
 
         // Builder-owned device series resistors are physical resistor
         // stamps, but Xyce exposes their noise under the parent MOS device as
@@ -2826,11 +2947,15 @@ impl Engine {
         }
         let mut port_adjoint = Vec::with_capacity(port_rhs.len());
 
-        for &frequency in frequencies {
+        for (frequency_index, &frequency) in frequencies.iter().enumerate() {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
+            let final_step = frequency_index + 1 == frequencies.len();
             let omega = 2.0 * PI * frequency;
+            circuit
+                .prepare_veriloga_frequency_analysis_point(3, final_step)
+                .map_err(SimulationError::Circuit)?;
             circuit
                 .prepare_behavioral_small_signal_at_frequency(&dc_solution, frequency)
                 .map_err(SimulationError::Circuit)?;
@@ -2843,6 +2968,31 @@ impl Engine {
                 true,
                 true,
             )?;
+            // As in ordinary noise, a final_step event may feed a generated
+            // or runtime Verilog-A noise expression. Refresh only the final
+            // public point against the accepted initial state. The analysis-
+            // local circuit has no post-sweep consumer, so the speculative
+            // final state is intentionally not accepted.
+            let final_noise_sources = if final_step && Self::has_veriloga_noise_devices(&circuit) {
+                Some(Self::try_refresh_veriloga_noise_sources(
+                    &circuit,
+                    &dc_solution,
+                    &noise_sources,
+                    &elementary_absolute_temperatures,
+                    engine.config.spice_dialect,
+                )?)
+            } else {
+                None
+            };
+            let point_noise_sources = final_noise_sources
+                .as_ref()
+                .map_or(noise_sources.as_slice(), |sources| sources.0.as_slice());
+            let point_noise_temperatures = final_noise_sources
+                .as_ref()
+                .map_or(elementary_absolute_temperatures.as_slice(), |sources| {
+                    sources.1.as_slice()
+                });
+            let point_correlated_noise_sources = correlated_noise_sources.as_slice();
             let mut covariance = vec![vec![zero; num_ports]; num_ports];
             let mut compensation = vec![vec![zero; num_ports]; num_ports];
 
@@ -2879,9 +3029,9 @@ impl Engine {
                         .collect()
                 };
 
-            debug_assert_eq!(noise_sources.len(), elementary_absolute_temperatures.len());
+            debug_assert_eq!(point_noise_sources.len(), point_noise_temperatures.len());
             for (source, &absolute_temperature) in
-                noise_sources.iter().zip(&elementary_absolute_temperatures)
+                point_noise_sources.iter().zip(point_noise_temperatures)
             {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
@@ -2900,7 +3050,7 @@ impl Engine {
                 Self::add_port_noise_outer_product(&mut covariance, &mut compensation, &amplitude)?;
             }
 
-            for source in &correlated_noise_sources {
+            for source in point_correlated_noise_sources {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
@@ -3194,6 +3344,25 @@ impl Engine {
             &mut correlated_noise_sources,
             engine.config.spice_dialect,
         );
+        // A lifecycle guard may expose a Verilog-A mechanism only when the
+        // public sweep reaches final_step. Probe that transactional state once
+        // up front so every result publishes one activation-independent
+        // catalog. Reuse the same merged source schedule at the final point;
+        // this preserves base-source order, appends genuinely final-only
+        // identities deterministically, and retains the selected physical
+        // constants without accepting speculative model state.
+        let final_veriloga_noise_sources = Self::try_probe_final_veriloga_noise_sources(
+            &circuit,
+            &dc_solution,
+            &noise_sources,
+            &elementary_absolute_temperatures,
+            engine.config.spice_dialect,
+        )?;
+        let maximum_elementary_sources = final_veriloga_noise_sources
+            .as_ref()
+            .map_or(noise_sources.len(), |sources| {
+                noise_sources.len().max(sources.0.len())
+            });
         engine.ensure_result_shape(
             frequencies.len(),
             circuit
@@ -3201,8 +3370,7 @@ impl Engine {
                 .saturating_mul(2)
                 .saturating_add(4)
                 .saturating_add(
-                    noise_sources
-                        .len()
+                    maximum_elementary_sources
                         .saturating_add(correlated_noise_sources.len())
                         .saturating_mul(3),
                 ),
@@ -3218,6 +3386,9 @@ impl Engine {
                 .iter()
                 .map(|source| source.identity.clone()),
         );
+        if let Some((final_sources, _)) = &final_veriloga_noise_sources {
+            contribution_catalog.extend(final_sources.iter().map(|source| source.identity.clone()));
+        }
         for mos in &circuit.mosfets.devices {
             contribution_catalog.extend(["RD", "RS", "ID", "FN"].map(|mechanism| {
                 crate::analysis::NoiseSourceIdentity::mechanism(&mos.name, mechanism)
@@ -3331,12 +3502,16 @@ impl Engine {
                                   rhs: &mut Vec<Complex64>,
                                   ac_solution: &mut Vec<Complex64>,
                                   transfer_solution: &mut Vec<Complex64>,
-                                  freq: Value|
+                                  freq: Value,
+                                  final_step: bool|
          -> Result<NoiseResult, SimulationError> {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
             let omega = 2.0 * PI * freq;
+            circuit
+                .prepare_veriloga_frequency_analysis_point(3, final_step)
+                .map_err(SimulationError::Circuit)?;
             circuit
                 .prepare_behavioral_small_signal_at_frequency(&dc_solution, freq)
                 .map_err(SimulationError::Circuit)?;
@@ -3349,6 +3524,27 @@ impl Engine {
                 true,
                 true,
             )?;
+
+            // Noise schedules are normally invariant over the sweep and are
+            // captured once above. The final public frequency is the one
+            // exception: final_step may update model state used by a noise
+            // expression, so use the schedule probed transactionally against
+            // the same accepted initial state and final lifecycle flag. Both
+            // that probe and matrix assembly operate on private clones; no
+            // post-sweep consumer exists, so final-point state is deliberately
+            // not accepted.
+            let final_noise_sources = if final_step {
+                final_veriloga_noise_sources.as_ref()
+            } else {
+                None
+            };
+            let point_noise_sources = final_noise_sources
+                .map_or(noise_sources.as_slice(), |sources| sources.0.as_slice());
+            let point_noise_temperatures = final_noise_sources
+                .map_or(elementary_absolute_temperatures.as_slice(), |sources| {
+                    sources.1.as_slice()
+                });
+            let point_correlated_noise_sources = correlated_noise_sources.as_slice();
 
             match ac_matrix.solve_into(&ac_excitation_rhs, ac_solution) {
                 Ok(()) => {}
@@ -3411,9 +3607,9 @@ impl Engine {
                 Err(error) => return Err(SimulationError::Solver(error)),
             }
 
-            debug_assert_eq!(noise_sources.len(), elementary_absolute_temperatures.len());
+            debug_assert_eq!(point_noise_sources.len(), point_noise_temperatures.len());
             for (source, &absolute_temperature) in
-                noise_sources.iter().zip(&elementary_absolute_temperatures)
+                point_noise_sources.iter().zip(point_noise_temperatures)
             {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
@@ -3453,7 +3649,7 @@ impl Engine {
                 });
             }
 
-            for source in &correlated_noise_sources {
+            for source in point_correlated_noise_sources {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
@@ -3574,14 +3770,15 @@ impl Engine {
             let workers = self.parallel_worker_count(frequencies.len());
             if workers > 1 {
                 let chunk_len = frequencies.len().div_ceil(workers);
-                let work: Vec<(CircuitData, &[Value])> = frequencies
+                let work: Vec<(CircuitData, usize, &[Value])> = frequencies
                     .chunks(chunk_len)
-                    .map(|chunk| (circuit.clone(), chunk))
+                    .enumerate()
+                    .map(|(chunk_index, chunk)| (circuit.clone(), chunk_index * chunk_len, chunk))
                     .collect();
                 let chunk_results: Result<Vec<Vec<NoiseResult>>, SimulationError> = self
                     .install_parallel(|| {
                         work.into_par_iter()
-                            .map(|(mut worker_circuit, chunk)| {
+                            .map(|(mut worker_circuit, chunk_start, chunk)| {
                                 let mut worker_matrix =
                                     rspice_matrix::ComplexMatrix::from_real_structure(&matrix);
                                 let mut worker_rhs = vec![Complex64::new(0.0, 0.0); size];
@@ -3589,7 +3786,10 @@ impl Engine {
                                 let mut worker_transfer_solution = Vec::with_capacity(size);
                                 chunk
                                     .iter()
-                                    .map(|&frequency| {
+                                    .enumerate()
+                                    .map(|(chunk_offset, &frequency)| {
+                                        let final_step =
+                                            chunk_start + chunk_offset + 1 == frequencies.len();
                                         solve_at_frequency(
                                             &mut worker_circuit,
                                             &mut worker_matrix,
@@ -3597,6 +3797,7 @@ impl Engine {
                                             &mut worker_ac_solution,
                                             &mut worker_transfer_solution,
                                             frequency,
+                                            final_step,
                                         )
                                     })
                                     .collect()
@@ -3613,7 +3814,8 @@ impl Engine {
         let mut transfer_solution = Vec::with_capacity(size);
         frequencies
             .iter()
-            .map(|&frequency| {
+            .enumerate()
+            .map(|(index, &frequency)| {
                 solve_at_frequency(
                     &mut circuit,
                     &mut ac_matrix,
@@ -3621,6 +3823,7 @@ impl Engine {
                     &mut ac_solution,
                     &mut transfer_solution,
                     frequency,
+                    index + 1 == frequencies.len(),
                 )
             })
             .collect()

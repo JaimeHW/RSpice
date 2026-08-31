@@ -13,6 +13,7 @@
 //!     through the branch-equation row.
 #![cfg(feature = "veriloga")]
 
+use rspice_core::analysis::NoiseContributionProbe;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
 use std::io::Write;
@@ -130,6 +131,177 @@ endmodule
             result.frequency
         );
     }
+}
+
+#[test]
+fn noise_final_step_marks_only_the_global_final_frequency() {
+    let model = write_model(
+        "final_step_noise.va",
+        r#"
+`include "disciplines.vams"
+module va_noise_final_step(p, n);
+    inout p, n;
+    electrical p, n;
+    real count;
+    analog begin
+        @(initial_step("noise")) count = count + 1.0;
+        @(final_step("noise")) count = count + 1.0;
+        I(p, n) <+ count * 1.0e-3 * V(p, n);
+        I(p, n) <+ ddt(count * 1.0e-9 * V(p, n));
+        I(p, n) <+ white_noise(count * 4.0e-18, "lifecycle");
+        if (count > 1.5)
+            I(p, n) <+ white_noise(8.0e-18, "final_only");
+    end
+endmodule
+"#,
+    );
+    let quiet = write_model("final_step_qres.va", QUIET_RES);
+    let frequencies = [
+        10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 1.0e3, 2.0e3, 5.0e3, 1.0e4, 1.0e5, 5.0e5, 1.0e6,
+    ];
+    let ordinary_deck = Netlist::parse(&format!(
+        "* ordinary noise final-step lifecycle\n\
+         VREF in 0 DC 0 AC 1\n\
+         XLINK in out qres r=1k\n\
+         X1 out 0 va_noise_final_step\n\
+         .va \"{quiet}\" qres\n\
+         .va \"{model}\" va_noise_final_step\n\
+         .end\n"
+    ))
+    .expect("ordinary final-step deck parses");
+
+    let ordinary_run = |workers| {
+        let mut config = SimulationConfig::default();
+        config.resource_limits.max_parallel_workers = workers;
+        Engine::new(config)
+            .run_noise_named_with_input_source(
+                &ordinary_deck,
+                "out",
+                None,
+                "VREF",
+                &frequencies,
+                T_NOM,
+            )
+            .expect("ordinary final-step noise runs")
+    };
+    let serial = ordinary_run(1);
+    let chunk_parallel = ordinary_run(4);
+    assert_eq!(serial.len(), frequencies.len());
+    assert_eq!(chunk_parallel.len(), frequencies.len());
+    let final_only_probe =
+        NoiseContributionProbe::parse("DNO(X1, final_only)").expect("final-only DNO parses");
+    let expected_catalog = serial[0].contribution_catalog.clone();
+    assert!(
+        expected_catalog.iter().any(|identity| {
+            identity.device.eq_ignore_ascii_case("X1")
+                && identity
+                    .mechanism
+                    .as_deref()
+                    .is_some_and(|mechanism| mechanism.eq_ignore_ascii_case("final_only"))
+        }),
+        "activation-independent catalog omits final-only Verilog-A mechanism: {expected_catalog:?}"
+    );
+    for (index, (serial_point, parallel_point)) in serial.iter().zip(&chunk_parallel).enumerate() {
+        assert_eq!(
+            serial_point.contribution_catalog, expected_catalog,
+            "ordinary-noise catalog changed at serial index {index}"
+        );
+        assert_eq!(
+            parallel_point.contribution_catalog, expected_catalog,
+            "ordinary-noise catalog changed at chunk-parallel index {index}"
+        );
+        assert_eq!(
+            serial_point.output_noise_density.to_bits(),
+            parallel_point.output_noise_density.to_bits(),
+            "ordinary noise differs between serial and chunk-parallel index {index}"
+        );
+        let count = if index + 1 == frequencies.len() {
+            2.0
+        } else {
+            1.0
+        };
+        let final_only_psd = if index + 1 == frequencies.len() {
+            8.0e-18
+        } else {
+            0.0
+        };
+        let real_y = (1.0 + count) * 1.0e-3;
+        let imag_y = 2.0 * std::f64::consts::PI * frequencies[index] * count * 1.0e-9;
+        let transfer_denominator = real_y * real_y + imag_y * imag_y;
+        let expected = (count * 4.0e-18 + final_only_psd) / transfer_denominator;
+        let expected_final_only = final_only_psd / transfer_denominator;
+        let observed_final_only = serial_point
+            .contribution(&final_only_probe)
+            .expect("cataloged final-only contribution resolves");
+        assert!(
+            (observed_final_only - expected_final_only).abs()
+                <= 1.0e-10 * expected_final_only.max(f64::MIN_POSITIVE),
+            "final-only contribution at index {index} was not exact: actual={observed_final_only:.16e}, expected={expected_final_only:.16e}"
+        );
+        assert_eq!(
+            parallel_point
+                .contribution(&final_only_probe)
+                .expect("parallel cataloged final-only contribution resolves")
+                .to_bits(),
+            observed_final_only.to_bits(),
+            "final-only contribution differs between serial and chunk-parallel index {index}"
+        );
+        assert!(
+            (serial_point.output_noise_density - expected).abs() <= 1.0e-10 * expected,
+            "ordinary noise final_step count at index {index} was not exact: actual={:.16e}, expected={expected:.16e}",
+            serial_point.output_noise_density
+        );
+    }
+
+    let port_deck = Netlist::parse(&format!(
+        "* SP port-noise final-step lifecycle\n\
+         VPORT port 0 0\n\
+         XLINK port out qres r=1k\n\
+         X1 out 0 va_noise_final_step\n\
+         .va \"{quiet}\" qres\n\
+         .va \"{model}\" va_noise_final_step\n\
+         .end\n"
+    ))
+    .expect("port final-step deck parses");
+    let port_run = |workers| {
+        let mut config = SimulationConfig::default();
+        config.resource_limits.max_parallel_workers = workers;
+        Engine::new(config)
+            .run_port_noise_correlation(&port_deck, &["VPORT".to_owned()], &frequencies, T_NOM)
+            .expect("port final-step noise runs")
+    };
+    let port_serial = port_run(1);
+    let port_parallel_config = port_run(4);
+    for (index, (serial_point, parallel_point)) in
+        port_serial.iter().zip(&port_parallel_config).enumerate()
+    {
+        let serial_density = serial_point.current_correlation[0][0];
+        let parallel_density = parallel_point.current_correlation[0][0];
+        assert_eq!(serial_density.re.to_bits(), parallel_density.re.to_bits());
+        assert_eq!(serial_density.im.to_bits(), parallel_density.im.to_bits());
+        let count = if index + 1 == frequencies.len() {
+            2.0
+        } else {
+            1.0
+        };
+        let final_only_psd = if index + 1 == frequencies.len() {
+            8.0e-18
+        } else {
+            0.0
+        };
+        let real_y = (1.0 + count) * 1.0e-3;
+        let imag_y = 2.0 * std::f64::consts::PI * frequencies[index] * count * 1.0e-9;
+        let expected =
+            (count * 4.0e-18 + final_only_psd) * 1.0e-6 / (real_y * real_y + imag_y * imag_y);
+        assert!(
+            (serial_density.re - expected).abs() <= 1.0e-10 * expected
+                && serial_density.im.abs() <= 1.0e-30,
+            "port noise final_step count at index {index} was not exact: actual={serial_density:?}, expected={expected:.16e}"
+        );
+    }
+
+    let _ = std::fs::remove_file(model);
+    let _ = std::fs::remove_file(quiet);
 }
 
 #[test]

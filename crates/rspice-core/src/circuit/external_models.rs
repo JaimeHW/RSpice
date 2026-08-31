@@ -2067,6 +2067,17 @@ impl CircuitData {
         Ok(())
     }
 
+    /// Prepare one frequency-domain AC/noise point. The operating-point
+    /// initial state is already accepted before a sweep reaches this surface,
+    /// so frequency points can expose only the final boundary.
+    pub(crate) fn prepare_veriloga_frequency_analysis_point(
+        &mut self,
+        analysis: u8,
+        final_step: bool,
+    ) -> Result<(), String> {
+        self.prepare_veriloga_equilibrium_analysis_point(analysis, false, final_step)
+    }
+
     /// Atomically accept the exact public analysis point across both
     /// runtime-compiled and build-time generated Verilog-A instances.
     /// Validation completes for every instance before the first mutation.

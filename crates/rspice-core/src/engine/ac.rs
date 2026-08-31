@@ -2808,12 +2808,16 @@ impl Engine {
         // clone (device-evaluation caches are Cell-based and not Sync).
         let solve_at_freq = |circuit: &mut CircuitData,
                              ac_matrix: &mut ComplexMatrix,
-                             freq: Value|
+                             freq: Value,
+                             final_step: bool|
          -> Result<AcResult, SimulationError> {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
             let omega = 2.0 * PI * freq;
+            circuit
+                .prepare_veriloga_frequency_analysis_point(1, final_step)
+                .map_err(SimulationError::Circuit)?;
             circuit
                 .prepare_behavioral_small_signal_at_frequency(&dc_solution, freq)
                 .map_err(SimulationError::Circuit)?;
@@ -2880,38 +2884,60 @@ impl Engine {
         // worker owns an independent clone paired with one contiguous chunk
         // of the sweep — no shared state, no locks, and chunk order
         // preserves output ordering. The caches are pure memoization, so
-        // per-point results are identical to the sequential path.
+        // per-point results are identical to the sequential path. Lifecycle
+        // state is evaluated only on the private point clone: the final
+        // frequency is an observation boundary, not state consumed by a
+        // later analysis point, so it is intentionally not accepted.
         #[cfg(feature = "parallel")]
         if frequencies.len() >= 10 {
             use rayon::prelude::*;
 
             let workers = self.parallel_worker_count(frequencies.len());
-            let chunk_len = frequencies.len().div_ceil(workers);
-            let work: Vec<(CircuitData, &[Value])> = frequencies
-                .chunks(chunk_len)
-                .map(|chunk| (circuit.clone(), chunk))
-                .collect();
-            let chunk_results: Result<Vec<Vec<AcResult>>, SimulationError> = self
-                .install_parallel(|| {
-                    work.into_par_iter()
-                        .map(|(mut worker_circuit, chunk)| {
-                            let mut workspace = ComplexMatrix::from_real_structure(&matrix);
-                            chunk
-                                .iter()
-                                .map(|&freq| {
-                                    solve_at_freq(&mut worker_circuit, &mut workspace, freq)
-                                })
-                                .collect()
-                        })
-                        .collect()
-                })?;
-            return chunk_results.map(|chunks| chunks.into_iter().flatten().collect());
+            if workers > 1 {
+                let chunk_len = frequencies.len().div_ceil(workers);
+                let work: Vec<(CircuitData, usize, &[Value])> = frequencies
+                    .chunks(chunk_len)
+                    .enumerate()
+                    .map(|(chunk_index, chunk)| (circuit.clone(), chunk_index * chunk_len, chunk))
+                    .collect();
+                let chunk_results: Result<Vec<Vec<AcResult>>, SimulationError> = self
+                    .install_parallel(|| {
+                        work.into_par_iter()
+                            .map(|(mut worker_circuit, chunk_start, chunk)| {
+                                let mut workspace = ComplexMatrix::from_real_structure(&matrix);
+                                chunk
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(chunk_offset, &freq)| {
+                                        let final_step =
+                                            chunk_start + chunk_offset + 1 == frequencies.len();
+                                        solve_at_freq(
+                                            &mut worker_circuit,
+                                            &mut workspace,
+                                            freq,
+                                            final_step,
+                                        )
+                                    })
+                                    .collect()
+                            })
+                            .collect()
+                    })?;
+                return chunk_results.map(|chunks| chunks.into_iter().flatten().collect());
+            }
         }
 
         let mut workspace = ComplexMatrix::from_real_structure(&matrix);
         frequencies
             .iter()
-            .map(|&freq| solve_at_freq(&mut circuit, &mut workspace, freq))
+            .enumerate()
+            .map(|(index, &freq)| {
+                solve_at_freq(
+                    &mut circuit,
+                    &mut workspace,
+                    freq,
+                    index + 1 == frequencies.len(),
+                )
+            })
             .collect()
     }
 
