@@ -458,6 +458,7 @@ impl SemanticAnalyzer {
                 continuous_assigns.push(analyzed_assignment);
             }
         }
+        self.reject_drivers_on_input_ports(module, &continuous_assigns);
 
         analyzed.digital = AnalyzedDigital {
             signals,
@@ -507,6 +508,53 @@ impl SemanticAnalyzer {
         }
         self.push_implicit_port_nets(module, &mut signals, &mut seen);
         signals
+    }
+
+    /// Refuse a continuous assignment that drives one of this module's own
+    /// `input` ports.
+    ///
+    /// IEEE 1364-2005 section 12.3.9.1: an input port is driven from outside
+    /// the instance, so nothing inside the module may assign it. Hierarchy
+    /// elaboration already refuses this — but only for a module somebody
+    /// *instantiates*, and only when the connecting scope's own view says the
+    /// net is an input port. A module compiled as the top of the design is
+    /// never instantiated, so without this the same source is accepted or
+    /// refused depending on where it sits in a hierarchy, and a top-level
+    /// design with the defect gets a net with a driver the standard says it
+    /// cannot have.
+    ///
+    /// `inout` is deliberately not here. Section 12.3.9.3 makes a bidirectional
+    /// port drivable from both sides, which is the whole reason the direction
+    /// exists.
+    fn reject_drivers_on_input_ports(
+        &mut self,
+        module: &Module,
+        assignments: &[AnalyzedContinuousAssign],
+    ) {
+        let inputs: std::collections::HashSet<&SmolStr> = module
+            .port_declarations
+            .iter()
+            .filter(|declaration| declaration.direction == PortDirection::Input)
+            .flat_map(|declaration| declaration.names.iter())
+            .collect();
+        if inputs.is_empty() {
+            return;
+        }
+        for assignment in assignments {
+            for (name, span) in assignment.assignment.target.written_names() {
+                if inputs.contains(name) {
+                    self.record_error_at(
+                        SemanticErrorKind::InvalidContribution(format!(
+                            "`{name}`, which module `{}` declares an `input` port; IEEE \
+                             1364-2005 section 12.3.9.1 drives an input port from outside the \
+                             instance, so nothing inside the module may assign one",
+                            module.name
+                        )),
+                        span,
+                    );
+                }
+            }
+        }
     }
 
     /// The module's integer parameters and localparams, by name.

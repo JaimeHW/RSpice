@@ -2821,6 +2821,25 @@ impl<'a> Parser<'a> {
             .text
             .clone()
             .unwrap_or_else(|| format!("{:?}", self.current().kind).to_lowercase());
+        // `defparam` gets its clause and its alternative rather than the bare
+        // keyword refusal. It is the one construct in this set an author
+        // reaches for by accident — it is the *other* way to give a parameter a
+        // value, and IEEE 1364-2005 section 12.2.1 deprecates it in favour of
+        // the one this compiler reads — so a diagnostic that only says "not
+        // supported" leaves the author with nothing to do.
+        if keyword == "defparam" {
+            return ParseError::new(
+                ParseErrorKind::UnsupportedConstruct {
+                    context: "module item".to_string(),
+                    found: "`defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect \
+                            as a `#(...)` override on the instance and deprecates it in favour \
+                            of one, so write the override — and note that a parameter override \
+                            on a *digital* instance is itself refused, per section 12.2"
+                        .to_string(),
+                },
+                self.current_span(),
+            );
+        }
         ParseError::new(
             ParseErrorKind::UnsupportedAmsConstruct { keyword },
             self.current_span(),

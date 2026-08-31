@@ -1305,6 +1305,11 @@ fn defparam_is_refused_by_name() {
         "    wire a, b, y;\n     nand2 g1(y, a, b);\n     defparam g1.w = 1;",
     ));
     assert!(message.contains("defparam"), "{message}");
+    // The clause, and what to write instead. `defparam` is the one construct in
+    // this set an author reaches for on purpose — it is the other spelling of a
+    // parameter override — so the refusal has to say which spelling is read.
+    assert!(message.contains("12.2.1"), "{message}");
+    assert!(message.contains("`#(...)` override"), "{message}");
 }
 
 /// A hierarchy that elaborates is still refused by the bytecode backend, which
@@ -1345,6 +1350,50 @@ fn a_module_whose_only_digital_content_is_an_instance_still_refuses() {
         message.contains("digital instance `g1` of module `nand2`"),
         "{message}"
     );
+}
+
+/// A module may not drive its own `input` port, whether or not anybody
+/// instantiates it (IEEE 1364-2005 section 12.3.9.1).
+///
+/// The "whether or not" is the point. An input port is driven from outside the
+/// instance, and that holds for a module compiled as the top of the design as
+/// much as for one somebody instantiates — so the refusal is on the module's own
+/// text rather than on a connection, and the same source cannot be accepted or
+/// refused depending on where it sits in a hierarchy.
+///
+/// `inout` is not included: section 12.3.9.3 makes a bidirectional port
+/// drivable from both sides, which is the whole reason the direction exists.
+#[test]
+fn a_module_may_not_drive_its_own_input_port() {
+    let message = analyze_error(
+        "module driver(y, a);\n\
+         \x20   output y;\n     input a;\n     wire y, a;\n\
+         \x20   assign y = 1'b0;\n\
+         \x20   assign a = y;\n\
+         endmodule\n",
+    );
+    assert!(message.contains("declares an `input` port"), "{message}");
+    assert!(message.contains("12.3.9.1"), "{message}");
+
+    // A gate primitive is a continuous assignment by the time this runs, so the
+    // same rule reaches it — a design cannot get past the check by spelling the
+    // driver as `buf`.
+    let message = analyze_error(
+        "module gated(y, a);\n\
+         \x20   output y;\n     input a;\n     wire y, a;\n\
+         \x20   buf u (a, y);\n\
+         endmodule\n",
+    );
+    assert!(message.contains("declares an `input` port"), "{message}");
+
+    // An `inout` port may be driven from inside.
+    let analyzed = analyze(
+        "module bidirectional(io, a);\n\
+         \x20   inout io;\n     input a;\n     wire io, a;\n\
+         \x20   assign io = a;\n\
+         endmodule\n",
+    );
+    assert_eq!(only_module(&analyzed).digital.continuous_assigns.len(), 1);
 }
 
 /// A port connected to *some of* a net's bits does not collapse; it becomes an
@@ -1572,7 +1621,7 @@ fn unelaborated_instance_constructs_refuse_by_name() {
             vec!["connects an output or inout port to a net", "12.3.9.2"],
         ),
         (
-            "an instance driving its own input port",
+            "a module driving its own input port",
             hierarchy(
                 "module gate(y, a);\n\
                  \x20   output y;\n     input a;\n     wire y, a;\n\
@@ -1580,7 +1629,7 @@ fn unelaborated_instance_constructs_refuse_by_name() {
                  endmodule\n",
                 "    wire x, z;\n     gate g1(z, x);",
             ),
-            vec!["receives through an input port", "12.3.9.1"],
+            vec!["declares an `input` port", "12.3.9.1"],
         ),
         (
             "an unknown named port",

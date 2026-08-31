@@ -92,8 +92,6 @@
 //! * an output or inout port connected to a variable, or to anything the
 //!   connecting scope sees as an input port, because either would let the
 //!   instance drive what it must not (section 12.3.9.1);
-//! * a continuous assignment that drives a port its own module receives as an
-//!   input (section 12.3.9.1);
 //! * a port of a digital module that reaches here with no discrete-domain
 //!   declaration at all. Section 12.3.3's implicit net covers every port the
 //!   author did not declare, so this is a residual guard rather than a
@@ -310,29 +308,14 @@ impl DigitalElaborator<'_> {
         let (signals, scope, port_drivers) =
             self.bind_ports(instance, child, parent_scope, path, &connections)?;
 
-        // A continuous assignment inside the instance may not drive a net the
-        // instance receives through an `input` port, however many levels above
-        // the driven net was declared. Checked here rather than at the port,
-        // because the driver is written in the child and the prohibition is a
-        // property of the connection.
-        for assignment in &child.digital.continuous_assigns {
-            for (name, span) in assignment.assignment.target.written_names() {
-                if scope
-                    .signals
-                    .get(name)
-                    .is_some_and(|binding| binding.is_input_port)
-                {
-                    return Err(semantic_error(
-                        SemanticErrorKind::InvalidContribution(format!(
-                            "`{name}`, which instance `{path}` receives through an input port; \
-                             IEEE 1364-2005 section 12.3.9.1 drives an input port from outside \
-                             the instance, so nothing inside it may assign one"
-                        )),
-                        span,
-                    ));
-                }
-            }
-        }
+        // A continuous assignment driving one of the child's own `input` ports
+        // is *not* checked here. Semantic analysis refuses it on the module
+        // itself, before the module is instantiated at all — which is where the
+        // check belongs, because the prohibition is a property of the module's
+        // own text and holds whether or not anybody instantiates it. What is
+        // left for the connection to police is the other half: an output or
+        // inout port connected to something the connecting scope receives
+        // through an input port, which `bind_ports` refuses above.
 
         self.instances.push(ElaboratedDigitalInstance {
             path: path.into(),
