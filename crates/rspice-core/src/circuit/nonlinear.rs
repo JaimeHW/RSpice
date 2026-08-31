@@ -40,7 +40,10 @@ pub(crate) struct NonlinearDeviceStateSnapshot {
     iswitches: Vec<crate::device::CurrentSwitch>,
     generic_switches: Vec<crate::device::GenericSwitch>,
     behavioral_sources: BehavioralSources,
-    xspice_instances: Vec<XspiceInstance>,
+    // Shared with the circuit until something writes through it. Capture is a
+    // reference-count bump per instance; the copy is deferred to whatever the
+    // step attempt actually touches. See `SharedXspiceInstance`.
+    xspice_instances: Vec<SharedXspiceInstance>,
     xspice_digital_values: HashMap<NodeId, DigitalValue>,
     xspice_digital_drivers: XspiceDigitalDrivers,
     xspice_digital_event_times: HashMap<NodeId, Value>,
@@ -625,7 +628,7 @@ impl CircuitData {
             && self
                 .xspice_instances
                 .iter()
-                .all(XspiceInstance::has_memoryless_linear_transient_stamp)
+                .all(|instance| instance.has_memoryless_linear_transient_stamp())
     }
 
     /// Check if circuit has any BSIM3SOI device (DD, FD, or PD variant).

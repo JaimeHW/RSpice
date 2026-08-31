@@ -153,7 +153,7 @@ fn apply_xspice_events_at_or_before(
 /// `Ok`.
 fn mark_drained_fanout_dirty(
     dispatch: &super::xspice_dispatch::XspiceEventDispatch,
-    instances: &mut [crate::xspice::XspiceInstance],
+    instances: &mut [crate::xspice::SharedXspiceInstance],
     touched_digital_nodes: &[NodeId],
     touched_real_nodes: &[NodeId],
 ) {
@@ -252,7 +252,8 @@ impl CircuitData {
         for connection in instance.connections() {
             mark_xspice_event_connection_nets(&mut self.net_kinds, connection);
         }
-        self.xspice_instances.push(instance);
+        self.xspice_instances
+            .push(crate::xspice::SharedXspiceInstance::new(instance));
         self.invalidate_xspice_event_dispatch();
     }
 
@@ -300,7 +301,7 @@ impl CircuitData {
         let tstep = (tstep.is_finite() && tstep > 0.0).then_some(tstep);
         let tstop = (tstop.is_finite() && tstop >= 0.0).then_some(tstop);
         for instance in &mut self.xspice_instances {
-            instance.set_transient_run_context(tstep, tstop);
+            instance.make_mut().set_transient_run_context(tstep, tstop);
         }
     }
 
@@ -594,7 +595,11 @@ impl CircuitData {
                 if !pending[index] {
                     continue;
                 }
-                let instance = &mut instances[index];
+                // Read-only until the skip check has had its say: an instance
+                // the dispatch skips must stay shared with the rollback
+                // snapshot, or the copy this whole arrangement defers happens
+                // anyway.
+                let instance = &instances[index];
                 if dirty_dispatch_applies
                     && dispatch.is_dirty_dispatched(index)
                     && !instance.event_inputs_dirty()
@@ -615,6 +620,7 @@ impl CircuitData {
                     continue;
                 }
 
+                let instance = instances[index].make_mut();
                 instance.set_transient_companion_coefficients(companion_coefficients);
                 instance.set_xyce_one_step_order2(xyce_one_step_order2);
                 if let Err(e) = instance.update_inputs_with_analog_transitions(
@@ -773,7 +779,13 @@ impl CircuitData {
         F: FnMut(Value),
     {
         for instance in &mut self.xspice_instances {
-            for time in instance.drain_requested_breakpoints() {
+            // Asking first keeps the sweep off the copy-on-write path for
+            // every instance that requested nothing, which on a gate-level
+            // design is all but a handful.
+            if !instance.has_requested_breakpoints() {
+                continue;
+            }
+            for time in instance.make_mut().drain_requested_breakpoints() {
                 sink(time);
             }
         }
@@ -1411,7 +1423,8 @@ impl CircuitData {
             );
         }
 
-        for instance in &mut self.xspice_instances {
+        for slot in &mut self.xspice_instances {
+            let instance = &**slot;
             for (pos, neg, branch_ordinal) in instance.current_probe_branches() {
                 stamp_current_probe(matrix, pos, neg, branch_ordinal, num_nodes);
             }
@@ -1752,11 +1765,17 @@ impl CircuitData {
             }
 
             // Drain any explicit matrix/RHS stamps queued by the code model.
-            for (row, col, value) in instance.take_deferred_stamps() {
-                add_matrix_if_present(matrix, row, col, value);
-            }
-            for (node, value) in instance.take_deferred_rhs() {
-                add_rhs_if_present(rhs, node, value);
+            // The condition is the last read through the shared view, so the
+            // mutable view below is free to copy — and only does so for an
+            // instance that queued something.
+            if instance.has_deferred_contributions() {
+                let instance = slot.make_mut();
+                for (row, col, value) in instance.take_deferred_stamps() {
+                    add_matrix_if_present(matrix, row, col, value);
+                }
+                for (node, value) in instance.take_deferred_rhs() {
+                    add_rhs_if_present(rhs, node, value);
+                }
             }
         }
     }
@@ -1765,7 +1784,11 @@ impl CircuitData {
     /// evaluation to a probe RHS.  Applying queued stamps directly to the
     /// residual avoids rebuilding matrix topology for every accepted step.
     pub(crate) fn stamp_xspice_static_residual(&mut self, solution: &[Value], rhs: &mut [Value]) {
-        for instance in &mut self.xspice_instances {
+        for slot in &mut self.xspice_instances {
+            if !slot.has_static_deferred_contributions() {
+                continue;
+            }
+            let instance = slot.make_mut();
             for (row, col, value) in instance.take_static_deferred_stamps() {
                 if let (Some(rhs_value), Some(solution_value)) =
                     (rhs.get_mut(row), solution.get(col))
@@ -1788,7 +1811,14 @@ impl CircuitData {
     /// Called after a successful timestep to commit state changes.
     pub fn accept_xspice_timestep(&mut self) {
         for instance in &mut self.xspice_instances {
-            instance.accept_timestep();
+            // A gate the settle pass skipped carries the time and state its
+            // last evaluation left, which the accept after that evaluation
+            // already advanced; re-advancing writes the same bytes back and is
+            // not worth a copy.
+            if instance.accept_timestep_is_noop() {
+                continue;
+            }
+            instance.make_mut().accept_timestep();
         }
     }
 
@@ -2753,7 +2783,7 @@ impl CircuitData {
     ) -> Result<(), String> {
         self.validate_xspice_checkpoint_instance_states(checkpoints)?;
         for (instance, checkpoint) in self.xspice_instances.iter_mut().zip(checkpoints) {
-            instance.restore_checkpoint_state(checkpoint)?;
+            instance.make_mut().restore_checkpoint_state(checkpoint)?;
         }
         Ok(())
     }

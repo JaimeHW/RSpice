@@ -1842,6 +1842,12 @@ impl CmContext {
         std::mem::take(&mut self.requested_breakpoints)
     }
 
+    /// Whether any absolute breakpoint request is queued.
+    #[inline]
+    pub(crate) fn has_requested_breakpoints(&self) -> bool {
+        !self.requested_breakpoints.is_empty()
+    }
+
     /// Drain pending breakpoint requests while preserving the queue allocation.
     pub(crate) fn drain_requested_breakpoints(&mut self) -> Drain<'_, Value> {
         self.requested_breakpoints.drain(..)
@@ -2254,6 +2260,23 @@ impl CmContext {
     }
 
     /// Advance state for new timestep
+    /// Whether [`Self::advance_state`] would write back exactly what is there.
+    ///
+    /// Mirrors `advance_state` field for field, so the two cannot drift: each
+    /// clause below is the equality of one assignment's destination and
+    /// source.
+    pub(crate) fn advance_state_is_noop(&self) -> bool {
+        self.state_prev == self.state
+            && self.time_prev == self.time
+            && self.outputs.values().all(|output| match output {
+                OutputValue::Analog(value) => value.prev_value == value.value,
+                OutputValue::AnalogVector(values) => {
+                    values.iter().all(|value| value.prev_value == value.value)
+                }
+                _ => true,
+            })
+    }
+
     pub fn advance_state(&mut self) {
         self.state_prev.clone_from(&self.state);
         for output in self.outputs.values_mut() {
@@ -2295,6 +2318,18 @@ impl CmContext {
     /// Add an RHS contribution to the static residual history queue.
     pub(crate) fn stamp_static_rhs(&mut self, node: usize, value: Value) {
         self.static_rhs.push((node, value));
+    }
+
+    /// Whether any deferred matrix or RHS contribution is queued.
+    #[inline]
+    pub(crate) fn has_deferred_contributions(&self) -> bool {
+        !self.stamps.is_empty() || !self.rhs.is_empty()
+    }
+
+    /// Whether any static-only matrix or RHS contribution is queued.
+    #[inline]
+    pub(crate) fn has_static_deferred_contributions(&self) -> bool {
+        !self.static_stamps.is_empty() || !self.static_rhs.is_empty()
     }
 
     /// Get all conductance stamps and clear

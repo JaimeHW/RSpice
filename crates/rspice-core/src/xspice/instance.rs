@@ -828,6 +828,60 @@ pub struct XspiceInstance {
     initialized: bool,
 }
 
+/// A circuit's handle on one instance, shared with rollback snapshots until
+/// something writes through it.
+///
+/// Rollback capture used to deep-copy every registered instance, so a
+/// gate-level design paid for 288 `CmContext`s — string-keyed maps and all —
+/// at every attempted timestep and merit checkpoint, whether or not any of
+/// them had moved. Sharing the instance behind an [`Arc`] turns that capture
+/// into a reference-count bump and defers the copy to the first write after
+/// it, which the event dispatch has already narrowed to the handful of gates
+/// an event actually reached.
+///
+/// The rollback image this produces is the same image the deep copy produced.
+/// [`Arc::make_mut`] copies whenever the pointer is shared, so a snapshot that
+/// aliases an instance observes every subsequent write on a fresh allocation
+/// and never on its own; and writing is the only way to reach that path,
+/// because the only mutable view of the instance is [`Self::make_mut`].
+/// `DerefMut` is deliberately not implemented: shared reads go through
+/// [`Deref`] unchanged, and every mutation site is spelled out.
+#[derive(Clone)]
+pub(crate) struct SharedXspiceInstance(Arc<XspiceInstance>);
+
+impl SharedXspiceInstance {
+    /// Register an instance the circuit has just built.
+    pub(crate) fn new(instance: XspiceInstance) -> Self {
+        Self(Arc::new(instance))
+    }
+
+    /// Take a mutable view, copying the instance first if a snapshot still
+    /// shares it.
+    ///
+    /// Callers on a per-step path should ask a cheap shared-borrow predicate
+    /// whether the write would change anything before calling this — a write
+    /// that stores what is already there still costs a copy.
+    #[inline]
+    pub(crate) fn make_mut(&mut self) -> &mut XspiceInstance {
+        Arc::make_mut(&mut self.0)
+    }
+}
+
+impl std::ops::Deref for SharedXspiceInstance {
+    type Target = XspiceInstance;
+
+    #[inline]
+    fn deref(&self) -> &XspiceInstance {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for SharedXspiceInstance {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&*self.0, f)
+    }
+}
+
 /// Serializable state for one XSPICE code-model instance.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct XspiceInstanceCheckpoint {
@@ -1870,7 +1924,7 @@ impl XspiceInstance {
     #[cfg(debug_assertions)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn debug_assert_event_inputs_quiet(
-        &mut self,
+        &self,
         solution: &[Value],
         num_nodes: usize,
         digital_values: &HashMap<usize, DigitalValue>,
@@ -1890,7 +1944,13 @@ impl XspiceInstance {
         if self.last_event_input_signature.is_none() {
             return;
         }
-        if self
+        // Rebuilding the signature is itself a write, and the instance this
+        // runs on is one the dispatch just declined to touch — the whole point
+        // of the skip is that it stays shared with the rollback snapshot. So
+        // the check takes its own copy, which also makes it what an assertion
+        // should be: an observation that cannot perturb what it observes.
+        let mut probe = self.clone();
+        if probe
             .update_inputs_with_analog_transitions(
                 solution,
                 num_nodes,
@@ -1906,10 +1966,10 @@ impl XspiceInstance {
         {
             return;
         }
-        self.refresh_event_input_signature();
+        probe.refresh_event_input_signature();
         assert_eq!(
-            self.last_event_input_signature.as_deref(),
-            Some(self.event_input_signature_scratch.as_slice()),
+            probe.last_event_input_signature.as_deref(),
+            Some(probe.event_input_signature_scratch.as_slice()),
             "XSPICE dispatch skipped {} ({}) as quiet, but its event inputs moved; \
              the net-to-instance sensitivity map is missing one of its input nets",
             self.name,
@@ -2417,6 +2477,16 @@ impl XspiceInstance {
         for (node, value) in self.context.drain_rhs() {
             rhs_add(node, value);
         }
+    }
+
+    /// Whether [`Self::drain_requested_breakpoints`] would yield anything.
+    ///
+    /// The breakpoint sweep visits every registered instance once per step, so
+    /// it asks this before taking the mutable view that would copy a shared
+    /// instance to drain an empty queue.
+    #[inline]
+    pub(crate) fn has_requested_breakpoints(&self) -> bool {
+        self.context.has_requested_breakpoints()
     }
 
     /// Drain transient breakpoint requests while preserving context storage.
@@ -2980,6 +3050,22 @@ impl XspiceInstance {
         )
     }
 
+    /// Whether the code model queued any deferred matrix or RHS contribution.
+    ///
+    /// The analog stamping walk visits every registered instance on every
+    /// matrix load; asking first keeps an instance that queued nothing out of
+    /// the copy-on-write path.
+    #[inline]
+    pub(crate) fn has_deferred_contributions(&self) -> bool {
+        self.context.has_deferred_contributions()
+    }
+
+    /// The same question for the static-only stamps retained for Xyce OneStep.
+    #[inline]
+    pub(crate) fn has_static_deferred_contributions(&self) -> bool {
+        self.context.has_static_deferred_contributions()
+    }
+
     /// Drain deferred matrix stamps queued by the code model.
     pub fn take_deferred_stamps(&mut self) -> Vec<(usize, usize, Value)> {
         self.context.take_stamps()
@@ -2998,6 +3084,18 @@ impl XspiceInstance {
     /// Drain static-only RHS contributions queued by the code model.
     pub(crate) fn take_static_deferred_rhs(&mut self) -> Vec<(usize, Value)> {
         self.context.drain_static_rhs().collect()
+    }
+
+    /// Whether [`Self::accept_timestep`] would leave the instance byte-for-byte
+    /// as it is.
+    ///
+    /// An instance the settle pass skipped keeps the time and state it carried
+    /// out of its last evaluation, and the accept that followed that
+    /// evaluation already equalised them — so for every gate quiet since, this
+    /// answers yes and the per-step accept sweep leaves it shared.
+    #[inline]
+    pub(crate) fn accept_timestep_is_noop(&self) -> bool {
+        self.context.advance_state_is_noop()
     }
 
     /// Accept the current timestep

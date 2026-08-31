@@ -112,7 +112,7 @@
 //! analog and hybrid model stay in that set.
 
 use super::{CircuitData, NodeId};
-use crate::xspice::{EventInputKind, XspiceInstance};
+use crate::xspice::{EventInputKind, SharedXspiceInstance};
 use std::collections::HashMap;
 
 /// Which instances read events from which nets.
@@ -134,7 +134,7 @@ pub(crate) struct XspiceEventDispatch {
 
 impl XspiceEventDispatch {
     /// Build the map for a fixed instance list.
-    pub(crate) fn build(instances: &[XspiceInstance]) -> Self {
+    pub(crate) fn build(instances: &[SharedXspiceInstance]) -> Self {
         let mut digital_fanout: HashMap<NodeId, Vec<u32>> = HashMap::new();
         let mut real_fanout: HashMap<NodeId, Vec<u32>> = HashMap::new();
         let mut dirty_dispatched = Vec::with_capacity(instances.len());
@@ -188,14 +188,19 @@ impl XspiceEventDispatch {
     /// part of that signature.
     pub(crate) fn mark_fanout_dirty(
         &self,
-        instances: &mut [XspiceInstance],
+        instances: &mut [SharedXspiceInstance],
         kind: EventInputKind,
         nodes: &[NodeId],
     ) {
         for &node in nodes {
             for &index in self.fanout(kind, node) {
-                if let Some(instance) = instances.get_mut(index as usize) {
-                    instance.mark_event_inputs_dirty();
+                if let Some(instance) = instances.get_mut(index as usize)
+                    // Setting a bit that is already set is not worth the copy
+                    // an instance still shared with a rollback snapshot would
+                    // otherwise pay for it.
+                    && !instance.event_inputs_dirty()
+                {
+                    instance.make_mut().mark_event_inputs_dirty();
                 }
             }
         }

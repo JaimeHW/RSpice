@@ -559,7 +559,9 @@ impl CircuitData {
         }
 
         for instance in &mut self.xspice_instances {
-            instance.remap_circuit_nodes(|node| Self::remap_node_id(node, old_node_id));
+            instance
+                .make_mut()
+                .remap_circuit_nodes(|node| Self::remap_node_id(node, old_node_id));
         }
         // The instances now carry renumbered connections, so the cached net
         // kinds still describe the pre-remap node IDs. Replay them.
@@ -887,6 +889,7 @@ impl CircuitData {
         let current_sources = self.current_sources.clone();
         for instance in &mut self.xspice_instances {
             instance
+                .make_mut()
                 .resolve_branch_references(
                     |name| {
                         if capacitor_ic_names.contains(&name.to_ascii_uppercase()) {

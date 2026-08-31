@@ -10,7 +10,9 @@ use crate::device::behavioral::BehavioralSources;
 use crate::device::{Cccs, Ccvs, MatrixStamper, NonlinearConvergenceCriteria, Vccs, Vcvs};
 use crate::numerics::integration::CompanionCoefficients;
 use crate::solver::{CscIndex, StaticMatrix, TripletMatrix};
-use crate::xspice::{CodeModelRegistry, DigitalValue, XspiceEventScheduler, XspiceInstance};
+use crate::xspice::{
+    CodeModelRegistry, DigitalValue, SharedXspiceInstance, XspiceEventScheduler, XspiceInstance,
+};
 use crate::{NodeId, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -594,7 +596,7 @@ pub struct CircuitData {
 
     // XSPICE code model instances
     /// XSPICE instance storage for code model evaluation
-    pub(crate) xspice_instances: Vec<XspiceInstance>,
+    pub(crate) xspice_instances: Vec<SharedXspiceInstance>,
     /// Cached presence of event-driven XSPICE ports.
     pub(crate) xspice_has_event_driven_devices: bool,
     /// Circuit-level digital node values driven by XSPICE events.
