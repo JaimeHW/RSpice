@@ -594,18 +594,20 @@ impl CodeModel for PspiceDigitalStimulus {
         }
 
         match next {
-            Some(index) => {
-                if scheduled_row != index as i64 {
-                    let delay = rows.times[index] - ctx.time;
-                    ctx.set_output_digital_vector_from_slice("out", rows.row_values(index), delay);
-                    set_row_state(ctx, STIM_SCHEDULED_ROW, index as i64);
-                }
-                // Self-scheduling keeps the stimulus correct even when the
-                // breakpoint pass ran without a known stop time.
+            Some(index) if scheduled_row != index as i64 => {
+                let delay = rows.times[index] - ctx.time;
+                ctx.set_output_digital_vector_from_slice("out", rows.row_values(index), delay);
+                set_row_state(ctx, STIM_SCHEDULED_ROW, index as i64);
+                // Asking for the breakpoint as well as publishing it through
+                // `transient_breakpoints` keeps the stimulus correct even if the
+                // breakpoint pass ever runs without a known stop time. Doing it
+                // here rather than on every evaluation makes it one request per
+                // row, and a rewind that resets the cursor re-requests.
                 if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe {
                     ctx.request_breakpoint(rows.times[index]);
                 }
             }
+            Some(_) => {}
             None if scheduled_row != STIM_NO_ROW => {
                 set_row_state(ctx, STIM_SCHEDULED_ROW, STIM_NO_ROW);
             }

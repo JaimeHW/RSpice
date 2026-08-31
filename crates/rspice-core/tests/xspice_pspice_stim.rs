@@ -9,6 +9,7 @@
 
 use rspice_core::engine::{Engine, TransientResult};
 use rspice_core::netlist::Netlist;
+use rspice_core::solver::SimulationResult;
 
 fn run(deck: &str, tstop: f64, max_step: f64) -> TransientResult {
     let netlist = Netlist::parse(deck).unwrap_or_else(|err| panic!("deck parses: {err}"));
@@ -58,6 +59,15 @@ fn assert_transitions(actual: &[(f64, String)], expected: &[(f64, &str)]) {
             "transition {index} token differs\n  actual: {actual:?}"
         );
     }
+}
+
+fn node_voltage(result: &SimulationResult, node: &str) -> f64 {
+    let index = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case(node))
+        .unwrap_or_else(|| panic!("node {node} missing from {:?}", result.node_names));
+    result.node_voltages[index]
 }
 
 fn analog_at(result: &TransientResult, node: &str, target: f64) -> f64 {
@@ -849,4 +859,123 @@ fn a_negative_time_increment_is_refused() {
         message.contains("negative time increment"),
         "unexpected diagnostic: {message}"
     );
+}
+
+/// Every shape of malformed STIM card resolves to `Err`, never a panic.
+///
+/// The parser indexes a field list whose length it derives from the declared
+/// width, so truncation is the failure mode to watch: each case here stops the
+/// card somewhere a slice bound could have been taken on trust.
+#[test]
+fn no_malformed_stim_card_panics() {
+    let cards = [
+        "STIM",
+        "STIM(",
+        "STIM()",
+        "STIM(1)",
+        "STIM(1,)",
+        "STIM(0,1)",
+        "STIM(,1)",
+        "STIM(1,1,1)",
+        "STIM(x,1)",
+        "STIM(1,1) $G_DPWR",
+        "STIM(1,1) $G_DPWR $G_DGND",
+        "STIM(1,1) $G_DPWR $G_DGND A",
+        "STIM(1,1) $G_DPWR $G_DGND $D_NC IO_STM",
+        "STIM(1,1) $G_DPWR $G_DGND A IO_STM TIMESTEP=",
+        "STIM(1,1) $G_DPWR $G_DGND A IO_STM TIMESTEP=0",
+        "STIM(1,1) $G_DPWR $G_DGND A IO_STM TIMESTEP=-1n",
+        "STIM(1,1) $G_DPWR $G_DGND A IO_STM BOGUS=1",
+        "STIM(1,1) $G_DPWR $G_DGND A=B IO_STM",
+        "STIM(2,11) $G_DPWR $G_DGND A IO_LEVEL=1 IO_STM",
+        "STIM(65,1111111111111111111111111111111111111111111111111111111111111111\
+         1) $G_DPWR $G_DGND A IO_STM",
+    ];
+    let bodies = [
+        "",
+        "+ 0s\n",
+        "+ 0s 0\n",
+        "+ 0s 0\n+ REPEAT\n",
+        "+ 0s 0\n+ REPEAT 0 TIMES\n+ ENDREPEAT\n",
+        "+ ENDREPEAT\n",
+        "+ LABEL=\n",
+        "+ LABEL=A\n+ LABEL=A\n+ 0s 0\n",
+        "+ 0s 0\n+ GOTO\n",
+        "+ 0s 0\n+ +1n GOTO A\n",
+        "+ 0s 0\n+ +1n INCR\n",
+        "+ 0s 0\n+ +1n INCR BY\n",
+        "+ 0s 0\n+ +1n DECR BY 2\n",
+        "+ 0s 0\n+ 1n R\n",
+        "+ 0s 0\n+ 1c 1\n",
+        "+ 0s 0\n+ {UNDEFINED} 1\n",
+    ];
+    for card in cards {
+        for body in bodies {
+            let deck = stim_deck(card, body);
+            // Either outcome is acceptable; unwinding is not.
+            let _ = Netlist::parse(&deck);
+        }
+    }
+}
+
+//=============================================================================
+// Analyses that are not `.tran`
+//=============================================================================
+
+#[test]
+fn a_stimulus_deck_solves_its_operating_point() {
+    let deck = "\
+* PSpice STIM at the operating point
+U1 STIM(1,1) $G_DPWR $G_DGND D IO_STM
++ 0s 1
++ 10ns 0
+a_dac [D] [DRV] DAC
+.model DAC dac_bridge (out_low=0 out_high=5 out_undef=2.5 t_rise=1p t_fall=1p)
+R1 DRV 0 1k
+.op
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let result = Engine::default()
+        .run_dc_op(&netlist)
+        .expect("operating point solves");
+    // Outside `.tran` only the commands at or before time zero apply, so the
+    // stimulus holds its t=0 value and the bridge drives the rail.
+    assert!(
+        (node_voltage(&result, "DRV") - 5.0).abs() < 1.0e-6,
+        "DRV should sit at the high rail, got {}",
+        node_voltage(&result, "DRV")
+    );
+}
+
+#[test]
+fn a_stimulus_deck_solves_a_dc_sweep() {
+    let deck = "\
+* PSpice STIM across a DC sweep
+U1 STIM(1,1) $G_DPWR $G_DGND D IO_STM
++ 0s 0
++ 10ns 1
+a_dac [D] [DRV] DAC
+.model DAC dac_bridge (out_low=0 out_high=5 out_undef=2.5 t_rise=1p t_fall=1p)
+R1 DRV OUT 1k
+R2 OUT 0 1k
+V1 BIAS 0 1
+R3 BIAS OUT 1meg
+.dc V1 0 2 0.5
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let points = Engine::default()
+        .run_dc_sweep(&netlist, "V1", 0.0, 2.0, 0.5)
+        .expect("DC sweep solves");
+    assert_eq!(points.len(), 5, "five sweep points");
+    for (sweep, result) in &points {
+        // The stimulus holds its t=0 low value at every sweep point, so the
+        // divider output stays pinned near ground however V1 moves.
+        assert!(
+            node_voltage(result, "OUT").abs() < 0.01,
+            "OUT drifted at sweep value {sweep}: {}",
+            node_voltage(result, "OUT")
+        );
+    }
 }
