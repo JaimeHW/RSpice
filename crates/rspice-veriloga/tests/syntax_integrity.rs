@@ -84,16 +84,179 @@ endmodule
 #[test]
 fn unsupported_keyword_module_items_are_not_silently_discarded() {
     assert_unsupported(
+        &module_with_item("wire hidden;"),
+        "Verilog-AMS digital construct not yet supported: `wire`",
+    );
+}
+
+fn module_with_item(item: &str) -> String {
+    format!(
+        "`include \"disciplines.vams\"\n\
+         module digital_item(p, n);\n\
+         \x20   inout p, n;\n\
+         \x20   electrical p, n;\n\
+         \x20   real x;\n\
+         \x20   {item}\n\
+         \x20   analog I(p, n) <+ V(p, n);\n\
+         endmodule\n"
+    )
+}
+
+fn module_with_statement(statement: &str) -> String {
+    format!(
+        "`include \"disciplines.vams\"\n\
+         module digital_statement(p, n);\n\
+         \x20   inout p, n;\n\
+         \x20   electrical p, n;\n\
+         \x20   real x;\n\
+         \x20   analog begin\n\
+         \x20       x = 1.0;\n\
+         \x20       {statement}\n\
+         \x20       I(p, n) <+ x * V(p, n);\n\
+         \x20   end\n\
+         endmodule\n"
+    )
+}
+
+/// The digital half of Verilog-AMS is refused by name, at the keyword that
+/// opens the construct.
+///
+/// Before this pin, `always @(posedge clk)` reached the parser as an ordinary
+/// identifier and died as an unrecognized module item, blaming the wrong thing;
+/// several other digital keywords lexed but had no production at all. Every one
+/// of them now stops on itself with a construct-specific diagnostic.
+#[test]
+fn verilog_ams_digital_constructs_are_refused_by_name() {
+    // Declarations, in module-item position.
+    for (keyword, item) in [
+        ("always", "always @(posedge clk) x = 1;"),
+        ("initial", "initial x = 1;"),
+        ("reg", "reg r;"),
+        ("wreal", "wreal w;"),
+        ("wire", "wire hidden;"),
+        ("wand", "wand w;"),
+        ("wor", "wor w;"),
+        ("tri", "tri t;"),
+        ("tri0", "tri0 t;"),
+        ("tri1", "tri1 t;"),
+        ("triand", "triand t;"),
+        ("trior", "trior t;"),
+        ("trireg", "trireg t;"),
+        ("supply0", "supply0 vss;"),
+        ("supply1", "supply1 vdd;"),
+        ("time", "time t;"),
+        ("realtime", "realtime t;"),
+        ("event", "event e;"),
+        ("edge", "edge e;"),
+        ("defparam", "defparam u1.gain = 1;"),
+        ("scalared", "scalared b;"),
+        ("vectored", "vectored b;"),
+        ("task", "task report_it; endtask"),
+        ("endtask", "endtask"),
+        ("specify", "specify endspecify"),
+        ("endspecify", "endspecify"),
+    ] {
+        assert_unsupported(
+            &module_with_item(item),
+            &format!("Verilog-AMS digital construct not yet supported: `{keyword}`"),
+        );
+    }
+
+    // Procedural statements, inside the analog block.
+    for (keyword, statement) in [
+        ("always", "always x = 1.0;"),
+        ("wait", "wait (x) x = 1.0;"),
+        ("casex", "casex (1) default: x = 1.0; endcase"),
+        ("casez", "casez (1) default: x = 1.0; endcase"),
+        ("fork", "fork x = 1.0; join"),
+        ("join", "join"),
+        ("assign", "assign x = 1.0;"),
+        ("deassign", "deassign x;"),
+        ("force", "force x = 1.0;"),
+        ("release", "release x;"),
+    ] {
+        assert_unsupported(
+            &module_with_statement(statement),
+            &format!("Verilog-AMS digital construct not yet supported: `{keyword}`"),
+        );
+    }
+
+    // File-scope items.
+    for (keyword, source) in [
+        (
+            "connectmodule",
+            "connectmodule l2e(l, e);\n    input l;\n    output e;\nendconnectmodule\n",
+        ),
+        (
+            "primitive",
+            "primitive latch(q, clk, d);\n    output q;\nendprimitive\n",
+        ),
+        ("endprimitive", "endprimitive\n"),
+    ] {
+        assert_unsupported(
+            source,
+            &format!("Verilog-AMS digital construct not yet supported: `{keyword}`"),
+        );
+    }
+}
+
+/// Reserving the digital keywords must not retract identifier space that
+/// accepted sources already use.
+///
+/// The keywords that already had token kinds (`wire`, `force`, `assign`, ...)
+/// have always doubled as ordinary names, because a Verilog-A source may
+/// legitimately declare `real force;`. They are read as their construct only
+/// where an assignment cannot start, so a variable named after one still
+/// declares, assigns, and evaluates exactly as before.
+#[test]
+fn pre_existing_keywords_remain_usable_as_variable_names() {
+    let model = DeviceFixture::compile(
         r#"
 `include "disciplines.vams"
-module unsupported_wire(p, n);
+module keyword_named_variables(p, n);
     inout p, n;
     electrical p, n;
-    wire hidden;
-    analog I(p, n) <+ V(p, n);
+    real force;
+    real wire;
+    analog begin
+        force = 2.0;
+        wire = 3.0;
+        I(p, n) <+ force * wire * V(p, n);
+    end
 endmodule
 "#,
-        "Unsupported module item: wire",
+    );
+    let mut device = model.device("A1", &[1, 0]);
+    device.update_voltages(&[1.0]);
+    assert_eq!(
+        device.try_evaluate().expect("keyword-named variables"),
+        vec![6.0]
+    );
+}
+
+/// Refusing bare `initial` and `analog final` must not disturb the block that
+/// shares their keywords and does have a consumer.
+#[test]
+fn analog_initial_still_runs_before_the_analog_block() {
+    let model = DeviceFixture::compile(
+        r#"
+`include "disciplines.vams"
+module seeded(p, n);
+    inout p, n;
+    electrical p, n;
+    real gain;
+    analog initial gain = 4.0;
+    analog I(p, n) <+ gain * V(p, n);
+endmodule
+"#,
+    );
+    let mut device = model.device("A1", &[1, 0]);
+    device.update_voltages(&[1.5]);
+    assert_eq!(
+        device
+            .try_evaluate()
+            .expect("analog initial seeds the gain"),
+        vec![6.0]
     );
 }
 

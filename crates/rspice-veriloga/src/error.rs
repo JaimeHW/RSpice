@@ -196,6 +196,16 @@ pub enum ParseErrorKind {
         "Unsupported construct '{keyword}': generate regions are not supported by the RSpice Verilog-A compiler"
     )]
     UnsupportedGenerate { keyword: String },
+
+    /// A reserved IEEE 1364 / Verilog-AMS *digital* keyword, refused at the
+    /// position where it introduces its construct.
+    ///
+    /// RSpice compiles the continuous subset of Verilog-AMS. The digital
+    /// keywords are lexed so that a digital source stops on the construct the
+    /// author has to remove, rather than being mistaken for an identifier and
+    /// dying as an unrecognized module item.
+    #[error("Verilog-AMS digital construct not yet supported: `{keyword}`")]
+    UnsupportedAmsConstruct { keyword: String },
 }
 
 impl LexerErrorKind {
@@ -237,6 +247,7 @@ impl ParseErrorKind {
             Self::InvalidNature => "VA-PARSE-INVALID-NATURE",
             Self::UnsupportedConstruct { .. } => "VA-PARSE-UNSUPPORTED-CONSTRUCT",
             Self::UnsupportedGenerate { .. } => "VA-PARSE-UNSUPPORTED-GENERATE",
+            Self::UnsupportedAmsConstruct { .. } => "VA-PARSE-UNSUPPORTED-AMS-DIGITAL",
         }
     }
 }

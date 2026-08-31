@@ -58,6 +58,9 @@ impl<'a> Parser<'a> {
                 items.push(Item::Nature(self.parse_nature()?));
             } else if self.check(TokenKind::Eof) {
                 break;
+            } else if Self::is_digital_declaration_keyword(self.current().kind) {
+                // `connectmodule`, `primitive`, `always`, ... at file scope.
+                return Err(self.unsupported_ams_construct());
             } else {
                 return Err(self.error(ParseErrorKind::UnexpectedToken(format!(
                     "{:?}",
@@ -340,6 +343,12 @@ impl<'a> Parser<'a> {
             // keyword without saying that the construct itself is the gap.
             TokenKind::Genvar | TokenKind::Generate | TokenKind::Endgenerate => {
                 return Err(self.unsupported_generate());
+            }
+            // The digital half of Verilog-AMS. `analog initial` and
+            // `analog final` are handled by the `analog` arm above, so a bare
+            // `initial` reaching here is the 1364 procedural block.
+            kind if Self::is_digital_declaration_keyword(kind) => {
+                return Err(self.unsupported_ams_construct());
             }
             _ => {
                 return Err(self.unsupported_current("module item"));
@@ -1110,6 +1119,7 @@ impl<'a> Parser<'a> {
             TokenKind::Identifier | TokenKind::SystemIdentifier => {
                 self.parse_assignment_or_contribution()
             }
+            _ if self.is_digital_statement_start() => Err(self.unsupported_ams_construct()),
             _ => {
                 // Keywords might be used as variable names (e.g., voltage, current)
                 // Try to parse as assignment/contribution
@@ -2175,6 +2185,10 @@ impl<'a> Parser<'a> {
                     span: start.extend(self.previous_span()),
                 }))
             }
+            // A reserved digital keyword is never an identifier, so an
+            // expression that reaches for one is naming a construct this
+            // compiler does not have (`x = time;`), not a variable.
+            TokenKind::AmsDigital => Err(self.unsupported_ams_construct()),
             // Handle keywords used as identifiers (e.g., 'voltage' as a variable name)
             _ if self.current().kind.is_keyword() => {
                 let name = self
@@ -2449,6 +2463,11 @@ impl<'a> Parser<'a> {
             });
             self.advance();
             Ok(text)
+        } else if self.current().kind == TokenKind::AmsDigital {
+            // A reserved digital keyword is not available as a name, so
+            // `real time;` names the 1364 type rather than declaring a
+            // variable. Say which keyword instead of reporting the token kind.
+            Err(self.unsupported_ams_construct())
         } else {
             Err(ParseError::expected(
                 context.to_string(),
@@ -2487,6 +2506,85 @@ impl<'a> Parser<'a> {
         ParseError::new(
             ParseErrorKind::UnsupportedGenerate { keyword },
             self.current_span(),
+        )
+    }
+
+    /// Refuse the Verilog-AMS digital keyword under the cursor by name.
+    ///
+    /// Like [`Self::unsupported_generate`], the construct's body is left
+    /// unconsumed: it carries no meaning for this compiler, so skipping it
+    /// would only move the reported position away from the keyword the author
+    /// has to remove.
+    fn unsupported_ams_construct(&self) -> ParseError {
+        let keyword = self
+            .current()
+            .text
+            .clone()
+            .unwrap_or_else(|| format!("{:?}", self.current().kind).to_lowercase());
+        ParseError::new(
+            ParseErrorKind::UnsupportedAmsConstruct { keyword },
+            self.current_span(),
+        )
+    }
+
+    /// Whether the token introduces a digital construct in a *declaration*
+    /// position (top level or module item).
+    ///
+    /// [`TokenKind::AmsDigital`] covers the keywords reserved solely to be
+    /// refused. The rest already had token kinds but no production, so they
+    /// reached the generic "unsupported module item" error; naming the
+    /// construct is strictly better and changes no accepted source.
+    const fn is_digital_declaration_keyword(kind: TokenKind) -> bool {
+        matches!(
+            kind,
+            TokenKind::AmsDigital
+                | TokenKind::Assign
+                | TokenKind::Casex
+                | TokenKind::Casez
+                | TokenKind::Connectmodule
+                | TokenKind::Deassign
+                | TokenKind::Endspecify
+                | TokenKind::Endtask
+                | TokenKind::Force
+                | TokenKind::Fork
+                | TokenKind::Initial
+                | TokenKind::Join
+                | TokenKind::Release
+                | TokenKind::Specify
+                | TokenKind::Task
+                | TokenKind::Wire
+        )
+    }
+
+    /// Whether the token under the cursor introduces a digital construct in
+    /// *statement* position.
+    ///
+    /// The pre-existing keyword kinds double as identifiers here — an analog
+    /// block may legitimately assign to a variable named `force` or `assign`,
+    /// which [`Self::parse_assignment_or_contribution`] has always accepted.
+    /// So a keyword is read as its construct only when what follows it cannot
+    /// begin an assignment or a contribution. `force x = 1;` is the digital
+    /// statement; `force = 1;` is a variable named `force`.
+    ///
+    /// Newly reserved [`TokenKind::AmsDigital`] keywords have no such history
+    /// and are always the construct.
+    fn is_digital_statement_start(&self) -> bool {
+        let kind = self.current().kind;
+        if kind == TokenKind::AmsDigital {
+            return true;
+        }
+        if !Self::is_digital_declaration_keyword(kind) {
+            return false;
+        }
+        !matches!(
+            self.tokens.get(self.pos + 1).map(|t| t.kind),
+            Some(
+                TokenKind::Assign_
+                    | TokenKind::LBracket
+                    | TokenKind::Dot
+                    | TokenKind::Contribute
+                    | TokenKind::Semicolon
+            )
         )
     }
 

@@ -172,6 +172,26 @@ pub enum TokenKind {
     #[allow(non_camel_case_types)]
     Ddt_Nature,
 
+    // === Keywords - Verilog-AMS digital (IEEE 1364) ===
+    /// A reserved digital keyword this compiler recognizes only so that it can
+    /// be refused by name.
+    ///
+    /// RSpice compiles the continuous (analog) subset of Verilog-AMS. The
+    /// digital half of the language lexes here so that `always @(posedge clk)`
+    /// stops at `always` with a construct-specific diagnostic, instead of
+    /// reaching the parser as an ordinary identifier and dying as an
+    /// unrecognized module item — or worse, being silently absorbed into some
+    /// analog production.
+    ///
+    /// One kind covers the whole set because every member has exactly one
+    /// behavior: refusal. The token's `text` carries the exact keyword, so the
+    /// diagnostic can name it.
+    ///
+    /// Deliberately **not** reported by [`TokenKind::is_keyword`]: that
+    /// predicate is what lets a keyword stand in as an identifier, and these
+    /// keywords must never be accepted in an identifier position.
+    AmsDigital,
+
     // === Operators - Arithmetic ===
     Plus,     // +
     Minus,    // -
@@ -329,6 +349,47 @@ impl TokenKind {
             "units" => TokenKind::Units,
             "idt_nature" => TokenKind::Idt_Nature,
             "ddt_nature" => TokenKind::Ddt_Nature,
+
+            // IEEE 1364 / Verilog-AMS digital keywords. Reserved here purely so
+            // the parser can refuse them by name; see [`TokenKind::AmsDigital`].
+            //
+            // Excluded on purpose:
+            //   * `table` / `endtable` and gate-primitive names (`and`, `or`,
+            //     `not`, `buf`, `nmos`, `tran`, ...). `table` is only reachable
+            //     inside a `primitive` or `specify` region, both of which
+            //     already fail closed at their opening keyword; a gate
+            //     instantiation already fails closed as
+            //     `Undefined module: 'and'`. Reserving them would buy no
+            //     fail-closed coverage while stealing identifier space from
+            //     plausible model variable names.
+            //   * `disable`, `assign`, `force`, `release`, `wire`, `task`,
+            //     `fork`, `casex`, ... — these already have their own token
+            //     kinds above and are refused by the parser at the positions
+            //     where they are constructs, while remaining usable as
+            //     identifiers exactly where they are today.
+            "always" => TokenKind::AmsDigital,
+            "defparam" => TokenKind::AmsDigital,
+            "edge" => TokenKind::AmsDigital,
+            "event" => TokenKind::AmsDigital,
+            "primitive" => TokenKind::AmsDigital,
+            "endprimitive" => TokenKind::AmsDigital,
+            "realtime" => TokenKind::AmsDigital,
+            "reg" => TokenKind::AmsDigital,
+            "scalared" => TokenKind::AmsDigital,
+            "supply0" => TokenKind::AmsDigital,
+            "supply1" => TokenKind::AmsDigital,
+            "time" => TokenKind::AmsDigital,
+            "tri" => TokenKind::AmsDigital,
+            "tri0" => TokenKind::AmsDigital,
+            "tri1" => TokenKind::AmsDigital,
+            "triand" => TokenKind::AmsDigital,
+            "trior" => TokenKind::AmsDigital,
+            "trireg" => TokenKind::AmsDigital,
+            "vectored" => TokenKind::AmsDigital,
+            "wait" => TokenKind::AmsDigital,
+            "wand" => TokenKind::AmsDigital,
+            "wor" => TokenKind::AmsDigital,
+            "wreal" => TokenKind::AmsDigital,
 
             _ => return None,
         })
