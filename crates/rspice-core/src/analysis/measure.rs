@@ -126,6 +126,7 @@ impl MeasureResult {
     /// Apply a statement's verification contracts to a computed result.
     pub(super) fn check_contract(mut self, statement: &MeasureStatement) -> Self {
         if let Some(raw_value) = self.raw_value
+            && statement.fail_value.is_some()
             && !raw_value.is_finite()
         {
             self.passed = false;
