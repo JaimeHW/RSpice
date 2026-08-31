@@ -1,0 +1,44 @@
+# RSPICE-VERILOG-STIMULUS 1
+#
+# Operand pairs chosen so that each output's rule is exercised where the two
+# readings of section 5.4.1 disagree, and where the answer is not the same by
+# accident:
+#
+#   * all-ones for `a` and `b`, the largest product and the carry-generating
+#     sum
+#   * a lone `a = 1`, the smallest shift that a four-bit shift loses entirely
+#   * `b + c` summing to exactly sixteen, so the concatenation operand wraps to
+#     zero and a context pushed through the concatenation would show a one
+#   * `a` zero with `b` equal to and unequal to `c`, the two sides of the
+#     eight-bit comparison
+#   * `a` equal to and unequal to `b`, the two values `inverted` takes
+#
+# The design is combinational, so there is no clock; each vector is applied and
+# settled before it is sampled.
+
+module width_forms
+
+input a 4
+input b 4
+input c 4
+
+output prod 8
+output sum5 5
+output shifted 8
+output mixed 8
+output cmp 1
+output inverted 8
+output cout 1
+output s 4
+
+step 10
+settle 5
+
+vector 0000 0000 0000
+vector 1111 1111 0000
+vector 0001 0000 0000
+vector 1000 0011 1110
+vector 0000 0101 0101
+vector 0110 0110 1111
+vector 1010 1100 0011
+vector 0000 1001 0111

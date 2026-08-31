@@ -36,7 +36,7 @@ use std::fs;
 /// size; this tells you *which* language mechanism stopped being covered, which
 /// is the question anyone reading the failure actually has. Removing a case is
 /// allowed — editing this list is how you say you meant to.
-const REQUIRED_CASES: [(&str, &str); 14] = [
+const REQUIRED_CASES: [(&str, &str); 15] = [
     ("c17", "structural gate netlist (ISCAS85)"),
     (
         "gate_primitives",
@@ -74,6 +74,10 @@ const REQUIRED_CASES: [(&str, &str); 14] = [
     (
         "hier_forms",
         "ordered port connections and the event-list separators",
+    ),
+    (
+        "width_forms",
+        "context-determined expression width, IEEE 1364-2005 section 5.4.1",
     ),
 ];
 
@@ -589,7 +593,23 @@ type Expected = &'static [&'static str];
 ///   cell's own three gates and from which net each instance connects to,
 ///   positional order for the first and the declaration's names for the
 ///   second.
-const EXPECTED: [(&str, Expected); 14] = [
+///
+/// * **width_forms** — eight closed forms, each derived from the row of IEEE
+///   1364-2005 table 5-22 its output is named for, and evaluated in decimal
+///   per vector before being written back in binary. `prod` is `a * b` at
+///   eight bits and `sum5` is `a + b` at five, both exact — 225 and 30 fit,
+///   which is the point of the widths. `shifted` is `a << 5` at eight bits,
+///   which moves `a`'s low three bits to positions 5, 6 and 7 and drops `a[3]`
+///   off the top, so it is `(a mod 8) * 32`. `mixed` is `a` in the top nibble
+///   and `(b + c) mod 16` in the bottom, the modulus being the concatenation
+///   operand's self-determined four bits. `cmp` is `1` exactly when `a` is
+///   zero and `b` equals `c`, because the comparison is made at the eight bits
+///   of `{a, b}` with `c` zero-extended into them. `inverted` is
+///   `8'b11111110` when `a` equals `b` and `8'b11111111` otherwise — the
+///   one-bit comparison zero-extended to the target and then inverted, in that
+///   order. `cout` and `s` are the fifth bit and the low four bits of `a + b`,
+///   the five-bit sum the concatenation target asks for.
+const EXPECTED: [(&str, Expected); 15] = [
     (
         "c17",
         &[
@@ -845,6 +865,48 @@ const EXPECTED: [(&str, Expected); 14] = [
             "s0=0 c0=1 s1=1 c1=0 anded=01 ored=11",
             "s0=1 c0=0 s1=0 c1=1 anded=10 ored=11",
             "s0=0 c0=1 s1=0 c1=1 anded=11 ored=11",
+        ],
+    ),
+    (
+        "width_forms",
+        &[
+            // a=0 b=0 c=0. Everything at rest; `cmp` is 1 because `a` is zero
+            // and `b` equals `c`, and `inverted` is `~1` across eight bits.
+            "prod=00000000 sum5=00000 shifted=00000000 mixed=00000000 cmp=1 \
+             inverted=11111110 cout=0 s=0000",
+            // a=15 b=15 c=0. 15*15 = 225 and 15+15 = 30, both of which need
+            // more than four bits and both of which the targets have room for.
+            // `a << 5` keeps a[2:0] and drops a[3]: 7*32 = 224.
+            "prod=11100001 sum5=11110 shifted=11100000 mixed=11111111 cmp=0 \
+             inverted=11111110 cout=1 s=1110",
+            // a=1 b=0 c=0. The smallest shift a four-bit operand loses whole:
+            // bit 0 travels to bit 5.
+            "prod=00000000 sum5=00001 shifted=00100000 mixed=00010000 cmp=0 \
+             inverted=11111111 cout=0 s=0001",
+            // a=8 b=3 c=14. 8*3 = 24, 8+3 = 11; `a << 5` is zero because a[3]
+            // is the only bit set and it falls off. b+c = 17, which wraps to 1
+            // in the concatenation's four bits.
+            "prod=00011000 sum5=01011 shifted=00000000 mixed=10000001 cmp=0 \
+             inverted=11111111 cout=0 s=1011",
+            // a=0 b=5 c=5. `cmp` is 1: {a, b} is 8'b00000101 and c
+            // zero-extends to the same.
+            "prod=00000000 sum5=00101 shifted=00000000 mixed=00001010 cmp=1 \
+             inverted=11111111 cout=0 s=0101",
+            // a=6 b=6 c=15. 6*6 = 36, 6+6 = 12, 6<<5 = 192; b+c = 21 wraps to
+            // 5.
+            "prod=00100100 sum5=01100 shifted=11000000 mixed=01100101 cmp=0 \
+             inverted=11111110 cout=0 s=1100",
+            // a=10 b=12 c=3. 10*12 = 120, 10+12 = 22 — a carry into `cout`
+            // with `s` holding 6. `a << 5` keeps a[1] only: 2*32 = 64.
+            "prod=01111000 sum5=10110 shifted=01000000 mixed=10101111 cmp=0 \
+             inverted=11111111 cout=1 s=0110",
+            // a=0 b=9 c=7. b+c is exactly sixteen, so the concatenation's
+            // self-determined operand wraps to zero and `mixed` is all zeros;
+            // a context pushed through the concatenation would put a 1 there.
+            // `cmp` is 0 because 9 is not 7, which is the negative half of the
+            // eight-bit comparison.
+            "prod=00000000 sum5=01001 shifted=00000000 mixed=00000000 cmp=0 \
+             inverted=11111111 cout=0 s=1001",
         ],
     ),
 ];
