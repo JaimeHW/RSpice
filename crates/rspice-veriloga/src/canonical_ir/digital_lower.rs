@@ -9,38 +9,57 @@
 //!
 //! # What state lives where
 //!
-//! Nothing in a process is an SSA variable. Every `reg` and `wire` is a
-//! signal, read by a [`CfgValueKind::DigitalSignalRead`] node and written by a
-//! write node, and a value therefore never has to cross a block boundary. That
-//! is not a simplification of the model — it *is* the model. A process that
-//! suspends and resumes must see whatever the signal holds when it wakes, and
-//! a value carried across the suspension in a register would see what it held
-//! when the process went to sleep.
+//! A module-level `reg` or `wire` is never an SSA value. It is a signal, read
+//! by a [`CfgValueKind::DigitalSignalRead`] node and written by a write node.
+//! That is not a simplification of the model — it *is* the model. A process
+//! that suspends and resumes must see whatever the signal holds when it wakes,
+//! and a value carried across the suspension in a register would see what it
+//! held when the process went to sleep.
 //!
-//! The consequence is that this wave's process functions have no block
-//! parameters and every `Wait` resumes with no arguments. The mechanism for
-//! carrying live state across a suspension exists in the terminator anyway,
-//! because the first process-local variable will need it.
+//! A variable declared *inside* the process is the opposite case, and the two
+//! must not be confused. It belongs to the process, nothing else can observe
+//! it, and it is an ordinary SSA variable: merged at joins by a block
+//! parameter, carried across a suspension by a resume argument. IEEE 1364-2005
+//! section 9.8.1 makes such a variable static; the reading frozen here is
+//! automatic — it starts at `x` each time control enters the block that
+//! declares it — because the difference is observable only by reading one
+//! before writing it, and the case that matters is a loop counter.
 //!
-//! # The wave-1 subset
+//! Everything crossing a `Wait` crosses as a resume argument: every in-scope
+//! local, plus the right-hand side of an intra-assignment timing control
+//! (`q <= #5 d`, section 9.2.2), whose value is read before the suspension and
+//! written after it. Nothing else survives — the interpreter starts a
+//! resumption with an empty value table, which is what proves the lowering
+//! routed the state through the terminator rather than assuming a register
+//! kept it.
+//!
+//! # The subset
 //!
 //! Everything the front end parses is not everything this lowers. Refusals are
-//! by name, with a span, and are listed in [`refusals`](self#refusals) below
-//! rather than discovered by a reader at the point of failure:
+//! by name and with a span, so a model that crosses one is told what is
+//! missing rather than compiled into a device that is quietly short of what
+//! its author wrote. What still refuses here:
 //!
-//! - `for` and `repeat` need a loop counter, which is a process-local variable
-//!   and therefore a typed SSA merge this wave does not build.
-//! - A block-local `integer` or `real` declaration is the same problem.
-//! - A continuous assignment (`assign`) drives a net rather than executing in
-//!   a process. It has no representation here at all, and inventing one — a
-//!   process that writes a wire — would encode something the language forbids
-//!   everywhere else.
+//! - A module-level analog `integer` or `real` read from a process. It is
+//!   shared with the continuous-domain body, which runs on a different clock
+//!   in a different value domain; a process-local declaration is the lowered
+//!   form of the same intent.
+//! - A process-local `real` or `string`, for the same reason from the other
+//!   side: a process computes in four-state values.
+//! - A nonblocking assignment to a process-local, which would need a store to
+//!   defer the update into, and a partial (bit- or part-select) write to one,
+//!   which is a read-modify-write this wave has no node for outside the signal
+//!   store.
+//! - A process-local `reg` whose bounds are not literal, and an array of any
+//!   kind inside a process.
+//! - `**`, a non-constant delay, and a non-constant select bound.
 //!
-//! Each of those refuses with a message naming the construct, so a model that
-//! uses one is told what is missing rather than compiled into a device that is
-//! quietly short of what its author wrote.
+//! Refused before this pass, and still refused: tasks and functions,
+//! `generate`, primitives, hierarchical instances, `===` and `!==`,
+//! `fork`/`join`, `wait`, `disable`, and `force`/`release` — the parser stops
+//! each on its own keyword, so none of them reaches a lowering decision.
 
-use super::cfg::{CfgTerminator, CfgValueKind, CfgValueType, DigitalWait, SsaBuilder};
+use super::cfg::{CfgTerminator, CfgValueKind, CfgValueType, CfgVariable, DigitalWait, SsaBuilder};
 use super::diagnostic::{CompilerPhase, IrDiagnostic, SourceSpanRef};
 use super::digital::{
     CanonicalDigitalPlan, CfgDigitalProcess, DigitalEdge, DigitalProcessKind,
@@ -48,9 +67,9 @@ use super::digital::{
     DigitalStaticSensitivity, DigitalWriteSelect, DigitalWriteTarget,
 };
 use super::digital_value::{
-    ArithmeticOp, BitwiseOp, FourStateValue, LogicalOp, RelationalOp, ShiftOp,
+    ArithmeticOp, BitwiseOp, DigitalCaseMatch, FourStateValue, LogicalOp, RelationalOp, ShiftOp,
 };
-use super::ids::{BlockId, DigitalProcessId, DigitalSignalId, ValueId};
+use super::ids::{BlockId, DigitalLocalId, DigitalProcessId, DigitalSignalId, ValueId};
 use crate::ast::DigitalProcessKind as AstKind;
 use crate::ast::{
     ArrayLiteralElement, BinaryOp, DigitalAssign, DigitalCase, DigitalLValue, DigitalStatement,
@@ -59,6 +78,7 @@ use crate::ast::{
 use crate::four_state::FourStateBit;
 use crate::semantic::{AnalyzedDigital, AnalyzedDigitalProcess, AnalyzedDigitalSignal};
 use crate::source::Span;
+use smol_str::SmolStr;
 use std::collections::{BTreeSet, HashMap};
 
 /// Lower the analyzed discrete-domain content of a module.
@@ -133,15 +153,24 @@ fn lower_process(
         index,
         builder: SsaBuilder::new(),
         diagnostics: Vec::new(),
+        locals: Vec::new(),
+        scopes: Vec::new(),
     };
-
-    let entry = lowerer.builder.create_block();
-    let exit = lowerer.statement(entry, &process.body);
 
     let kind = match process.kind {
         AstKind::Always => DigitalProcessKind::Always,
         AstKind::Initial => DigitalProcessKind::Initial,
     };
+
+    let entry = lowerer.builder.create_block();
+    // An `initial` process's entry has no predecessors and can be sealed at
+    // once. An `always` process's entry gains one when the restart edge is
+    // added below, so sealing it here would decide a merge before the loop
+    // exists.
+    if !kind.restarts() {
+        lowerer.builder.seal_block(entry);
+    }
+    let exit = lowerer.statement(entry, &process.body);
 
     // IEEE 1364-2005 sections 9.9.1 and 9.9.2, as a difference in the graph
     // rather than a flag: `always` loops back to its own entry, `initial`
@@ -155,6 +184,12 @@ fn lower_process(
         CfgTerminator::Return
     };
     lowerer.builder.set_terminator(exit, terminator);
+    lowerer.builder.seal_block(entry);
+    // Every construct seals the blocks it creates as soon as their
+    // predecessors are known. This is the backstop for the paths that stopped
+    // early: a construct that refused left its blocks behind, and an unsealed
+    // block reaching `finish` holds parameters whose arguments never arrived.
+    lowerer.builder.seal_all_blocks();
 
     if !lowerer.diagnostics.is_empty() {
         return Err(lowerer.diagnostics);
@@ -204,11 +239,34 @@ fn lower_process(
     })
 }
 
+/// What a loop runs at the end of each pass.
+enum LoopUpdate<'a> {
+    /// A `for` loop's third clause, written by the author.
+    Assign(&'a DigitalAssign),
+    /// A `repeat` loop's decrement of the counter the lowering invented.
+    Decrement(DigitalLocalId),
+}
+
+/// A variable that lives in the process function rather than in the signal
+/// store.
+struct ProcessLocal {
+    /// `None` for a counter the lowering invented, which no source name can
+    /// reach and which therefore cannot be shadowed or read by mistake.
+    name: Option<SmolStr>,
+    width: u32,
+    /// Where it was declared, for a diagnostic about it.
+    span: Span,
+}
+
 struct ProcessLowerer<'a> {
     signals: &'a [DigitalSignal],
     index: &'a HashMap<&'a str, DigitalSignalId>,
     builder: SsaBuilder,
     diagnostics: Vec<IrDiagnostic>,
+    /// Every variable declared in the process, by id.
+    locals: Vec<ProcessLocal>,
+    /// Declarative regions, innermost last (IEEE 1364-2005 section 9.8.1).
+    scopes: Vec<Vec<DigitalLocalId>>,
 }
 
 impl ProcessLowerer<'_> {
@@ -227,6 +285,207 @@ impl ProcessLowerer<'_> {
     }
 
     // ------------------------------------------------------------------
+    // Process-local variables
+    // ------------------------------------------------------------------
+
+    /// The local a name resolves to, innermost region first.
+    ///
+    /// The same order the analyzer resolves in, and for the same reason: a
+    /// name that meant the local in one pass and the module signal in the
+    /// other would be two compilers disagreeing about one program.
+    fn lookup_local(&self, name: &str) -> Option<DigitalLocalId> {
+        self.scopes.iter().rev().find_map(|scope| {
+            scope
+                .iter()
+                .rev()
+                .copied()
+                .find(|id| self.locals[usize::from(*id)].name.as_deref() == Some(name))
+        })
+    }
+
+    fn local_width(&self, id: DigitalLocalId) -> u32 {
+        self.locals[usize::from(id)].width
+    }
+
+    /// Declare a local and give it its initial value in `block`.
+    ///
+    /// The initial value is written at the declaration, which makes every
+    /// later read reach a definition and is what keeps the merge machinery
+    /// from ever having to answer "what was this before anything set it".
+    ///
+    /// That models a block variable as *automatic*: it starts at `x` (IEEE
+    /// 1364-2005 section 4.2.2) each time control enters the block. Section
+    /// 9.8.1 makes a named block's variable static, so an `always` process that
+    /// read one before writing it would see the previous pass's value; that is
+    /// a read of an uninitialised variable in any case, and the reading frozen
+    /// here is the one a loop counter needs.
+    fn declare_local(
+        &mut self,
+        block: BlockId,
+        name: Option<SmolStr>,
+        width: u32,
+        span: Span,
+        initial: Option<ValueId>,
+    ) -> DigitalLocalId {
+        let id = DigitalLocalId::from(self.locals.len());
+        self.locals.push(ProcessLocal { name, width, span });
+        let variable = CfgVariable::DigitalLocal(id);
+        self.builder
+            .declare_variable(variable, CfgValueType::FourState { width });
+        let initial = match initial {
+            Some(value) => self.resize(block, value, width),
+            None => self.builder.push_leaf(
+                CfgValueType::FourState { width },
+                CfgValueKind::FourStateConstant(FourStateValue::splat(
+                    width,
+                    FourStateBit::Unknown,
+                )),
+            ),
+        };
+        self.builder.write_variable(variable, block, initial);
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.push(id);
+        }
+        id
+    }
+
+    /// Read a local's current value in `block`.
+    ///
+    /// A local always has a definition — the declaration wrote one — so a
+    /// miss is a lowering bug rather than a program error, and it reports as
+    /// one instead of producing a value nothing defined.
+    fn read_local(&mut self, block: BlockId, id: DigitalLocalId) -> ValueId {
+        let variable = CfgVariable::DigitalLocal(id);
+        match self.builder.read_variable(variable, block) {
+            Some(value) => value,
+            None => {
+                let local = &self.locals[usize::from(id)];
+                let (width, span) = (local.width, local.span);
+                let name = local.name.clone();
+                self.error(
+                    format!(
+                        "process-local `{}` is read on a path that never defines it",
+                        name.as_deref().unwrap_or("<loop counter>")
+                    ),
+                    span,
+                );
+                self.unknown(width)
+            }
+        }
+    }
+
+    /// Write a local, resizing per IEEE 1364-2005 section 5.2.1.
+    fn write_local(&mut self, block: BlockId, id: DigitalLocalId, value: ValueId) {
+        let width = self.local_width(id);
+        let value = self.resize(block, value, width);
+        self.builder
+            .write_variable(CfgVariable::DigitalLocal(id), block, value);
+    }
+
+    /// `counter = counter - 1` at the counter's own width, which is what makes
+    /// a `repeat` of `2'b00` passes stop rather than wrap forever.
+    fn decrement(&mut self, block: BlockId, id: DigitalLocalId) {
+        let width = self.local_width(id);
+        let current = self.read_local(block, id);
+        let one = self.builder.push_leaf(
+            CfgValueType::FourState { width },
+            CfgValueKind::FourStateConstant(FourStateValue::from_u64(width, 1)),
+        );
+        let next = self.builder.push(
+            block,
+            CfgValueType::FourState { width },
+            CfgValueKind::DigitalArithmetic {
+                op: ArithmeticOp::Sub,
+                left: current,
+                right: one,
+            },
+        );
+        self.builder
+            .write_variable(CfgVariable::DigitalLocal(id), block, next);
+    }
+
+    /// Every local currently in scope, outermost region first.
+    ///
+    /// The order is declaration order, which is what makes the parameter list
+    /// of a resume block reproducible across runs.
+    fn locals_in_scope(&self) -> Vec<DigitalLocalId> {
+        self.scopes.iter().flatten().copied().collect()
+    }
+
+    /// Lower the declarations of one `begin`/`end` block.
+    fn declare_block_locals(&mut self, block: BlockId, inner: &crate::ast::DigitalBlock) {
+        for declaration in &inner.variables {
+            let width = match declaration.var_type {
+                // IEEE 1364-2005 section 3.9: an `integer` is a 32-bit
+                // variable. It is four-state here rather than the IR's own
+                // `Integer`, which has no `x` — and section 4.2.2 gives an
+                // unwritten `integer` exactly that.
+                crate::ast::VarType::Integer => 32,
+                crate::ast::VarType::Real | crate::ast::VarType::String => {
+                    self.error(
+                        format!(
+                            "a process-local `{}` has no lowered form yet: a process \
+                             computes in four-state values",
+                            if matches!(declaration.var_type, crate::ast::VarType::Real) {
+                                "real"
+                            } else {
+                                "string"
+                            }
+                        ),
+                        declaration.span,
+                    );
+                    continue;
+                }
+            };
+            for item in &declaration.items {
+                if !item.dimensions.is_empty() {
+                    self.error(
+                        format!(
+                            "an array `{}` inside a process has no lowered form yet",
+                            item.name
+                        ),
+                        item.span,
+                    );
+                    continue;
+                }
+                let initial = item.init.as_ref().map(|init| self.expression(block, init));
+                self.declare_local(block, Some(item.name.clone()), width, item.span, initial);
+            }
+        }
+
+        for declaration in &inner.digital_variables {
+            let width = match &declaration.range {
+                None => Some(1),
+                Some(range) => match (constant_of(&range.msb), constant_of(&range.lsb)) {
+                    (Some(msb), Some(lsb)) => Some(msb.abs_diff(lsb) as u32 + 1),
+                    _ => {
+                        self.error(
+                            "the bounds of a process-local `reg` must be literal in this wave",
+                            range.span,
+                        );
+                        None
+                    }
+                },
+            };
+            let Some(width) = width else { continue };
+            for item in &declaration.items {
+                if !item.dimensions.is_empty() {
+                    self.error(
+                        format!(
+                            "an array `{}` inside a process has no lowered form yet",
+                            item.name
+                        ),
+                        item.span,
+                    );
+                    continue;
+                }
+                let initial = item.init.as_ref().map(|init| self.expression(block, init));
+                self.declare_local(block, Some(item.name.clone()), width, item.span, initial);
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
     // Statements
     // ------------------------------------------------------------------
 
@@ -237,17 +496,13 @@ impl ProcessLowerer<'_> {
         match statement {
             DigitalStatement::Null(_) => block,
             DigitalStatement::Block(inner) => {
-                if let Some(declaration) = inner.variables.first() {
-                    self.error(
-                        "a block-local `integer` or `real` declaration inside a \
-                         process has no lowered form yet",
-                        declaration.span,
-                    );
-                }
+                self.scopes.push(Vec::new());
+                self.declare_block_locals(block, inner);
                 let mut current = block;
                 for statement in &inner.statements {
                     current = self.statement(current, statement);
                 }
+                self.scopes.pop();
                 current
             }
             DigitalStatement::BlockingAssign(assign) => self.assign(block, assign, false),
@@ -267,6 +522,10 @@ impl ProcessLowerer<'_> {
                         else_args: Vec::new(),
                     },
                 );
+                // Both arms have their one predecessor now, so they are sealed
+                // before anything inside them reads a variable.
+                self.builder.seal_block(then_entry);
+                self.builder.seal_block(else_entry);
                 let then_exit = self.statement(then_entry, &conditional.then_branch);
                 self.builder.set_terminator(
                     then_exit,
@@ -286,11 +545,13 @@ impl ProcessLowerer<'_> {
                         args: Vec::new(),
                     },
                 );
+                self.builder.seal_block(join);
                 join
             }
             DigitalStatement::Case(case) => self.case(block, case),
             DigitalStatement::Timing(timing) => {
-                let resume = self.wait(block, &timing.control, timing.statement.as_deref());
+                let resume =
+                    self.wait(block, &timing.control, timing.statement.as_deref(), &mut []);
                 match &timing.statement {
                     Some(statement) => self.statement(resume, statement),
                     None => resume,
@@ -317,79 +578,135 @@ impl ProcessLowerer<'_> {
                         args: Vec::new(),
                     },
                 );
-                self.builder.create_block()
+                // Sealed only now: the back edge is the body's second
+                // predecessor, and a variable read inside the body has to see
+                // both of them or it merges with half the loop missing.
+                self.builder.seal_block(body);
+                let unreachable = self.builder.create_block();
+                self.builder.seal_block(unreachable);
+                unreachable
             }
             DigitalStatement::While(statement) => {
-                let header = self.builder.create_block();
-                let body = self.builder.create_block();
-                let exit = self.builder.create_block();
-                self.builder.set_terminator(
-                    block,
-                    CfgTerminator::Jump {
-                        target: header,
-                        args: Vec::new(),
-                    },
-                );
-                let condition = self.condition(header, &statement.condition);
-                self.builder.set_terminator(
-                    header,
-                    CfgTerminator::Branch {
-                        condition,
-                        then_target: body,
-                        then_args: Vec::new(),
-                        else_target: exit,
-                        else_args: Vec::new(),
-                    },
-                );
-                let body_exit = self.statement(body, &statement.body);
-                self.builder.set_terminator(
-                    body_exit,
-                    CfgTerminator::Jump {
-                        target: header,
-                        args: Vec::new(),
-                    },
-                );
-                exit
+                self.loop_statement(block, &statement.body, None, |lowerer, header| {
+                    lowerer.condition(header, &statement.condition)
+                })
             }
+            // IEEE 1364-2005 section 9.6.2. The initialization runs once
+            // before the loop and the update at the end of each pass, which is
+            // exactly where they are placed here; the counter is an ordinary
+            // process-local, so nothing about the loop needs a mechanism of its
+            // own once one exists.
             DigitalStatement::For(statement) => {
-                self.error(
-                    "a `for` statement inside a process has no lowered form yet: \
-                     its loop counter is a process-local variable",
-                    statement.span,
-                );
-                block
+                let block = self.assign(block, &statement.init, false);
+                self.loop_statement(
+                    block,
+                    &statement.body,
+                    Some(LoopUpdate::Assign(&statement.update)),
+                    |lowerer, header| lowerer.condition(header, &statement.condition),
+                )
             }
+            // Section 9.6.2 evaluates the count *once*, before the loop, and
+            // runs the body that many times. A count with an `x` or `z` bit
+            // has no number of passes, so the loop runs zero of them — which
+            // is what the truth-value reduction of the counter already says,
+            // without a rule of its own.
             DigitalStatement::Repeat(statement) => {
-                self.error(
-                    "a `repeat` statement inside a process has no lowered form yet: \
-                     its iteration counter is a process-local variable",
-                    statement.span,
+                let count = self.expression(block, &statement.count);
+                let width = self.value_width(count);
+                // The counter lives in a region of its own so that it crosses
+                // a suspension inside the body like any other local, and so
+                // that nothing in the body can name it.
+                self.scopes.push(Vec::new());
+                let counter = self.declare_local(block, None, width, statement.span, Some(count));
+                let exit = self.loop_statement(
+                    block,
+                    &statement.body,
+                    Some(LoopUpdate::Decrement(counter)),
+                    |lowerer, header| {
+                        let value = lowerer.read_local(header, counter);
+                        lowerer.truth_value(header, value)
+                    },
                 );
-                block
+                self.scopes.pop();
+                exit
             }
         }
     }
 
-    /// Lower a `case`, `casez`, or `casex` as a chain of equality tests.
+    /// Lower a loop whose header tests a condition before each pass.
     ///
-    /// Wildcard matching is not folded in here. `casez` and `casex` compare
-    /// against a mask, which is a different operator from `==`, and this wave
-    /// has no node for it — so they refuse rather than silently behaving as
-    /// `case`, which would match on `x` where the author asked not to.
-    fn case(&mut self, block: BlockId, case: &DigitalCase) -> BlockId {
-        if !matches!(case.kind, crate::ast::CaseKind::Exact) {
-            self.error(
-                format!(
-                    "`{}` has no lowered form yet: wildcard matching is a distinct \
-                     operator from `==` and lowering it as one would match where \
-                     the author asked not to",
-                    case.kind.keyword()
-                ),
-                case.span,
-            );
-            return block;
-        }
+    /// `while`, `for`, and `repeat` differ only in what the header tests and
+    /// what runs at the end of a pass, so they share the graph shape: the
+    /// header is a merge point with two predecessors, and it cannot be sealed
+    /// until the back edge exists — which is the one place SSA construction
+    /// genuinely needs two passes.
+    fn loop_statement(
+        &mut self,
+        block: BlockId,
+        body_statement: &DigitalStatement,
+        update: Option<LoopUpdate<'_>>,
+        condition_of: impl FnOnce(&mut Self, BlockId) -> ValueId,
+    ) -> BlockId {
+        let header = self.builder.create_block();
+        let body = self.builder.create_block();
+        let exit = self.builder.create_block();
+        self.builder.set_terminator(
+            block,
+            CfgTerminator::Jump {
+                target: header,
+                args: Vec::new(),
+            },
+        );
 
+        let condition = condition_of(self, header);
+        self.builder.set_terminator(
+            header,
+            CfgTerminator::Branch {
+                condition,
+                then_target: body,
+                then_args: Vec::new(),
+                else_target: exit,
+                else_args: Vec::new(),
+            },
+        );
+        self.builder.seal_block(body);
+        self.builder.seal_block(exit);
+
+        let mut body_exit = self.statement(body, body_statement);
+        match update {
+            Some(LoopUpdate::Assign(assign)) => {
+                body_exit = self.assign(body_exit, assign, false);
+            }
+            Some(LoopUpdate::Decrement(counter)) => self.decrement(body_exit, counter),
+            None => {}
+        }
+        self.builder.set_terminator(
+            body_exit,
+            CfgTerminator::Jump {
+                target: header,
+                args: Vec::new(),
+            },
+        );
+        self.builder.seal_block(header);
+        exit
+    }
+
+    /// Lower a `case`, `casez`, or `casex` as a chain of match tests.
+    ///
+    /// The test is [`CfgValueKind::DigitalCaseMatch`], not `==`. IEEE
+    /// 1364-2005 section 9.5 compares a case item against the selector *bit by
+    /// bit including `x` and `z`*, so `case (sel) 2'bx0:` matches a selector of
+    /// `x0` — where `==` yields `x` and would send it to the default. Section
+    /// 9.5.1 then adds the wildcard forms, which ignore the positions where
+    /// either operand holds a don't-care value. All three are the same
+    /// operator with a different ignore set, which is why they are one node
+    /// and not a lowering trick.
+    fn case(&mut self, block: BlockId, case: &DigitalCase) -> BlockId {
+        let match_kind = match case.kind {
+            crate::ast::CaseKind::Exact => DigitalCaseMatch::Exact,
+            crate::ast::CaseKind::WildcardZ => DigitalCaseMatch::WildcardZ,
+            crate::ast::CaseKind::WildcardXZ => DigitalCaseMatch::WildcardXZ,
+        };
         let selector = self.expression(block, &case.selector);
         let join = self.builder.create_block();
         let mut current = block;
@@ -401,10 +718,10 @@ impl ProcessLowerer<'_> {
                 let test = self.builder.push(
                     current,
                     CfgValueType::FourState { width: 1 },
-                    CfgValueKind::DigitalEquality {
-                        left: selector,
-                        right: label_value,
-                        negate: false,
+                    CfgValueKind::DigitalCaseMatch {
+                        selector,
+                        label: label_value,
+                        kind: match_kind,
                     },
                 );
                 matched = Some(match matched {
@@ -435,6 +752,8 @@ impl ProcessLowerer<'_> {
                     else_args: Vec::new(),
                 },
             );
+            self.builder.seal_block(arm);
+            self.builder.seal_block(next);
             let arm_exit = self.statement(arm, &item.statement);
             self.builder.set_terminator(
                 arm_exit,
@@ -457,6 +776,7 @@ impl ProcessLowerer<'_> {
                 args: Vec::new(),
             },
         );
+        self.builder.seal_block(join);
         join
     }
 
@@ -467,12 +787,14 @@ impl ProcessLowerer<'_> {
     /// which is why the value node is emitted into the current block and only
     /// the write lands after the wait.
     fn assign(&mut self, block: BlockId, assign: &DigitalAssign, nonblocking: bool) -> BlockId {
-        let value = self.expression(block, &assign.value);
+        let mut carried = [self.expression(block, &assign.value)];
         let block = match &assign.timing {
-            Some(control) => self.wait(block, control, None),
+            // The value crosses the suspension as a resume argument; without
+            // that the write would read a value the interpreter no longer has.
+            Some(control) => self.wait(block, control, None, &mut carried),
             None => block,
         };
-        self.write(block, &assign.target, value, nonblocking);
+        self.write(block, &assign.target, carried[0], nonblocking);
         block
     }
 
@@ -512,6 +834,36 @@ impl ProcessLowerer<'_> {
                     );
                     self.write(block, element, slice, nonblocking);
                 }
+            }
+            // A process-local is an SSA variable, not a signal: writing one is
+            // a definition in the current block rather than a node in the
+            // instruction stream.
+            DigitalLValue::Identifier { name, .. } if self.lookup_local(name).is_some() => {
+                let local = self.lookup_local(name).expect("just resolved");
+                if nonblocking {
+                    self.error(
+                        format!(
+                            "a nonblocking assignment to the process-local `{name}` has no \
+                             lowered form yet: a deferred update needs a store to defer it \
+                             into, and a process-local lives in the function"
+                        ),
+                        target.span(),
+                    );
+                    return;
+                }
+                self.write_local(block, local, value);
+            }
+            DigitalLValue::BitSelect { name, .. } | DigitalLValue::PartSelect { name, .. }
+                if self.lookup_local(name).is_some() =>
+            {
+                self.error(
+                    format!(
+                        "a select on the process-local `{name}` cannot be assigned yet: a \
+                         partial write is a read-modify-write and this wave has no node \
+                         for one outside the signal store"
+                    ),
+                    target.span(),
+                );
             }
             _ => {
                 let Some(resolved) = self.write_target(target) else {
@@ -600,7 +952,14 @@ impl ProcessLowerer<'_> {
                 select,
             }),
             None => {
-                self.error(format!("`{name}` is not a discrete-domain signal"), span);
+                self.error(
+                    format!(
+                        "`{name}` is not a discrete-domain signal; assigning a module-level \
+                         analog variable from a process has no lowered form yet — declare \
+                         the variable inside the process instead"
+                    ),
+                    span,
+                );
                 None
             }
         }
@@ -608,10 +967,13 @@ impl ProcessLowerer<'_> {
 
     fn lvalue_width(&mut self, target: &DigitalLValue) -> u32 {
         match target {
-            DigitalLValue::Identifier { name, .. } => self
-                .index
-                .get(name.as_str())
-                .map_or(1, |signal| self.width_of(*signal)),
+            DigitalLValue::Identifier { name, .. } => match self.lookup_local(name) {
+                Some(local) => self.local_width(local),
+                None => self
+                    .index
+                    .get(name.as_str())
+                    .map_or(1, |signal| self.width_of(*signal)),
+            },
             DigitalLValue::BitSelect { .. } => 1,
             DigitalLValue::PartSelect { msb, lsb, .. } => {
                 match (constant_of(msb), constant_of(lsb)) {
@@ -626,11 +988,25 @@ impl ProcessLowerer<'_> {
     }
 
     /// Lower a timing control into a `Wait` and return the resume block.
+    ///
+    /// Everything the resumed half of the process needs travels through
+    /// `resume_args`, because a suspension does not preserve the value table:
+    /// the process stopped, and the kernel that starts it again does so from a
+    /// resume state and nothing else. Two things cross here — every
+    /// process-local in scope, and whatever `carried` names, which is how
+    /// `q <= #5 d` gets the `d` it read *before* the delay (IEEE 1364-2005
+    /// section 9.2.2) to the write that lands after it.
+    ///
+    /// Every in-scope local crosses, not only the ones the resumed half reads.
+    /// A liveness analysis would carry fewer; carrying one that is never read
+    /// again costs a bound parameter and nothing else, and getting liveness
+    /// wrong costs correctness.
     fn wait(
         &mut self,
         block: BlockId,
         control: &TimingControl,
         guarded: Option<&DigitalStatement>,
+        carried: &mut [ValueId],
     ) -> BlockId {
         let resume = self.builder.create_block();
         let wait = match control {
@@ -651,6 +1027,14 @@ impl ProcessLowerer<'_> {
                 resume_args: Vec::new(),
             },
         );
+        for value in carried.iter_mut() {
+            *value = self.builder.carry_value(*value, block, resume);
+        }
+        for local in self.locals_in_scope() {
+            self.builder
+                .carry_variable(CfgVariable::DigitalLocal(local), block, resume);
+        }
+        self.builder.seal_block(resume);
         resume
     }
 
@@ -739,6 +1123,11 @@ impl ProcessLowerer<'_> {
     /// reduced to one bit here rather than at every branch site.
     fn condition(&mut self, block: BlockId, expression: &Expression) -> ValueId {
         let value = self.expression(block, expression);
+        self.truth_value(block, value)
+    }
+
+    /// Reduce a value to the one bit a `Branch` reads.
+    fn truth_value(&mut self, block: BlockId, value: ValueId) -> ValueId {
         if self.value_width(value) == 1 {
             return value;
         }
@@ -1026,6 +1415,11 @@ impl ProcessLowerer<'_> {
     }
 
     fn named_value(&mut self, block: BlockId, name: &str, span: Span) -> ValueId {
+        // A process-local shadows a module signal of the same name, per IEEE
+        // 1364-2005 section 9.8.1, so the innermost region is asked first.
+        if let Some(local) = self.lookup_local(name) {
+            return self.read_local(block, local);
+        }
         match self.index.get(name) {
             Some(signal) => {
                 let width = self.width_of(*signal);
@@ -1038,8 +1432,9 @@ impl ProcessLowerer<'_> {
             None => {
                 self.error(
                     format!(
-                        "`{name}` is not a discrete-domain signal; reading an analog \
-                         variable from a process has no lowered form yet"
+                        "`{name}` is not a discrete-domain signal; reading a module-level \
+                         analog variable from a process has no lowered form yet — declare \
+                         the variable inside the process instead"
                     ),
                     span,
                 );

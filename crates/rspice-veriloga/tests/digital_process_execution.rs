@@ -636,20 +636,409 @@ fn a_case_selector_with_an_unknown_bit_falls_to_the_default() {
     }
 }
 
-/// `casez` and `casex` were refused by the lowering and stay refused. The
-/// interpreter has no node for a wildcard comparison, so a fixture that started
-/// compiling would reach it as an exact `case` and quietly match on `x`.
+/// Section 9.5: a `case` item is matched bit by bit *including* `x` and `z`,
+/// which is an identity comparison and not `==`.
+///
+/// The distinction is invisible until a label carries an unknown digit: `==`
+/// makes every comparison against an `x` unknown, so `2'bx0` would match
+/// nothing and fall to the default. The standard matches it against a selector
+/// of `x0` and no other.
 #[test]
-fn wildcard_case_statements_are_still_refused() {
-    for keyword in ["casez", "casex"] {
-        let source = digital_module(&format!(
+fn a_case_item_matches_unknown_digits_by_identity() {
+    for (selector, expected) in [("x0", "1"), ("00", "0"), ("10", "0"), ("xx", "0")] {
+        let mut harness = Harness::new(
             "    reg [1:0] sel;\n\
          \x20   reg q;\n\
-         \x20   always @* {keyword} (sel) 2'b1?: q = 1'b1; default: q = 1'b0; endcase"
-        ));
-        let result =
-            VerilogACompiler::new(CompilerOptions::default()).compile_canonical_ir(&source);
-        assert!(result.is_err(), "`{keyword}` must still refuse to lower");
+         \x20   initial case (sel) 2'bx0: q = 1'b1; default: q = 1'b0; endcase",
+        );
+        harness.set("sel", selector);
+        harness.set("q", "x");
+        expect_finished(harness.run());
+        assert_eq!(harness.get("q"), expected, "selector `{selector}`");
+    }
+}
+
+/// Section 9.5.1: `casez` ignores the positions where either operand holds `z`
+/// — `?` in a literal is `z` — and compares the rest by identity.
+///
+/// "Either operand" is the part that is easy to get wrong: a `z` in the
+/// *selector* is a don't-care too, not a value that fails to match. Both
+/// directions are covered here.
+#[test]
+fn casez_ignores_high_impedance_positions_in_either_operand() {
+    for (selector, expected) in [
+        // The label is `1?`, so bit 0 is ignored and bit 1 must be 1.
+        ("10", "1"),
+        ("11", "1"),
+        ("1x", "1"),
+        ("1z", "1"),
+        ("00", "0"),
+        // An `x` in the selector is *not* a don't-care for `casez`.
+        ("x0", "0"),
+        // A `z` in the selector is, so this matches the `1?` arm at bit 1.
+        ("z1", "1"),
+    ] {
+        let mut harness = Harness::new(
+            "    reg [1:0] sel;\n\
+         \x20   reg q;\n\
+         \x20   initial casez (sel) 2'b1?: q = 1'b1; default: q = 1'b0; endcase",
+        );
+        harness.set("sel", selector);
+        harness.set("q", "x");
+        expect_finished(harness.run());
+        assert_eq!(harness.get("q"), expected, "casez selector `{selector}`");
+    }
+}
+
+/// Section 9.5.1: `casex` ignores `x` as well, which is the whole difference
+/// between the two forms. The same selectors that `casez` rejects for holding
+/// an `x` are matched here.
+#[test]
+fn casex_ignores_unknown_positions_as_well() {
+    for (selector, expected) in [("10", "1"), ("x0", "1"), ("z0", "1"), ("00", "0")] {
+        let mut harness = Harness::new(
+            "    reg [1:0] sel;\n\
+         \x20   reg q;\n\
+         \x20   initial casex (sel) 2'b1?: q = 1'b1; default: q = 1'b0; endcase",
+        );
+        harness.set("sel", selector);
+        harness.set("q", "x");
+        expect_finished(harness.run());
+        assert_eq!(harness.get("q"), expected, "casex selector `{selector}`");
+    }
+}
+
+/// A match test yields a bit, never an unknown one, so an arm is taken or it is
+/// not. This is what makes `casez` usable for decoding a bus that holds `x`
+/// where `==` is not.
+#[test]
+fn a_wildcard_arm_is_taken_even_when_the_selector_is_all_unknown() {
+    let mut harness = Harness::new(
+        "    reg [1:0] sel;\n\
+     \x20   reg q;\n\
+     \x20   initial casex (sel) 2'b??: q = 1'b1; default: q = 1'b0; endcase",
+    );
+    harness.set("sel", "xx");
+    harness.set("q", "0");
+    expect_finished(harness.run());
+    assert_eq!(harness.get("q"), "1");
+}
+
+// ===========================================================================
+// Process-local variables and loops (IEEE 1364-2005 sections 9.6, 9.8.1)
+// ===========================================================================
+
+/// A variable declared inside the process is the process's own: it merges
+/// through block parameters rather than through the signal store, and nothing
+/// outside the process can see it.
+#[test]
+fn a_process_local_carries_a_value_between_statements() {
+    let mut harness = Harness::new(
+        "    reg [3:0] q;\n\
+     \x20   initial begin : work\n\
+     \x20       integer i;\n\
+     \x20       i = 4'b0011;\n\
+     \x20       i = i + 1;\n\
+     \x20       q = i;\n\
+     \x20   end",
+    );
+    harness.set("q", "0000");
+    expect_finished(harness.run());
+    assert_eq!(harness.get("q"), "0100");
+}
+
+/// A declaration initializer runs where it is written, and a local with none
+/// starts at `x` (IEEE 1364-2005 section 4.2.2).
+#[test]
+fn a_process_local_starts_at_its_initializer_or_at_unknown() {
+    let mut harness = Harness::new(
+        "    reg [3:0] initialized, bare;\n\
+     \x20   initial begin : work\n\
+     \x20       reg [3:0] a = 4'b1010;\n\
+     \x20       reg [3:0] b;\n\
+     \x20       initialized = a;\n\
+     \x20       bare = b;\n\
+     \x20   end",
+    );
+    harness.set("initialized", "0000");
+    harness.set("bare", "0000");
+    expect_finished(harness.run());
+    assert_eq!(harness.get("initialized"), "1010");
+    assert_eq!(harness.get("bare"), "xxxx");
+}
+
+/// Section 9.8.1: a name declared in a block shadows a module signal of the
+/// same name for the extent of the block. The signal keeps its value, which is
+/// how the test tells the two apart.
+#[test]
+fn a_process_local_shadows_a_module_signal_of_the_same_name() {
+    let mut harness = Harness::new(
+        "    reg [3:0] shared, observed;\n\
+     \x20   initial begin : work\n\
+     \x20       reg [3:0] shared;\n\
+     \x20       shared = 4'b1111;\n\
+     \x20       observed = shared;\n\
+     \x20   end",
+    );
+    harness.set("shared", "0000");
+    harness.set("observed", "0000");
+    expect_finished(harness.run());
+    assert_eq!(harness.get("observed"), "1111", "the local was read");
+    assert_eq!(
+        harness.get("shared"),
+        "0000",
+        "the module signal was not written"
+    );
+}
+
+/// Section 9.6.2: `for` runs its initialization once, tests before each pass,
+/// and updates at the end of one. The counter is an ordinary process-local, so
+/// the loop needs no mechanism of its own.
+///
+/// The counter is used as a shift count rather than as a bit index, because a
+/// select whose bounds are not constant is still refused — a write target is a
+/// compile-time `DigitalWriteSelect`, and a runtime one is a different node.
+#[test]
+fn a_for_loop_runs_its_body_once_per_pass() {
+    let mut harness = Harness::new(
+        "    reg [3:0] q;\n\
+     \x20   initial begin : work\n\
+     \x20       integer i;\n\
+     \x20       q = 4'b0000;\n\
+     \x20       for (i = 0; i < 4; i = i + 1) q = q | (4'b0001 << i);\n\
+     \x20   end",
+    );
+    harness.set("q", "0000");
+    expect_finished(harness.run());
+    assert_eq!(harness.get("q"), "1111");
+}
+
+/// A select whose index is a process-local is refused, by name, rather than
+/// silently folded to the counter's initial value.
+#[test]
+fn a_select_indexed_by_a_process_local_is_refused() {
+    let error = VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir(&digital_module(
+            "    reg [3:0] q;\n\
+         \x20   initial begin : work\n\
+         \x20       integer i;\n\
+         \x20       for (i = 0; i < 4; i = i + 1) q[i] = 1'b1;\n\
+         \x20   end",
+        ))
+        .expect_err("a runtime select bound must be refused");
+    assert!(
+        error.to_string().contains("must have constant bounds"),
+        "{error}"
+    );
+}
+
+/// A `for` whose condition is false at the start runs its body no times.
+#[test]
+fn a_for_loop_with_a_false_condition_never_enters_its_body() {
+    let mut harness = Harness::new(
+        "    reg [3:0] q;\n\
+     \x20   initial begin : work\n\
+     \x20       integer i;\n\
+     \x20       q = 4'b0000;\n\
+     \x20       for (i = 4; i < 4; i = i + 1) q = 4'b1111;\n\
+     \x20   end",
+    );
+    harness.set("q", "0000");
+    expect_finished(harness.run());
+    assert_eq!(harness.get("q"), "0000");
+}
+
+/// `while` tests before each pass, over a counter the body moves.
+#[test]
+fn a_while_loop_tests_before_each_pass() {
+    let mut harness = Harness::new(
+        "    reg [3:0] q;\n\
+     \x20   initial begin : work\n\
+     \x20       integer i;\n\
+     \x20       q = 4'b0000;\n\
+     \x20       i = 0;\n\
+     \x20       while (i < 3) begin q = q + 4'b0001; i = i + 1; end\n\
+     \x20   end",
+    );
+    harness.set("q", "0000");
+    expect_finished(harness.run());
+    assert_eq!(harness.get("q"), "0011");
+}
+
+/// Section 9.6.2: `repeat` evaluates its count once and runs the body that many
+/// times. The count is read before the loop, so a body that changes the signal
+/// it came from does not change the number of passes.
+#[test]
+fn a_repeat_loop_evaluates_its_count_once() {
+    let mut harness = Harness::new(
+        "    reg [3:0] count, q;\n\
+     \x20   initial begin\n\
+     \x20       q = 4'b0000;\n\
+     \x20       repeat (count) begin q = q + 4'b0001; count = 4'b0000; end\n\
+     \x20   end",
+    );
+    harness.set("count", "0011");
+    harness.set("q", "0000");
+    expect_finished(harness.run());
+    assert_eq!(harness.get("q"), "0011", "three passes, not one");
+}
+
+/// A count with an unknown bit is no number of passes at all, so the body runs
+/// zero times — the truth-value reduction of the counter says so without a rule
+/// of its own.
+#[test]
+fn a_repeat_loop_with_an_unknown_count_runs_no_passes() {
+    for (count, expected) in [("0010", "0010"), ("0000", "0000"), ("00x0", "0000")] {
+        let mut harness = Harness::new(
+            "    reg [3:0] count, q;\n\
+         \x20   initial begin\n\
+         \x20       q = 4'b0000;\n\
+         \x20       repeat (count) q = q + 4'b0001;\n\
+         \x20   end",
+        );
+        harness.set("count", count);
+        harness.set("q", "0000");
+        expect_finished(harness.run());
+        assert_eq!(harness.get("q"), expected, "count `{count}`");
+    }
+}
+
+// ===========================================================================
+// State across a suspension
+// ===========================================================================
+
+/// The resume-argument round trip, on the shape that needs it: a loop counter
+/// live across a `#delay` inside the loop body.
+///
+/// The interpreter starts every resumption with an empty value table, so the
+/// counter can only survive as a resume argument bound to a block parameter. A
+/// lowering that left it in the value table produces a process that reads a
+/// value nothing defines on its second pass, which is why the assertion is on
+/// what lands in `q` on each of the four passes rather than only at the end.
+#[test]
+fn a_loop_counter_survives_a_suspension_inside_the_loop() {
+    let mut harness = Harness::new(
+        "    reg [3:0] q;\n\
+     \x20   initial begin : work\n\
+     \x20       integer i;\n\
+     \x20       for (i = 0; i < 4; i = i + 1) begin #1 q <= i; end\n\
+     \x20   end",
+    );
+    harness.set("q", "0000");
+
+    let mut outcome = harness.run();
+    for pass in 0..4 {
+        let suspension = expect_suspended(outcome);
+        assert_eq!(*suspension.wait(), DigitalWaitRequest::Delay(1));
+        assert!(
+            !suspension.resume_state().arguments().is_empty(),
+            "pass {pass} must carry the counter across the suspension"
+        );
+        let state = suspension.resume_state().clone();
+        outcome = harness.resume(0, &state);
+        harness.flush_nonblocking();
+        assert_eq!(
+            harness.get("q"),
+            format!("{:04b}", pass),
+            "pass {pass} wrote its own counter value"
+        );
+    }
+    expect_finished(outcome);
+}
+
+/// IEEE 1364-2005 section 9.2.2: an intra-assignment timing control evaluates
+/// the right-hand side *before* suspending and writes it after.
+///
+/// So the value has to cross the suspension too. It is not a variable and has
+/// no name, and the interpreter's value table does not survive — it travels as
+/// a resume argument like everything else that lives across a `Wait`.
+#[test]
+fn an_intra_assignment_delay_writes_the_value_read_before_it() {
+    let mut harness = Harness::new(
+        "    reg d, q;\n\
+     \x20   initial q <= #5 d;",
+    );
+    harness.set("d", "1");
+    harness.set("q", "0");
+
+    let suspension = expect_suspended(harness.run());
+    assert_eq!(*suspension.wait(), DigitalWaitRequest::Delay(5));
+    assert_eq!(harness.get("q"), "0", "nothing is written before the delay");
+
+    // The world moves while the process sleeps. The assignment must still
+    // write the `d` it read when it ran.
+    harness.set("d", "0");
+    let state = suspension.resume_state().clone();
+    expect_finished(harness.resume(0, &state));
+    harness.flush_nonblocking();
+    assert_eq!(harness.get("q"), "1", "the value read before the delay");
+}
+
+/// A process-local declared outside a suspension and read after it keeps what
+/// it held, which is the same mechanism seen from the other side.
+#[test]
+fn a_process_local_survives_a_suspension() {
+    let mut harness = Harness::new(
+        "    reg [3:0] q, source;\n\
+     \x20   initial begin : work\n\
+     \x20       reg [3:0] saved;\n\
+     \x20       saved = source;\n\
+     \x20       #5 q = saved;\n\
+     \x20   end",
+    );
+    harness.set("source", "1010");
+    harness.set("q", "0000");
+
+    let suspension = expect_suspended(harness.run());
+    harness.set("source", "0101");
+    let state = suspension.resume_state().clone();
+    expect_finished(harness.resume(0, &state));
+    assert_eq!(
+        harness.get("q"),
+        "1010",
+        "the local held the value from before the delay"
+    );
+}
+
+// ===========================================================================
+// What still refuses
+// ===========================================================================
+
+/// The refusals that remain inside a process, each naming what is missing.
+#[test]
+fn the_remaining_process_refusals_name_themselves() {
+    let cases = [
+        (
+            "    reg [3:0] q;\n\
+             \x20   integer i;\n\
+             \x20   initial for (i = 0; i < 4; i = i + 1) q[i] = 1'b0;",
+            "module-level",
+        ),
+        (
+            "    reg q;\n\
+             \x20   initial begin : work real r; r = 1.0; q = 1'b0; end",
+            "process-local `real`",
+        ),
+        (
+            "    reg q;\n\
+             \x20   initial begin : work integer i; i <= 1; q = 1'b0; end",
+            "nonblocking assignment to the process-local `i`",
+        ),
+        (
+            "    reg q;\n\
+             \x20   initial begin : work reg [3:0] t; t[0] = 1'b1; q = t[0]; end",
+            "select on the process-local `t`",
+        ),
+    ];
+    for (section, expected) in cases {
+        let error = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(&digital_module(section))
+            .expect_err("the construct must be refused");
+        let rendered = error.to_string();
+        assert!(
+            rendered.contains(expected),
+            "expected `{expected}` to be named in: {rendered}"
+        );
     }
 }
 

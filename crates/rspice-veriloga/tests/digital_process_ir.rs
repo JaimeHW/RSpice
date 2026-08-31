@@ -714,27 +714,65 @@ fn the_derivative_pass_refuses_a_digital_value() {
     );
 }
 
-/// Wave-1 boundaries refuse by name, so a model that crosses one is told what
-/// is missing rather than compiled into something short of what it says.
+/// The constructs that reached this wave's lowering and now have one.
+///
+/// `for`, `repeat`, and the wildcard `case` forms were refused because each
+/// needed something the lowering could not build — a loop counter, a
+/// process-local, a match operator that is not `==`. They are here as the
+/// other half of the refusal test below: what retreated has to be pinned as
+/// pointedly as what remains, or the boundary moves without anyone noticing.
+#[test]
+fn the_deferred_constructs_now_lower() {
+    for section in [
+        "    reg [3:0] q;\n\
+         \x20   initial begin : work integer i;\n\
+         \x20       for (i = 0; i < 4; i = i + 1) q = q + 4'b0001; end",
+        "    reg q;\n\
+         \x20   initial repeat (4) q = ~q;",
+        "    reg q;\n\
+         \x20   initial begin : work integer i; i = 0;\n\
+         \x20       while (i < 4) begin q = ~q; i = i + 1; end end",
+        "    reg [1:0] sel;\n\
+         \x20   reg q;\n\
+         \x20   always @* casez (sel) 2'b1?: q = 1'b1; default: q = 1'b0; endcase",
+        "    reg [1:0] sel;\n\
+         \x20   reg q;\n\
+         \x20   always @* casex (sel) 2'b1?: q = 1'b1; default: q = 1'b0; endcase",
+    ] {
+        let process = only_process(section);
+        process
+            .function
+            .validate()
+            .unwrap_or_else(|error| panic!("{section}\nproduced an invalid graph: {error}"));
+    }
+}
+
+/// The boundaries that remain refuse by name, so a model that crosses one is
+/// told what is missing rather than compiled into something short of what it
+/// says.
 #[test]
 fn unlowered_constructs_refuse_by_name() {
     let cases = [
         (
             "    reg [3:0] q;\n\
              \x20   integer i;\n\
-             \x20   initial for (i = 0; i < 4; i = i + 1) q[i] = 1'b0;",
-            "`for` statement",
+             \x20   initial begin : work i = 0; q = 4'b0000; end",
+            "module-level",
         ),
         (
             "    reg q;\n\
-             \x20   initial repeat (4) q = ~q;",
-            "`repeat` statement",
+             \x20   initial begin : work real r; r = 1.0; q = 1'b0; end",
+            "process-local `real`",
         ),
         (
-            "    reg [1:0] sel;\n\
-             \x20   reg q;\n\
-             \x20   always @* casez (sel) 2'b1?: q = 1'b1; default: q = 1'b0; endcase",
-            "`casez`",
+            "    reg [3:0] q;\n\
+             \x20   initial begin : work reg [3:0] t; t = 4'b0000; t[1] = 1'b1; q = t; end",
+            "select on the process-local `t`",
+        ),
+        (
+            "    reg q;\n\
+             \x20   initial begin : work integer i; i <= 0; q = 1'b0; end",
+            "nonblocking assignment to the process-local `i`",
         ),
     ];
     for (section, expected) in cases {
@@ -747,9 +785,63 @@ fn unlowered_constructs_refuse_by_name() {
             "expected {expected} to be named in: {rendered}"
         );
         assert!(
-            rendered.contains("has no lowered form yet"),
+            rendered.contains("has no lowered form yet") || rendered.contains("cannot be assigned"),
             "the refusal must say what is missing: {rendered}"
         );
+    }
+}
+
+/// A `Wait` that has live state to carry passes it as resume arguments bound
+/// to the resume block's parameters.
+///
+/// The arity is what a kernel relies on and what the interpreter validates, so
+/// the two lists are asserted against each other rather than counted alone.
+#[test]
+fn a_suspension_carries_live_state_as_resume_arguments() {
+    let process = only_process(
+        "    reg [3:0] q;\n\
+         \x20   initial begin : work\n\
+         \x20       integer i;\n\
+         \x20       for (i = 0; i < 4; i = i + 1) begin #1 q <= i; end\n\
+         \x20   end",
+    );
+    let waits: Vec<(usize, usize)> = process
+        .function
+        .blocks
+        .iter()
+        .filter_map(|block| match &block.terminator {
+            CfgTerminator::Wait {
+                resume,
+                resume_args,
+                ..
+            } => Some((
+                resume_args.len(),
+                process.function.block(*resume).params.len(),
+            )),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(waits.len(), 1, "the loop body suspends once");
+    assert_eq!(waits[0].0, waits[0].1, "arguments match parameters");
+    assert!(
+        waits[0].0 >= 1,
+        "the counter must cross the suspension, got {} arguments",
+        waits[0].0
+    );
+
+    // And every parameter in the process is a four-state value of a declared
+    // width — a `real` here would be the analog default leaking in.
+    for block in &process.function.blocks {
+        for param in &block.params {
+            assert!(
+                matches!(
+                    process.function.value(*param).value_type,
+                    CfgValueType::FourState { .. }
+                ),
+                "parameter {param} is {:?}",
+                process.function.value(*param).value_type
+            );
+        }
     }
 }
 
