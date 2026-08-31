@@ -281,7 +281,11 @@ pub fn sec32(style: EccStyle) -> Design {
                 // and an XOR costs nothing and is what puts the `xnor`
                 // primitive into the suite.
                 let miss = n.gate(Gate::Nand, "hit", &literals);
-                n.drive(Gate::Xnor, &format!("q[{index}]"), &[d[index].clone(), miss]);
+                n.drive(
+                    Gate::Xnor,
+                    &format!("q[{index}]"),
+                    &[d[index].clone(), miss],
+                );
             }
             EccStyle::NandOnly => {
                 let miss = n.gate(Gate::Nand, "hit", &literals);
@@ -460,9 +464,7 @@ pub fn secded16() -> Design {
     n.limit_fanout(4, &[]);
     design(
         "secded16",
-        &provenance(
-            "secded16 -- 16-bit single-error-correcting, double-error-detecting decoder.",
-        ),
+        &provenance("secded16 -- 16-bit single-error-correcting, double-error-detecting decoder."),
         vec![n.finish()],
     )
 }
@@ -472,9 +474,8 @@ pub fn secded16() -> Design {
 // ===========================================================================
 
 /// The eight functions of [`alu8`], in `f` order.
-pub const ALU8_FUNCTIONS: [&str; 8] = [
-    "add", "sub", "and", "or", "xor", "xnor", "pass_a", "pass_b",
-];
+pub const ALU8_FUNCTIONS: [&str; 8] =
+    ["add", "sub", "and", "or", "xor", "xnor", "pass_a", "pass_b"];
 
 /// An 8-bit arithmetic and logic unit.
 ///

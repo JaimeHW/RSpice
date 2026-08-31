@@ -100,6 +100,15 @@ fn lfsr32() -> String {
 /// stage before it held *entering* the edge; a scheduler that updates in
 /// source order instead would collapse the pipeline and let an operand reach
 /// the accumulator two clocks early.
+///
+/// The operand registers are declared at the *product's* width rather than the
+/// operands'. That is deliberate and it is what makes this case about the
+/// scheduler and nothing else: written the other way the multiply's width
+/// would be fixed by the assignment context — the rule of IEEE 1364-2005
+/// section 5.4.1, under which the left-hand side of an assignment widens the
+/// operation — and this case would be testing that rule as much as the
+/// pipeline. Widening first states the intent locally and reads the same on
+/// every simulator.
 fn pipe_mac8() -> String {
     let mut out = header("pipe_mac8 -- three-stage pipelined 8-bit multiply-accumulate.");
     out.push_str(
@@ -109,6 +118,10 @@ fn pipe_mac8() -> String {
          // `en` down the same three stages, so it says which accumulate the\n\
          // outputs belong to. `clr` zeroes the accumulator and outranks the\n\
          // accumulate on the same edge.\n\
+         //\n\
+         // The stage-one registers are as wide as the product, so the width\n\
+         // of the multiply is fixed by its own operands rather than by the\n\
+         // assignment it appears in.\n\
          \n\
          module pipe_mac8 (clk, rst, en, clr, a, b, prod, acc, vld);\n\
          \x20 input             clk;\n\
@@ -121,15 +134,15 @@ fn pipe_mac8() -> String {
          \x20 output reg [23:0] acc;\n\
          \x20 output reg        vld;\n\
          \n\
-         \x20 reg [7:0] a1;\n\
-         \x20 reg [7:0] b1;\n\
-         \x20 reg       v1;\n\
-         \x20 reg       v2;\n\
+         \x20 reg [15:0] a1;\n\
+         \x20 reg [15:0] b1;\n\
+         \x20 reg        v1;\n\
+         \x20 reg        v2;\n\
          \n\
          \x20 always @(posedge clk) begin\n\
          \x20   if (rst) begin\n\
-         \x20     a1   <= 8'd0;\n\
-         \x20     b1   <= 8'd0;\n\
+         \x20     a1   <= 16'd0;\n\
+         \x20     b1   <= 16'd0;\n\
          \x20     v1   <= 1'b0;\n\
          \x20     v2   <= 1'b0;\n\
          \x20     prod <= 16'd0;\n\

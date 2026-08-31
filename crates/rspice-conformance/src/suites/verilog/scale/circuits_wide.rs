@@ -64,7 +64,12 @@ pub fn alu_core(
     let arith_sel = sel[0..4].to_vec();
     let beff: Vec<String> = (0..width)
         .map(|i| {
-            let sources = vec![b[i].clone(), not_b[i].clone(), lo.to_string(), hi.to_string()];
+            let sources = vec![
+                b[i].clone(),
+                not_b[i].clone(),
+                lo.to_string(),
+                hi.to_string(),
+            ];
             mux_onehot(n, &format!("{p}_bs"), &arith_sel, &sources, 2)
         })
         .collect();
@@ -429,14 +434,21 @@ pub fn alu8bcd() -> Design {
         let b_digit: Vec<String> = (0..4).map(|bit| b[base + bit].clone()).collect();
 
         // `(~b + 10) mod 16`, the nine's complement of a decimal digit.
-        let inverted: Vec<String> = (0..4)
-            .map(|bit| inv(&mut n, "nc", &b_digit[bit]))
-            .collect();
+        let inverted: Vec<String> = (0..4).map(|bit| inv(&mut n, "nc", &b_digit[bit])).collect();
         let ten = vec![lo.clone(), hi.clone(), lo.clone(), hi.clone()];
         let (nines, _) = ripple_add(&mut n, "nc", &inverted, &ten, &lo);
 
         let operand: Vec<String> = (0..4)
-            .map(|bit| mux2(&mut n, "bs", &subtract, &nsubtract, &b_digit[bit], &nines[bit]))
+            .map(|bit| {
+                mux2(
+                    &mut n,
+                    "bs",
+                    &subtract,
+                    &nsubtract,
+                    &b_digit[bit],
+                    &nines[bit],
+                )
+            })
             .collect();
         let (raw, raw_carry) = ripple_add(&mut n, "dadd", &a_digit, &operand, &digit_carry);
 
@@ -475,14 +487,7 @@ pub fn alu8bcd() -> Design {
     let keep_binary = n.not("ub", &use_bcd);
     let mut result = Vec::with_capacity(WIDTH);
     for i in 0..WIDTH {
-        let value = mux2(
-            &mut n,
-            "ysel",
-            &use_bcd,
-            &keep_binary,
-            &core.y[i],
-            &bcd[i],
-        );
+        let value = mux2(&mut n, "ysel", &use_bcd, &keep_binary, &core.y[i], &bcd[i]);
         n.drive(Gate::Buf, &format!("y[{i}]"), &[value.clone()]);
         result.push(value);
     }
@@ -568,14 +573,7 @@ pub fn alu9d() -> Design {
     let lo = slice.tie("lo", false);
     let hi = slice.tie("hi", true);
     let core = alu_core(
-        &mut slice,
-        "c",
-        &a_names,
-        &b_names,
-        &sel_names,
-        "cin",
-        &lo,
-        &hi,
+        &mut slice, "c", &a_names, &b_names, &sel_names, "cin", &lo, &hi,
     );
     for (index, net) in core.y.iter().enumerate() {
         slice.drive(Gate::Buf, &y_names[index], &[net.clone()]);
@@ -664,9 +662,7 @@ pub fn alu9d() -> Design {
         let y_wires: Vec<String> = (0..WIDTH)
             .map(|i| top.wire(&format!("y{lane}w{i}")))
             .collect();
-        let flags: Vec<String> = (0..3)
-            .map(|i| top.wire(&format!("f{lane}w{i}")))
-            .collect();
+        let flags: Vec<String> = (0..3).map(|i| top.wire(&format!("f{lane}w{i}"))).collect();
         let mut conns: Vec<(&str, String)> = Vec::new();
         for (index, name) in a_names.iter().enumerate() {
             conns.push((name.as_str(), a_wires[index].clone()));

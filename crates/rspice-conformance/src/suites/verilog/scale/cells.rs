@@ -179,7 +179,11 @@ pub fn ripple_add(
     y: &[String],
     cin: &str,
 ) -> (Vec<String>, Vec<String>) {
-    assert_eq!(x.len(), y.len(), "an adder's operands must be the same width");
+    assert_eq!(
+        x.len(),
+        y.len(),
+        "an adder's operands must be the same width"
+    );
     let mut sums = Vec::with_capacity(x.len());
     let mut carries = Vec::with_capacity(x.len());
     let mut carry = cin.to_string();
@@ -260,16 +264,12 @@ mod tests {
 
     #[test]
     fn the_nand_xor_matches_the_xor_primitive() {
-        check(
-            2,
-            |b| vec![xor2n(b, "t", "i0", "i1")],
-            &|bits| vec![bits[0] ^ bits[1]],
-        );
-        check(
-            2,
-            |b| vec![xnor2n(b, "t", "i0", "i1")],
-            &|bits| vec![!(bits[0] ^ bits[1])],
-        );
+        check(2, |b| vec![xor2n(b, "t", "i0", "i1")], &|bits| {
+            vec![bits[0] ^ bits[1]]
+        });
+        check(2, |b| vec![xnor2n(b, "t", "i0", "i1")], &|bits| {
+            vec![!(bits[0] ^ bits[1])]
+        });
     }
 
     #[test]

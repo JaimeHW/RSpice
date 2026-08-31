@@ -125,21 +125,11 @@ pub struct Module {
     /// Comment lines emitted immediately above the module header.
     pub doc: Vec<String>,
     pub ports: Vec<Port>,
-    /// Ports that also need an explicit `wire` declaration, because an
-    /// instance connects to them and the front end does not create the
-    /// implicit net of IEEE 1364-2005 section 4.5.
-    pub net_ports: Vec<String>,
     pub wires: Vec<(String, u32)>,
     /// `assign <name> = 1'b<0|1>;` constant sources.
     pub ties: Vec<(String, bool)>,
     pub gates: Vec<GateInst>,
     pub insts: Vec<ModInst>,
-}
-
-impl Module {
-    fn port(&self, name: &str) -> Option<&Port> {
-        self.ports.iter().find(|port| port.name == name)
-    }
 }
 
 /// A whole design: child modules first, top module last.
@@ -185,7 +175,6 @@ impl Builder {
                 name: name.to_string(),
                 doc: Vec::new(),
                 ports: Vec::new(),
-                net_ports: Vec::new(),
                 wires: Vec::new(),
                 ties: Vec::new(),
                 gates: Vec::new(),
@@ -214,11 +203,6 @@ impl Builder {
             width,
             dir: Dir::Out,
         });
-    }
-
-    /// Mark a port as also needing a `wire` declaration.
-    pub fn net_port(&mut self, name: &str) {
-        self.module.net_ports.push(name.to_string());
     }
 
     /// Declare a named wire and return its name.
@@ -392,9 +376,7 @@ impl Builder {
             let Some((net, count)) = load
                 .into_iter()
                 .filter(|(net, count)| {
-                    *count > limit
-                        && !exempt.contains(net.as_str())
-                        && !instance_nets.contains(net)
+                    *count > limit && !exempt.contains(net.as_str()) && !instance_nets.contains(net)
                 })
                 .max_by(|left, right| left.1.cmp(&right.1).then(right.0.cmp(&left.0)))
             else {
@@ -502,35 +484,6 @@ fn emit_module(out: &mut String, module: &Module) {
                 format!(" [{}:0]", width - 1)
             };
             let _ = writeln!(out, "  {keyword}{range} {};", wrap(&group, 4));
-        }
-    }
-
-    if !module.net_ports.is_empty() {
-        let mut widths: Vec<u32> = module
-            .net_ports
-            .iter()
-            .map(|name| {
-                module
-                    .port(name)
-                    .expect("a net-declared port is a declared port")
-                    .width
-            })
-            .collect();
-        widths.sort_unstable();
-        widths.dedup();
-        for width in widths {
-            let group: Vec<&str> = module
-                .net_ports
-                .iter()
-                .filter(|name| module.port(name).is_some_and(|port| port.width == width))
-                .map(String::as_str)
-                .collect();
-            let range = if width == 1 {
-                String::new()
-            } else {
-                format!(" [{}:0]", width - 1)
-            };
-            let _ = writeln!(out, "  wire{range} {};", wrap(&group, 4));
         }
     }
 
@@ -961,10 +914,11 @@ mod tests {
         top.input("p", 1);
         top.input("q", 1);
         top.output("z", 1);
-        top.net_port("p");
-        top.net_port("q");
-        top.net_port("z");
-        top.instance("cell", "u0", &[("a", "p".into()), ("b", "q".into()), ("y", "z".into())]);
+        top.instance(
+            "cell",
+            "u0",
+            &[("a", "p".into()), ("b", "q".into()), ("y", "z".into())],
+        );
 
         let design = Design {
             top: "top".into(),
