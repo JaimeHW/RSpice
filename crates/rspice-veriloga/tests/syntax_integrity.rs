@@ -234,6 +234,29 @@ endmodule
     );
 }
 
+/// `analog final` parses into its own block that nothing downstream reads.
+///
+/// Accepting the module would compile a device whose end-of-analysis behavior
+/// the author wrote and the simulator never runs.
+#[test]
+fn analog_final_blocks_are_refused_instead_of_being_dropped() {
+    assert_unsupported(
+        r#"
+`include "disciplines.vams"
+module dropped_final(p, n);
+    inout p, n;
+    electrical p, n;
+    real total;
+    analog final begin
+        total = 1.0;
+    end
+    analog I(p, n) <+ V(p, n);
+endmodule
+"#,
+        "`analog final` is parsed but never executed",
+    );
+}
+
 /// Refusing bare `initial` and `analog final` must not disturb the block that
 /// shares their keywords and does have a consumer.
 #[test]

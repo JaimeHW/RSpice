@@ -1126,6 +1126,30 @@ impl SemanticAnalyzer {
             }
         }
 
+        // `analog final` parses into its own block and has no consumer: no
+        // phase below reads it. Accepting the module would compile a device
+        // whose end-of-analysis behavior the author wrote and the simulator
+        // never runs, so it is refused by name.
+        //
+        // Lowering it as `@(final_step)` appended to the analog block was
+        // considered and rejected. The analog block's assignments run *before*
+        // the contributions on every device evaluation, so a final-block write
+        // to a variable that a contribution reads would change the device stamp
+        // at the last time point — the silent miscompile this fail-closed pass
+        // exists to remove. `analog final` also runs at the end of every
+        // analysis, while `final_step` is a per-analysis filtered transient
+        // event, so the two are not the same event.
+        if let Some(block) = &module.analog_final {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::UnsupportedFeature(
+                    "`analog final` is parsed but never executed by this compiler; remove the \
+                     block or move its work into the analog block"
+                        .to_owned(),
+                ),
+                block.span,
+            )));
+        }
+
         // Phase 11: analog initial runs before the main analog block
         if let Some(block) = &module.analog_initial {
             for stmt in &block.statements {

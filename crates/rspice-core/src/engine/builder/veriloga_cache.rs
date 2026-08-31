@@ -7,7 +7,12 @@ use super::*;
 // Version 18 retains exact transfer-function DC actions in compiled Laplace filters.
 // Version 19 adds signed slew IR, runtime, and checkpoint semantics.
 // Version 20 adds transactional event-state variable metadata.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 20;
+// Version 21 retracts front-end acceptance: reserved Verilog-AMS digital
+// keywords, discrete-discipline `posedge`/`negedge`, and `analog final` are now
+// refused. The record carries no compiler identity of its own, so this constant
+// is the only thing standing between a stale artifact and a source the current
+// compiler will not compile.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 21;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
