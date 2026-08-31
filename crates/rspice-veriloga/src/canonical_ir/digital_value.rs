@@ -851,6 +851,118 @@ pub fn concat(parts: &[FourStateValue]) -> FourStateValue {
     out
 }
 
+// ============================================================================
+// Real values
+// ============================================================================
+//
+// Verilog-AMS LRM 2.4 section 3.7 puts a second value domain in the discrete
+// half of the language: a `wreal` net carries a real, not bits. These are its
+// operators, kept beside the four-state ones rather than in a module of their
+// own, because the question they answer is the same question — what one
+// discrete-domain operator does to its operands — and a reader comparing the
+// two domains should not have to change files to do it.
+//
+// # What is deliberately absent
+//
+// Every conversion between the two. Section 3.7 says a `wreal` "cannot be
+// connected to any other wires, although connection to explicitly declared
+// 64-bit wires can be done via system tasks `$realtobits` and `$bitstoreal`" —
+// the standard's own answer to real-versus-bits is an explicit call, not a
+// coercion. So there is no `real_from_four_state` here, and none is wanted: a
+// four-state value holding `x` has no real to be, and the lowering refuses a
+// mixed operand pair by name rather than picking one.
+
+/// An arithmetic operator over real values.
+///
+/// Four, not five: IEEE 1364-2005 section 5.1 excludes `%` from the operators
+/// real operands may be used with, and there is no modulus here to be tempted
+/// by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum RealArithmeticOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+}
+
+impl RealArithmeticOp {
+    pub const fn spelling(self) -> &'static str {
+        match self {
+            Self::Add => "+",
+            Self::Sub => "-",
+            Self::Mul => "*",
+            Self::Div => "/",
+        }
+    }
+}
+
+/// Apply a real arithmetic operator.
+///
+/// Plain IEEE 754 double arithmetic, including its answer for division by
+/// zero. That is deliberate and is the difference from [`arithmetic`], which
+/// makes a four-state division by zero all-`x`: the four-state rule exists
+/// because 1364 says so, and there is no real-valued `x` for the same rule to
+/// produce. A real model that divides by zero gets an infinity it can see
+/// rather than a zero it cannot.
+pub fn real_arithmetic(op: RealArithmeticOp, left: f64, right: f64) -> f64 {
+    match op {
+        RealArithmeticOp::Add => left + right,
+        RealArithmeticOp::Sub => left - right,
+        RealArithmeticOp::Mul => left * right,
+        RealArithmeticOp::Div => left / right,
+    }
+}
+
+/// A comparison between two real values.
+///
+/// Equality is here rather than beside [`equality`] because the four-state one
+/// is a different operator: section 4.1.7's `==` can answer `x`, and this one
+/// cannot — two reals are equal or they are not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum RealCompareOp {
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Eq,
+    Ne,
+}
+
+impl RealCompareOp {
+    pub const fn spelling(self) -> &'static str {
+        match self {
+            Self::Lt => "<",
+            Self::Le => "<=",
+            Self::Gt => ">",
+            Self::Ge => ">=",
+            Self::Eq => "==",
+            Self::Ne => "!=",
+        }
+    }
+}
+
+/// Compare two reals, yielding IEEE 1364-2005 section 5.4.2 rule (g)'s one
+/// unsigned bit.
+///
+/// Never `x`. The four-state comparisons answer `x` when an operand holds one,
+/// and a real cannot hold one, so the two-valued answer here is the complete
+/// one rather than a simplification of it.
+pub fn real_compare(op: RealCompareOp, left: f64, right: f64) -> FourStateValue {
+    let outcome = match op {
+        RealCompareOp::Lt => left < right,
+        RealCompareOp::Le => left <= right,
+        RealCompareOp::Gt => left > right,
+        RealCompareOp::Ge => left >= right,
+        RealCompareOp::Eq => left == right,
+        RealCompareOp::Ne => left != right,
+    };
+    one_bit(if outcome {
+        FourStateBit::One
+    } else {
+        FourStateBit::Zero
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

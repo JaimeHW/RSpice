@@ -394,6 +394,46 @@ pub enum CfgValueKind {
     DigitalSignalRead {
         signal: DigitalSignalId,
     },
+    /// The current value of a real net (Verilog-AMS LRM 2.4 section 3.7).
+    ///
+    /// The real-valued twin of [`Self::DigitalSignalRead`], and a separate kind
+    /// rather than the same one reinterpreted by the signal's declaration. A
+    /// consumer that had to look the signal up to learn what type the node
+    /// produces would be one lookup away from producing the wrong one, and this
+    /// node's type — [`CfgValueType::Real`] — has to be readable from the node.
+    ///
+    /// A leaf in the same sense and not in the `is_leaf_kind` sense, for the
+    /// same reason its four-state twin is not: two reads on either side of a
+    /// `Wait` are meant to differ.
+    DigitalRealSignalRead {
+        signal: DigitalSignalId,
+    },
+    /// Arithmetic over two real values, inside a process function.
+    ///
+    /// Distinct from [`Self::Binary`], which is the analog body's arithmetic on
+    /// the same `f64`s. They compute the same numbers and belong to different
+    /// halves of the language: this one is `is_digital`, is classified by
+    /// `leaf_class`, and is refused by the analog emitter — none of which is
+    /// true of `Binary`, and all of which is what keeps a real *net* from being
+    /// mistaken for an analog quantity somewhere downstream.
+    DigitalRealArithmetic {
+        op: digital_value::RealArithmeticOp,
+        left: ValueId,
+        right: ValueId,
+    },
+    /// A comparison between two real values, yielding one unsigned bit.
+    ///
+    /// The result is [`CfgValueType::FourState`] of width one, not
+    /// [`CfgValueType::Boolean`]: IEEE 1364-2005 section 5.4.2 rule (g) makes
+    /// every comparison in the discrete domain a one-bit unsigned value, and
+    /// the rest of the process machinery — `Branch`, `&&`, an assignment to a
+    /// `reg` — reads exactly that. Producing a `Boolean` here would need a
+    /// bridge node whose only job was to undo the mistake.
+    DigitalRealCompare {
+        op: digital_value::RealCompareOp,
+        left: ValueId,
+        right: ValueId,
+    },
     /// Elementwise bitwise operator over four-state values.
     DigitalBitwise {
         op: digital_value::BitwiseOp,
@@ -595,6 +635,9 @@ impl CfgValueKind {
             Self::FourStateConstant(_)
             | Self::IntegerConstant(_)
             | Self::DigitalSignalRead { .. }
+            | Self::DigitalRealSignalRead { .. }
+            | Self::DigitalRealArithmetic { .. }
+            | Self::DigitalRealCompare { .. }
             | Self::DigitalBitwise { .. }
             | Self::DigitalBitwiseNot { .. }
             | Self::DigitalLogical { .. }
@@ -684,6 +727,8 @@ impl CfgValueKind {
             | Self::DigitalLogical { left, right, .. }
             | Self::DigitalEquality { left, right, .. }
             | Self::DigitalRelational { left, right, .. }
+            | Self::DigitalRealArithmetic { left, right, .. }
+            | Self::DigitalRealCompare { left, right, .. }
             | Self::DigitalArithmetic { left, right, .. } => vec![*left, *right],
             Self::DigitalCaseMatch {
                 selector, label, ..
@@ -806,6 +851,8 @@ impl CfgValueKind {
             | Self::DigitalLogical { left, right, .. }
             | Self::DigitalEquality { left, right, .. }
             | Self::DigitalRelational { left, right, .. }
+            | Self::DigitalRealArithmetic { left, right, .. }
+            | Self::DigitalRealCompare { left, right, .. }
             | Self::DigitalArithmetic { left, right, .. } => {
                 *left = map(*left);
                 *right = map(*right);

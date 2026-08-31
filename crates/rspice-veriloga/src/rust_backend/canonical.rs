@@ -496,6 +496,15 @@ fn kernel_region_metrics(
             CfgValueKind::DigitalSignalRead { signal } => {
                 write!(out, "digital-read:{signal}")
             }
+            CfgValueKind::DigitalRealSignalRead { signal } => {
+                write!(out, "digital-real-read:{signal}")
+            }
+            CfgValueKind::DigitalRealArithmetic { op, .. } => {
+                write!(out, "digital-real-arithmetic:{op:?}")
+            }
+            CfgValueKind::DigitalRealCompare { op, .. } => {
+                write!(out, "digital-real-compare:{op:?}")
+            }
             CfgValueKind::DigitalBitwise { op, .. } => write!(out, "digital-bitwise:{op:?}"),
             CfgValueKind::DigitalBitwiseNot { .. } => write!(out, "digital-bitwise-not"),
             CfgValueKind::DigitalLogical { op, .. } => write!(out, "digital-logical:{op:?}"),

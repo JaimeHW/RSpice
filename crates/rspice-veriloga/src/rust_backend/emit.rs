@@ -1766,6 +1766,9 @@ impl Emitter<'_> {
             CfgValueKind::FourStateConstant(_)
             | CfgValueKind::IntegerConstant(_)
             | CfgValueKind::DigitalSignalRead { .. }
+            | CfgValueKind::DigitalRealSignalRead { .. }
+            | CfgValueKind::DigitalRealArithmetic { .. }
+            | CfgValueKind::DigitalRealCompare { .. }
             | CfgValueKind::DigitalBitwise { .. }
             | CfgValueKind::DigitalBitwiseNot { .. }
             | CfgValueKind::DigitalLogical { .. }

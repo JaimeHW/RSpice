@@ -1836,6 +1836,9 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         CfgValueKind::FourStateConstant(_)
         | CfgValueKind::IntegerConstant(_)
         | CfgValueKind::DigitalSignalRead { .. }
+        | CfgValueKind::DigitalRealSignalRead { .. }
+        | CfgValueKind::DigitalRealArithmetic { .. }
+        | CfgValueKind::DigitalRealCompare { .. }
         | CfgValueKind::DigitalBitwise { .. }
         | CfgValueKind::DigitalBitwiseNot { .. }
         | CfgValueKind::DigitalLogical { .. }
@@ -2214,7 +2217,8 @@ mod digital_leaf_class {
         DigitalSchedulingRegion, DigitalWriteSelect, DigitalWriteTarget,
     };
     use crate::canonical_ir::digital_value::{
-        ArithmeticOp, BitwiseOp, FourStateValue, LogicalOp, RelationalOp, ShiftOp,
+        ArithmeticOp, BitwiseOp, FourStateValue, LogicalOp, RealArithmeticOp, RealCompareOp,
+        RelationalOp, ShiftOp,
     };
     use crate::canonical_ir::{DigitalSignalId, ValueId};
 
@@ -2235,6 +2239,19 @@ mod digital_leaf_class {
             CfgValueKind::IntegerConstant(7),
             CfgValueKind::DigitalSignalRead {
                 signal: DigitalSignalId::from(0usize),
+            },
+            CfgValueKind::DigitalRealSignalRead {
+                signal: DigitalSignalId::from(0usize),
+            },
+            CfgValueKind::DigitalRealArithmetic {
+                op: RealArithmeticOp::Add,
+                left: value,
+                right: value,
+            },
+            CfgValueKind::DigitalRealCompare {
+                op: RealCompareOp::Lt,
+                left: value,
+                right: value,
             },
             CfgValueKind::DigitalBitwise {
                 op: BitwiseOp::And,

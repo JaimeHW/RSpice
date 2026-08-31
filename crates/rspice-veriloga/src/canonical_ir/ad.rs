@@ -1374,10 +1374,17 @@ fn differentiate_with_control_for_optional_roots(
     // through `differentiable`'s catch-all, which would report `false` and
     // leave a silent zero where a derivative should be. The check is one pass
     // over the value table and runs before anything is allocated.
+    //
+    // The *kind* is asked as well as the type, and the two do not answer the
+    // same question. Every four-state kind carries a four-state type, so the
+    // type alone caught them; a real net's read (Verilog-AMS LRM 2.4 section
+    // 3.7) carries `CfgValueType::Real`, which is exactly the type an analog
+    // quantity has, and would sail through a type-only guard to be
+    // differentiated as though a `wreal` were a node voltage.
     if let Some(value) = function
         .values
         .iter()
-        .find(|value| value.value_type.is_digital())
+        .find(|value| value.value_type.is_digital() || value.kind.is_digital())
     {
         return Err(DifferentiationError::Validation(
             CfgValidationError::DigitalValueInDerivative(value.id),

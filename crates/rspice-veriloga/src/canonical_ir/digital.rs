@@ -189,12 +189,89 @@ pub enum DigitalSensitivityOrigin {
     Implicit,
 }
 
+/// How a real net combines the contributions of its drivers.
+///
+/// Restated here rather than reused from the syntax tree, for the reason
+/// [`DigitalEdge`] is: the canonical IR is serialized and must not inherit a
+/// parser type's layout.
+///
+/// [`Self::Single`] is Verilog-AMS LRM 2.4 section 6.5.3 — "there can be a
+/// maximum of one driver of a real-valued net" — and is what a plain `wreal`
+/// selects. The other four are the real-number-modelling extension the LRM does
+/// not define, opted into by writing `wrealsum`, `wrealavg`, `wrealmin` or
+/// `wrealmax` on the declaration.
+///
+/// The fold itself is the *kernel's*, exactly as IEEE 1364-2005 table 4-1's is:
+/// which value a net takes from several drivers is a simulation rule over the
+/// whole net, and the compiler's job is to say which rule, not to apply it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum DigitalRealResolution {
+    /// One driver, and a second is refused.
+    #[default]
+    Single,
+    Sum,
+    Average,
+    Minimum,
+    Maximum,
+}
+
+impl DigitalRealResolution {
+    /// The net-type keyword that selects this resolution.
+    pub const fn keyword(self) -> &'static str {
+        match self {
+            Self::Single => "wreal",
+            Self::Sum => "wrealsum",
+            Self::Average => "wrealavg",
+            Self::Minimum => "wrealmin",
+            Self::Maximum => "wrealmax",
+        }
+    }
+}
+
+/// What kind of value a signal carries.
+///
+/// A separate axis from `width` and from
+/// [`DigitalSignal::procedurally_assignable`], because it is a separate
+/// question: `reg`/`wire` decides *who may write it*, the width decides *how
+/// many bits*, and this decides *what a bit even is*. A real net has no bits at
+/// all (Verilog-AMS LRM 2.4 section 3.7), which is why the two cannot be folded
+/// into one enum without one of them lying.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum DigitalSignalKind {
+    /// IEEE 1364-2005's four-state value, at the declared width.
+    #[default]
+    FourState,
+    /// Verilog-AMS LRM 2.4 section 3.7's real-valued net, with the resolution
+    /// its net-type keyword named.
+    Real(DigitalRealResolution),
+}
+
+impl DigitalSignalKind {
+    pub const fn is_real(self) -> bool {
+        matches!(self, Self::Real(_))
+    }
+
+    pub const fn resolution(self) -> Option<DigitalRealResolution> {
+        match self {
+            Self::FourState => None,
+            Self::Real(resolution) => Some(resolution),
+        }
+    }
+}
+
 /// A declared discrete-domain net or variable.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DigitalSignal {
     pub id: DigitalSignalId,
     pub name: SmolStr,
-    /// Declared width in bits. A scalar is one.
+    /// What the signal carries.
+    ///
+    /// Defaulted on the wire format so that a plan serialized before real nets
+    /// existed still decodes as the four-state design it was.
+    #[serde(default, skip_serializing_if = "is_four_state")]
+    pub kind: DigitalSignalKind,
+    /// Declared width in bits. A scalar is one, and a real net is zero — it has
+    /// no bits, and says so the same way a process-local `real` does.
     pub width: u32,
     /// Left and right bounds exactly as written, `None` for a scalar. Retained
     /// because IEEE 1364-2005 section 4.2.1 makes `[7:0]` and `[0:7]` different
@@ -204,6 +281,11 @@ pub struct DigitalSignal {
     /// Whether a procedural assignment may drive it (`reg` can, `wire` cannot).
     pub procedurally_assignable: bool,
     pub span: SourceSpanRef,
+}
+
+/// Whether a signal kind is the default, for the wire format.
+fn is_four_state(kind: &DigitalSignalKind) -> bool {
+    matches!(kind, DigitalSignalKind::FourState)
 }
 
 /// Which bits of a signal an assignment drives.

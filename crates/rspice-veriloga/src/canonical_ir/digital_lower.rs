@@ -89,8 +89,9 @@ use super::cfg::{CfgTerminator, CfgValueKind, CfgValueType, CfgVariable, Digital
 use super::diagnostic::{CompilerPhase, IrDiagnostic, SourceSpanRef};
 use super::digital::{
     CanonicalDigitalPlan, CfgDigitalProcess, DigitalDriver, DigitalDriverId, DigitalEdge,
-    DigitalProcessKind, DigitalSchedulingRegion, DigitalSensitivityOrigin, DigitalSensitivityTerm,
-    DigitalSignal, DigitalStaticSensitivity, DigitalWriteSelect, DigitalWriteTarget,
+    DigitalProcessKind, DigitalRealResolution, DigitalSchedulingRegion, DigitalSensitivityOrigin,
+    DigitalSensitivityTerm, DigitalSignal, DigitalSignalKind, DigitalStaticSensitivity,
+    DigitalWriteSelect, DigitalWriteTarget,
 };
 use super::digital_value::{
     ArithmeticOp, BitwiseOp, DigitalCaseMatch, FourStateValue, LogicalOp, RelationalOp, ShiftOp,
@@ -99,7 +100,7 @@ use super::ids::{BlockId, DigitalLocalId, DigitalProcessId, DigitalSignalId, Val
 use crate::ast::DigitalProcessKind as AstKind;
 use crate::ast::{
     ArrayLiteralElement, BinaryOp, DigitalAssign, DigitalCase, DigitalLValue, DigitalStatement,
-    EdgeKind, Expression, ReductionOp, TimingControl, UnaryOp,
+    EdgeKind, Expression, ReductionOp, TimingControl, UnaryOp, WrealResolution,
 };
 use crate::four_state::FourStateBit;
 use crate::semantic::{AnalyzedDigital, AnalyzedDigitalProcess, AnalyzedDigitalSignal};
@@ -423,6 +424,16 @@ fn lower_signal(
     DigitalSignal {
         id,
         name,
+        kind: match signal.class.wreal_resolution() {
+            None => DigitalSignalKind::FourState,
+            Some(resolution) => DigitalSignalKind::Real(match resolution {
+                WrealResolution::Single => DigitalRealResolution::Single,
+                WrealResolution::Sum => DigitalRealResolution::Sum,
+                WrealResolution::Average => DigitalRealResolution::Average,
+                WrealResolution::Minimum => DigitalRealResolution::Minimum,
+                WrealResolution::Maximum => DigitalRealResolution::Maximum,
+            }),
+        },
         width: signal.width,
         bounds: signal.range.map(|range| (range.msb, range.lsb)),
         signed: signal.signedness.is_signed(),
