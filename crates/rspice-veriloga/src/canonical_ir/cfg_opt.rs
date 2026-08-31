@@ -128,6 +128,17 @@ pub(crate) fn optimize_with_control_and_tracking(
     }
     check_cancelled(control)?;
     optimizer.eliminate_dead_code();
+    // Dead value elimination can leave a report-only conditional as an empty
+    // diamond. Keeping its condition alive is not merely cosmetic: a `ddx` in
+    // that condition makes every later block appear Newton-dependent and can
+    // defeat the generated backend's otherwise profitable static stages.
+    // Splice empty arms, collapse identical branch targets, then run liveness
+    // once more so the now-unreferenced predicate and its derivative slice are
+    // removed. Stateful/event work is included in `outputs` by each caller and
+    // therefore cannot become an empty arm here.
+    let blocks = std::mem::take(&mut optimizer.blocks);
+    (optimizer.blocks, optimizer.entry) = super::schedule::prune_blocks(blocks, optimizer.entry);
+    optimizer.eliminate_dead_code();
     check_cancelled(control)?;
 
     Ok((

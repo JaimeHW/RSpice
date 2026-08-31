@@ -443,11 +443,14 @@ fn generated_veriloga_noise_is_a_slice_rather_than_a_second_model() {
 
 #[test]
 fn generated_veriloga_sources_stay_compact() {
-    /// Deliberate headroom above the authenticated 22.07 MB model corpus and
-    /// 1.77 MB largest leaf: model updates may add physics, but a backend
-    /// regression must be reviewed explicitly.
+    /// Deliberate headroom above the authenticated model corpus. Exact
+    /// second-order `ddx` stamping raises the HiSIM-HV leaf to about 2.39 MB:
+    /// its induced-gate-noise correlation uses `ddx(qge, V(dp/sp))` inside a
+    /// reactive contribution, so omitting those Hessian rows would make its
+    /// Newton matrix wrong. The reviewed ceiling retains roughly ten percent
+    /// headroom while still catching duplication or failed pruning.
     const MAX_TOTAL_MODEL_RUST_BYTES: usize = 24_500_000;
-    const MAX_SINGLE_MODEL_RUST_BYTES: usize = 1_950_000;
+    const MAX_SINGLE_MODEL_RUST_BYTES: usize = 2_650_000;
     const MAX_EMPTY_ELSE_ARMS: usize = 32;
 
     let models_root = generated_veriloga_root().join("models");

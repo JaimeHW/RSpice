@@ -1631,7 +1631,7 @@ fn onward(
 /// A loop header is never removed. Its emptiness in some stage would be a
 /// question about the loop, and `raise_loops` has already put every loop
 /// entirely inside one stage.
-fn prune_blocks(mut blocks: Vec<CfgBlock>, entry: BlockId) -> (Vec<CfgBlock>, BlockId) {
+pub(crate) fn prune_blocks(mut blocks: Vec<CfgBlock>, entry: BlockId) -> (Vec<CfgBlock>, BlockId) {
     // Spliced-out blocks are recorded rather than deleted in place, so the next
     // round does not rediscover them: nothing points at one any more, but it is
     // still in the vector until the unreachable sweep at the end.
