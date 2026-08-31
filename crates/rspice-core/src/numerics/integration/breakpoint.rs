@@ -545,7 +545,11 @@ impl BreakpointManager {
     /// later source breakpoint without being the same time. Restarting must
     /// therefore leave both the permanent/runtime schedules and any saved
     /// approach step intact for the later breakpoint.
-    pub fn mark_external_breakpoint_solved(&mut self, time: Value, accepted_delta: Value) -> Value {
+    pub(crate) fn mark_external_breakpoint_solved(
+        &mut self,
+        time: Value,
+        accepted_delta: Value,
+    ) -> Value {
         self.just_passed_breakpoint = true;
         let next_gap = self
             .next_after(time)
