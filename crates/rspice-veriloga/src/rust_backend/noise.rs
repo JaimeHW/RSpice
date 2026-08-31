@@ -12,7 +12,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
-use crate::canonical_ir::ad::lane_liveness;
 use crate::canonical_ir::{
     AdSeed, CanonicalIrArtifact, CanonicalNoiseSourceKind, CfgBinaryOp, CfgFunction, CfgTerminator,
     CfgUnaryOp, CfgValueKind, ExprId, HirAnalogOperator, HirAssignment, HirExprKind, HirLoop,
@@ -747,13 +746,29 @@ fn plan_grouped_noise(
         .iter()
         .map(|process| AdSeed::NoiseProcess(process.process_id))
         .collect::<Vec<_>>();
-    validate_linear_noise_routing(artifact, &cfg.function, &seeds)?;
     let residuals = artifact
         .mir
         .equations
         .iter()
         .map(|equation| cfg.residuals[usize::from(equation.contribution)])
         .collect::<Vec<_>>();
+    let validation_roots = residuals
+        .iter()
+        .copied()
+        .chain(cfg.noise_processes.iter().flat_map(|process| {
+            std::iter::once(process.active)
+                .chain(std::iter::once(process.psd))
+                .chain(process.exponent)
+                .chain(process.table.iter().copied())
+        }))
+        .collect::<Vec<_>>();
+    // A model may compute operating-point report variables after its circuit
+    // equations. Noise realization leaves reaching those dead reports must not
+    // disqualify the generated backend; only paths that can affect a residual
+    // or a process's own metadata are observable by noise analysis.
+    let (validation_function, _) =
+        crate::canonical_ir::prune_cfg_to_outputs(&cfg.function, &validation_roots);
+    validate_linear_noise_routing(artifact, &validation_function)?;
     let charges = super::canonical::stored_charges(&mut cfg.function, &residuals);
     let mut differentiated = differentiate(&cfg.function, &seeds).map_err(|error| {
         unsupported(artifact, format!("grouped noise differentiation: {error}"))
@@ -838,10 +853,9 @@ fn plan_grouped_noise(
 fn validate_linear_noise_routing(
     artifact: &CanonicalIrArtifact,
     function: &CfgFunction,
-    seeds: &[AdSeed],
 ) -> Result<(), RustBackendError> {
-    let live = lane_liveness(function, seeds);
-    let depends = |value: ValueId| !live[usize::from(value)].is_empty();
+    let noise_dependent = raw_noise_dependencies(function);
+    let depends = |value: ValueId| noise_dependent[usize::from(value)];
     for block in &function.blocks {
         if let CfgTerminator::Branch { condition, .. } = block.terminator
             && depends(condition)
@@ -898,6 +912,65 @@ fn validate_linear_noise_routing(
         }
     }
     Ok(())
+}
+
+/// Track structural dependence on a stochastic realization through every CFG
+/// operation, including comparisons and Boolean control. AD liveness is not
+/// sufficient here: predicates are intentionally piecewise constant to AD,
+/// but selecting a circuit equation from the random realization is still
+/// nonlinear stochastic routing and must fail closed.
+fn raw_noise_dependencies(function: &CfgFunction) -> Vec<bool> {
+    let mut users = vec![Vec::new(); function.values.len()];
+    for value in &function.values {
+        for operand in value.kind.operands() {
+            users[usize::from(operand)].push(value.id);
+        }
+    }
+    let mut add_edge = |target, args: &[ValueId]| {
+        for (&parameter, &argument) in function.block(target).params.iter().zip(args) {
+            users[usize::from(argument)].push(parameter);
+        }
+    };
+    for block in &function.blocks {
+        match &block.terminator {
+            CfgTerminator::Jump { target, args } => add_edge(*target, args),
+            CfgTerminator::Branch {
+                then_target,
+                then_args,
+                else_target,
+                else_args,
+                ..
+            } => {
+                add_edge(*then_target, then_args);
+                add_edge(*else_target, else_args);
+            }
+            CfgTerminator::Wait {
+                resume,
+                resume_args,
+                ..
+            } => add_edge(*resume, resume_args),
+            CfgTerminator::Return | CfgTerminator::Unset => {}
+        }
+    }
+
+    let mut dependent = vec![false; function.values.len()];
+    let mut pending = Vec::new();
+    for value in &function.values {
+        if matches!(value.kind, CfgValueKind::NoiseProcess(_)) {
+            dependent[usize::from(value.id)] = true;
+            pending.push(value.id);
+        }
+    }
+    while let Some(value) = pending.pop() {
+        for &user in &users[usize::from(value)] {
+            let index = usize::from(user);
+            if !dependent[index] {
+                dependent[index] = true;
+                pending.push(user);
+            }
+        }
+    }
+    dependent
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2048,5 +2121,91 @@ endmodule
             0.0,
             "equal mixed current/potential transfer paths must cancel coherently"
         );
+    }
+
+    #[test]
+    fn dead_nonlinear_noise_reports_do_not_disqualify_linear_circuit_routing() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module dead_noise_report(p, n);
+    inout p, n; electrical p, n; real x, report;
+    analog begin
+        x = white_noise(1.0, "linear");
+        I(p, n) <+ x;
+        report = (x + 1.0) / (x + 2.0);
+    end
+endmodule
+"#,
+            )
+            .expect("dead-report fixture compiles");
+
+        let plan = super::plan_grouped_noise(&artifact)
+            .expect("dead nonlinear report is irrelevant to circuit noise")
+            .expect("fixture has a grouped process");
+        assert_eq!(plan.processes.len(), 1);
+        assert_eq!(plan.processes[0].injections.len(), 1);
+    }
+
+    #[test]
+    fn live_nonlinear_noise_routing_is_rejected() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module live_nonlinear_noise(p, n);
+    inout p, n; electrical p, n; real x;
+    analog begin
+        x = white_noise(1.0, "nonlinear");
+        I(p, n) <+ x / (x + 1.0);
+    end
+endmodule
+"#,
+            )
+            .expect("nonlinear-routing fixture compiles");
+
+        let error = super::plan_grouped_noise(&artifact)
+            .expect_err("nonlinear realization routing must fail closed");
+        assert!(
+            error.to_string().contains("nonlinear or stateful"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn dead_noise_control_flow_is_pruned_but_live_control_flow_fails_closed() {
+        let dead = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module dead_noise_control(p, n);
+    inout p, n; electrical p, n; real x, report;
+    analog begin
+        x = white_noise(1.0, "linear");
+        I(p, n) <+ x;
+        if (x > 0.0) report = 1.0; else report = 2.0;
+    end
+endmodule
+"#,
+            )
+            .expect("dead-control fixture compiles");
+        super::plan_grouped_noise(&dead)
+            .expect("dead report-only control flow is not circuit-observable")
+            .expect("fixture has a grouped process");
+
+        let live = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module live_noise_control(p, n);
+    inout p, n; electrical p, n; real x;
+    analog begin
+        x = white_noise(1.0, "control");
+        if (x > 0.0) I(p, n) <+ 1.0; else I(p, n) <+ 0.0;
+    end
+endmodule
+"#,
+            )
+            .expect("live-control fixture compiles");
+        let error = super::plan_grouped_noise(&live)
+            .expect_err("noise-dependent circuit control flow must fail closed");
+        assert!(error.to_string().contains("control flow"), "{error}");
     }
 }

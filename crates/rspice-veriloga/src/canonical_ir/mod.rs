@@ -47,7 +47,7 @@ pub use cfg_eval::{
     CfgEvalError, CfgEvalInputs, CfgEvalSnapshot, CfgScalar, evaluate as evaluate_cfg,
 };
 pub use cfg_lower::CfgModel;
-pub use cfg_opt::optimize as optimize_cfg;
+pub use cfg_opt::{optimize as optimize_cfg, prune_to_outputs as prune_cfg_to_outputs};
 pub use diagnostic::{
     CompilerPhase, DiagnosticSeverity, IrDiagnostic, IrValidationResult, SourceSpanRef,
 };

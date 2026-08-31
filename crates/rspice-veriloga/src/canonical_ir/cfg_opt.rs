@@ -73,6 +73,41 @@ pub fn optimize(function: &CfgFunction, outputs: &[ValueId]) -> (CfgFunction, Ve
         .expect("the no-op pipeline control cannot cancel")
 }
 
+/// Retain only values and control-flow structure observable from `outputs`,
+/// without performing algebraic simplification or common-subexpression work.
+///
+/// This is the linear-cost slice used by structural validators. They need dead
+/// report-only paths removed, but rewriting a large compact model merely to
+/// inspect the surviving operations adds substantial compile latency and can
+/// obscure the original operation that a diagnostic should name.
+pub fn prune_to_outputs(
+    function: &CfgFunction,
+    outputs: &[ValueId],
+) -> (CfgFunction, Vec<ValueId>) {
+    let mut optimizer = Optimizer {
+        entry: function.entry,
+        values: function.values.clone(),
+        blocks: function.blocks.clone(),
+        shapes: function.shapes.clone(),
+        outputs: outputs.to_vec(),
+        tracked: Vec::new(),
+        replacement: vec![None; function.values.len()],
+    };
+    optimizer.eliminate_dead_code();
+    let blocks = std::mem::take(&mut optimizer.blocks);
+    (optimizer.blocks, optimizer.entry) = super::schedule::prune_blocks(blocks, optimizer.entry);
+    optimizer.eliminate_dead_code();
+    (
+        CfgFunction {
+            entry: optimizer.entry,
+            blocks: optimizer.blocks,
+            values: optimizer.values,
+            shapes: optimizer.shapes,
+        },
+        optimizer.outputs,
+    )
+}
+
 pub(crate) fn optimize_with_control(
     function: &CfgFunction,
     outputs: &[ValueId],
