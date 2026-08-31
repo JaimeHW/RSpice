@@ -180,18 +180,26 @@ fn xspice_event_output_count(instances: &[crate::xspice::XspiceInstance]) -> usi
         .sum()
 }
 
-fn extend_xspice_event_connection_nodes(
-    nodes: &mut Vec<NodeId>,
+/// Mark every net one event connection reaches as discrete. Analog port
+/// connections carry a solved voltage and are left alone.
+fn mark_xspice_event_connection_nets(
+    kinds: &mut NetKinds,
     connection: &crate::xspice::PortConnection,
 ) {
+    let mut mark = |node: NodeId| kinds.set(node, NetKind::Discrete);
     match connection {
         crate::xspice::PortConnection::Digital(node)
         | crate::xspice::PortConnection::DigitalInverted(node)
-        | crate::xspice::PortConnection::Real(node) => nodes.push(*node),
+        | crate::xspice::PortConnection::Real(node) => mark(*node),
         crate::xspice::PortConnection::DigitalVector(vector)
-        | crate::xspice::PortConnection::RealVector(vector) => nodes.extend(vector),
+        | crate::xspice::PortConnection::RealVector(vector) => {
+            vector.iter().copied().for_each(mark);
+        }
         crate::xspice::PortConnection::DigitalVectorMapped(vector) => {
-            nodes.extend(vector.iter().map(|connection| connection.node));
+            vector
+                .iter()
+                .map(|connection| connection.node)
+                .for_each(mark);
         }
         _ => {}
     }
@@ -225,7 +233,7 @@ fn xspice_event_node_summary(digital_nodes: &[NodeId], real_nodes: &[NodeId]) ->
     }
 }
 
-fn extend_xspice_event_nodes(target: &mut Vec<NodeId>, source: &[NodeId]) {
+fn merge_changed_event_nodes(target: &mut Vec<NodeId>, source: &[NodeId]) {
     if source.is_empty() {
         return;
     }
@@ -303,11 +311,8 @@ impl CircuitData {
             *self.xspice_event_loads.entry(node).or_insert(0.0) += load;
         });
         for connection in instance.connections() {
-            extend_xspice_event_connection_nodes(&mut self.xspice_event_nodes, connection);
+            mark_xspice_event_connection_nets(&mut self.net_kinds, connection);
         }
-        self.xspice_event_nodes.retain(|node| *node > 0);
-        self.xspice_event_nodes.sort_unstable();
-        self.xspice_event_nodes.dedup();
         self.xspice_instances.push(instance);
     }
 
@@ -317,9 +322,16 @@ impl CircuitData {
         self.xspice_has_event_driven_devices
     }
 
+    /// Whether a net carries an event-driven value rather than a solved
+    /// voltage. Ground and unknown nodes are continuous.
+    #[inline]
+    pub(crate) fn is_discrete_net(&self, node: NodeId) -> bool {
+        self.net_kinds.kind(node) == NetKind::Discrete
+    }
+
     /// Zero-based MNA rows that also serve as XSPICE event-node identities.
     pub(crate) fn xspice_event_node_matrix_rows(&self) -> impl Iterator<Item = usize> + '_ {
-        self.xspice_event_nodes.iter().map(|node| node - 1)
+        self.net_kinds.discrete_nodes().map(|node| node - 1)
     }
 
     /// Set transient run context on all XSPICE instances.
@@ -559,8 +571,8 @@ impl CircuitData {
                 touched_real_nodes,
                 time,
             );
-            extend_xspice_event_nodes(&mut dispatch_digital_nodes, touched_digital_nodes);
-            extend_xspice_event_nodes(&mut dispatch_real_nodes, touched_real_nodes);
+            merge_changed_event_nodes(&mut dispatch_digital_nodes, touched_digital_nodes);
+            merge_changed_event_nodes(&mut dispatch_real_nodes, touched_real_nodes);
 
             for instance in &mut self.xspice_instances {
                 if pass > 0
@@ -619,11 +631,11 @@ impl CircuitData {
                 );
                 if instance_changed {
                     changed = true;
-                    extend_xspice_event_nodes(
+                    merge_changed_event_nodes(
                         &mut next_dispatch_digital_nodes,
                         touched_digital_nodes,
                     );
-                    extend_xspice_event_nodes(&mut next_dispatch_real_nodes, touched_real_nodes);
+                    merge_changed_event_nodes(&mut next_dispatch_real_nodes, touched_real_nodes);
                 }
             }
 

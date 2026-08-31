@@ -37,6 +37,8 @@ mod introspection;
 pub use introspection::{DeviceOpEntry, DeviceOpReport};
 mod linear_stamping;
 mod magnetic;
+mod net_kind;
+pub(crate) use net_kind::{NetKind, NetKinds};
 mod nonlinear;
 pub use crate::op_label::{OP_LABELS, OpLabel};
 pub(crate) use nonlinear::{AcceptedNativeNonlinearCheckpointStates, NonlinearDeviceStateSnapshot};
@@ -469,6 +471,10 @@ pub struct CircuitData {
     branch_name_by_ordinal: Vec<Option<String>>,
     /// Number of nodes (excluding ground)
     num_nodes: usize,
+    /// What kind of quantity each net carries. This is the one record of
+    /// which nets are event-driven rather than analog; the XSPICE event-node
+    /// accessors read it rather than keeping a node list of their own.
+    pub(crate) net_kinds: NetKinds,
     /// Number of branch current variables (voltage sources, inductors)
     num_branches: usize,
     /// Number of private scalar DAE state variables appended after the public
@@ -590,8 +596,6 @@ pub struct CircuitData {
     pub(crate) xspice_instances: Vec<XspiceInstance>,
     /// Cached presence of event-driven XSPICE ports.
     pub(crate) xspice_has_event_driven_devices: bool,
-    /// Sorted, unique circuit nodes used by XSPICE event connections.
-    pub(crate) xspice_event_nodes: Vec<NodeId>,
     /// Circuit-level digital node values driven by XSPICE events.
     pub(crate) xspice_digital_values: HashMap<NodeId, DigitalValue>,
     /// Per-output digital driver values, resolved onto digital nodes.

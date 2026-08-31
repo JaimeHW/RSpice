@@ -76,8 +76,8 @@ const EXCLUDED_FROM_DEVICE_COUNT: &[(&str, &str)] = &[
     ),
     // Node, topology, and solver facts with no element behind them.
     (
-        "xspice_event_nodes",
-        "the circuit nodes XSPICE event connections reach",
+        "net_kinds",
+        "the kind of quantity each net carries, a node fact with no element",
     ),
     (
         "xspice_touched_digital_nodes",

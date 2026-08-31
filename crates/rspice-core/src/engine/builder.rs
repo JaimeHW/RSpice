@@ -9440,8 +9440,6 @@ impl Engine {
             .cshunt
             .filter(|value| value.is_finite() && *value > 0.0)
         {
-            let event_nodes: HashSet<crate::NodeId> =
-                circuit.xspice_event_nodes.iter().copied().collect();
             let mut shunted: Vec<(crate::NodeId, &str)> = flat_elements
                 .iter()
                 .flat_map(|element| {
@@ -9465,7 +9463,7 @@ impl Engine {
                 })
                 .filter_map(|name| {
                     let node = circuit.get_node_by_name(name)?;
-                    (node > 0 && !event_nodes.contains(&node)).then_some((node, name))
+                    (node > 0 && !circuit.is_discrete_net(node)).then_some((node, name))
                 })
                 .collect();
             shunted.sort_unstable();

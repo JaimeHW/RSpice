@@ -22,6 +22,7 @@ impl CircuitData {
             branch_names: HashMap::new(),
             branch_name_by_ordinal: Vec::new(),
             num_nodes: 0,
+            net_kinds: NetKinds::default(),
             num_branches: 0,
             hidden_state_count: 0,
             resistors: Resistors::new(),
@@ -81,7 +82,6 @@ impl CircuitData {
             // XSPICE instances
             xspice_instances: Vec::new(),
             xspice_has_event_driven_devices: false,
-            xspice_event_nodes: Vec::new(),
             xspice_digital_values: HashMap::new(),
             xspice_digital_drivers: HashMap::new(),
             xspice_digital_event_times: HashMap::new(),
