@@ -362,6 +362,7 @@ fn extract_expression(
             source,
             operands,
             name,
+            ..
         } => match source.as_str() {
             "White" if operands.len() == 1 => {
                 push(
@@ -387,7 +388,7 @@ fn extract_expression(
                 last.psd = multiply(hir, last.psd.id, operands[0], expression.span);
                 Ok(())
             }
-            "Table" if !operands.is_empty() => {
+            "Table" | "TableLog" if !operands.is_empty() => {
                 push(
                     CanonicalNoiseSourceKind::Table,
                     name.clone(),
@@ -395,7 +396,7 @@ fn extract_expression(
                     None,
                     Some(CanonicalNoiseTable {
                         operands: operands.iter().map(|id| expr_ref(hir, *id)).collect(),
-                        log_interp: false,
+                        log_interp: source == "TableLog",
                     }),
                 );
                 Ok(())

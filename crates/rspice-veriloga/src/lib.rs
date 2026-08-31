@@ -80,6 +80,7 @@
 
 mod array_index;
 pub mod ast;
+mod canonical_compat;
 pub mod canonical_ir;
 pub mod codegen;
 pub mod disciplines;

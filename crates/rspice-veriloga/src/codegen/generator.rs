@@ -434,6 +434,7 @@ impl CodeGenerator {
             variable_names: ir.variables.iter().map(|v| v.name.clone()).collect(),
             event_state_variables: ir.event_state_variables.clone(),
             assignment_steps: Vec::new(),
+            noise_assignment_steps: Vec::new(),
             stamp_programs: Vec::new(),
             lookup_tables: Vec::new(),
             internal_nodes: ir.internal_nodes.len(),
@@ -449,12 +450,15 @@ impl CodeGenerator {
             laplace_filters: Vec::new(),
             zi_filters: Vec::new(),
             zi_filter_definitions: Vec::new(),
+            noise_process_schema: 1,
             noise_sources: Vec::new(),
         };
 
         // Generate evaluation steps (executed in order before contributions)
         let phase_start = web_time::Instant::now();
         model.assignment_steps = self.compile_assignment_items(&ir.assignments, &emit_ctx)?;
+        model.noise_assignment_steps =
+            self.compile_assignment_items(&ir.noise_assignments, &emit_ctx)?;
         if timings {
             eprintln!(
                 "timing codegen.assignments module={} elapsed={:.3}s steps={}",
@@ -490,7 +494,29 @@ impl CodeGenerator {
                 .as_ref()
                 .map(|e| self.compile_expr(e, &emit_ctx))
                 .transpose()?;
+            let injections = source
+                .injections
+                .iter()
+                .map(|injection| {
+                    let equation = &ir.equations[injection.equation_index];
+                    let rhs_sign = if equation.indirect || equation.is_current {
+                        -1.0
+                    } else {
+                        1.0
+                    };
+                    Ok(crate::codegen::CompiledNoiseInjection {
+                        pos: Self::node_stamp_index(ir, injection.branch.pos_terminal),
+                        neg: Self::node_stamp_index(ir, injection.branch.neg_terminal),
+                        is_current: injection.is_current,
+                        branch_ordinal: injection.branch_ordinal,
+                        program_idx: injection.equation_index,
+                        rhs_sign,
+                        gain_program: self.compile_expr(&injection.gain, &emit_ctx)?,
+                    })
+                })
+                .collect::<CompileResult<Vec<_>>>()?;
             model.noise_sources.push(CompiledNoiseSource {
+                process_id: source.process_id,
                 pos: Self::node_stamp_index(ir, source.branch.pos_terminal),
                 neg: Self::node_stamp_index(ir, source.branch.neg_terminal),
                 is_current: source.is_current,
@@ -503,6 +529,7 @@ impl CodeGenerator {
                     .as_ref()
                     .map(|t| (t.points.clone(), t.log_interp)),
                 name: source.name.clone(),
+                injections,
             });
         }
         if timings {
@@ -575,6 +602,9 @@ impl CodeGenerator {
                 (Self::node_stamp_index(ir, *node), ColumnAxis::Node(*node))
             }
             DerivativeWrt::BranchCurrent(k) => (StampIndex::Branch(*k), ColumnAxis::Branch(*k)),
+            DerivativeWrt::Noise(_) => {
+                unreachable!("noise-process derivatives are not matrix Jacobian columns")
+            }
         }
     }
 
@@ -1462,7 +1492,9 @@ impl CodeGenerator {
                     .instructions
                     .push(Instruction::LastCrossingState(detector_id));
             }
-            IrExpr::WhiteNoise { power: _, name: _ } => {
+            IrExpr::WhiteNoise {
+                power: _, name: _, ..
+            } => {
                 // The large-signal contribution is zero. The PSD operand is
                 // compiled separately into model.noise_sources for noise
                 // analysis and must not create stamp-time dependencies.
@@ -1545,6 +1577,7 @@ impl CodeGenerator {
                 power: _,
                 exponent: _,
                 name: _,
+                ..
             } => {
                 // The large-signal contribution is zero. PSD and exponent
                 // programs are compiled separately for noise analysis.

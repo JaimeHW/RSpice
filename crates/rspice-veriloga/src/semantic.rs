@@ -148,6 +148,9 @@ pub struct SemanticAnalyzer {
     /// threading a scope through every one of them would put the same argument
     /// in every signature to be used by three.
     digital_scopes: Vec<Vec<digital::AnalyzedProcessLocal>>,
+    /// Dense identity assigned once, before an analyzed expression is cloned
+    /// into the flat compatibility stream and the structured CFG body.
+    next_noise_process: u32,
 }
 
 /// How an event expression lowers into the dataflow representation
@@ -189,6 +192,7 @@ impl SemanticAnalyzer {
             unfiltered_initial_step_guards: Vec::new(),
             warnings: Vec::new(),
             digital_scopes: Vec::new(),
+            next_noise_process: 0,
         }
     }
 
@@ -258,6 +262,7 @@ impl SemanticAnalyzer {
                 self.dynamic_analog_operator_guard_depth = 0;
                 self.current_default_transition = default_transition;
                 self.parameter_arrays.clear();
+                self.next_noise_process = 0;
 
                 match self.analyze_module(module, default_transition) {
                     Ok(analyzed) => {
@@ -4658,24 +4663,40 @@ impl SemanticAnalyzer {
         sink: &mut Vec<AnalyzedStatement>,
     ) -> CompileResult<NoiseSource> {
         Ok(match noise {
-            NoiseSource::White { power, name, span } => NoiseSource::White {
+            NoiseSource::White {
+                process_id,
+                power,
+                name,
+                span,
+            } => NoiseSource::White {
+                process_id: *process_id,
                 power: Box::new(self.materialize_output_function_calls(power, module, sink)?),
                 name: name.clone(),
                 span: *span,
             },
             NoiseSource::Flicker {
+                process_id,
                 power,
                 exponent,
                 name,
                 span,
             } => NoiseSource::Flicker {
+                process_id: *process_id,
                 power: Box::new(self.materialize_output_function_calls(power, module, sink)?),
                 exponent: Box::new(self.materialize_output_function_calls(exponent, module, sink)?),
                 name: name.clone(),
                 span: *span,
             },
-            NoiseSource::Table { data, name, span } => NoiseSource::Table {
+            NoiseSource::Table {
+                process_id,
+                data,
+                log_interp,
+                name,
+                span,
+            } => NoiseSource::Table {
+                process_id: *process_id,
                 data: self.materialize_output_function_calls_in_expr_list(data, module, sink)?,
+                log_interp: *log_interp,
                 name: name.clone(),
                 span: *span,
             },
@@ -5111,11 +5132,15 @@ impl SemanticAnalyzer {
                     .iter()
                     .map(|a| self.lower_expression(a))
                     .collect::<CompileResult<Vec<_>>>()?;
-                Expression::SystemFunction(SystemFunction {
-                    name: f.name.clone(),
-                    args,
-                    span: f.span,
-                })
+                if let Some(noise) = self.lower_noise_process_call(&f.name, &args, f.span)? {
+                    Expression::NoiseSource(noise)
+                } else {
+                    Expression::SystemFunction(SystemFunction {
+                        name: f.name.clone(),
+                        args,
+                        span: f.span,
+                    })
+                }
             }
             Expression::Call(call) => {
                 self.validate_builtin_call_arity(call)?;
@@ -5220,11 +5245,17 @@ impl SemanticAnalyzer {
                             call.span,
                         ));
                     }
-                    Expression::Call(CallExpr {
-                        name: call.name.clone(),
-                        args,
-                        span: call.span,
-                    })
+                    if let Some(noise) =
+                        self.lower_noise_process_call(&call.name, &args, call.span)?
+                    {
+                        Expression::NoiseSource(noise)
+                    } else {
+                        Expression::Call(CallExpr {
+                            name: call.name.clone(),
+                            args,
+                            span: call.span,
+                        })
+                    }
                 }
             }
             Expression::ArrayAccess(a) => {
@@ -5301,7 +5332,162 @@ impl SemanticAnalyzer {
                 self.validate_stateful_analog_operator_placement(operator_name, operator.span())?;
                 self.lower_stateful_public_analog_operator(operator)?
             }
-            Expression::AnalogOperator(_) | Expression::NoiseSource(_) => expr.clone(),
+            Expression::AnalogOperator(_) => expr.clone(),
+            Expression::NoiseSource(noise) => {
+                Expression::NoiseSource(self.lower_typed_noise_source(noise)?)
+            }
+        })
+    }
+
+    fn allocate_noise_process_id(&mut self, span: Span) -> CompileResult<u32> {
+        if self.runtime_loop_depth != 0 {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::UnsupportedFeature(
+                    "noise sources in runtime-bounded loops do not have a defined finite process set; use a compile-time-bounded loop"
+                        .into(),
+                ),
+                span,
+            )));
+        }
+        let process_id = self.next_noise_process;
+        self.next_noise_process = self.next_noise_process.checked_add(1).ok_or_else(|| {
+            CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::UnsupportedFeature(
+                    "module contains more than u32::MAX noise processes".into(),
+                ),
+                span,
+            ))
+        })?;
+        Ok(process_id)
+    }
+
+    fn lower_noise_process_call(
+        &mut self,
+        name: &str,
+        args: &[Expression],
+        span: Span,
+    ) -> CompileResult<Option<NoiseSource>> {
+        let normalized = name.trim_start_matches('$').to_ascii_lowercase();
+        let allowed = match normalized.as_str() {
+            "white_noise" | "noise_table" | "noise_table_log" => 1..=2,
+            "flicker_noise" => 2..=3,
+            _ => return Ok(None),
+        };
+        if !allowed.contains(&args.len()) {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::InvalidAnalogOperator(format!(
+                    "'{name}' requires {} to {} arguments, found {}",
+                    allowed.start(),
+                    allowed.end(),
+                    args.len()
+                )),
+                span,
+            )));
+        }
+        let process_id = match normalized.as_str() {
+            "white_noise" | "flicker_noise" | "noise_table" | "noise_table_log" => {
+                self.allocate_noise_process_id(span)?
+            }
+            _ => unreachable!("recognized above"),
+        };
+        let label_at = |index: usize| match args.get(index) {
+            Some(Expression::StringLit(label)) => Some(label.value.clone()),
+            _ => None,
+        };
+        let source = match normalized.as_str() {
+            "white_noise" => NoiseSource::White {
+                process_id: Some(process_id),
+                power: Box::new(args[0].clone()),
+                name: label_at(1),
+                span,
+            },
+            "flicker_noise" => NoiseSource::Flicker {
+                process_id: Some(process_id),
+                power: Box::new(args[0].clone()),
+                exponent: Box::new(args[1].clone()),
+                name: label_at(2),
+                span,
+            },
+            "noise_table" | "noise_table_log" => {
+                let data = match &args[0] {
+                    Expression::ArrayLiteral(array) => array
+                        .elements
+                        .iter()
+                        .map(|element| match element {
+                            ArrayLiteralElement::Value(value) => Ok(value.clone()),
+                            ArrayLiteralElement::Replication(replication) => Err(
+                                CompileError::Semantic(SemanticError::new(
+                                    SemanticErrorKind::UnsupportedFeature(
+                                        "replication in a noise table is not supported; write each frequency/power pair explicitly"
+                                            .into(),
+                                    ),
+                                    replication.span,
+                                )),
+                            ),
+                        })
+                        .collect::<CompileResult<Vec<_>>>()?,
+                    value => vec![value.clone()],
+                };
+                NoiseSource::Table {
+                    process_id: Some(process_id),
+                    data,
+                    log_interp: normalized == "noise_table_log",
+                    name: label_at(1),
+                    span,
+                }
+            }
+            _ => unreachable!("recognized above"),
+        };
+        Ok(Some(source))
+    }
+
+    fn lower_typed_noise_source(&mut self, source: &NoiseSource) -> CompileResult<NoiseSource> {
+        let process_id = match source {
+            NoiseSource::White { process_id, .. }
+            | NoiseSource::Flicker { process_id, .. }
+            | NoiseSource::Table { process_id, .. } => match process_id {
+                Some(process_id) => *process_id,
+                None => self.allocate_noise_process_id(source.span())?,
+            },
+        };
+        Ok(match source {
+            NoiseSource::White {
+                power, name, span, ..
+            } => NoiseSource::White {
+                process_id: Some(process_id),
+                power: Box::new(self.lower_expression(power)?),
+                name: name.clone(),
+                span: *span,
+            },
+            NoiseSource::Flicker {
+                power,
+                exponent,
+                name,
+                span,
+                ..
+            } => NoiseSource::Flicker {
+                process_id: Some(process_id),
+                power: Box::new(self.lower_expression(power)?),
+                exponent: Box::new(self.lower_expression(exponent)?),
+                name: name.clone(),
+                span: *span,
+            },
+            NoiseSource::Table {
+                data,
+                log_interp,
+                name,
+                span,
+                ..
+            } => NoiseSource::Table {
+                process_id: Some(process_id),
+                data: data
+                    .iter()
+                    .map(|value| self.lower_expression(value))
+                    .collect::<CompileResult<Vec<_>>>()?,
+                log_interp: *log_interp,
+                name: name.clone(),
+                span: *span,
+            },
         })
     }
 

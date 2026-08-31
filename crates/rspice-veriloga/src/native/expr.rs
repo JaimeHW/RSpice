@@ -10829,11 +10829,13 @@ mod tests {
                 left: Box::new(Expression::Binary(BinaryExpr {
                     op: BinaryOp::Add,
                     left: Box::new(Expression::NoiseSource(NoiseSource::White {
+                        process_id: Some(0),
                         power: Box::new(number(1.0, "1.0")),
                         name: Some("white".into()),
                         span,
                     })),
                     right: Box::new(Expression::NoiseSource(NoiseSource::Flicker {
+                        process_id: Some(1),
                         power: Box::new(number(2.0, "2.0")),
                         exponent: Box::new(number(1.0, "1.0")),
                         name: Some("flicker".into()),
@@ -10842,7 +10844,9 @@ mod tests {
                     span,
                 })),
                 right: Box::new(Expression::NoiseSource(NoiseSource::Table {
+                    process_id: Some(2),
                     data: vec![number(1.0, "1.0"), number(1.0e-18, "1.0e-18")],
+                    log_interp: false,
                     name: Some("table".into()),
                     span,
                 })),

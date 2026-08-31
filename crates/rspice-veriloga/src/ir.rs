@@ -130,6 +130,30 @@ impl AbsDelaySiteId {
     }
 }
 
+/// Stable identity of one syntactic Verilog-A noise process.  A process may
+/// reach several contribution branches (for example through an assigned
+/// intermediate variable); every such injection remains perfectly
+/// correlated because generated derivatives retain this identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct NoiseSiteId {
+    pub source: u32,
+    pub start: u32,
+    pub end: u32,
+    /// Dense deterministic preorder id used by the executable noise plan.
+    pub ordinal: u32,
+}
+
+impl NoiseSiteId {
+    pub fn from_span(span: crate::source::Span) -> Self {
+        Self {
+            source: span.source.raw(),
+            start: span.start,
+            end: span.end,
+            ordinal: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ZiPolynomialDefinition {
     Coefficients(Vec<IrExpr>),
@@ -154,6 +178,9 @@ pub struct DeviceIR {
     pub event_state_variables: Vec<usize>,
     /// Variable assignments and runtime loops (in execution order)
     pub assignments: Vec<IrAssignmentItem>,
+    /// Frequency-domain assignment replay including noise-process shadows.
+    /// Kept separate so DC/transient evaluation pays no process-AD overhead.
+    pub noise_assignments: Vec<IrAssignmentItem>,
     /// Array variables (elements are contiguous slots in `variables`)
     pub arrays: Vec<ArrayDef>,
     /// Branch equations
@@ -324,6 +351,8 @@ pub enum DerivativeWrt {
     Voltage(usize),
     /// Branch-current unknown (by ordinal)
     BranchCurrent(usize),
+    /// Unit-amplitude realization of one syntactic noise process.
+    Noise(usize),
 }
 
 /// Independent solver quantity selected by a symbolic `ddx` expression.
@@ -496,12 +525,14 @@ pub enum IrExpr {
     /// white_noise - white noise source for AC noise analysis
     /// Args: (power, name)
     WhiteNoise {
+        site: NoiseSiteId,
         power: Box<IrExpr>,
         name: Option<String>,
     },
     /// flicker_noise - 1/f flicker noise source
     /// Args: (power, exponent, name)
     FlickerNoise {
+        site: NoiseSiteId,
         power: Box<IrExpr>,
         exponent: Box<IrExpr>,
         name: Option<String>,
@@ -510,6 +541,7 @@ pub enum IrExpr {
     /// Points are (frequency, power) pairs sorted by frequency;
     /// `log_interp` selects log-log interpolation.
     NoiseTable {
+        site: NoiseSiteId,
         points: Vec<(f64, f64)>,
         log_interp: bool,
         name: Option<String>,
@@ -654,25 +686,31 @@ pub struct NoiseTableData {
     pub log_interp: bool,
 }
 
-/// Noise source extracted from a contribution: the deterministic part of
-/// the expression stamps as usual, and each `white_noise`/`flicker_noise`
-/// term becomes one small-signal source injected at the contribution's
-/// branch during noise analysis.
+/// One coherent injection of a syntactic noise process into an equation.
+#[derive(Debug, Clone)]
+pub struct NoiseInjectionDef {
+    pub branch: BranchRef,
+    pub is_current: bool,
+    pub branch_ordinal: Option<usize>,
+    pub equation_index: usize,
+    /// Complex small-signal gain from the unit process to this contribution.
+    pub gain: IrExpr,
+}
+
+/// One independent syntactic noise process.  Reusing its assigned value or
+/// routing it through several equations adds injections here instead of
+/// creating independent sources.
 #[derive(Debug, Clone)]
 pub struct NoiseSourceDef {
-    /// Injection branch (the contribution's node pair)
+    pub site: NoiseSiteId,
+    pub process_id: usize,
+    /// First legacy injection fields are retained while canonical generated
+    /// backends migrate to the grouped process representation.
     pub branch: BranchRef,
-    /// Current contribution (true) injects across the nodes; a potential
-    /// contribution injects at its branch-equation row (series EMF)
     pub is_current: bool,
-    /// Branch ordinal for potential contributions
     pub branch_ordinal: Option<usize>,
-    /// Index of the originating equation/stamp program (activation gates
-    /// with the program's instance-static condition)
     pub equation_index: usize,
-    /// Power spectral density at the operating point, including any
-    /// multiplicative amplitude squared (A²/Hz, or V²/Hz for potential
-    /// contributions)
+    /// Raw process power spectral density at the operating point.
     pub psd: IrExpr,
     /// Flicker frequency exponent (None = white): S(f) = psd / f^exp
     pub exponent: Option<IrExpr>,
@@ -681,6 +719,8 @@ pub struct NoiseSourceDef {
     pub table: Option<NoiseTableData>,
     /// Source label from the noise function's name argument
     pub name: Option<SmolStr>,
+    /// All coherent circuit injections of this process.
+    pub injections: Vec<NoiseInjectionDef>,
 }
 
 impl DeviceIR {
@@ -740,6 +780,7 @@ impl DeviceIR {
             variables: Vec::new(),
             event_state_variables: module.event_state_variables.clone(),
             assignments: Vec::new(),
+            noise_assignments: Vec::new(),
             arrays: Vec::new(),
             equations: Vec::new(),
             branch_unknowns: Vec::new(),
@@ -959,6 +1000,38 @@ impl DeviceIR {
         }
         let num_branches = ir.branch_unknowns.len();
 
+        // Convert contribution expressions exactly once.  Besides avoiding
+        // duplicate stateful-operator identities, this makes the preorder
+        // noise process ids assigned below identical for metadata,
+        // assignment shadows, and final equation gains.
+        let mut converted_contribs = Vec::with_capacity(module.contributions.len());
+        for contrib in &module.contributions {
+            let mut expr = converter.convert_contribution(&contrib.expression)?;
+            autodiff::assign_zi_site_ordinals(&mut expr, &mut zi_site_ordinal);
+            autodiff::assign_laplace_site_ordinals(&mut expr, &mut laplace_site_ordinal);
+            autodiff::assign_slew_site_ordinals(&mut expr, &mut slew_site_ordinal);
+            autodiff::assign_transition_site_ordinals(&mut expr, &mut transition_site_ordinal);
+            autodiff::assign_absdelay_site_ordinals(&mut expr, &mut absdelay_site_ordinal);
+            converted_contribs.push(autodiff::rewrite_branch_probes(&expr, &branch_table));
+        }
+
+        Self::collect_noise_processes_in_items(&ir.assignments, &mut ir.noise_sources)?;
+        for expr in &converted_contribs {
+            Self::collect_noise_processes(expr, &mut ir.noise_sources)?;
+        }
+        ir.noise_sources.sort_by_key(|source| source.process_id);
+        for (expected, source) in ir.noise_sources.iter().enumerate() {
+            if source.process_id != expected {
+                return Err(crate::error::CodeGenError::new(
+                    crate::error::CodeGenErrorKind::Internal(format!(
+                        "noise process source-order IDs are not dense: expected {expected}, found {}",
+                        source.process_id
+                    )),
+                )
+                .into());
+            }
+        }
+
         // Current probes I(a,b) of a branch that carries a potential
         // contribution read the branch unknown (exact), not the inferred
         // contribution cache.
@@ -977,8 +1050,7 @@ impl DeviceIR {
         // primal value but never costs shadow slots or updates.
         let mut shadow_roots: HashSet<SmolStr> = HashSet::new();
         let mut second_shadow_roots: HashSet<SmolStr> = HashSet::new();
-        for contrib in &module.contributions {
-            let expr = converter.convert_contribution(&contrib.expression)?;
+        for expr in &converted_contribs {
             autodiff::collect_var_names(&expr, &mut shadow_roots);
             autodiff::collect_ddx_operand_names_in_expr(&expr, &mut second_shadow_roots);
         }
@@ -991,27 +1063,36 @@ impl DeviceIR {
         // Jacobians chain through intermediate variables. Shadow updates
         // recurse into loop bodies so loop-carried dependencies
         // differentiate correctly.
-        let shadows = autodiff::build_shadow_assignments(
+        let mut shadows = autodiff::build_shadow_assignments(
             &mut ir,
             num_nodes,
             num_branches,
             &shadow_roots,
             &second_shadow_roots,
         );
+        if !ir.noise_sources.is_empty() {
+            let noise_process_count = ir.noise_sources.len();
+            let ordinary_assignments = ir.assignments.clone();
+            autodiff::build_noise_shadow_assignments(
+                &mut ir,
+                noise_process_count,
+                &shadow_roots,
+                &mut shadows,
+            );
+            ir.noise_assignments = std::mem::replace(&mut ir.assignments, ordinary_assignments);
+        }
 
         // Resolve ddx() operators now that the shadow context exists
         autodiff::resolve_ddx_in_items(&mut ir.assignments, &shadows);
+        autodiff::resolve_ddx_in_items(&mut ir.noise_assignments, &shadows);
 
         // Convert contributions to equations
-        for (contrib, branch_ref) in module.contributions.iter().zip(parsed_contribs) {
-            // Convert the expression
-            let mut expr = converter.convert_contribution(&contrib.expression)?;
-            autodiff::assign_zi_site_ordinals(&mut expr, &mut zi_site_ordinal);
-            autodiff::assign_laplace_site_ordinals(&mut expr, &mut laplace_site_ordinal);
-            autodiff::assign_slew_site_ordinals(&mut expr, &mut slew_site_ordinal);
-            autodiff::assign_transition_site_ordinals(&mut expr, &mut transition_site_ordinal);
-            autodiff::assign_absdelay_site_ordinals(&mut expr, &mut absdelay_site_ordinal);
-            let expr = autodiff::rewrite_branch_probes(&expr, &branch_table);
+        for ((contrib, branch_ref), expr) in module
+            .contributions
+            .iter()
+            .zip(parsed_contribs)
+            .zip(converted_contribs)
+        {
             let expr = autodiff::resolve_ddx(&expr, &shadows);
 
             // Peel instance-static guards (parameter expressions or
@@ -1079,15 +1160,30 @@ impl DeviceIR {
             // flicker_noise terms) for noise analysis; they evaluate to
             // zero in the large-signal programs
             let equation_index = ir.equations.len();
-            Self::extract_noise_sources(
-                &expr,
-                &IrExpr::Const(1.0),
-                &branch_ref,
-                contrib.is_current,
-                branch_ordinal,
-                equation_index,
-                &mut ir.noise_sources,
-            )?;
+            for process in &mut ir.noise_sources {
+                let gain = autodiff::simplify(autodiff::differentiate_with_shadows(
+                    &expr,
+                    &DerivativeWrt::Noise(process.process_id),
+                    &shadows,
+                ));
+                if Self::is_zero(&gain) {
+                    continue;
+                }
+                let injection = NoiseInjectionDef {
+                    branch: branch_ref.clone(),
+                    is_current: contrib.is_current,
+                    branch_ordinal,
+                    equation_index,
+                    gain,
+                };
+                if process.injections.is_empty() {
+                    process.branch = injection.branch.clone();
+                    process.is_current = injection.is_current;
+                    process.branch_ordinal = injection.branch_ordinal;
+                    process.equation_index = injection.equation_index;
+                }
+                process.injections.push(injection);
+            }
 
             ir.equations.push(BranchEquation {
                 branch: branch_ref,
@@ -1104,189 +1200,47 @@ impl DeviceIR {
         Ok(ir)
     }
 
-    /// Whether an expression contains a noise function anywhere
-    fn contains_noise(expr: &IrExpr) -> bool {
-        match expr {
-            IrExpr::WhiteNoise { .. } | IrExpr::FlickerNoise { .. } | IrExpr::NoiseTable { .. } => {
-                true
+    fn collect_noise_processes_in_items(
+        items: &[IrAssignmentItem],
+        out: &mut Vec<NoiseSourceDef>,
+    ) -> CompileResult<()> {
+        for item in items {
+            match item {
+                IrAssignmentItem::Assign(assignment) => {
+                    Self::collect_noise_processes(&assignment.expr, out)?;
+                }
+                IrAssignmentItem::Loop { condition, body } => {
+                    Self::collect_noise_processes(condition, out)?;
+                    Self::collect_noise_processes_in_items(body, out)?;
+                }
             }
-            IrExpr::Binary(_, l, r) => Self::contains_noise(l) || Self::contains_noise(r),
-            IrExpr::Unary(_, e)
-            | IrExpr::Limexp(e)
-            | IrExpr::Ddt(e)
-            | IrExpr::DdtCompanion(e)
-            | IrExpr::IdtCompanion(e)
-            | IrExpr::Limit(e, _)
-            | IrExpr::CanonicalLimit(e) => Self::contains_noise(e),
-            IrExpr::Idt(e, ic) => {
-                Self::contains_noise(e) || ic.as_deref().is_some_and(Self::contains_noise)
-            }
-            IrExpr::Conditional(c, t, e) => {
-                Self::contains_noise(c) || Self::contains_noise(t) || Self::contains_noise(e)
-            }
-            IrExpr::Call(_, args) => args.iter().any(Self::contains_noise),
-            _ => false,
         }
+        Ok(())
     }
 
-    /// Structurally extract noise sources from a contribution expression:
-    /// `expr ~ deterministic + Σ amplitude_i · noise_i(...)`. Each source
-    /// records its operating-point PSD as `amplitude² · power`, so scaled
-    /// and guarded noise terms (`gain * white_noise(S)`, conditionals)
-    /// keep exact small-signal semantics. Noise functions in nonlinear
-    /// positions are hard errors — silently mis-shaping a noise spectrum
-    /// would be worse than refusing the model.
-    #[allow(clippy::too_many_arguments)]
-    fn extract_noise_sources(
-        expr: &IrExpr,
-        amplitude: &IrExpr,
-        branch: &BranchRef,
-        is_current: bool,
-        branch_ordinal: Option<usize>,
-        equation_index: usize,
-        out: &mut Vec<NoiseSourceDef>,
-    ) -> crate::error::CompileResult<()> {
-        if !Self::contains_noise(expr) {
-            return Ok(());
-        }
-        let recurse = |e: &IrExpr, amp: &IrExpr, out: &mut Vec<NoiseSourceDef>| {
-            Self::extract_noise_sources(
-                e,
-                amp,
-                branch,
-                is_current,
-                branch_ordinal,
-                equation_index,
-                out,
-            )
-        };
-        let unsupported = |what: &str| {
-            crate::error::CompileError::from(crate::error::CodeGenError::new(
-                crate::error::CodeGenErrorKind::UnsupportedFeature(format!(
-                    "noise function in a {what} (noise terms must enter contributions \
-                     additively, optionally scaled)"
-                )),
-            ))
-        };
-        let square = |amp: &IrExpr| {
-            IrExpr::Binary(BinaryOp::Mul, Box::new(amp.clone()), Box::new(amp.clone()))
-        };
-
-        match expr {
-            IrExpr::WhiteNoise { power, name } => {
-                out.push(NoiseSourceDef {
-                    branch: branch.clone(),
-                    is_current,
-                    branch_ordinal,
-                    equation_index,
-                    psd: IrExpr::Binary(BinaryOp::Mul, Box::new(square(amplitude)), power.clone()),
-                    exponent: None,
-                    table: None,
-                    name: name.as_deref().map(SmolStr::from),
-                });
-                Ok(())
-            }
-            IrExpr::FlickerNoise {
-                power,
+    fn collect_noise_processes(expr: &IrExpr, out: &mut Vec<NoiseSourceDef>) -> CompileResult<()> {
+        let mut definitions = Vec::new();
+        autodiff::collect_noise_definitions(expr, &mut definitions);
+        for (site, psd, exponent, table, name) in definitions {
+            let process_id = site.ordinal as usize;
+            out.push(NoiseSourceDef {
+                site,
+                process_id,
+                branch: BranchRef {
+                    pos_terminal: usize::MAX,
+                    neg_terminal: usize::MAX,
+                },
+                is_current: true,
+                branch_ordinal: None,
+                equation_index: 0,
+                psd,
                 exponent,
+                table,
                 name,
-            } => {
-                out.push(NoiseSourceDef {
-                    branch: branch.clone(),
-                    is_current,
-                    branch_ordinal,
-                    equation_index,
-                    psd: IrExpr::Binary(BinaryOp::Mul, Box::new(square(amplitude)), power.clone()),
-                    exponent: Some((**exponent).clone()),
-                    table: None,
-                    name: name.as_deref().map(SmolStr::from),
-                });
-                Ok(())
-            }
-            IrExpr::NoiseTable {
-                points,
-                log_interp,
-                name,
-            } => {
-                out.push(NoiseSourceDef {
-                    branch: branch.clone(),
-                    is_current,
-                    branch_ordinal,
-                    equation_index,
-                    // The interpolated table value picks up the
-                    // amplitude-squared scale at evaluation time
-                    psd: square(amplitude),
-                    exponent: None,
-                    table: Some(NoiseTableData {
-                        points: points.clone(),
-                        log_interp: *log_interp,
-                    }),
-                    name: name.as_deref().map(SmolStr::from),
-                });
-                Ok(())
-            }
-            IrExpr::Binary(BinaryOp::Add | BinaryOp::Sub, l, r) => {
-                // Sign flips square away
-                recurse(l, amplitude, out)?;
-                recurse(r, amplitude, out)
-            }
-            IrExpr::Binary(BinaryOp::Mul, l, r) => {
-                match (Self::contains_noise(l), Self::contains_noise(r)) {
-                    (true, true) => Err(unsupported("product of noise terms")),
-                    (true, false) => {
-                        let amp =
-                            IrExpr::Binary(BinaryOp::Mul, Box::new(amplitude.clone()), r.clone());
-                        recurse(l, &amp, out)
-                    }
-                    (false, true) => {
-                        let amp =
-                            IrExpr::Binary(BinaryOp::Mul, Box::new(amplitude.clone()), l.clone());
-                        recurse(r, &amp, out)
-                    }
-                    (false, false) => Ok(()),
-                }
-            }
-            IrExpr::Binary(BinaryOp::Div, l, r) => {
-                if Self::contains_noise(r) {
-                    return Err(unsupported("divisor"));
-                }
-                let amp = IrExpr::Binary(BinaryOp::Div, Box::new(amplitude.clone()), r.clone());
-                recurse(l, &amp, out)
-            }
-            // Sign is irrelevant under the square
-            IrExpr::Unary(UnaryOp::Neg | UnaryOp::Pos, e) => recurse(e, amplitude, out),
-            // A guard gates the source: amplitude picks up cond ? 1 : 0,
-            // which squares to the same 0/1 gate
-            IrExpr::Conditional(c, t, e) => {
-                if Self::contains_noise(c) {
-                    return Err(unsupported("condition"));
-                }
-                if Self::contains_noise(t) {
-                    let gate = IrExpr::Conditional(
-                        c.clone(),
-                        Box::new(IrExpr::Const(1.0)),
-                        Box::new(IrExpr::Const(0.0)),
-                    );
-                    let amp =
-                        IrExpr::Binary(BinaryOp::Mul, Box::new(amplitude.clone()), Box::new(gate));
-                    recurse(t, &amp, out)?;
-                }
-                if Self::contains_noise(e) {
-                    let gate = IrExpr::Conditional(
-                        c.clone(),
-                        Box::new(IrExpr::Const(0.0)),
-                        Box::new(IrExpr::Const(1.0)),
-                    );
-                    let amp =
-                        IrExpr::Binary(BinaryOp::Mul, Box::new(amplitude.clone()), Box::new(gate));
-                    recurse(e, &amp, out)?;
-                }
-                Ok(())
-            }
-            // Anything else holding a noise term (inside ddt, functions,
-            // comparisons, ...) has no defined small-signal meaning
-            _ => Err(unsupported("nonlinear or dynamic position")),
+                injections: Vec::new(),
+            });
         }
+        Ok(())
     }
 
     /// Extract the reactive operand of a contribution: for
@@ -1815,7 +1769,7 @@ impl DeviceIR {
 /// Automatic differentiation for Jacobian generation
 pub mod autodiff {
     use super::*;
-    use std::collections::{HashMap, HashSet};
+    use std::collections::{BTreeSet, HashMap, HashSet};
 
     /// Bitmask over differentiation axes (node voltages first, then
     /// branch-current unknowns). Devices with more than 128 axes saturate
@@ -1830,6 +1784,7 @@ pub mod autodiff {
         let ordinal = match wrt {
             DerivativeWrt::Voltage(node) => *node,
             DerivativeWrt::BranchCurrent(k) => num_nodes + k,
+            DerivativeWrt::Noise(_) => return ALL_AXES,
         };
         if ordinal >= 128 {
             ALL_AXES
@@ -1879,6 +1834,8 @@ pub mod autodiff {
         array_shadow_base: HashMap<SmolStr, usize>,
         /// Node-axis count (axis ordinals of branch unknowns start here)
         num_nodes: usize,
+        /// Independent syntactic noise processes carried by each variable.
+        noise_shadowed: HashMap<SmolStr, BTreeSet<usize>>,
     }
 
     impl ShadowContext {
@@ -1892,6 +1849,7 @@ pub mod autodiff {
             match wrt {
                 DerivativeWrt::Voltage(node) => format!("{name}@d{node}").into(),
                 DerivativeWrt::BranchCurrent(k) => format!("{name}@dI{k}").into(),
+                DerivativeWrt::Noise(k) => format!("{name}@dN{k}").into(),
             }
         }
 
@@ -1901,6 +1859,12 @@ pub mod autodiff {
 
         /// Whether `name` carries a shadow along the given axis
         pub fn is_shadowed_on(&self, name: &str, wrt: &DerivativeWrt) -> bool {
+            if let DerivativeWrt::Noise(process) = wrt {
+                return self
+                    .noise_shadowed
+                    .get(name)
+                    .is_some_and(|axes| axes.contains(process));
+            }
             self.shadowed
                 .get(name)
                 .is_some_and(|mask| mask & axis_bit(wrt, self.num_nodes) != 0)
@@ -1909,6 +1873,10 @@ pub mod autodiff {
         /// Dependency mask of a variable (0 when not shadowed)
         fn axes_of(&self, name: &str) -> AxisMask {
             self.shadowed.get(name).copied().unwrap_or(0)
+        }
+
+        fn noise_axes_of(&self, name: &str) -> Option<&BTreeSet<usize>> {
+            self.noise_shadowed.get(name)
         }
 
         /// First variable slot of an array's shadow run along an axis
@@ -1940,6 +1908,58 @@ pub mod autodiff {
                 IrExpr::VarIndexed { array, .. } => {
                     out.insert(array.clone());
                 }
+                _ => {}
+            }
+            None
+        });
+    }
+
+    pub(crate) fn collect_noise_definitions(
+        expr: &IrExpr,
+        out: &mut Vec<(
+            NoiseSiteId,
+            IrExpr,
+            Option<IrExpr>,
+            Option<NoiseTableData>,
+            Option<SmolStr>,
+        )>,
+    ) {
+        map_expr(expr, &mut |node| {
+            match node {
+                IrExpr::WhiteNoise { site, power, name } => out.push((
+                    *site,
+                    power.as_ref().clone(),
+                    None,
+                    None,
+                    name.as_deref().map(SmolStr::from),
+                )),
+                IrExpr::FlickerNoise {
+                    site,
+                    power,
+                    exponent,
+                    name,
+                } => out.push((
+                    *site,
+                    power.as_ref().clone(),
+                    Some(exponent.as_ref().clone()),
+                    None,
+                    name.as_deref().map(SmolStr::from),
+                )),
+                IrExpr::NoiseTable {
+                    site,
+                    points,
+                    log_interp,
+                    name,
+                } => out.push((
+                    *site,
+                    IrExpr::Const(1.0),
+                    None,
+                    Some(NoiseTableData {
+                        points: points.clone(),
+                        log_interp: *log_interp,
+                    }),
+                    name.as_deref().map(SmolStr::from),
+                )),
                 _ => {}
             }
             None
@@ -2617,6 +2637,7 @@ pub mod autodiff {
             shadowed,
             array_shadow_base,
             num_nodes,
+            noise_shadowed: HashMap::new(),
         };
 
         // Interleave shadow updates before each original assignment.
@@ -2634,6 +2655,226 @@ pub mod autodiff {
         );
 
         ctx
+    }
+
+    fn expression_noise_axes(
+        expr: &IrExpr,
+        deps: &HashMap<SmolStr, BTreeSet<usize>>,
+        num_processes: usize,
+    ) -> BTreeSet<usize> {
+        let shadows = ShadowContext {
+            noise_shadowed: deps.clone(),
+            ..ShadowContext::default()
+        };
+        let mut axes = BTreeSet::new();
+        for process in 0..num_processes {
+            let derivative = simplify(differentiate_with_shadows(
+                expr,
+                &DerivativeWrt::Noise(process),
+                &shadows,
+            ));
+            if !matches!(derivative, IrExpr::Const(value) if value == 0.0) {
+                axes.insert(process);
+            }
+        }
+        axes
+    }
+
+    fn scan_noise_shadowed(
+        items: &[IrAssignmentItem],
+        variables: &[VarDef],
+        arrays: &[ArrayDef],
+        num_processes: usize,
+        deps: &mut HashMap<SmolStr, BTreeSet<usize>>,
+        changed: &mut bool,
+    ) {
+        for item in items {
+            match item {
+                IrAssignmentItem::Assign(assign) => {
+                    let axes = expression_noise_axes(&assign.expr, deps, num_processes);
+                    if axes.is_empty() {
+                        continue;
+                    }
+                    if let Some(array) = arrays.iter().find(|array| {
+                        assign.var_index >= array.base && assign.var_index < array.base + array.len
+                    }) {
+                        let current = deps.get(&array.name).cloned().unwrap_or_default();
+                        let mut merged = current.clone();
+                        merged.extend(axes.iter().copied());
+                        if merged != current {
+                            deps.insert(array.name.clone(), merged.clone());
+                            for index in array.lower..array.lower + array.len as i64 {
+                                deps.insert(
+                                    format!("{}[{index}]", array.name).into(),
+                                    merged.clone(),
+                                );
+                            }
+                            *changed = true;
+                        }
+                    } else if let Some(variable) = variables.get(assign.var_index) {
+                        let current = deps.get(&variable.name).cloned().unwrap_or_default();
+                        let mut merged = current.clone();
+                        merged.extend(axes.iter().copied());
+                        if merged != current {
+                            deps.insert(variable.name.clone(), merged);
+                            *changed = true;
+                        }
+                    }
+                }
+                IrAssignmentItem::Loop { body, .. } => {
+                    scan_noise_shadowed(body, variables, arrays, num_processes, deps, changed)
+                }
+            }
+        }
+    }
+
+    fn interleave_noise_shadows(
+        items: Vec<IrAssignmentItem>,
+        variables: &[VarDef],
+        shadow_index: &HashMap<SmolStr, usize>,
+        ctx: &ShadowContext,
+    ) -> Vec<IrAssignmentItem> {
+        let mut rewritten = Vec::with_capacity(items.len().saturating_mul(2));
+        for item in items {
+            match item {
+                IrAssignmentItem::Assign(assign) => {
+                    let target_name = assign
+                        .index
+                        .as_ref()
+                        .map(|target| target.array.clone())
+                        .or_else(|| variables.get(assign.var_index).map(|var| var.name.clone()));
+                    if let Some(target_name) = target_name {
+                        let processes = ctx
+                            .noise_axes_of(&target_name)
+                            .into_iter()
+                            .flatten()
+                            .copied()
+                            .collect::<Vec<_>>();
+                        for process in processes {
+                            let axis = DerivativeWrt::Noise(process);
+                            let derivative =
+                                simplify(differentiate_with_shadows(&assign.expr, &axis, ctx));
+                            let shadow_name = ShadowContext::shadow_name(&target_name, &axis);
+                            if let Some(target) = &assign.index {
+                                let shadow_base = ctx
+                                    .array_shadow_base(&target.array, &axis)
+                                    .expect("noise-shadowed array has a contiguous run");
+                                rewritten.push(IrAssignmentItem::Assign(VarAssignment {
+                                    var_index: shadow_base,
+                                    index: Some(IndexedTarget {
+                                        array: shadow_name,
+                                        len: target.len,
+                                        lower: target.lower,
+                                        index: target.index.clone(),
+                                    }),
+                                    expr: derivative,
+                                }));
+                            } else {
+                                rewritten.push(IrAssignmentItem::Assign(VarAssignment {
+                                    var_index: shadow_index[&shadow_name],
+                                    index: None,
+                                    expr: derivative,
+                                }));
+                            }
+                        }
+                    }
+                    rewritten.push(IrAssignmentItem::Assign(assign));
+                }
+                IrAssignmentItem::Loop { condition, body } => {
+                    rewritten.push(IrAssignmentItem::Loop {
+                        condition,
+                        body: interleave_noise_shadows(body, variables, shadow_index, ctx),
+                    });
+                }
+            }
+        }
+        rewritten
+    }
+
+    /// Add assignment shadows for syntactic noise processes.  These are
+    /// separate from solver-axis shadows so process count never enlarges the
+    /// nonlinear Jacobian or its second-derivative layout.
+    pub fn build_noise_shadow_assignments(
+        ir: &mut DeviceIR,
+        num_processes: usize,
+        shadow_roots: &HashSet<SmolStr>,
+        ctx: &mut ShadowContext,
+    ) {
+        if num_processes == 0 {
+            return;
+        }
+        let mut deps = HashMap::new();
+        loop {
+            let mut changed = false;
+            scan_noise_shadowed(
+                &ir.assignments,
+                &ir.variables,
+                &ir.arrays,
+                num_processes,
+                &mut deps,
+                &mut changed,
+            );
+            if !changed {
+                break;
+            }
+        }
+        let live = shadow_liveness(&ir.assignments, &ir.variables, &ir.arrays, shadow_roots);
+        deps.retain(|name, _| live.contains(name));
+        if deps.is_empty() {
+            return;
+        }
+
+        let array_members = ir
+            .arrays
+            .iter()
+            .filter(|array| deps.get(&array.name).is_some_and(|axes| !axes.is_empty()))
+            .flat_map(|array| {
+                std::iter::once(array.name.clone()).chain(
+                    ir.variables[array.base..array.base + array.len]
+                        .iter()
+                        .map(|var| var.name.clone()),
+                )
+            })
+            .collect::<HashSet<_>>();
+        let mut shadow_index = HashMap::new();
+        let mut scalar_layout = deps
+            .iter()
+            .filter(|(name, _)| !array_members.contains(*name))
+            .map(|(name, axes)| (name.clone(), axes.clone()))
+            .collect::<Vec<_>>();
+        scalar_layout.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        for (name, axes) in scalar_layout {
+            for process in axes {
+                let shadow =
+                    ShadowContext::shadow_name(name.as_str(), &DerivativeWrt::Noise(process));
+                shadow_index.insert(shadow.clone(), ir.variables.len());
+                ir.variables.push(VarDef {
+                    name: shadow,
+                    is_state: false,
+                });
+            }
+        }
+        for array in &ir.arrays {
+            let processes = deps.get(&array.name).cloned().unwrap_or_default();
+            for process in processes {
+                let axis = DerivativeWrt::Noise(process);
+                let run_name = ShadowContext::shadow_name(&array.name, &axis);
+                let run_base = ir.variables.len();
+                ctx.array_shadow_base.insert(run_name, run_base);
+                for index in array.lower..array.lower + array.len as i64 {
+                    let element = format!("{}[{index}]", array.name);
+                    let shadow = ShadowContext::shadow_name(&element, &axis);
+                    shadow_index.insert(shadow.clone(), ir.variables.len());
+                    ir.variables.push(VarDef {
+                        name: shadow,
+                        is_state: false,
+                    });
+                }
+            }
+        }
+        ctx.noise_shadowed = deps;
+        let originals = std::mem::take(&mut ir.assignments);
+        ir.assignments = interleave_noise_shadows(originals, &ir.variables, &shadow_index, ctx);
     }
 
     /// Rewrite I(a,b) probes of branches carrying potential contributions
@@ -2776,7 +3017,7 @@ pub mod autodiff {
 
     /// Structurally map an IR expression bottom-up. The closure may replace
     /// a node entirely (returning Some) before its children are visited.
-    fn map_expr(expr: &IrExpr, f: &mut impl FnMut(&IrExpr) -> Option<IrExpr>) -> IrExpr {
+    pub(super) fn map_expr(expr: &IrExpr, f: &mut impl FnMut(&IrExpr) -> Option<IrExpr>) -> IrExpr {
         if let Some(replacement) = f(expr) {
             return replacement;
         }
@@ -3926,6 +4167,18 @@ pub mod autodiff {
                 let resolved = resolve_ddx(expr, shadows);
                 differentiate(&resolved)
             }
+
+            // A syntactic noise call is the unit realization of exactly one
+            // independent process.  Its PSD operands are metadata, not part
+            // of the realization gain.
+            IrExpr::WhiteNoise { site, .. }
+            | IrExpr::FlickerNoise { site, .. }
+            | IrExpr::NoiseTable { site, .. } => match wrt {
+                DerivativeWrt::Noise(process) if *process == site.ordinal as usize => {
+                    IrExpr::Const(1.0)
+                }
+                _ => IrExpr::Const(0.0),
+            },
 
             // Event detectors, noise sources, analysis queries, and current
             // probes are treated as constants in the DC Jacobian

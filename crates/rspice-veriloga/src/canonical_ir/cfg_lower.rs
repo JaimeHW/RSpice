@@ -40,7 +40,7 @@ use super::cfg::{
 };
 use super::hir::{
     HirAnalogOperator, HirContribution, HirContributionKind, HirExprKind, HirExpression,
-    HirLimiterArgument, HirModel, HirRegion,
+    HirLaplaceKind, HirLimiterArgument, HirModel, HirRegion, HirZiKind,
 };
 use super::mir::{MirEquationKind, MirModel};
 use super::noise::{contains_noise, is_noise_call, string_literal};
@@ -77,6 +77,10 @@ pub struct CfgModel {
     /// time-domain equations: these are the small-signal powers, evaluated at
     /// whatever operating point the same body just computed.
     pub noise: Vec<CfgNoiseSource>,
+    /// Raw syntactic noise processes from every source-order body position,
+    /// including assignment origins. Unlike `noise`, routing amplitude is not
+    /// folded into these values; grouped complex injections carry it.
+    pub noise_processes: Vec<CfgNoiseProcess>,
     /// Everything the lowering wanted to say that did not stop it. Carried on
     /// the model rather than dropped, because a model that lowered *and* warned
     /// is exactly the case worth surfacing.
@@ -111,6 +115,18 @@ pub struct CfgNoiseSource {
     pub table: Vec<ValueId>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct CfgNoiseProcess {
+    pub process_id: u32,
+    pub kind: CanonicalNoiseSourceKind,
+    pub log_interp: bool,
+    pub label: Option<SmolStr>,
+    pub active: ValueId,
+    pub psd: ValueId,
+    pub exponent: Option<ValueId>,
+    pub table: Vec<ValueId>,
+}
+
 impl CfgModel {
     /// Lower `hir`'s structured body, using `mir` for name-to-id resolution.
     ///
@@ -118,8 +134,29 @@ impl CfgModel {
     /// flow survives, and node, branch, and branch-unknown identity is settled
     /// in MIR. Nothing is recomputed here that MIR already decided.
     pub fn from_hir(hir: &HirModel, mir: &MirModel) -> Result<Self, Vec<IrDiagnostic>> {
-        let mut lowerer = CfgLowerer::new(hir, mir);
-        let (function, residuals, activations, event_state_candidates, noise) = lowerer.lower()?;
+        Self::from_hir_with_mode(hir, mir, false)
+    }
+
+    /// Lower only the control-flow and reaching definitions needed to
+    /// evaluate raw grouped-noise metadata. Contribution values are traversed
+    /// structurally for noise sites, so a supported routing operator such as
+    /// `absdelay(noise, ...)` does not require the ordinary residual CFG to
+    /// implement that operator. Ordinary [`Self::from_hir`] remains strict.
+    pub(crate) fn noise_metadata_from_hir(
+        hir: &HirModel,
+        mir: &MirModel,
+    ) -> Result<Self, Vec<IrDiagnostic>> {
+        Self::from_hir_with_mode(hir, mir, true)
+    }
+
+    fn from_hir_with_mode(
+        hir: &HirModel,
+        mir: &MirModel,
+        noise_metadata_only: bool,
+    ) -> Result<Self, Vec<IrDiagnostic>> {
+        let mut lowerer = CfgLowerer::new(hir, mir, noise_metadata_only);
+        let (function, residuals, activations, event_state_candidates, noise, noise_processes) =
+            lowerer.lower()?;
         // Errors only. A warning that failed the lowering would be an error
         // wearing a different word.
         if lowerer
@@ -136,6 +173,7 @@ impl CfgModel {
             activations,
             event_state_candidates,
             noise,
+            noise_processes,
             warnings: lowerer.diagnostics,
         })
     }
@@ -170,6 +208,108 @@ fn resolve_noise(pending: Vec<PendingNoise>, outputs: &[ValueId]) -> Vec<CfgNois
     sources
 }
 
+fn resolve_noise_processes(
+    pending: Vec<PendingNoiseProcess>,
+    outputs: &[ValueId],
+) -> Vec<CfgNoiseProcess> {
+    let mut next = outputs.iter().copied();
+    pending
+        .into_iter()
+        .map(|process| {
+            let mut take = || {
+                next.next()
+                    .expect("an output for every noise-process variable")
+            };
+            CfgNoiseProcess {
+                process_id: process.process_id,
+                kind: process.kind,
+                log_interp: process.log_interp,
+                label: process.label,
+                active: take(),
+                psd: take(),
+                exponent: process.exponent.map(|_| take()),
+                table: process.table.iter().map(|_| take()).collect(),
+            }
+        })
+        .collect()
+}
+
+fn laplace_kind_children(kind: &HirLaplaceKind) -> Vec<ExprId> {
+    match kind {
+        HirLaplaceKind::ZeroPole { zeros, poles } => zeros.iter().chain(poles).copied().collect(),
+        HirLaplaceKind::ZeroDenominator { zeros, denominator } => {
+            zeros.iter().chain(denominator).copied().collect()
+        }
+        HirLaplaceKind::NumeratorPole { numerator, poles } => {
+            numerator.iter().chain(poles).copied().collect()
+        }
+        HirLaplaceKind::NumeratorDenominator {
+            numerator,
+            denominator,
+        } => numerator.iter().chain(denominator).copied().collect(),
+    }
+}
+
+fn zi_kind_children(kind: &HirZiKind) -> Vec<ExprId> {
+    match kind {
+        HirZiKind::ZeroPole { zeros, poles } => zeros.iter().chain(poles).copied().collect(),
+        HirZiKind::ZeroDenominator { zeros, denominator } => {
+            zeros.iter().chain(denominator).copied().collect()
+        }
+        HirZiKind::NumeratorPole { numerator, poles } => {
+            numerator.iter().chain(poles).copied().collect()
+        }
+        HirZiKind::NumeratorDenominator {
+            numerator,
+            denominator,
+        } => numerator.iter().chain(denominator).copied().collect(),
+    }
+}
+
+/// Whether replacing every noise source by its large-signal value zero makes
+/// this expression identically zero. Used only to prove that substituting a
+/// routing/filter result with zero in the metadata-only assignment stream is
+/// exact; an unproved mixed deterministic/noise value fails closed.
+fn noise_substitution_is_zero(hir: &HirModel, id: ExprId) -> bool {
+    let Some(expression) = hir.expressions.get(usize::from(id)) else {
+        return false;
+    };
+    let zero = |child| noise_substitution_is_zero(hir, child);
+    match &expression.kind {
+        HirExprKind::NoiseSource { .. } => true,
+        HirExprKind::Unary { op, operand } if matches!(op.as_str(), "Neg" | "Pos") => {
+            zero(*operand)
+        }
+        HirExprKind::Binary { op, left, right } => match op.as_str() {
+            "Add" | "Sub" => zero(*left) && zero(*right),
+            "Mul" => zero(*left) || zero(*right),
+            "Div" => zero(*left) && !contains_noise(hir, *right),
+            _ => false,
+        },
+        HirExprKind::Conditional {
+            then_expr,
+            else_expr,
+            ..
+        } => zero(*then_expr) && zero(*else_expr),
+        HirExprKind::AnalogOperator { op } => match op {
+            HirAnalogOperator::Ddt { expr, .. }
+            | HirAnalogOperator::Absdelay { expr, .. }
+            | HirAnalogOperator::Transition { expr, .. }
+            | HirAnalogOperator::Slew { expr, .. } => zero(*expr),
+            HirAnalogOperator::Ddx { expr, .. } => zero(*expr),
+            HirAnalogOperator::TransitionDerivative { input, .. } => zero(*input),
+            HirAnalogOperator::Idt { .. }
+            | HirAnalogOperator::IdtMod { .. }
+            | HirAnalogOperator::Limit { .. }
+            | HirAnalogOperator::Limexp { .. }
+            | HirAnalogOperator::LastCrossing { .. }
+            | HirAnalogOperator::LimiterArgument { .. } => false,
+        },
+        HirExprKind::Laplace { expr, .. } | HirExprKind::Zi { expr, .. } => zero(*expr),
+        _ => false,
+    }
+}
+
 /// A leaf value's identity, for interning.
 ///
 /// Constants and unknowns are read thousands of times in a BSIM-class model and
@@ -180,6 +320,7 @@ enum LeafKey {
     RealConstant(u64),
     Parameter(ParamId),
     ParameterGiven(ParamId),
+    PortConnected(u32),
     EventState(u32),
     Temperature,
     ThermalVoltage,
@@ -214,6 +355,11 @@ struct CfgLowerer<'a> {
     /// Noise sources found so far, each still holding the SSA variables its
     /// values are carried in rather than the values themselves.
     noise: Vec<PendingNoise>,
+    noise_processes: Vec<PendingNoiseProcess>,
+    /// Scoped mode used only by the grouped-noise metadata slicer. It never
+    /// changes ordinary canonical residual lowering or its diagnostics.
+    noise_metadata_only: bool,
+    metadata_assignment_value: bool,
     diagnostics: Vec<IrDiagnostic>,
 }
 
@@ -230,10 +376,30 @@ struct PendingNoise {
     table: Vec<CfgVariable>,
 }
 
+struct PendingNoiseProcess {
+    process_id: u32,
+    kind: CanonicalNoiseSourceKind,
+    log_interp: bool,
+    label: Option<SmolStr>,
+    active: CfgVariable,
+    psd: CfgVariable,
+    exponent: Option<CfgVariable>,
+    table: Vec<CfgVariable>,
+}
+
 impl PendingNoise {
     /// Every variable this source carries, in the order the outputs are laid
     /// out. Both the zero-initialization and the read-back walk this, so they
     /// cannot disagree about which variables a source owns.
+    fn variables(&self) -> impl Iterator<Item = CfgVariable> + '_ {
+        [self.active, self.psd]
+            .into_iter()
+            .chain(self.exponent)
+            .chain(self.table.iter().copied())
+    }
+}
+
+impl PendingNoiseProcess {
     fn variables(&self) -> impl Iterator<Item = CfgVariable> + '_ {
         [self.active, self.psd]
             .into_iter()
@@ -508,7 +674,7 @@ fn compute_instance_static_guard_conditions(hir: &HirModel) -> HashSet<ExprId> {
 }
 
 impl<'a> CfgLowerer<'a> {
-    fn new(hir: &'a HirModel, mir: &'a MirModel) -> Self {
+    fn new(hir: &'a HirModel, mir: &'a MirModel, noise_metadata_only: bool) -> Self {
         let mut ground_names: HashSet<SmolStr> = mir.ground_nodes.iter().cloned().collect();
         ground_names.insert(SmolStr::new("0"));
         let static_guard_conditions = compute_instance_static_guard_conditions(hir);
@@ -539,6 +705,9 @@ impl<'a> CfgLowerer<'a> {
             temporary_count: 0,
             limiters: Vec::new(),
             noise: Vec::new(),
+            noise_processes: Vec::new(),
+            noise_metadata_only,
+            metadata_assignment_value: false,
             diagnostics: Vec::new(),
         }
     }
@@ -553,6 +722,7 @@ impl<'a> CfgLowerer<'a> {
             Vec<Option<ValueId>>,
             Vec<ValueId>,
             Vec<CfgNoiseSource>,
+            Vec<CfgNoiseProcess>,
         ),
         Vec<IrDiagnostic>,
     > {
@@ -636,11 +806,36 @@ impl<'a> CfgLowerer<'a> {
                 }
             }
         }
+        let mut pending_processes = std::mem::take(&mut self.noise_processes);
+        pending_processes.sort_by_key(|process| process.process_id);
+        for (expected, process) in pending_processes.iter().enumerate() {
+            if process.process_id as usize != expected {
+                self.diagnostics.push(IrDiagnostic::global_error(
+                    CompilerPhase::CfgLowering,
+                    format!(
+                        "structural noise process IDs must be dense: expected {expected}, found {}",
+                        process.process_id
+                    ),
+                ));
+            }
+        }
+        for process in &pending_processes {
+            for variable in process.variables() {
+                if self.builder.read_variable(variable, entry).is_none() {
+                    self.builder.write_variable(variable, entry, zero);
+                }
+            }
+        }
         let mut outputs = residuals.clone();
         outputs.extend(activations.iter().flatten().copied());
         outputs.extend(event_state_candidates.iter().copied());
         for source in &pending {
             for variable in source.variables() {
+                outputs.push(self.builder.read_variable(variable, exit).unwrap_or(zero));
+            }
+        }
+        for process in &pending_processes {
+            for variable in process.variables() {
                 outputs.push(self.builder.read_variable(variable, exit).unwrap_or(zero));
             }
         }
@@ -663,14 +858,20 @@ impl<'a> CfgLowerer<'a> {
                     })
                     .collect();
                 debug_assert!(mapped_activations.next().is_none());
-                let (event_state_candidates, noise) =
+                let (event_state_candidates, remaining) =
                     remaining.split_at(event_state_candidates.len());
+                let legacy_noise_width = pending
+                    .iter()
+                    .map(|source| source.variables().count())
+                    .sum::<usize>();
+                let (noise, noise_processes) = remaining.split_at(legacy_noise_width);
                 Ok((
                     function,
                     residuals.to_vec(),
                     activations,
                     event_state_candidates.to_vec(),
                     resolve_noise(pending, noise),
+                    resolve_noise_processes(pending_processes, noise_processes),
                 ))
             }
             Err(error) => Err(vec![IrDiagnostic::global_error(
@@ -699,7 +900,10 @@ impl<'a> CfgLowerer<'a> {
                     );
                     return;
                 }
+                let was_assignment = self.metadata_assignment_value;
+                self.metadata_assignment_value = self.noise_metadata_only;
                 let value = self.expr(assignment.expr.id);
+                self.metadata_assignment_value = was_assignment;
                 self.builder.write_variable(
                     CfgVariable::Local(assignment.target),
                     self.block,
@@ -707,7 +911,11 @@ impl<'a> CfgLowerer<'a> {
                 );
             }
             HirRegion::Contribution(contribution) => {
-                self.contribution(contribution, dynamic_topology_ancestor)
+                if self.noise_metadata_only {
+                    self.metadata_noise_expr(contribution.expression.id);
+                } else {
+                    self.contribution(contribution, dynamic_topology_ancestor)
+                }
             }
             HirRegion::Conditional {
                 condition,
@@ -824,6 +1032,223 @@ impl<'a> CfgLowerer<'a> {
         self.noise_term(contribution, expression, unit);
     }
 
+    /// Walk a contribution value only far enough to execute its syntactic
+    /// noise sites. This is deliberately not an alternate primal evaluator:
+    /// assignments and conditions still use ordinary CFG semantics so raw PSD
+    /// operands retain exact reaching definitions and lazy branch behavior.
+    fn metadata_noise_expr(&mut self, id: ExprId) {
+        if !contains_noise(self.hir, id) {
+            return;
+        }
+        let Some(expression) = self.hir.expressions.get(usize::from(id)).cloned() else {
+            self.diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::CfgLowering,
+                format!("noise-metadata lowering found expression id {id} outside the arena"),
+            ));
+            return;
+        };
+        match expression.kind {
+            HirExprKind::NoiseSource { .. } => {
+                let _ = self.expr(id);
+            }
+            HirExprKind::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+            } => self.metadata_noise_conditional(condition, then_expr, else_expr),
+            HirExprKind::Binary { left, right, .. } => {
+                self.metadata_noise_expr(left);
+                self.metadata_noise_expr(right);
+            }
+            HirExprKind::Unary { operand, .. } => self.metadata_noise_expr(operand),
+            HirExprKind::Call { args, .. } | HirExprKind::SystemFunction { args, .. } => {
+                for argument in args {
+                    self.metadata_noise_expr(argument);
+                }
+            }
+            HirExprKind::ArrayAccess { index, .. } => self.metadata_noise_expr(index),
+            HirExprKind::ArrayLiteral { elements, .. } => {
+                for element in elements {
+                    self.metadata_noise_expr(element);
+                }
+            }
+            HirExprKind::AnalogOperator { op } => {
+                let mut children = Vec::new();
+                match op {
+                    HirAnalogOperator::Limit {
+                        proposed,
+                        candidate,
+                        type_metadata,
+                        ..
+                    } => {
+                        children.extend([proposed, candidate]);
+                        children.extend(type_metadata);
+                    }
+                    HirAnalogOperator::LimiterArgument { .. } => {}
+                    HirAnalogOperator::Ddt { expr, abstol } => {
+                        children.push(expr);
+                        children.extend(abstol);
+                    }
+                    HirAnalogOperator::Idt {
+                        expr,
+                        ic,
+                        assert,
+                        abstol,
+                    } => {
+                        children.push(expr);
+                        children.extend(ic);
+                        children.extend(assert);
+                        children.extend(abstol);
+                    }
+                    HirAnalogOperator::IdtMod {
+                        expr,
+                        ic,
+                        modulus,
+                        offset,
+                        abstol,
+                    } => {
+                        children.push(expr);
+                        children.extend(ic);
+                        children.extend(modulus);
+                        children.extend(offset);
+                        children.extend(abstol);
+                    }
+                    HirAnalogOperator::Ddx { expr, probe } => children.extend([expr, probe]),
+                    HirAnalogOperator::Limexp { expr }
+                    | HirAnalogOperator::LastCrossing { expr, .. } => children.push(expr),
+                    HirAnalogOperator::Absdelay {
+                        expr,
+                        delay,
+                        max_delay,
+                    } => {
+                        children.extend([expr, delay]);
+                        children.extend(max_delay);
+                    }
+                    HirAnalogOperator::Transition {
+                        expr,
+                        delay,
+                        rise,
+                        fall,
+                        tolerance,
+                        ..
+                    } => {
+                        children.push(expr);
+                        children.extend(delay);
+                        children.extend(rise);
+                        children.extend(fall);
+                        children.extend(tolerance);
+                    }
+                    HirAnalogOperator::TransitionDerivative {
+                        input,
+                        input_derivative,
+                        delay,
+                        rise,
+                        fall,
+                        ..
+                    } => {
+                        children.extend([input, input_derivative]);
+                        children.extend(delay);
+                        children.extend(rise);
+                        children.extend(fall);
+                    }
+                    HirAnalogOperator::Slew {
+                        expr,
+                        max_rise,
+                        max_fall,
+                    } => {
+                        children.push(expr);
+                        children.extend(max_rise);
+                        children.extend(max_fall);
+                    }
+                }
+                for child in children {
+                    self.metadata_noise_expr(child);
+                }
+            }
+            HirExprKind::Laplace { expr, kind } => {
+                self.metadata_noise_expr(expr);
+                for child in laplace_kind_children(&kind) {
+                    self.metadata_noise_expr(child);
+                }
+            }
+            HirExprKind::Zi {
+                expr,
+                kind,
+                period,
+                transition,
+                first_transition,
+            } => {
+                self.metadata_noise_expr(expr);
+                for child in zi_kind_children(&kind) {
+                    self.metadata_noise_expr(child);
+                }
+                self.metadata_noise_expr(period);
+                if let Some(child) = transition {
+                    self.metadata_noise_expr(child);
+                }
+                if let Some(child) = first_transition {
+                    self.metadata_noise_expr(child);
+                }
+            }
+            HirExprKind::NullArgument
+            | HirExprKind::Number { .. }
+            | HirExprKind::StringLiteral { .. }
+            | HirExprKind::Identifier { .. }
+            | HirExprKind::BranchAccess { .. }
+            | HirExprKind::NamedBranchAccess { .. } => {}
+        }
+    }
+
+    fn metadata_noise_conditional(
+        &mut self,
+        condition: ExprId,
+        then_expr: ExprId,
+        else_expr: ExprId,
+    ) {
+        if contains_noise(self.hir, condition) {
+            let span = self.hir.expressions[usize::from(condition)].span;
+            self.unsupported_noise(span, "condition");
+            return;
+        }
+        let condition = self.expr(condition);
+        let then_block = self.builder.create_block();
+        let else_block = self.builder.create_block();
+        let join = self.builder.create_block();
+        self.builder.set_terminator(
+            self.block,
+            CfgTerminator::Branch {
+                condition,
+                then_target: then_block,
+                then_args: Vec::new(),
+                else_target: else_block,
+                else_args: Vec::new(),
+            },
+        );
+        self.builder.seal_block(then_block);
+        self.builder.seal_block(else_block);
+
+        self.block = then_block;
+        self.metadata_noise_expr(then_expr);
+        self.builder.set_terminator(
+            self.block,
+            CfgTerminator::Jump {
+                target: join,
+                args: Vec::new(),
+            },
+        );
+        self.block = else_block;
+        self.metadata_noise_expr(else_expr);
+        self.builder.set_terminator(
+            self.block,
+            CfgTerminator::Jump {
+                target: join,
+                args: Vec::new(),
+            },
+        );
+        self.builder.seal_block(join);
+        self.block = join;
+    }
+
     fn noise_term(&mut self, contribution: ContributionId, id: ExprId, amplitude: ValueId) {
         if !contains_noise(self.hir, id) {
             return;
@@ -854,11 +1279,13 @@ impl<'a> CfgLowerer<'a> {
                 source,
                 operands,
                 name,
+                ..
             } => {
                 let (kind, log_interp) = match source.as_str() {
                     "White" if operands.len() == 1 => (CanonicalNoiseSourceKind::White, false),
                     "Flicker" if operands.len() == 2 => (CanonicalNoiseSourceKind::Flicker, false),
                     "Table" if !operands.is_empty() => (CanonicalNoiseSourceKind::Table, false),
+                    "TableLog" if !operands.is_empty() => (CanonicalNoiseSourceKind::Table, true),
                     _ => {
                         self.unsupported(
                             span,
@@ -1255,16 +1682,127 @@ impl<'a> CfgLowerer<'a> {
             }
             HirExprKind::SystemFunction { name, args } => self.system_function(name, args, span),
             HirExprKind::Call { name, args } => self.call(expression.id, name, args, span),
+            HirExprKind::AnalogOperator { .. }
+                if self.noise_metadata_only && contains_noise(self.hir, expression.id) =>
+            {
+                if self.metadata_assignment_value
+                    && !noise_substitution_is_zero(self.hir, expression.id)
+                {
+                    self.unsupported(
+                        span,
+                        "a noise-bearing dynamic operator assignment whose deterministic primal can reach later noise metadata"
+                            .to_string(),
+                    );
+                }
+                self.metadata_noise_expr(expression.id);
+                self.real_constant(0.0)
+            }
+            HirExprKind::Laplace { .. } | HirExprKind::Zi { .. }
+                if self.noise_metadata_only && contains_noise(self.hir, expression.id) =>
+            {
+                if self.metadata_assignment_value
+                    && !noise_substitution_is_zero(self.hir, expression.id)
+                {
+                    self.unsupported(
+                        span,
+                        "a noise-bearing filter assignment whose deterministic primal can reach later noise metadata"
+                            .to_string(),
+                    );
+                }
+                self.metadata_noise_expr(expression.id);
+                self.real_constant(0.0)
+            }
             HirExprKind::AnalogOperator { op } => self.analog_operator(op, expression, span),
-            // Noise sources are lifted into their own plan before codegen and
-            // contribute nothing to the time-domain residual, exactly as in the
-            // level this replaces.
-            HirExprKind::NoiseSource { .. } => self.real_constant(0.0),
+            // Record raw metadata at the exact executed CFG site, then return
+            // the required zero primal. Routing/filter amplitude is handled by
+            // grouped complex injection derivatives, not folded into PSD here.
+            HirExprKind::NoiseSource {
+                process_id,
+                source,
+                operands,
+                name,
+            } => self.noise_process(*process_id, source, operands, name.clone(), span),
             other => {
                 self.unsupported(span, format!("{} expression", kind_label(other)));
                 self.real_constant(0.0)
             }
         }
+    }
+
+    fn noise_process(
+        &mut self,
+        process_id: u32,
+        source: &SmolStr,
+        operands: &[ExprId],
+        label: Option<SmolStr>,
+        span: SourceSpanRef,
+    ) -> ValueId {
+        let (kind, log_interp) = match source.as_str() {
+            "White" if operands.len() == 1 => (CanonicalNoiseSourceKind::White, false),
+            "Flicker" if operands.len() == 2 => (CanonicalNoiseSourceKind::Flicker, false),
+            "Table" if !operands.is_empty() => (CanonicalNoiseSourceKind::Table, false),
+            "TableLog" if !operands.is_empty() => (CanonicalNoiseSourceKind::Table, true),
+            _ => {
+                self.unsupported(
+                    span,
+                    format!("noise process '{source}' with {} operands", operands.len()),
+                );
+                return self.real_constant(0.0);
+            }
+        };
+        if self
+            .noise_processes
+            .iter()
+            .any(|process| process.process_id == process_id)
+        {
+            self.diagnostics.push(IrDiagnostic::error(
+                CompilerPhase::CfgLowering,
+                format!("duplicate structural noise process id {process_id}"),
+                span,
+            ));
+            return self.real_constant(0.0);
+        }
+
+        // Operand lowering occurs only after control reaches this expression;
+        // untaken branches therefore cannot evaluate an invalid PSD/exponent.
+        let (psd, exponent, table) = match kind {
+            CanonicalNoiseSourceKind::White => (self.expr(operands[0]), None, Vec::new()),
+            CanonicalNoiseSourceKind::Flicker => (
+                self.expr(operands[0]),
+                Some(self.expr(operands[1])),
+                Vec::new(),
+            ),
+            CanonicalNoiseSourceKind::Table => (
+                self.real_constant(1.0),
+                None,
+                operands.iter().map(|operand| self.expr(*operand)).collect(),
+            ),
+        };
+        let pending = PendingNoiseProcess {
+            process_id,
+            kind,
+            log_interp,
+            label,
+            active: CfgVariable::Local(self.result_variable()),
+            psd: CfgVariable::Local(self.result_variable()),
+            exponent: exponent.map(|_| CfgVariable::Local(self.result_variable())),
+            table: table
+                .iter()
+                .map(|_| CfgVariable::Local(self.result_variable()))
+                .collect(),
+        };
+        let block = self.block;
+        let one = self.real_constant(1.0);
+        self.builder.write_variable(pending.active, block, one);
+        self.builder.write_variable(pending.psd, block, psd);
+        if let (Some(variable), Some(value)) = (pending.exponent, exponent) {
+            self.builder.write_variable(variable, block, value);
+        }
+        for (variable, value) in pending.table.iter().zip(table) {
+            self.builder.write_variable(*variable, block, value);
+        }
+        self.noise_processes.push(pending);
+        self.real_constant(0.0)
     }
 
     fn identifier(&mut self, name: &SmolStr, span: SourceSpanRef) -> ValueId {
@@ -1767,6 +2305,19 @@ impl<'a> CfgLowerer<'a> {
             // kind and an evaluator input, not a one-line change: the constant is
             // what lets the optimizer fold every `$port_connected` guard in the
             // shipped compact models away, and an opaque leaf would keep them.
+            ("$port_connected", 1) if self.noise_metadata_only => {
+                match self.port_argument(args[0]) {
+                    Some(port) => self.leaf(
+                        LeafKey::PortConnected(port),
+                        CfgValueType::Real,
+                        CfgValueKind::PortConnected(port),
+                    ),
+                    None => {
+                        self.unsupported(span, "$port_connected of a non-port".to_string());
+                        self.real_constant(0.0)
+                    }
+                }
+            }
             ("$port_connected", 1) => self.real_constant(1.0),
             _ => {
                 self.unsupported(span, format!("system function '{name}'"));
@@ -1785,18 +2336,16 @@ impl<'a> CfgLowerer<'a> {
             self.unsupported(span, "$simparam with a non-literal name".to_string());
             return self.real_constant(0.0);
         };
-        let fallback = match args.get(1) {
-            Some(fallback) => self.expr(*fallback),
-            None => self.real_constant(0.0),
+        if let Some(fallback) = args.get(1) {
+            return self.expr(*fallback);
+        }
+        let value = match value.as_str() {
+            "gmin" => 1.0e-12,
+            "tnom" => 300.15,
+            "simulatorVersion" => 1.0,
+            _ => 0.0,
         };
-        self.builder.push(
-            self.block,
-            CfgValueType::Real,
-            CfgValueKind::SimParam {
-                name: SmolStr::new(value.to_ascii_lowercase()),
-                fallback,
-            },
-        )
+        self.real_constant(value)
     }
 
     fn parameter_argument(&self, expr: ExprId) -> Option<ParamId> {
@@ -1805,6 +2354,18 @@ impl<'a> CfgLowerer<'a> {
             return None;
         };
         self.parameters_by_name.get(name).copied()
+    }
+
+    fn port_argument(&self, expr: ExprId) -> Option<u32> {
+        let expression = self.hir.expressions.get(usize::from(expr))?;
+        let HirExprKind::Identifier { name } = &expression.kind else {
+            return None;
+        };
+        self.hir
+            .ports
+            .iter()
+            .position(|port| port.name == *name)
+            .and_then(|index| u32::try_from(index).ok())
     }
 
     fn call(

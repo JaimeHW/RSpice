@@ -67,9 +67,17 @@ fn build_model_plan_inner(
     } else {
         base_limits
     };
+    // Process-level noise can originate in procedural assignments and pass
+    // through dynamic operators before reaching several equations.  The
+    // legacy canonical extractor is equation-local and cannot represent that
+    // graph.  Scalar PSD/exponent programs are still compiled into the
+    // selected native/WASM backend from the source-digest-authenticated
+    // executable artifact; complex gains remain in the shared SmallSignalVm.
+    let grouped_noise = model.noise_process_schema >= 1;
     let canonical_noise_plan = match canonical_mir {
-        Some(mir) => Some(build_canonical_noise_plan(model, mir)?),
+        Some(mir) if !grouped_noise => Some(build_canonical_noise_plan(model, mir)?),
         None => None,
+        Some(_) => None,
     };
     let mut assignment_prior_current_probes = Vec::new();
     if canonical_mir.is_some() {
@@ -1273,6 +1281,7 @@ fn extract_canonical_noise_expr(
             source,
             operands,
             name,
+            ..
         } => {
             if canonical_expr_list_contains_noise(model, mir, &operands)? {
                 return Err(unsupported_canonical_noise_position(
@@ -2221,17 +2230,10 @@ fn validate_canonical_artifact_for_model(
     model: &CompiledModel,
     artifact: &CanonicalIrArtifact,
 ) -> JitResult<()> {
-    artifact
-        .validate()
-        .map_err(|diagnostics| JitError::InvalidCanonicalIr {
-            model: model.name.clone(),
-            detail: diagnostics
-                .first()
-                .map(|diagnostic| diagnostic.message.clone())
-                .unwrap_or_else(|| "canonical artifact validation failed".into())
-                .into(),
-        })?;
+    validate_canonical_artifact_identity_for_model(model, artifact)?;
 
+    // Native executable ABI coverage, deliberately not part of the shared
+    // artifact/model identity validator used by the portable CFG evaluator.
     if let Some(parameter) = artifact
         .mir
         .parameters
@@ -2246,46 +2248,21 @@ fn validate_canonical_artifact_for_model(
             ),
         ));
     }
-
-    if artifact.mir.module_name != model.name {
-        return Err(JitError::InvalidCanonicalIr {
-            model: model.name.clone(),
-            detail: format!(
-                "canonical module '{}' does not match compiled model '{}'",
-                artifact.mir.module_name, model.name
-            )
-            .into(),
-        });
-    }
-
-    if artifact.mir.equations.len() != model.stamp_programs.len() {
-        return Err(JitError::InvalidCanonicalIr {
-            model: model.name.clone(),
-            detail: format!(
-                "canonical equation count {} does not match stamp program count {}",
-                artifact.mir.equations.len(),
-                model.stamp_programs.len()
-            )
-            .into(),
-        });
-    }
-
-    validate_canonical_source_digest_for_model(model, artifact)?;
-    validate_canonical_parameters_for_model(model, &artifact.mir)?;
-
-    for (index, (equation, stamp)) in artifact
-        .mir
-        .equations
-        .iter()
-        .zip(&model.stamp_programs)
-        .enumerate()
-    {
-        validate_canonical_equation_matches_stamp(model, &artifact.mir, index, equation, stamp)?;
-    }
-
     Ok(())
 }
 
+pub(crate) fn validate_canonical_artifact_identity_for_model(
+    model: &CompiledModel,
+    artifact: &CanonicalIrArtifact,
+) -> JitResult<()> {
+    crate::canonical_compat::validate_canonical_artifact_identity_for_model(model, artifact)
+        .map_err(|detail| JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: detail.into(),
+        })
+}
+
+#[allow(dead_code)] // Retained temporarily for native-plan compatibility tests during validator migration.
 fn validate_canonical_parameters_for_model(model: &CompiledModel, mir: &MirModel) -> JitResult<()> {
     if mir.parameters.len() != model.parameters.len() {
         return Err(JitError::InvalidCanonicalIr {
@@ -2443,6 +2420,7 @@ fn validate_canonical_parameters_for_model(model: &CompiledModel, mir: &MirModel
     Ok(())
 }
 
+#[allow(dead_code)] // Retained temporarily for native-plan compatibility tests during validator migration.
 fn validate_canonical_equation_matches_stamp(
     model: &CompiledModel,
     mir: &MirModel,
@@ -2495,6 +2473,7 @@ fn validate_canonical_equation_matches_stamp(
     Ok(())
 }
 
+#[allow(dead_code)]
 fn compiled_equation_kind(stamp: &StampProgram) -> MirEquationKind {
     if stamp.indirect {
         MirEquationKind::Indirect
@@ -2505,6 +2484,7 @@ fn compiled_equation_kind(stamp: &StampProgram) -> MirEquationKind {
     }
 }
 
+#[allow(dead_code)]
 fn compiled_branch_pair_for_stamp(
     model: &CompiledModel,
     stamp: &StampProgram,
@@ -2532,6 +2512,7 @@ fn compiled_branch_pair_for_stamp(
     ))
 }
 
+#[allow(dead_code)]
 fn same_unordered_current_pair(
     lhs_pos: usize,
     lhs_neg: usize,
@@ -2541,6 +2522,7 @@ fn same_unordered_current_pair(
     (lhs_pos, lhs_neg) == (rhs_pos, rhs_neg) || (lhs_pos, lhs_neg) == (rhs_neg, rhs_pos)
 }
 
+#[allow(dead_code)] // Retained temporarily for native-plan compatibility tests during validator migration.
 fn validate_canonical_source_digest_for_model(
     model: &CompiledModel,
     artifact: &CanonicalIrArtifact,
@@ -4012,7 +3994,8 @@ fn mark_canonical_entry_variable_roots(
     include_noise: bool,
     live: &mut [bool],
 ) -> JitResult<()> {
-    let canonical_noise_plan = if model.noise_sources.is_empty() {
+    let canonical_noise_plan = if model.noise_sources.is_empty() || model.noise_process_schema >= 1
+    {
         None
     } else {
         Some(build_canonical_noise_plan(model, mir)?)

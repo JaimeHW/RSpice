@@ -176,6 +176,8 @@ pub enum CfgValueKind {
     BlockParameter,
     Parameter(ParamId),
     ParameterGiven(ParamId),
+    /// Runtime connection state of one external terminal.
+    PortConnected(u32),
     /// Accepted procedural state for a variable written by an event-controlled
     /// body. The dense slot is stable within one generated model.
     EventState(u32),
@@ -553,6 +555,7 @@ impl CfgValueKind {
             | Self::BlockParameter
             | Self::Parameter(_)
             | Self::ParameterGiven(_)
+            | Self::PortConnected(_)
             | Self::EventState(_)
             | Self::Temperature
             | Self::ThermalVoltage
@@ -1178,6 +1181,7 @@ fn is_leaf(kind: &CfgValueKind) -> bool {
             | CfgValueKind::BooleanConstant(_)
             | CfgValueKind::Parameter(_)
             | CfgValueKind::ParameterGiven(_)
+            | CfgValueKind::PortConnected(_)
             | CfgValueKind::EventState(_)
             | CfgValueKind::Temperature
             | CfgValueKind::ThermalVoltage

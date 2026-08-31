@@ -412,6 +412,7 @@ fn kernel_region_metrics(
                 "parameter-given:{}",
                 artifact.mir.parameters[usize::from(*parameter)].name
             ),
+            CfgValueKind::PortConnected(port) => write!(out, "port-connected:{port}"),
             CfgValueKind::EventState(slot) => write!(out, "event-state:{slot}"),
             CfgValueKind::Temperature => write!(out, "temperature"),
             CfgValueKind::ThermalVoltage => write!(out, "thermal-voltage"),

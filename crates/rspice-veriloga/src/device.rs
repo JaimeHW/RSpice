@@ -33,12 +33,12 @@
 //! targeted audit before expanding that boundary.
 
 use crate::canonical_ir::CanonicalIrArtifact;
-#[cfg(any(
-    feature = "native",
-    all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32")
+#[cfg(all(
+    not(feature = "native"),
+    not(all(feature = "wasm-jit", target_arch = "wasm32"))
 ))]
-use crate::codegen::AssignmentStep;
-use crate::codegen::{CompiledModel, Instruction, StampIndex};
+use crate::codegen::BytecodeProgram;
+use crate::codegen::{AssignmentStep, CompiledModel, Instruction, StampIndex};
 use crate::vm::{CURRENT_PAIR_GROUND, Vm, VmAcceptedCheckpoint, VmContext, VmError};
 #[cfg(feature = "native")]
 use crate::vm::{terminal_pair_current_endpoints, terminal_pair_current_len};
@@ -131,6 +131,7 @@ fn compiled_model_layout_identity(model: &CompiledModel) -> CompiledModelLayoutI
         usize_field(&mut hasher, *slot);
     }
     assignment_layout(&mut hasher, &model.assignment_steps);
+    assignment_layout(&mut hasher, &model.noise_assignment_steps);
 
     usize_field(&mut hasher, model.internal_nodes);
     usize_field(&mut hasher, model.branch_sources.len());
@@ -191,8 +192,10 @@ fn compiled_model_layout_identity(model: &CompiledModel) -> CompiledModelLayoutI
     usize_field(&mut hasher, model.laplace_filters.len());
     usize_field(&mut hasher, model.zi_filters.len());
     usize_field(&mut hasher, model.zi_filter_definitions.len());
+    hasher.update(&model.noise_process_schema.to_le_bytes());
     usize_field(&mut hasher, model.noise_sources.len());
     for source in &model.noise_sources {
+        usize_field(&mut hasher, source.process_id);
         stamp_index(&mut hasher, &source.pos);
         stamp_index(&mut hasher, &source.neg);
         hasher.update(&[u8::from(source.is_current)]);
@@ -202,6 +205,15 @@ fn compiled_model_layout_identity(model: &CompiledModel) -> CompiledModelLayoutI
             u8::from(source.exponent_program.is_some()),
             u8::from(source.table.is_some()),
         ]);
+        usize_field(&mut hasher, source.injections.len());
+        for injection in &source.injections {
+            stamp_index(&mut hasher, &injection.pos);
+            stamp_index(&mut hasher, &injection.neg);
+            hasher.update(&[u8::from(injection.is_current)]);
+            usize_field(&mut hasher, injection.branch_ordinal.unwrap_or(usize::MAX));
+            usize_field(&mut hasher, injection.program_idx);
+            hasher.update(&injection.rhs_sign.to_bits().to_le_bytes());
+        }
     }
 
     CompiledModelLayoutIdentity(hasher.finalize())
@@ -1086,6 +1098,9 @@ pub struct VerilogADevice {
     /// Flat, model-order Jacobian output storage for the fused stamp driver.
     #[cfg(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32")))]
     fused_stamp_jacobians: Vec<f64>,
+    /// Shared canonical CFG slice that evaluates raw grouped-noise metadata
+    /// with exact source control flow and reaching definitions.
+    canonical_noise_plan: Option<std::sync::Arc<CanonicalNoiseRuntimePlan>>,
     /// Native compiled model. In native mode this is required: construction
     /// fails if a complete native image cannot be produced.
     #[cfg(feature = "native")]
@@ -1896,7 +1911,318 @@ pub struct RhsIndex {
     pub program_idx: usize,
 }
 
+#[derive(Debug, Clone)]
+struct CanonicalNoiseProcessValues {
+    process_id: usize,
+    active: usize,
+    psd: usize,
+    exponent: Option<usize>,
+    table: Vec<usize>,
+}
+
+#[derive(Debug, Clone)]
+struct CanonicalNoiseRuntimePlan {
+    function: crate::canonical_ir::CfgFunction,
+    outputs: Vec<crate::canonical_ir::ValueId>,
+    processes: Vec<CanonicalNoiseProcessValues>,
+    branch_endpoints: Vec<(Option<usize>, Option<usize>)>,
+    used_branch_flows: std::collections::HashSet<usize>,
+}
+
+#[derive(Debug, Clone)]
+struct EvaluatedCanonicalNoiseProcess {
+    process_id: usize,
+    active: bool,
+    psd: f64,
+    exponent: Option<f64>,
+}
+
+impl CanonicalNoiseRuntimePlan {
+    fn build(artifact: &CanonicalIrArtifact, model: &CompiledModel) -> Result<Self, VmError> {
+        crate::canonical_compat::validate_canonical_artifact_identity_for_model(model, artifact)
+            .map_err(|detail| {
+                VmError::InvalidModel(format!(
+                    "canonical grouped-noise artifact/model mismatch: {detail}"
+                ))
+            })?;
+        if artifact.hir.module_name != model.name
+            || artifact.hir.ports.len() != model.num_terminals
+            || artifact
+                .hir
+                .ports
+                .iter()
+                .zip(&model.terminal_names)
+                .any(|(canonical, compiled)| canonical.name != *compiled)
+        {
+            return Err(VmError::InvalidModel(
+                "canonical grouped-noise HIR terminal layout does not match compiled model".into(),
+            ));
+        }
+        let cfg =
+            crate::canonical_ir::CfgModel::noise_metadata_from_hir(&artifact.hir, &artifact.mir)
+                .map_err(|diagnostics| {
+                    VmError::InvalidModel(format!(
+                        "canonical grouped-noise CFG lowering failed: {diagnostics:?}"
+                    ))
+                })?;
+        if cfg.noise_processes.len() != model.noise_sources.len() {
+            return Err(VmError::InvalidModel(format!(
+                "canonical grouped-noise process count {} does not match compiled count {}",
+                cfg.noise_processes.len(),
+                model.noise_sources.len()
+            )));
+        }
+
+        let mut wanted = Vec::new();
+        let mut processes = Vec::with_capacity(cfg.noise_processes.len());
+        for (expected, (lowered, compiled)) in cfg
+            .noise_processes
+            .iter()
+            .zip(&model.noise_sources)
+            .enumerate()
+        {
+            if lowered.process_id as usize != expected || compiled.process_id != expected {
+                return Err(VmError::InvalidModel(format!(
+                    "grouped-noise process IDs must be dense and identical at index {expected}: canonical={}, compiled={}",
+                    lowered.process_id, compiled.process_id
+                )));
+            }
+            let compiled_kind = if compiled.table.is_some() {
+                crate::canonical_ir::CanonicalNoiseSourceKind::Table
+            } else if compiled.exponent_program.is_some() {
+                crate::canonical_ir::CanonicalNoiseSourceKind::Flicker
+            } else {
+                crate::canonical_ir::CanonicalNoiseSourceKind::White
+            };
+            if lowered.kind != compiled_kind
+                || lowered.log_interp
+                    != compiled
+                        .table
+                        .as_ref()
+                        .is_some_and(|(_, log_interp)| *log_interp)
+                || lowered.label != compiled.name
+                || lowered.exponent.is_some() != compiled.exponent_program.is_some()
+                || lowered.table.len()
+                    != compiled
+                        .table
+                        .as_ref()
+                        .map_or(0, |(points, _)| points.len().saturating_mul(2))
+            {
+                return Err(VmError::InvalidModel(format!(
+                    "canonical grouped-noise metadata shape disagrees for process {expected}"
+                )));
+            }
+            let mut place = |value| {
+                wanted.push(value);
+                wanted.len() - 1
+            };
+            processes.push(CanonicalNoiseProcessValues {
+                process_id: expected,
+                active: place(lowered.active),
+                psd: place(lowered.psd),
+                exponent: lowered.exponent.map(&mut place),
+                table: lowered.table.iter().copied().map(place).collect(),
+            });
+        }
+        let (function, outputs, _) =
+            crate::canonical_ir::cfg_opt::optimize_with_tracking(&cfg.function, &wanted, &[]);
+        for value in &function.values {
+            use crate::canonical_ir::CfgValueKind;
+            if matches!(
+                value.kind,
+                CfgValueKind::Ddt { .. }
+                    | CfgValueKind::DdtScale
+                    | CfgValueKind::Idt { .. }
+                    | CfgValueKind::IdtScale
+                    | CfgValueKind::Transition { .. }
+                    | CfgValueKind::TransitionDerivative { .. }
+                    | CfgValueKind::Cross { .. }
+                    | CfgValueKind::Above { .. }
+                    | CfgValueKind::Timer { .. }
+                    | CfgValueKind::Limit { .. }
+                    | CfgValueKind::LimitPrevious { .. }
+                    | CfgValueKind::Ddx { .. }
+            ) {
+                return Err(VmError::InvalidModel(
+                    "grouped-noise PSD/exponent metadata reaches unsupported dynamic/history state"
+                        .into(),
+                ));
+            }
+        }
+        let used_branch_flows = function
+            .values
+            .iter()
+            .filter_map(|value| match value.kind {
+                crate::canonical_ir::CfgValueKind::BranchFlow(branch) => Some(usize::from(branch)),
+                _ => None,
+            })
+            .collect();
+        let branch_endpoints = artifact
+            .mir
+            .branches
+            .iter()
+            .map(|branch| {
+                (
+                    branch.pos_node.map(usize::from),
+                    branch.neg_node.map(usize::from),
+                )
+            })
+            .collect();
+        Ok(Self {
+            function,
+            outputs,
+            processes,
+            branch_endpoints,
+            used_branch_flows,
+        })
+    }
+
+    fn evaluate(
+        &self,
+        context: &VmContext,
+    ) -> Result<Vec<EvaluatedCanonicalNoiseProcess>, VmError> {
+        let mut node_potentials = context.voltages.clone();
+        node_potentials.extend_from_slice(&context.internal_voltages);
+        let mut branch_flows = vec![0.0; self.branch_endpoints.len()];
+        for &branch in &self.used_branch_flows {
+            let Some(&(pos, neg)) = self.branch_endpoints.get(branch) else {
+                return Err(VmError::InvalidModel(format!(
+                    "canonical grouped-noise branch flow {branch} is outside the branch table"
+                )));
+            };
+            let endpoint = |node: Option<usize>| -> Result<usize, VmError> {
+                match node {
+                    None => Ok(usize::MAX),
+                    Some(node) if node < context.voltages.len() => Ok(node),
+                    Some(node) => Err(VmError::InvalidModel(format!(
+                        "canonical grouped-noise metadata reads unsupported internal-node branch flow {node}"
+                    ))),
+                }
+            };
+            branch_flows[branch] = context.try_current(endpoint(pos)?, endpoint(neg)?)?;
+        }
+        let mut analyses = std::collections::HashSet::new();
+        for analysis in ["noise", "smallsig", "smallsignal", "small_signal"] {
+            analyses.insert(SmolStr::new(analysis));
+        }
+        let inputs = crate::canonical_ir::CfgEvalInputs {
+            parameters: context.parameters.clone(),
+            parameter_given: context
+                .param_given
+                .iter()
+                .map(|given| *given != 0)
+                .collect(),
+            port_connected: context
+                .port_connected
+                .iter()
+                .map(|connected| *connected != 0)
+                .collect(),
+            event_state: context.accepted_event_variables().to_vec(),
+            node_potentials,
+            branch_flows,
+            branch_unknown_flows: context.branch_current_values.clone(),
+            temperature: context.temperature,
+            thermal_voltage: context.vt(),
+            multiplicity: context.multiplicity,
+            time: context.time,
+            analyses,
+            simparams: Default::default(),
+            ddt: 0.0,
+            ddt_scale: 0.0,
+            idt: 0.0,
+            idt_scale: 0.0,
+            event_controls: Default::default(),
+            staged: Vec::new(),
+        };
+        let snapshot =
+            crate::canonical_ir::evaluate_cfg(&self.function, &inputs).map_err(|error| {
+                VmError::InvalidNumericResult(format!(
+                    "canonical grouped-noise metadata evaluation failed: {error}"
+                ))
+            })?;
+        let read = |position: usize| -> Result<f64, VmError> {
+            let value = self
+                .outputs
+                .get(position)
+                .and_then(|value| snapshot.value(*value))
+                .ok_or_else(|| {
+                    VmError::InvalidNumericResult(format!(
+                        "canonical grouped-noise output {position} was not defined"
+                    ))
+                })?;
+            Ok(value)
+        };
+        self.processes
+            .iter()
+            .map(|process| {
+                // Table outputs are evaluated for their lazy-path diagnostics
+                // even though the compiled artifact owns the validated table.
+                for &position in &process.table {
+                    let _ = read(position)?;
+                }
+                let active = read(process.active)?;
+                if !active.is_finite() {
+                    return Err(VmError::InvalidNumericResult(format!(
+                        "canonical grouped-noise activation for process {} is non-finite",
+                        process.process_id
+                    )));
+                }
+                Ok(EvaluatedCanonicalNoiseProcess {
+                    process_id: process.process_id,
+                    active: active != 0.0,
+                    psd: read(process.psd)?,
+                    exponent: process.exponent.map(read).transpose()?,
+                })
+            })
+            .collect()
+    }
+}
+
 impl VerilogADevice {
+    /// Whether noise must be evaluated through the correlated per-frequency
+    /// process API. Schema-1 devices must never enter the eager legacy scalar
+    /// PSD path because that would bypass CFG activation/reaching definitions.
+    pub fn uses_grouped_noise_processes(&self) -> bool {
+        self.model.noise_process_schema >= 1
+    }
+
+    /// Whether this instance has at least one structurally routed grouped
+    /// process. This is allocation-free and does not evaluate activation or
+    /// PSD metadata, so analysis sweeps can skip no-noise instances safely.
+    pub fn has_grouped_noise_processes(&self) -> bool {
+        self.uses_grouped_noise_processes()
+            && self
+                .model
+                .noise_sources
+                .iter()
+                .any(|source| !source.injections.is_empty())
+    }
+
+    /// Activation-independent catalog of grouped noise processes that can
+    /// reach at least one circuit equation. The list is structural: raw PSDs
+    /// are not evaluated, so inactive and final-step-only processes remain
+    /// discoverable by contribution UIs and saved-result validators.
+    pub fn grouped_noise_process_catalog(&self) -> Vec<(usize, String)> {
+        if !self.has_grouped_noise_processes() {
+            return Vec::new();
+        }
+        self.model
+            .noise_sources
+            .iter()
+            .filter(|source| !source.injections.is_empty())
+            .map(|source| {
+                (
+                    source.process_id,
+                    source
+                        .name
+                        .as_ref()
+                        .map(ToString::to_string)
+                        .unwrap_or_else(|| format!("noise{}", source.process_id)),
+                )
+            })
+            .collect()
+    }
+
     fn finite_result(value: f64, context: impl Into<String>) -> Result<f64, VmError> {
         if value.is_finite() {
             Ok(value)
@@ -1973,7 +2299,6 @@ impl VerilogADevice {
     /// Checked constructor that compiles stamp values from canonical MIR when
     /// the native backend is available. Unsupported MIR is a construction
     /// error; the bytecode stamp path is not used as a fallback.
-    #[cfg(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32")))]
     pub fn try_new_with_canonical_ir(
         name: impl Into<SmolStr>,
         model: impl Into<std::sync::Arc<CompiledModel>>,
@@ -1991,6 +2316,17 @@ impl VerilogADevice {
         canonical_artifact: Option<&CanonicalIrArtifact>,
     ) -> Result<Self, VmError> {
         Self::validate_compiled_assignment_layout(model.num_variables, &model.assignment_steps)?;
+        Self::validate_compiled_assignment_layout(
+            model.num_variables,
+            &model.noise_assignment_steps,
+        )?;
+        #[cfg(all(
+            not(feature = "native"),
+            not(all(feature = "wasm-jit", target_arch = "wasm32"))
+        ))]
+        if model.noise_process_schema >= 1 {
+            Self::validate_portable_noise_assignment_split(&model)?;
+        }
 
         #[cfg(all(
             not(feature = "native"),
@@ -2030,6 +2366,22 @@ impl VerilogADevice {
         context.laplace_filters = model.laplace_filters.clone();
         context.zi_filters = model.zi_filters.clone();
         Self::preallocate_vm_runtime_state(&mut context, &model)?;
+
+        let canonical_noise_plan = if model.noise_process_schema >= 1
+            && !model.noise_sources.is_empty()
+        {
+            let artifact = canonical_artifact.ok_or_else(|| {
+                VmError::InvalidModel(
+                    "grouped Verilog-A noise requires canonical IR metadata; no legacy fallback is permitted"
+                        .into(),
+                )
+            })?;
+            Some(std::sync::Arc::new(CanonicalNoiseRuntimePlan::build(
+                artifact, &model,
+            )?))
+        } else {
+            None
+        };
 
         #[cfg(feature = "native")]
         let native_model = match canonical_artifact {
@@ -2078,6 +2430,7 @@ impl VerilogADevice {
             fused_program_active: vec![1; num_stamp_programs],
             #[cfg(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32")))]
             fused_stamp_jacobians: vec![0.0; fused_jacobian_count],
+            canonical_noise_plan,
             #[cfg(feature = "native")]
             native_model,
             #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
@@ -2230,6 +2583,7 @@ impl VerilogADevice {
         }
 
         scan_steps(&model.assignment_steps, &mut scan_program);
+        scan_steps(&model.noise_assignment_steps, &mut scan_program);
 
         for stamp in &model.stamp_programs {
             if let Some(condition) = &stamp.static_condition {
@@ -2248,6 +2602,9 @@ impl VerilogADevice {
             scan_program(&source.psd_program);
             if let Some(program) = &source.exponent_program {
                 scan_program(program);
+            }
+            for injection in &source.injections {
+                scan_program(&injection.gain_program);
             }
         }
 
@@ -5903,6 +6260,142 @@ impl VerilogADevice {
             })
     }
 
+    /// Whether a noise term is an ordinary KCL current injection. An
+    /// indirect current constraint owns a branch unknown and its residual is
+    /// stamped on that branch row, so it has the mapping and multiplicity
+    /// convention of a potential contribution.
+    fn noise_scales_as_current(
+        model: &CompiledModel,
+        is_current: bool,
+        branch_ordinal: Option<usize>,
+        program_idx: usize,
+    ) -> bool {
+        is_current
+            && !(branch_ordinal.is_some()
+                && model
+                    .stamp_programs
+                    .get(program_idx)
+                    .is_some_and(|program| program.indirect))
+    }
+
+    #[cfg(all(
+        not(feature = "native"),
+        not(all(feature = "wasm-jit", target_arch = "wasm32"))
+    ))]
+    fn assignment_step_reads_contribution_current(step: &AssignmentStep) -> bool {
+        let program_reads_current = |program: &BytecodeProgram| {
+            program
+                .instructions
+                .iter()
+                .any(|instruction| matches!(instruction, Instruction::PushCurrent(_, _)))
+        };
+        match step {
+            AssignmentStep::Assign(assignment) => program_reads_current(&assignment.program),
+            AssignmentStep::AssignIndexed { index, value, .. } => {
+                program_reads_current(index) || program_reads_current(value)
+            }
+            AssignmentStep::Loop { condition, body } => {
+                program_reads_current(condition)
+                    || body
+                        .iter()
+                        .any(Self::assignment_step_reads_contribution_current)
+            }
+        }
+    }
+
+    #[cfg(all(
+        not(feature = "native"),
+        not(all(feature = "wasm-jit", target_arch = "wasm32"))
+    ))]
+    fn validate_portable_noise_assignment_split(model: &CompiledModel) -> Result<(), VmError> {
+        fn program_reads(program: &BytecodeProgram, out: &mut std::collections::HashSet<usize>) {
+            for instruction in &program.instructions {
+                match instruction {
+                    Instruction::PushVariable(slot) => {
+                        out.insert(*slot);
+                    }
+                    Instruction::PushVariableDyn { base, len, .. } => {
+                        out.extend(*base..base.saturating_add(*len));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        fn step_targets(step: &AssignmentStep, out: &mut std::collections::HashSet<usize>) {
+            match step {
+                AssignmentStep::Assign(assignment) => {
+                    out.insert(assignment.var_index);
+                }
+                AssignmentStep::AssignIndexed { base, len, .. } => {
+                    out.extend(*base..base.saturating_add(*len));
+                }
+                AssignmentStep::Loop { body, .. } => {
+                    for step in body {
+                        step_targets(step, out);
+                    }
+                }
+            }
+        }
+        fn step_reads(step: &AssignmentStep, out: &mut std::collections::HashSet<usize>) {
+            match step {
+                AssignmentStep::Assign(assignment) => program_reads(&assignment.program, out),
+                AssignmentStep::AssignIndexed { index, value, .. } => {
+                    program_reads(index, out);
+                    program_reads(value, out);
+                }
+                AssignmentStep::Loop { condition, body } => {
+                    program_reads(condition, out);
+                    for step in body {
+                        step_reads(step, out);
+                    }
+                }
+            }
+        }
+
+        let Some(split) = model
+            .assignment_steps
+            .iter()
+            .position(Self::assignment_step_reads_contribution_current)
+        else {
+            return Ok(());
+        };
+        let mut post_targets = std::collections::HashSet::new();
+        for step in &model.assignment_steps[split..] {
+            step_targets(step, &mut post_targets);
+        }
+        let mut pre_current_roots = std::collections::HashSet::new();
+        for stamp in &model.stamp_programs {
+            program_reads(&stamp.value_program, &mut pre_current_roots);
+        }
+        loop {
+            let before = pre_current_roots.len();
+            for step in model.assignment_steps[..split].iter().rev() {
+                let mut targets = std::collections::HashSet::new();
+                step_targets(step, &mut targets);
+                if targets
+                    .iter()
+                    .any(|target| pre_current_roots.contains(target))
+                {
+                    step_reads(step, &mut pre_current_roots);
+                }
+            }
+            if pre_current_roots.len() == before {
+                break;
+            }
+        }
+        if let Some(slot) = post_targets.intersection(&pre_current_roots).copied().min() {
+            let name = model
+                .variable_names
+                .get(slot)
+                .map(SmolStr::as_str)
+                .unwrap_or("<unnamed>");
+            return Err(VmError::InvalidModel(format!(
+                "assignment variable '{name}' (slot {slot}) depends on a contribution current but is required before contribution-current evaluation"
+            )));
+        }
+        Ok(())
+    }
+
     /// Checked noise-source evaluation path for callers that can surface
     /// runtime model diagnostics instead of panicking or dropping sources.
     #[cfg(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32")))]
@@ -5916,6 +6409,7 @@ impl VerilogADevice {
         let context = &mut self.context;
         let model = &self.model;
         let program_active = &self.program_active;
+        let legacy_noise_artifact = model.noise_process_schema == 0;
         #[cfg(feature = "native")]
         let native = self.native_model.as_ref();
         #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
@@ -5961,11 +6455,20 @@ impl VerilogADevice {
 
         let mut sources = Vec::with_capacity(model.noise_sources.len());
         for (idx, source) in model.noise_sources.iter().enumerate() {
-            if !program_active
-                .get(source.program_idx)
-                .copied()
-                .unwrap_or(true)
-            {
+            let active = if source.injections.is_empty() {
+                program_active
+                    .get(source.program_idx)
+                    .copied()
+                    .unwrap_or(true)
+            } else {
+                source.injections.iter().any(|injection| {
+                    program_active
+                        .get(injection.program_idx)
+                        .copied()
+                        .unwrap_or(true)
+                })
+            };
+            if !active {
                 continue;
             }
             let psd = Self::run_value_program(
@@ -5985,7 +6488,13 @@ impl VerilogADevice {
                 continue;
             }
             let m = vm.context.multiplicity;
-            let psd = if source.is_current { psd * m } else { psd / m };
+            let scales_as_current = Self::noise_scales_as_current(
+                model,
+                source.is_current,
+                source.branch_ordinal,
+                source.program_idx,
+            );
+            let psd = if scales_as_current { psd * m } else { psd / m };
             let psd = Self::finite_result(psd, format!("scaled noise source {idx} power"))?;
             let exponent = source
                 .exponent_program
@@ -6016,7 +6525,7 @@ impl VerilogADevice {
                 .map(|value| Self::finite_result(value, format!("noise source {idx} exponent")))
                 .transpose()?;
 
-            let (node_pos, node_neg) = match (source.is_current, source.branch_ordinal) {
+            let (node_pos, node_neg) = match (scales_as_current, source.branch_ordinal) {
                 (false, Some(ordinal)) => (
                     self.branch_current_indices
                         .get(ordinal)
@@ -6028,6 +6537,14 @@ impl VerilogADevice {
             };
 
             sources.push(EvaluatedNoiseSource {
+                // Pre-grouped cache artifacts did not persist a process id,
+                // so serde initializes every source to zero. Give those
+                // artifacts deterministic dense identities by source index.
+                process_id: if legacy_noise_artifact {
+                    idx
+                } else {
+                    source.process_id
+                },
                 node_pos,
                 node_neg,
                 psd,
@@ -6041,6 +6558,400 @@ impl VerilogADevice {
             });
         }
         Ok(sources)
+    }
+
+    #[cfg(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32")))]
+    fn prepare_canonical_noise_operating_point(
+        &mut self,
+        circuit_voltages: &[f64],
+    ) -> Result<(), VmError> {
+        self.try_update_all_voltages(circuit_voltages)?;
+        self.begin_evaluation(crate::vm::VerilogAEvaluationMode::SmallSignal);
+        let context = &mut self.context;
+        let model = &self.model;
+        let program_active = &self.program_active;
+        #[cfg(feature = "native")]
+        let native = self.native_model.as_ref();
+        #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+        let wasm = self.wasm_jit_model.as_ref();
+        context.clear_currents();
+        context.currents.reserve(model.stamp_programs.len());
+        let mut vm = Vm::new(context);
+        Self::run_assignment_pass(
+            &mut vm,
+            model,
+            #[cfg(feature = "native")]
+            native,
+            #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+            wasm,
+        )?;
+        Self::populate_noise_current_probe_cache(
+            &mut vm,
+            model,
+            program_active,
+            #[cfg(feature = "native")]
+            native,
+            #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+            wasm,
+        )?;
+        Self::run_post_assignment_pass(
+            &mut vm,
+            model,
+            #[cfg(feature = "native")]
+            native,
+            #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+            wasm,
+        )
+    }
+
+    #[cfg(all(
+        not(feature = "native"),
+        not(all(feature = "wasm-jit", target_arch = "wasm32"))
+    ))]
+    fn prepare_canonical_noise_operating_point(
+        &mut self,
+        circuit_voltages: &[f64],
+    ) -> Result<(), VmError> {
+        self.try_update_all_voltages(circuit_voltages)?;
+        self.begin_evaluation(crate::vm::VerilogAEvaluationMode::SmallSignal);
+        let model = &self.model;
+        let split = model
+            .assignment_steps
+            .iter()
+            .position(Self::assignment_step_reads_contribution_current)
+            .unwrap_or(model.assignment_steps.len());
+        let context = &mut self.context;
+        context.clear_currents();
+        context.currents.reserve(model.stamp_programs.len());
+        let mut vm = Vm::new(context);
+        Self::execute_assignment_steps(&mut vm, &model.assignment_steps[..split])?;
+        Self::populate_noise_current_probe_cache(&mut vm, model, &self.program_active)?;
+        Self::execute_assignment_steps(&mut vm, &model.assignment_steps[split..])
+    }
+
+    fn try_grouped_noise_processes_from_canonical_cfg(
+        &mut self,
+        circuit_voltages: &[f64],
+        frequency_hz: f64,
+    ) -> Result<Vec<EvaluatedNoiseProcess>, VmError> {
+        self.prepare_canonical_noise_operating_point(circuit_voltages)?;
+        let multiplicity = self.context.multiplicity;
+        if !multiplicity.is_finite() || multiplicity <= 0.0 {
+            return Err(VmError::InvalidRuntimeConfiguration(format!(
+                "noise multiplicity must be finite and positive, got {multiplicity}"
+            )));
+        }
+        let plan = self.canonical_noise_plan.as_ref().ok_or_else(|| {
+            VmError::InvalidModel("grouped-noise canonical runtime plan is missing".into())
+        })?;
+        let metadata = plan.evaluate(&self.context)?;
+        if metadata.len() != self.model.noise_sources.len() {
+            return Err(VmError::InvalidModel(
+                "grouped-noise canonical runtime result shape changed after construction".into(),
+            ));
+        }
+        let variable_seed = self.context.variables.clone();
+        let mut vm = crate::vm::SmallSignalVm::with_variable_seed(
+            &self.context,
+            frequency_hz,
+            &variable_seed,
+        )?;
+        vm.execute_assignments(if self.model.noise_assignment_steps.is_empty() {
+            &self.model.assignment_steps
+        } else {
+            &self.model.noise_assignment_steps
+        })?;
+        let circuit_node = |index: &StampIndex| -> usize {
+            match index {
+                StampIndex::Terminal(terminal) => {
+                    self.node_mapping.get(*terminal).copied().unwrap_or(0)
+                }
+                StampIndex::Internal(internal) => self
+                    .internal_node_indices
+                    .get(*internal)
+                    .copied()
+                    .unwrap_or(0),
+                StampIndex::Branch(branch) => self
+                    .branch_current_indices
+                    .get(*branch)
+                    .copied()
+                    .unwrap_or(0),
+                StampIndex::Ground => 0,
+            }
+        };
+        let mut processes = Vec::with_capacity(metadata.len());
+        for (expected, metadata) in metadata.into_iter().enumerate() {
+            if metadata.process_id != expected {
+                return Err(VmError::InvalidModel(format!(
+                    "grouped-noise runtime process ID {} is not dense at {expected}",
+                    metadata.process_id
+                )));
+            }
+            let source = self.model.noise_sources.get(expected).ok_or_else(|| {
+                VmError::InvalidModel("grouped-noise source index is outside model table".into())
+            })?;
+            if !metadata.active || source.injections.is_empty() {
+                continue;
+            }
+            let mut injections = Vec::with_capacity(source.injections.len());
+            let mut any_active_injection = false;
+            for injection in &source.injections {
+                if !self
+                    .program_active
+                    .get(injection.program_idx)
+                    .copied()
+                    .unwrap_or(true)
+                {
+                    continue;
+                }
+                // Activation is structural/control-flow activation of an
+                // individual injection, not its numeric gain. A live zero
+                // gain must still validate the source's raw PSD.
+                any_active_injection = true;
+                let scales_as_current = Self::noise_scales_as_current(
+                    &self.model,
+                    injection.is_current,
+                    injection.branch_ordinal,
+                    injection.program_idx,
+                );
+                let gain_scale = if scales_as_current {
+                    multiplicity.sqrt()
+                } else {
+                    multiplicity.sqrt().recip()
+                };
+                if !matches!(injection.rhs_sign, -1.0 | 1.0) {
+                    return Err(VmError::InvalidModel(format!(
+                        "noise process {expected} injection RHS sign must be +1 or -1, got {}",
+                        injection.rhs_sign
+                    )));
+                }
+                let gain = vm.execute(&injection.gain_program)? * gain_scale * injection.rhs_sign;
+                if !gain.re.is_finite() || !gain.im.is_finite() {
+                    return Err(VmError::InvalidNumericResult(format!(
+                        "noise process {expected} injection gain is non-finite at {frequency_hz} Hz"
+                    )));
+                }
+                let (node_pos, node_neg) = match (scales_as_current, injection.branch_ordinal) {
+                    (false, Some(ordinal)) => (
+                        self.branch_current_indices
+                            .get(ordinal)
+                            .copied()
+                            .unwrap_or(0),
+                        0,
+                    ),
+                    _ => (circuit_node(&injection.pos), circuit_node(&injection.neg)),
+                };
+                injections.push(EvaluatedNoiseInjection {
+                    node_pos,
+                    node_neg,
+                    gain,
+                });
+            }
+            if !any_active_injection {
+                continue;
+            }
+            let psd = Self::noise_power(metadata.psd, expected)?;
+            if psd == 0.0 {
+                continue;
+            }
+            let exponent = metadata
+                .exponent
+                .map(|value| {
+                    Self::finite_result(value, format!("noise process {expected} exponent"))
+                })
+                .transpose()?;
+            processes.push(EvaluatedNoiseProcess {
+                process_id: expected,
+                psd,
+                exponent,
+                table: source.table.clone(),
+                name: source
+                    .name
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| format!("noise{expected}")),
+                injections,
+            });
+        }
+        Ok(processes)
+    }
+
+    /// Evaluate coherent, frequency-dependent injections for every
+    /// syntactic Verilog-A noise process. Scalar PSD metadata is evaluated by
+    /// the selected native/VM/WASM backend through `try_noise_sources`; only
+    /// complex gain composition uses the shared read-only small-signal VM.
+    pub fn try_noise_processes_at_frequency(
+        &mut self,
+        circuit_voltages: &[f64],
+        frequency_hz: f64,
+    ) -> Result<Vec<EvaluatedNoiseProcess>, VmError> {
+        if !frequency_hz.is_finite() || frequency_hz < 0.0 {
+            return Err(VmError::InvalidRuntimeConfiguration(format!(
+                "noise frequency must be finite and nonnegative, got {frequency_hz}"
+            )));
+        }
+        if self.canonical_noise_plan.is_some() {
+            return self
+                .try_grouped_noise_processes_from_canonical_cfg(circuit_voltages, frequency_hz);
+        }
+        self.try_update_all_voltages(circuit_voltages)?;
+        let variable_seed = self.context.variables.clone();
+        let scalar_sources = self.try_noise_sources(circuit_voltages)?;
+        let multiplicity = self.context.multiplicity;
+        if !multiplicity.is_finite() || multiplicity <= 0.0 {
+            return Err(VmError::InvalidRuntimeConfiguration(format!(
+                "noise multiplicity must be finite and positive, got {multiplicity}"
+            )));
+        }
+
+        let mut vm = crate::vm::SmallSignalVm::with_variable_seed(
+            &self.context,
+            frequency_hz,
+            &variable_seed,
+        )?;
+        vm.execute_assignments(if self.model.noise_assignment_steps.is_empty() {
+            &self.model.assignment_steps
+        } else {
+            &self.model.noise_assignment_steps
+        })?;
+
+        let circuit_node = |index: &StampIndex| -> usize {
+            match index {
+                StampIndex::Terminal(terminal) => {
+                    self.node_mapping.get(*terminal).copied().unwrap_or(0)
+                }
+                StampIndex::Internal(internal) => self
+                    .internal_node_indices
+                    .get(*internal)
+                    .copied()
+                    .unwrap_or(0),
+                StampIndex::Branch(branch) => self
+                    .branch_current_indices
+                    .get(*branch)
+                    .copied()
+                    .unwrap_or(0),
+                StampIndex::Ground => 0,
+            }
+        };
+
+        let mut processes = Vec::with_capacity(scalar_sources.len());
+        let legacy_noise_artifact = self.model.noise_process_schema == 0;
+        for scalar in scalar_sources {
+            let Some(source) = self.model.noise_sources.get(scalar.process_id) else {
+                return Err(VmError::InvalidInstruction(
+                    "evaluated noise process has no compiled definition",
+                ));
+            };
+            if !legacy_noise_artifact && source.process_id != scalar.process_id {
+                return Err(VmError::InvalidModel(format!(
+                    "grouped-noise process table is not dense at index {}",
+                    scalar.process_id
+                )));
+            }
+            let source_scales_as_current = Self::noise_scales_as_current(
+                &self.model,
+                source.is_current,
+                source.branch_ordinal,
+                source.program_idx,
+            );
+            let legacy_scale = if source_scales_as_current {
+                multiplicity
+            } else {
+                multiplicity.recip()
+            };
+            let psd = Self::finite_result(
+                scalar.psd / legacy_scale,
+                format!("noise process {} raw power", source.process_id),
+            )?;
+            let mut injections = Vec::with_capacity(source.injections.len());
+            if source.injections.is_empty() {
+                // Backward-compatible cache migration: artifacts serialized
+                // before grouped injections carried exactly one unit-gain
+                // injection in the legacy source fields.
+                let gain_scale = if source_scales_as_current {
+                    multiplicity.sqrt()
+                } else {
+                    multiplicity.sqrt().recip()
+                };
+                let (node_pos, node_neg) = match (source_scales_as_current, source.branch_ordinal) {
+                    (false, Some(ordinal)) => (
+                        self.branch_current_indices
+                            .get(ordinal)
+                            .copied()
+                            .unwrap_or(0),
+                        0,
+                    ),
+                    _ => (circuit_node(&source.pos), circuit_node(&source.neg)),
+                };
+                injections.push(EvaluatedNoiseInjection {
+                    node_pos,
+                    node_neg,
+                    gain: num_complex::Complex64::new(gain_scale, 0.0),
+                });
+            }
+            for injection in &source.injections {
+                if !self
+                    .program_active
+                    .get(injection.program_idx)
+                    .copied()
+                    .unwrap_or(true)
+                {
+                    continue;
+                }
+                let injection_scales_as_current = Self::noise_scales_as_current(
+                    &self.model,
+                    injection.is_current,
+                    injection.branch_ordinal,
+                    injection.program_idx,
+                );
+                let gain_scale = if injection_scales_as_current {
+                    multiplicity.sqrt()
+                } else {
+                    multiplicity.sqrt().recip()
+                };
+                if !matches!(injection.rhs_sign, -1.0 | 1.0) {
+                    return Err(VmError::InvalidModel(format!(
+                        "noise process {} injection RHS sign must be +1 or -1, got {}",
+                        source.process_id, injection.rhs_sign
+                    )));
+                }
+                let gain = vm.execute(&injection.gain_program)? * gain_scale * injection.rhs_sign;
+                if !gain.re.is_finite() || !gain.im.is_finite() {
+                    return Err(VmError::InvalidNumericResult(format!(
+                        "noise process {} injection gain is non-finite at {frequency_hz} Hz",
+                        source.process_id
+                    )));
+                }
+                let (node_pos, node_neg) =
+                    match (injection_scales_as_current, injection.branch_ordinal) {
+                        (false, Some(ordinal)) => (
+                            self.branch_current_indices
+                                .get(ordinal)
+                                .copied()
+                                .unwrap_or(0),
+                            0,
+                        ),
+                        _ => (circuit_node(&injection.pos), circuit_node(&injection.neg)),
+                    };
+                injections.push(EvaluatedNoiseInjection {
+                    node_pos,
+                    node_neg,
+                    gain,
+                });
+            }
+            if injections.is_empty() {
+                continue;
+            }
+            processes.push(EvaluatedNoiseProcess {
+                process_id: scalar.process_id,
+                psd,
+                exponent: scalar.exponent,
+                table: scalar.table,
+                name: scalar.name,
+                injections,
+            });
+        }
+        Ok(processes)
     }
 
     /// Checked noise-source evaluation path for callers that can surface
@@ -6059,12 +6970,24 @@ impl VerilogADevice {
         let context = &mut self.context;
         let model = &self.model;
         let program_active = &self.program_active;
+        let legacy_noise_artifact = model.noise_process_schema == 0;
 
         context.clear_currents();
         context.currents.reserve(model.stamp_programs.len());
         let mut vm = Vm::new(context);
-        Self::run_assignment_pass(&mut vm, model)?;
+        let assignment_split = model
+            .assignment_steps
+            .iter()
+            .position(Self::assignment_step_reads_contribution_current)
+            .unwrap_or(model.assignment_steps.len());
+        Self::execute_assignment_steps(&mut vm, &model.assignment_steps[..assignment_split])?;
         Self::populate_noise_current_probe_cache(&mut vm, model, program_active)?;
+        // Preserve source order while running every assignment exactly once:
+        // the suffix beginning at the first contribution-current read waits
+        // until the contribution vector is complete. This matches the
+        // native/WASM split without double-running self-referential or
+        // stateful assignments.
+        Self::execute_assignment_steps(&mut vm, &model.assignment_steps[assignment_split..])?;
 
         let circuit_node = |index: &StampIndex| -> usize {
             match index {
@@ -6077,11 +7000,20 @@ impl VerilogADevice {
 
         let mut sources = Vec::with_capacity(model.noise_sources.len());
         for (idx, source) in model.noise_sources.iter().enumerate() {
-            if !program_active
-                .get(source.program_idx)
-                .copied()
-                .unwrap_or(true)
-            {
+            let active = if source.injections.is_empty() {
+                program_active
+                    .get(source.program_idx)
+                    .copied()
+                    .unwrap_or(true)
+            } else {
+                source.injections.iter().any(|injection| {
+                    program_active
+                        .get(injection.program_idx)
+                        .copied()
+                        .unwrap_or(true)
+                })
+            };
+            if !active {
                 continue;
             }
             let psd_program = &source.psd_program;
@@ -6093,7 +7025,13 @@ impl VerilogADevice {
             // m uncorrelated parallel copies: current-noise powers add
             // (x m); series voltage-noise EMFs average (/ m)
             let m = vm.context.multiplicity;
-            let psd = if source.is_current { psd * m } else { psd / m };
+            let scales_as_current = Self::noise_scales_as_current(
+                model,
+                source.is_current,
+                source.branch_ordinal,
+                source.program_idx,
+            );
+            let psd = if scales_as_current { psd * m } else { psd / m };
             let psd = Self::finite_result(psd, format!("scaled noise source {idx} power"))?;
             let exponent = source
                 .exponent_program
@@ -6105,7 +7043,7 @@ impl VerilogADevice {
 
             // Potential-contribution noise is a series EMF on the branch
             // equation row; current noise injects across the node pair
-            let (node_pos, node_neg) = match (source.is_current, source.branch_ordinal) {
+            let (node_pos, node_neg) = match (scales_as_current, source.branch_ordinal) {
                 (false, Some(ordinal)) => (
                     self.branch_current_indices
                         .get(ordinal)
@@ -6117,6 +7055,14 @@ impl VerilogADevice {
             };
 
             sources.push(EvaluatedNoiseSource {
+                // Pre-grouped cache artifacts did not persist a process id,
+                // so serde initializes every source to zero. Give those
+                // artifacts deterministic dense identities by source index.
+                process_id: if legacy_noise_artifact {
+                    idx
+                } else {
+                    source.process_id
+                },
                 node_pos,
                 node_neg,
                 psd,
@@ -6238,6 +7184,8 @@ impl VerilogADevice {
 /// One noise source evaluated at an operating point
 #[derive(Debug, Clone)]
 pub struct EvaluatedNoiseSource {
+    /// Dense syntactic process identity.
+    pub process_id: usize,
     /// Positive injection circuit node (0 = ground); for potential
     /// contributions this is the branch-equation row's unknown
     pub node_pos: usize,
@@ -6254,6 +7202,25 @@ pub struct EvaluatedNoiseSource {
     pub table: Option<(Vec<(f64, f64)>, bool)>,
     /// Source label
     pub name: String,
+}
+
+/// One complex circuit injection of a coherent noise process.
+#[derive(Debug, Clone)]
+pub struct EvaluatedNoiseInjection {
+    pub node_pos: usize,
+    pub node_neg: usize,
+    pub gain: num_complex::Complex64,
+}
+
+/// One syntactic Verilog-A noise process evaluated at a frequency.
+#[derive(Debug, Clone)]
+pub struct EvaluatedNoiseProcess {
+    pub process_id: usize,
+    pub psd: f64,
+    pub exponent: Option<f64>,
+    pub table: Option<(Vec<(f64, f64)>, bool)>,
+    pub name: String,
+    pub injections: Vec<EvaluatedNoiseInjection>,
 }
 
 /// Result of Jacobian computation
@@ -7651,6 +8618,7 @@ endmodule
                 },
             });
         model.noise_sources.push(CompiledNoiseSource {
+            process_id: 0,
             pos: StampIndex::Terminal(0),
             neg: StampIndex::Ground,
             is_current: true,
@@ -7673,6 +8641,7 @@ endmodule
             }),
             table: None,
             name: None,
+            injections: Vec::new(),
         });
 
         let mut context = VmContext::with_internal_nodes(model.num_terminals, model.internal_nodes);

@@ -1045,11 +1045,13 @@ fn hir_expr_kind_label(kind: &HirExprKind) -> String {
             )
         }
         HirExprKind::NoiseSource {
+            process_id,
             source,
             operands,
             name,
         } => format!(
-            "noise_source source:{} operands:{} name:{}",
+            "noise_source process:{} source:{} operands:{} name:{}",
+            process_id,
             enc_str(source),
             join_expr_ids(operands),
             option_smol(name.as_ref())

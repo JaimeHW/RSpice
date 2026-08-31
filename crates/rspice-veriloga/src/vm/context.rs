@@ -429,6 +429,10 @@ impl Default for VmContext {
 }
 
 impl VmContext {
+    pub(crate) fn accepted_event_variables(&self) -> &[f64] {
+        &self.accepted_event_variables
+    }
+
     /// Create a new VM context with specified terminal count.
     pub fn new(num_terminals: usize) -> Self {
         Self {

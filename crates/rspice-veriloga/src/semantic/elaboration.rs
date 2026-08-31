@@ -1536,24 +1536,40 @@ fn rewrite_noise_source(noise: &NoiseSource, scope: &ScopeMap) -> CompileResult<
         })
     };
     Ok(match noise {
-        NoiseSource::White { power, name, span } => NoiseSource::White {
+        NoiseSource::White {
+            process_id,
+            power,
+            name,
+            span,
+        } => NoiseSource::White {
+            process_id: *process_id,
             power: Box::new(rewrite_expression(power, scope)?),
             name: qualified_name(name),
             span: *span,
         },
         NoiseSource::Flicker {
+            process_id,
             power,
             exponent,
             name,
             span,
         } => NoiseSource::Flicker {
+            process_id: *process_id,
             power: Box::new(rewrite_expression(power, scope)?),
             exponent: Box::new(rewrite_expression(exponent, scope)?),
             name: qualified_name(name),
             span: *span,
         },
-        NoiseSource::Table { data, name, span } => NoiseSource::Table {
+        NoiseSource::Table {
+            process_id,
+            data,
+            log_interp,
+            name,
+            span,
+        } => NoiseSource::Table {
+            process_id: *process_id,
             data: rewrite_expressions(data, scope)?,
+            log_interp: *log_interp,
             name: qualified_name(name),
             span: *span,
         },

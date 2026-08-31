@@ -1540,6 +1540,10 @@ impl Emitter<'_> {
                     format!("{given} as u8 as f64")
                 }
             }
+            // Ordinary generated-device CFG lowering retains its historical
+            // constant-connected contract; this leaf is emitted only by the
+            // runtime grouped-noise metadata entrypoint.
+            CfgValueKind::PortConnected(_) => "true".into(),
             CfgValueKind::EventState(slot) => {
                 format!("{}[{slot}]", bindings.event_state)
             }

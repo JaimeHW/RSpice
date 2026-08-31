@@ -321,6 +321,10 @@ pub enum HirExprKind {
         first_transition: Option<ExprId>,
     },
     NoiseSource {
+        /// Dense structural identity assigned while lowering the source-order
+        /// analog body. Labels do not define process correlation.
+        #[serde(default)]
+        process_id: u32,
         source: SmolStr,
         operands: Vec<ExprId>,
         name: Option<SmolStr>,
@@ -861,7 +865,18 @@ impl HirModel {
                 }
                 self.validate_zi_children(diagnostics, expression, kind);
             }
-            HirExprKind::NoiseSource { operands, .. } => {
+            HirExprKind::NoiseSource {
+                process_id,
+                operands,
+                ..
+            } => {
+                if *process_id == u32::MAX {
+                    diagnostics.push(IrDiagnostic::error(
+                        CompilerPhase::HirValidation,
+                        "HIR noise source is missing its semantic process identity",
+                        expression.span,
+                    ));
+                }
                 self.validate_expression_child_list(diagnostics, expression, "operand", operands);
             }
         }
@@ -2267,10 +2282,12 @@ impl HirLowerer {
                     }
                 }
             }
-            Expression::SystemFunction(function) => HirExprKind::SystemFunction {
-                name: function.name.clone(),
-                args: self.lower_expr_ids(&function.args),
-            },
+            Expression::SystemFunction(function) => self
+                .lower_noise_call(&function.name, &function.args)
+                .unwrap_or_else(|| HirExprKind::SystemFunction {
+                    name: function.name.clone(),
+                    args: self.lower_expr_ids(&function.args),
+                }),
             Expression::Binary(binary) => HirExprKind::Binary {
                 op: format!("{:?}", binary.op).into(),
                 left: self.lower_expr(&binary.left).id,
@@ -2285,10 +2302,12 @@ impl HirLowerer {
                 then_expr: self.lower_expr(&conditional.then_expr).id,
                 else_expr: self.lower_expr(&conditional.else_expr).id,
             },
-            Expression::Call(call) => HirExprKind::Call {
-                name: call.name.clone(),
-                args: self.lower_expr_ids(&call.args),
-            },
+            Expression::Call(call) => self
+                .lower_noise_call(&call.name, &call.args)
+                .unwrap_or_else(|| HirExprKind::Call {
+                    name: call.name.clone(),
+                    args: self.lower_expr_ids(&call.args),
+                }),
             Expression::BranchAccess(access) => self.lower_branch_access_kind(access),
             Expression::ArrayAccess(array) => HirExprKind::ArrayAccess {
                 array: array.array.clone(),
@@ -2622,8 +2641,18 @@ impl HirLowerer {
     }
 
     fn lower_noise_source(&mut self, source: &NoiseSource) -> HirExprKind {
+        let assigned = match source {
+            NoiseSource::White { process_id, .. }
+            | NoiseSource::Flicker { process_id, .. }
+            | NoiseSource::Table { process_id, .. } => *process_id,
+        };
+        // Missing identity is malformed analyzed input. Preserve a sentinel so
+        // HIR/CFG validation fails closed instead of correlating unrelated
+        // sites through an independently restarted counter.
+        let process_id = assigned.unwrap_or(u32::MAX);
         match source {
             NoiseSource::White { power, name, .. } => HirExprKind::NoiseSource {
+                process_id,
                 source: "White".into(),
                 operands: vec![self.lower_expr(power).id],
                 name: name.clone(),
@@ -2634,16 +2663,60 @@ impl HirLowerer {
                 name,
                 ..
             } => HirExprKind::NoiseSource {
+                process_id,
                 source: "Flicker".into(),
                 operands: vec![self.lower_expr(power).id, self.lower_expr(exponent).id],
                 name: name.clone(),
             },
-            NoiseSource::Table { data, name, .. } => HirExprKind::NoiseSource {
-                source: "Table".into(),
+            NoiseSource::Table {
+                data,
+                log_interp,
+                name,
+                ..
+            } => HirExprKind::NoiseSource {
+                process_id,
+                source: if *log_interp { "TableLog" } else { "Table" }.into(),
                 operands: self.lower_expr_ids(data),
                 name: name.clone(),
             },
         }
+    }
+
+    fn lower_noise_call(&mut self, name: &SmolStr, args: &[Expression]) -> Option<HirExprKind> {
+        let normalized = name.trim_start_matches('$').to_ascii_lowercase();
+        let (source, operand_count) = match normalized.as_str() {
+            "white_noise" if !args.is_empty() => ("White", 1),
+            "flicker_noise" if args.len() >= 2 => ("Flicker", 2),
+            "noise_table" if !args.is_empty() => ("Table", 1),
+            "noise_table_log" if !args.is_empty() => ("TableLog", 1),
+            _ => return None,
+        };
+        // Executable semantic lowering canonicalizes noise calls into the
+        // typed NoiseSource form. A retained raw call is malformed input and
+        // must not acquire a second, independently numbered identity stream.
+        let process_id = u32::MAX;
+        let label = args
+            .get(operand_count)
+            .and_then(|expression| match expression {
+                Expression::StringLit(string) => Some(string.value.clone()),
+                _ => None,
+            });
+        let operands = if matches!(source, "Table" | "TableLog") {
+            match &args[0] {
+                Expression::ArrayLiteral(array) => {
+                    self.lower_array_literal_elements(&array.elements)
+                }
+                expression => vec![self.lower_expr(expression).id],
+            }
+        } else {
+            self.lower_expr_ids(&args[..operand_count])
+        };
+        Some(HirExprKind::NoiseSource {
+            process_id,
+            source: source.into(),
+            operands,
+            name: label,
+        })
     }
 }
 

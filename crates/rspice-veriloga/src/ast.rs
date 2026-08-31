@@ -1362,12 +1362,16 @@ pub enum ZiKind {
 pub enum NoiseSource {
     /// White noise: white_noise(pwr, name)
     White {
+        /// Dense identity assigned by semantic lowering. Parsed ASTs carry
+        /// `None`; every executable analyzed module carries `Some`.
+        process_id: Option<u32>,
         power: Box<Expression>,
         name: Option<SmolStr>,
         span: Span,
     },
     /// Flicker noise: flicker_noise(pwr, exp, name)
     Flicker {
+        process_id: Option<u32>,
         power: Box<Expression>,
         exponent: Box<Expression>,
         name: Option<SmolStr>,
@@ -1375,7 +1379,10 @@ pub enum NoiseSource {
     },
     /// Noise table: noise_table(vector, name)
     Table {
+        process_id: Option<u32>,
         data: Vec<Expression>,
+        /// `true` for `noise_table_log`, `false` for `noise_table`.
+        log_interp: bool,
         name: Option<SmolStr>,
         span: Span,
     },

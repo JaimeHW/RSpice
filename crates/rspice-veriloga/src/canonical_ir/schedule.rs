@@ -1805,7 +1805,9 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
 
         CfgValueKind::Temperature | CfgValueKind::ThermalVoltage => InvalidationClass::Temperature,
 
-        CfgValueKind::Multiplicity => InvalidationClass::Instance,
+        CfgValueKind::Multiplicity | CfgValueKind::PortConnected(_) => {
+            InvalidationClass::Instance
+        }
 
         CfgValueKind::Parameter(parameter) | CfgValueKind::ParameterGiven(parameter) => {
             match parameter_scopes

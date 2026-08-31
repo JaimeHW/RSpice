@@ -5786,6 +5786,7 @@ endmodule
             variable_names: Vec::new(),
             event_state_variables: Vec::new(),
             assignment_steps: Vec::new(),
+            noise_assignment_steps: Vec::new(),
             stamp_programs: Vec::new(),
             lookup_tables: Vec::new(),
             internal_nodes: 0,
@@ -5793,6 +5794,7 @@ endmodule
             laplace_filters: Vec::new(),
             zi_filters: Vec::new(),
             zi_filter_definitions: Vec::new(),
+            noise_process_schema: 1,
             noise_sources: Vec::new(),
         }
     }

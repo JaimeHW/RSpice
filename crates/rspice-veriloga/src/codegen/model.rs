@@ -76,6 +76,9 @@ pub struct CompiledModel {
     /// Evaluation steps (assignments and runtime loops), executed in order
     /// before the contributions
     pub assignment_steps: Vec<AssignmentStep>,
+    /// Assignment replay augmented with noise-process derivative shadows.
+    #[serde(default)]
+    pub noise_assignment_steps: Vec<AssignmentStep>,
     /// Compiled stamp programs for each contribution
     pub stamp_programs: Vec<StampProgram>,
     /// Lookup tables for $table_model (x_data, y_data pairs)
@@ -95,6 +98,11 @@ pub struct CompiledModel {
     /// first correctly ordered evaluation.
     #[serde(default)]
     pub zi_filter_definitions: Vec<CompiledZiFilterDefinition>,
+    /// Grouped process schema. Zero identifies pre-grouped serialized
+    /// artifacts; current compilers write version 1 even when a process has
+    /// no live circuit injections, removing empty-vector ambiguity.
+    #[serde(default)]
+    pub noise_process_schema: u32,
     /// Small-signal noise sources extracted from contributions
     pub noise_sources: Vec<CompiledNoiseSource>,
 }
@@ -365,6 +373,9 @@ mod zi_runtime_layout_tests {
 /// at the originating contribution's branch during noise analysis
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompiledNoiseSource {
+    /// Dense syntactic process identity (labels do not define correlation).
+    #[serde(default)]
+    pub process_id: usize,
     /// Positive injection node
     pub pos: StampIndex,
     /// Negative injection node
@@ -388,6 +399,30 @@ pub struct CompiledNoiseSource {
     pub table: Option<(Vec<(f64, f64)>, bool)>,
     /// Source label from the noise function's name argument
     pub name: Option<SmolStr>,
+    /// Every coherent circuit injection produced by this process.
+    #[serde(default)]
+    pub injections: Vec<CompiledNoiseInjection>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompiledNoiseInjection {
+    pub pos: StampIndex,
+    pub neg: StampIndex,
+    pub is_current: bool,
+    pub branch_ordinal: Option<usize>,
+    pub program_idx: usize,
+    /// Sign with which the originating equation value enters the solver RHS.
+    /// Direct current KCL and indirect constraints use -1; direct potential
+    /// equations use +1. This is observable when one correlated process mixes
+    /// contribution forms.
+    #[serde(default = "default_noise_rhs_sign")]
+    pub rhs_sign: f64,
+    /// Complex transfer gain evaluated by the shared frequency-domain VM.
+    pub gain_program: BytecodeProgram,
+}
+
+fn default_noise_rhs_sign() -> f64 {
+    1.0
 }
 
 /// Lookup table for $table_model interpolation

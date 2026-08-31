@@ -939,6 +939,7 @@ impl<'a> ExprConverter<'a> {
                 let power = self.convert(&func.args[0])?;
                 let name = optional_string_arg(&func.name, func.args.get(1), "name")?;
                 Ok(IrExpr::WhiteNoise {
+                    site: crate::ir::NoiseSiteId::from_span(func.span),
                     power: Box::new(power),
                     name,
                 })
@@ -950,6 +951,7 @@ impl<'a> ExprConverter<'a> {
                 let exponent = self.convert(&func.args[1])?;
                 let name = optional_string_arg(&func.name, func.args.get(2), "name")?;
                 Ok(IrExpr::FlickerNoise {
+                    site: crate::ir::NoiseSiteId::from_span(func.span),
                     power: Box::new(power),
                     exponent: Box::new(exponent),
                     name,
@@ -961,6 +963,7 @@ impl<'a> ExprConverter<'a> {
                 let name = optional_string_arg(&func.name, func.args.get(1), "name")?;
                 let points = self.noise_table_points(&func.args[0], log_interp)?;
                 Ok(IrExpr::NoiseTable {
+                    site: crate::ir::NoiseSiteId::from_span(func.span),
                     points,
                     log_interp,
                     name,
@@ -1304,6 +1307,7 @@ impl<'a> ExprConverter<'a> {
                 let power = self.convert(require_arg(0)?)?;
                 let name = optional_string_arg(&call.name, call.args.get(1), "name")?;
                 Ok(IrExpr::WhiteNoise {
+                    site: crate::ir::NoiseSiteId::from_span(call.span),
                     power: Box::new(power),
                     name,
                 })
@@ -1314,6 +1318,7 @@ impl<'a> ExprConverter<'a> {
                 let exponent = self.convert(require_arg(1)?)?;
                 let name = optional_string_arg(&call.name, call.args.get(2), "name")?;
                 Ok(IrExpr::FlickerNoise {
+                    site: crate::ir::NoiseSiteId::from_span(call.span),
                     power: Box::new(power),
                     exponent: Box::new(exponent),
                     name,
@@ -1325,6 +1330,7 @@ impl<'a> ExprConverter<'a> {
                 let name = optional_string_arg(&call.name, call.args.get(1), "name")?;
                 let points = self.noise_table_points(require_arg(0)?, log_interp)?;
                 Ok(IrExpr::NoiseTable {
+                    site: crate::ir::NoiseSiteId::from_span(call.span),
                     points,
                     log_interp,
                     name,
@@ -2427,10 +2433,113 @@ impl<'a> ExprConverter<'a> {
 
     /// Convert a noise source
     fn convert_noise_source(&self, noise: &crate::ast::NoiseSource) -> CompileResult<IrExpr> {
-        // Noise sources evaluate to 0 for DC analysis
-        // Real noise handling is in the noise analysis phase
-        let _ = noise;
-        Ok(IrExpr::Const(0.0))
+        use crate::ast::NoiseSource;
+        let process_id = match noise {
+            NoiseSource::White { process_id, .. }
+            | NoiseSource::Flicker { process_id, .. }
+            | NoiseSource::Table { process_id, .. } => process_id.ok_or_else(|| {
+                CodeGenError::new(CodeGenErrorKind::Internal(
+                    "analyzed noise source is missing its semantic process identity".into(),
+                ))
+            })?,
+        };
+        match noise {
+            NoiseSource::White {
+                process_id: _,
+                power,
+                name,
+                span,
+            } => Ok(IrExpr::WhiteNoise {
+                site: crate::ir::NoiseSiteId {
+                    ordinal: process_id,
+                    ..crate::ir::NoiseSiteId::from_span(*span)
+                },
+                power: Box::new(self.convert(power)?),
+                name: name.as_ref().map(ToString::to_string),
+            }),
+            NoiseSource::Flicker {
+                process_id: _,
+                power,
+                exponent,
+                name,
+                span,
+            } => Ok(IrExpr::FlickerNoise {
+                site: crate::ir::NoiseSiteId {
+                    ordinal: process_id,
+                    ..crate::ir::NoiseSiteId::from_span(*span)
+                },
+                power: Box::new(self.convert(power)?),
+                exponent: Box::new(self.convert(exponent)?),
+                name: name.as_ref().map(ToString::to_string),
+            }),
+            NoiseSource::Table {
+                process_id: _,
+                data,
+                log_interp,
+                name,
+                span,
+            } => {
+                let mut flat = Vec::with_capacity(data.len());
+                for value in data {
+                    match autodiff_fold(self.convert(value)?) {
+                        IrExpr::Const(value) => flat.push(value),
+                        _ => {
+                            return Err(CodeGenError::with_span(
+                                CodeGenErrorKind::UnsupportedFeature(
+                                    "noise_table entries must be compile-time constants".into(),
+                                ),
+                                *span,
+                            )
+                            .into());
+                        }
+                    }
+                }
+                if flat.is_empty() || flat.len() % 2 != 0 {
+                    return Err(CodeGenError::with_span(
+                        CodeGenErrorKind::InvalidExpression(
+                            "noise_table needs a non-empty, even-length {f, p, ...} list".into(),
+                        ),
+                        *span,
+                    )
+                    .into());
+                }
+                let mut points = flat
+                    .chunks_exact(2)
+                    .map(|pair| (pair[0], pair[1]))
+                    .collect::<Vec<_>>();
+                if points.iter().any(|(frequency, power)| {
+                    !frequency.is_finite() || !power.is_finite() || *frequency < 0.0 || *power < 0.0
+                }) {
+                    return Err(CodeGenError::with_span(
+                        CodeGenErrorKind::InvalidExpression(
+                            "noise_table frequencies and powers must be finite and non-negative"
+                                .into(),
+                        ),
+                        *span,
+                    )
+                    .into());
+                }
+                points.sort_by(|left, right| left.0.total_cmp(&right.0));
+                if points.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+                    return Err(CodeGenError::with_span(
+                        CodeGenErrorKind::InvalidExpression(
+                            "noise_table frequency points must be unique".into(),
+                        ),
+                        *span,
+                    )
+                    .into());
+                }
+                Ok(IrExpr::NoiseTable {
+                    site: crate::ir::NoiseSiteId {
+                        ordinal: process_id,
+                        ..crate::ir::NoiseSiteId::from_span(*span)
+                    },
+                    points,
+                    log_interp: *log_interp,
+                    name: name.as_ref().map(ToString::to_string),
+                })
+            }
+        }
     }
 
     /// Convert a branch access to a BranchRef

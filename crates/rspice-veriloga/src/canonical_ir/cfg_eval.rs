@@ -202,6 +202,8 @@ pub struct CfgEvalInputs<S> {
     pub parameters: Vec<S>,
     /// Which parameters the instance set, indexed by `ParamId`.
     pub parameter_given: Vec<bool>,
+    /// External-terminal connection state, indexed by canonical port ordinal.
+    pub port_connected: Vec<bool>,
     /// Accepted event-controlled procedural state, in dense generated slot
     /// order.
     pub event_state: Vec<S>,
@@ -547,6 +549,15 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                     .copied()
                     .unwrap_or(false);
                 S::from_f64(f64::from(u8::from(given)))
+            }
+            CfgValueKind::PortConnected(port) => {
+                let connected = self
+                    .inputs
+                    .port_connected
+                    .get(port as usize)
+                    .copied()
+                    .unwrap_or(false);
+                S::from_f64(f64::from(u8::from(connected)))
             }
             CfgValueKind::EventState(slot) => *self
                 .inputs
