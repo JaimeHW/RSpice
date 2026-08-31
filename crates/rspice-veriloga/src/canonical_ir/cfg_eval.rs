@@ -711,7 +711,8 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             | CfgValueKind::DigitalConcat { .. }
             | CfgValueKind::DigitalSelect { .. }
             | CfgValueKind::DigitalBlockingWrite { .. }
-            | CfgValueKind::DigitalNonblockingWrite { .. } => {
+            | CfgValueKind::DigitalNonblockingWrite { .. }
+            | CfgValueKind::DigitalDriverWrite { .. } => {
                 return Err(CfgEvalError::DigitalConstructInAnalogEvaluation {
                     what: "a four-state or integer value",
                 });

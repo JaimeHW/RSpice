@@ -1770,7 +1770,8 @@ impl Emitter<'_> {
             | CfgValueKind::DigitalConcat { .. }
             | CfgValueKind::DigitalSelect { .. }
             | CfgValueKind::DigitalBlockingWrite { .. }
-            | CfgValueKind::DigitalNonblockingWrite { .. } => {
+            | CfgValueKind::DigitalNonblockingWrite { .. }
+            | CfgValueKind::DigitalDriverWrite { .. } => {
                 return Err(EmitError::DigitalValueInAnalogEmitter(value));
             }
         })

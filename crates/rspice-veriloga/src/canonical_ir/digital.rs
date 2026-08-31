@@ -206,13 +206,30 @@ pub struct DigitalStaticSensitivity {
     pub origin: DigitalSensitivityOrigin,
 }
 
-/// Which procedural process this is.
+/// Which process this is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DigitalProcessKind {
     /// Restarts as soon as it finishes (IEEE 1364-2005 section 9.9.2).
     Always,
     /// Runs once (IEEE 1364-2005 section 9.9.1).
     Initial,
+    /// A continuous assignment: a permanent driver on a net (section 6.1).
+    ///
+    /// A process kind rather than a fourth kind of thing, because what a
+    /// continuous assignment *does* is what an `always @(operands)` does —
+    /// evaluate an expression whenever an operand changes. What it does not do
+    /// is write a variable, and that is the whole difference: its write is a
+    /// [`CfgValueKind::DigitalDriverWrite`] carrying a driver identity, so the
+    /// contribution of this driver stays separable from the contributions of
+    /// every other driver on the same net.
+    ///
+    /// The evaluation is in the *entry* block and the suspension follows it,
+    /// which is the other structural difference from an `always @*`. A driver
+    /// is active from the start of the simulation rather than from the first
+    /// change of an operand, so it evaluates once before it ever waits.
+    ///
+    /// [`CfgValueKind::DigitalDriverWrite`]: super::cfg::CfgValueKind::DigitalDriverWrite
+    ContinuousAssign,
 }
 
 impl DigitalProcessKind {
@@ -220,13 +237,52 @@ impl DigitalProcessKind {
         match self {
             Self::Always => "always",
             Self::Initial => "initial",
+            Self::ContinuousAssign => "assign",
         }
     }
 
     /// Whether the lowered function ends by looping back to its entry.
     pub const fn restarts(self) -> bool {
-        matches!(self, Self::Always)
+        matches!(self, Self::Always | Self::ContinuousAssign)
     }
+}
+
+/// Stable identity of one driver of one net.
+///
+/// The compiler's half of the identity the event kernel completes. A kernel
+/// names a driven point by instance, node, port, and driver index; a compiled
+/// module knows nothing about instances, so it fixes the part it does know —
+/// which net, and which of that net's drivers this is — and elaboration
+/// supplies the rest. Nothing here depends on the kernel's own type: the two
+/// are kept parallel by shape and mapped where they meet, for the same reason
+/// [`DigitalSchedulingRegion`] is.
+///
+/// The index is declaration order among the drivers of that one net, so it is
+/// stable across recompilation of the same source and says nothing about any
+/// other net's drivers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct DigitalDriverId {
+    pub signal: DigitalSignalId,
+    pub index: u32,
+}
+
+/// One continuous driver of a net, as the plan declares it.
+///
+/// Listed on the plan rather than discovered by walking every process, because
+/// a kernel has to know how many drivers a net has *before* it runs any of
+/// them: resolving a multi-driver net means combining one contribution per
+/// driver, and a driver that has not run yet still contributes `z`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DigitalDriver {
+    pub id: DigitalDriverId,
+    /// Which bits of the net this driver drives.
+    ///
+    /// `assign bus[3:0] = ...` drives four of them and leaves the rest to
+    /// whatever else drives the net, so resolution is per bit and not per net.
+    pub target: DigitalWriteTarget,
+    /// The process whose function computes it.
+    pub process: DigitalProcessId,
+    pub span: SourceSpanRef,
 }
 
 /// The discrete-domain half of a module, lowered.
@@ -244,11 +300,24 @@ pub struct CanonicalDigitalPlan {
     pub signals: Vec<DigitalSignal>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub processes: Vec<CfgDigitalProcess>,
+    /// Every continuous driver in the module, in declaration order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub drivers: Vec<DigitalDriver>,
 }
 
 impl CanonicalDigitalPlan {
     pub fn is_empty(&self) -> bool {
-        self.signals.is_empty() && self.processes.is_empty()
+        self.signals.is_empty() && self.processes.is_empty() && self.drivers.is_empty()
+    }
+
+    /// Every driver of one net, in declaration order.
+    ///
+    /// What a resolver iterates: a net with two of these needs both
+    /// contributions combined, and a net with one needs no resolution at all.
+    pub fn drivers_of(&self, signal: DigitalSignalId) -> impl Iterator<Item = &DigitalDriver> {
+        self.drivers
+            .iter()
+            .filter(move |driver| driver.id.signal == signal)
     }
 
     pub fn signal(&self, id: DigitalSignalId) -> Option<&DigitalSignal> {

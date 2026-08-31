@@ -43,7 +43,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-use super::digital::{DigitalSchedulingRegion, DigitalSensitivityTerm, DigitalWriteTarget};
+use super::digital::{
+    DigitalDriverId, DigitalSchedulingRegion, DigitalSensitivityTerm, DigitalWriteTarget,
+};
 use super::digital_value;
 use super::{
     BlockId, BranchId, BranchUnknownId, ContributionId, DigitalLocalId, DigitalSignalId, ExprId,
@@ -450,6 +452,29 @@ pub enum CfgValueKind {
         /// rather than assumed from the kind.
         region: DigitalSchedulingRegion,
     },
+    /// A continuous driver's contribution to a net (IEEE 1364-2005 section
+    /// 6.1).
+    ///
+    /// A third write kind, and not a flag on either of the others, because it
+    /// does not write the net: it publishes *this driver's* value for it. A net
+    /// with two drivers has one value per driver and a resolution function
+    /// between them (section 7.9), and a write node that stored into the net
+    /// would have destroyed the other driver's contribution before the
+    /// resolver ever saw it. The driver identity is what keeps them apart, and
+    /// it is on the node so that no consumer has to recover it by asking which
+    /// process it is standing in.
+    ///
+    /// Resolution itself is not the compiler's: which value wins when two
+    /// drivers disagree is a simulation-kernel rule over the whole net, and
+    /// the kernel owns the table.
+    DigitalDriverWrite {
+        driver: DigitalDriverId,
+        /// Which bits this driver drives. `driver.signal` and `target.signal`
+        /// name the same net — the id says *which driver of it*, the target
+        /// says *which of its bits*.
+        target: DigitalWriteTarget,
+        value: ValueId,
+    },
 }
 
 impl CfgValueKind {
@@ -515,7 +540,8 @@ impl CfgValueKind {
             | Self::DigitalConcat { .. }
             | Self::DigitalSelect { .. }
             | Self::DigitalBlockingWrite { .. }
-            | Self::DigitalNonblockingWrite { .. } => true,
+            | Self::DigitalNonblockingWrite { .. }
+            | Self::DigitalDriverWrite { .. } => true,
         }
     }
 
@@ -587,7 +613,8 @@ impl CfgValueKind {
                 else_value,
             } => vec![*condition, *then_value, *else_value],
             Self::DigitalBlockingWrite { value, .. }
-            | Self::DigitalNonblockingWrite { value, .. } => vec![*value],
+            | Self::DigitalNonblockingWrite { value, .. }
+            | Self::DigitalDriverWrite { value, .. } => vec![*value],
 
             _ => Vec::new(),
         }
@@ -699,7 +726,8 @@ impl CfgValueKind {
                 *else_value = map(*else_value);
             }
             Self::DigitalBlockingWrite { value, .. }
-            | Self::DigitalNonblockingWrite { value, .. } => *value = map(*value),
+            | Self::DigitalNonblockingWrite { value, .. }
+            | Self::DigitalDriverWrite { value, .. } => *value = map(*value),
 
             _ => {}
         }

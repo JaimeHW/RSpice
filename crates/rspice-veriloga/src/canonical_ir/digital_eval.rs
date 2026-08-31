@@ -63,7 +63,7 @@
 
 use super::cfg::{CfgFunction, CfgTerminator, CfgValueKind, DigitalWait, is_leaf_kind};
 use super::digital::{
-    CanonicalDigitalPlan, CfgDigitalProcess, DigitalEdge, DigitalSchedulingRegion,
+    CanonicalDigitalPlan, CfgDigitalProcess, DigitalDriverId, DigitalEdge, DigitalSchedulingRegion,
     DigitalSensitivityTerm, DigitalSignal, DigitalWriteSelect, DigitalWriteTarget,
 };
 use super::digital_value::{self, FourStateValue, truth};
@@ -118,6 +118,35 @@ pub trait DigitalEnvironment {
     /// a swap. The target and region ride along so the kernel can apply it with
     /// [`apply_deferred`] when the region it names drains.
     fn defer_update(&mut self, update: DigitalDeferredUpdate);
+
+    /// Accept one driver's contribution to a net.
+    ///
+    /// Deliberately *not* [`write_signal`](Self::write_signal), and deliberately
+    /// without a default implementation that forwards to it. A net with two
+    /// drivers has one value per driver and a resolution between them (IEEE
+    /// 1364-2005 section 7.9); an implementation that stored a drive into the
+    /// net would resolve it by last-write-wins, which is the exact bug the
+    /// driver identity exists to prevent, and it would do so silently. An
+    /// implementation that has no resolver yet should store the contribution
+    /// per driver and resolve a single-driver net as that driver's value —
+    /// which is correct, and stays correct when the resolver arrives.
+    ///
+    /// The value is already resized to the target's width per section 5.2.1.
+    fn drive_signal(&mut self, drive: DigitalDrive);
+}
+
+/// One driver's contribution to a net, evaluated.
+///
+/// The counterpart of [`DigitalDeferredUpdate`] for a continuous driver. It
+/// carries both identities because they answer different questions: the driver
+/// id says *whose* contribution this is, and the target says *which bits of the
+/// net* it covers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DigitalDrive {
+    pub driver: DigitalDriverId,
+    pub target: DigitalWriteTarget,
+    /// Already resized to the target's width, per IEEE 1364-2005 section 5.2.1.
+    pub value: FourStateValue,
 }
 
 /// A nonblocking write, evaluated but not yet applied.
@@ -945,6 +974,26 @@ impl<'a, E: DigitalEnvironment + ?Sized> Interpreter<'a, E> {
                 let (target, value) = (target.clone(), *value);
                 let value = self.four_state(value)?;
                 apply_write(self.plan, self.environment, &target, &value)?;
+                Ok(DigitalScalar::Effect)
+            }
+            CfgValueKind::DigitalDriverWrite {
+                driver,
+                target,
+                value,
+            } => {
+                let (driver, target, value) = (*driver, target.clone(), *value);
+                let value = self.four_state(value)?;
+                // Resized here for the same reason a nonblocking update is:
+                // section 5.2.1's width belongs to the assignment, and the
+                // assignment is here. What the kernel later does with the
+                // contribution cannot recover a width it was not given.
+                let signal = self.signal(target.signal)?;
+                let width = target_width(signal, &target.select);
+                self.environment.drive_signal(DigitalDrive {
+                    driver,
+                    target,
+                    value: value.resized(width),
+                });
                 Ok(DigitalScalar::Effect)
             }
             CfgValueKind::DigitalNonblockingWrite {
