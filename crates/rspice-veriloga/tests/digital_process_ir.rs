@@ -578,6 +578,434 @@ fn expression_result_widths_follow_the_standard() {
     );
 }
 
+// ===========================================================================
+// Table 5-22, operator by operator
+// ===========================================================================
+//
+// Section 5.4.1's table splits every operator into two columns: what its
+// result is as wide as, and which of its operands the surrounding context
+// reaches. The tests below take one row at a time, because the two halves fail
+// independently — an operator can take the context and not pass it on, or pass
+// it on and report the wrong result width — and a single fixture exercising
+// the whole table would not say which.
+//
+// The fixtures put a *wider target* than any operand on the left of every
+// assignment, because that is the only arrangement in which the two readings
+// of the rule differ. With the target no wider than the operands, computing at
+// the operand width and computing at the context width are the same thing.
+
+/// Every node width in a process that matches `wanted`, in definition order.
+fn widths_where(
+    process: &CfgDigitalProcess,
+    wanted: impl Fn(&CfgValueKind) -> bool,
+) -> Vec<Option<u32>> {
+    process
+        .function
+        .values
+        .iter()
+        .filter(|value| wanted(&value.kind))
+        .map(|value| value.value_type.width())
+        .collect()
+}
+
+fn width_of(
+    process: &CfgDigitalProcess,
+    value: rspice_veriloga::canonical_ir::ids::ValueId,
+) -> u32 {
+    process
+        .function
+        .value(value)
+        .value_type
+        .width()
+        .expect("a four-state value has a width")
+}
+
+/// Both operands of `+ - * / %` and of `& | ^` are context-determined, and the
+/// result takes the context size. Nine operators, one fixture each, all with
+/// four-bit operands under an eight-bit target.
+///
+/// This is the row that was wrong: the result width was the operands' maximum,
+/// so the operation ran narrow and the bits the target had room for were never
+/// computed rather than merely discarded.
+#[test]
+fn arithmetic_and_bitwise_operators_take_the_context_width() {
+    for spelling in ["+", "-", "*", "/", "%", "&", "|", "^", "~^"] {
+        let process = only_process(&format!(
+            "    reg [3:0] a, b;\n\
+             \x20   reg [7:0] p;\n\
+             \x20   initial p = a {spelling} b;",
+        ));
+        let widths = widths_where(&process, |kind| {
+            matches!(
+                kind,
+                CfgValueKind::DigitalArithmetic { .. } | CfgValueKind::DigitalBitwise { .. }
+            )
+        });
+        assert_eq!(widths, vec![Some(8)], "`{spelling}` at the context width");
+
+        // And both operands reached that width before the operator ran, which
+        // is what section 5.4.1 actually requires — a node labelled eight bits
+        // whose operands are four is still a four-bit operation.
+        let operands = process
+            .function
+            .values
+            .iter()
+            .find_map(|value| match value.kind {
+                CfgValueKind::DigitalArithmetic { left, right, .. }
+                | CfgValueKind::DigitalBitwise { left, right, .. } => Some((left, right)),
+                _ => None,
+            })
+            .expect("the operator is in the graph");
+        assert_eq!(width_of(&process, operands.0), 8, "`{spelling}` left");
+        assert_eq!(width_of(&process, operands.1), 8, "`{spelling}` right");
+    }
+}
+
+/// Unary `~`, `+` and `-` are context-determined with a result of L(i); `!` is
+/// self-determined and one bit. The four are spelled the same way and split
+/// down the middle, which is why they are checked together.
+#[test]
+fn unary_operators_split_between_the_two_columns() {
+    for spelling in ["~", "-"] {
+        let process = only_process(&format!(
+            "    reg [3:0] a;\n\
+             \x20   reg [7:0] p;\n\
+             \x20   initial p = {spelling}a;",
+        ));
+        let widths = widths_where(&process, |kind| {
+            matches!(
+                kind,
+                CfgValueKind::DigitalBitwiseNot { .. } | CfgValueKind::DigitalArithmetic { .. }
+            )
+        });
+        assert_eq!(widths, vec![Some(8)], "unary `{spelling}`");
+    }
+
+    // Unary `+` is the identity, so it leaves no node of its own; what it must
+    // not do is stop the context, and the addition under it proves it did not.
+    let process = only_process(
+        "    reg [3:0] a, b;\n\
+         \x20   reg [7:0] p;\n\
+         \x20   initial p = +(a + b);",
+    );
+    assert_eq!(
+        widths_where(&process, |kind| matches!(
+            kind,
+            CfgValueKind::DigitalArithmetic { .. }
+        )),
+        vec![Some(8)],
+        "unary `+` passes the context through"
+    );
+
+    let process = only_process(
+        "    reg [3:0] a;\n\
+         \x20   reg [7:0] p;\n\
+         \x20   initial p = !a;",
+    );
+    assert_eq!(
+        widths_where(&process, |kind| matches!(
+            kind,
+            CfgValueKind::DigitalLogicalNot { .. }
+        )),
+        vec![Some(1)],
+        "section 4.1.8: `!` is one bit whatever it is assigned to"
+    );
+}
+
+/// Section 4.1.6, 4.1.7 and 4.1.8: a comparison and a logical operator are one
+/// bit, and the context does not reach their operands. A sixteen-bit target
+/// changes neither the result width nor the operand widths.
+#[test]
+fn comparisons_and_logical_operators_are_one_bit_and_stop_the_context() {
+    for spelling in ["==", "!=", "<", "<=", ">", ">=", "&&", "||", "===", "!=="] {
+        let process = only_process(&format!(
+            "    reg [3:0] a, b;\n\
+             \x20   reg [15:0] p;\n\
+             \x20   initial p = a {spelling} b;",
+        ));
+        let widths = widths_where(&process, |kind| {
+            matches!(
+                kind,
+                CfgValueKind::DigitalEquality { .. }
+                    | CfgValueKind::DigitalRelational { .. }
+                    | CfgValueKind::DigitalLogical { .. }
+                    | CfgValueKind::DigitalCaseMatch { .. }
+            )
+        });
+        assert_eq!(widths, vec![Some(1)], "`{spelling}` is one bit");
+
+        // No operand was widened to sixteen: the only four-state nodes in the
+        // graph besides the comparison are the two operand reads.
+        let reads = widths_where(&process, |kind| {
+            matches!(kind, CfgValueKind::DigitalSignalRead { .. })
+        });
+        assert_eq!(reads, vec![Some(4), Some(4)], "`{spelling}` operands");
+        assert!(
+            widths_where(&process, |kind| matches!(
+                kind,
+                CfgValueKind::DigitalConcat { .. }
+            ))
+            .is_empty(),
+            "`{spelling}` widened an operand it should not have"
+        );
+    }
+}
+
+/// Table 5-22 gives a shift the size of its *left* operand and makes only that
+/// operand context-determined. So the shifted value reaches the context width
+/// and the count does not.
+#[test]
+fn a_shift_widens_its_value_and_leaves_its_count_alone() {
+    let process = only_process(
+        "    reg [3:0] a, n;\n\
+         \x20   reg [7:0] p;\n\
+         \x20   initial p = a << n;",
+    );
+    let shift = process
+        .function
+        .values
+        .iter()
+        .find(|value| matches!(value.kind, CfgValueKind::DigitalShift { .. }))
+        .expect("a shift node");
+    let CfgValueKind::DigitalShift { value, count, .. } = shift.kind else {
+        unreachable!("just matched")
+    };
+    assert_eq!(shift.value_type.width(), Some(8), "the result");
+    assert_eq!(width_of(&process, value), 8, "the value being shifted");
+    assert_eq!(
+        width_of(&process, count),
+        4,
+        "the count is self-determined and stays as declared"
+    );
+}
+
+/// Section 5.4.1 makes every operand of a concatenation self-determined, so an
+/// operator inside one is sized by its own operands and by nothing outside.
+///
+/// The concatenation's own size is the sum, and it is that sum whatever the
+/// target is — the target's width reaches the concatenation only through
+/// section 5.2.1's resize at the write, which is a different step.
+#[test]
+fn concatenation_operands_are_self_determined() {
+    let process = only_process(
+        "    reg [3:0] a, b, c;\n\
+         \x20   reg [15:0] p;\n\
+         \x20   initial p = {a, b + c};",
+    );
+    assert_eq!(
+        widths_where(&process, |kind| matches!(
+            kind,
+            CfgValueKind::DigitalArithmetic { .. }
+        )),
+        vec![Some(4)],
+        "`b + c` is as wide as `b` and `c`"
+    );
+    assert_eq!(
+        widths_where(&process, |kind| matches!(
+            kind,
+            CfgValueKind::DigitalConcat { .. }
+        )),
+        vec![Some(8)],
+        "the concatenation is the sum of its parts"
+    );
+}
+
+/// A replication's count is self-determined and constant (section 4.1.14), and
+/// what it repeats is a concatenation operand like any other.
+#[test]
+fn a_replication_repeats_a_self_determined_operand() {
+    let process = only_process(
+        "    reg [3:0] a, b;\n\
+         \x20   reg [15:0] p;\n\
+         \x20   initial p = {2{a + b}};",
+    );
+    assert_eq!(
+        widths_where(&process, |kind| matches!(
+            kind,
+            CfgValueKind::DigitalArithmetic { .. }
+        )),
+        vec![Some(4), Some(4)],
+        "each copy is sized by its own operands"
+    );
+    assert_eq!(
+        widths_where(&process, |kind| matches!(
+            kind,
+            CfgValueKind::DigitalConcat { .. }
+        )),
+        vec![Some(8)],
+        "two four-bit copies"
+    );
+}
+
+/// Section 4.1.10: a reduction is one bit and its operand is self-determined,
+/// so the fold runs across the operand's own bits and the context reaches
+/// neither the operand nor the result.
+#[test]
+fn a_reduction_folds_its_own_operand_width() {
+    let process = only_process(
+        "    reg [3:0] a;\n\
+         \x20   reg [15:0] p;\n\
+         \x20   initial p = ^a;",
+    );
+    // Four bit selects and three one-bit XOR steps: the fold, at the operand's
+    // width rather than the target's.
+    assert_eq!(
+        widths_where(&process, |kind| matches!(
+            kind,
+            CfgValueKind::DigitalPartSelect { .. }
+        )),
+        vec![Some(1); 4],
+    );
+    assert_eq!(
+        widths_where(&process, |kind| matches!(
+            kind,
+            CfgValueKind::DigitalBitwise { .. }
+        )),
+        vec![Some(1); 3],
+    );
+}
+
+/// Both arms of `?:` are context-determined and the condition is not, so the
+/// select is as wide as the target and the condition stays one bit.
+#[test]
+fn a_conditional_sizes_its_arms_and_not_its_condition() {
+    let process = only_process(
+        "    reg [3:0] a, b;\n\
+         \x20   reg [7:0] p;\n\
+         \x20   reg s;\n\
+         \x20   initial p = s ? a + b : a & b;",
+    );
+    let select = process
+        .function
+        .values
+        .iter()
+        .find(|value| matches!(value.kind, CfgValueKind::DigitalSelect { .. }))
+        .expect("a select node");
+    let CfgValueKind::DigitalSelect {
+        condition,
+        then_value,
+        else_value,
+    } = select.kind
+    else {
+        unreachable!("just matched")
+    };
+    assert_eq!(select.value_type.width(), Some(8));
+    assert_eq!(width_of(&process, then_value), 8);
+    assert_eq!(width_of(&process, else_value), 8);
+    assert_eq!(width_of(&process, condition), 1, "the condition is a truth");
+}
+
+/// Section 5.4.1's unsized-literal rule, both halves.
+///
+/// The floor is thirty-two, and the context takes over above it. Neither half
+/// alone is the rule: freezing at thirty-two loses the second, and taking the
+/// context unconditionally loses the first — and with it the width of every
+/// concatenation holding an unsized literal.
+#[test]
+fn an_unsized_literal_is_thirty_two_bits_or_the_context() {
+    let wide = only_process(
+        "    reg [39:0] q, p;\n\
+         \x20   initial p = q | 1;",
+    );
+    assert_eq!(
+        widths_where(&wide, |kind| matches!(
+            kind,
+            CfgValueKind::FourStateConstant(_)
+        )),
+        vec![Some(40)],
+        "a forty-bit context makes the literal forty bits"
+    );
+
+    let inside = only_process(
+        "    reg [3:0] a;\n\
+         \x20   reg [35:0] p;\n\
+         \x20   initial p = {a, 1};",
+    );
+    assert_eq!(
+        widths_where(&inside, |kind| matches!(
+            kind,
+            CfgValueKind::FourStateConstant(_)
+        )),
+        vec![Some(32)],
+        "a concatenation operand is self-determined, so the floor applies"
+    );
+
+    // A *sized* literal is not an unsized one and never grows: section 3.5.1
+    // makes it exactly as wide as its author wrote it, and section 5.4.1
+    // extends it as an ordinary operand — which is a separate node, so the
+    // constant itself is still four bits.
+    let sized = only_process(
+        "    reg [7:0] p;\n\
+         \x20   reg [3:0] a;\n\
+         \x20   initial p = a | 4'hF;",
+    );
+    let constants = widths_where(&sized, |kind| {
+        matches!(kind, CfgValueKind::FourStateConstant(_))
+    });
+    assert!(
+        constants.contains(&Some(4)),
+        "the sized literal keeps its four bits: {constants:?}"
+    );
+}
+
+/// A narrower target does not shrink an expression. Section 5.4.1 sizes it to
+/// the *largest* of the operands and the target, and section 5.2.1 then
+/// truncates at the write — two steps, and collapsing them would compute a
+/// four-bit addition at two bits.
+#[test]
+fn a_narrow_target_does_not_narrow_the_operation() {
+    let process = only_process(
+        "    reg [3:0] a, b;\n\
+         \x20   reg [1:0] p;\n\
+         \x20   initial p = a + b;",
+    );
+    assert_eq!(
+        widths_where(&process, |kind| matches!(
+            kind,
+            CfgValueKind::DigitalArithmetic { .. }
+        )),
+        vec![Some(4)],
+    );
+}
+
+/// The context of an assignment to a concatenation target is the whole target,
+/// which is what makes `{cout, sum} = a + b` the carry-out idiom rather than a
+/// two-bit addition with a `cout` that is always zero.
+#[test]
+fn a_concatenation_target_seeds_the_context_with_its_total_width() {
+    let process = only_process(
+        "    reg [1:0] a, b, sum;\n\
+         \x20   reg cout;\n\
+         \x20   initial {cout, sum} = a + b;",
+    );
+    assert_eq!(
+        widths_where(&process, |kind| matches!(
+            kind,
+            CfgValueKind::DigitalArithmetic { .. }
+        )),
+        vec![Some(3)],
+        "two bits of `sum` and one of `cout`"
+    );
+}
+
+/// A bit-select target is one bit of context, and one bit is still a context:
+/// the expression is sized to the larger of it and the operands, so a four-bit
+/// addition stays four bits and its low bit is what lands.
+#[test]
+fn a_bit_select_target_is_a_one_bit_context() {
+    let process = only_process(
+        "    reg [3:0] a, b, q;\n\
+         \x20   initial q[0] = a + b;",
+    );
+    assert_eq!(
+        widths_where(&process, |kind| matches!(
+            kind,
+            CfgValueKind::DigitalArithmetic { .. }
+        )),
+        vec![Some(4)],
+    );
+}
+
 /// A part select keeps the bounds as written, so it agrees with the direction
 /// its signal was declared in.
 #[test]
