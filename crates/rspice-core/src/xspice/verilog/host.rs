@@ -63,13 +63,13 @@ use rspice_veriloga::canonical_ir::digital::{
 };
 use rspice_veriloga::canonical_ir::digital_eval::{
     DigitalEvalError, DigitalProcessOutcome, DigitalResumeState, DigitalWaitRequest,
-    any_term_is_satisfied, apply_deferred as apply_deferred_update, resume as resume_process,
-    start as start_process,
+    any_real_term_is_satisfied, any_term_is_satisfied, apply_deferred as apply_deferred_update,
+    resume as resume_process, start as start_process,
 };
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
 use rspice_veriloga::canonical_ir::ids::DigitalSignalId;
 
-use super::store::{DigitalSignalStore, StoreError, signal_name};
+use super::store::{DigitalSignalStore, StoreError, TransitionValues, signal_name};
 use crate::xspice::EventValue;
 use crate::xspice::digital::DigitalValue;
 use crate::xspice::event_scheduler::{
@@ -137,6 +137,26 @@ pub enum DigitalRunError {
         declared: u32,
         /// Width the stimulus offered.
         offered: u32,
+    },
+    /// A stimulus offered a value in the wrong domain for the port.
+    ///
+    /// Verilog-AMS LRM 2.4 section 3.7 makes a `wreal` carry a real and a
+    /// `wire` carry bits, and converts between them only through the explicit
+    /// `$realtobits`/`$bitstoreal`. A harness that offers the wrong one is
+    /// refused rather than converted for, so a stimulus that has drifted away
+    /// from the design says so instead of running.
+    StimulusValueDomain {
+        /// The port.
+        name: String,
+        /// Whether the *design* declares the port real.
+        port_is_real: bool,
+    },
+    /// A vector column that is not a real number, for a real-valued port.
+    RealSpelling {
+        /// The port the column drives.
+        port: String,
+        /// What the column said.
+        spelling: String,
     },
     /// A vector column that is not a four-state spelling.
     VectorSpelling {
@@ -218,6 +238,24 @@ impl fmt::Display for DigitalRunError {
                 "`{name}` is declared {declared} bit(s) wide but the stimulus offered \
                  {offered} bit(s)"
             ),
+            Self::StimulusValueDomain { name, port_is_real } => {
+                if *port_is_real {
+                    write!(
+                        f,
+                        "`{name}` is a real-valued (`wreal`) port and the stimulus offered a \
+                         four-state value; Verilog-AMS LRM 2.4 section 3.7 makes it carry a real"
+                    )
+                } else {
+                    write!(
+                        f,
+                        "`{name}` is a four-state port and the stimulus offered a real value"
+                    )
+                }
+            }
+            Self::RealSpelling { port, spelling } => write!(
+                f,
+                "the column driving `{port}` reads `{spelling}`, which is not a real number"
+            ),
             Self::VectorSpelling { port, spelling } => write!(
                 f,
                 "the column driving `{port}` reads `{spelling}`, which is not a four-state \
@@ -281,6 +319,14 @@ impl From<StoreError> for DigitalRunError {
                 name,
                 declared,
                 offered,
+            },
+            StoreError::RealPortDrivenWithBits { name, .. } => Self::StimulusValueDomain {
+                name,
+                port_is_real: true,
+            },
+            StoreError::FourStatePortDrivenWithAReal { name, .. } => Self::StimulusValueDomain {
+                name,
+                port_is_real: false,
             },
         }
     }
@@ -380,6 +426,20 @@ impl<'plan> DigitalHost<'plan> {
         self.store.value(signal)
     }
 
+    /// The value a real net holds right now.
+    pub(crate) fn read_real(&self, signal: DigitalSignalId) -> Option<f64> {
+        self.store.real_value(signal)
+    }
+
+    /// Whether the compiled design declares this signal real.
+    ///
+    /// The *design* is the authority on a port's value domain, not the
+    /// stimulus: the net-type keyword its author wrote is what decides, and a
+    /// harness that disagrees is refused rather than believed.
+    pub(crate) fn is_real(&self, signal: DigitalSignalId) -> bool {
+        self.store.is_real(signal)
+    }
+
     /// Queue every process's first activation at tick zero and settle it.
     ///
     /// IEEE 1364-2005 section 9.9 starts every `always` and `initial` process
@@ -403,6 +463,18 @@ impl<'plan> DigitalHost<'plan> {
         tick: u64,
     ) -> Result<(), DigitalRunError> {
         self.store.force(signal, value, self.plan)?;
+        self.dispatch(tick)?;
+        self.settle(tick)
+    }
+
+    /// Write a real net from outside the design and settle the consequences.
+    pub(crate) fn force_real(
+        &mut self,
+        signal: DigitalSignalId,
+        value: f64,
+        tick: u64,
+    ) -> Result<(), DigitalRunError> {
+        self.store.force_real(signal, value, self.plan)?;
         self.dispatch(tick)?;
         self.settle(tick)
     }
@@ -575,13 +647,22 @@ impl<'plan> DigitalHost<'plan> {
                 let mut position = 0usize;
                 while position < self.waiters[net].len() {
                     let index = self.waiters[net][position];
-                    let satisfied = match &self.slots[index].status {
-                        ProcessStatus::AwaitingEvent(terms) => any_term_is_satisfied(
-                            terms,
-                            transition.signal,
-                            &transition.previous,
-                            &transition.next,
-                        ),
+                    let satisfied = match (&self.slots[index].status, &transition.values) {
+                        (
+                            ProcessStatus::AwaitingEvent(terms),
+                            TransitionValues::FourState { previous, next },
+                        ) => any_term_is_satisfied(terms, transition.signal, previous, next),
+                        // Verilog-AMS LRM 2.4 section 3.7's event on a real net
+                        // is a change of value, and the front end has already
+                        // refused `posedge` on one. The rule is asked of the
+                        // canonical IR rather than restated here, for the same
+                        // reason the four-state arm asks it there.
+                        (
+                            ProcessStatus::AwaitingEvent(terms),
+                            TransitionValues::Real { previous, next },
+                        ) => {
+                            any_real_term_is_satisfied(terms, transition.signal, *previous, *next)
+                        }
                         _ => false,
                     };
                     if satisfied {
