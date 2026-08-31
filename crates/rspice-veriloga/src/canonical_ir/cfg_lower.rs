@@ -1751,6 +1751,20 @@ impl<'a> CfgLowerer<'a> {
                     self.real_constant(0.0)
                 }
             },
+            // Constant, and only sound for the backend that reads this level
+            // today.
+            //
+            // A generated device is instantiated with exactly the terminals its
+            // descriptor declares — `veriloga_builtins::instantiate` refuses any
+            // other count — so no port it can be asked about is unconnected. The
+            // executable backends have no such guarantee: `VerilogADevice` marks
+            // terminal `i` connected only while `i < supplied_terminals`, and the
+            // JIT reads that flag with `NativeOp::LoadPortConnected`. So a
+            // consumer of this level that also has to serve partially connected
+            // instances needs a real value here, not this constant. That is a
+            // kind and an evaluator input, not a one-line change: the constant is
+            // what lets the optimizer fold every `$port_connected` guard in the
+            // shipped compact models away, and an opaque leaf would keep them.
             ("$port_connected", 1) => self.real_constant(1.0),
             _ => {
                 self.unsupported(span, format!("system function '{name}'"));

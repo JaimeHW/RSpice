@@ -7662,6 +7662,16 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.append_arithmetic("Mul")
     }
 
+    /// `$simparam`, answered at compile time.
+    ///
+    /// The generated-Rust backend answers it at run time instead — the CFG
+    /// carries a `SimParam` value and the emitter turns it into a
+    /// `simparam("gmin", fallback)` call — so the two backends disagree about
+    /// exactly the parameter that moves: a model reading `$simparam("gmin")`
+    /// follows gmin stepping when it is generated and does not when it is
+    /// compiled here. Closing that needs a `NativeOp` and a place for the
+    /// values in `EvalContext`, which is an ABI change across all three
+    /// emitters rather than a change to this function.
     fn lower_simparam_intrinsic(&mut self, name: &str, args: &[ExprId]) -> JitResult<()> {
         self.require_intrinsic_arity_range(name, args, 1, 2)?;
         let simparam_name = self.string_literal_argument(name, args[0])?;
@@ -7709,6 +7719,12 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.push(NativeOp::LoadPortConnected(index))
     }
 
+    /// `analysis(...)`, against a closed set of names.
+    ///
+    /// A name outside the set becomes a constant false here, where the
+    /// generated backend keeps the query and asks the runtime. Both are
+    /// defensible for a name no analysis will ever match; they stop agreeing
+    /// the moment the runtime learns a name this table has not.
     fn lower_analysis_intrinsic(&mut self, name: &str, args: &[ExprId]) -> JitResult<()> {
         if args.is_empty() {
             return Err(self.unsupported(format!(
