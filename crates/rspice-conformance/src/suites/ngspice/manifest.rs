@@ -105,6 +105,77 @@ mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    /// The decks whose transient comparison replays the reference's recorded
+    /// accepted-step sequence exactly.
+    ///
+    /// Pinned in both directions on purpose. `locked_grid` is the ngspice
+    /// suite's counterpart to the Xyce suite's index-aligned comparison: it
+    /// judges physics parity on an equal grid, which is only meaningful while
+    /// the grid really is the reference's. Downgrading one of these rows to a
+    /// free-run contract, or dropping it, replaces a bit-exact replay contract
+    /// with a much weaker one and would otherwise be a one-line edit to a data
+    /// file that no test reads back.
+    const LOCKED_GRID_DECKS: &[&str] = &["general/mosamp.cir", "transmission/ltra1_1_line.cir"];
+
+    fn workspace_ngspice_corpus() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .join("tests")
+            .join("ngspice")
+    }
+
+    #[test]
+    fn locked_grid_replay_contracts_are_pinned() {
+        assert_eq!(
+            ValidationContract::parse("locked_grid"),
+            Some(ValidationContract::LockedGrid),
+            "the manifest token that selects reference-grid replay must keep parsing"
+        );
+
+        let corpus = workspace_ngspice_corpus();
+        let manifest_path = corpus.join("validation-manifest.tsv");
+        let content = fs::read_to_string(&manifest_path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", manifest_path.display()));
+
+        let mut locked = Vec::new();
+        for raw_line in content.lines() {
+            let line = raw_line.trim_end_matches('\r');
+            if line.trim().is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let Some((relative_path, rest)) = line.split_once('\t') else {
+                continue;
+            };
+            let mode = rest.split('\t').next().unwrap_or_default().trim();
+            if ValidationContract::parse(mode) == Some(ValidationContract::LockedGrid) {
+                locked.push(relative_path.trim().to_string());
+            }
+        }
+        locked.sort();
+
+        assert_eq!(
+            locked,
+            LOCKED_GRID_DECKS,
+            "the locked-grid replay contracts in {} changed. These decks are gated \
+             on replaying the reference's accepted-step sequence exactly; moving one \
+             to a free-run contract silently swaps a bit-exact grid contract for a \
+             pointwise-tolerance one. If the change is deliberate, update \
+             LOCKED_GRID_DECKS with the reasoning in the commit message.",
+            manifest_path.display()
+        );
+
+        for deck in LOCKED_GRID_DECKS {
+            let path = corpus.join(deck);
+            assert!(
+                path.is_file(),
+                "locked-grid deck {} is manifested but missing from the corpus",
+                path.display()
+            );
+        }
+    }
+
     #[test]
     fn validation_manifest_is_resolved_from_ancestor_directory() {
         let unique = SystemTime::now()
