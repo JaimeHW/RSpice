@@ -48,7 +48,19 @@ use super::*;
 // drivers their operator spellings do. Source that version 26 refused now
 // compiles, and a structural design's artifact is a different artifact, so the
 // record's identity has to change.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 27;
+// Version 28 closes the last of the digital-Verilog language gaps the oracle
+// corpus named. The bitwise XNOR of IEEE 1364-2005 section 4.1.9 in both its
+// spellings, the case equality of section 4.1.8, and the reduction operators of
+// section 4.1.10 all lex, parse and lower; a generate region of section 12.4 is
+// unrolled at elaboration time; a port may be connected to a bit- or
+// part-select of a net (section 12.3.9); a child module's own parameters are
+// fixed at their declared defaults (section 12.2) instead of being refused; and
+// a sized literal keeps the width its author wrote (section 3.5.1) rather than
+// widening to thirty-two. Source that version 27 refused now compiles, and
+// source it compiled can produce a different artifact — a concatenation holding
+// a sized literal is a different width and therefore a different value — so the
+// record's identity has to change.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 28;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
