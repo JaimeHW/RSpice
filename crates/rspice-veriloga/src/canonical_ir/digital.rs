@@ -53,6 +53,54 @@
 //! 4. **A blocking write takes effect immediately**, before the next
 //!    instruction in the same block.
 //!
+//! # The plan is flat, and hierarchy is gone from it
+//!
+//! A Verilog design is a tree of module instances; this is not. A
+//! [`CanonicalDigitalPlan`] is one signal table, one process list, and one
+//! driver list for the whole compiled design, with every instantiated module
+//! already elaborated into it by
+//! [`digital_elaborate`](crate::semantic::digital_elaborate). Nothing here or
+//! downstream — not the interpreter, not the event kernel that follows it —
+//! ever asks which instance something came from.
+//!
+//! What survives the flattening is identity, in three places:
+//!
+//! * a [`DigitalSignal`] of an instance is named by its instance path
+//!   (`u1.g2.n1`, the IEEE 1364-2005 section 12.4 hierarchical name minus the
+//!   top module), which no author-written identifier can collide with because
+//!   an identifier cannot contain a `.`;
+//! * each instance's processes get their own [`DigitalProcessId`]s, so two
+//!   instances of one module are two things a scheduler resumes rather than
+//!   one resumed twice;
+//! * each instance's drivers get their own [`DigitalDriverId`]s on whatever
+//!   net they end up driving.
+//!
+//! ## What a port connection became
+//!
+//! IEEE 1364-2005 section 12.3.9 reads a port connection two ways, and the
+//! elaboration chooses between them **by the port's declared class**:
+//!
+//! * **A port declared as a net collapsed.** The port and the net it was
+//!   connected to are *one* entry in [`CanonicalDigitalPlan::signals`].
+//!   Section 12.3.9.3 makes an inout connection precisely this join, and
+//!   section 12.3.10 — which asks what net type results from connecting
+//!   dissimilar nets — is a question that only exists because the two nets
+//!   become one. For an input or an output the join and the assignment
+//!   readings agree whenever both sides are plain nets with no delay, and the
+//!   cases where they would not agree are refused by the elaboration rather
+//!   than decided here.
+//! * **A variable output port did not.** Section 12.3.9.2 permits `output q;
+//!   reg q;`, and a variable cannot be joined with a net: it keeps its own
+//!   signal and the connection appears in [`CanonicalDigitalPlan::drivers`] as
+//!   an ordinary continuous driver of the connected net.
+//!
+//! Collapsing does not merge drivers. Two instances driving one net through
+//! collapsed output ports are two entries in
+//! [`CanonicalDigitalPlan::drivers`] with indices 0 and 1 on that net, which
+//! is what [`DigitalDriverId`] exists to keep apart — a resolver sees both
+//! contributions, exactly as it would for two `assign` statements written side
+//! by side.
+//!
 //! [`CfgValueKind::DigitalSignalRead`]: super::cfg::CfgValueKind::DigitalSignalRead
 
 use super::cfg::CfgFunction;
@@ -250,16 +298,19 @@ impl DigitalProcessKind {
 /// Stable identity of one driver of one net.
 ///
 /// The compiler's half of the identity the event kernel completes. A kernel
-/// names a driven point by instance, node, port, and driver index; a compiled
-/// module knows nothing about instances, so it fixes the part it does know —
-/// which net, and which of that net's drivers this is — and elaboration
-/// supplies the rest. Nothing here depends on the kernel's own type: the two
-/// are kept parallel by shape and mapped where they meet, for the same reason
-/// [`DigitalSchedulingRegion`] is.
+/// names a driven point by instance, node, port, and driver index; a plan names
+/// a *device*'s driven point, so it fixes the part that is the device's — which
+/// net, and which of that net's drivers this is — and the kernel supplies the
+/// instance the device itself was instantiated as. Nothing here depends on the
+/// kernel's own type: the two are kept parallel by shape and mapped where they
+/// meet, for the same reason [`DigitalSchedulingRegion`] is.
 ///
-/// The index is declaration order among the drivers of that one net, so it is
-/// stable across recompilation of the same source and says nothing about any
-/// other net's drivers.
+/// The index is declaration order among the drivers of that one net, and says
+/// nothing about any other net's drivers. Elaborating a hierarchy does not
+/// weaken that: the order is the elaboration order — the compiled module's own
+/// assignments, then each instance in depth-first declaration order with its
+/// assignments and then its implicit port drivers — which is a function of the
+/// source, so a driver keeps its index across recompilation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct DigitalDriverId {
     pub signal: DigitalSignalId,

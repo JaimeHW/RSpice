@@ -55,9 +55,24 @@
 //! - `**`, a non-constant delay, and a non-constant select bound.
 //!
 //! Refused before this pass, and still refused: tasks and functions,
-//! `generate`, primitives, hierarchical instances, `===` and `!==`,
-//! `fork`/`join`, `wait`, `disable`, and `force`/`release` — the parser stops
-//! each on its own keyword, so none of them reaches a lowering decision.
+//! `generate`, primitives, `===` and `!==`, `fork`/`join`, `wait`, `disable`,
+//! and `force`/`release` — the parser stops each on its own keyword, so none of
+//! them reaches a lowering decision.
+//!
+//! # Hierarchy
+//!
+//! A hierarchical instance is no longer among them. It is resolved before this
+//! pass by [`digital_elaborate`](crate::semantic::digital_elaborate), which
+//! turns the instance tree into a flat list of frames, and this pass turns the
+//! frames into one plan: one signal table, one process list, one driver list.
+//! Nothing downstream sees a hierarchy — the interpreter is unchanged, and the
+//! event kernel that follows it will be too.
+//!
+//! What survives flattening is identity. Each frame is lowered against its own
+//! scope with its own freshly allocated process ids, so two instances of one
+//! module are two sets of processes a scheduler can resume individually, and
+//! two sets of drivers a resolver can tell apart, rather than one body lowered
+//! twice.
 
 use super::cfg::{CfgTerminator, CfgValueKind, CfgValueType, CfgVariable, DigitalWait, SsaBuilder};
 use super::diagnostic::{CompilerPhase, IrDiagnostic, SourceSpanRef};
@@ -92,37 +107,146 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
     }
 
     let mut diagnostics = Vec::new();
-    let signals = lower_signals(&digital.signals);
-    let index: HashMap<&str, DigitalSignalId> = signals
+
+    // ------------------------------------------------------------------
+    // The elaborated signal table.
+    //
+    // Built whole before anything is lowered, because a process function
+    // carries signal ids and a scope that hands out ids has to know all of
+    // them. The compiled module's own signals keep their names and their
+    // positions, so a design with no hierarchy produces exactly the table it
+    // always did. Each instance frame then contributes the signals it declares
+    // under the elaborated name the front end gave them — except a net port
+    // that collapsed onto the net it connects to, which the front end named
+    // after *that* net and which is therefore already in the table. Reusing
+    // the entry is what collapsing is; there is no separate merge step.
+    // ------------------------------------------------------------------
+    let mut signals = lower_signals(&digital.signals);
+    let mut elaborated: HashMap<SmolStr, DigitalSignalId> = signals
+        .iter()
+        .map(|signal| (signal.name.clone(), signal.id))
+        .collect();
+    let mut frame_signal_ids: Vec<Vec<DigitalSignalId>> =
+        Vec::with_capacity(digital.instances.len());
+    for instance in &digital.instances {
+        let mut ids = Vec::with_capacity(instance.signals.len());
+        for signal in &instance.signals {
+            let id = match elaborated.get(&signal.name) {
+                Some(existing) => *existing,
+                None => {
+                    let id = DigitalSignalId::from(signals.len());
+                    signals.push(lower_signal(&signal.declared, id, signal.name.clone()));
+                    elaborated.insert(signal.name.clone(), id);
+                    id
+                }
+            };
+            ids.push(id);
+        }
+        frame_signal_ids.push(ids);
+    }
+
+    // One scope per frame, each mapping the names *that frame's* body writes to
+    // the elaborated ids they resolve to. The instance's body is lowered
+    // unmodified against its own scope, which is what keeps two instances of
+    // one module two separately addressable things rather than one body
+    // rewritten twice.
+    let module_scope: HashMap<&str, DigitalSignalId> = digital
+        .signals
+        .iter()
+        .zip(&signals)
+        .map(|(analyzed, signal)| (analyzed.name.as_str(), signal.id))
+        .collect();
+    let frame_scopes: Vec<HashMap<&str, DigitalSignalId>> = digital
+        .instances
+        .iter()
+        .zip(&frame_signal_ids)
+        .map(|(instance, ids)| {
+            instance
+                .signals
+                .iter()
+                .zip(ids)
+                .map(|(signal, id)| (signal.declared.name.as_str(), *id))
+                .collect()
+        })
+        .collect();
+    // The scope an implicit port driver resolves in. It names both sides of a
+    // connection, which live in two different instances, so it is the only one
+    // keyed by elaborated name.
+    let elaborated_scope: HashMap<&str, DigitalSignalId> = signals
         .iter()
         .map(|signal| (signal.name.as_str(), signal.id))
         .collect();
 
-    let mut processes = Vec::new();
-    for process in &digital.processes {
-        match lower_process(process, &signals, &index) {
-            Ok(lowered) => processes.push(lowered),
-            Err(mut errors) => diagnostics.append(&mut errors),
-        }
-    }
-
+    // ------------------------------------------------------------------
+    // Processes and drivers.
+    // ------------------------------------------------------------------
     // Continuous assignments become processes too, numbered after the ones the
     // front end named. An `assign` has no source-level process id — the parser
-    // assigns those to `always` and `initial` only — so the numbering continues
-    // rather than restarting, and a plan's process ids stay unique.
+    // assigns those to `always` and `initial` only — and neither has any
+    // process of an instance frame, because two instances of one module would
+    // otherwise share every id their module was given. So the numbering
+    // continues from the compiled module's own highest, in one fixed order:
+    // the module's own processes, its own assignments, then each frame in
+    // elaboration order with its processes, its assignments, and last its
+    // implicit port drivers. Driver indices fall out of the same order, which
+    // is what makes them stable across a recompilation.
     let mut next_id = digital
         .processes
         .iter()
         .map(|process| process.id.0)
         .max()
         .map_or(0, |highest| highest + 1);
-    let mut drivers = Vec::new();
-    for assignment in &digital.continuous_assigns {
+    let mut allocate = move || {
         let id = DigitalProcessId::from(next_id as usize);
         next_id += 1;
-        match lower_continuous_assign(assignment, &signals, &index, id, &mut drivers) {
+        id
+    };
+
+    let mut processes = Vec::new();
+    let mut drivers = Vec::new();
+    for process in &digital.processes {
+        let id = DigitalProcessId::from(usize::try_from(process.id.0).unwrap_or(usize::MAX));
+        match lower_process(process, id, &signals, &module_scope) {
             Ok(lowered) => processes.push(lowered),
             Err(mut errors) => diagnostics.append(&mut errors),
+        }
+    }
+    for assignment in &digital.continuous_assigns {
+        match lower_continuous_assign(
+            assignment,
+            &signals,
+            &module_scope,
+            allocate(),
+            &mut drivers,
+        ) {
+            Ok(lowered) => processes.push(lowered),
+            Err(mut errors) => diagnostics.append(&mut errors),
+        }
+    }
+    for (instance, scope) in digital.instances.iter().zip(&frame_scopes) {
+        for process in &instance.processes {
+            match lower_process(process, allocate(), &signals, scope) {
+                Ok(lowered) => processes.push(lowered),
+                Err(mut errors) => diagnostics.append(&mut errors),
+            }
+        }
+        for assignment in &instance.continuous_assigns {
+            match lower_continuous_assign(assignment, &signals, scope, allocate(), &mut drivers) {
+                Ok(lowered) => processes.push(lowered),
+                Err(mut errors) => diagnostics.append(&mut errors),
+            }
+        }
+        for assignment in &instance.port_drivers {
+            match lower_continuous_assign(
+                assignment,
+                &signals,
+                &elaborated_scope,
+                allocate(),
+                &mut drivers,
+            ) {
+                Ok(lowered) => processes.push(lowered),
+                Err(mut errors) => diagnostics.append(&mut errors),
+            }
         }
     }
 
@@ -241,20 +365,42 @@ fn lower_signals(analyzed: &[AnalyzedDigitalSignal]) -> Vec<DigitalSignal> {
     analyzed
         .iter()
         .enumerate()
-        .map(|(position, signal)| DigitalSignal {
-            id: DigitalSignalId::from(position),
-            name: signal.name.clone(),
-            width: signal.width,
-            bounds: signal.range.map(|range| (range.msb, range.lsb)),
-            signed: signal.signedness.is_signed(),
-            procedurally_assignable: signal.class.is_variable(),
-            span: signal.span.into(),
+        .map(|(position, signal)| {
+            lower_signal(signal, DigitalSignalId::from(position), signal.name.clone())
         })
         .collect()
 }
 
+/// One declaration, under the identity and name the elaborated scope gives it.
+///
+/// The name is a parameter rather than read off the declaration because an
+/// instance's signal is named by its instance path, and a port that collapsed
+/// is named by the net it joined.
+fn lower_signal(
+    signal: &AnalyzedDigitalSignal,
+    id: DigitalSignalId,
+    name: SmolStr,
+) -> DigitalSignal {
+    DigitalSignal {
+        id,
+        name,
+        width: signal.width,
+        bounds: signal.range.map(|range| (range.msb, range.lsb)),
+        signed: signal.signedness.is_signed(),
+        procedurally_assignable: signal.class.is_variable(),
+        span: signal.span.into(),
+    }
+}
+
+/// Lower one process under the identity the plan gives it.
+///
+/// `id` is the plan's, not the source's. They are the same number for a
+/// process of the compiled module, and deliberately not for one of an instance
+/// frame: two instances of a module have the same source process and must have
+/// two identities, because a scheduler resumes one of them.
 fn lower_process(
     process: &AnalyzedDigitalProcess,
+    id: DigitalProcessId,
     signals: &[DigitalSignal],
     index: &HashMap<&str, DigitalSignalId>,
 ) -> Result<CfgDigitalProcess, Vec<IrDiagnostic>> {
@@ -308,10 +454,7 @@ fn lower_process(
     let function = lowerer.builder.finish(entry).map_err(|error| {
         vec![IrDiagnostic::error(
             CompilerPhase::CfgLowering,
-            format!(
-                "lowering process {} produced an invalid graph: {error}",
-                process.id
-            ),
+            format!("lowering process {id} produced an invalid graph: {error}"),
             process.span.into(),
         )]
     })?;
@@ -341,7 +484,7 @@ fn lower_process(
     };
 
     Ok(CfgDigitalProcess {
-        id: DigitalProcessId::from(usize::try_from(process.id.0).unwrap_or(usize::MAX)),
+        id,
         kind,
         function,
         static_sensitivity,
