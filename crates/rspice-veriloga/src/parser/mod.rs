@@ -499,6 +499,23 @@ impl<'a> Parser<'a> {
         loop {
             let instance_start = self.current_span();
             let name: SmolStr = self.expect_identifier("module instance name")?.into();
+            // IEEE 1364-2005 section 12.1.2 lets a range after the instance
+            // name declare an array of instances. It has no elaborated form
+            // here — the range decides how many instances exist, and nothing
+            // downstream can be told a count — so it is refused on the bracket
+            // rather than reported as a missing `(`.
+            if self.check(TokenKind::LBracket) {
+                return Err(ParseError::new(
+                    ParseErrorKind::UnsupportedConstruct {
+                        context: format!("module instance `{name}`"),
+                        found: "an instance array range; IEEE 1364-2005 section 12.1.2 \
+                                declares one instance per element, and this compiler \
+                                elaborates only a single named instance — write them out"
+                            .to_string(),
+                    },
+                    self.current_span(),
+                ));
+            }
             let connections = self.parse_instance_connections()?;
             instances.push(ModuleInstance {
                 module: module.clone(),
