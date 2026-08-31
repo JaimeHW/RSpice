@@ -646,13 +646,6 @@ pub trait CodeModel: Send + Sync {
         self.ports().iter().all(|p| p.default_type.is_analog())
     }
 
-    /// Check if this model is digital-only (all event-driven ports)
-    fn is_digital_only(&self) -> bool {
-        self.ports()
-            .iter()
-            .all(|p| p.default_type.is_event_driven())
-    }
-
     /// Whether transient evaluation may be skipped when event-driven inputs
     /// have the same accepted event/value signature as the previous call.
     ///
