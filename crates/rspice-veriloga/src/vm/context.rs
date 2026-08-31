@@ -1376,6 +1376,9 @@ impl VmContext {
             for filter in &mut self.transition_filters {
                 filter.promote_operating_point_candidate();
             }
+            for filter in &mut self.laplace_filters {
+                filter.promote_operating_point_candidate();
+            }
         } else if self.integration != coefficients {
             // A candidate evaluated with different companion coefficients
             // cannot be accepted under the new integration rule.
@@ -1386,6 +1389,9 @@ impl VmContext {
                     self.state_derivatives[index] = self.state_derivatives_prev[index];
                     self.state_older_candidate[index] = 0.0;
                 }
+            }
+            for filter in &mut self.laplace_filters {
+                filter.begin_evaluation();
             }
         }
         self.integration = coefficients;

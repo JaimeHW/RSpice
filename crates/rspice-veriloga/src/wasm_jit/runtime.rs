@@ -1283,6 +1283,122 @@ mod tests {
     }
 
     #[test]
+    fn laplace_helpers_follow_trapezoidal_and_gear2_reference_semantics() {
+        let mut context = VmContext::default();
+        context.analysis_type = 2;
+        context.laplace_filters.push(
+            crate::laplace::StateSpaceFilter::from_transfer_function(&[1.0], &[1.0, 1.0])
+                .expect("valid first-order Laplace filter"),
+        );
+        let mut session = WasmJitRuntimeSession::new(context);
+
+        // Seed x[n-1] and x[n-2] from the transient operating point. For
+        // H(s)=1/(s+1) and u=1, the equilibrium state and output are both 1.
+        let operating_point = evaluate_helper_with_session(
+            420,
+            0,
+            0,
+            0,
+            [1.0, 0.0, 0.0, 0.0, 0.0],
+            &[],
+            Some(&mut session),
+        )
+        .expect("evaluate Laplace operating-point candidate");
+        assert_eq!(operating_point.to_bits(), 1.0_f64.to_bits());
+        session
+            .context_mut()
+            .advance_state()
+            .expect("accept Laplace operating-point candidate");
+
+        let trapezoidal = IntegrationCoefficients {
+            active: true,
+            derivative_scale: 4.0,
+            previous_value_scale: 4.0,
+            older_value_scale: 0.0,
+            previous_derivative_scale: 1.0,
+        };
+        session
+            .context_mut()
+            .try_set_integration_coefficients(trapezoidal)
+            .expect("install trapezoidal rule");
+        session.context_mut().begin_stateful_evaluation();
+
+        let accepted_before_trapezoidal = session.context().laplace_filters[0].checkpoint();
+        let trapezoidal_gain = evaluate_helper_with_session(
+            432,
+            0,
+            0,
+            0,
+            [1.0, 0.0, 0.0, 0.0, 0.0],
+            &[],
+            Some(&mut session),
+        )
+        .expect("evaluate trapezoidal Laplace derivative");
+        assert!((trapezoidal_gain - 0.2).abs() <= 8.0 * f64::EPSILON);
+        assert_eq!(
+            session.context().laplace_filters[0].checkpoint(),
+            accepted_before_trapezoidal,
+            "the WASM derivative helper must remain read-only"
+        );
+
+        // (4I-A)x = 4*x_prev + xdot_prev + u = 7 for A=-1.
+        let trapezoidal_output = evaluate_helper_with_session(
+            420,
+            0,
+            0,
+            0,
+            [3.0, 0.0, 0.0, 0.0, 0.0],
+            &[],
+            Some(&mut session),
+        )
+        .expect("evaluate trapezoidal Laplace candidate");
+        assert!((trapezoidal_output - 1.4).abs() <= 16.0 * f64::EPSILON);
+        session
+            .context_mut()
+            .advance_state()
+            .expect("accept trapezoidal Laplace candidate");
+
+        let gear2 = IntegrationCoefficients {
+            active: true,
+            derivative_scale: 3.0,
+            previous_value_scale: 4.0,
+            older_value_scale: -1.0,
+            previous_derivative_scale: 0.0,
+        };
+        session
+            .context_mut()
+            .try_set_integration_coefficients(gear2)
+            .expect("install Gear-2 rule");
+        session.context_mut().begin_stateful_evaluation();
+
+        let gear2_gain = evaluate_helper_with_session(
+            432,
+            0,
+            0,
+            0,
+            [1.0, 0.0, 0.0, 0.0, 0.0],
+            &[],
+            Some(&mut session),
+        )
+        .expect("evaluate Gear-2 Laplace derivative");
+        assert!((gear2_gain - 0.25).abs() <= 8.0 * f64::EPSILON);
+
+        // (3I-A)x = 4*1.4 - 1.0 + 6.0 = 10.6 for A=-1.
+        let gear2_output = evaluate_helper_with_session(
+            420,
+            0,
+            0,
+            0,
+            [6.0, 0.0, 0.0, 0.0, 0.0],
+            &[],
+            Some(&mut session),
+        )
+        .expect("evaluate Gear-2 Laplace candidate");
+        assert!((gear2_output - 2.65).abs() <= 32.0 * f64::EPSILON);
+        assert!(session.take_error().is_none());
+    }
+
+    #[test]
     fn stateful_integration_helper_does_not_accept_initialization_speculatively() {
         let mut context = VmContext::with_states(0, 1);
         context

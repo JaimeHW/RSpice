@@ -110,7 +110,10 @@ use super::{
 /// active interruption origin required for exact corner scheduling. Version
 /// 30 persists whether each runtime Verilog-A `absdelay` site froze a
 /// fixed delay or a maximum-delay bound, including the exact accepted value.
-const FORMAT_VERSION: u32 = 30;
+/// Version 31 persists the older accepted state and previous physical
+/// derivative for every runtime Verilog-A Laplace filter so trapezoidal and
+/// Gear-2 continuation is bit-exact across a restart.
+const FORMAT_VERSION: u32 = 31;
 const RUNTIME_VERILOGA_FORMAT_VERSION: u32 = 17;
 #[cfg(feature = "veriloga")]
 const RUNTIME_VERILOGA_SLEW_INITIALIZATION_FORMAT_VERSION: u32 = 23;
@@ -122,6 +125,8 @@ const RUNTIME_VERILOGA_SLEW_CORNER_FORMAT_VERSION: u32 = 27;
 const RUNTIME_VERILOGA_TRANSITION_QUEUE_FORMAT_VERSION: u32 = 29;
 #[cfg(feature = "veriloga")]
 const RUNTIME_VERILOGA_ABSDELAY_CONFIGURATION_FORMAT_VERSION: u32 = 30;
+#[cfg(feature = "veriloga")]
+const RUNTIME_VERILOGA_LAPLACE_HISTORY_FORMAT_VERSION: u32 = 31;
 const CONTROLLER_PHASE_FORMAT_VERSION: u32 = 18;
 const NATIVE_NONLINEAR_FORMAT_VERSION: u32 = 19;
 const ACCEPTED_JUNCTION_HISTORY_FORMAT_VERSION: u32 = 20;
@@ -2938,6 +2943,8 @@ fn read_runtime_veriloga_states(
             Some(4)
         } else if checkpoint_version < RUNTIME_VERILOGA_ABSDELAY_CONFIGURATION_FORMAT_VERSION {
             Some(5)
+        } else if checkpoint_version < RUNTIME_VERILOGA_LAPLACE_HISTORY_FORMAT_VERSION {
+            Some(6)
         } else {
             None
         };
@@ -3025,6 +3032,7 @@ fn read_runtime_veriloga_states(
                 3 => VerilogADeviceCheckpoint::validate_legacy_v3_words(&words),
                 4 => VerilogADeviceCheckpoint::validate_legacy_v4_words(&words),
                 5 => VerilogADeviceCheckpoint::validate_legacy_v5_words(&words),
+                6 => VerilogADeviceCheckpoint::validate_legacy_v6_words(&words),
                 _ => unreachable!("known legacy runtime Verilog-A state version"),
             }
             .map_err(|error| {
@@ -3052,8 +3060,11 @@ fn read_runtime_veriloga_states(
     // omitted exact accepted `slew` catch-up corners. Version 4 retained only
     // one transition target, not the accepted pending queue and interruption
     // origin. Version 5 retained `absdelay` samples but not the frozen fixed
-    // delay or maximum-delay bound. All remain fully parseable for diagnostics
-    // but cannot be promoted into exact current accepted state.
+    // delay or maximum-delay bound. Version 6 retained only the latest
+    // accepted Laplace state, not the older state and previous physical
+    // derivative required by Gear-2 and trapezoidal integration. All remain
+    // fully parseable for diagnostics but cannot be promoted into exact
+    // current accepted state.
     Ok((states, legacy_state_version.is_some() && count != 0))
 }
 
@@ -8417,6 +8428,43 @@ mod tests {
     }
 
     #[cfg(feature = "veriloga")]
+    fn runtime_veriloga_laplace_words(state_version: u32, accepted_time: Value) -> Vec<u64> {
+        let mut words = vec![
+            u64::from(state_version),
+            0, // previous discontinuity
+            accepted_time.to_bits(),
+            0, // variables
+            0, // previous state values
+            0, // older state values
+            0, // previous state derivatives
+            0, // state initialization flags
+            0, // delay buffers
+            0, // transition filters
+            0, // slew filters
+            0, // cross detectors
+            1, // Laplace filters
+            2, // latest accepted state
+            0.5_f64.to_bits(),
+            (-0.25_f64).to_bits(),
+        ];
+        if state_version >= 7 {
+            words.extend([
+                2, // older accepted state
+                0.375_f64.to_bits(),
+                (-0.125_f64).to_bits(),
+                2, // previous physical derivative
+                1.0_f64.to_bits(),
+                (-2.0_f64).to_bits(),
+            ]);
+        }
+        words.extend([
+            0, // Zi filters
+            0, // optional timer-event bound
+        ]);
+        words
+    }
+
+    #[cfg(feature = "veriloga")]
     fn replace_empty_runtime_veriloga_tail(
         text: String,
         state_version: u32,
@@ -9661,7 +9709,9 @@ mod tests {
             (28, 5, "expected legacy version 4"),
             (29, 4, "expected legacy version 5"),
             (29, 6, "expected legacy version 5"),
-            (30, 5, "unsupported runtime Verilog-A state version 5"),
+            (30, 5, "expected legacy version 6"),
+            (30, 7, "expected legacy version 6"),
+            (31, 6, "unsupported runtime Verilog-A state version 6"),
         ] {
             let words = runtime_veriloga_idtmod_words(inner_version, checkpoint.time);
             let fixture = replace_empty_runtime_veriloga_tail(
@@ -9740,6 +9790,34 @@ mod tests {
 
     #[cfg(feature = "veriloga")]
     #[test]
+    fn v30_runtime_veriloga_rows_without_exact_laplace_history_are_discarded() {
+        let checkpoint = sample_without_generated_veriloga_state();
+        let words = runtime_veriloga_laplace_words(6, checkpoint.time);
+        let fixture = replace_empty_runtime_veriloga_tail(legacy_text(&checkpoint, 30), 6, &words);
+
+        let restored = TransientCheckpoint::from_text(&fixture)
+            .expect("v30 runtime Verilog-A v6 Laplace state remains parseable");
+        assert!(
+            !restored.runtime_veriloga_state_available,
+            "v6 has no exact Laplace Gear-2/trapezoidal continuation history"
+        );
+        assert!(restored.runtime_veriloga_instance_states.is_empty());
+
+        let mut malformed_words = words;
+        malformed_words[14] = Value::NAN.to_bits();
+        let malformed =
+            replace_empty_runtime_veriloga_tail(legacy_text(&checkpoint, 30), 6, &malformed_words);
+        let error = TransientCheckpoint::from_text(&malformed)
+            .expect_err("legacy v6 Laplace state must remain fully validated");
+        assert!(
+            error.contains("legacy payload is invalid")
+                && error.contains("Laplace filter 0 state contains a non-finite value"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[cfg(feature = "veriloga")]
+    #[test]
     fn current_runtime_veriloga_slew_initialization_round_trips_exactly() {
         let checkpoint = sample();
         for initialized in [false, true] {
@@ -9777,6 +9855,27 @@ mod tests {
         let state = &restored.runtime_veriloga_instance_states[0].accepted;
         assert_eq!(state.state_values_prev, vec![0.2]);
         assert_eq!(state.state_values_older, vec![-0.4]);
+        assert_eq!(restored.to_text(), fixture);
+    }
+
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn current_runtime_veriloga_laplace_history_round_trips_exactly() {
+        let checkpoint = sample();
+        let state_version = rspice_veriloga::device::RUNTIME_CHECKPOINT_STATE_VERSION;
+        let words = runtime_veriloga_laplace_words(state_version, checkpoint.time);
+        let fixture =
+            replace_empty_runtime_veriloga_tail(checkpoint.to_text(), state_version, &words);
+
+        let restored = TransientCheckpoint::from_text(&fixture)
+            .expect("current exact Laplace integration history must parse");
+        assert!(restored.runtime_veriloga_state_available);
+        let laplace = &restored.runtime_veriloga_instance_states[0]
+            .accepted
+            .laplace_filters[0];
+        assert_eq!(laplace.state, vec![0.5, -0.25]);
+        assert_eq!(laplace.older_state, vec![0.375, -0.125]);
+        assert_eq!(laplace.derivative, vec![1.0, -2.0]);
         assert_eq!(restored.to_text(), fixture);
     }
 

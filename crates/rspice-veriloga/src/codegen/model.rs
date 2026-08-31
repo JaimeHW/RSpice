@@ -683,12 +683,12 @@ pub enum Instruction {
     And, // Logical and
     Or, // Logical or
     Not, // Logical not
-    /// State-based time derivative: ddt(expr) using state index
-    /// Backward Euler: (current - prev) / dt; records current into state
+    /// State-based time derivative: `ddt(expr)` using the solver's active
+    /// companion rule; records the current candidate into state.
     /// Stack: `[expr] -> [d(expr)/dt]`
     DdtState(usize),
-    /// State-based integration: idt(expr, ic) using state index
-    /// Backward Euler: prev + expr * dt; returns ic at DC
+    /// State-based integration: `idt(expr, ic)` using the solver's active
+    /// companion rule; returns `ic` at DC.
     /// Stack: `[expr, ic] -> [integral]`
     IdtState(usize),
     /// Wrapped integration: idtmod(expr, ic, modulus, offset)
@@ -742,7 +742,8 @@ pub enum Instruction {
     /// Timer event: one-shot or periodic time-based trigger
     /// Stack: `[start_time, period, time_tol, enable] -> [0 or 1]`
     TimerState(usize),
-    /// Laplace filter with poles/zeros (state-space form)
+    /// Laplace filter in state-space form using the solver's active companion
+    /// rule during transient analysis.
     /// Stack: `[input] -> [filtered]`
     LaplaceState(usize),
     /// Conditional: if top is nonzero, use second, else third

@@ -17,7 +17,7 @@ use std::cell::UnsafeCell;
 use crate::array_index::{checked_array_slot, checked_rounded_i64};
 use crate::integer_runtime::{IntegerBinaryOperation, integer_binary, real_to_integer};
 use crate::timing_contract::{NormalizedSlewRates, normalize_slew_rates};
-use crate::vm::idtmod_wrapped_candidate;
+use crate::vm::{IntegrationCoefficients, idtmod_wrapped_candidate};
 
 const INTEGER_DESCRIPTOR_KIND_MASK: usize = 0xff;
 const INTEGER_DESCRIPTOR_PAYLOAD_SHIFT: u32 = 32;
@@ -25,6 +25,16 @@ pub(crate) const INTEGER_CAST_DESCRIPTOR: usize = 0;
 const INTEGER_BINARY_DESCRIPTOR_BASE: usize = 1;
 const INTEGER_SHIFT_CONST_DESCRIPTOR_BASE: usize = 16;
 const INTEGER_BINARY_CONST_DESCRIPTOR_BASE: usize = 32;
+
+fn integration_coefficients(ctx: &EvalContext) -> IntegrationCoefficients {
+    IntegrationCoefficients {
+        active: ctx.integration_active != 0,
+        derivative_scale: ctx.integration_derivative_scale,
+        previous_value_scale: ctx.integration_previous_value_scale,
+        older_value_scale: ctx.integration_older_value_scale,
+        previous_derivative_scale: ctx.integration_previous_derivative_scale,
+    }
+}
 
 fn event_integer_operand(name: &str, value: f64) -> Result<i32, String> {
     let converted = real_to_integer(value)
@@ -970,8 +980,9 @@ pub unsafe extern "C" fn rspice_laplace_step_native(
 
     let filters =
         unsafe { std::slice::from_raw_parts_mut(ctx.laplace_filters, ctx.laplace_filters_len) };
-    let result = if ctx.analysis_type == 2 && ctx.integration_active != 0 {
-        filters[filter_id].step(input, ctx.timestep)
+    let coefficients = integration_coefficients(ctx);
+    let result = if ctx.analysis_type == 2 && coefficients.active {
+        filters[filter_id].step_with_integration(input, coefficients)
     } else if ctx.analysis_type == 2 {
         filters[filter_id].dc_candidate(input)
     } else {
@@ -992,7 +1003,7 @@ pub unsafe extern "C" fn rspice_laplace_step_native(
 /// Evaluate the exact input derivative of a native Laplace filter without
 /// changing either its accepted history or its in-flight candidate.
 ///
-/// Active transient integration uses the current Backward Euler input
+/// Active transient integration uses the current companion-rule input
 /// coefficient. Transient operating-point and non-transient analyses use the
 /// DC action, matching the reference VM's `LaplaceStateDerivative` contract.
 ///
@@ -1040,8 +1051,9 @@ pub unsafe extern "C" fn rspice_laplace_derivative_native(
         std::slice::from_raw_parts(ctx.laplace_filters.cast_const(), ctx.laplace_filters_len)
     };
     let filter = &filters[filter_id];
-    let result = if ctx.analysis_type == 2 && ctx.integration_active != 0 {
-        match filter.backward_euler_input_gain(ctx.timestep) {
+    let coefficients = integration_coefficients(ctx);
+    let result = if ctx.analysis_type == 2 && coefficients.active {
+        match filter.transient_input_gain(coefficients) {
             Ok(gain) => {
                 let result = gain * input_derivative;
                 if !result.is_finite() || (result == 0.0 && gain != 0.0 && input_derivative != 0.0)
@@ -2733,6 +2745,8 @@ mod tests {
 
         ctx.timestep = 0.5;
         ctx.integration_active = 1;
+        ctx.integration_derivative_scale = 2.0;
+        ctx.integration_previous_value_scale = 2.0;
         filters[0].begin_evaluation();
         let first_step = unsafe { rspice_laplace_step_native(2.0, &ctx, 0) };
         assert!((first_step - (14.0 / 3.0)).abs() <= 1.0e-12);
@@ -2761,6 +2775,8 @@ mod tests {
         ctx.analysis_type = 2;
         ctx.timestep = 0.5;
         ctx.integration_active = 1;
+        ctx.integration_derivative_scale = 2.0;
+        ctx.integration_previous_value_scale = 2.0;
         let transient = unsafe { rspice_laplace_derivative_native(2.0, &ctx, 0) };
         assert!((transient - (2.0 / 3.0)).abs() <= 1.0e-15);
         assert_eq!(filters[0].checkpoint(), initial);
@@ -2777,6 +2793,39 @@ mod tests {
         );
         assert!(error.message.contains("input action is not representable"));
         assert_eq!(filters[0].checkpoint(), initial);
+    }
+
+    #[test]
+    fn laplace_native_helpers_follow_trapezoidal_and_gear2_coefficients() {
+        let mut filters = [crate::laplace::StateSpaceFilter::integrator(1.0)
+            .expect("first-order low-pass realization")];
+        let mut ctx = empty_eval_context();
+        ctx.analysis_type = 2;
+        ctx.integration_active = 1;
+        ctx.laplace_filters = filters.as_mut_ptr();
+        ctx.laplace_filters_len = filters.len();
+
+        ctx.integration_derivative_scale = 4.0;
+        ctx.integration_previous_value_scale = 4.0;
+        ctx.integration_older_value_scale = 0.0;
+        ctx.integration_previous_derivative_scale = 1.0;
+        filters[0].begin_evaluation();
+        let trap_gain = unsafe { rspice_laplace_derivative_native(1.0, &ctx, 0) };
+        assert!((trap_gain - 0.2).abs() <= 8.0 * f64::EPSILON);
+        let trap = unsafe { rspice_laplace_step_native(2.0, &ctx, 0) };
+        assert!((trap - 0.4).abs() <= 8.0 * f64::EPSILON);
+        filters[0].commit();
+
+        ctx.integration_derivative_scale = 3.0;
+        ctx.integration_previous_value_scale = 4.0;
+        ctx.integration_older_value_scale = -1.0;
+        ctx.integration_previous_derivative_scale = 0.0;
+        filters[0].begin_evaluation();
+        let gear_gain = unsafe { rspice_laplace_derivative_native(1.0, &ctx, 0) };
+        assert!((gear_gain - 0.25).abs() <= 8.0 * f64::EPSILON);
+        let gear = unsafe { rspice_laplace_step_native(3.0, &ctx, 0) };
+        assert!((gear - 1.15).abs() <= 16.0 * f64::EPSILON);
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]

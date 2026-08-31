@@ -36,7 +36,10 @@ use super::*;
 // processes and drivers carry per-instance identities. Source that version 24
 // refused compiles, and a hierarchy's artifact is a different artifact, so the
 // record's identity has to change.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 25;
+// Version 26 adds generalized transient integration and exact accepted history
+// to compiled Laplace filters. Cached version-25 realizations do not carry the
+// older state and derivative lanes required by trapezoidal and Gear-2 stepping.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 26;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

@@ -552,7 +552,8 @@ pub enum IrExpr {
     },
     /// Exact Jacobian action of a coefficient-form Laplace filter. It shares
     /// the primal site's state and applies the DC gain outside active
-    /// transient integration or the Backward-Euler input gain during it.
+    /// transient integration or the active companion-rule input gain during
+    /// it.
     LaplaceNDDerivative {
         site: LaplaceSiteId,
         expr: Box<IrExpr>,
@@ -3870,7 +3871,7 @@ pub mod autodiff {
             },
 
             // Laplace derivatives retain the primal site's state action.
-            // Runtime selects DC gain or the active Backward-Euler input gain.
+            // Runtime selects DC gain or the active companion-rule input gain.
             IrExpr::LaplaceND {
                 site,
                 expr,

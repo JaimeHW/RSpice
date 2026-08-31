@@ -9403,6 +9403,8 @@ mod tests {
         ctx.analysis_type = 2;
         ctx.timestep = 0.5;
         ctx.integration_active = 1;
+        ctx.integration_derivative_scale = 2.0;
+        ctx.integration_previous_value_scale = 2.0;
         let transient = f(&ctx, std::ptr::null());
         let repeated = f(&ctx, std::ptr::null());
         assert!(
@@ -9452,6 +9454,8 @@ mod tests {
         ctx.analysis_type = 2;
         ctx.timestep = 0.5;
         ctx.integration_active = 1;
+        ctx.integration_derivative_scale = 2.0;
+        ctx.integration_previous_value_scale = 2.0;
         ctx.laplace_filters = filters.as_mut_ptr();
         ctx.laplace_filters_len = filters.len();
 
@@ -12555,7 +12559,9 @@ mod tests {
             vars.as_ptr(),
             iterations,
             samples,
-            11.0,
+            // Integer conversion rounds 13.75 to 14 and 6.25 to 6, so
+            // `(14 & 6) + 7 == 13` under the shared runtime contract.
+            13.0,
         );
         run_native_value_microbench(
             "guarded_current_pair",
@@ -12614,6 +12620,37 @@ mod tests {
             iterations,
             samples,
             2.0,
+        );
+
+        let laplace_vars = [2.0_f64];
+        let mut laplace_filters = [
+            StateSpaceFilter::integrator(1.0).expect("first-order Laplace microbenchmark filter")
+        ];
+        let mut laplace_ctx = eval_context(&[], &[], &[], &[]);
+        laplace_ctx.analysis_type = 2;
+        laplace_ctx.integration_active = 1;
+        laplace_ctx.integration_derivative_scale = 4.0;
+        laplace_ctx.integration_previous_value_scale = 4.0;
+        laplace_ctx.integration_older_value_scale = 0.0;
+        laplace_ctx.integration_previous_derivative_scale = 1.0;
+        laplace_ctx.laplace_filters = laplace_filters.as_mut_ptr();
+        laplace_ctx.laplace_filters_len = laplace_filters.len();
+        run_native_value_microbench(
+            "laplace_trapezoidal",
+            NativeProgram::from_bytecode(
+                "native-x64-laplace-microbench",
+                EntryKind::StampValue,
+                &BytecodeProgram {
+                    instructions: vec![Instruction::PushVariable(0), Instruction::LaplaceState(0)],
+                },
+                NativeLoweringLimits::new(0, 0, 0, 1, 0).with_laplace_filter_count(1),
+            )
+            .expect("lower Laplace microbenchmark program"),
+            &laplace_ctx,
+            laplace_vars.as_ptr(),
+            iterations,
+            samples,
+            0.4,
         );
     }
 

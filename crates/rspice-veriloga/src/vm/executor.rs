@@ -1033,11 +1033,10 @@ impl<'a> Vm<'a> {
             Instruction::LaplaceState(filter_id) => {
                 let input = self.pop()?;
                 let result = if self.context.analysis_type == 2 {
-                    let integration_active = self.context.integration_coefficients().active;
-                    let timestep = self.context.timestep();
+                    let coefficients = self.context.integration_coefficients();
                     if let Some(filter) = self.context.laplace_filters.get_mut(*filter_id) {
-                        let result = if integration_active {
-                            filter.step(input, timestep)
+                        let result = if coefficients.active {
+                            filter.step_with_integration(input, coefficients)
                         } else {
                             // The transient operating-point pass has no
                             // integration formula. Solve an equilibrium
@@ -1067,25 +1066,22 @@ impl<'a> Vm<'a> {
                 self.stack.push(result);
             }
             // Read-only Laplace Jacobian action. Active transient integration
-            // uses the coefficient of the current Backward-Euler input;
+            // uses the coefficient of the current companion-rule input;
             // equilibrium and all other analyses use the filter's DC action.
             Instruction::LaplaceStateDerivative(filter_id) => {
                 let input_derivative = self.pop()?;
-                let integration_active = self.context.integration_coefficients().active;
-                let timestep = self.context.timestep();
+                let coefficients = self.context.integration_coefficients();
                 let filter = self
                     .context
                     .laplace_filters
                     .get(*filter_id)
                     .ok_or(VmError::InvalidInstruction("missing laplace filter"))?;
-                let result = if self.context.analysis_type == 2 && integration_active {
-                    let gain = filter
-                        .backward_euler_input_gain(timestep)
-                        .map_err(|error| {
-                            VmError::InvalidNumericResult(format!(
-                                "Laplace derivative {filter_id}: {error}"
-                            ))
-                        })?;
+                let result = if self.context.analysis_type == 2 && coefficients.active {
+                    let gain = filter.transient_input_gain(coefficients).map_err(|error| {
+                        VmError::InvalidNumericResult(format!(
+                            "Laplace derivative {filter_id}: {error}"
+                        ))
+                    })?;
                     let result = gain * input_derivative;
                     if !result.is_finite()
                         || (result == 0.0 && gain != 0.0 && input_derivative != 0.0)
@@ -1744,6 +1740,42 @@ mod tests {
             .advance_state()
             .expect("accept the preserved primal candidate");
         assert!((context.laplace_filters[0].checkpoint().state[0] - 5.0 / 12.0).abs() <= 1.0e-12);
+    }
+
+    #[test]
+    fn changing_companion_rule_invalidates_a_laplace_candidate() {
+        let mut context = VmContext::default();
+        context.analysis_type = 2;
+        context
+            .try_set_integration_coefficients(IntegrationCoefficients::backward_euler(0.5))
+            .expect("valid Backward Euler rule");
+        let mut filter = crate::laplace::StateSpaceFilter::integrator(1.0)
+            .expect("first-order low-pass realization");
+        filter
+            .set_initial_state(&[0.25])
+            .expect("matching accepted state");
+        context.laplace_filters.push(filter);
+
+        context.begin_stateful_evaluation();
+        execute_with_context(
+            &mut context,
+            vec![Instruction::PushConst(1.0), Instruction::LaplaceState(0)],
+        )
+        .expect("finite Backward Euler candidate");
+
+        context
+            .try_set_integration_coefficients(IntegrationCoefficients {
+                active: true,
+                derivative_scale: 4.0,
+                previous_value_scale: 4.0,
+                older_value_scale: 0.0,
+                previous_derivative_scale: 1.0,
+            })
+            .expect("valid trapezoidal rule");
+        context
+            .advance_state()
+            .expect("coefficient change discarded the stale candidate");
+        assert_eq!(context.laplace_filters[0].checkpoint().state, vec![0.25]);
     }
 
     #[test]

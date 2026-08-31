@@ -14,17 +14,22 @@
 //!
 //! ## Time Integration
 //!
-//! Backward Euler integration is used for numerical stability:
+//! The filter consumes the transient solver's active companion rule. For
+//! coefficients `(g, p, o, q)` this is:
 //!
 //! ```text
-//! x[n] = (I - h*A)^(-1) * (x[n-1] + h*B*u[n])
+//! xdot[n] = g*x[n] - p*x[n-1] - o*x[n-2] - q*xdot[n-1]
+//! (g*I - A)*x[n] = p*x[n-1] + o*x[n-2] + q*xdot[n-1] + B*u[n]
 //! ```
 //!
-//! where h is the timestep.
+//! This supports Backward Euler, trapezoidal, and variable-step Gear-2 with
+//! the same accepted/candidate transaction boundary as the circuit solver.
 
 use num_complex::Complex64;
 use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
+
+use crate::vm::IntegrationCoefficients;
 
 /// A malformed transfer function or a Laplace evaluation that cannot be
 /// represented faithfully in `f64`.
@@ -117,12 +122,22 @@ pub struct StateSpaceFilter {
     transfer_function_dc_gain: Option<f64>,
     /// Candidate state vector for the in-flight timestep
     state: Vec<f64>,
+    /// Physical derivative of the in-flight state candidate.
+    state_derivative: Vec<f64>,
     /// State at the last accepted timestep
     state_prev: Vec<f64>,
+    /// State at the accepted timestep before [`Self::state_prev`].
+    state_older: Vec<f64>,
+    /// Physical state derivative at the last accepted timestep.
+    derivative_prev: Vec<f64>,
     /// Whether `state` was successfully recreated by the current complete
     /// device evaluation pass.
     #[serde(skip)]
     candidate_valid: bool,
+    /// An operating-point candidate seeds both accepted value-history lanes
+    /// instead of advancing them as a transient sample.
+    #[serde(skip)]
+    candidate_seeds_history: bool,
     /// System order
     order: usize,
 }
@@ -133,6 +148,8 @@ pub struct StateSpaceFilter {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LaplaceCheckpoint {
     pub state: Vec<f64>,
+    pub older_state: Vec<f64>,
+    pub derivative: Vec<f64>,
 }
 
 impl StateSpaceFilter {
@@ -140,7 +157,10 @@ impl StateSpaceFilter {
     pub fn new(a: Vec<Vec<f64>>, b: Vec<f64>, c: Vec<f64>, d: f64) -> Result<Self, LaplaceError> {
         let order = b.len();
         let state = vec![0.0; order];
+        let state_derivative = vec![0.0; order];
         let state_prev = vec![0.0; order];
+        let state_older = vec![0.0; order];
+        let derivative_prev = vec![0.0; order];
 
         let filter = Self {
             a,
@@ -149,8 +169,12 @@ impl StateSpaceFilter {
             d,
             transfer_function_dc_gain: None,
             state,
+            state_derivative,
             state_prev,
+            state_older,
+            derivative_prev,
             candidate_valid: false,
+            candidate_seeds_history: false,
             order,
         };
         filter.validate_structure()?;
@@ -218,8 +242,12 @@ impl StateSpaceFilter {
                 d: gain,
                 transfer_function_dc_gain,
                 state: vec![],
+                state_derivative: vec![],
                 state_prev: vec![],
+                state_older: vec![],
+                derivative_prev: vec![],
                 candidate_valid: false,
+                candidate_seeds_history: false,
                 order: 0,
             });
         }
@@ -279,8 +307,12 @@ impl StateSpaceFilter {
             d: d_scalar,
             transfer_function_dc_gain,
             state: vec![0.0; n],
+            state_derivative: vec![0.0; n],
             state_prev: vec![0.0; n],
+            state_older: vec![0.0; n],
+            derivative_prev: vec![0.0; n],
             candidate_valid: false,
+            candidate_seeds_history: false,
             order: n,
         };
         filter.validate_structure()?;
@@ -308,8 +340,12 @@ impl StateSpaceFilter {
                 d: gain,
                 transfer_function_dc_gain: Some(gain),
                 state: vec![],
+                state_derivative: vec![],
                 state_prev: vec![],
+                state_older: vec![],
+                derivative_prev: vec![],
                 candidate_valid: false,
+                candidate_seeds_history: false,
                 order: 0,
             });
         }
@@ -406,8 +442,12 @@ impl StateSpaceFilter {
             d: 1.0,
             transfer_function_dc_gain: Some(1.0),
             state: vec![],
+            state_derivative: vec![],
             state_prev: vec![],
+            state_older: vec![],
+            derivative_prev: vec![],
             candidate_valid: false,
+            candidate_seeds_history: false,
             order: 0,
         }
     }
@@ -441,21 +481,56 @@ impl StateSpaceFilter {
 
     /// Evaluate an in-flight Backward Euler candidate.
     ///
-    /// This computes:
+    /// This compatibility entrypoint constructs the same companion rule used
+    /// by [`IntegrationCoefficients::backward_euler`] and delegates to
+    /// [`Self::step_with_integration`].
+    pub fn step(&mut self, input: f64, timestep: f64) -> Result<f64, LaplaceError> {
+        // Preserve the historical order-zero API contract: a purely static
+        // transfer has no timestep to validate.
+        if self.order == 0 {
+            return self.step_with_integration(input, IntegrationCoefficients::backward_euler(1.0));
+        }
+        if !timestep.is_finite() || timestep <= 0.0 {
+            return Err(LaplaceError::InvalidEvaluation(format!(
+                "transient timestep must be finite and positive, got {timestep}"
+            )));
+        }
+        let coefficients = IntegrationCoefficients::backward_euler(timestep);
+        if !coefficients.active {
+            return Err(LaplaceError::InvalidEvaluation(format!(
+                "transient timestep {timestep} does not produce an active Backward Euler rule"
+            )));
+        }
+        self.step_with_integration(input, coefficients)
+    }
+
+    /// Evaluate an in-flight candidate using the solver's exact companion
+    /// rule.
+    ///
+    /// For
     ///
     /// ```text
-    /// x[n] = (I - h*A)^(-1) * (x[n-1] + h*B*u[n])
-    /// y[n] = C*x[n] + D*u[n]
+    /// x_dot[n] = g*x[n] - p*x[n-1] - o*x[n-2] - q*x_dot[n-1]
     /// ```
     ///
-    /// Repeated calls recompute from `state_prev`, which is the last accepted
-    /// state. The simulator calls [`Self::commit`] only after accepting the
-    /// timestep, keeping Newton reevaluations idempotent.
-    pub fn step(&mut self, input: f64, timestep: f64) -> Result<f64, LaplaceError> {
-        // A failed reevaluation must not leave an older candidate eligible for
-        // acceptance.
+    /// and the state equation `x_dot = A*x + B*u`, this solves
+    ///
+    /// ```text
+    /// (g*I - A)*x[n] = p*x[n-1] + o*x[n-2] + q*x_dot[n-1] + B*u[n]
+    /// ```
+    ///
+    /// Repeated calls always start from accepted history and replace the
+    /// speculative candidate, so rejected Newton passes cannot advance the
+    /// filter.
+    pub fn step_with_integration(
+        &mut self,
+        input: f64,
+        coefficients: IntegrationCoefficients,
+    ) -> Result<f64, LaplaceError> {
         self.candidate_valid = false;
+        self.candidate_seeds_history = false;
         self.validate_structure()?;
+        validate_integration_coefficients(coefficients)?;
         if !input.is_finite() {
             return Err(LaplaceError::InvalidEvaluation(
                 "input must be finite".into(),
@@ -464,13 +539,8 @@ impl StateSpaceFilter {
         if self.order == 0 {
             return checked_product(self.d, input, "static output");
         }
-        if !timestep.is_finite() || timestep <= 0.0 {
-            return Err(LaplaceError::InvalidEvaluation(format!(
-                "transient timestep must be finite and positive, got {timestep}"
-            )));
-        }
 
-        let output = self.step_checked(input, timestep)?;
+        let output = self.step_checked(input, coefficients)?;
         self.candidate_valid = true;
         Ok(output)
     }
@@ -490,6 +560,8 @@ impl StateSpaceFilter {
     /// affecting transactionality.
     pub fn backward_euler_input_gain(&self, timestep: f64) -> Result<f64, LaplaceError> {
         self.validate_structure()?;
+        // Preserve the historical order-zero API contract: a purely static
+        // transfer has no timestep to validate.
         if self.order == 0 {
             return checked_product(self.d, 1.0, "static transient input gain");
         }
@@ -498,12 +570,33 @@ impl StateSpaceFilter {
                 "transient timestep must be finite and positive, got {timestep}"
             )));
         }
+        let coefficients = IntegrationCoefficients::backward_euler(timestep);
+        if !coefficients.active {
+            return Err(LaplaceError::InvalidEvaluation(format!(
+                "transient timestep {timestep} does not produce an active Backward Euler rule"
+            )));
+        }
+        self.transient_input_gain(coefficients)
+    }
 
-        let matrix = self.backward_euler_matrix(timestep)?;
+    /// Return the exact coefficient of the current input under the supplied
+    /// companion rule. This is read-only and therefore safe to use from every
+    /// Newton/Jacobian evaluation path.
+    pub fn transient_input_gain(
+        &self,
+        coefficients: IntegrationCoefficients,
+    ) -> Result<f64, LaplaceError> {
+        self.validate_structure()?;
+        validate_integration_coefficients(coefficients)?;
+        if self.order == 0 {
+            return checked_product(self.d, 1.0, "static transient input gain");
+        }
+
+        let (matrix, scale) = self.integration_matrix(coefficients)?;
         let rhs = self
             .b
             .iter()
-            .map(|coefficient| timestep * coefficient)
+            .map(|coefficient| coefficient / scale)
             .collect::<Vec<_>>();
         if rhs.iter().any(|value| !value.is_finite()) {
             return Err(LaplaceError::InvalidEvaluation(
@@ -524,10 +617,13 @@ impl StateSpaceFilter {
     /// state. Order-zero filters remain stateless.
     pub(crate) fn dc_candidate(&mut self, input: f64) -> Result<f64, LaplaceError> {
         self.candidate_valid = false;
+        self.candidate_seeds_history = false;
         let (equilibrium, output) = self.dc_equilibrium(input)?;
         if let Some(equilibrium) = equilibrium {
             self.state.copy_from_slice(&equilibrium);
+            self.state_derivative.fill(0.0);
             self.candidate_valid = true;
+            self.candidate_seeds_history = true;
         }
         Ok(output)
     }
@@ -535,8 +631,24 @@ impl StateSpaceFilter {
     /// Commit the most recently evaluated candidate.
     pub fn commit(&mut self) {
         if self.candidate_valid {
+            if self.candidate_seeds_history {
+                self.state_older.clone_from(&self.state);
+                self.derivative_prev.fill(0.0);
+            } else {
+                self.state_older.clone_from(&self.state_prev);
+                self.derivative_prev.clone_from(&self.state_derivative);
+            }
             self.state_prev.clone_from(&self.state);
             self.candidate_valid = false;
+            self.candidate_seeds_history = false;
+        }
+    }
+
+    /// Promote a successfully evaluated transient operating-point candidate
+    /// when the solver activates its first integration rule.
+    pub(crate) fn promote_operating_point_candidate(&mut self) {
+        if self.candidate_valid && self.candidate_seeds_history {
+            self.commit();
         }
     }
 
@@ -544,14 +656,18 @@ impl StateSpaceFilter {
     /// candidate left by the preceding pass.
     pub(crate) fn begin_evaluation(&mut self) {
         self.candidate_valid = false;
+        self.candidate_seeds_history = false;
     }
 
     /// Validate the candidate that would be committed, without mutation.
     pub(crate) fn validate_commit(&self) -> Result<(), LaplaceError> {
         self.validate_structure()?;
-        if self.candidate_valid && self.state.iter().any(|value| !value.is_finite()) {
+        if self.candidate_valid
+            && (self.state.iter().any(|value| !value.is_finite())
+                || self.state_derivative.iter().any(|value| !value.is_finite()))
+        {
             return Err(LaplaceError::InvalidEvaluation(
-                "Laplace candidate state is not finite".into(),
+                "Laplace candidate state or derivative is not finite".into(),
             ));
         }
         Ok(())
@@ -560,6 +676,8 @@ impl StateSpaceFilter {
     pub(crate) fn checkpoint(&self) -> LaplaceCheckpoint {
         LaplaceCheckpoint {
             state: self.state_prev.clone(),
+            older_state: self.state_older.clone(),
+            derivative: self.derivative_prev.clone(),
         }
     }
 
@@ -585,9 +703,24 @@ impl StateSpaceFilter {
                 self.order
             )));
         }
-        if checkpoint.state.iter().any(|value| !value.is_finite()) {
+        if checkpoint.older_state.len() != self.order || checkpoint.derivative.len() != self.order {
+            return Err(LaplaceError::InvalidDefinition(format!(
+                "checkpoint older-state/derivative lengths are {}/{}, expected {}/{}",
+                checkpoint.older_state.len(),
+                checkpoint.derivative.len(),
+                self.order,
+                self.order
+            )));
+        }
+        if checkpoint
+            .state
+            .iter()
+            .chain(&checkpoint.older_state)
+            .chain(&checkpoint.derivative)
+            .any(|value| !value.is_finite())
+        {
             return Err(LaplaceError::InvalidDefinition(
-                "checkpoint state contains a non-finite value".into(),
+                "checkpoint state history contains a non-finite value".into(),
             ));
         }
         Ok(())
@@ -595,18 +728,34 @@ impl StateSpaceFilter {
 
     pub(crate) fn restore_checkpoint(&mut self, checkpoint: &LaplaceCheckpoint) {
         self.state_prev.copy_from_slice(&checkpoint.state);
+        self.state_older.copy_from_slice(&checkpoint.older_state);
+        self.derivative_prev.copy_from_slice(&checkpoint.derivative);
         self.state.copy_from_slice(&checkpoint.state);
+        self.state_derivative
+            .copy_from_slice(&checkpoint.derivative);
         self.candidate_valid = false;
+        self.candidate_seeds_history = false;
     }
 
-    fn step_checked(&mut self, input: f64, h: f64) -> Result<f64, LaplaceError> {
-        let matrix = self.backward_euler_matrix(h)?;
+    fn step_checked(
+        &mut self,
+        input: f64,
+        coefficients: IntegrationCoefficients,
+    ) -> Result<f64, LaplaceError> {
+        let (matrix, scale) = self.integration_matrix(coefficients)?;
+        let previous_scale = coefficients.previous_value_scale / scale;
+        let older_scale = coefficients.older_value_scale / scale;
+        let derivative_scale = coefficients.previous_derivative_scale / scale;
 
-        let rhs = self
-            .state_prev
-            .iter()
-            .zip(self.b.iter())
-            .map(|(&previous, &b)| previous + h * b * input)
+        let rhs = (0..self.order)
+            .map(|index| {
+                let history = older_scale.mul_add(
+                    self.state_older[index],
+                    previous_scale * self.state_prev[index],
+                );
+                let history = derivative_scale.mul_add(self.derivative_prev[index], history);
+                (self.b[index] / scale).mul_add(input, history)
+            })
             .collect::<Vec<_>>();
         if rhs.iter().any(|value| !value.is_finite()) {
             return Err(LaplaceError::InvalidEvaluation(
@@ -616,16 +765,43 @@ impl StateSpaceFilter {
 
         let candidate = solve_real_system(matrix, rhs, "transient")?;
         let output = checked_state_output(&self.c, &candidate, self.d, input)?;
+        let derivative = self.physical_derivative(&candidate, input)?;
         self.state.copy_from_slice(&candidate);
+        self.state_derivative.copy_from_slice(&derivative);
         Ok(output)
     }
 
-    fn backward_euler_matrix(&self, h: f64) -> Result<Vec<Vec<f64>>, LaplaceError> {
+    fn integration_matrix(
+        &self,
+        coefficients: IntegrationCoefficients,
+    ) -> Result<(Vec<Vec<f64>>, f64), LaplaceError> {
+        let scale = self
+            .a
+            .iter()
+            .flatten()
+            .chain(&self.b)
+            .map(|value| value.abs())
+            .chain([
+                coefficients.derivative_scale.abs(),
+                coefficients.previous_value_scale.abs(),
+                coefficients.older_value_scale.abs(),
+                coefficients.previous_derivative_scale.abs(),
+            ])
+            .fold(0.0_f64, f64::max);
+        if !scale.is_finite() || scale == 0.0 {
+            return Err(LaplaceError::InvalidEvaluation(
+                "transient state equation has an invalid scaling factor".into(),
+            ));
+        }
         let mut matrix = vec![vec![0.0; self.order]; self.order];
         for (i, row) in matrix.iter_mut().enumerate() {
             for (j, cell) in row.iter_mut().enumerate() {
-                *cell = if i == j { 1.0 } else { 0.0 };
-                *cell -= h * self.a[i][j];
+                *cell = if i == j {
+                    coefficients.derivative_scale / scale
+                } else {
+                    0.0
+                };
+                *cell -= self.a[i][j] / scale;
                 if !cell.is_finite() {
                     return Err(LaplaceError::InvalidEvaluation(
                         "transient state matrix overflowed".into(),
@@ -633,7 +809,42 @@ impl StateSpaceFilter {
                 }
             }
         }
-        Ok(matrix)
+        Ok((matrix, scale))
+    }
+
+    fn physical_derivative(&self, state: &[f64], input: f64) -> Result<Vec<f64>, LaplaceError> {
+        let mut derivative = Vec::with_capacity(self.order);
+        for (row_index, row) in self.a.iter().enumerate() {
+            let scale = row
+                .iter()
+                .map(|value| value.abs())
+                .chain(std::iter::once(self.b[row_index].abs()))
+                .fold(0.0_f64, f64::max);
+            if scale == 0.0 {
+                derivative.push(0.0);
+                continue;
+            }
+            if !scale.is_finite() {
+                return Err(LaplaceError::InvalidEvaluation(
+                    "transient derivative has an invalid scaling factor".into(),
+                ));
+            }
+            let normalized = row
+                .iter()
+                .zip(state)
+                .fold(0.0, |sum, (&coefficient, &value)| {
+                    (coefficient / scale).mul_add(value, sum)
+                });
+            let normalized = (self.b[row_index] / scale).mul_add(input, normalized);
+            let value = normalized * scale;
+            if !value.is_finite() {
+                return Err(LaplaceError::InvalidEvaluation(
+                    "transient state derivative overflowed".into(),
+                ));
+            }
+            derivative.push(value);
+        }
+        Ok(derivative)
     }
 
     /// Get DC output (s=0) for a given input
@@ -680,8 +891,12 @@ impl StateSpaceFilter {
     /// The compiled state-space realization remains unchanged.
     pub fn reset(&mut self) {
         self.state.fill(0.0);
+        self.state_derivative.fill(0.0);
         self.state_prev.fill(0.0);
+        self.state_older.fill(0.0);
+        self.derivative_prev.fill(0.0);
         self.candidate_valid = false;
+        self.candidate_seeds_history = false;
     }
 
     /// Set initial state
@@ -700,8 +915,12 @@ impl StateSpaceFilter {
             ));
         }
         self.state.copy_from_slice(initial);
+        self.state_derivative.fill(0.0);
         self.state_prev.copy_from_slice(initial);
+        self.state_older.copy_from_slice(initial);
+        self.derivative_prev.fill(0.0);
         self.candidate_valid = false;
+        self.candidate_seeds_history = false;
         Ok(())
     }
 
@@ -765,7 +984,10 @@ impl StateSpaceFilter {
             && self.b.len() == self.order
             && self.c.len() == self.order
             && self.state.len() == self.order
-            && self.state_prev.len() == self.order;
+            && self.state_derivative.len() == self.order
+            && self.state_prev.len() == self.order
+            && self.state_older.len() == self.order
+            && self.derivative_prev.len() == self.order;
         if !dimensions_match {
             return Err(LaplaceError::InvalidDefinition(format!(
                 "state-space dimensions do not match declared order {}",
@@ -783,7 +1005,10 @@ impl StateSpaceFilter {
                 .chain(self.b.iter())
                 .chain(self.c.iter())
                 .chain(self.state.iter())
+                .chain(self.state_derivative.iter())
                 .chain(self.state_prev.iter())
+                .chain(self.state_older.iter())
+                .chain(self.derivative_prev.iter())
                 .any(|value| !value.is_finite())
         {
             return Err(LaplaceError::InvalidDefinition(
@@ -792,6 +1017,20 @@ impl StateSpaceFilter {
         }
         Ok(())
     }
+}
+
+fn validate_integration_coefficients(
+    coefficients: IntegrationCoefficients,
+) -> Result<(), LaplaceError> {
+    coefficients.validate().map_err(|error| {
+        LaplaceError::InvalidEvaluation(format!("invalid integration coefficients: {error}"))
+    })?;
+    if !coefficients.active {
+        return Err(LaplaceError::InvalidEvaluation(
+            "transient integration coefficients must be active".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn solve_complex_system(
@@ -1283,6 +1522,30 @@ impl LaplaceFilter {
 mod tests {
     use super::*;
 
+    fn trapezoidal(derivative_scale: f64) -> IntegrationCoefficients {
+        IntegrationCoefficients {
+            active: true,
+            derivative_scale,
+            previous_value_scale: derivative_scale,
+            older_value_scale: 0.0,
+            previous_derivative_scale: 1.0,
+        }
+    }
+
+    fn gear2(
+        derivative_scale: f64,
+        previous_value_scale: f64,
+        older_value_scale: f64,
+    ) -> IntegrationCoefficients {
+        IntegrationCoefficients {
+            active: true,
+            derivative_scale,
+            previous_value_scale,
+            older_value_scale,
+            previous_derivative_scale: 0.0,
+        }
+    }
+
     fn compile_filter(expression: &str) -> crate::CompileResult<crate::CompiledModel> {
         let source = format!(
             r#"
@@ -1332,6 +1595,99 @@ endmodule
             .expect("lower candidate");
         let finite_difference = (upper - lower) / (2.0 * epsilon);
         assert!((finite_difference - gain).abs() <= 1.0e-9);
+    }
+
+    #[test]
+    fn generalized_companion_rules_advance_exact_accepted_history() {
+        let mut filter = StateSpaceFilter::integrator(1.0).expect("first-order low-pass");
+
+        let backward_euler = IntegrationCoefficients::backward_euler(0.5);
+        let first = filter
+            .step_with_integration(1.0, backward_euler)
+            .expect("Backward Euler candidate");
+        assert!((first - 1.0 / 3.0).abs() <= 8.0 * f64::EPSILON);
+        // Repeated Newton evaluation must start from accepted history rather
+        // than integrating the preceding speculative candidate.
+        assert_eq!(
+            filter
+                .step_with_integration(1.0, backward_euler)
+                .expect("replacement Backward Euler candidate")
+                .to_bits(),
+            first.to_bits()
+        );
+        filter.commit();
+        assert_eq!(filter.checkpoint().older_state, vec![0.0]);
+        assert!((filter.checkpoint().derivative[0] - 2.0 / 3.0).abs() <= 8.0 * f64::EPSILON);
+
+        let trap = trapezoidal(4.0);
+        let second = filter
+            .step_with_integration(2.0, trap)
+            .expect("trapezoidal candidate");
+        assert!((second - 0.8).abs() <= 16.0 * f64::EPSILON);
+        filter.commit();
+        let after_trap = filter.checkpoint();
+        assert!((after_trap.state[0] - 0.8).abs() <= 16.0 * f64::EPSILON);
+        assert!((after_trap.older_state[0] - 1.0 / 3.0).abs() <= 16.0 * f64::EPSILON);
+        assert!((after_trap.derivative[0] - 1.2).abs() <= 16.0 * f64::EPSILON);
+
+        let third = filter
+            .step_with_integration(3.0, gear2(3.0, 4.0, -1.0))
+            .expect("Gear-2 candidate");
+        assert!((third - 22.0 / 15.0).abs() <= 32.0 * f64::EPSILON);
+        filter.commit();
+        let after_gear = filter.checkpoint();
+        assert!((after_gear.state[0] - 22.0 / 15.0).abs() <= 32.0 * f64::EPSILON);
+        assert!((after_gear.older_state[0] - 0.8).abs() <= 16.0 * f64::EPSILON);
+        assert!((after_gear.derivative[0] - 23.0 / 15.0).abs() <= 32.0 * f64::EPSILON);
+    }
+
+    #[test]
+    fn generalized_input_gain_matches_each_companion_rule_and_is_read_only() {
+        let mut filter = StateSpaceFilter::integrator(1.0).expect("first-order low-pass");
+        filter
+            .set_initial_state(&[0.25])
+            .expect("matching initial state");
+
+        for (coefficients, expected) in [
+            (IntegrationCoefficients::backward_euler(0.5), 1.0 / 3.0),
+            (trapezoidal(4.0), 1.0 / 5.0),
+            (gear2(3.0, 4.0, -1.0), 1.0 / 4.0),
+        ] {
+            let before = filter.checkpoint();
+            let gain = filter
+                .transient_input_gain(coefficients)
+                .expect("finite companion-rule input gain");
+            assert!((gain - expected).abs() <= 8.0 * f64::EPSILON);
+
+            let epsilon = 1.0e-6;
+            let upper = filter
+                .step_with_integration(0.75 + epsilon, coefficients)
+                .expect("upper candidate");
+            let lower = filter
+                .step_with_integration(0.75 - epsilon, coefficients)
+                .expect("lower candidate");
+            assert!(((upper - lower) / (2.0 * epsilon) - gain).abs() <= 1.0e-9);
+            assert_eq!(filter.checkpoint(), before);
+        }
+    }
+
+    #[test]
+    fn failed_candidate_cannot_replace_multistep_history() {
+        let mut filter = StateSpaceFilter::integrator(1.0).expect("first-order low-pass");
+        filter
+            .set_initial_state(&[0.25])
+            .expect("matching initial state");
+        let accepted = filter.checkpoint();
+
+        filter
+            .step_with_integration(1.0, trapezoidal(4.0))
+            .expect("finite speculative candidate");
+        filter
+            .step_with_integration(f64::NAN, trapezoidal(4.0))
+            .expect_err("failed replacement must invalidate the candidate");
+        filter.commit();
+
+        assert_eq!(filter.checkpoint(), accepted);
     }
 
     #[test]

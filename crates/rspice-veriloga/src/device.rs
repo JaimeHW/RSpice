@@ -229,6 +229,7 @@ mod runtime_checkpoint_codec_tests {
     use super::{
         CheckpointWordEncoder, RUNTIME_CHECKPOINT_STATE_VERSION, VerilogADeviceCheckpoint,
     };
+    use crate::laplace::LaplaceCheckpoint;
     use crate::vm::{
         DelayCheckpoint, DelayConfiguration, PendingTransitionCheckpoint, SlewCheckpoint,
         TransitionCheckpoint, TransitionSegmentCheckpoint, VmAcceptedCheckpoint,
@@ -303,7 +304,11 @@ mod runtime_checkpoint_codec_tests {
                     },
                 ],
                 cross_detectors: Vec::new(),
-                laplace_filters: Vec::new(),
+                laplace_filters: vec![LaplaceCheckpoint {
+                    state: vec![-0.0, f64::MIN_POSITIVE],
+                    older_state: vec![1.25, -2.5],
+                    derivative: vec![3.0, -4.0],
+                }],
                 zi_filters: Vec::new(),
                 timer_event_bound: Some(4.0),
             },
@@ -363,6 +368,10 @@ mod runtime_checkpoint_codec_tests {
         assert_eq!(
             decoded.accepted.transition_filters[0].active,
             checkpoint.accepted.transition_filters[0].active
+        );
+        assert_eq!(
+            decoded.accepted.laplace_filters, checkpoint.accepted.laplace_filters,
+            "all accepted Laplace integration lanes must round-trip exactly"
         );
 
         let mut trailing = words;
@@ -615,6 +624,63 @@ mod runtime_checkpoint_codec_tests {
             VerilogADeviceCheckpoint::validate_legacy_v5_words(&malformed)
                 .expect_err("legacy v5 delay samples must remain fully validated")
                 .contains("delay sample 0 is not finite")
+        );
+    }
+
+    #[test]
+    fn legacy_v6_payload_is_validated_without_inventing_laplace_history() {
+        let checkpoint = checkpoint_with_slew_entries();
+        let words = checkpoint.to_legacy_v6_words_for_test();
+        VerilogADeviceCheckpoint::validate_legacy_v6_words(&words)
+            .expect("complete legacy v6 Laplace state validates");
+        assert!(
+            VerilogADeviceCheckpoint::from_words(
+                checkpoint.instance_name.clone(),
+                checkpoint.model_name.clone(),
+                checkpoint.source_digest.clone(),
+                checkpoint.shape_identity.clone(),
+                &words,
+            )
+            .expect_err("v6 cannot resume without older Laplace state and derivative history")
+            .contains("unsupported runtime Verilog-A state version 6")
+        );
+
+        let state_word = words
+            .windows(4)
+            .position(|window| {
+                window
+                    == [
+                        1, // one Laplace filter
+                        2, // two state values
+                        (-0.0_f64).to_bits(),
+                        f64::MIN_POSITIVE.to_bits(),
+                    ]
+            })
+            .expect("legacy Laplace state has a unique serialized prefix")
+            + 2;
+        let mut malformed = words;
+        malformed[state_word] = f64::NAN.to_bits();
+        assert!(
+            VerilogADeviceCheckpoint::validate_legacy_v6_words(&malformed)
+                .expect_err("legacy v6 Laplace state must remain fully validated")
+                .contains("Laplace filter 0 state contains a non-finite value")
+        );
+    }
+
+    #[test]
+    fn current_runtime_word_payload_rejects_inconsistent_laplace_history_lanes() {
+        let mut checkpoint = checkpoint_with_slew_entries();
+        checkpoint.accepted.laplace_filters[0].older_state.pop();
+        assert!(
+            VerilogADeviceCheckpoint::from_words(
+                checkpoint.instance_name.clone(),
+                checkpoint.model_name.clone(),
+                checkpoint.source_digest.clone(),
+                checkpoint.shape_identity.clone(),
+                &checkpoint.to_words(),
+            )
+            .expect_err("mismatched Laplace integration lanes must fail closed")
+            .contains("history lengths are 2/1/2")
         );
     }
 }
@@ -1031,7 +1097,7 @@ pub struct VerilogADevice {
     prev_discontinuity: bool,
 }
 
-pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 6;
+pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 7;
 
 /// Versioned accepted runtime state for one compiled Verilog-A instance.
 /// Compiled programs, topology, and solver caches are intentionally absent.
@@ -1146,6 +1212,10 @@ impl VerilogADeviceCheckpoint {
         encoder.word(self.accepted.laplace_filters.len() as u64);
         for state in &self.accepted.laplace_filters {
             encoder.floats(&state.state);
+            if state_version >= 7 {
+                encoder.floats(&state.older_state);
+                encoder.floats(&state.derivative);
+            }
         }
         encoder.word(self.accepted.zi_filters.len() as u64);
         for state in &self.accepted.zi_filters {
@@ -1375,11 +1445,52 @@ impl VerilogADeviceCheckpoint {
             });
         }
 
-        let laplace_count = decoder.length("Laplace filters", 1)?;
+        let laplace_has_exact_integration_history = state_version >= 7;
+        let laplace_count = decoder.length(
+            "Laplace filters",
+            if laplace_has_exact_integration_history {
+                3
+            } else {
+                1
+            },
+        )?;
         let mut laplace_filters = Vec::with_capacity(laplace_count);
         for index in 0..laplace_count {
+            let state = decoder.floats(&format!("Laplace filter {index} state"))?;
+            let older_state = if laplace_has_exact_integration_history {
+                decoder.floats(&format!("Laplace filter {index} older state"))?
+            } else {
+                Vec::new()
+            };
+            let derivative = if laplace_has_exact_integration_history {
+                decoder.floats(&format!("Laplace filter {index} derivative"))?
+            } else {
+                Vec::new()
+            };
+            if laplace_has_exact_integration_history
+                && (older_state.len() != state.len() || derivative.len() != state.len())
+            {
+                return Err(format!(
+                    "Laplace filter {index} history lengths are {}/{}/{}, expected three equal lanes",
+                    state.len(),
+                    older_state.len(),
+                    derivative.len()
+                ));
+            }
+            if state
+                .iter()
+                .chain(&older_state)
+                .chain(&derivative)
+                .any(|value| !value.is_finite())
+            {
+                return Err(format!(
+                    "Laplace filter {index} state contains a non-finite value"
+                ));
+            }
             laplace_filters.push(LaplaceCheckpoint {
-                state: decoder.floats(&format!("Laplace filter {index} state"))?,
+                state,
+                older_state,
+                derivative,
             });
         }
 
@@ -1586,6 +1697,22 @@ impl VerilogADeviceCheckpoint {
         .map(drop)
     }
 
+    /// Validate and consume a complete legacy version-6 runtime payload.
+    /// Version 6 retained only the most recent accepted Laplace state. It did
+    /// not preserve the older state or previous physical derivative required
+    /// by Gear-2 and trapezoidal integration, so it cannot be resumed exactly.
+    pub fn validate_legacy_v6_words(words: &[u64]) -> Result<(), String> {
+        Self::from_words_with_expected_version(
+            SmolStr::new_inline("legacy"),
+            SmolStr::new_inline("legacy"),
+            SmolStr::new_inline("legacy"),
+            SmolStr::new_inline("legacy"),
+            words,
+            6,
+        )
+        .map(drop)
+    }
+
     #[cfg(test)]
     fn to_legacy_v2_words_for_test(&self) -> Vec<u64> {
         self.to_words_with_format(2, false, false)
@@ -1604,6 +1731,11 @@ impl VerilogADeviceCheckpoint {
     #[cfg(test)]
     fn to_legacy_v5_words_for_test(&self) -> Vec<u64> {
         self.to_words_with_format(5, true, true)
+    }
+
+    #[cfg(test)]
+    fn to_legacy_v6_words_for_test(&self) -> Vec<u64> {
+        self.to_words_with_format(6, true, true)
     }
 
     pub fn retained_value_count(&self) -> usize {
