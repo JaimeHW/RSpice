@@ -274,22 +274,7 @@ fn decode_width(raw: &str, size: &str) -> Result<Option<u32>, String> {
 
 fn decode_digits(raw: &str, base: LiteralBase, digits: &str) -> Result<Vec<FourStateBit>, String> {
     let Some(bits_per_digit) = base.bits_per_digit() else {
-        // IEEE 1364-2005 section 3.5.1: a decimal literal that is not a plain
-        // number must be exactly one `x` or `z` digit, because a decimal digit
-        // string has no per-digit bit expansion to place the unknown into.
-        let mut characters = digits.chars();
-        let single = characters
-            .next()
-            .ok_or_else(|| format!("'{raw}' is missing digits after its base"))?;
-        if characters.next().is_some() {
-            return Err(format!(
-                "'{raw}' mixes an x/z digit with decimal digits; a decimal \
-                 four-state literal must be exactly one x or z digit"
-            ));
-        }
-        let bit = four_state_digit(single)
-            .ok_or_else(|| format!("'{raw}' contains a digit outside base 10"))?;
-        return Ok(vec![bit]);
+        return decode_decimal(raw, digits);
     };
 
     let width = (digits.len() as u64).saturating_mul(u64::from(bits_per_digit));
@@ -324,6 +309,60 @@ fn decode_digits(raw: &str, base: LiteralBase, digits: &str) -> Result<Vec<FourS
         }
     }
     Ok(bits)
+}
+
+/// Largest decimal literal this decoder materializes.
+///
+/// A decimal digit string is a number rather than a per-digit expansion, so
+/// decoding one means arithmetic, and arithmetic here is `u128`. Refusing past
+/// that is a stated boundary; guessing past it would be a wrong constant.
+const MAX_DECIMAL_LITERAL_BITS: u32 = 128;
+
+/// Decode a base-10 digit string, IEEE 1364-2005 section 3.5.1.
+///
+/// Two forms, and they cannot be mixed. Ordinarily the digits are a plain
+/// number, which is expanded to bits here and then padded or truncated to the
+/// declared width by [`resize`] like any other literal. The exception is a
+/// single `x` or `z` standing for the whole value: a decimal digit string has
+/// no per-digit bit expansion to place an unknown into, so the standard permits
+/// the unknown only as the entire digit string.
+///
+/// The plain-number form matters beyond `x`/`z` handling. It is what gives a
+/// `4'd9` a *declared width of four*: without it the literal fails to decode,
+/// and a caller that recovers a literal's size from its spelling has to fall
+/// back on the 32-bit unsized floor for every based decimal in a design.
+fn decode_decimal(raw: &str, digits: &str) -> Result<Vec<FourStateBit>, String> {
+    if let Some(unknown) = digits.chars().find_map(four_state_digit) {
+        if digits.chars().count() > 1 {
+            return Err(format!(
+                "'{raw}' mixes an x/z digit with decimal digits; a decimal \
+                 four-state literal must be exactly one x or z digit"
+            ));
+        }
+        return Ok(vec![unknown]);
+    }
+    if !digits.chars().all(|character| character.is_ascii_digit()) {
+        return Err(format!("'{raw}' contains a digit outside base 10"));
+    }
+    let value = digits.parse::<u128>().map_err(|_| {
+        format!(
+            "'{raw}' is a decimal literal beyond {MAX_DECIMAL_LITERAL_BITS} bits; \
+             this compiler materializes no wider decimal value"
+        )
+    })?;
+    // Most significant bit first, and never empty: a zero is one `0` bit, which
+    // `resize` then pads to the declared width.
+    let significant = MAX_DECIMAL_LITERAL_BITS - value.leading_zeros();
+    Ok((0..significant.max(1))
+        .rev()
+        .map(|index| {
+            if value >> index & 1 == 1 {
+                FourStateBit::One
+            } else {
+                FourStateBit::Zero
+            }
+        })
+        .collect())
 }
 
 const fn four_state_digit(character: char) -> Option<FourStateBit> {
@@ -418,6 +457,27 @@ mod tests {
         assert!(decoded.signed);
         assert_eq!(decoded.base, LiteralBase::Binary);
         assert_eq!(decoded.raw, "4'sb10x1");
+    }
+
+    /// IEEE 1364-2005 section 3.5.1: a based decimal literal is an ordinary
+    /// number, expanded to its declared width. This is what gives `4'd9` a
+    /// width of four rather than the 32-bit unsized floor a failed decode
+    /// leaves behind.
+    #[test]
+    fn based_decimal_literals_decode_to_their_declared_width() {
+        assert_eq!(spell("4'd9"), "1001");
+        assert_eq!(spell("4'd0"), "0000");
+        assert_eq!(spell("8'd255"), "11111111");
+        assert_eq!(spell("4'sd9"), "1001");
+        assert_eq!(decode("4'd9").expect("decodes").declared_width, Some(4));
+        assert!(decode("4'sd9").expect("decodes").signed);
+        assert!(!decode("4'd9").expect("decodes").signed);
+        // An unsized decimal takes the 32-bit floor.
+        let floored = decode("'d5").expect("decodes");
+        assert_eq!(floored.declared_width, None);
+        assert_eq!(floored.width(), UNSIZED_FOUR_STATE_WIDTH);
+        // Section 3.5.1 truncates from the left, so twenty in four bits is four.
+        assert_eq!(spell("4'd20"), "0100");
     }
 
     /// IEEE 1364-2005 section 3.5.1: a decimal four-state literal is exactly
