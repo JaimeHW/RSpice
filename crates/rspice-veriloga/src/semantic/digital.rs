@@ -227,8 +227,56 @@ pub struct AnalyzedContinuousAssign {
 // Analysis
 // ============================================================================
 
+/// A variable declared inside a process, in the block that declares it.
+///
+/// IEEE 1364-2005 section 9.8.1 gives a `begin`/`end` block its own
+/// declarative region, so a name declared there is not a module signal and
+/// does not collide with one — it shadows it for the extent of the block. The
+/// analyzer therefore resolves names against a stack of these before it
+/// consults the module's signals.
+#[derive(Debug, Clone)]
+pub struct AnalyzedProcessLocal {
+    pub name: SmolStr,
+    pub kind: ProcessLocalKind,
+    /// Packed range of a `reg`, `None` for a scalar or a non-vector type.
+    pub range: Option<VectorBounds>,
+    pub width: u32,
+    pub span: Span,
+}
+
+/// What a process-local declaration declared.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProcessLocalKind {
+    /// `reg [msb:lsb] name;`
+    Reg,
+    /// `integer name;` — IEEE 1364-2005 section 3.9 makes it 32 bits.
+    Integer,
+    /// `real name;`
+    Real,
+    /// `string name;`
+    String,
+}
+
+impl ProcessLocalKind {
+    pub const fn keyword(self) -> &'static str {
+        match self {
+            Self::Reg => "reg",
+            Self::Integer => "integer",
+            Self::Real => "real",
+            Self::String => "string",
+        }
+    }
+
+    /// Whether a bit or part select may name a bit of one.
+    const fn is_selectable(self) -> bool {
+        matches!(self, Self::Reg | Self::Integer)
+    }
+}
+
 /// Where a name resolves.
 enum Resolution {
+    /// A variable declared in an enclosing `begin`/`end` block.
+    ProcessLocal(AnalyzedProcessLocal),
     Digital(usize),
     Analog(SymbolKind),
     Undeclared,
@@ -463,7 +511,9 @@ impl SemanticAnalyzer {
             None => (None, false),
         };
 
+        self.digital_scopes.clear();
         self.check_digital_statement(&process.body, signals, index);
+        self.digital_scopes.clear();
 
         AnalyzedDigitalProcess {
             id: process.id,
@@ -542,9 +592,28 @@ impl SemanticAnalyzer {
     ) {
         match statement {
             DigitalStatement::Block(block) => {
+                let scope = self.collect_process_locals(block);
+                self.digital_scopes.push(scope);
+                // Initializers are checked inside the scope they belong to, so
+                // `integer i = 0, j = i;` resolves the way it reads.
+                for declaration in &block.variables {
+                    for item in &declaration.items {
+                        if let Some(init) = &item.init {
+                            self.check_digital_expression(init, signals, index);
+                        }
+                    }
+                }
+                for declaration in &block.digital_variables {
+                    for item in &declaration.items {
+                        if let Some(init) = &item.init {
+                            self.check_digital_expression(init, signals, index);
+                        }
+                    }
+                }
                 for inner in &block.statements {
                     self.check_digital_statement(inner, signals, index);
                 }
+                self.digital_scopes.pop();
             }
             DigitalStatement::BlockingAssign(assign)
             | DigitalStatement::NonblockingAssign(assign) => {
@@ -594,6 +663,99 @@ impl SemanticAnalyzer {
             }
             DigitalStatement::Null(_) => {}
         }
+    }
+
+    /// Resolve the declarations of one `begin`/`end` block into a scope.
+    ///
+    /// IEEE 1364-2005 section 9.8.1 gives the block its own declarative
+    /// region. A name declared here shadows a module signal of the same name
+    /// rather than colliding with it; a name declared twice in one region, or
+    /// in a region already inside another that declares it, is the collision.
+    fn collect_process_locals(&mut self, block: &DigitalBlock) -> Vec<AnalyzedProcessLocal> {
+        let mut scope: Vec<AnalyzedProcessLocal> = Vec::new();
+
+        for declaration in &block.variables {
+            let kind = match declaration.var_type {
+                VarType::Real => ProcessLocalKind::Real,
+                VarType::Integer => ProcessLocalKind::Integer,
+                VarType::String => ProcessLocalKind::String,
+            };
+            for item in &declaration.items {
+                if !item.dimensions.is_empty() {
+                    self.record_error_at(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "array dimensions on the process-local `{}` are not supported yet",
+                            item.name
+                        )),
+                        item.span,
+                    );
+                    continue;
+                }
+                self.push_process_local(
+                    &mut scope,
+                    AnalyzedProcessLocal {
+                        name: item.name.clone(),
+                        kind,
+                        range: None,
+                        // IEEE 1364-2005 section 3.9: an `integer` is 32 bits.
+                        // A `real` has no bit width, and says so with zero.
+                        width: u32::from(kind == ProcessLocalKind::Integer) * 32,
+                        span: item.span,
+                    },
+                );
+            }
+        }
+
+        for declaration in &block.digital_variables {
+            let range = self.resolve_vector_range(declaration.range.as_ref(), "reg");
+            for item in &declaration.items {
+                if !item.dimensions.is_empty() {
+                    self.record_error_at(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "unpacked array dimensions on the process-local `{}` are not \
+                             supported yet; declare a packed vector instead",
+                            item.name
+                        )),
+                        item.span,
+                    );
+                    continue;
+                }
+                self.push_process_local(
+                    &mut scope,
+                    AnalyzedProcessLocal {
+                        name: item.name.clone(),
+                        kind: ProcessLocalKind::Reg,
+                        range,
+                        width: range.map_or(1, VectorBounds::width),
+                        span: item.span,
+                    },
+                );
+            }
+        }
+
+        scope
+    }
+
+    fn push_process_local(
+        &mut self,
+        scope: &mut Vec<AnalyzedProcessLocal>,
+        local: AnalyzedProcessLocal,
+    ) {
+        let existing = scope
+            .iter()
+            .chain(self.digital_scopes.iter().flatten())
+            .find(|entry| entry.name == local.name);
+        if let Some(existing) = existing {
+            self.record_error_at(
+                SemanticErrorKind::DuplicateSymbol {
+                    name: local.name.clone(),
+                    first_defined: existing.span,
+                },
+                local.span,
+            );
+            return;
+        }
+        scope.push(local);
     }
 
     fn check_timing_control(
@@ -684,7 +846,23 @@ impl SemanticAnalyzer {
         index: &HashMap<SmolStr, usize>,
         procedural: bool,
     ) -> bool {
-        match Self::resolve_digital_name(name, index, &self.symbols) {
+        match self.resolve_digital_name(name, index) {
+            // A process-local is a variable of the process, so a procedural
+            // assignment writes it and a continuous one cannot reach it at all.
+            Resolution::ProcessLocal(local) => {
+                if !procedural {
+                    self.record_error_at(
+                        SemanticErrorKind::InvalidContribution(format!(
+                            "`{name}`, which is a process-local `{}`; a continuous `assign` \
+                             drives a net declared in the module",
+                            local.kind.keyword()
+                        )),
+                        span,
+                    );
+                    return false;
+                }
+                true
+            }
             Resolution::Digital(position) => {
                 let signal = &signals[position];
                 if procedural && !signal.class.is_variable() {
@@ -745,11 +923,29 @@ impl SemanticAnalyzer {
         signals: &[AnalyzedDigitalSignal],
         index: &HashMap<SmolStr, usize>,
     ) {
-        let Resolution::Digital(position) = Self::resolve_digital_name(name, index, &self.symbols)
-        else {
-            return;
+        let (range, kind) = match self.resolve_digital_name(name, index) {
+            Resolution::Digital(position) => (signals[position].range, None),
+            Resolution::ProcessLocal(local) => {
+                if !local.kind.is_selectable() {
+                    self.record_error_at(
+                        SemanticErrorKind::InvalidExpression(format!(
+                            "`{name}` is a process-local `{}`, which has no bits to select",
+                            local.kind.keyword()
+                        )),
+                        expression.span(),
+                    );
+                    return;
+                }
+                // IEEE 1364-2005 section 3.9 numbers an `integer`'s bits
+                // [31:0]; a `reg` uses the range it was declared with.
+                let range = local.range.or(match local.kind {
+                    ProcessLocalKind::Integer => Some(VectorBounds { msb: 31, lsb: 0 }),
+                    _ => None,
+                });
+                (range, Some(local.kind))
+            }
+            Resolution::Analog(_) | Resolution::Undeclared => return,
         };
-        let signal = &signals[position];
         // A non-constant index is checked at run time by a later wave; only a
         // constant one can be refused here.
         let Some(value) = self.eval_const_invariant(expression) else {
@@ -767,15 +963,21 @@ impl SemanticAnalyzer {
             return;
         }
         let selected = value as i64;
-        let inside = match signal.range {
+        let inside = match range {
             Some(bounds) => bounds.contains(selected),
             // A scalar signal has exactly one bit, numbered zero.
             None => selected == 0,
         };
         if !inside {
-            let declared = signal
-                .range
-                .map_or_else(|| "a scalar (1 bit)".to_string(), VectorBounds::spelling);
+            let declared = range.map_or_else(
+                || {
+                    kind.map_or_else(
+                        || "a scalar (1 bit)".to_string(),
+                        |kind| format!("a scalar `{}` (1 bit)", kind.keyword()),
+                    )
+                },
+                VectorBounds::spelling,
+            );
             self.record_error_at(
                 SemanticErrorKind::IndexOutOfBounds(format!(
                     "bit {selected} of `{name}`, which is declared {declared}"
@@ -825,7 +1027,7 @@ impl SemanticAnalyzer {
             Expression::Number(_) | Expression::StringLit(_) | Expression::NullArgument(_) => {}
             Expression::Identifier(identifier) => {
                 if matches!(
-                    Self::resolve_digital_name(&identifier.name, index, &self.symbols),
+                    self.resolve_digital_name(&identifier.name, index),
                     Resolution::Undeclared
                 ) {
                     self.record_error_at(
@@ -839,7 +1041,7 @@ impl SemanticAnalyzer {
             Expression::Digital(digital) => {
                 if let Some(name) = digital.base_name() {
                     if matches!(
-                        Self::resolve_digital_name(name, index, &self.symbols),
+                        self.resolve_digital_name(name, index),
                         Resolution::Undeclared
                     ) {
                         self.record_error_at(
@@ -857,7 +1059,7 @@ impl SemanticAnalyzer {
             }
             Expression::ArrayAccess(access) => {
                 if matches!(
-                    Self::resolve_digital_name(&access.array, index, &self.symbols),
+                    self.resolve_digital_name(&access.array, index),
                     Resolution::Undeclared
                 ) {
                     self.record_error_at(
@@ -964,15 +1166,23 @@ impl SemanticAnalyzer {
         }
     }
 
-    fn resolve_digital_name(
-        name: &SmolStr,
-        index: &HashMap<SmolStr, usize>,
-        symbols: &super::SymbolTable,
-    ) -> Resolution {
+    /// Where a name written inside a process resolves.
+    ///
+    /// Innermost declarative region first, per IEEE 1364-2005 section 9.8.1,
+    /// then the module's discrete-domain signals, then its continuous-domain
+    /// symbols. The order is the shadowing rule, and the lowering resolves in
+    /// the same order — a name that meant the local here and the signal there
+    /// would be two compilers.
+    fn resolve_digital_name(&self, name: &SmolStr, index: &HashMap<SmolStr, usize>) -> Resolution {
+        for scope in self.digital_scopes.iter().rev() {
+            if let Some(local) = scope.iter().find(|local| local.name == *name) {
+                return Resolution::ProcessLocal(local.clone());
+            }
+        }
         if let Some(position) = index.get(name) {
             return Resolution::Digital(*position);
         }
-        match symbols.lookup(name) {
+        match self.symbols.lookup(name) {
             Some(Symbol { kind, .. }) => Resolution::Analog(*kind),
             None => Resolution::Undeclared,
         }

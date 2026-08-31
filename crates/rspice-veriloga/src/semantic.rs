@@ -138,6 +138,15 @@ pub struct SemanticAnalyzer {
     /// code and span so a construct inside a statically unrolled loop is
     /// reported once per source site rather than once per iteration.
     warnings: Vec<SemanticWarning>,
+    /// Declarative regions of the digital process being analyzed, innermost
+    /// last (IEEE 1364-2005 section 9.8.1).
+    ///
+    /// Empty everywhere except inside one process's statement walk. It is a
+    /// stack rather than a parameter for the same reason `guard_stack` is: the
+    /// walk is recursive over a dozen statement and expression forms, and
+    /// threading a scope through every one of them would put the same argument
+    /// in every signature to be used by three.
+    digital_scopes: Vec<Vec<digital::AnalyzedProcessLocal>>,
 }
 
 /// How an event expression lowers into the dataflow representation
@@ -178,6 +187,7 @@ impl SemanticAnalyzer {
             task_vars: HashMap::new(),
             unfiltered_initial_step_guards: Vec::new(),
             warnings: Vec::new(),
+            digital_scopes: Vec::new(),
         }
     }
 
