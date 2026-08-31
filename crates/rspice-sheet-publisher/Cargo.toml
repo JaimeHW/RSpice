@@ -18,7 +18,7 @@ path = "src/main.rs"
 # not include a GPU renderer, a circuit solver, or a Verilog-A compiler, so
 # this tool links the shared model rather than the application that imports it.
 rspice-design-model = { workspace = true }
-base64 = "0.22"
+base64 = "0.23"
 clap.workspace = true
 zeroize = "1"
 

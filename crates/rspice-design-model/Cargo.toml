@@ -13,7 +13,7 @@ rust-version.workspace = true
 # The signed drawing-sheet package contract. Publishing and verification share
 # one implementation with the importer, so the offline publisher executable
 # links this crate instead of the GUI.
-base64 = "0.22"
+base64 = "0.23"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
