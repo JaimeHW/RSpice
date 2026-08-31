@@ -105,8 +105,12 @@ use super::{
 /// Version 27 persists exact accepted runtime Verilog-A `slew` catch-up
 /// corners so checkpoint resume cannot step over a rate-limit endpoint.
 /// Version 28 separates strong source, semantic-model, and accepted-state
-/// shape identities for generated models.
-const FORMAT_VERSION: u32 = 28;
+/// shape identities for generated models. Version 29 persists the arbitrary
+/// accepted runtime Verilog-A `transition` queue and
+/// active interruption origin required for exact corner scheduling. Version
+/// 30 persists whether each runtime Verilog-A `absdelay` site froze a
+/// fixed delay or a maximum-delay bound, including the exact accepted value.
+const FORMAT_VERSION: u32 = 30;
 const RUNTIME_VERILOGA_FORMAT_VERSION: u32 = 17;
 #[cfg(feature = "veriloga")]
 const RUNTIME_VERILOGA_SLEW_INITIALIZATION_FORMAT_VERSION: u32 = 23;
@@ -114,6 +118,10 @@ const RUNTIME_VERILOGA_SLEW_INITIALIZATION_FORMAT_VERSION: u32 = 23;
 const RUNTIME_VERILOGA_IDTMOD_COMMON_BRANCH_FORMAT_VERSION: u32 = 24;
 #[cfg(feature = "veriloga")]
 const RUNTIME_VERILOGA_SLEW_CORNER_FORMAT_VERSION: u32 = 27;
+#[cfg(feature = "veriloga")]
+const RUNTIME_VERILOGA_TRANSITION_QUEUE_FORMAT_VERSION: u32 = 29;
+#[cfg(feature = "veriloga")]
+const RUNTIME_VERILOGA_ABSDELAY_CONFIGURATION_FORMAT_VERSION: u32 = 30;
 const CONTROLLER_PHASE_FORMAT_VERSION: u32 = 18;
 const NATIVE_NONLINEAR_FORMAT_VERSION: u32 = 19;
 const ACCEPTED_JUNCTION_HISTORY_FORMAT_VERSION: u32 = 20;
@@ -2926,6 +2934,10 @@ fn read_runtime_veriloga_states(
             Some(2)
         } else if checkpoint_version < RUNTIME_VERILOGA_SLEW_CORNER_FORMAT_VERSION {
             Some(3)
+        } else if checkpoint_version < RUNTIME_VERILOGA_TRANSITION_QUEUE_FORMAT_VERSION {
+            Some(4)
+        } else if checkpoint_version < RUNTIME_VERILOGA_ABSDELAY_CONFIGURATION_FORMAT_VERSION {
+            Some(5)
         } else {
             None
         };
@@ -3011,6 +3023,8 @@ fn read_runtime_veriloga_states(
                 1 => VerilogADeviceCheckpoint::validate_legacy_v1_words(&words),
                 2 => VerilogADeviceCheckpoint::validate_legacy_v2_words(&words),
                 3 => VerilogADeviceCheckpoint::validate_legacy_v3_words(&words),
+                4 => VerilogADeviceCheckpoint::validate_legacy_v4_words(&words),
+                5 => VerilogADeviceCheckpoint::validate_legacy_v5_words(&words),
                 _ => unreachable!("known legacy runtime Verilog-A state version"),
             }
             .map_err(|error| {
@@ -3035,9 +3049,11 @@ fn read_runtime_veriloga_states(
     }
     // Runtime state v1 omitted slew initialization and v2 could not identify
     // the modulo branch shared by accepted `idtmod` history lanes, and v3
-    // omitted exact accepted `slew` catch-up corners. All remain fully
-    // parseable for diagnostics but cannot be promoted into exact current
-    // accepted state.
+    // omitted exact accepted `slew` catch-up corners. Version 4 retained only
+    // one transition target, not the accepted pending queue and interruption
+    // origin. Version 5 retained `absdelay` samples but not the frozen fixed
+    // delay or maximum-delay bound. All remain fully parseable for diagnostics
+    // but cannot be promoted into exact current accepted state.
     Ok((states, legacy_state_version.is_some() && count != 0))
 }
 
@@ -7830,6 +7846,13 @@ mod tests {
         }
     }
 
+    fn sample_without_generated_veriloga_state() -> TransientCheckpoint {
+        let mut checkpoint = sample();
+        checkpoint.generated_veriloga_state_available = false;
+        checkpoint.generated_veriloga_instance_states.clear();
+        checkpoint
+    }
+
     fn legacy_text(checkpoint: &TransientCheckpoint, version: u32) -> String {
         let text = checkpoint.to_text().replace(
             &format!("RSPICE-CHECKPOINT {FORMAT_VERSION}"),
@@ -8321,6 +8344,76 @@ mod tests {
             0, // Zi filters
             0, // optional timer-event bound
         ]
+    }
+
+    #[cfg(feature = "veriloga")]
+    fn runtime_veriloga_transition_words(state_version: u32, accepted_time: Value) -> Vec<u64> {
+        vec![
+            u64::from(state_version),
+            0, // previous discontinuity
+            accepted_time.to_bits(),
+            0,                 // variables
+            0,                 // previous state values
+            0,                 // older state values
+            0,                 // previous state derivatives
+            0,                 // state initialization flags
+            0,                 // delay buffers
+            1,                 // transition filters
+            1,                 // transition initialized
+            1.0_f64.to_bits(), // input
+            0.5_f64.to_bits(), // output
+            accepted_time.to_bits(),
+            1,                                  // active segment present
+            (accepted_time - 1.0e-7).to_bits(), // origin time
+            0.0_f64.to_bits(),                  // origin value
+            1.0_f64.to_bits(),                  // destination
+            (accepted_time + 1.0e-7).to_bits(), // end time
+            1,                                  // pending transitions
+            (accepted_time + 1.0).to_bits(),    // pending start
+            0.0_f64.to_bits(),                  // pending destination
+            0.25_f64.to_bits(),                 // rise
+            0.5_f64.to_bits(),                  // fall
+            0,                                  // slew filters
+            0,                                  // cross detectors
+            0,                                  // Laplace filters
+            0,                                  // Zi filters
+            0,                                  // optional timer-event bound
+        ]
+    }
+
+    #[cfg(feature = "veriloga")]
+    fn runtime_veriloga_absdelay_words(state_version: u32, accepted_time: Value) -> Vec<u64> {
+        let mut words = vec![
+            u64::from(state_version),
+            0, // previous discontinuity
+            accepted_time.to_bits(),
+            0, // variables
+            0, // previous state values
+            0, // older state values
+            0, // previous state derivatives
+            0, // state initialization flags
+            1, // delay buffers
+        ];
+        if state_version >= 6 {
+            words.extend([
+                2,                 // bounded-delay configuration
+                2.0_f64.to_bits(), // maximum delay
+            ]);
+        }
+        words.extend([
+            2, // accepted samples
+            0.0_f64.to_bits(),
+            1.0_f64.to_bits(),
+            accepted_time.to_bits(),
+            4.0_f64.to_bits(),
+            0, // transition filters
+            0, // slew filters
+            0, // cross detectors
+            0, // Laplace filters
+            0, // Zi filters
+            0, // optional timer-event bound
+        ]);
+        words
     }
 
     #[cfg(feature = "veriloga")]
@@ -9490,7 +9583,7 @@ mod tests {
 
     #[test]
     fn v17_runtime_veriloga_tail_parses_without_reinterpreting_controller_phase() {
-        let checkpoint = sample();
+        let checkpoint = sample_without_generated_veriloga_state();
         let legacy = TransientCheckpoint::from_text(&legacy_text(&checkpoint, 17))
             .expect("version-17 runtime Verilog-A checkpoint remains parseable");
 
@@ -9511,7 +9604,7 @@ mod tests {
     #[cfg(feature = "veriloga")]
     #[test]
     fn v22_legacy_runtime_veriloga_rows_are_validated_then_discarded() {
-        let checkpoint = sample();
+        let checkpoint = sample_without_generated_veriloga_state();
         let words = runtime_veriloga_slew_words(1, checkpoint.time, None);
         let fixture = replace_empty_runtime_veriloga_tail(legacy_text(&checkpoint, 22), 1, &words);
 
@@ -9541,7 +9634,7 @@ mod tests {
     #[cfg(feature = "veriloga")]
     #[test]
     fn v23_runtime_veriloga_rows_are_validated_then_discarded() {
-        let checkpoint = sample();
+        let checkpoint = sample_without_generated_veriloga_state();
         let words = runtime_veriloga_idtmod_words(2, checkpoint.time);
         let fixture = replace_empty_runtime_veriloga_tail(legacy_text(&checkpoint, 23), 2, &words);
 
@@ -9557,13 +9650,18 @@ mod tests {
     #[cfg(feature = "veriloga")]
     #[test]
     fn runtime_veriloga_checkpoint_versions_cannot_cross_history_contracts() {
-        let checkpoint = sample();
+        let checkpoint = sample_without_generated_veriloga_state();
         for (outer_version, inner_version, expected) in [
             (23, 1, "expected legacy version 2"),
             (23, 3, "expected legacy version 2"),
             (24, 2, "expected legacy version 3"),
             (26, 4, "expected legacy version 3"),
-            (27, 3, "unsupported runtime Verilog-A state version 3"),
+            (27, 3, "expected legacy version 4"),
+            (27, 5, "expected legacy version 4"),
+            (28, 5, "expected legacy version 4"),
+            (29, 4, "expected legacy version 5"),
+            (29, 6, "expected legacy version 5"),
+            (30, 5, "unsupported runtime Verilog-A state version 5"),
         ] {
             let words = runtime_veriloga_idtmod_words(inner_version, checkpoint.time);
             let fixture = replace_empty_runtime_veriloga_tail(
@@ -9583,7 +9681,7 @@ mod tests {
     #[cfg(feature = "veriloga")]
     #[test]
     fn v26_runtime_veriloga_rows_without_slew_corners_are_validated_then_discarded() {
-        let checkpoint = sample();
+        let checkpoint = sample_without_generated_veriloga_state();
         let words = runtime_veriloga_idtmod_words(3, checkpoint.time);
         let fixture = replace_empty_runtime_veriloga_tail(legacy_text(&checkpoint, 26), 3, &words);
 
@@ -9591,6 +9689,53 @@ mod tests {
             .expect("v26 runtime Verilog-A v3 payload remains parseable");
         assert!(!restored.runtime_veriloga_state_available);
         assert!(restored.runtime_veriloga_instance_states.is_empty());
+    }
+
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn v27_and_v28_runtime_veriloga_rows_without_transition_queues_are_discarded() {
+        let checkpoint = sample_without_generated_veriloga_state();
+        let words = runtime_veriloga_idtmod_words(4, checkpoint.time);
+        for outer_version in [27, 28] {
+            let fixture = replace_empty_runtime_veriloga_tail(
+                legacy_text(&checkpoint, outer_version),
+                4,
+                &words,
+            );
+
+            let restored = TransientCheckpoint::from_text(&fixture).unwrap_or_else(|error| {
+                panic!(
+                    "v{outer_version} runtime Verilog-A v4 payload must remain parseable: {error}"
+                )
+            });
+            assert!(!restored.runtime_veriloga_state_available);
+            assert!(restored.runtime_veriloga_instance_states.is_empty());
+        }
+    }
+
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn v29_runtime_veriloga_rows_without_absdelay_configuration_are_discarded() {
+        let checkpoint = sample_without_generated_veriloga_state();
+        let words = runtime_veriloga_absdelay_words(5, checkpoint.time);
+        let fixture = replace_empty_runtime_veriloga_tail(legacy_text(&checkpoint, 29), 5, &words);
+
+        let restored = TransientCheckpoint::from_text(&fixture)
+            .expect("v29 runtime Verilog-A v5 absdelay history remains parseable");
+        assert!(!restored.runtime_veriloga_state_available);
+        assert!(restored.runtime_veriloga_instance_states.is_empty());
+
+        let mut malformed_words = words;
+        malformed_words[10] = Value::NAN.to_bits();
+        let malformed =
+            replace_empty_runtime_veriloga_tail(legacy_text(&checkpoint, 29), 5, &malformed_words);
+        let error = TransientCheckpoint::from_text(&malformed)
+            .expect_err("legacy v5 absdelay history must remain fully validated");
+        assert!(
+            error.contains("legacy payload is invalid")
+                && error.contains("delay sample 0 is not finite"),
+            "unexpected error: {error}"
+        );
     }
 
     #[cfg(feature = "veriloga")]
@@ -9632,6 +9777,50 @@ mod tests {
         let state = &restored.runtime_veriloga_instance_states[0].accepted;
         assert_eq!(state.state_values_prev, vec![0.2]);
         assert_eq!(state.state_values_older, vec![-0.4]);
+        assert_eq!(restored.to_text(), fixture);
+    }
+
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn current_runtime_veriloga_transition_queue_round_trips_exactly() {
+        let checkpoint = sample();
+        let state_version = rspice_veriloga::device::RUNTIME_CHECKPOINT_STATE_VERSION;
+        let words = runtime_veriloga_transition_words(state_version, checkpoint.time);
+        let fixture =
+            replace_empty_runtime_veriloga_tail(checkpoint.to_text(), state_version, &words);
+
+        let restored = TransientCheckpoint::from_text(&fixture)
+            .expect("current transition queue history must parse");
+        assert!(restored.runtime_veriloga_state_available);
+        let transition = &restored.runtime_veriloga_instance_states[0]
+            .accepted
+            .transition_filters[0];
+        assert_eq!(transition.pending.len(), 1);
+        assert_eq!(transition.pending[0].start_time, checkpoint.time + 1.0);
+        assert_eq!(
+            transition.active.expect("active segment").end_time,
+            checkpoint.time + 1.0e-7
+        );
+        assert_eq!(restored.to_text(), fixture);
+    }
+
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn current_runtime_veriloga_absdelay_configuration_round_trips_exactly() {
+        let checkpoint = sample();
+        let state_version = rspice_veriloga::device::RUNTIME_CHECKPOINT_STATE_VERSION;
+        let words = runtime_veriloga_absdelay_words(state_version, checkpoint.time);
+        let fixture =
+            replace_empty_runtime_veriloga_tail(checkpoint.to_text(), state_version, &words);
+
+        let restored = TransientCheckpoint::from_text(&fixture)
+            .expect("current absdelay configuration and samples must parse");
+        assert!(restored.runtime_veriloga_state_available);
+        let delay = &restored.runtime_veriloga_instance_states[0]
+            .accepted
+            .delay_buffers[0];
+        assert!(delay.configuration.is_some());
+        assert_eq!(delay.samples, vec![(0.0, 1.0), (checkpoint.time, 4.0)]);
         assert_eq!(restored.to_text(), fixture);
     }
 

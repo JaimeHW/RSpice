@@ -352,6 +352,173 @@ endmodule
 }
 
 #[test]
+fn veriloga_transition_lands_on_exact_leading_and_trailing_corners() {
+    let model = write_model(
+        "transition_corners",
+        r#"
+`include "disciplines.vams"
+module va_transition_corners(p, n);
+    inout p, n;
+    electrical p, n;
+    analog V(p, n) <+ transition(
+        $abstime > 0.0 ? 1.0 : 0.0,
+        0.3e-6,
+        0.4e-6,
+        0.6e-6
+    );
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* Transition exact-corner scheduling\n\
+         X1 out 0 va_transition_corners\n\
+         .va \"{}\" va_transition_corners\n\
+         .end\n",
+        deck_path(&model)
+    );
+    let netlist = Netlist::parse(&deck).expect("parse transition-corner deck");
+    let result = Engine::new(SimulationConfig {
+        transient_initial_timestep: Some(0.2e-6),
+        locked_time_grid: Some(Arc::new(vec![0.0, 0.2e-6, 2.0e-6])),
+        ..SimulationConfig::default()
+    })
+    .run_tran(&netlist, 2.0e-6, 2.0e-6)
+    .expect("transition transient lands on both accepted corners");
+    let out = node_series(&result.node_names, &result.voltages, "out");
+
+    let leading_time = 0.5e-6;
+    let leading_index = result
+        .time
+        .iter()
+        .position(|time| (*time - leading_time).abs() <= 2.0e-18)
+        .unwrap_or_else(|| panic!("transition leading corner is missing: {:?}", result.time));
+    assert_eq!(out[leading_index].to_bits(), 0.0_f64.to_bits());
+
+    let trailing_time = 0.9e-6;
+    let trailing_index = result
+        .time
+        .iter()
+        .position(|time| (*time - trailing_time).abs() <= 2.0e-18)
+        .unwrap_or_else(|| panic!("transition trailing corner is missing: {:?}", result.time));
+    assert!((out[trailing_index] - 1.0).abs() < 1.0e-12, "{out:?}");
+    assert_eq!(result.time.last().copied(), Some(2.0e-6));
+    assert!(result.time.windows(2).all(|times| times[0] < times[1]));
+
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn veriloga_transition_cancels_later_queued_events_on_a_locked_grid() {
+    let model = write_model(
+        "transition_queue_cancel",
+        r#"
+`include "disciplines.vams"
+module va_transition_queue_cancel(p, n);
+    inout p, n;
+    electrical p, n;
+    real target;
+    analog begin
+        target = $abstime < 0.2e-6 ? 0.0
+               : $abstime < 0.4e-6 ? 1.0
+               : $abstime < 0.6e-6 ? 2.0
+               : 3.0;
+        V(p, n) <+ transition(
+            target,
+            $abstime < 0.6e-6 ? 1.0e-6 : 0.5e-6,
+            0.4e-6,
+            0.4e-6
+        );
+    end
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* Transition queue cancellation\n\
+         X1 out 0 va_transition_queue_cancel\n\
+         .va \"{}\" va_transition_queue_cancel\n\
+         .end\n",
+        deck_path(&model)
+    );
+    let netlist = Netlist::parse(&deck).expect("parse transition queue-cancel deck");
+    let result = Engine::new(SimulationConfig {
+        transient_initial_timestep: Some(0.2e-6),
+        locked_time_grid: Some(Arc::new(vec![0.0, 0.2e-6, 0.4e-6, 0.6e-6, 2.0e-6])),
+        ..SimulationConfig::default()
+    })
+    .run_tran(&netlist, 2.0e-6, 2.0e-6)
+    .expect("transition queue cancellation transient succeeds");
+    let out = node_series(&result.node_names, &result.voltages, "out");
+
+    let leading_index = result
+        .time
+        .iter()
+        .position(|time| (*time - 1.1e-6).abs() <= 2.0e-18)
+        .unwrap_or_else(|| panic!("replacement leading corner is missing: {:?}", result.time));
+    assert_eq!(out[leading_index].to_bits(), 0.0_f64.to_bits());
+    let trailing_index = result
+        .time
+        .iter()
+        .position(|time| (*time - 1.5e-6).abs() <= 2.0e-18)
+        .unwrap_or_else(|| panic!("replacement trailing corner is missing: {:?}", result.time));
+    assert!((out[trailing_index] - 3.0).abs() < 1.0e-12, "{out:?}");
+
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn veriloga_transition_interruption_preserves_lrm_slopes_on_a_locked_grid() {
+    let model = write_model(
+        "transition_interrupt",
+        r#"
+`include "disciplines.vams"
+module va_transition_interrupt(p, n);
+    inout p, n;
+    electrical p, n;
+    real target;
+    analog begin
+        target = $abstime < 0.2e-6 ? 0.0
+               : $abstime < 0.4e-6 ? 1.0
+               : $abstime < 0.5e-6 ? 2.0
+               : -1.0;
+        V(p, n) <+ transition(target, 0.0, 0.4e-6, 0.6e-6);
+    end
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* Transition LRM interruption slopes\n\
+         X1 out 0 va_transition_interrupt\n\
+         .va \"{}\" va_transition_interrupt\n\
+         .end\n",
+        deck_path(&model)
+    );
+    let netlist = Netlist::parse(&deck).expect("parse transition interruption deck");
+    let result = Engine::new(SimulationConfig {
+        transient_initial_timestep: Some(0.1e-6),
+        locked_time_grid: Some(Arc::new(vec![0.0, 0.2e-6, 0.4e-6, 0.5e-6, 2.0e-6])),
+        ..SimulationConfig::default()
+    })
+    .run_tran(&netlist, 2.0e-6, 2.0e-6)
+    .expect("transition interruption transient succeeds");
+    let out = node_series(&result.node_names, &result.voltages, "out");
+
+    for (time, expected) in [(0.4e-6, 0.5), (0.5e-6, 1.0), (0.9e-6, -1.0)] {
+        let index = result
+            .time
+            .iter()
+            .position(|actual| (*actual - time).abs() <= 2.0e-18)
+            .unwrap_or_else(|| panic!("interruption point {time} is missing: {:?}", result.time));
+        assert!(
+            (out[index] - expected).abs() < 1.0e-12,
+            "time={time} expected={expected} actual={} trace={out:?}",
+            out[index]
+        );
+    }
+
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
 fn veriloga_zi_iir_checkpoint_resume_is_bit_identical_on_and_between_edges() {
     let model = write_model(
         "zi_checkpoint",
