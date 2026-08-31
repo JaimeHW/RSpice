@@ -98,16 +98,23 @@ fn digital_declarations_resolve_their_shape() {
          \x20   integer plain;",
     ));
     let module = only_module(&analyzed);
-    let shapes: Vec<(&str, &str, bool, Option<(i64, i64)>, u32)> = module
+    let shapes: Vec<String> = module
         .digital
         .signals
         .iter()
         .map(|signal| {
-            (
-                signal.name.as_str(),
+            format!(
+                "{}{} {} {} width={}",
                 signal.class.keyword(),
-                signal.signedness.is_signed(),
-                signal.range.map(|range| (range.msb, range.lsb)),
+                if signal.signedness.is_signed() {
+                    " signed"
+                } else {
+                    ""
+                },
+                signal
+                    .range
+                    .map_or_else(|| "scalar".to_string(), |range| range.spelling()),
+                signal.name,
                 signal.width,
             )
         })
@@ -116,15 +123,15 @@ fn digital_declarations_resolve_their_shape() {
     assert_eq!(
         shapes,
         vec![
-            ("w", "wire", false, None, 1),
-            ("bus", "wire", false, Some((7, 0)), 8),
-            ("sbus", "wire", true, Some((15, 0)), 16),
-            ("q", "reg", false, None, 1),
-            ("nibble", "reg", false, Some((3, 0)), 4),
-            ("counter", "reg", true, Some((31, 0)), 32),
+            "wire scalar w width=1",
+            "wire [7:0] bus width=8",
+            "wire signed [15:0] sbus width=16",
+            "reg scalar q width=1",
+            "reg [3:0] nibble width=4",
+            "reg signed [31:0] counter width=32",
             // A descending range is a different declaration, not a
             // normalization of the ascending one.
-            ("reversed", "reg", false, Some((0, 7)), 8),
+            "reg [0:7] reversed width=8",
         ]
     );
     // `integer` keeps its continuous-domain declaration: IEEE 1364-2005
