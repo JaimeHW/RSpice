@@ -119,6 +119,27 @@ pub trait DigitalEnvironment {
     /// [`apply_deferred`] when the region it names drains.
     fn defer_update(&mut self, update: DigitalDeferredUpdate);
 
+    /// The real net's value right now (Verilog-AMS LRM 2.4 section 3.7).
+    ///
+    /// A second method rather than a widened return type on
+    /// [`read_signal`](Self::read_signal), because the caller always knows
+    /// which it wants: the node it is evaluating is either a
+    /// `DigitalSignalRead` or a `DigitalRealSignalRead`, and the plan settled
+    /// which at compile time. A union return would make every four-state
+    /// consumer unwrap a case the compiler already ruled out.
+    fn read_real_signal(&self, signal: DigitalSignalId) -> Option<f64>;
+
+    /// Accept one driver's contribution to a real net.
+    ///
+    /// The real twin of [`drive_signal`](Self::drive_signal), and it carries no
+    /// select: section 3.7 makes a `wreal` a real-valued connection with no
+    /// bits, so there is no partial drive of one to represent.
+    ///
+    /// How several contributions combine is the kernel's, exactly as IEEE
+    /// 1364-2005 table 4-1 is for a `wire`. The net's declaration says *which*
+    /// rule — the compiler's half — and the store applies it.
+    fn drive_real_signal(&mut self, drive: DigitalRealDrive);
+
     /// Accept one driver's contribution to a net.
     ///
     /// Deliberately *not* [`write_signal`](Self::write_signal), and deliberately
@@ -149,6 +170,22 @@ pub struct DigitalDrive {
     pub value: FourStateValue,
 }
 
+/// One driver's contribution to a real net, evaluated.
+///
+/// No target and no width: a `wreal` has no bits, so a driver of one drives all
+/// of it or none of it, and the driver identity is the whole of what the
+/// resolution needs to tell two contributions apart.
+///
+/// `PartialEq` and not `Eq`, because an `f64` is not `Eq` — and the missing
+/// reflexivity is a real property of the value rather than an inconvenience:
+/// resolution and change detection both compare these, and a NaN that compared
+/// equal to itself would be lying about which of the two it is.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DigitalRealDrive {
+    pub driver: DigitalDriverId,
+    pub value: f64,
+}
+
 /// A nonblocking write, evaluated but not yet applied.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DigitalDeferredUpdate {
@@ -169,16 +206,25 @@ pub struct DigitalDeferredUpdate {
 
 /// A value a process function computes.
 ///
-/// Three cases and no more, because a process function's type system has three:
+/// Four cases and no more, because a process function's type system has four:
 /// [`CfgValueType::FourState`](super::cfg::CfgValueType::FourState),
-/// [`Integer`](super::cfg::CfgValueType::Integer), and
+/// [`Integer`](super::cfg::CfgValueType::Integer),
+/// [`Real`](super::cfg::CfgValueType::Real) — which Verilog-AMS LRM 2.4 section
+/// 3.7's real net brought into the discrete domain — and
 /// [`Effect`](super::cfg::CfgValueType::Effect). The last is not data — it is a
 /// write's position in the instruction stream — so reading one is an error
 /// rather than a value.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `Eq` is gone with the arrival of [`Self::Real`], and deliberately not
+/// worked around: an `f64` is not `Eq`, and every comparison this type is used
+/// in — a resume state against a recompiled function, one drive against the
+/// last — wants IEEE 754's answer rather than a bit pattern's.
+#[derive(Debug, Clone, PartialEq)]
 pub enum DigitalScalar {
     FourState(FourStateValue),
     Integer(i32),
+    /// A real, as a `wreal` net or a process-local `real` holds one.
+    Real(f64),
     /// A write's ordering token. Carries no data and may not be read.
     Effect,
 }
@@ -188,7 +234,7 @@ pub enum DigitalScalar {
 // ============================================================================
 
 /// What running a process produced.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DigitalProcessOutcome {
     /// The process reached a [`CfgTerminator::Wait`] and stopped there.
     Suspended(DigitalSuspension),
@@ -204,7 +250,7 @@ pub enum DigitalProcessOutcome {
 }
 
 /// A suspended process: what it is waiting for, and how to start it again.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DigitalSuspension {
     wait: DigitalWaitRequest,
     resume: DigitalResumeState,
@@ -248,7 +294,7 @@ pub enum DigitalWaitRequest {
 /// or carried the wrong number of arguments would be a silently wrong
 /// resumption rather than a refused one. [`resume`] validates what it is given
 /// anyway — a state can outlive a recompilation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DigitalResumeState {
     process: DigitalProcessId,
     block: BlockId,
@@ -316,6 +362,16 @@ pub enum DigitalEvalError {
     ResumeBlockOutOfRange { block: BlockId, blocks: usize },
     /// A `#delay` operand that is not an integer.
     NonIntegerDelay(ValueId),
+    /// A four-state value reached an operator that computes on reals, or the
+    /// reverse.
+    ///
+    /// Refused rather than converted, for the reason Verilog-AMS LRM 2.4
+    /// section 3.7 gives: the standard's own conversion between a real and bits
+    /// is the explicit `$realtobits`/`$bitstoreal`, and a value holding `x` has
+    /// no real to become. The lowering refuses every mix it can see, so
+    /// reaching this means the plan and this interpreter disagree about a
+    /// node's type.
+    MixedValueDomains(ValueId),
     /// The process ran this many blocks without suspending or returning.
     StepLimitExceeded(usize),
 }
@@ -381,6 +437,13 @@ impl std::fmt::Display for DigitalEvalError {
             Self::NonIntegerDelay(value) => write!(
                 f,
                 "value {} is a delay operand but is not an integer",
+                usize::from(*value)
+            ),
+            Self::MixedValueDomains(value) => write!(
+                f,
+                "value {} mixes a real and a four-state operand in one operator, which \
+                 Verilog-AMS LRM 2.4 section 3.7 converts between only with an explicit \
+                 `$realtobits` or `$bitstoreal`",
                 usize::from(*value)
             ),
             Self::StepLimitExceeded(limit) => write!(
@@ -469,6 +532,39 @@ pub fn term_is_satisfied(
         Some(edge) => classify_edge(previous.bit(0), next.bit(0)) == Some(edge),
         None => previous != next,
     }
+}
+
+/// Whether a change of one real net satisfies one sensitivity term.
+///
+/// The real counterpart of [`term_is_satisfied`], and it answers a shorter
+/// question because the standard asks a shorter one. Verilog-AMS LRM 2.4
+/// section 3.7 gives a `wreal` a value and no bits; the event a `@(net)` term
+/// waits for is that value changing, and there is no edge to classify — the
+/// front end refuses `posedge` on a real rather than inventing a threshold, so
+/// an edge-qualified term here is a disagreement and is reported as
+/// unsatisfied rather than guessed at.
+///
+/// **Exact inequality, with no tolerance.** The event is a change of value, not
+/// a change large enough to matter: a model that ramps by 1e-18 per step has
+/// changed, and an epsilon here would silently stop waking the processes that
+/// said they wanted to know. Which also means a NaN never wakes anything by
+/// staying NaN, and always wakes on the transition into or out of one, both of
+/// which are what `!=` says.
+pub fn real_term_is_satisfied(term: &DigitalSensitivityTerm, previous: f64, next: f64) -> bool {
+    term.edge.is_none() && previous != next
+}
+
+/// Whether a change of one real net satisfies any term of a sensitivity list.
+pub fn any_real_term_is_satisfied(
+    terms: &[DigitalSensitivityTerm],
+    signal: DigitalSignalId,
+    previous: f64,
+    next: f64,
+) -> bool {
+    terms
+        .iter()
+        .filter(|term| term.signal == signal)
+        .any(|term| real_term_is_satisfied(term, previous, next))
 }
 
 /// Whether a change of `signal` satisfies any term of a sensitivity list.
@@ -833,6 +929,21 @@ impl<'a, E: DigitalEnvironment + ?Sized> Interpreter<'a, E> {
             DigitalScalar::Integer(value) => {
                 Ok(FourStateValue::from_u64(32, u64::from(value as u32)))
             }
+            // Not converted. Section 3.7's conversion is an explicit system
+            // task, and the lowering refuses every mix it can see, so a real
+            // arriving here is a disagreement rather than a program.
+            DigitalScalar::Real(_) => Err(DigitalEvalError::MixedValueDomains(id)),
+            DigitalScalar::Effect => Err(DigitalEvalError::EffectValueRead(id)),
+        }
+    }
+
+    /// Read a value as a real, and only as one.
+    fn real(&mut self, id: ValueId) -> Result<f64, DigitalEvalError> {
+        match self.read(id)? {
+            DigitalScalar::Real(value) => Ok(value),
+            DigitalScalar::FourState(_) | DigitalScalar::Integer(_) => {
+                Err(DigitalEvalError::MixedValueDomains(id))
+            }
             DigitalScalar::Effect => Err(DigitalEvalError::EffectValueRead(id)),
         }
     }
@@ -846,6 +957,10 @@ impl<'a, E: DigitalEnvironment + ?Sized> Interpreter<'a, E> {
                 .to_u64()
                 .and_then(|bits| i64::try_from(bits).ok())
                 .ok_or(DigitalEvalError::NonIntegerDelay(id)),
+            // A `#r` with a real operand would need section 3.9.2's rounding
+            // and a ruling on what a fractional time unit is; neither is this
+            // wave's, and a rounded delay is a schedule nobody wrote.
+            DigitalScalar::Real(_) => Err(DigitalEvalError::NonIntegerDelay(id)),
             DigitalScalar::Effect => Err(DigitalEvalError::EffectValueRead(id)),
         }
     }
@@ -867,6 +982,38 @@ impl<'a, E: DigitalEnvironment + ?Sized> Interpreter<'a, E> {
                     self.environment,
                     signal,
                 )?))
+            }
+            // A real constant is the analog body's leaf too, and is shared
+            // rather than duplicated: it reads nothing and means the same
+            // number in both halves of the language. A block parameter is
+            // shared for the same reason.
+            CfgValueKind::RealConstant(value) => Ok(DigitalScalar::Real(*value)),
+            CfgValueKind::DigitalRealSignalRead { signal } => {
+                let id = *signal;
+                // Asked of the plan first, so an id the plan does not declare
+                // reports as that rather than as an environment miss.
+                self.signal(id)?;
+                let value = self
+                    .environment
+                    .read_real_signal(id)
+                    .ok_or(DigitalEvalError::SignalUnavailable(id))?;
+                Ok(DigitalScalar::Real(value))
+            }
+            CfgValueKind::DigitalRealArithmetic { op, left, right } => {
+                let (op, left, right) = (*op, *left, *right);
+                let left = self.real(left)?;
+                let right = self.real(right)?;
+                Ok(DigitalScalar::Real(digital_value::real_arithmetic(
+                    op, left, right,
+                )))
+            }
+            CfgValueKind::DigitalRealCompare { op, left, right } => {
+                let (op, left, right) = (*op, *left, *right);
+                let left = self.real(left)?;
+                let right = self.real(right)?;
+                Ok(DigitalScalar::FourState(digital_value::real_compare(
+                    op, left, right,
+                )))
             }
             CfgValueKind::DigitalBitwise { op, left, right } => {
                 let (op, left, right) = (*op, *left, *right);
@@ -994,6 +1141,16 @@ impl<'a, E: DigitalEnvironment + ?Sized> Interpreter<'a, E> {
                 value,
             } => {
                 let (driver, target, value) = (*driver, target.clone(), *value);
+                // One write node for both domains. What the driven net carries
+                // is a property of the net, and the plan already recorded it —
+                // reading it here is what keeps `assign` one construct rather
+                // than two that could drift apart.
+                if self.signal(target.signal)?.kind.is_real() {
+                    let value = self.real(value)?;
+                    self.environment
+                        .drive_real_signal(DigitalRealDrive { driver, value });
+                    return Ok(DigitalScalar::Effect);
+                }
                 let value = self.four_state(value)?;
                 // Resized here for the same reason a nonblocking update is:
                 // section 5.2.1's width belongs to the assignment, and the

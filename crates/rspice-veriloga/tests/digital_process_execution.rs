@@ -17,8 +17,8 @@ use rspice_veriloga::canonical_ir::digital::{
 };
 use rspice_veriloga::canonical_ir::digital_eval::{
     DigitalDeferredUpdate, DigitalDrive, DigitalEnvironment, DigitalEvalError,
-    DigitalProcessOutcome, DigitalResumeState, DigitalSuspension, DigitalWaitRequest,
-    any_term_is_satisfied, apply_deferred, classify_edge, resume, start,
+    DigitalProcessOutcome, DigitalRealDrive, DigitalResumeState, DigitalSuspension,
+    DigitalWaitRequest, any_term_is_satisfied, apply_deferred, classify_edge, resume, start,
 };
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
 use rspice_veriloga::canonical_ir::ids::DigitalSignalId;
@@ -61,12 +61,18 @@ fn parse_value(spelling: &str) -> FourStateValue {
 /// event kernel's own.
 struct Store {
     values: Vec<FourStateValue>,
+    /// The value of every real net, in the same signal space. A four-state
+    /// signal's slot is never read; keeping one table per signal id rather than
+    /// a map means a signal has exactly one place its value can be.
+    reals: Vec<f64>,
     deferred: Vec<DigitalDeferredUpdate>,
     /// The latest contribution of each driver, which is what a resolver
     /// combines. Kept per driver rather than written into the net, because a
     /// net with two drivers has two contributions and storing one over the
     /// other is the bug the driver identity exists to prevent.
     driven: BTreeMap<DigitalDriverId, DigitalDrive>,
+    /// The same, for a real net's drivers.
+    driven_reals: BTreeMap<DigitalDriverId, DigitalRealDrive>,
 }
 
 impl DigitalEnvironment for Store {
@@ -84,6 +90,14 @@ impl DigitalEnvironment for Store {
 
     fn drive_signal(&mut self, drive: DigitalDrive) {
         self.driven.insert(drive.driver, drive);
+    }
+
+    fn read_real_signal(&self, signal: DigitalSignalId) -> Option<f64> {
+        self.reals.get(usize::from(signal)).copied()
+    }
+
+    fn drive_real_signal(&mut self, drive: DigitalRealDrive) {
+        self.driven_reals.insert(drive.driver, drive);
     }
 }
 
@@ -106,12 +120,18 @@ impl Harness {
             .iter()
             .map(|signal| FourStateValue::splat(signal.width, FourStateBit::Unknown))
             .collect();
+        // Verilog-AMS LRM 2.4 section 3.7: a `wreal` starts at zero, not at
+        // `z`, and that is stated as the *net's* initial value rather than as
+        // an absence of drivers.
+        let reals = vec![0.0; plan.signals.len()];
         Self {
             plan,
             store: Store {
                 values,
+                reals,
                 deferred: Vec::new(),
                 driven: BTreeMap::new(),
+                driven_reals: BTreeMap::new(),
             },
         }
     }
@@ -213,6 +233,38 @@ impl Harness {
 
     fn drive_count(&self) -> usize {
         self.store.driven.len()
+    }
+
+    /// Force a real net from outside, as a stimulus generator would.
+    fn set_real(&mut self, name: &str, value: f64) {
+        let id = self.signal(name);
+        assert!(
+            self.plan.signal(id).expect("declared").kind.is_real(),
+            "`{name}` is not a real net"
+        );
+        self.store.reals[usize::from(id)] = value;
+    }
+
+    fn get_real(&self, name: &str) -> f64 {
+        self.store.reals[usize::from(self.signal(name))]
+    }
+
+    /// Settle the single-driver real nets every driver contributed to.
+    ///
+    /// The same stand-in `resolve_drivers` is, and refusing for the same
+    /// reason: Verilog-AMS LRM 2.4 section 6.5.3 gives a `wreal` one driver,
+    /// and combining several is the kernel's fold rather than this harness's.
+    fn resolve_real_drivers(&mut self) {
+        let drives: Vec<DigitalRealDrive> = self.store.driven_reals.values().cloned().collect();
+        for drive in drives {
+            let count = self.plan.drivers_of(drive.driver.signal).count();
+            assert_eq!(
+                count, 1,
+                "multi-driver resolution belongs to the kernel; signal {:?} has {count} drivers",
+                drive.driver.signal
+            );
+            self.store.reals[usize::from(drive.driver.signal)] = drive.value;
+        }
     }
 }
 
@@ -1819,6 +1871,185 @@ fn case_inequality_is_the_exact_complement() {
 }
 
 // ===========================================================================
+// Real nets (Verilog-AMS LRM 2.4 section 3.7)
+// ===========================================================================
+
+/// A continuous assignment drives a real net with a real expression, and the
+/// value arrives as a real rather than as bits.
+///
+/// Section 3.7's own example is `assign wrstim = stim;`, a real driven onto a
+/// `wreal` by an ordinary continuous assignment.
+#[test]
+fn a_continuous_assignment_drives_a_real_net() {
+    let mut harness = Harness::new(
+        "    wreal vin, vout;\n\
+     \x20   assign vout = vin * 0.5 + 1.0;",
+    );
+    harness.set_real("vin", 3.0);
+    expect_suspended(harness.run());
+    harness.resolve_real_drivers();
+    assert_eq!(harness.get_real("vout"), 2.5);
+
+    harness.set_real("vin", -1.0);
+    expect_suspended(harness.run());
+    harness.resolve_real_drivers();
+    assert_eq!(harness.get_real("vout"), 0.5);
+}
+
+/// A process reads a `wreal` into a process-local `real`, compares it, and
+/// drives four-state bits from the answer — the shape of section 6.5.3's own
+/// `a2d` example, without a bit of conversion between the domains anywhere.
+#[test]
+fn a_process_reads_a_real_net_into_a_real_local() {
+    let mut harness = Harness::new(
+        "    wreal vin;\n\
+     \x20   reg [1:0] code;\n\
+     \x20   always @(vin) begin : convert\n\
+     \x20       real residue;\n\
+     \x20       residue = vin;\n\
+     \x20       if (residue > 0.5) code = 2'b11;\n\
+     \x20       else if (residue > 0.0) code = 2'b01;\n\
+     \x20       else code = 2'b00;\n\
+     \x20   end",
+    );
+    // An `always @(vin)` suspends at its top before running anything, so the
+    // first pass only reaches the wait; every reading after that is a
+    // resumption, which is what a value change on `vin` would cause.
+    let mut state = expect_suspended(harness.start(0)).into_parts().1;
+    for (input, expected) in [(0.75, "11"), (0.25, "01"), (-1.0, "00"), (0.5, "01")] {
+        harness.set_real("vin", input);
+        state = expect_suspended(harness.resume(0, &state)).into_parts().1;
+        assert_eq!(harness.get("code"), expected, "for {input}");
+    }
+}
+
+/// A bare real is a branch condition, IEEE 1364-2005 section 9.4's "nonzero
+/// known value" — and the test is exact, so `-0.0` is false and `1e-300` is
+/// true.
+#[test]
+fn a_real_is_a_condition_by_being_nonzero() {
+    let mut harness = Harness::new(
+        "    wreal level;\n\
+     \x20   reg live;\n\
+     \x20   always @(level) if (level) live = 1'b1; else live = 1'b0;",
+    );
+    let mut state = expect_suspended(harness.start(0)).into_parts().1;
+    for (input, expected) in [(0.0, "0"), (-0.0, "0"), (1e-300, "1"), (-2.5, "1")] {
+        harness.set_real("level", input);
+        state = expect_suspended(harness.resume(0, &state)).into_parts().1;
+        assert_eq!(harness.get("live"), expected, "for {input}");
+    }
+}
+
+/// A `wreal` is a net, so IEEE 1364-2005 section 6.2's rule applies to it
+/// unchanged: only a continuous driver writes one.
+#[test]
+fn a_procedural_assignment_to_a_real_net_is_refused() {
+    let error = VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir(&digital_module(
+            "    wreal vout;\n\
+         \x20   initial vout = 1.0;",
+        ))
+        .expect_err("a net is not procedurally assignable");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("`wreal`") && rendered.contains("section 6.2"),
+        "expected the section 6.2 refusal, got: {rendered}"
+    );
+}
+
+/// Section 6.5.3 permits one driver of a real-valued net, and the LRM defines
+/// no resolution for two — so a second is refused, and the refusal says which
+/// spellings do combine.
+#[test]
+fn a_second_driver_on_a_plain_wreal_is_refused() {
+    let error = VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir(&digital_module(
+            "    wreal a, b, bus;\n\
+         \x20   assign bus = a;\n\
+         \x20   assign bus = b;",
+        ))
+        .expect_err("section 6.5.3 permits one driver");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("section 6.5.3") && rendered.contains("wrealsum"),
+        "expected the arity refusal, got: {rendered}"
+    );
+}
+
+/// The resolved spellings admit what `wreal` refuses, and the plan records
+/// which resolution was named — the fold itself is the kernel's.
+#[test]
+fn a_resolved_real_net_admits_several_drivers() {
+    for keyword in ["wrealsum", "wrealavg", "wrealmin", "wrealmax"] {
+        let plan = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(&digital_module(&format!(
+                "    wreal a, b;\n\
+             \x20   {keyword} bus;\n\
+             \x20   assign bus = a;\n\
+             \x20   assign bus = b;"
+            )))
+            .unwrap_or_else(|error| panic!("`{keyword}` must lower: {error}"))
+            .digital;
+        let bus = plan
+            .signals
+            .iter()
+            .find(|signal| signal.name == "bus")
+            .expect("declared");
+        assert_eq!(bus.width, 0, "a real net has no bits");
+        assert_eq!(
+            bus.kind
+                .resolution()
+                .expect("a real net names a resolution")
+                .keyword(),
+            keyword
+        );
+        assert_eq!(plan.drivers_of(bus.id).count(), 2);
+    }
+}
+
+/// `posedge` on a real has no transition to classify, and a range on one
+/// declares an array of nets nothing downstream has. Both refuse by name.
+#[test]
+fn the_real_net_refusals_name_themselves() {
+    let cases = [
+        (
+            "    wreal level;\n\
+         \x20   reg q;\n\
+         \x20   always @(posedge level) q = 1'b1;",
+            "section 9.7.2",
+        ),
+        (
+            "    wreal [3:0] bus;\n\
+         \x20   reg q;\n\
+         \x20   initial q = 1'b0;",
+            "bus of real nets",
+        ),
+        (
+            "    wreal level;\n\
+         \x20   reg q;\n\
+         \x20   initial q = level[0];",
+            "no bits to select",
+        ),
+        (
+            "    wreal a, b, out;\n\
+         \x20   assign out = (a > b) ? a : b;",
+            "section 5.1.13",
+        ),
+    ];
+    for (section, expected) in cases {
+        let error = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(&digital_module(section))
+            .expect_err("the construct must be refused");
+        let rendered = error.to_string();
+        assert!(
+            rendered.contains(expected),
+            "expected `{expected}` to be named in: {rendered}"
+        );
+    }
+}
+
+// ===========================================================================
 // What still refuses
 // ===========================================================================
 
@@ -2400,12 +2631,15 @@ impl Design {
             .map(|signal| FourStateValue::splat(signal.width, FourStateBit::Unknown))
             .collect();
         let waits = vec![None; plan.processes.len()];
+        let reals = vec![0.0; plan.signals.len()];
         Self {
             plan,
             store: Store {
                 values,
+                reals,
                 deferred: Vec::new(),
                 driven: BTreeMap::new(),
+                driven_reals: BTreeMap::new(),
             },
             waits,
         }
