@@ -1,0 +1,53 @@
+# RSPICE-VERILOG-STIMULUS 1
+#
+# ISCAS85 c17, exhaustively: five inputs, all 32 combinations in ascending
+# binary order. A five-input circuit is small enough that sampling would be a
+# choice needing justification and exhaustion is not, so the stimulus is the
+# complete truth table.
+
+module c17
+
+input N1 1
+input N2 1
+input N3 1
+input N6 1
+input N7 1
+
+output N22 1
+output N23 1
+
+step 10
+settle 5
+
+vector 0 0 0 0 0
+vector 0 0 0 0 1
+vector 0 0 0 1 0
+vector 0 0 0 1 1
+vector 0 0 1 0 0
+vector 0 0 1 0 1
+vector 0 0 1 1 0
+vector 0 0 1 1 1
+vector 0 1 0 0 0
+vector 0 1 0 0 1
+vector 0 1 0 1 0
+vector 0 1 0 1 1
+vector 0 1 1 0 0
+vector 0 1 1 0 1
+vector 0 1 1 1 0
+vector 0 1 1 1 1
+vector 1 0 0 0 0
+vector 1 0 0 0 1
+vector 1 0 0 1 0
+vector 1 0 0 1 1
+vector 1 0 1 0 0
+vector 1 0 1 0 1
+vector 1 0 1 1 0
+vector 1 0 1 1 1
+vector 1 1 0 0 0
+vector 1 1 0 0 1
+vector 1 1 0 1 0
+vector 1 1 0 1 1
+vector 1 1 1 0 0
+vector 1 1 1 0 1
+vector 1 1 1 1 0
+vector 1 1 1 1 1

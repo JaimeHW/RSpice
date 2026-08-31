@@ -39,6 +39,24 @@ by `crates/rspice-conformance/tests/execution_corpora.rs`:
 - `paranoia/` — the ngspice example decks. Bought for dialect breadth: CIDER,
   `.measure`, transient noise, XSPICE, Monte Carlo, memristors. Modified BSD.
 
+**Live-oracle corpora** carry no reference output and never will, because the
+oracle is a program rather than a file:
+
+- `verilog/` — digital Verilog run through Icarus Verilog and Verilator, two
+  simulators that share no code with RSpice or with each other. RSpice-authored
+  rather than vendored, and chosen for language coverage rather than scale: one
+  case per wave-1 construct the digital front end has to implement. Run by
+  `crates/rspice-conformance/tests/verilog_oracles.rs`.
+
+  The difference that matters is what a green run means when the oracles are
+  absent, which today they always are — neither binary is on CI. The suite then
+  checks corpus integrity, testbench generation, and its own comparator, and
+  reports the absence; it does **not** claim the circuits are right. Set
+  `RSPICE_VERILOG_ORACLES_REQUIRED=1` to turn that absence into a failure, which
+  is what CI should do once the binaries are installed. Nothing in RSpice
+  executes digital Verilog yet, so the RSpice arm of the comparison is present
+  and refuses by name until W2.3 lands.
+
 Do not mix validation manifests, generated outputs, or harness sidecars between
 corpora. Add a corpus-specific README or vendoring note when importing another
 upstream suite, and record excluded material there — `paranoia/` in particular

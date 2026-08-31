@@ -1,0 +1,51 @@
+# RSPICE-VERILOG-STIMULUS 1
+#
+# Icarus-only; see the header of `xz_propagation.v` for why Verilator cannot be
+# held to this case and why every other entry in the corpus avoids needing it.
+#
+# The rows are grouped by the mechanism each one interrogates:
+#
+#   a = 0 then 1                 -- the controlling-value rule for AND and OR.
+#                                   `and_x` must be 0 then x; `or_x` x then 1.
+#   drive_hi/drive_lo 00,10,01,11 -- the tristate net through all four driver
+#                                   states, ending on contention, which must
+#                                   resolve to x rather than to either driver.
+#   sel_in                       -- one selector per `casez` arm plus one that
+#                                   reaches the default, walking the wildcard
+#                                   from the top bit down.
+#
+# `eq_case` and `eq_log` are constant across every row by construction: `===`
+# against x is always 1, `==` against x is always x. They are here as a standing
+# check that the two comparison operators have not been unified.
+
+module xz_propagation
+
+input a 1
+input drive_hi 1
+input drive_lo 1
+input sel_in 4
+
+output and_x 1
+output or_x 1
+output bus 1
+output eq_case 1
+output eq_log 1
+output sel 2
+
+step 10
+settle 5
+
+# Controlling-value rule, with the bus left undriven.
+vector 0 0 0 0000
+vector 1 0 0 0000
+# Tristate net: undriven, high, low, contended.
+vector 0 0 0 1000
+vector 0 1 0 0100
+vector 0 0 1 0010
+vector 0 1 1 0001
+# casez wildcards, one selector per arm.
+vector 1 0 0 1111
+vector 1 0 0 0111
+vector 1 0 0 0011
+vector 1 0 0 0001
+vector 1 0 0 0000

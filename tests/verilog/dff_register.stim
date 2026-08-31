@@ -1,0 +1,47 @@
+# RSPICE-VERILOG-STIMULUS 1
+#
+# `clock clk 5` with `step 10` gives exactly one rising edge per vector, at
+# t = k*10 + 5. `settle 8` samples after that edge but before the next vector is
+# applied, so every observation is the post-edge state of the register.
+#
+# The sequence walks the three mechanisms in turn: assert reset, release it and
+# load with the enable high, hold with the enable low while `d` changes
+# underneath (the register must not follow it), then assert reset again while
+# the register holds a non-zero value so the asynchronous path is exercised from
+# a state it can actually be seen to clear.
+#
+# `q_delayed` trails `q` by exactly one clock throughout. That is the assertion
+# the whole case exists for: both registers are written non-blocking from the
+# same edge, so `q_delayed` samples the pre-edge `q`.
+
+module dff_register
+
+input clk 1
+input rst 1
+input en 1
+input d 4
+
+output q 4
+output q_delayed 4
+
+clock clk 5
+step 10
+settle 8
+
+# Reset asserted: both registers clear.
+vector 1 0 0000
+vector 1 0 1111
+# Reset released, enable high: q follows d, q_delayed trails by one clock.
+vector 0 1 0001
+vector 0 1 0010
+vector 0 1 0100
+vector 0 1 1000
+# Enable low: q holds while d keeps changing.
+vector 0 0 0011
+vector 0 0 0110
+# Enable high again from a held state.
+vector 0 1 1010
+vector 0 1 0101
+# Asynchronous reset from a non-zero state.
+vector 1 1 1111
+vector 0 1 1100

@@ -1,0 +1,43 @@
+# RSPICE-VERILOG-STIMULUS 1
+#
+# 2^17 combinations is too many to exhaust, so these vectors are chosen rather
+# than sampled, and each one is chosen to make the carry chain do something
+# specific:
+#
+#   zero + zero            -- the identity, and the only row where a stuck-at-1
+#                             carry is visible in isolation
+#   ff + 01                -- a carry that ripples the full eight stages and
+#                             falls out of cout; the deepest path in the design
+#   ff + ff, cin=1         -- every stage generating and propagating at once
+#   55 + aa                -- alternating bits, no carry generated anywhere
+#   aa + 55, cin=1         -- the same pattern with the carry injected at the
+#                             bottom, which then ripples the whole way
+#   0f + 01                -- a carry that ripples exactly four stages and stops
+#   80 + 80                -- carry generated only in the top stage
+#   7f + 01                -- the signed-overflow boundary
+#
+# Inputs are listed most-significant bit first, matching the [WIDTH-1:0]
+# declaration.
+
+module ripple_adder
+
+input a 8
+input b 8
+input cin 1
+
+output sum 8
+output cout 1
+
+step 10
+settle 5
+
+vector 00000000 00000000 0
+vector 11111111 00000001 0
+vector 11111111 11111111 1
+vector 01010101 10101010 0
+vector 10101010 01010101 1
+vector 00001111 00000001 0
+vector 10000000 10000000 0
+vector 01111111 00000001 0
+vector 00000000 00000000 1
+vector 11111111 00000000 1

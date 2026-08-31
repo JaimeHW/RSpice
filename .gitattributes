@@ -21,6 +21,14 @@ tests/xyce/** text=auto eol=crlf
 # CRLF materialization rule above.
 tests/xyce/RSPICE-UPSTREAM-EXCLUSIONS.tsv text eol=lf
 
+# The Verilog oracle corpus is handed verbatim to Icarus Verilog and Verilator
+# and will be digested alongside captured oracle sidecars, the way the ngspice
+# corpora record a BLAKE3 of their expanded input. Pinned to LF at import
+# rather than after the first digest mismatch: `tests/` is otherwise unpinned,
+# so these files would materialize CRLF on a Windows checkout and LF on Linux
+# CI, and the two would disagree about bytes that are supposed to be identical.
+tests/verilog/** text eol=lf
+
 # Publication-contract golden fixtures are compared byte-for-byte against the
 # canonical serializer's LF output and include_str!'d into the test binary, so
 # CRLF materialization on Windows would fail the byte-exactness gate.

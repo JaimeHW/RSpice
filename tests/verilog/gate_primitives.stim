@@ -1,0 +1,43 @@
+# RSPICE-VERILOG-STIMULUS 1
+#
+# Three inputs, so the eight-row truth table is exhaustive. Every output is a
+# function of (a, b, c) alone, which makes each row an independent assertion
+# about eighteen operators at once.
+
+module gate_primitives
+
+input a 1
+input b 1
+input c 1
+
+output g_and 1
+output g_or 1
+output g_nand 1
+output g_nor 1
+output g_xor 1
+output g_xnor 1
+output g_buf 1
+output g_not 1
+output o_and 1
+output o_or 1
+output o_nand 1
+output o_nor 1
+output o_xor 1
+output o_xnor 1
+output o_buf 1
+output o_not 1
+output wide 4
+output mux 1
+output reduce 1
+
+step 10
+settle 5
+
+vector 0 0 0
+vector 0 0 1
+vector 0 1 0
+vector 0 1 1
+vector 1 0 0
+vector 1 0 1
+vector 1 1 0
+vector 1 1 1

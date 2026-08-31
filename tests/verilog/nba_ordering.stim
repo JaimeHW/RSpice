@@ -1,0 +1,47 @@
+# RSPICE-VERILOG-STIMULUS 1
+#
+# One rising edge per vector, sampled after it. Reset is synchronous in every
+# block here, so the first two vectors establish a known state through the clock
+# rather than around it.
+#
+# `din` then walks a sequence of values that are distinct from each other and
+# from zero, which is what makes the pipeline depths readable straight off the
+# trace: after reset is released, `bl2` shows the current `din` on the very next
+# observation while `nb2` still shows zero and does not show that same value
+# until two observations later. If those two columns ever move together, the
+# scheduler is applying non-blocking updates eagerly.
+#
+# `din` is held constant for the last four vectors so both pipelines drain to
+# the same steady value. A case that ends mid-flight cannot distinguish "the
+# depths are wrong" from "the trace stopped early".
+#
+# `swap_x`/`swap_y` alternate on every clock throughout, independent of `din`.
+
+module nba_ordering
+
+input clk 1
+input rst 1
+input din 4
+
+output nb2 4
+output bl2 4
+output swap_x 4
+output swap_y 4
+
+clock clk 5
+step 10
+settle 8
+
+# Synchronous reset, held two clocks.
+vector 1 0000
+vector 1 0000
+# Four distinct values walk the pipelines.
+vector 0 0001
+vector 0 0010
+vector 0 0100
+vector 0 1000
+# Hold, so both pipelines drain to the same steady value.
+vector 0 1111
+vector 0 1111
+vector 0 1111
+vector 0 1111

@@ -1,0 +1,29 @@
+# Verilog oracle corpus: which independent simulators each case may be
+# compared against.
+#
+#   <corpus-relative .v path>\t<oracles>\t<note>
+#
+# `oracles` is a comma-separated subset of: iverilog, verilator
+#
+# Why the column exists. Icarus Verilog is a four-state event simulator and
+# Verilator is a two-state cycle simulator, and that is a design decision on
+# Verilator's part rather than a deficiency. Where a case's answer depends on X
+# or Z the two tools cannot agree, and demanding that they do would make the
+# harness report a defect that is not there. Listing the applicable oracles per
+# case keeps the oracle-vs-oracle self-check meaningful: a disagreement between
+# two listed oracles is always a real finding.
+#
+# Every case is deliberately two-state-clean except `xz_propagation.v`, which
+# exists precisely to cover the four-state rules and is therefore Icarus-only.
+#
+# There is no RSpice contract column yet. Nothing in RSpice executes digital
+# Verilog, so every case would carry the same value and the column would be
+# scaffolding. It arrives with the CFG interpreter (W2.3), at the same commit
+# that removes the harness's `RspiceExecutionUnimplemented` refusal.
+
+c17.v	iverilog,verilator	ISCAS85 c17, exhaustive truth table over five inputs
+gate_primitives.v	iverilog,verilator	all eight gate primitives against their operator spellings
+ripple_adder.v	iverilog,verilator	8-bit carry chain, generate-unrolled from full adders
+dff_register.v	iverilog,verilator	posedge clocking, asynchronous reset, non-blocking vector update
+nba_ordering.v	iverilog,verilator	blocking versus non-blocking, arranged to be defined rather than raced
+xz_propagation.v	iverilog	four-state rules; Verilator is two-state by design and is excluded
