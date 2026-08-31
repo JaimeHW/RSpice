@@ -36,7 +36,7 @@ use std::fs;
 /// size; this tells you *which* language mechanism stopped being covered, which
 /// is the question anyone reading the failure actually has. Removing a case is
 /// allowed — editing this list is how you say you meant to.
-const REQUIRED_CASES: [(&str, &str); 15] = [
+const REQUIRED_CASES: [(&str, &str); 16] = [
     ("c17", "structural gate netlist (ISCAS85)"),
     (
         "gate_primitives",
@@ -78,6 +78,10 @@ const REQUIRED_CASES: [(&str, &str); 15] = [
     (
         "width_forms",
         "context-determined expression width, IEEE 1364-2005 section 5.4.1",
+    ),
+    (
+        "signed_forms",
+        "signed expression semantics, IEEE 1364-2005 section 5.4.2",
     ),
 ];
 
@@ -609,7 +613,26 @@ type Expected = &'static [&'static str];
 ///   one-bit comparison zero-extended to the target and then inverted, in that
 ///   order. `cout` and `s` are the fifth bit and the low four bits of `a + b`,
 ///   the five-bit sum the concatenation target asks for.
-const EXPECTED: [(&str, Expected); 15] = [
+///
+/// * **signed_forms** — eleven closed forms, each a rule of IEEE 1364-2005
+///   section 5.4.2, evaluated per vector on the two readings of the same four
+///   bits and written back in binary. `a` and `b` are read as two's complement
+///   in [-8, 7] and `u` as a magnitude in [0, 15]. `ext` is `a` in eight bits
+///   with its sign bit repeated and `zext` is `u` in eight bits with zeros,
+///   which is the whole difference the qualifier makes at an assignment.
+///   `cmp` is `a < b` on the signed numbers; `mix` is `a < u` on the
+///   magnitudes, because one unsigned operand makes the comparison unsigned
+///   however `a` was declared. `quot` is `a / b` truncated toward zero and
+///   `rem` is `a - b * quot`, the modulus taking the sign of its first
+///   operand; both are written back in four-bit two's complement. `asr` is `a`
+///   with its sign bit shifted in once and `lsr` is `a` with a zero shifted in
+///   once. `sum` is `a + b` on the signed numbers in eight bits, while
+///   `poison` is `a + u` and `part` is `a + b[3:0]` on the *magnitudes* — the
+///   first because `u` is unsigned and the second because a part-select is
+///   unsigned whatever it selects. Those last two are the rows a front end
+///   fails if it extends each operand by its own declaration rather than by
+///   the expression's.
+const EXPECTED: [(&str, Expected); 16] = [
     (
         "c17",
         &[
@@ -907,6 +930,56 @@ const EXPECTED: [(&str, Expected); 15] = [
             // eight-bit comparison.
             "prod=00000000 sum5=01001 shifted=00000000 mixed=00000000 cmp=0 \
              inverted=11111111 cout=0 s=1001",
+        ],
+    ),
+    (
+        "signed_forms",
+        &[
+            // a=0 (0) b=1 (1) u=0. Everything at rest, and the one row where
+            // the signed and unsigned readings of `a` agree — 0 is 0 either
+            // way — so it fixes the shape without exercising the difference.
+            "ext=00000000 zext=00000000 cmp=1 mix=0 quot=0000 rem=0000 \
+             asr=0000 lsr=0000 sum=00000001 poison=00000000 part=00000001",
+            // a=1111 (-1 / 15) b=1 u=1. The extension row: `ext` is all ones
+            // where an unsigned `a` would give 8'b00001111, and `zext` shows
+            // the fill the same assignment gives an unsigned operand. -1 < 1
+            // holds while 15 < 1 does not, which is `cmp` against `mix` on the
+            // same left-hand bits. -1/1 = -1 and -1%1 = 0; `>>>` keeps the
+            // sign and `>>` does not. `poison` is 15+1 = 16, the unsigned sum
+            // that one unsigned operand forces, where `sum` is -1+1 = 0.
+            "ext=11111111 zext=00000001 cmp=1 mix=0 quot=1111 rem=0000 \
+             asr=1111 lsr=0111 sum=00000000 poison=00010000 part=00010000",
+            // a=1001 (-7 / 9) b=2 u=3. The division row. -7/2 truncates toward
+            // zero to -3 (1101), not to the -4 a floor would give, and -7%2
+            // takes the sign of the first operand and is -1 (1111). `asr` is
+            // 1100 (-4) against `lsr`'s 0100 (4), the same shift on the same
+            // bits. sum = -7+2 = -5; poison = 9+3 = 12; part = 9+2 = 11,
+            // because b[3:0] is unsigned and unsigns the sum.
+            "ext=11111001 zext=00000011 cmp=1 mix=0 quot=1101 rem=1111 \
+             asr=1100 lsr=0100 sum=11111011 poison=00001100 part=00001011",
+            // a=7 b=1110 (-2 / 14) u=15. The comparison row: 7 < -2 is false
+            // while 7 < 15 is true, so `cmp` and `mix` disagree with the
+            // senses swapped from the second row. 7/-2 truncates to -3 and
+            // 7%-2 is +1 — the modulus follows the *first* operand's sign, not
+            // the divisor's. part = 7+14 = 21.
+            "ext=00000111 zext=00001111 cmp=0 mix=1 quot=1101 rem=0001 \
+             asr=0011 lsr=0011 sum=00000101 poison=00010110 part=00010101",
+            // a=1000 (-8 / 8) b=3 u=0. The most negative four-bit value, whose
+            // magnitude is not representable: -8/3 truncates to -2 and -8%3 is
+            // -2. `asr` is 1100 (-4) where `lsr` is 0100 (4).
+            "ext=11111000 zext=00000000 cmp=1 mix=0 quot=1110 rem=1110 \
+             asr=1100 lsr=0100 sum=11111011 poison=00001000 part=00001011",
+            // a=5 b=1111 (-1 / 15) u=8. Dividing by -1 negates: 5/-1 = -5
+            // (1011) and 5%-1 = 0. sum = 5-1 = 4; part = 5+15 = 20, the
+            // unsigned reading of the same `b`.
+            "ext=00000101 zext=00001000 cmp=0 mix=1 quot=1011 rem=0000 \
+             asr=0010 lsr=0010 sum=00000100 poison=00001101 part=00010100",
+            // a=b=1100 (-4 / 12) u=4. Equal operands: `<` is false on either
+            // reading, the quotient is 1 and the remainder 0. sum = -8, which
+            // is 11111000 sign-extended into eight bits; part = 12+12 = 24,
+            // the same addition read unsigned.
+            "ext=11111100 zext=00000100 cmp=0 mix=0 quot=0001 rem=0000 \
+             asr=1110 lsr=0110 sum=11111000 poison=00010000 part=00011000",
         ],
     ),
 ];

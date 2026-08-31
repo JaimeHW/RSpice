@@ -44,3 +44,4 @@ bus_forms.v	iverilog	two continuous drivers on one net; Verilator cannot arbitra
 edge_forms.v	iverilog	negedge beside posedge, and a register before its first write
 hier_forms.v	iverilog,verilator	ordered and named port connections, and both event-list separators
 width_forms.v	iverilog,verilator	context-determined expression width: every target wider than its operands
+signed_forms.v	iverilog,verilator	signed expression semantics: extension, comparison, division and >>> against their unsigned readings

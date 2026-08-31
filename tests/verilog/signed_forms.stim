@@ -1,0 +1,51 @@
+# RSPICE-VERILOG-STIMULUS 1
+#
+# Vectors chosen so that each output's rule is exercised where the signed and
+# unsigned readings of one bit pattern disagree:
+#
+#   * `a` at rest, then -1, which is the smallest value whose extension
+#     separates the two fills across all eight bits
+#   * `a` negative and odd (-7, 1001), where truncation toward zero and a
+#     floor division part company on `quot` and where `>>>` and `>>` differ in
+#     every bit they move
+#   * `a` positive against a negative `b`, so the signed comparison is false
+#     while the unsigned one on the same bits is true
+#   * `a` at the most negative value a four-bit signed register holds, -8,
+#     whose magnitude has no positive counterpart
+#   * `b` equal to -1, the divisor that turns a division into a negation
+#   * `a` equal to `b`, so `<` is false on both readings and `quot` is 1
+#
+# Every `b` is non-zero: division by zero is the unknown of section 4.1.5, and
+# an unknown is a value Verilator cannot arbitrate.
+#
+# The design is combinational, so there is no clock; each vector is applied and
+# settled before it is sampled.
+
+module signed_forms
+
+input a 4
+input b 4
+input u 4
+
+output ext 8
+output zext 8
+output cmp 1
+output mix 1
+output quot 4
+output rem 4
+output asr 4
+output lsr 4
+output sum 8
+output poison 8
+output part 8
+
+step 10
+settle 5
+
+vector 0000 0001 0000
+vector 1111 0001 0001
+vector 1001 0010 0011
+vector 0111 1110 1111
+vector 1000 0011 0000
+vector 0101 1111 1000
+vector 1100 1100 0100
