@@ -614,6 +614,12 @@ impl DeviceIR {
     pub fn from_analyzed(module: &AnalyzedModule) -> crate::error::CompileResult<Self> {
         use crate::expr_converter::{ConversionContext, ExprConverter};
 
+        // The bytecode backend's fail-closed boundary for digital content. It
+        // has no representation for a process, a net, or a continuous
+        // assignment, and building an IR from the analog half alone would
+        // produce a device missing the behavior the author wrote.
+        crate::semantic::reject_digital_content(module)?;
+
         if module
             .event_state_variables
             .iter()

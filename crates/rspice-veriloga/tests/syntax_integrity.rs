@@ -81,11 +81,14 @@ endmodule
     assert_eq!(model.num_terminals, 2);
 }
 
+/// A digital declaration that now parses is still not silently discarded: the
+/// refusal moved from the parser to the backend boundary, where the compiler
+/// would have to execute it.
 #[test]
 fn unsupported_keyword_module_items_are_not_silently_discarded() {
     assert_unsupported(
         &module_with_item("wire hidden;"),
-        "Verilog-AMS digital construct not yet supported: `wire`",
+        "Verilog-AMS digital construct `wire` has no executable form in this compiler yet",
     );
 }
 
@@ -118,22 +121,24 @@ fn module_with_statement(statement: &str) -> String {
     )
 }
 
-/// The digital half of Verilog-AMS is refused by name, at the keyword that
-/// opens the construct.
+/// The digital half of Verilog-AMS that this compiler still has no grammar for
+/// is refused by name, at the keyword that opens the construct.
 ///
 /// Before this pin, `always @(posedge clk)` reached the parser as an ordinary
 /// identifier and died as an unrecognized module item, blaming the wrong thing;
 /// several other digital keywords lexed but had no production at all. Every one
-/// of them now stops on itself with a construct-specific diagnostic.
+/// of them stops on itself with a construct-specific diagnostic.
+///
+/// The list shrinks as the digital front end grows. `always`, `initial`, `reg`,
+/// `wire`, and `assign` have module-item productions now and are pinned by
+/// `tests/digital_grammar.rs` instead — they parse, resolve, and are refused at
+/// the backend. They stay listed below in *statement* position, because a
+/// digital construct still cannot appear inside an `analog` block.
 #[test]
 fn verilog_ams_digital_constructs_are_refused_by_name() {
     // Declarations, in module-item position.
     for (keyword, item) in [
-        ("always", "always @(posedge clk) x = 1;"),
-        ("initial", "initial x = 1;"),
-        ("reg", "reg r;"),
         ("wreal", "wreal w;"),
-        ("wire", "wire hidden;"),
         ("wand", "wand w;"),
         ("wor", "wor w;"),
         ("tri", "tri t;"),
@@ -162,9 +167,13 @@ fn verilog_ams_digital_constructs_are_refused_by_name() {
         );
     }
 
-    // Procedural statements, inside the analog block.
+    // Procedural statements, inside the analog block. A digital construct has
+    // no meaning in continuous-time code, so these do not retreat with the
+    // module-item productions.
     for (keyword, statement) in [
         ("always", "always x = 1.0;"),
+        ("reg", "reg r;"),
+        ("wire", "wire w;"),
         ("wait", "wait (x) x = 1.0;"),
         ("casex", "casex (1) default: x = 1.0; endcase"),
         ("casez", "casez (1) default: x = 1.0; endcase"),

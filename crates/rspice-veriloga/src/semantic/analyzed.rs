@@ -1,6 +1,6 @@
 //! Public analyzed-output data shapes produced by the semantic analyzer.
 
-use super::SymbolTable;
+use super::{AnalyzedDigital, SymbolTable};
 use crate::ast::{Expression, ParamType, PortDirection, SourceFile, VarType};
 use crate::source::Span;
 use crate::types::{ParameterRange as TypedParameterRange, ValueType};
@@ -74,6 +74,13 @@ pub struct AnalyzedModule {
     /// Array variables: name -> contiguous element storage layout
     pub arrays: HashMap<SmolStr, AnalyzedArray>,
     pub symbol_table: SymbolTable,
+    /// Resolved discrete-domain (IEEE 1364) content.
+    ///
+    /// Empty for every continuous-domain model. When it is not, the module has
+    /// passed parse and semantic analysis and is refused at every executable
+    /// backend boundary, by name — see
+    /// [`crate::semantic::AnalyzedDigital::first_construct`].
+    pub digital: AnalyzedDigital,
 }
 
 /// One step of the analog block, with control flow intact.

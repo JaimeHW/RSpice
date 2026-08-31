@@ -996,6 +996,12 @@ impl VerilogACompiler {
         module: &semantic::AnalyzedModule,
         measurements: &mut metrics::MetricsRecorder,
     ) -> CompileResult<canonical_ir::CanonicalIrArtifact> {
+        // The canonical-IR backend's fail-closed boundary for digital content.
+        // HIR, MIR, the CFG, and every backend built on them describe a
+        // continuous-domain device; lowering only the analog half of a module
+        // that also has processes would emit exactly that device, silently
+        // short of what the author wrote.
+        semantic::reject_digital_content(module)?;
         let trace = compiler_phase_trace_enabled();
         let metadata = canonical_ir::CanonicalMetadata::for_source(source_package, source);
         measurements.checkpoint(PipelinePhase::HirLowering)?;

@@ -60,11 +60,20 @@ const NO_EFFECT_SYSTEM_TASK_CODE: &str = "VA-SEM-NO-EFFECT-SYSTEM-TASK";
 /// Diagnostic code for `posedge`/`negedge` lowered to an analog `cross`.
 const EDGE_EVENT_AS_CROSS_CODE: &str = "VA-SEM-EDGE-EVENT-AS-CROSS";
 
+/// Widest packed vector this front end will resolve.
+///
+/// Nothing materializes a bit per entry yet, but a declared width becomes an
+/// allocation the moment a later wave lowers one, and the bound belongs with
+/// the declaration that produced it.
+pub(crate) const MAX_DIGITAL_VECTOR_WIDTH: u32 = 65_536;
+
 mod analyzed;
+mod digital;
 mod elaboration;
 mod symbols;
 
 pub use analyzed::*;
+pub use digital::*;
 pub(crate) use elaboration::elaborate_executable_module;
 pub use symbols::*;
 
@@ -393,6 +402,7 @@ impl SemanticAnalyzer {
             ground_nodes: Vec::new(),
             arrays: HashMap::new(),
             symbol_table: SymbolTable::new(),
+            digital: AnalyzedDigital::default(),
         };
         // Evaluation statements accumulate in a local sink so loop bodies
         // can recurse into their own sinks without aliasing the module
@@ -1149,6 +1159,14 @@ impl SemanticAnalyzer {
                 block.span,
             );
         }
+
+        // Phase 10b: the discrete (IEEE 1364) half of the module. It runs
+        // after every analog declaration is in the symbol table, so a digital
+        // name that collides with one is caught and a process can read an
+        // analog `integer` or `real`. Unlike `analog final`, digital content
+        // is *accepted* here: it is refused at each executable backend
+        // boundary instead, where the compiler would have to run it.
+        self.analyze_digital(module, &mut analyzed);
 
         // Phase 11: analog initial runs before the main analog block
         if let Some(block) = &module.analog_initial {

@@ -422,6 +422,21 @@ pub enum CodeGenErrorKind {
 
     #[error("Cannot compile expression: {0}")]
     InvalidExpression(String),
+
+    /// A module that parsed and passed semantic analysis, but carries
+    /// discrete-domain (IEEE 1364) content that no backend can execute yet.
+    ///
+    /// This is the fail-closed boundary of the digital front end. The grammar
+    /// accepts `always`, `initial`, `reg`, `wire`, and `assign` so that a
+    /// digital source is read, resolved, and diagnosed properly; every path
+    /// that would have to *run* one refuses here, naming the construct, rather
+    /// than compiling a device with the author's digital behavior missing.
+    #[error(
+        "Verilog-AMS digital construct `{construct}` has no executable form in this compiler \
+         yet: {detail}. Remove the digital section or compile the continuous-domain module \
+         on its own"
+    )]
+    UnsupportedDigitalExecution { construct: String, detail: String },
 }
 
 impl CodeGenErrorKind {
@@ -432,6 +447,7 @@ impl CodeGenErrorKind {
             Self::DerivativeFailed(_) => "VA-CODEGEN-DERIVATIVE-FAILED",
             Self::Internal(_) => "VA-CODEGEN-INTERNAL",
             Self::InvalidExpression(_) => "VA-CODEGEN-INVALID-EXPRESSION",
+            Self::UnsupportedDigitalExecution { .. } => "VA-CODEGEN-UNSUPPORTED-AMS-DIGITAL",
         }
     }
 }

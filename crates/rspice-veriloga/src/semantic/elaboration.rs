@@ -30,6 +30,10 @@ pub(crate) fn elaborate_executable_module<'a>(
     analyzed: &'a AnalyzedFile,
     selected: &'a AnalyzedModule,
 ) -> CompileResult<Cow<'a, AnalyzedModule>> {
+    // Elaboration is the funnel every executable path shares, so it is where
+    // the digital refusal covers a module that is selected directly as well as
+    // one pulled in as a child instance further down.
+    super::reject_digital_content(selected)?;
     let source_modules = source_modules(analyzed)?;
     let root = source_modules.get(&selected.name).copied().ok_or_else(|| {
         internal_error(format!(
@@ -237,6 +241,9 @@ impl<'a> HierarchyElaborator<'a> {
                 instance.module
             ))
         })?;
+        // A child's digital content is as unexecutable as the root's, and
+        // flattening would otherwise drop it without a word.
+        super::reject_digital_content(child)?;
         if module_stack.contains(&instance.module) {
             let mut cycle = module_stack.iter().map(SmolStr::as_str).collect::<Vec<_>>();
             cycle.push(instance.module.as_str());

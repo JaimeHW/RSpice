@@ -12,7 +12,11 @@ use super::*;
 // refused. The record carries no compiler identity of its own, so this constant
 // is the only thing standing between a stale artifact and a source the current
 // compiler will not compile.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 21;
+// Version 22 extends front-end acceptance the other way: the IEEE 1364 digital
+// subset (`always`, `initial`, `reg`, `wire`, `assign`, four-state literals,
+// vector ranges) now parses and is semantically analyzed, so the same source
+// text produces a different parse than version 21 did.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 22;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
