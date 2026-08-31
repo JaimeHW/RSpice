@@ -1776,11 +1776,15 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         CfgValueKind::NodePotential(_)
         | CfgValueKind::BranchFlow(_)
         | CfgValueKind::BranchUnknownFlow(_)
+        | CfgValueKind::EventState(_)
         | CfgValueKind::Ddt { .. }
         // `idt` accumulates into per-instance history on every evaluation, so
         // caching it at a coarser class would integrate a step the solver did
         // not take.
         | CfgValueKind::Idt { .. }
+        | CfgValueKind::Cross { .. }
+        | CfgValueKind::Above { .. }
+        | CfgValueKind::Timer { .. }
         | CfgValueKind::Limit { .. }
         | CfgValueKind::LimitPrevious { .. }
         // Both of these are constant within an analysis, and both are put here

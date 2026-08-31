@@ -197,6 +197,8 @@ fn inputs<S: CfgScalar>(bias: &Bias, promote: impl Fn(f64) -> S) -> CfgEvalInput
     CfgEvalInputs {
         parameters: bias.parameters.iter().copied().map(&promote).collect(),
         parameter_given: vec![false; bias.parameters.len()],
+        event_state: Vec::new(),
+        event_controls: HashMap::new(),
         node_potentials: bias.node_potentials.iter().copied().map(&promote).collect(),
         branch_flows: Vec::new(),
         branch_unknown_flows: bias

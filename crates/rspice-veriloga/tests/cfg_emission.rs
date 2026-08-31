@@ -399,6 +399,8 @@ fn inputs(bias: &Bias) -> CfgEvalInputs<f64> {
     CfgEvalInputs {
         parameters: bias.parameters.clone(),
         parameter_given: vec![false; bias.parameters.len()],
+        event_state: Vec::new(),
+        event_controls: HashMap::new(),
         node_potentials: bias.node_potentials.clone(),
         branch_flows: bias.branch_flows.clone(),
         branch_unknown_flows: bias.branch_unknown_flows.clone(),

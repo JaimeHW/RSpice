@@ -1295,3 +1295,138 @@ d1 out 0 dcmc
         "identity refusal identifies generated-model provenance: {identity_error}"
     );
 }
+
+#[cfg(feature = "veriloga-model-vbic13")]
+#[test]
+fn generated_vbic_initial_step_state_is_accepted_at_origin_and_survives_resume() {
+    const STEP: f64 = 1.0e-12;
+    const SPLIT: f64 = 2.0e-12;
+    const STOP: f64 = 4.0e-12;
+    let netlist = Netlist::parse(
+        "\
+* generated VBIC origin-state checkpoint bench
+vcc c 0 1
+vb b 0 0.65
+q1 c b 0 qmod
+.model qmod npn (level=11 is=1e-16 ibei=1e-18 ibci=1e-18 rcx=1)
+.tran 1p 4p
+.end
+",
+    )
+    .expect("generated VBIC origin-state deck parses");
+    let engine = Engine::new(SimulationConfig {
+        spice_dialect: SpiceDialect::Xyce,
+        integration_method: IntegrationMethod::BackwardEuler,
+        transient_initial_timestep: Some(STEP),
+        locked_time_grid: Some(Arc::new((0..=4).map(|index| index as f64 * STEP).collect())),
+        ..Default::default()
+    });
+
+    engine
+        .run_tran(&netlist, STOP, STEP)
+        .expect("uninterrupted generated VBIC run completes");
+    let (_, checkpoint) = engine
+        .run_tran_checkpointed(&netlist, SPLIT, STEP)
+        .expect("generated VBIC first segment completes");
+    let checkpoint_text = checkpoint.to_text();
+    let mut lines = checkpoint_text.lines();
+    let event_header = lines
+        .find(|line| line.starts_with("event_state "))
+        .expect("format-26 checkpoint contains generated event state");
+    assert_eq!(event_header, "event_state 20");
+    let accepted_event_state = lines
+        .by_ref()
+        .take(20)
+        .map(|line| line.parse::<f64>().expect("numeric VBIC event state"))
+        .collect::<Vec<_>>();
+    assert_eq!(accepted_event_state.len(), 20);
+    assert!(
+        accepted_event_state.iter().any(|value| *value != 0.0),
+        "VBIC initial_step assignments must be accepted at t=0 before the first positive step"
+    );
+
+    let rewrite_first_event_value = |replacement: &str| {
+        let mut rewritten = String::with_capacity(checkpoint_text.len());
+        let mut replace_next = false;
+        for line in checkpoint_text.lines() {
+            rewritten.push_str(if replace_next { replacement } else { line });
+            rewritten.push('\n');
+            replace_next = line == "event_state 20";
+        }
+        rewritten
+    };
+    let nan_error = TransientCheckpoint::from_text(&rewrite_first_event_value("NaN"))
+        .expect_err("format-26 generated event state must reject NaN");
+    assert!(
+        nan_error.contains("NaN event state"),
+        "NaN rejection identifies generated event state: {nan_error}"
+    );
+    TransientCheckpoint::from_text(&rewrite_first_event_value("inf"))
+        .expect("format-26 event state permits infinity like runtime Verilog-A");
+
+    let mut legacy_v25 = String::with_capacity(checkpoint_text.len());
+    let mut skip_event_values = 0usize;
+    for (index, line) in checkpoint_text.lines().enumerate() {
+        if skip_event_values > 0 {
+            skip_event_values -= 1;
+            continue;
+        }
+        if line == "event_state 20" {
+            skip_event_values = 20;
+            continue;
+        }
+        let line = if index == 0 {
+            "RSPICE-CHECKPOINT 25".to_string()
+        } else if line.starts_with("generated_veriloga_state ") {
+            let (prefix, _) = line
+                .rsplit_once(' ')
+                .expect("generated state header carries its version");
+            format!("{prefix} 3")
+        } else {
+            line.to_string()
+        };
+        legacy_v25.push_str(&line);
+        legacy_v25.push('\n');
+    }
+    let upgraded_v25 = TransientCheckpoint::from_text(&legacy_v25)
+        .expect("v25 generated payload remains parseable without event-state rows");
+    let upgraded_text = upgraded_v25.to_text();
+    assert!(upgraded_text.contains("generated_veriloga_state_available 0\n"));
+    assert!(upgraded_text.contains("generated_veriloga_states 0\n"));
+    let legacy_error = engine
+        .run_tran_resume(&netlist, &upgraded_v25, STOP, STEP)
+        .expect_err("v25 cannot authoritatively resume a generated event-state model");
+    assert!(
+        legacy_error
+            .to_string()
+            .contains("does not contain generated Verilog-A persistent state"),
+        "v25 resume fails closed with a precise diagnostic: {legacy_error}"
+    );
+
+    let serialized = TransientCheckpoint::from_text(&checkpoint_text)
+        .expect("format-26 VBIC checkpoint round-trips");
+    let (_, resumed_checkpoint) = engine
+        .run_tran_resume(&netlist, &serialized, STOP, STEP)
+        .unwrap_or_else(|error| {
+            panic!(
+                "generated VBIC resumes with accepted origin event state {accepted_event_state:?}: {error}"
+            )
+        });
+    let resumed_text = resumed_checkpoint.to_text();
+    let mut resumed_lines = resumed_text.lines();
+    assert_eq!(
+        resumed_lines.find(|line| line.starts_with("event_state ")),
+        Some("event_state 20")
+    );
+    let resumed_event_state = resumed_lines
+        .take(20)
+        .map(|line| {
+            line.parse::<f64>()
+                .expect("numeric resumed VBIC event state")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        resumed_event_state, accepted_event_state,
+        "resume must preserve accepted initial_step variables exactly"
+    );
+}

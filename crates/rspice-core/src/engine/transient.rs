@@ -2930,6 +2930,18 @@ impl Engine {
             .generated_veriloga_devices_mut()
             .set_analysis_step(resume.is_none() && !uic_requested, false);
 
+        // A resume rebuilds the circuit before the checkpoint's full engine
+        // state can be injected. Prime accepted Verilog-A state now so the
+        // intervening startup solve never evaluates an initial-step-derived
+        // compact model against a zeroed procedural state. Full injection
+        // below remains authoritative and restores any candidates touched by
+        // this priming solve.
+        if let Some(checkpoint) = resume {
+            checkpoint
+                .prime_veriloga_resume_startup(&mut circuit)
+                .map_err(SimulationError::Circuit)?;
+        }
+
         // Get the startup state. Ordinary transient validates the exact t=0
         // accepted equation contract below; its waveform can intentionally
         // differ from the source's separate DC value. UIC skips an operating
@@ -3544,20 +3556,38 @@ impl Engine {
         // final t=0 Verilog-A pass against the solution that will actually be
         // reported. Commit it exactly once so sampled/event operators advance
         // their origin-time state before the first positive timestep.
-        #[cfg(feature = "veriloga")]
-        if resume.is_none() && circuit.has_veriloga_devices() {
-            circuit
-                .evaluate_veriloga_timepoint(&solution)
-                .map_err(SimulationError::Circuit)?;
-            circuit
-                .accept_veriloga_timestep()
-                .map_err(SimulationError::Circuit)?;
-            if let Some(bound) = circuit
-                .veriloga_timestep_bound()
-                .map_err(SimulationError::Circuit)?
-                && bound < timestep.dt()
-            {
-                timestep.force_step(bound.min(max_step));
+        if resume.is_none() && circuit.has_any_veriloga_devices() {
+            let origin_state = circuit.nonlinear_state_snapshot();
+            let origin_result = (|| -> Result<(), SimulationError> {
+                #[cfg(feature = "veriloga")]
+                if circuit.has_veriloga_devices() {
+                    circuit
+                        .evaluate_veriloga_timepoint(&solution)
+                        .map_err(SimulationError::Circuit)?;
+                }
+                #[cfg(feature = "veriloga-builtins-base")]
+                if circuit.has_generated_veriloga_devices() {
+                    circuit
+                        .evaluate_generated_veriloga_timepoint(&mut matrix, &solution)
+                        .map_err(SimulationError::Circuit)?;
+                }
+                circuit
+                    .accept_all_veriloga_timestep()
+                    .map_err(SimulationError::Circuit)?;
+                #[cfg(feature = "veriloga")]
+                if circuit.has_veriloga_devices()
+                    && let Some(bound) = circuit
+                        .veriloga_timestep_bound()
+                        .map_err(SimulationError::Circuit)?
+                    && bound < timestep.dt()
+                {
+                    timestep.force_step(bound.min(max_step));
+                }
+                Ok(())
+            })();
+            if let Err(error) = origin_result {
+                circuit.restore_nonlinear_state(origin_state);
+                return Err(error);
             }
         }
         for (trace, &retain) in branch_currents
@@ -7533,14 +7563,16 @@ impl Engine {
                         circuit
                             .evaluate_veriloga_timepoint(&new_solution)
                             .map_err(SimulationError::Circuit)?;
-                        circuit
-                            .accept_veriloga_timestep()
-                            .map_err(SimulationError::Circuit)?;
                     }
                     #[cfg(feature = "veriloga-builtins-base")]
                     if circuit.has_generated_veriloga_devices() {
                         circuit
-                            .accept_generated_veriloga_timestep()
+                            .evaluate_generated_veriloga_timepoint(&mut matrix, &new_solution)
+                            .map_err(SimulationError::Circuit)?;
+                    }
+                    if circuit.has_any_veriloga_devices() {
+                        circuit
+                            .accept_all_veriloga_timestep()
                             .map_err(SimulationError::Circuit)?;
                     }
 
@@ -7986,22 +8018,26 @@ impl Engine {
                 }
             }
             #[cfg(feature = "veriloga")]
-            let veriloga_discontinuity = if circuit.has_veriloga_devices() {
+            if circuit.has_veriloga_devices() {
                 circuit
                     .evaluate_veriloga_timepoint(&new_solution)
                     .map_err(SimulationError::Circuit)?;
+            }
+            #[cfg(feature = "veriloga-builtins-base")]
+            if circuit.has_generated_veriloga_devices() {
                 circuit
-                    .accept_veriloga_timestep()
+                    .evaluate_generated_veriloga_timepoint(&mut matrix, &new_solution)
+                    .map_err(SimulationError::Circuit)?;
+            }
+            let veriloga_discontinuity = if circuit.has_any_veriloga_devices() {
+                circuit
+                    .accept_all_veriloga_timestep()
                     .map_err(SimulationError::Circuit)?
             } else {
                 false
             };
-            #[cfg(feature = "veriloga-builtins-base")]
-            if circuit.has_generated_veriloga_devices() {
-                circuit
-                    .accept_generated_veriloga_timestep()
-                    .map_err(SimulationError::Circuit)?;
-            }
+            #[cfg(not(feature = "veriloga"))]
+            let _ = veriloga_discontinuity;
 
             if fixed_method.is_none() {
                 if hit_breakpoint {

@@ -328,6 +328,9 @@ fn kernel_region_metrics(
                 }
                 CfgValueKind::Ddt { operator, .. }
                 | CfgValueKind::Idt { operator, .. }
+                | CfgValueKind::Cross { operator, .. }
+                | CfgValueKind::Above { operator, .. }
+                | CfgValueKind::Timer { operator, .. }
                 | CfgValueKind::Limit { operator, .. }
                 | CfgValueKind::LimitPrevious { operator, .. } => {
                     let next = operator_indices.len();
@@ -402,6 +405,7 @@ fn kernel_region_metrics(
                 "parameter-given:{}",
                 artifact.mir.parameters[usize::from(*parameter)].name
             ),
+            CfgValueKind::EventState(slot) => write!(out, "event-state:{slot}"),
             CfgValueKind::Temperature => write!(out, "temperature"),
             CfgValueKind::ThermalVoltage => write!(out, "thermal-voltage"),
             CfgValueKind::Multiplicity => write!(out, "multiplicity"),
@@ -423,6 +427,15 @@ fn kernel_region_metrics(
                 write!(out, "idt:{}", operator_indices[operator])
             }
             CfgValueKind::IdtScale => write!(out, "idt-scale"),
+            CfgValueKind::Cross { operator, .. } => {
+                write!(out, "cross:{}", operator_indices[operator])
+            }
+            CfgValueKind::Above { operator, .. } => {
+                write!(out, "above:{}", operator_indices[operator])
+            }
+            CfgValueKind::Timer { operator, .. } => {
+                write!(out, "timer:{}", operator_indices[operator])
+            }
             CfgValueKind::Limit {
                 operator, selector, ..
             } => write!(out, "limit:{}:{selector}", operator_indices[operator]),
@@ -641,6 +654,9 @@ struct ModelPlan {
     potential_groups: Vec<PotentialBranchGroup>,
     /// Output position of each equation's control-flow activation value.
     activation_positions: Vec<Option<usize>>,
+    /// Output position of each event-controlled procedural variable candidate,
+    /// in dense accepted-state slot order.
+    event_state_candidate_positions: Vec<usize>,
     /// The noise magnitudes, as their own body.
     ///
     /// `None` where the canonical level cannot express them and the generator
@@ -661,6 +677,11 @@ struct ModelPlan {
     ddt_slots: HashMap<ExprId, usize>,
     /// One history slot per `idt`, allocated from the CFG for the same reason.
     idt_slots: HashMap<ExprId, usize>,
+    /// One accepted/candidate detector slot shared by `cross` and `above`.
+    cross_slots: HashMap<ExprId, usize>,
+    /// Dense source-order timer ids (timers share one per-instance next-event
+    /// bound, but ids preserve diagnostics and emitted-code stability).
+    timer_slots: HashMap<ExprId, usize>,
     /// One anchor slot per `$limit`, holding what it returned on the previous
     /// Newton iteration. `Limit` and its `LimitPrevious` readers carry the same
     /// operator id, so they resolve to the same slot by construction.
@@ -707,6 +728,8 @@ impl ModelPlan {
         let mut ddt_slots: HashMap<ExprId, usize> = HashMap::new();
         let mut idt_slots: HashMap<ExprId, usize> = HashMap::new();
         let mut limit_slots: HashMap<ExprId, usize> = HashMap::new();
+        let mut cross_slots: HashMap<ExprId, usize> = HashMap::new();
+        let mut timer_slots: HashMap<ExprId, usize> = HashMap::new();
         for value in &cfg.function.values {
             match &value.kind {
                 CfgValueKind::Ddt { operator, .. } => {
@@ -716,6 +739,14 @@ impl ModelPlan {
                 CfgValueKind::Idt { operator, .. } => {
                     let next = idt_slots.len();
                     idt_slots.entry(*operator).or_insert(next);
+                }
+                CfgValueKind::Cross { operator, .. } | CfgValueKind::Above { operator, .. } => {
+                    let next = cross_slots.len();
+                    cross_slots.entry(*operator).or_insert(next);
+                }
+                CfgValueKind::Timer { operator, .. } => {
+                    let next = timer_slots.len();
+                    timer_slots.entry(*operator).or_insert(next);
                 }
                 // `LimitPrevious` is included so a `$limit` whose body reads the
                 // previous iterate before the `Limit` value is built still finds
@@ -918,6 +949,8 @@ impl ModelPlan {
         wanted.extend_from_slice(&reactive_wanted);
         let stamp_wanted = wanted.len();
         wanted.extend(activations.iter().flatten().copied());
+        let activation_wanted = activations.iter().flatten().count();
+        wanted.extend(cfg.event_state_candidates.iter().copied());
         let tracked_primal = (0..cfg.function.values.len())
             .map(ValueId::from)
             .collect::<Vec<_>>();
@@ -937,7 +970,8 @@ impl ModelPlan {
         let conduction_wanted = stamp_wanted - reactive_wanted.len();
         conduction.remap(&mapped[..conduction_wanted]);
         reactive.remap(&mapped[conduction_wanted..stamp_wanted]);
-        let mut mapped_activations = mapped[stamp_wanted..].iter().copied();
+        let activation_end = stamp_wanted + activation_wanted;
+        let mut mapped_activations = mapped[stamp_wanted..activation_end].iter().copied();
         let activations = activations
             .iter()
             .map(|activation| {
@@ -945,6 +979,7 @@ impl ModelPlan {
             })
             .collect::<Vec<_>>();
         debug_assert!(mapped_activations.next().is_none());
+        let event_state_candidates = mapped[activation_end..].to_vec();
         conduction.drop_zeros(&function);
         reactive.drop_zeros(&function);
         let mut scalar_derivatives = 0usize;
@@ -990,6 +1025,13 @@ impl ModelPlan {
                     outputs.push(activation);
                     outputs.len() - 1
                 })
+            })
+            .collect();
+        let event_state_candidate_positions = event_state_candidates
+            .iter()
+            .map(|candidate| {
+                outputs.push(*candidate);
+                outputs.len() - 1
             })
             .collect();
 
@@ -1087,9 +1129,12 @@ impl ModelPlan {
             potential_equations,
             potential_groups,
             activation_positions,
+            event_state_candidate_positions,
             noise,
             ddt_slots,
             idt_slots,
+            cross_slots,
+            timer_slots,
             limit_slots,
             one_step_dae_split_safe,
         })
@@ -1542,6 +1587,8 @@ impl ModelPlan {
         EmitBindings {
             ddt_slots: self.ddt_slots.clone(),
             idt_slots: self.idt_slots.clone(),
+            cross_slots: self.cross_slots.clone(),
+            timer_slots: self.timer_slots.clone(),
             limit_slots: self.limit_slots.clone(),
             ..bindings()
         }
@@ -1584,6 +1631,9 @@ impl ModelPlan {
         );
         runtime_support.extend(lane_types);
         runtime_support.extend([
+            "evaluate_generated_above".to_string(),
+            "evaluate_generated_cross".to_string(),
+            "evaluate_generated_timer".to_string(),
             "rspice_eval_ddt".to_string(),
             "rspice_eval_idt".to_string(),
             "rspice_limexp".to_string(),
@@ -1937,6 +1987,19 @@ impl ModelPlan {
         self.emit_prologue(artifact, function, 2, out)?;
         out.push_str(&indent(&body, 2));
 
+        for (slot, position) in self
+            .event_state_candidate_positions
+            .iter()
+            .copied()
+            .enumerate()
+        {
+            let _ = writeln!(
+                out,
+                "        self.event_state_candidate[{slot}] = {};",
+                values[position]
+            );
+        }
+
         self.emit_potential_structure(&values, out);
 
         for (index, row) in self.conduction.rows.iter().enumerate() {
@@ -2279,6 +2342,9 @@ impl ModelPlan {
         if wants.parameter_given {
             out.push_str("        let parameter_given = &*self.param_given;\n");
         }
+        if wants.event_state {
+            out.push_str("        let event_state = &*self.event_state_accepted;\n");
+        }
         if wants.multiplicity {
             out.push_str("        let multiplicity = self.multiplicity;\n");
         }
@@ -2335,6 +2401,15 @@ impl ModelPlan {
             out.push_str(
                 "        let limit_previous = |_operator: usize, proposed: f64| proposed;\n",
             );
+        }
+        if wants.cross {
+            out.push_str("        macro_rules! rspice_cross { ($slot:expr, $value:expr, $direction:expr, $time_tol:expr, $expr_tol:expr, $enable:expr) => {{ let _ = ($slot, $value, $direction, $time_tol, $expr_tol, $enable); 0.0 }}; }\n");
+        }
+        if wants.above {
+            out.push_str("        macro_rules! rspice_above { ($slot:expr, $value:expr, $time_tol:expr, $expr_tol:expr, $enable:expr) => {{ let _ = ($slot, $value, $time_tol, $expr_tol, $enable); 0.0 }}; }\n");
+        }
+        if wants.timer {
+            out.push_str("        macro_rules! rspice_timer { ($slot:expr, $start:expr, $period:expr, $time_tol:expr, $enable:expr) => {{ let _ = ($slot, $start, $period, $time_tol, $enable); 0.0 }}; }\n");
         }
     }
 
@@ -2654,6 +2729,9 @@ impl ModelPlan {
         if wants.parameter_given {
             let _ = writeln!(out, "{pad}let parameter_given = &*self.param_given;");
         }
+        if wants.event_state {
+            let _ = writeln!(out, "{pad}let event_state = &*self.event_state_accepted;");
+        }
         if wants.multiplicity {
             let _ = writeln!(out, "{pad}let multiplicity = self.multiplicity;");
         }
@@ -2764,6 +2842,66 @@ impl ModelPlan {
                  {pad}}};"
             );
         }
+        if wants.cross {
+            for value in &function.values {
+                if let CfgValueKind::Cross { operator, .. } = &value.kind {
+                    self.cross_slots.get(operator).copied().ok_or_else(|| {
+                        unsupported(
+                            artifact,
+                            format!("a cross event at {operator} with no generated detector slot"),
+                        )
+                    })?;
+                }
+            }
+            out.push_str(&format!(
+                "{pad}macro_rules! rspice_cross {{ ($slot:expr, $value:expr, $direction:expr, $time_tol:expr, $expr_tol:expr, $enable:expr) => {{{{\n\
+                 {pad}    let slot = $slot;\n\
+                 {pad}    match evaluate_generated_cross(self.cross_event_accepted[slot], $value, self.time, $direction, $time_tol, $expr_tol, $enable, ctx.analysis_tran()) {{\n\
+                 {pad}        Ok(evaluation) => {{\n\
+                 {pad}            self.cross_event_candidate[slot] = evaluation.candidate;\n\
+                 {pad}            if let Some(target) = evaluation.refinement_time {{ self.event_refinement_time = self.event_refinement_time.min(target); }}\n\
+                 {pad}            evaluation.fired as u8 as f64\n\
+                 {pad}        }}\n\
+                 {pad}        Err(source) => {{ ctx.report_event_control_error(\"cross\", slot, source); 0.0 }}\n\
+                 {pad}    }}\n\
+                 {pad}}}}}; }}"
+            ));
+        }
+        if wants.above {
+            for value in &function.values {
+                if let CfgValueKind::Above { operator, .. } = &value.kind {
+                    self.cross_slots.get(operator).copied().ok_or_else(|| {
+                        unsupported(
+                            artifact,
+                            format!("an above event at {operator} with no generated detector slot"),
+                        )
+                    })?;
+                }
+            }
+            out.push_str(&format!(
+                "{pad}macro_rules! rspice_above {{ ($slot:expr, $value:expr, $time_tol:expr, $expr_tol:expr, $enable:expr) => {{{{\n\
+                 {pad}    let slot = $slot;\n\
+                 {pad}    match evaluate_generated_above(self.cross_event_accepted[slot], $value, self.time, $time_tol, $expr_tol, $enable, ctx.analysis_static()) {{\n\
+                 {pad}        Ok(evaluation) => {{\n\
+                 {pad}            self.cross_event_candidate[slot] = evaluation.candidate;\n\
+                 {pad}            if let Some(target) = evaluation.refinement_time {{ self.event_refinement_time = self.event_refinement_time.min(target); }}\n\
+                 {pad}            evaluation.fired as u8 as f64\n\
+                 {pad}        }}\n\
+                 {pad}        Err(source) => {{ ctx.report_event_control_error(\"above\", slot, source); 0.0 }}\n\
+                 {pad}    }}\n\
+                 {pad}}}}}; }}"
+            ));
+        }
+        if wants.timer {
+            out.push_str(&format!(
+                "{pad}macro_rules! rspice_timer {{ ($slot:expr, $start:expr, $period:expr, $time_tol:expr, $enable:expr) => {{{{\n\
+                 {pad}    let _ = $slot;\n\
+                 {pad}    let (fired, next_event) = evaluate_generated_timer($start, $period, $time_tol, $enable, self.time, self.timestep);\n\
+                 {pad}    if let Some(target) = next_event {{ self.timer_event_bound_candidate = self.timer_event_bound_candidate.min(target); }}\n\
+                 {pad}    fired as u8 as f64\n\
+                 {pad}}}}}; }}"
+            ));
+        }
         if wants.ddt {
             // `ddt` is the one binding that is a call rather than an expression,
             // because it reads and writes per-instance history. Call sites pass
@@ -2871,6 +3009,7 @@ impl ModelPlan {
     fn state_extensions(&self, artifact: &CanonicalIrArtifact) -> state_file::StateFileExtensions {
         let mut extensions = state_file::StateFileExtensions::default();
         self.push_limit_state_fields(&mut extensions);
+        self.push_event_control_state_fields(&mut extensions);
         let reactive = self.reactive.width();
         if reactive > 0 {
             let _ = writeln!(
@@ -3030,6 +3169,209 @@ impl ModelPlan {
              \x20       self.canonical_limit.active = false;\n",
         );
     }
+
+    fn push_event_control_state_fields(&self, extensions: &mut state_file::StateFileExtensions) {
+        let cross_count = self.cross_slots.len();
+        let has_timer = !self.timer_slots.is_empty();
+        if cross_count == 0 && !has_timer {
+            return;
+        }
+
+        if cross_count > 0 {
+            extensions.uses_cross_event_state = true;
+            let _ = write!(
+                extensions.instance_fields,
+                "    pub(crate) cross_event_accepted: Box<[GeneratedCrossState; {cross_count}]>,\n\
+                     pub(crate) cross_event_candidate: Box<[GeneratedCrossState; {cross_count}]>,\n\
+                     pub(crate) event_refinement_time: f64,\n"
+            );
+            extensions.clone_fields.push_str(
+                "            cross_event_accepted: self.cross_event_accepted.clone(),\n\
+                             cross_event_candidate: self.cross_event_candidate.clone(),\n\
+                             event_refinement_time: self.event_refinement_time,\n",
+            );
+            let _ = write!(
+                extensions.new_initializers,
+                "            cross_event_accepted: Box::new([GeneratedCrossState::INITIAL; {cross_count}]),\n\
+                             cross_event_candidate: Box::new([GeneratedCrossState::INITIAL; {cross_count}]),\n\
+                             event_refinement_time: f64::INFINITY,\n"
+            );
+            extensions.begin_event_state_evaluation.push_str(
+                "        self.cross_event_candidate.copy_from_slice(&*self.cross_event_accepted);\n\
+                         self.event_refinement_time = f64::INFINITY;\n",
+            );
+            extensions.validate_advance_state.push_str(
+                "        for (index, (accepted, candidate)) in self.cross_event_accepted.iter().copied().zip(self.cross_event_candidate.iter().copied()).enumerate() {\n\
+                             validate_generated_cross_state(accepted).map_err(|error| format!(\"generated accepted event detector state {index} is invalid: {error}\"))?;\n\
+                             validate_generated_cross_state(candidate).map_err(|error| format!(\"generated candidate event detector state {index} is invalid: {error}\"))?;\n\
+                             if candidate != accepted && candidate.initialized && candidate.time != self.time {\n\
+                                 return Err(format!(\"generated event detector candidate {index} time {} does not equal evaluation time {}\", candidate.time, self.time));\n\
+                             }\n\
+                         }\n\
+                         if self.event_refinement_time != f64::INFINITY && (!self.event_refinement_time.is_finite() || self.event_refinement_time < 0.0 || self.event_refinement_time >= self.time) {\n\
+                             return Err(format!(\"generated event refinement {} is not interior to candidate time {}\", self.event_refinement_time, self.time));\n\
+                         }\n",
+            );
+            extensions.apply_advance_state.push_str(
+                "        self.cross_event_accepted.copy_from_slice(&*self.cross_event_candidate);\n\
+                         self.event_refinement_time = f64::INFINITY;\n",
+            );
+            let cross_rollback_values = cross_count.saturating_mul(12).saturating_add(1);
+            extensions.rollback_value_count = extensions
+                .rollback_value_count
+                .saturating_add(cross_rollback_values);
+            extensions.rollback_capture_values.push_str(
+                "        for state in self.cross_event_accepted.iter().copied() { state.append_checkpoint_lanes(&mut values); }\n\
+                         for state in self.cross_event_candidate.iter().copied() { state.append_checkpoint_lanes(&mut values); }\n\
+                         values.push(self.event_refinement_time);\n",
+            );
+            let _ = write!(
+                extensions.rollback_restore_fields,
+                "        for state in self.cross_event_accepted.iter_mut() {{\n\
+                             let (lanes, remaining) = rollback_values.split_at(GeneratedCrossState::CHECKPOINT_LANES);\n\
+                             *state = GeneratedCrossState::from_checkpoint_lanes(lanes).expect(\"captured generated crossing rollback state\");\n\
+                             rollback_values = remaining;\n\
+                         }}\n\
+                         for state in self.cross_event_candidate.iter_mut() {{\n\
+                             let (lanes, remaining) = rollback_values.split_at(GeneratedCrossState::CHECKPOINT_LANES);\n\
+                             *state = GeneratedCrossState::from_checkpoint_lanes(lanes).expect(\"captured generated crossing rollback candidate\");\n\
+                             rollback_values = remaining;\n\
+                         }}\n\
+                         let (refinement, remaining) = rollback_values.split_first().expect(\"generated crossing rollback refinement\");\n\
+                         self.event_refinement_time = *refinement;\n\
+                         rollback_values = remaining;\n"
+            );
+
+            let persistent_cross_lanes =
+                cross_count.saturating_mul(rspice_veriloga_runtime_checkpoint_lanes());
+            extensions.persistent_event_lane_count = extensions
+                .persistent_event_lane_count
+                .saturating_add(persistent_cross_lanes);
+            extensions.checkpoint_event_capture.push_str(
+                "        for state in self.cross_event_accepted.iter().copied() { state.append_checkpoint_lanes(&mut event_variables); }\n",
+            );
+            let _ = write!(
+                extensions.checkpoint_event_validate,
+                "        let mut generated_event_lanes = &state.event_variables[Self::EVENT_STATE_COUNT..];\n\
+                         for index in 0..{cross_count} {{\n\
+                             let (lanes, remaining) = generated_event_lanes.split_at(GeneratedCrossState::CHECKPOINT_LANES);\n\
+                             GeneratedCrossState::from_checkpoint_lanes(lanes).map_err(|error| format!(\"generated crossing checkpoint slot {{index}}: {{error}}\"))?;\n\
+                             generated_event_lanes = remaining;\n\
+                         }}\n"
+            );
+            let _ = write!(
+                extensions.checkpoint_event_restore,
+                "        let mut generated_event_lanes = &state.event_variables[Self::EVENT_STATE_COUNT..];\n\
+                         for target in self.cross_event_accepted.iter_mut() {{\n\
+                             let (lanes, remaining) = generated_event_lanes.split_at(GeneratedCrossState::CHECKPOINT_LANES);\n\
+                             *target = GeneratedCrossState::from_checkpoint_lanes(lanes)?;\n\
+                             generated_event_lanes = remaining;\n\
+                         }}\n\
+                         self.cross_event_candidate.copy_from_slice(&*self.cross_event_accepted);\n\
+                         self.event_refinement_time = f64::INFINITY;\n"
+            );
+        }
+
+        if has_timer {
+            extensions.instance_fields.push_str(
+                "    pub(crate) timer_event_bound_accepted: f64,\n\
+                     pub(crate) timer_event_bound_candidate: f64,\n",
+            );
+            extensions.clone_fields.push_str(
+                "            timer_event_bound_accepted: self.timer_event_bound_accepted,\n\
+                             timer_event_bound_candidate: self.timer_event_bound_candidate,\n",
+            );
+            extensions.new_initializers.push_str(
+                "            timer_event_bound_accepted: f64::INFINITY,\n\
+                             timer_event_bound_candidate: f64::INFINITY,\n",
+            );
+            extensions
+                .begin_event_state_evaluation
+                .push_str("        self.timer_event_bound_candidate = f64::INFINITY;\n");
+            extensions.validate_advance_state.push_str(
+                "        if self.timer_event_bound_accepted != f64::INFINITY && (!self.timer_event_bound_accepted.is_finite() || self.timer_event_bound_accepted <= 0.0) {\n\
+                             return Err(format!(\"generated accepted timer event bound is invalid: {}\", self.timer_event_bound_accepted));\n\
+                         }\n\
+                         if self.timer_event_bound_candidate != f64::INFINITY && (!self.timer_event_bound_candidate.is_finite() || self.timer_event_bound_candidate <= self.time) {\n\
+                             return Err(format!(\"generated candidate timer event bound {} is not strictly after time {}\", self.timer_event_bound_candidate, self.time));\n\
+                         }\n",
+            );
+            extensions.apply_advance_state.push_str(
+                "        self.timer_event_bound_accepted = self.timer_event_bound_candidate;\n",
+            );
+            extensions.rollback_value_count = extensions.rollback_value_count.saturating_add(2);
+            extensions.rollback_capture_values.push_str(
+                "        values.push(self.timer_event_bound_accepted);\n\
+                                   values.push(self.timer_event_bound_candidate);\n",
+            );
+            extensions.rollback_restore_fields.push_str(
+                "        let (accepted_timer_bound, remaining) = rollback_values.split_first().expect(\"generated accepted timer rollback bound\");\n\
+                         self.timer_event_bound_accepted = *accepted_timer_bound;\n\
+                         rollback_values = remaining;\n\
+                         let (candidate_timer_bound, remaining) = rollback_values.split_first().expect(\"generated candidate timer rollback bound\");\n\
+                         self.timer_event_bound_candidate = *candidate_timer_bound;\n\
+                         rollback_values = remaining;\n",
+            );
+            extensions.persistent_event_lane_count =
+                extensions.persistent_event_lane_count.saturating_add(1);
+            extensions
+                .checkpoint_event_capture
+                .push_str("        event_variables.push(self.timer_event_bound_accepted);\n");
+            extensions.checkpoint_event_validate.push_str(
+                "        let timer_bound = *generated_event_lanes.first().expect(\"generated timer checkpoint lane\");\n\
+                         if timer_bound != f64::INFINITY && (!timer_bound.is_finite() || timer_bound <= 0.0) { return Err(format!(\"generated timer checkpoint bound is invalid: {timer_bound}\")); }\n\
+                         generated_event_lanes = &generated_event_lanes[1..];\n\
+                         debug_assert!(generated_event_lanes.is_empty());\n",
+            );
+            extensions.checkpoint_event_restore.push_str(
+                "        self.timer_event_bound_accepted = *generated_event_lanes.first().expect(\"generated timer checkpoint lane\");\n\
+                         self.timer_event_bound_candidate = self.timer_event_bound_accepted;\n\
+                         generated_event_lanes = &generated_event_lanes[1..];\n\
+                         debug_assert!(generated_event_lanes.is_empty());\n",
+            );
+        } else if cross_count > 0 {
+            extensions
+                .checkpoint_event_validate
+                .push_str("        debug_assert!(generated_event_lanes.is_empty());\n");
+            extensions
+                .checkpoint_event_restore
+                .push_str("        debug_assert!(generated_event_lanes.is_empty());\n");
+        }
+
+        if cross_count > 0 {
+            extensions.impl_methods.push_str(
+                "    #[inline]\n\
+                     pub fn transient_event_refinement_time(&self) -> Option<f64> {\n\
+                         (self.event_refinement_time.is_finite() && self.event_refinement_time >= 0.0 && self.event_refinement_time < self.time).then_some(self.event_refinement_time)\n\
+                     }\n",
+            );
+        } else {
+            extensions.impl_methods.push_str(
+                "    #[inline]\n\
+                     pub fn transient_event_refinement_time(&self) -> Option<f64> { None }\n",
+            );
+        }
+        if has_timer {
+            extensions.impl_methods.push_str(
+                "    #[inline]\n\
+                     pub fn transient_timer_step_bound(&self) -> Option<f64> {\n\
+                         let bound = self.timer_event_bound_candidate - self.time;\n\
+                         (bound.is_finite() && bound > 0.0).then_some(bound)\n\
+                     }\n",
+            );
+        } else {
+            extensions.impl_methods.push_str(
+                "    #[inline]\n\
+                     pub fn transient_timer_step_bound(&self) -> Option<f64> { None }\n",
+            );
+        }
+    }
+}
+
+const fn rspice_veriloga_runtime_checkpoint_lanes() -> usize {
+    // Kept as a compiler constant so generated array and checkpoint sizing do
+    // not depend on executing emitted-runtime code during compilation.
+    6
 }
 
 enum StructuralSpecializationError {
@@ -3393,6 +3735,7 @@ enum Reactive {
 struct Wants {
     parameters: bool,
     parameter_given: bool,
+    event_state: bool,
     node_potentials: bool,
     branch_unknown_flows: bool,
     temperature: bool,
@@ -3403,6 +3746,9 @@ struct Wants {
     ddt_scale: bool,
     idt: bool,
     idt_scale: bool,
+    cross: bool,
+    above: bool,
+    timer: bool,
     limit: bool,
     limit_previous: bool,
     staged: bool,
@@ -3413,6 +3759,7 @@ impl Wants {
         match kind {
             CfgValueKind::Parameter(_) => self.parameters = true,
             CfgValueKind::ParameterGiven(_) => self.parameter_given = true,
+            CfgValueKind::EventState(_) => self.event_state = true,
             CfgValueKind::NodePotential(_) => self.node_potentials = true,
             CfgValueKind::BranchUnknownFlow(_) => self.branch_unknown_flows = true,
             CfgValueKind::Temperature => self.temperature = true,
@@ -3423,6 +3770,9 @@ impl Wants {
             CfgValueKind::DdtScale => self.ddt_scale = true,
             CfgValueKind::Idt { .. } => self.idt = true,
             CfgValueKind::IdtScale => self.idt_scale = true,
+            CfgValueKind::Cross { .. } => self.cross = true,
+            CfgValueKind::Above { .. } => self.above = true,
+            CfgValueKind::Timer { .. } => self.timer = true,
             CfgValueKind::Limit { .. } => self.limit = true,
             CfgValueKind::LimitPrevious { .. } => self.limit_previous = true,
             CfgValueKind::Staged { .. } => self.staged = true,
@@ -3998,6 +4348,9 @@ fn bindings() -> EmitBindings {
     EmitBindings {
         analysis: "ctx.analysis".into(),
         simparam: "ctx.simparam_or".into(),
+        cross: "rspice_cross!".into(),
+        above: "rspice_above!".into(),
+        timer: "rspice_timer!".into(),
         ..EmitBindings::default()
     }
 }

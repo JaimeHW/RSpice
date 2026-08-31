@@ -11,6 +11,7 @@
 //! perfectly and be worth nothing.
 
 use rspice_veriloga::VerilogACompiler;
+use rspice_veriloga::canonical_ir::cfg::CfgValueKind;
 use rspice_veriloga::canonical_ir::cfg_lower::CfgModel;
 use rspice_veriloga::canonical_ir::schedule::{
     InvalidationClass, schedule_with_parameter_scopes, split, structural_guards, worth_splitting,
@@ -126,6 +127,42 @@ endmodule
         stages.iter().any(|stage| !stage.exports.is_empty()),
         "a split that caches nothing has not split anything"
     );
+}
+
+#[test]
+fn event_control_values_are_always_newton_dynamic() {
+    let artifact = artifact(
+        r#"
+module event_schedule(p, n);
+    inout p, n;
+    electrical p, n;
+    real count;
+    analog begin
+        @(cross(V(p, n), 1)) count = count + 1.0;
+        @(above(V(p, n))) count = count + 1.0;
+        @(timer(1.0, 2.0)) count = count + 1.0;
+        I(p, n) <+ count * V(p, n);
+    end
+endmodule
+"#,
+    );
+    let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).expect("event CFG lowering");
+    let schedule = schedule_cfg(&cfg.function);
+    let mut operators = 0;
+    for value in &cfg.function.values {
+        if matches!(
+            value.kind,
+            CfgValueKind::Cross { .. } | CfgValueKind::Above { .. } | CfgValueKind::Timer { .. }
+        ) {
+            operators += 1;
+            assert_eq!(
+                schedule.class(value.id),
+                InvalidationClass::Newton,
+                "stateful event controls must be evaluated for every nonlinear trial"
+            );
+        }
+    }
+    assert_eq!(operators, 3);
 }
 
 #[test]
@@ -424,6 +461,8 @@ fn inputs(staged: &[f64]) -> CfgEvalInputs<f64> {
     CfgEvalInputs {
         parameters: vec![1.0e-6, 0.4, 300.15, 250.0, 1.0e-14, 2.0],
         parameter_given: vec![false; 6],
+        event_state: Vec::new(),
+        event_controls: HashMap::new(),
         node_potentials: vec![0.41, 0.28, 0.15, 0.07],
         branch_flows: vec![1.0e-4; 4],
         branch_unknown_flows: vec![1.0e-4; 4],

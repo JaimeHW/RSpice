@@ -15,7 +15,7 @@ use smol_str::SmolStr;
 /// This is a hard compatibility boundary: caches and external backends must
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 9;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 10;
 
 /// Stable deterministic digest for canonical IR metadata.
 ///

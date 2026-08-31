@@ -2801,6 +2801,22 @@ fn write_registry(
     }
     out.push_str("    }\n");
     out.push('\n');
+    out.push_str("    pub fn begin_event_state_evaluation(&mut self) {\n");
+    if devices.is_empty() {
+        out.push_str("        let _ = self;\n");
+    } else {
+        out.push_str("        match self {\n");
+        for (index, feature) in feature_names.iter().enumerate() {
+            writeln!(
+                out,
+                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(device) => device.begin_event_state_evaluation(),"
+            )?;
+        }
+        out.push_str("            Self::__NonExhaustive(value) => match *value {},\n");
+        out.push_str("        }\n");
+    }
+    out.push_str("    }\n");
+    out.push('\n');
     out.push_str("    pub fn validate_advance_state(&self) -> Result<(), String> {\n");
     if devices.is_empty() {
         out.push_str("        let _ = self;\n");

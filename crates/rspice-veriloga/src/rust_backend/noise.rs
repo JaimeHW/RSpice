@@ -156,6 +156,7 @@ pub(super) fn generate_noise_file(
         artifact.hir.variables.len()
     )
     .expect("write noise workspace");
+    emit_event_state_seed(&mut out, artifact);
     let mut activation_schedule = MergedNoiseSchedule::default();
     let mut metadata_schedule = MergedNoiseSchedule::default();
     for (index, source) in artifact.noise_sources.sources.iter().enumerate() {
@@ -243,6 +244,7 @@ pub(super) fn generate_noise_file(
     )
     .expect("write packed noise activation mask");
     out.push_str("        w.fill(0.0);\n");
+    emit_event_state_seed(&mut out, artifact);
     emit_partitioned_noise_schedule(
         &mut out,
         &mut helper_methods,
@@ -348,6 +350,23 @@ pub(super) fn generate_noise_file(
         relative_path: "noise.rs".to_string(),
         contents: out,
     })
+}
+
+fn emit_event_state_seed(out: &mut String, artifact: &CanonicalIrArtifact) {
+    for (slot, variable) in artifact
+        .hir
+        .variables
+        .iter()
+        .filter(|variable| variable.is_state)
+        .enumerate()
+    {
+        writeln!(
+            out,
+            "        w[{}] = self.event_state_accepted[{slot}];",
+            variable.id.index()
+        )
+        .expect("write accepted event-state noise seed");
+    }
 }
 
 /// The static descriptor per noise source: where it injects, and how the
@@ -1278,6 +1297,47 @@ mod tests {
              { ctx.report_analog_loop_limit(\"noise\", p_iterations, \
              Self::MAX_ANALOG_LOOP_ITERATIONS); break; }"
         ));
+    }
+
+    #[test]
+    fn fallback_noise_seeds_event_state_for_both_replay_schedules() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module fallback_event_noise(p, n);
+    inout p, n;
+    electrical p, n;
+    real count;
+    analog begin
+        @(initial_step("noise")) count = count + 1.0;
+        if (count > 0.0)
+            I(p, n) <+ white_noise(count, "count");
+    end
+endmodule
+"#,
+            )
+            .expect("event-state fallback-noise fixture compiles");
+        let count = artifact
+            .hir
+            .variables
+            .iter()
+            .find(|variable| variable.name == "count")
+            .expect("count variable");
+        assert!(count.is_state, "event-written variable must be stateful");
+
+        let generated = super::generate_noise_file(
+            &artifact,
+            &crate::rust_backend::RustTranspileOptions::default(),
+        )
+        .expect("fallback noise emission succeeds")
+        .contents;
+        let seed = format!("w[{}] = self.event_state_accepted[0];", count.id.index());
+        assert_eq!(generated.matches(&seed).count(), 2, "{generated}");
+        let reset = generated.find("w.fill(0.0);").expect("metadata reset");
+        assert!(
+            generated[reset..].contains(&seed),
+            "metadata replay must be reseeded after clearing its workspace"
+        );
     }
 }
 

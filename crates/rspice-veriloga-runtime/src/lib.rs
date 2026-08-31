@@ -1214,22 +1214,467 @@ pub struct GeneratedVerilogAPersistentState {
     pub idt_older: Vec<Value>,
     pub idt_input_previous: Vec<Value>,
     pub idt_initialized: Vec<bool>,
+    /// Accepted event-controlled procedural variables in generated dense-slot
+    /// order. Speculative candidates are intentionally not persistent.
+    pub event_variables: Vec<Value>,
     pub limiter_anchor: Vec<Value>,
     pub limiter_initialized: Vec<bool>,
+}
+
+/// Accepted history for one generated Verilog-A `cross`/`above` event site.
+///
+/// Generated models keep a separate speculative copy while Newton iterates.
+/// Only this accepted image is serialized; a rejected endpoint therefore
+/// cannot consume a crossing or change which side of zero the next trial sees.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GeneratedCrossState {
+    pub value: Value,
+    pub time: Value,
+    pub side: i8,
+    pub last_event_time: Value,
+    pub last_crossing_time: Value,
+    pub initialized: bool,
+}
+
+impl GeneratedCrossState {
+    pub const INITIAL: Self = Self {
+        value: 0.0,
+        time: 0.0,
+        side: 0,
+        last_event_time: Value::NEG_INFINITY,
+        last_crossing_time: -1.0,
+        initialized: false,
+    };
+
+    /// Six scalar checkpoint lanes, kept stable so generated state can travel
+    /// through the existing variable-vector checkpoint envelope.
+    pub const CHECKPOINT_LANES: usize = 6;
+
+    #[inline]
+    pub fn append_checkpoint_lanes(self, values: &mut Vec<Value>) {
+        values.extend_from_slice(&[
+            self.value,
+            self.time,
+            Value::from(self.side),
+            self.last_event_time,
+            self.last_crossing_time,
+            Value::from(u8::from(self.initialized)),
+        ]);
+    }
+
+    pub fn from_checkpoint_lanes(values: &[Value]) -> Result<Self, String> {
+        if values.len() != Self::CHECKPOINT_LANES {
+            return Err(format!(
+                "generated crossing checkpoint requires {} lanes, found {}",
+                Self::CHECKPOINT_LANES,
+                values.len()
+            ));
+        }
+        let side = generated_checkpoint_integer("crossing side", values[2])?;
+        let initialized = generated_checkpoint_integer("crossing initialized flag", values[5])?;
+        if !(-1..=1).contains(&side) {
+            return Err(format!(
+                "generated crossing checkpoint side must be -1, 0, or 1, got {side}"
+            ));
+        }
+        if !(0..=1).contains(&initialized) {
+            return Err(format!(
+                "generated crossing checkpoint initialized flag must be 0 or 1, got {initialized}"
+            ));
+        }
+        let state = Self {
+            value: values[0],
+            time: values[1],
+            side: side as i8,
+            last_event_time: values[3],
+            last_crossing_time: values[4],
+            initialized: initialized != 0,
+        };
+        validate_generated_cross_state(state)?;
+        Ok(state)
+    }
+}
+
+impl Default for GeneratedCrossState {
+    fn default() -> Self {
+        Self::INITIAL
+    }
+}
+
+/// Result of evaluating one generated `cross` or `above` site against accepted
+/// history. The candidate is committed only after the simulator accepts the
+/// complete timepoint.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GeneratedCrossEvaluation {
+    pub fired: bool,
+    pub candidate: GeneratedCrossState,
+    pub refinement_time: Option<Value>,
+}
+
+/// Malformed numeric input or accepted history at a generated event site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeneratedEventControlError {
+    NonFiniteExpression,
+    InvalidTime,
+    InvalidTimeTolerance,
+    InvalidExpressionTolerance,
+    NonIntegerDirection,
+    NonIntegerEnable,
+    InvalidAcceptedState,
+    UnrepresentableRefinement,
+}
+
+impl std::fmt::Display for GeneratedEventControlError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = match self {
+            Self::NonFiniteExpression => "event expression must be finite",
+            Self::InvalidTime => "event evaluation time must be finite and non-negative",
+            Self::InvalidTimeTolerance => "event time tolerance must be finite and non-negative",
+            Self::InvalidExpressionTolerance => {
+                "event expression tolerance must be finite and non-negative"
+            }
+            Self::NonIntegerDirection => "cross direction must be a finite integer",
+            Self::NonIntegerEnable => "event enable must be a finite integer",
+            Self::InvalidAcceptedState => "accepted crossing state is malformed",
+            Self::UnrepresentableRefinement => {
+                "crossing cannot be refined to a representable interior time"
+            }
+        };
+        f.write_str(message)
+    }
+}
+
+impl std::error::Error for GeneratedEventControlError {}
+
+#[inline]
+fn generated_event_integer(
+    value: Value,
+    error: GeneratedEventControlError,
+) -> Result<i32, GeneratedEventControlError> {
+    if !value.is_finite()
+        || value.fract() != 0.0
+        || value < i32::MIN as Value
+        || value > i32::MAX as Value
+    {
+        return Err(error);
+    }
+    Ok(value as i32)
+}
+
+fn generated_checkpoint_integer(name: &str, value: Value) -> Result<i32, String> {
+    if !value.is_finite()
+        || value.fract() != 0.0
+        || value < i32::MIN as Value
+        || value > i32::MAX as Value
+    {
+        return Err(format!(
+            "generated {name} checkpoint lane must be a finite integer, got {value}"
+        ));
+    }
+    Ok(value as i32)
+}
+
+#[inline]
+fn generated_event_side(value: Value) -> i8 {
+    if value > 0.0 {
+        1
+    } else if value < 0.0 {
+        -1
+    } else {
+        0
+    }
+}
+
+pub fn validate_generated_cross_state(state: GeneratedCrossState) -> Result<(), String> {
+    if !(-1..=1).contains(&state.side)
+        || !state.value.is_finite()
+        || !state.time.is_finite()
+        || state.time < 0.0
+        || !(state.last_event_time.is_finite() || state.last_event_time == Value::NEG_INFINITY)
+        || !state.last_crossing_time.is_finite()
+        || state.last_crossing_time < -1.0
+    {
+        return Err("generated accepted crossing state is malformed".to_string());
+    }
+    Ok(())
+}
+
+#[inline]
+fn generated_event_effective_tolerance(requested: Value, scale: Value) -> Value {
+    if requested > 0.0 {
+        requested
+    } else {
+        (64.0 * Value::EPSILON * scale).max(Value::MIN_POSITIVE)
+    }
+}
+
+#[inline]
+fn generated_next_time_after(time: Value) -> Value {
+    if time == 0.0 {
+        Value::from_bits(1)
+    } else {
+        Value::from_bits(time.to_bits() + 1)
+    }
+}
+
+fn generated_strictly_interior_time(start: Value, estimate: Value, end: Value) -> Option<Value> {
+    if !estimate.is_finite() || end <= start {
+        return None;
+    }
+    let target = generated_next_time_after(estimate.max(start));
+    (target > start && target < end).then_some(target)
+}
+
+fn generated_crossing_time(accepted: GeneratedCrossState, value: Value, time: Value) -> Value {
+    let accepted_magnitude = accepted.value.abs();
+    let candidate_magnitude = value.abs();
+    let scale = accepted_magnitude.max(candidate_magnitude);
+    if scale == 0.0 || !scale.is_finite() {
+        return time;
+    }
+    let accepted_scaled = accepted_magnitude / scale;
+    let candidate_scaled = candidate_magnitude / scale;
+    let fraction = (accepted_scaled / (accepted_scaled + candidate_scaled)).clamp(0.0, 1.0);
+    accepted.time + fraction * (time - accepted.time)
+}
+
+/// Evaluate a generated Verilog-A `cross` site from accepted history.
+pub fn evaluate_generated_cross(
+    accepted: GeneratedCrossState,
+    value: Value,
+    time: Value,
+    direction: Value,
+    time_tol: Value,
+    expr_tol: Value,
+    enable: Value,
+    transient: bool,
+) -> Result<GeneratedCrossEvaluation, GeneratedEventControlError> {
+    let direction =
+        generated_event_integer(direction, GeneratedEventControlError::NonIntegerDirection)?;
+    let enabled = generated_event_enable(enable)?;
+    evaluate_generated_cross_impl(
+        accepted, value, time, direction, time_tol, expr_tol, enabled, false, false, transient,
+    )
+}
+
+/// Evaluate a generated Verilog-A `above` site from accepted history.
+pub fn evaluate_generated_above(
+    accepted: GeneratedCrossState,
+    value: Value,
+    time: Value,
+    time_tol: Value,
+    expr_tol: Value,
+    enable: Value,
+    static_analysis: bool,
+) -> Result<GeneratedCrossEvaluation, GeneratedEventControlError> {
+    let enabled = generated_event_enable(enable)?;
+    evaluate_generated_cross_impl(
+        accepted,
+        value,
+        time,
+        1,
+        time_tol,
+        expr_tol,
+        enabled,
+        true,
+        static_analysis,
+        true,
+    )
+}
+
+#[inline]
+fn generated_event_enable(enable: Value) -> Result<bool, GeneratedEventControlError> {
+    generated_event_integer(enable, GeneratedEventControlError::NonIntegerEnable)
+        .map(|enable| enable != 0)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn evaluate_generated_cross_impl(
+    accepted: GeneratedCrossState,
+    value: Value,
+    time: Value,
+    direction: i32,
+    time_tol: Value,
+    expr_tol: Value,
+    enabled: bool,
+    initial_above: bool,
+    allow_same_time_crossing: bool,
+    events_enabled: bool,
+) -> Result<GeneratedCrossEvaluation, GeneratedEventControlError> {
+    if !value.is_finite() {
+        return Err(GeneratedEventControlError::NonFiniteExpression);
+    }
+    if !time.is_finite() || time < 0.0 {
+        return Err(GeneratedEventControlError::InvalidTime);
+    }
+    if !time_tol.is_finite() || time_tol < 0.0 {
+        return Err(GeneratedEventControlError::InvalidTimeTolerance);
+    }
+    if !expr_tol.is_finite() || expr_tol < 0.0 {
+        return Err(GeneratedEventControlError::InvalidExpressionTolerance);
+    }
+    validate_generated_cross_state(accepted)
+        .map_err(|_| GeneratedEventControlError::InvalidAcceptedState)?;
+
+    if !accepted.initialized {
+        let fired = initial_above && enabled && events_enabled && value > 0.0;
+        return Ok(GeneratedCrossEvaluation {
+            fired,
+            candidate: GeneratedCrossState {
+                value,
+                time,
+                side: generated_event_side(value),
+                last_event_time: if fired { time } else { Value::NEG_INFINITY },
+                last_crossing_time: if fired { time } else { -1.0 },
+                initialized: true,
+            },
+            refinement_time: None,
+        });
+    }
+
+    let same_time_static = allow_same_time_crossing && time == accepted.time;
+    if time < accepted.time || (time == accepted.time && !same_time_static) {
+        return Ok(GeneratedCrossEvaluation {
+            fired: false,
+            candidate: accepted,
+            refinement_time: None,
+        });
+    }
+
+    let rising = accepted.side < 0 && value >= 0.0;
+    let falling = accepted.side > 0 && value <= 0.0;
+    let crossing_direction = if rising {
+        1
+    } else if falling {
+        -1
+    } else {
+        0
+    };
+    let crossing_time = if crossing_direction != 0 {
+        generated_crossing_time(accepted, value, time)
+    } else {
+        -1.0
+    };
+    let fired = events_enabled
+        && enabled
+        && crossing_direction != 0
+        && (direction == 0 || direction == crossing_direction);
+    let refinement_time = if fired && !same_time_static {
+        let effective_time_tol =
+            generated_event_effective_tolerance(time_tol, accepted.time.abs().max(time.abs()));
+        let effective_expr_tol =
+            generated_event_effective_tolerance(expr_tol, accepted.value.abs().max(value.abs()));
+        let time_error = (time - crossing_time).max(0.0);
+        if time_error > effective_time_tol || value.abs() > effective_expr_tol {
+            Some(
+                generated_strictly_interior_time(accepted.time, crossing_time, time)
+                    .ok_or(GeneratedEventControlError::UnrepresentableRefinement)?,
+            )
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let stable_side = generated_event_side(value);
+    let side = if stable_side != 0 {
+        stable_side
+    } else if crossing_direction != 0 {
+        crossing_direction as i8
+    } else {
+        accepted.side
+    };
+    Ok(GeneratedCrossEvaluation {
+        fired,
+        candidate: GeneratedCrossState {
+            value,
+            time,
+            side,
+            last_event_time: if fired {
+                crossing_time
+            } else {
+                accepted.last_event_time
+            },
+            last_crossing_time: if fired {
+                crossing_time
+            } else {
+                accepted.last_crossing_time
+            },
+            initialized: true,
+        },
+        refinement_time,
+    })
+}
+
+/// Evaluate a generated timer and return its event level and next exact event.
+/// This matches the portable VM's endpoint and coalescing rules.
+pub fn evaluate_generated_timer(
+    start_time: Value,
+    period: Value,
+    time_tol: Value,
+    enable: Value,
+    current_time: Value,
+    timestep: Value,
+) -> (bool, Option<Value>) {
+    if !start_time.is_finite()
+        || !period.is_finite()
+        || !time_tol.is_finite()
+        || !enable.is_finite()
+        || !current_time.is_finite()
+        || !timestep.is_finite()
+        || enable == 0.0
+        || period < 0.0
+    {
+        return (false, None);
+    }
+
+    let scale = start_time.abs().max(current_time.abs());
+    let numeric_tol = (16.0 * Value::EPSILON * scale).max(Value::MIN_POSITIVE);
+    let event_tol = time_tol.max(0.0).max(numeric_tol);
+    let horizon = current_time + event_tol;
+    let previous_time = current_time - timestep.max(0.0);
+    let scheduled = if horizon + numeric_tol < start_time {
+        None
+    } else if period > 0.0 {
+        let cycles = ((horizon - start_time) / period).floor().max(0.0);
+        let candidate = start_time + cycles * period;
+        candidate.is_finite().then_some(candidate)
+    } else {
+        Some(start_time)
+    };
+    let fired = scheduled.is_some_and(|event_time| {
+        event_time <= horizon
+            && if timestep > numeric_tol {
+                event_time > previous_time + numeric_tol
+            } else {
+                (current_time - event_time).abs() <= event_tol
+            }
+    });
+    let next_event = if horizon + numeric_tol < start_time {
+        Some(start_time)
+    } else if period > 0.0 {
+        let cycles = ((horizon - start_time) / period).floor().max(0.0) + 1.0;
+        let next = start_time + cycles * period;
+        (next.is_finite() && next > current_time + numeric_tol).then_some(next)
+    } else {
+        None
+    };
+    (fired, next_event)
 }
 
 /// Mutable evaluation state captured around rejected nonlinear trial points.
 ///
 /// Parameter values, topology, static caches, and linked matrix locations are
-/// deliberately excluded. Generated models pack only their DDT/IDT and limiter
-/// state into these two contiguous buffers.
+/// deliberately excluded. Generated models pack DDT/IDT history, accepted and
+/// candidate event variables, and limiter state into these contiguous buffers.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct GeneratedVerilogARollbackState {
     pub values: Vec<Value>,
     pub flags: Vec<bool>,
 }
 
-pub const GENERATED_PERSISTENT_STATE_VERSION: u32 = 3;
+pub const GENERATED_PERSISTENT_STATE_VERSION: u32 = 4;
 
 /// Persistent state plus exact generated-model and instance provenance.
 #[derive(Debug, Clone, PartialEq)]
@@ -1272,6 +1717,11 @@ pub enum GeneratedEvaluationError {
         slot: usize,
         source: GeneratedIdtCandidateError,
     },
+    EventControl {
+        operator: &'static str,
+        slot: usize,
+        source: GeneratedEventControlError,
+    },
 }
 
 impl std::fmt::Display for GeneratedEvaluationError {
@@ -1291,6 +1741,14 @@ impl std::fmt::Display for GeneratedEvaluationError {
             Self::IdtCandidate { slot, source } => {
                 write!(f, "generated Verilog-A idt slot {slot} failed: {source}")
             }
+            Self::EventControl {
+                operator,
+                slot,
+                source,
+            } => write!(
+                f,
+                "generated Verilog-A {operator} event slot {slot} failed: {source}"
+            ),
         }
     }
 }
@@ -1830,6 +2288,23 @@ impl<'a> GeneratedEvalContext<'a> {
         if self.evaluation_error.get().is_none() {
             self.evaluation_error
                 .set(Some(GeneratedEvaluationError::IdtCandidate {
+                    slot,
+                    source,
+                }));
+        }
+    }
+
+    #[inline]
+    pub fn report_event_control_error(
+        &self,
+        operator: &'static str,
+        slot: usize,
+        source: GeneratedEventControlError,
+    ) {
+        if self.evaluation_error.get().is_none() {
+            self.evaluation_error
+                .set(Some(GeneratedEvaluationError::EventControl {
+                    operator,
                     slot,
                     source,
                 }));
@@ -6655,6 +7130,189 @@ impl<'a> GeneratedReactiveStamper<'a> {
 #[cfg(test)]
 mod fixed_lane_tests {
     use super::*;
+
+    #[test]
+    fn generated_cross_checkpoint_lanes_round_trip_and_fail_closed() {
+        let state = GeneratedCrossState {
+            value: -2.5,
+            time: 4.0,
+            side: -1,
+            last_event_time: 3.0,
+            last_crossing_time: 3.0,
+            initialized: true,
+        };
+        let mut lanes = Vec::new();
+        state.append_checkpoint_lanes(&mut lanes);
+        assert_eq!(lanes.len(), GeneratedCrossState::CHECKPOINT_LANES);
+        assert_eq!(
+            GeneratedCrossState::from_checkpoint_lanes(&lanes),
+            Ok(state)
+        );
+
+        assert!(
+            GeneratedCrossState::from_checkpoint_lanes(&lanes[..5])
+                .expect_err("truncated checkpoint must fail")
+                .contains("requires 6 lanes")
+        );
+
+        let mut malformed = lanes.clone();
+        malformed[2] = 2.0;
+        assert!(
+            GeneratedCrossState::from_checkpoint_lanes(&malformed)
+                .expect_err("invalid crossing side must fail")
+                .contains("side must be -1, 0, or 1")
+        );
+
+        malformed = lanes.clone();
+        malformed[5] = 0.5;
+        let error = GeneratedCrossState::from_checkpoint_lanes(&malformed)
+            .expect_err("fractional initialized flag must fail");
+        assert!(error.contains("crossing initialized flag"));
+        assert!(error.contains("finite integer"));
+
+        malformed = lanes.clone();
+        malformed[5] = 2.0;
+        assert!(
+            GeneratedCrossState::from_checkpoint_lanes(&malformed)
+                .expect_err("out-of-domain initialized flag must fail")
+                .contains("initialized flag must be 0 or 1")
+        );
+
+        malformed = lanes;
+        malformed[0] = Value::NAN;
+        assert!(
+            GeneratedCrossState::from_checkpoint_lanes(&malformed)
+                .expect_err("non-finite crossing state must fail")
+                .contains("malformed")
+        );
+    }
+
+    #[test]
+    fn generated_cross_is_pure_against_accepted_state_and_refines_the_root() {
+        let initial = evaluate_generated_cross(
+            GeneratedCrossState::INITIAL,
+            -1.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+            true,
+        )
+        .expect("initialize crossing state");
+        assert!(!initial.fired);
+        let accepted = initial.candidate;
+
+        let crossing = evaluate_generated_cross(accepted, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, true)
+            .expect("evaluate crossing");
+        assert!(crossing.fired);
+        assert_eq!(crossing.candidate.value, 1.0);
+        assert_eq!(crossing.candidate.time, 1.0);
+        assert_eq!(crossing.candidate.side, 1);
+        assert_eq!(crossing.candidate.last_crossing_time, 0.5);
+        assert_eq!(
+            crossing.refinement_time,
+            Some(generated_next_time_after(0.5))
+        );
+
+        let repeated = evaluate_generated_cross(accepted, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, true)
+            .expect("repeat the same Newton candidate");
+        assert_eq!(repeated, crossing);
+        assert_eq!(accepted, initial.candidate, "candidate evaluation is pure");
+
+        let rolled_back = evaluate_generated_cross(accepted, -0.5, 0.75, 1.0, 0.0, 0.0, 1.0, true)
+            .expect("evaluate from the unmodified accepted endpoint");
+        assert!(!rolled_back.fired);
+        assert_eq!(rolled_back.candidate.side, -1);
+    }
+
+    #[test]
+    fn generated_event_operands_are_exact_and_invalid_directions_are_inactive() {
+        let initialized = evaluate_generated_cross(
+            GeneratedCrossState::INITIAL,
+            -1.0,
+            0.0,
+            2.0,
+            0.0,
+            0.0,
+            1.0,
+            true,
+        )
+        .expect("integer direction outside the event domain remains legal");
+        let inactive =
+            evaluate_generated_cross(initialized.candidate, 1.0, 1.0, 2.0, 0.0, 0.0, 1.0, true)
+                .expect("out-of-domain integer direction is inactive");
+        assert!(!inactive.fired);
+
+        assert_eq!(
+            evaluate_generated_cross(initialized.candidate, 1.0, 1.0, 0.5, 0.0, 0.0, 1.0, true,),
+            Err(GeneratedEventControlError::NonIntegerDirection)
+        );
+        assert_eq!(
+            evaluate_generated_above(initialized.candidate, 1.0, 1.0, 0.0, 0.0, 0.5, false,),
+            Err(GeneratedEventControlError::NonIntegerEnable)
+        );
+    }
+
+    #[test]
+    fn generated_above_fires_at_a_positive_static_initial_point() {
+        let above =
+            evaluate_generated_above(GeneratedCrossState::INITIAL, 0.25, 0.0, 0.0, 0.0, 1.0, true)
+                .expect("static above evaluation");
+        assert!(above.fired);
+        assert_eq!(above.candidate.side, 1);
+        assert_eq!(above.candidate.last_event_time, 0.0);
+        assert_eq!(above.candidate.last_crossing_time, 0.0);
+        assert_eq!(above.refinement_time, None);
+
+        let disabled =
+            evaluate_generated_above(GeneratedCrossState::INITIAL, 0.25, 0.0, 0.0, 0.0, 0.0, true)
+                .expect("disabled static above evaluation");
+        assert!(!disabled.fired);
+    }
+
+    #[test]
+    fn generated_timer_reports_one_shot_and_periodic_event_bounds() {
+        assert_eq!(
+            evaluate_generated_timer(1.0, 0.0, 0.0, 1.0, 0.0, 0.0),
+            (false, Some(1.0))
+        );
+        assert_eq!(
+            evaluate_generated_timer(1.0, 0.0, 0.0, 1.0, 1.0, 1.0),
+            (true, None)
+        );
+        assert_eq!(
+            evaluate_generated_timer(1.0, 0.0, 0.0, 1.0, 1.0, 1.0),
+            (true, None),
+            "repeated Newton evaluations keep a timer event level true"
+        );
+        assert_eq!(
+            evaluate_generated_timer(1.0, 0.0, 0.0, 1.0, 2.0, 1.0),
+            (false, None),
+            "an accepted one-shot endpoint is not replayed"
+        );
+
+        assert_eq!(
+            evaluate_generated_timer(1.0, 2.0, 0.0, 1.0, 0.0, 0.0),
+            (false, Some(1.0))
+        );
+        assert_eq!(
+            evaluate_generated_timer(1.0, 2.0, 0.0, 1.0, 1.0, 1.0),
+            (true, Some(3.0))
+        );
+        assert_eq!(
+            evaluate_generated_timer(1.0, 2.0, 0.0, 1.0, 2.0, 1.0),
+            (false, Some(3.0))
+        );
+        assert_eq!(
+            evaluate_generated_timer(1.0, 2.0, 0.0, 1.0, 3.0, 1.0),
+            (true, Some(5.0))
+        );
+        assert_eq!(
+            evaluate_generated_timer(1.0, -1.0, 0.0, 1.0, 0.0, 0.0),
+            (false, None)
+        );
+    }
 
     #[test]
     fn descriptor_v2_unifies_terminal_current_and_dual_scope_metadata() {

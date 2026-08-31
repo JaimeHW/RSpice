@@ -2,7 +2,7 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, L6, L7, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, L6, L7, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 127] = [267, 268, 269, 107, 270, 0, 1, 2, 3, 253, 283, 103, 338, 7, 122, 184, 284, 285, 4, 286, 5, 287, 6, 296, 298, 300, 64, 8, 307, 233, 125, 242, 62, 127, 309, 312, 315, 313, 314, 10, 9, 11, 12, 13, 14, 326, 322, 323, 17, 19, 22, 68, 63, 67, 325, 157, 83, 82, 86, 87, 101, 104, 112, 109, 108, 111, 110, 113, 114, 115, 116, 117, 118, 119, 120, 121, 128, 131, 327, 141, 150, 151, 152, 153, 154, 328, 155, 156, 329, 160, 161, 162, 165, 173, 176, 334, 182, 189, 190, 192, 339, 205, 211, 340, 217, 341, 342, 343, 344, 246, 249, 346, 347, 348, 349, 350, 351, 352, 354, 355, 356, 357, 358, 359, 360, 362, 363];

@@ -20,7 +20,7 @@ use smol_str::SmolStr;
 use std::collections::{HashMap, HashSet};
 
 use super::cfg::{CfgBinaryOp, CfgFunction, CfgTerminator, CfgUnaryOp, CfgValueKind, is_leaf_kind};
-use super::{BlockId, ValueId};
+use super::{BlockId, ExprId, ValueId};
 
 /// The arithmetic a CFG needs from its scalar type.
 ///
@@ -173,6 +173,9 @@ pub struct CfgEvalInputs<S> {
     pub parameters: Vec<S>,
     /// Which parameters the instance set, indexed by `ParamId`.
     pub parameter_given: Vec<bool>,
+    /// Accepted event-controlled procedural state, in dense generated slot
+    /// order.
+    pub event_state: Vec<S>,
     /// Node potentials, indexed by `NodeId`.
     pub node_potentials: Vec<S>,
     /// Declared-branch flows, indexed by `BranchId`.
@@ -202,6 +205,11 @@ pub struct CfgEvalInputs<S> {
     /// interpreter does not keep.
     pub idt: S,
     pub idt_scale: S,
+    /// Results supplied for stateful event controls, keyed by their canonical
+    /// call expression. The reference interpreter has no accepted-history
+    /// owner, so omitted sites evaluate false while still evaluating every
+    /// operand on the executed path.
+    pub event_controls: HashMap<ExprId, S>,
     /// What coarser invalidation stages cached, by slot. Empty for a whole
     /// unsplit function, which reads no slot.
     pub staged: Vec<S>,
@@ -474,6 +482,11 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                     .unwrap_or(false);
                 S::from_f64(f64::from(u8::from(given)))
             }
+            CfgValueKind::EventState(slot) => *self
+                .inputs
+                .event_state
+                .get(slot as usize)
+                .ok_or(CfgEvalError::MissingInput("event state", slot as usize))?,
             CfgValueKind::Temperature => self.inputs.temperature,
             CfgValueKind::ThermalVoltage => self.inputs.thermal_voltage,
             CfgValueKind::Multiplicity => self.inputs.multiplicity,
@@ -520,6 +533,59 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                 self.inputs.idt
             }
             CfgValueKind::IdtScale => self.inputs.idt_scale,
+            CfgValueKind::Cross {
+                operator,
+                input,
+                direction,
+                time_tol,
+                expr_tol,
+                enable,
+            } => {
+                self.read(input)?;
+                self.read(direction)?;
+                self.read(time_tol)?;
+                self.read(expr_tol)?;
+                self.read(enable)?;
+                self.inputs
+                    .event_controls
+                    .get(&operator)
+                    .copied()
+                    .unwrap_or_else(|| S::from_f64(0.0))
+            }
+            CfgValueKind::Above {
+                operator,
+                input,
+                time_tol,
+                expr_tol,
+                enable,
+            } => {
+                self.read(input)?;
+                self.read(time_tol)?;
+                self.read(expr_tol)?;
+                self.read(enable)?;
+                self.inputs
+                    .event_controls
+                    .get(&operator)
+                    .copied()
+                    .unwrap_or_else(|| S::from_f64(0.0))
+            }
+            CfgValueKind::Timer {
+                operator,
+                start,
+                period,
+                time_tol,
+                enable,
+            } => {
+                self.read(start)?;
+                self.read(period)?;
+                self.read(time_tol)?;
+                self.read(enable)?;
+                self.inputs
+                    .event_controls
+                    .get(&operator)
+                    .copied()
+                    .unwrap_or_else(|| S::from_f64(0.0))
+            }
             CfgValueKind::Staged { slot } => *self
                 .inputs
                 .staged

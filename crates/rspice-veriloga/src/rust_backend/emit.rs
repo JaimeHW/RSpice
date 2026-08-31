@@ -64,6 +64,7 @@ use crate::canonical_ir::{BlockId, ValueId};
 pub struct EmitBindings {
     pub parameters: String,
     pub parameter_given: String,
+    pub event_state: String,
     pub node_potentials: String,
     pub branch_flows: String,
     pub branch_unknown_flows: String,
@@ -78,6 +79,12 @@ pub struct EmitBindings {
     pub idt: String,
     pub idt_slots: HashMap<crate::canonical_ir::ExprId, usize>,
     pub idt_scale: String,
+    /// Stateful generated event-control evaluators.
+    pub cross: String,
+    pub cross_slots: HashMap<crate::canonical_ir::ExprId, usize>,
+    pub above: String,
+    pub timer: String,
+    pub timer_slots: HashMap<crate::canonical_ir::ExprId, usize>,
     /// Called as `analysis("dc")`.
     pub analysis: String,
     /// Called as `simparam("gmin", fallback)`.
@@ -96,6 +103,7 @@ impl Default for EmitBindings {
         Self {
             parameters: "parameters".into(),
             parameter_given: "parameter_given".into(),
+            event_state: "event_state".into(),
             node_potentials: "node_potentials".into(),
             branch_flows: "branch_flows".into(),
             branch_unknown_flows: "branch_unknown_flows".into(),
@@ -109,6 +117,11 @@ impl Default for EmitBindings {
             idt: "idt".into(),
             idt_slots: HashMap::new(),
             idt_scale: "idt_scale".into(),
+            cross: "cross".into(),
+            cross_slots: HashMap::new(),
+            above: "above".into(),
+            timer: "timer".into(),
+            timer_slots: HashMap::new(),
             analysis: "analysis".into(),
             simparam: "simparam".into(),
             limit: "limit".into(),
@@ -1398,6 +1411,7 @@ impl Emitter<'_> {
                 | CfgValueKind::BooleanConstant(_)
                 | CfgValueKind::Parameter(_)
                 | CfgValueKind::ParameterGiven(_)
+                | CfgValueKind::EventState(_)
                 | CfgValueKind::Temperature
                 | CfgValueKind::ThermalVoltage
                 | CfgValueKind::Multiplicity
@@ -1425,6 +1439,7 @@ impl Emitter<'_> {
                 | CfgValueKind::BooleanConstant(_)
                 | CfgValueKind::Parameter(_)
                 | CfgValueKind::ParameterGiven(_)
+                | CfgValueKind::EventState(_)
                 | CfgValueKind::Temperature
                 | CfgValueKind::ThermalVoltage
                 | CfgValueKind::Multiplicity
@@ -1501,11 +1516,18 @@ impl Emitter<'_> {
                     format!("{given} as u8 as f64")
                 }
             }
+            CfgValueKind::EventState(slot) => {
+                format!("{}[{slot}]", bindings.event_state)
+            }
             CfgValueKind::Temperature => bindings.temperature.clone(),
             CfgValueKind::ThermalVoltage => bindings.thermal_voltage.clone(),
             CfgValueKind::Multiplicity => bindings.multiplicity.clone(),
             CfgValueKind::Time => bindings.time.clone(),
-            CfgValueKind::Analysis(name) => format!("{}(\"{name}\")", bindings.analysis),
+            CfgValueKind::Analysis(name) => match name.as_str() {
+                "__rspice_initial_step" => "ctx.analysis_initial_step()".to_string(),
+                "__rspice_final_step" => "ctx.analysis_final_step()".to_string(),
+                _ => format!("{}(\"{name}\")", bindings.analysis),
+            },
             CfgValueKind::SimParam { name, fallback } => format!(
                 "{}(\"{name}\", {})",
                 bindings.simparam,
@@ -1549,6 +1571,65 @@ impl Emitter<'_> {
                 self.numeric_operand(*ic)
             ),
             CfgValueKind::IdtScale => format!("{}()", bindings.idt_scale),
+            CfgValueKind::Cross {
+                operator,
+                input,
+                direction,
+                time_tol,
+                expr_tol,
+                enable,
+            } => format!(
+                "{}({}, {}, {}, {}, {}, {})",
+                bindings.cross,
+                bindings
+                    .cross_slots
+                    .get(operator)
+                    .copied()
+                    .unwrap_or_else(|| usize::from(*operator)),
+                self.numeric_operand(*input),
+                self.numeric_operand(*direction),
+                self.numeric_operand(*time_tol),
+                self.numeric_operand(*expr_tol),
+                self.numeric_operand(*enable),
+            ),
+            CfgValueKind::Above {
+                operator,
+                input,
+                time_tol,
+                expr_tol,
+                enable,
+            } => format!(
+                "{}({}, {}, {}, {}, {})",
+                bindings.above,
+                bindings
+                    .cross_slots
+                    .get(operator)
+                    .copied()
+                    .unwrap_or_else(|| usize::from(*operator)),
+                self.numeric_operand(*input),
+                self.numeric_operand(*time_tol),
+                self.numeric_operand(*expr_tol),
+                self.numeric_operand(*enable),
+            ),
+            CfgValueKind::Timer {
+                operator,
+                start,
+                period,
+                time_tol,
+                enable,
+            } => format!(
+                "{}({}, {}, {}, {}, {})",
+                bindings.timer,
+                bindings
+                    .timer_slots
+                    .get(operator)
+                    .copied()
+                    .unwrap_or_else(|| usize::from(*operator)),
+                self.numeric_operand(*start),
+                self.numeric_operand(*period),
+                self.numeric_operand(*time_tol),
+                self.numeric_operand(*enable),
+            ),
             CfgValueKind::Limit {
                 operator,
                 proposed,

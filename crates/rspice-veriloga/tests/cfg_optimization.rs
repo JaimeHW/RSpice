@@ -249,6 +249,8 @@ fn inputs(artifact: &CanonicalIrArtifact) -> CfgEvalInputs<f64> {
     CfgEvalInputs {
         parameters,
         parameter_given,
+        event_state: Vec::new(),
+        event_controls: HashMap::new(),
         node_potentials: (0..artifact.mir.nodes.len())
             .map(|index| 0.37 - 0.12 * index as f64)
             .collect(),

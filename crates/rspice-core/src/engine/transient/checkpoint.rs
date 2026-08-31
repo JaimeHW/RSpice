@@ -94,7 +94,9 @@ use super::{
 /// history so direct-transient startup is unambiguous and restart-exact.
 /// Version 24 changes runtime Verilog-A `idtmod` accepted lanes to a common-
 /// branch representation so Trap/Gear continuation remains exact across wraps.
-const FORMAT_VERSION: u32 = 25;
+/// Version 25 adds exact generated-device accepted terminal currents. Version
+/// 26 adds accepted ordinary variables written by generated event controls.
+const FORMAT_VERSION: u32 = 26;
 const RUNTIME_VERILOGA_FORMAT_VERSION: u32 = 17;
 #[cfg(feature = "veriloga")]
 const RUNTIME_VERILOGA_SLEW_INITIALIZATION_FORMAT_VERSION: u32 = 23;
@@ -106,6 +108,7 @@ const ACCEPTED_JUNCTION_HISTORY_FORMAT_VERSION: u32 = 20;
 const EXACT_INTEGRATION_RUNTIME_FORMAT_VERSION: u32 = 21;
 const GENERATED_STATEFUL_TRANSACTION_FORMAT_VERSION: u32 = 22;
 const GENERATED_TERMINAL_CURRENT_FORMAT_VERSION: u32 = 25;
+const GENERATED_EVENT_STATE_FORMAT_VERSION: u32 = 26;
 
 const PACKED_MAGIC: &[u8; 16] = b"RSPICE-CPACK\0\0\0\0";
 const PACKED_ENVELOPE_VERSION: u32 = 1;
@@ -2717,14 +2720,15 @@ fn read_generated_veriloga_states(
             .ok_or_else(|| format!("generated state row {row} is missing state version"))?
             .parse::<u32>()
             .map_err(|_| format!("generated state row {row} has invalid state version"))?;
-        let expected_state_version =
-            if checkpoint_version >= GENERATED_TERMINAL_CURRENT_FORMAT_VERSION {
-                GENERATED_PERSISTENT_STATE_VERSION
-            } else if checkpoint_version >= GENERATED_STATEFUL_TRANSACTION_FORMAT_VERSION {
-                2
-            } else {
-                1
-            };
+        let expected_state_version = if checkpoint_version >= GENERATED_EVENT_STATE_FORMAT_VERSION {
+            GENERATED_PERSISTENT_STATE_VERSION
+        } else if checkpoint_version >= GENERATED_TERMINAL_CURRENT_FORMAT_VERSION {
+            3
+        } else if checkpoint_version >= GENERATED_STATEFUL_TRANSACTION_FORMAT_VERSION {
+            2
+        } else {
+            1
+        };
         if state_version != expected_state_version {
             return Err(format!(
                 "generated state row {row} uses unsupported persistent-state version {state_version}; checkpoint format {checkpoint_version} requires version {expected_state_version}"
@@ -2745,6 +2749,11 @@ fn read_generated_veriloga_states(
             read_generated_state_rows(lines, "idt_state", idt_value_columns, budget)?;
         let (mut limiter, limiter_initialized) =
             read_generated_state_rows(lines, "limiter_state", 1, budget)?;
+        let event_variables = if checkpoint_version >= GENERATED_EVENT_STATE_FORMAT_VERSION {
+            read_value_vector(lines, "event_state", budget)?
+        } else {
+            Vec::new()
+        };
         let terminal_currents = if checkpoint_version >= GENERATED_TERMINAL_CURRENT_FORMAT_VERSION {
             read_value_vector(lines, "terminal_currents", budget)?
         } else {
@@ -2784,6 +2793,7 @@ fn read_generated_veriloga_states(
                 idt_older,
                 idt_input_previous,
                 idt_initialized,
+                event_variables,
                 limiter_anchor: limiter.remove(0),
                 limiter_initialized,
             },
@@ -4602,6 +4612,11 @@ impl TransientCheckpoint {
                     "generated Verilog-A checkpoint instance {index} contains non-finite persistent state"
                 ));
             }
+            if state.event_variables.iter().any(|value| value.is_nan()) {
+                return Err(format!(
+                    "generated Verilog-A checkpoint instance {index} contains NaN event state"
+                ));
+            }
             if instance
                 .terminal_currents
                 .iter()
@@ -4921,6 +4936,27 @@ impl TransientCheckpoint {
             circuit,
             &self.accepted_junction_history,
         )
+    }
+
+    /// Prime external Verilog-A accepted state before the resume-time startup
+    /// solve. Some generated models derive all usable equations from
+    /// `initial_step`; a rebuilt instance cannot safely evaluate with those
+    /// accepted variables reset to zero while waiting for full injection.
+    pub(crate) fn prime_veriloga_resume_startup(
+        &self,
+        circuit: &mut CircuitData,
+    ) -> Result<(), String> {
+        self.validate_numeric_state()?;
+        circuit.restore_generated_veriloga_checkpoint_states(
+            &self.generated_veriloga_instance_states,
+            self.generated_veriloga_state_available,
+        )?;
+        #[cfg(feature = "veriloga")]
+        circuit.restore_runtime_veriloga_checkpoint_states(
+            &self.runtime_veriloga_instance_states,
+            self.runtime_veriloga_state_available,
+        )?;
+        Ok(())
     }
 
     /// Inject the captured reactive-state histories into a freshly built
@@ -5705,6 +5741,7 @@ impl TransientCheckpoint {
                 .saturating_add(state.idt_older.len())
                 .saturating_add(state.idt_input_previous.len())
                 .saturating_add(state.idt_initialized.len())
+                .saturating_add(state.event_variables.len())
                 .saturating_add(state.limiter_anchor.len())
                 .saturating_add(state.limiter_initialized.len())
                 .saturating_add(instance.terminal_currents.len());
@@ -6182,6 +6219,7 @@ impl TransientCheckpoint {
                     u8::from(state.limiter_initialized[index])
                 ));
             }
+            write_value_vector(&mut out, "event_state", &state.event_variables);
             write_value_vector(&mut out, "terminal_currents", &instance.terminal_currents);
         }
         out.push_str(&format!(
@@ -6827,13 +6865,14 @@ impl TransientCheckpoint {
                     ));
                 }
                 let states = read_generated_veriloga_states(&mut lines, version, budget)?;
-                if version >= GENERATED_TERMINAL_CURRENT_FORMAT_VERSION {
+                if version >= GENERATED_EVENT_STATE_FORMAT_VERSION {
                     (available, states)
                 } else {
                     // Older formats remain parseable, but cannot reconstruct
                     // every accepted generated-device observable required by
                     // the current runtime (generalized IDT history before v22,
-                    // exact external terminal currents before v25). Preserve
+                    // exact external terminal currents before v25, accepted
+                    // event-controlled variables before v26). Preserve
                     // a fail-closed resume representation.
                     (false, Vec::new())
                 }
@@ -7657,6 +7696,7 @@ mod tests {
                     idt_older: vec![4.25],
                     idt_input_previous: vec![-1.125],
                     idt_initialized: vec![true],
+                    event_variables: vec![6.75, Value::INFINITY, Value::NEG_INFINITY],
                     limiter_anchor: vec![-0.75],
                     limiter_initialized: vec![true],
                 },
@@ -7987,17 +8027,19 @@ mod tests {
             if version < 7 && line.starts_with("generated_veriloga_state_available ") {
                 break;
             }
-            if version < GENERATED_TERMINAL_CURRENT_FORMAT_VERSION
+            if version < GENERATED_EVENT_STATE_FORMAT_VERSION
                 && line.starts_with("generated_veriloga_state ")
             {
                 let (prefix, _) = line
                     .rsplit_once(' ')
                     .expect("generated state header has a version");
                 output.push_str(prefix);
-                output.push_str(if version < GENERATED_STATEFUL_TRANSACTION_FORMAT_VERSION {
-                    " 1\n"
-                } else {
+                output.push_str(if version >= GENERATED_TERMINAL_CURRENT_FORMAT_VERSION {
+                    " 3\n"
+                } else if version >= GENERATED_STATEFUL_TRANSACTION_FORMAT_VERSION {
                     " 2\n"
+                } else {
+                    " 1\n"
                 });
                 continue;
             }
@@ -8036,6 +8078,18 @@ mod tests {
                     lines
                         .next()
                         .expect("complete generated terminal-current vector");
+                }
+                continue;
+            }
+            if version < GENERATED_EVENT_STATE_FORMAT_VERSION && line.starts_with("event_state ") {
+                let count = line
+                    .split_whitespace()
+                    .nth(1)
+                    .expect("generated event-state count")
+                    .parse::<usize>()
+                    .expect("numeric generated event-state count");
+                for _ in 0..count {
+                    lines.next().expect("complete generated event-state vector");
                 }
                 continue;
             }
@@ -9631,6 +9685,20 @@ mod tests {
     }
 
     #[test]
+    fn version_twenty_five_generated_state_parses_but_event_state_fails_closed() {
+        let legacy = TransientCheckpoint::from_text(&legacy_text(
+            &sample(),
+            GENERATED_EVENT_STATE_FORMAT_VERSION - 1,
+        ))
+        .expect("persistent-state v3 generated payload remains parseable");
+        assert!(
+            !legacy.generated_veriloga_state_available,
+            "v25 lacks accepted event-controlled variables and cannot be resume-authoritative"
+        );
+        assert!(legacy.generated_veriloga_instance_states.is_empty());
+    }
+
+    #[test]
     fn checkpoint_rejects_non_finite_solution_and_lte_reference_values() {
         for non_finite in [Value::NAN, Value::INFINITY, Value::NEG_INFINITY] {
             let mut checkpoint = sample();
@@ -9739,6 +9807,23 @@ mod tests {
             err.contains("non-finite persistent state"),
             "unexpected error: {err}"
         );
+
+        let mut nan_event_state = sample();
+        nan_event_state.generated_veriloga_instance_states[0]
+            .state
+            .event_variables[0] = Value::NAN;
+        let err = nan_event_state
+            .validate_numeric_state()
+            .expect_err("NaN generated event state must fail closed");
+        assert!(err.contains("NaN event state"), "unexpected error: {err}");
+
+        let mut infinite_event_state = sample();
+        infinite_event_state.generated_veriloga_instance_states[0]
+            .state
+            .event_variables = vec![Value::INFINITY, Value::NEG_INFINITY];
+        infinite_event_state
+            .validate_numeric_state()
+            .expect("ordinary generated event state permits infinities like the VM");
 
         let mut non_finite_terminal_current = sample();
         non_finite_terminal_current.generated_veriloga_instance_states[0].terminal_currents[0] =

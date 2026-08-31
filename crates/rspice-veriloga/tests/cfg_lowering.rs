@@ -276,6 +276,252 @@ endmodule
     assert_eq!(model.residuals.len(), 2);
 }
 
+#[test]
+fn event_written_variables_are_seeded_and_returned_as_explicit_candidates() {
+    let source = r#"
+module event_candidate(p, n);
+    inout p, n;
+    electrical p, n;
+    real count;
+    analog begin
+        @(initial_step("ac", "noise")) count = count + 1.0;
+        @(final_step("ac", "noise")) count = count + 10.0;
+        I(p, n) <+ count * V(p, n);
+    end
+endmodule
+"#;
+    let artifact = artifact(source);
+    let model = lower(source);
+    assert_eq!(model.event_state_candidates.len(), 1);
+    assert!(
+        model
+            .function
+            .values
+            .iter()
+            .any(|value| matches!(value.kind, CfgValueKind::EventState(0)))
+    );
+
+    let bias = bias_point(&artifact);
+    let mut inputs = cfg_inputs(&bias);
+    inputs.event_state = vec![4.0];
+    let inactive = evaluate_cfg(&model.function, &inputs).expect("inactive event evaluation");
+    assert_eq!(inactive.value(model.event_state_candidates[0]), Some(4.0));
+
+    inputs.analyses.insert("ac".into());
+    inputs.analyses.insert("__rspice_initial_step".into());
+    let initial = evaluate_cfg(&model.function, &inputs).expect("initial-step evaluation");
+    assert_eq!(initial.value(model.event_state_candidates[0]), Some(5.0));
+
+    inputs.analyses.remove("__rspice_initial_step");
+    inputs.analyses.insert("__rspice_final_step".into());
+    let final_step = evaluate_cfg(&model.function, &inputs).expect("final-step evaluation");
+    assert_eq!(
+        final_step.value(model.event_state_candidates[0]),
+        Some(14.0)
+    );
+}
+
+#[test]
+fn analog_event_controls_lower_to_keyed_cfg_values_with_explicit_defaults() {
+    let source = r#"
+module event_operators(p, n);
+    inout p, n;
+    electrical p, n;
+    real count;
+    analog begin
+        @(cross(V(p, n), 1)) count = count + 1.0;
+        @(above(V(p, n))) count = count + 10.0;
+        @(timer(1.0)) count = count + 100.0;
+        I(p, n) <+ count * V(p, n);
+    end
+endmodule
+"#;
+    let artifact = artifact(source);
+    let model = lower(source);
+    assert_eq!(model.event_state_candidates.len(), 1);
+
+    let mut cross = None;
+    let mut above = None;
+    let mut timer = None;
+    for value in &model.function.values {
+        match &value.kind {
+            CfgValueKind::Cross {
+                operator,
+                direction,
+                time_tol,
+                expr_tol,
+                enable,
+                ..
+            } => {
+                assert!(matches!(
+                    &model.function.value(*direction).kind,
+                    CfgValueKind::RealConstant(1.0)
+                ));
+                for default in [time_tol, expr_tol] {
+                    assert!(matches!(
+                        &model.function.value(*default).kind,
+                        CfgValueKind::RealConstant(0.0)
+                    ));
+                }
+                assert!(matches!(
+                    &model.function.value(*enable).kind,
+                    CfgValueKind::RealConstant(1.0)
+                ));
+                assert!(cross.replace(*operator).is_none(), "one cross site");
+            }
+            CfgValueKind::Above {
+                operator,
+                time_tol,
+                expr_tol,
+                enable,
+                ..
+            } => {
+                for default in [time_tol, expr_tol] {
+                    assert!(matches!(
+                        &model.function.value(*default).kind,
+                        CfgValueKind::RealConstant(0.0)
+                    ));
+                }
+                assert!(matches!(
+                    &model.function.value(*enable).kind,
+                    CfgValueKind::RealConstant(1.0)
+                ));
+                assert!(above.replace(*operator).is_none(), "one above site");
+            }
+            CfgValueKind::Timer {
+                operator,
+                period,
+                time_tol,
+                enable,
+                ..
+            } => {
+                for default in [period, time_tol] {
+                    assert!(matches!(
+                        &model.function.value(*default).kind,
+                        CfgValueKind::RealConstant(0.0)
+                    ));
+                }
+                assert!(matches!(
+                    &model.function.value(*enable).kind,
+                    CfgValueKind::RealConstant(1.0)
+                ));
+                assert!(timer.replace(*operator).is_none(), "one timer site");
+            }
+            _ => {}
+        }
+    }
+    let cross = cross.expect("cross CFG value");
+    let above = above.expect("above CFG value");
+    let timer = timer.expect("timer CFG value");
+    assert_ne!(cross, above);
+    assert_ne!(cross, timer);
+    assert_ne!(above, timer);
+
+    let bias = bias_point(&artifact);
+    let mut inputs = cfg_inputs(&bias);
+    inputs.event_state = vec![10.0];
+    for (operator, expected) in [(cross, 11.0), (above, 20.0), (timer, 110.0)] {
+        inputs.event_controls.clear();
+        inputs.event_controls.insert(operator, 1.0);
+        let snapshot = evaluate_cfg(&model.function, &inputs).expect("event CFG evaluation");
+        assert_eq!(
+            snapshot.value(model.event_state_candidates[0]),
+            Some(expected)
+        );
+    }
+
+    inputs.event_controls = [(cross, 1.0), (above, 1.0), (timer, 1.0)]
+        .into_iter()
+        .collect();
+    let all = evaluate_cfg(&model.function, &inputs).expect("combined event CFG evaluation");
+    assert_eq!(all.value(model.event_state_candidates[0]), Some(121.0));
+}
+
+#[test]
+fn single_argument_cross_expression_gets_the_either_direction_default() {
+    let model = lower(
+        r#"
+module cross_default(p, n);
+    inout p, n;
+    electrical p, n;
+    analog begin
+        if (cross(V(p, n)))
+            I(p, n) <+ 1.0;
+    end
+endmodule
+"#,
+    );
+    let mut crosses = model.function.values.iter().filter_map(|value| {
+        let CfgValueKind::Cross { direction, .. } = &value.kind else {
+            return None;
+        };
+        Some(*direction)
+    });
+    let direction = crosses.next().expect("cross CFG value");
+    assert!(crosses.next().is_none(), "one cross site");
+    assert!(matches!(
+        &model.function.value(direction).kind,
+        CfgValueKind::RealConstant(0.0)
+    ));
+}
+
+#[test]
+fn analysis_lists_are_static_but_lifecycle_event_topology_remains_dynamic() {
+    let analysis_artifact = artifact(
+        r#"
+module analysis_list_topology(p, n);
+    inout p, n;
+    electrical p, n;
+    analog begin
+        if (analysis("dc", "tran"))
+            V(p, n) <+ 1.0;
+    end
+endmodule
+"#,
+    );
+    let analysis_list = CfgModel::from_hir(&analysis_artifact.hir, &analysis_artifact.mir)
+        .expect("analysis-list fixture must lower");
+    let analysis_bias = bias_point(&analysis_artifact);
+    let mut analysis_inputs = cfg_inputs(&analysis_bias);
+    let inactive = evaluate_cfg(&analysis_list.function, &analysis_inputs)
+        .expect("inactive analysis-list evaluation");
+    assert_eq!(
+        inactive.value(analysis_list.activations[0].expect("potential activation")),
+        Some(0.0),
+        "an instance-static analysis list must leave the branch open outside the listed analyses"
+    );
+    analysis_inputs.analyses.insert("tran".into());
+    let active = evaluate_cfg(&analysis_list.function, &analysis_inputs)
+        .expect("active analysis-list evaluation");
+    assert_eq!(
+        active.value(analysis_list.activations[0].expect("potential activation")),
+        Some(1.0)
+    );
+
+    let lifecycle_artifact = artifact(
+        r#"
+module lifecycle_event_topology(p, n);
+    inout p, n;
+    electrical p, n;
+    analog begin
+        @(final_step("ac")) V(p, n) <+ 1.0;
+    end
+endmodule
+"#,
+    );
+    let lifecycle_event = CfgModel::from_hir(&lifecycle_artifact.hir, &lifecycle_artifact.mir)
+        .expect("lifecycle-event fixture must lower");
+    let lifecycle_bias = bias_point(&lifecycle_artifact);
+    let lifecycle_inputs = cfg_inputs(&lifecycle_bias);
+    let before_final = evaluate_cfg(&lifecycle_event.function, &lifecycle_inputs)
+        .expect("pre-final lifecycle evaluation");
+    assert_eq!(
+        before_final.value(lifecycle_event.activations[0].expect("potential activation")),
+        Some(1.0),
+        "final-step topology is runtime-dependent, so its physical branch must stay closed before the event"
+    );
+}
+
 // --- numeric equivalence ---------------------------------------------------
 
 /// The two levels must agree on numbers, not just on shape.
@@ -465,6 +711,8 @@ fn cfg_inputs(bias: &BiasPoint) -> CfgEvalInputs<f64> {
     CfgEvalInputs {
         parameters: bias.parameters.clone(),
         parameter_given: vec![false; bias.parameters.len()],
+        event_state: Vec::new(),
+        event_controls: HashMap::new(),
         node_potentials: bias.node_potentials.clone(),
         branch_flows: bias.branch_flows.clone(),
         branch_unknown_flows: bias.branch_flows.clone(),

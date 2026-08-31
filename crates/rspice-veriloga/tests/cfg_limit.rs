@@ -215,6 +215,8 @@ fn inputs(artifact: &CanonicalIrArtifact) -> CfgEvalInputs<f64> {
             .map(|parameter| parameter.default.unwrap_or(0.0))
             .collect(),
         parameter_given: vec![false; artifact.mir.parameters.len()],
+        event_state: Vec::new(),
+        event_controls: HashMap::new(),
         node_potentials: vec![0.0; artifact.mir.nodes.len()],
         branch_flows: vec![0.0; artifact.mir.branches.len()],
         branch_unknown_flows: vec![0.0; artifact.mir.branch_unknowns.len()],

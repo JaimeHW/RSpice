@@ -572,6 +572,7 @@ impl BuiltinVerilogADevices {
         }
     }
 
+    #[cfg(test)]
     #[inline]
     pub(crate) fn advance_state(&mut self) -> Result<(), String> {
         self.validate_state_acceptance()?;
@@ -1207,8 +1208,21 @@ impl BuiltinVerilogAInstance {
             simparams,
             evaluation_mode,
         );
+        // A StaticDaeProbe is a discarded F(x)-B(t) observation used by the
+        // OneStep history path. It must not replace any candidate produced by
+        // the preceding complete transient evaluation, including ordinary
+        // event-controlled variables, DDT/IDT history, or limiter anchors.
+        let static_dae_state = (evaluation_mode == GeneratedEvaluationMode::StaticDaeProbe)
+            .then(|| self.kind.capture_rollback_state());
+        // Procedural variables written by event controls are transactional in
+        // every analysis, including modes where dynamic operators are off.
+        // StaticDaeProbe must preserve the integration candidate produced by
+        // the preceding complete OneStep stamp, so only dynamic evaluations
+        // normalize the DDT/IDT candidates as well.
         if ctx.dynamic_operators_enabled() {
             self.kind.begin_stateful_evaluation();
+        } else {
+            self.kind.begin_event_state_evaluation();
         }
         if evaluation_mode == GeneratedEvaluationMode::StaticDaeProbe {
             // OneStep history capture evaluates only F(x)-B(t), with dynamic
@@ -1235,7 +1249,11 @@ impl BuiltinVerilogAInstance {
             );
             self.kind.stamp(&ctx, &mut stamper);
         }
-        match ctx.take_evaluation_error() {
+        let evaluation_error = ctx.take_evaluation_error();
+        if let Some(state) = static_dae_state.as_ref() {
+            self.kind.restore_rollback_state(state);
+        }
+        match evaluation_error {
             Some(error) => Err(error),
             None => Ok(()),
         }
@@ -1387,9 +1405,9 @@ impl BuiltinVerilogAInstance {
             num_nodes,
             self.static_stamp_cache.as_ref(),
         );
-        if ctx.dynamic_operators_enabled() {
-            self.kind.begin_stateful_evaluation();
-        }
+        // Small-signal real evaluation can execute final-step event bodies,
+        // while any transient integration candidate must remain untouched.
+        self.kind.begin_event_state_evaluation();
         self.kind.stamp(&ctx, &mut stamper);
         match ctx.take_evaluation_error() {
             Some(error) => Err(error),
@@ -2124,6 +2142,105 @@ mod tests {
         devices
             .accepted_checkpoint_states()
             .expect("beginning a fresh evaluation clears stale candidate validity");
+    }
+
+    #[cfg(feature = "veriloga-model-vbic13")]
+    #[test]
+    fn generated_static_dae_probe_restores_event_candidate_bitwise() {
+        let mut circuit = crate::CircuitData::new();
+        let mut instance = instantiate_builtin(
+            "VBIC13",
+            "q1",
+            &["0".to_string(), "0".to_string(), "0".to_string()],
+            &[],
+            &crate::netlist::ParamContext::new(),
+            &mut circuit,
+        )
+        .expect("generated VBIC13 instantiates")
+        .expect("VBIC13 is registered");
+
+        let size = circuit.matrix_size();
+        let num_nodes = circuit.num_nodes();
+        let triplets = (0..size)
+            .flat_map(|row| (0..size).map(move |column| (row, column, 0.0)))
+            .collect::<Vec<_>>();
+        let mut matrix = super::StaticMatrix::from_triplets(size, size, &triplets)
+            .expect("dense generated-device test matrix");
+        let mut rhs = vec![0.0; size];
+        let voltages = vec![0.0; size];
+
+        instance.set_timepoint(0.0, 0.0, super::GeneratedDdtCoefficients::inactive());
+        instance.set_analysis_step(true, false);
+        instance
+            .stamp_with_mode(
+                &mut matrix,
+                &mut rhs,
+                &voltages,
+                num_nodes,
+                GeneratedAnalysisKind::Tran,
+                GeneratedSimulationParameters::default(),
+                GeneratedEvaluationMode::NewtonLimited,
+            )
+            .expect("VBIC13 initial-step state evaluates");
+        instance
+            .validate_advance_state()
+            .expect("VBIC13 initial-step candidate validates");
+        instance.apply_validated_advance_state();
+        instance.set_analysis_step(false, false);
+
+        let event_count = instance
+            .kind
+            .capture_persistent_state()
+            .event_variables
+            .len();
+        assert!(event_count > 0, "VBIC13 must exercise event-variable state");
+        let mut trial = instance.kind.capture_rollback_state();
+        let candidate_start = trial
+            .values
+            .len()
+            .checked_sub(event_count)
+            .expect("rollback state contains its event candidate suffix");
+        for (index, value) in trial.values[candidate_start..].iter_mut().enumerate() {
+            *value = if index == 0 {
+                -0.0
+            } else {
+                f64::from_bits(1.0_f64.to_bits() + index as u64)
+            };
+        }
+        instance.kind.restore_rollback_state(&trial);
+        let before = instance.kind.capture_rollback_state();
+        let before_value_bits = before
+            .values
+            .iter()
+            .map(|value| value.to_bits())
+            .collect::<Vec<_>>();
+
+        instance
+            .stamp_with_mode(
+                &mut matrix,
+                &mut rhs,
+                &voltages,
+                num_nodes,
+                GeneratedAnalysisKind::Tran,
+                GeneratedSimulationParameters::default(),
+                GeneratedEvaluationMode::StaticDaeProbe,
+            )
+            .expect("VBIC13 static-DAE probe evaluates");
+
+        let after = instance.kind.capture_rollback_state();
+        assert_eq!(
+            after
+                .values
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            before_value_bits,
+            "StaticDaeProbe must restore accepted and candidate numeric storage bit-for-bit"
+        );
+        assert_eq!(
+            after.flags, before.flags,
+            "StaticDaeProbe must restore candidate-valid flags exactly"
+        );
     }
 
     #[cfg(feature = "veriloga-builtins-base")]

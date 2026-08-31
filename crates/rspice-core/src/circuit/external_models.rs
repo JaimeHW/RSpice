@@ -306,6 +306,19 @@ impl CircuitData {
         !self.generated_veriloga_devices.is_empty()
     }
 
+    #[inline]
+    pub(crate) fn has_any_veriloga_devices(&self) -> bool {
+        #[cfg(feature = "veriloga")]
+        if !self.veriloga_devices.is_empty() {
+            return true;
+        }
+        #[cfg(feature = "veriloga-builtins-base")]
+        if !self.generated_veriloga_devices.is_empty() {
+            return true;
+        }
+        false
+    }
+
     /// Whether every Verilog-A instance can participate in Xyce OneStep's
     /// order-two F/Q split without changing its model equations.
     ///
@@ -1825,10 +1838,32 @@ impl CircuitData {
             .set_analysis_step(initial_step, final_step);
     }
 
-    /// Commit build-time generated Verilog-A integrator state after acceptance.
+    /// Re-evaluate generated Verilog-A devices at an exact accepted solution
+    /// without disturbing the live Newton matrix. Static-probe evaluation
+    /// recomputes DDT/IDT candidates, event-controlled variables, and terminal-
+    /// current caches at that reported bias point while leaving the matrix and
+    /// right-hand side used by Newton untouched.
     #[cfg(feature = "veriloga-builtins-base")]
-    pub(crate) fn accept_generated_veriloga_timestep(&mut self) -> Result<(), String> {
-        self.generated_veriloga_devices.advance_state()
+    pub(crate) fn evaluate_generated_veriloga_timepoint(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        solution: &[Value],
+    ) -> Result<(), String> {
+        let num_nodes = self.num_nodes;
+        let simparams = self.generated_simulation_parameters;
+        matrix.with_probe_values(|probe, rhs| {
+            self.generated_veriloga_devices
+                .stamp_all_with_mode(
+                    probe,
+                    rhs,
+                    solution,
+                    num_nodes,
+                    crate::device::veriloga_builtins::GeneratedAnalysisKind::Tran,
+                    simparams,
+                    crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
+                )
+                .map_err(|error| error.to_string())
+        })
     }
 
     pub(crate) fn generated_veriloga_checkpoint_states(
@@ -2170,20 +2205,33 @@ impl CircuitData {
         Ok(())
     }
 
-    /// Commit Verilog-A integrator state after an accepted timestep.
+    /// Atomically commit runtime-compiled and build-time generated Verilog-A
+    /// state after an accepted timestep.
     ///
     /// Returns whether any device newly raised `$discontinuity` at this
     /// step (a rising edge against the previous accepted step), so the
     /// stepper can place a fine restart without a level-true region
     /// pinning tiny steps forever.
-    #[cfg(feature = "veriloga")]
-    pub(crate) fn accept_veriloga_timestep(&mut self) -> Result<bool, String> {
+    pub(crate) fn accept_all_veriloga_timestep(&mut self) -> Result<bool, String> {
+        #[cfg(feature = "veriloga")]
         self.veriloga_devices.validate_timestep_acceptance()?;
+        #[cfg(feature = "veriloga-builtins-base")]
+        self.generated_veriloga_devices
+            .validate_state_acceptance()?;
+
+        #[cfg(feature = "veriloga")]
         let discontinuity = self
             .veriloga_devices
             .iter()
             .any(rspice_veriloga::device::VerilogADevice::discontinuity_rising);
+        #[cfg(not(feature = "veriloga"))]
+        let discontinuity = false;
+
+        #[cfg(feature = "veriloga")]
         self.veriloga_devices.apply_validated_timestep_acceptance();
+        #[cfg(feature = "veriloga-builtins-base")]
+        self.generated_veriloga_devices
+            .apply_validated_state_acceptance();
         Ok(discontinuity)
     }
 

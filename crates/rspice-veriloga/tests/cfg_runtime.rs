@@ -587,6 +587,8 @@ impl Bias {
         CfgEvalInputs {
             parameters: self.parameters.clone(),
             parameter_given: vec![false; self.parameters.len()],
+            event_state: Vec::new(),
+            event_controls: HashMap::new(),
             node_potentials: self.node_potentials.clone(),
             branch_flows: self.branch_flows.clone(),
             branch_unknown_flows: self.branch_unknown_flows.clone(),

@@ -50,6 +50,8 @@ fn evaluate(artifact: &CanonicalIrArtifact, model: &CfgModel) -> impl Fn(ValueId
             .map(|parameter| parameter.default.unwrap_or(0.0))
             .collect(),
         parameter_given: vec![false; artifact.mir.parameters.len()],
+        event_state: Vec::new(),
+        event_controls: HashMap::new(),
         node_potentials: (0..artifact.mir.nodes.len())
             .map(|index| 0.41 - 0.13 * index as f64)
             .collect(),

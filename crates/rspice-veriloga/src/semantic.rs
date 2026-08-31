@@ -2243,6 +2243,12 @@ impl SemanticAnalyzer {
                 );
                 let EventLowering::Guard(guard) =
                     self.event_guard(&event_ctrl.event, module, sink)?;
+                // The canonical HIR must retain the event predicate as
+                // structured control flow. The snapshot below exists only for
+                // the legacy flattened assignment stream; recording event-body
+                // assignments directly in the enclosing region would make
+                // generated backends execute every event unconditionally.
+                let unsnapshotted = guard.clone();
                 // Snapshot: the body must not perturb its own guard.
                 let guard = self.snapshot_guard(guard, event_ctrl.span, module, sink)?;
                 // The guard snapshot is an evaluation-local implementation
@@ -2257,6 +2263,7 @@ impl SemanticAnalyzer {
                     _ => None,
                 };
                 self.guard_stack.push(guard);
+                self.open_region();
                 if let Some(name) = initial_guard_name {
                     self.unfiltered_initial_step_guards.push(name);
                 }
@@ -2264,11 +2271,18 @@ impl SemanticAnalyzer {
                 let body_result = self.analyze_statement(&event_ctrl.statement, module, sink);
                 self.dynamic_analog_operator_guard_depth -= 1;
                 body_result?;
+                let then_body = self.close_region();
                 Self::record_event_state_variables(&sink[body_start..], module);
                 if unfiltered_initial_step {
                     self.unfiltered_initial_step_guards.pop();
                 }
                 self.guard_stack.pop();
+                self.record_region(AnalyzedRegion::Conditional {
+                    condition: unsnapshotted,
+                    then_body,
+                    else_body: Vec::new(),
+                    span: event_ctrl.span,
+                });
             }
             AnalogStatement::IndirectContribution(stmt) => {
                 self.analyze_indirect_contribution(stmt, module, sink)?;
@@ -2630,6 +2644,11 @@ impl SemanticAnalyzer {
         collect(statements, module, &mut slots);
         slots.sort_unstable();
         slots.dedup();
+        for &slot in &slots {
+            if let Some(variable) = module.variables.get_mut(slot) {
+                variable.is_state = true;
+            }
+        }
         module.event_state_variables = slots;
     }
 

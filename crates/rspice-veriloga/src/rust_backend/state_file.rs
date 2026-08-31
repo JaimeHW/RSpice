@@ -50,6 +50,9 @@ pub(super) fn generate_mod_file() -> String {
 
 #[derive(Debug, Clone)]
 pub(super) struct StateFileExtensions {
+    /// Whether generated state uses accepted/candidate `cross` or `above`
+    /// detector records and therefore needs their runtime helpers imported.
+    pub uses_cross_event_state: bool,
     pub params_visibility: &'static str,
     pub support_types: String,
     pub instance_fields: String,
@@ -68,11 +71,22 @@ pub(super) struct StateFileExtensions {
     pub checkpoint_capture_fields: String,
     pub checkpoint_shape_checks: String,
     pub checkpoint_restore_fields: String,
+    /// Additional scalar lanes appended to `event_variables` after ordinary
+    /// procedural event state. This keeps the public checkpoint envelope
+    /// stable while generated event operators retain accepted history.
+    pub persistent_event_lane_count: usize,
+    pub checkpoint_event_capture: String,
+    pub checkpoint_event_validate: String,
+    pub checkpoint_event_restore: String,
+    pub begin_event_state_evaluation: String,
+    pub validate_advance_state: String,
+    pub apply_advance_state: String,
 }
 
 impl Default for StateFileExtensions {
     fn default() -> Self {
         Self {
+            uses_cross_event_state: false,
             params_visibility: "pub",
             support_types: String::new(),
             instance_fields: String::new(),
@@ -93,6 +107,13 @@ impl Default for StateFileExtensions {
                     .to_string(),
             checkpoint_shape_checks: String::new(),
             checkpoint_restore_fields: String::new(),
+            persistent_event_lane_count: 0,
+            checkpoint_event_capture: String::new(),
+            checkpoint_event_validate: String::new(),
+            checkpoint_event_restore: String::new(),
+            begin_event_state_evaluation: String::new(),
+            validate_advance_state: String::new(),
+            apply_advance_state: String::new(),
         }
     }
 }
@@ -121,8 +142,13 @@ pub(super) fn generate_state_file_with_extensions(
     } else {
         ""
     };
+    let cross_event_imports = if extensions.uses_cross_event_state {
+        "GeneratedCrossState, validate_generated_cross_state, "
+    } else {
+        ""
+    };
     out.push_str(&format!(
-        "use {}::{{GeneratedDdtCoefficients, GeneratedParameterAssignment, GeneratedParameterOrigin, GeneratedVerilogAParameterBound as B, GeneratedVerilogAParameterDescriptor as P, GeneratedVerilogAPersistentState, GeneratedVerilogARollbackState, GeneratedVerilogATerminalDescriptor, GeneratedVerilogATerminalDirection, boxed_zero_bool_array, boxed_zero_f64_array{parameter_alias_installer}}};\n",
+        "use {}::{{{cross_event_imports}GeneratedDdtCoefficients, GeneratedParameterAssignment, GeneratedParameterOrigin, GeneratedVerilogAParameterBound as B, GeneratedVerilogAParameterDescriptor as P, GeneratedVerilogAPersistentState, GeneratedVerilogARollbackState, GeneratedVerilogATerminalDescriptor, GeneratedVerilogATerminalDirection, boxed_zero_bool_array, boxed_zero_f64_array{parameter_alias_installer}}};\n",
         options.runtime_path,
     ));
     if !artifact.mir.parameters.is_empty() {
@@ -269,6 +295,12 @@ pub(super) fn generate_state_file_with_extensions(
     let internal_node_count = internal_node_names.len();
     let parameter_count = artifact.mir.parameters.len();
     let variable_count = artifact.hir.variables.len();
+    let event_state_count = artifact
+        .hir
+        .variables
+        .iter()
+        .filter(|variable| variable.is_state)
+        .count();
     out.push_str("pub struct Instance {\n");
     out.push_str(&format!("    pub nodes: [usize; {node_count}],\n"));
     out.push_str(&format!("    pub branches: [usize; {branch_count}],\n"));
@@ -290,6 +322,12 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("    pub(crate) time: f64,\n");
     out.push_str("    pub(crate) timestep: f64,\n");
     out.push_str("    pub(crate) ddt_coefficients: GeneratedDdtCoefficients,\n");
+    if event_state_count > 0 {
+        out.push_str(&format!(
+            "    pub(crate) event_state_accepted: Box<[f64; {event_state_count}]>,\n\
+             \x20   pub(crate) event_state_candidate: Box<[f64; {event_state_count}]>,\n"
+        ));
+    }
     out.push_str(&extensions.instance_fields);
     out.push_str("}\n\n");
     out.push_str("impl Clone for Instance {\n");
@@ -307,6 +345,12 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("            time: self.time,\n");
     out.push_str("            timestep: self.timestep,\n");
     out.push_str("            ddt_coefficients: self.ddt_coefficients,\n");
+    if event_state_count > 0 {
+        out.push_str(
+            "            event_state_accepted: self.event_state_accepted.clone(),\n\
+             \x20           event_state_candidate: self.event_state_candidate.clone(),\n",
+        );
+    }
     out.push_str(&extensions.clone_fields);
     out.push_str("        }\n");
     out.push_str("    }\n");
@@ -358,6 +402,9 @@ pub(super) fn generate_state_file_with_extensions(
         "    pub const IDT_STATE_COUNT: usize = {idt_state_count};\n"
     ));
     out.push_str(&format!(
+        "    pub const EVENT_STATE_COUNT: usize = {event_state_count};\n"
+    ));
+    out.push_str(&format!(
         "    pub const ONE_STEP_DAE_SPLIT_SAFE: bool = {one_step_dae_split_safe};\n"
     ));
     out.push_str(&format!(
@@ -391,6 +438,12 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("            time: 0.0,\n");
     out.push_str("            timestep: 0.0,\n");
     out.push_str("            ddt_coefficients: GeneratedDdtCoefficients::inactive(),\n");
+    if event_state_count > 0 {
+        out.push_str(
+            "            event_state_accepted: boxed_zero_f64_array(),\n\
+             \x20           event_state_candidate: boxed_zero_f64_array(),\n",
+        );
+    }
     out.push_str(&extensions.new_initializers);
     if extensions.after_new.is_empty() {
         out.push_str("        }\n");
@@ -403,6 +456,7 @@ pub(super) fn generate_state_file_with_extensions(
     let rollback_value_count = ddt_state_count
         .saturating_mul(5)
         .saturating_add(idt_state_count.saturating_mul(6))
+        .saturating_add(event_state_count.saturating_mul(2))
         .saturating_add(extensions.rollback_value_count);
     let rollback_flag_count = ddt_state_count
         .saturating_mul(2)
@@ -425,6 +479,10 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("        values.extend_from_slice(&self.stamp_state.idt_previous);\n");
     out.push_str("        values.extend_from_slice(&self.stamp_state.idt_older);\n");
     out.push_str("        values.extend_from_slice(&self.stamp_state.idt_input_previous);\n");
+    if event_state_count > 0 {
+        out.push_str("        values.extend_from_slice(&*self.event_state_accepted);\n");
+        out.push_str("        values.extend_from_slice(&*self.event_state_candidate);\n");
+    }
     out.push_str(&extensions.rollback_capture_values);
     out.push_str(&format!(
         "        let mut flags = Vec::with_capacity({rollback_flag_count});\n"
@@ -470,6 +528,13 @@ pub(super) fn generate_state_file_with_extensions(
             "        let (field, remaining) = rollback_values.split_at(Self::IDT_STATE_COUNT);\n        self.stamp_state.{field}.copy_from_slice(field);\n        rollback_values = remaining;\n"
         ));
     }
+    if event_state_count > 0 {
+        for field in ["event_state_accepted", "event_state_candidate"] {
+            out.push_str(&format!(
+                "        let (field, remaining) = rollback_values.split_at(Self::EVENT_STATE_COUNT);\n        self.{field}.copy_from_slice(field);\n        rollback_values = remaining;\n"
+            ));
+        }
+    }
     out.push_str("        let mut rollback_flags = state.flags.as_slice();\n");
     out.push_str(
         "        let (field, remaining) = rollback_flags.split_at(Self::DDT_STATE_COUNT);\n",
@@ -499,6 +564,21 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str(
         "    #[doc(hidden)]\n    pub fn capture_persistent_state(&self) -> GeneratedVerilogAPersistentState {\n",
     );
+    let event_variables_mutability = if extensions.checkpoint_event_capture.is_empty() {
+        ""
+    } else {
+        "mut "
+    };
+    if event_state_count > 0 {
+        out.push_str(&format!(
+            "        let {event_variables_mutability}event_variables = self.event_state_accepted.to_vec();\n"
+        ));
+    } else {
+        out.push_str(&format!(
+            "        let {event_variables_mutability}event_variables = Vec::new();\n"
+        ));
+    }
+    out.push_str(&extensions.checkpoint_event_capture);
     out.push_str("        GeneratedVerilogAPersistentState {\n");
     out.push_str("            ddt_previous: self.stamp_state.ddt_previous.to_vec(),\n");
     out.push_str("            ddt_older: self.stamp_state.ddt_older.to_vec(),\n");
@@ -510,6 +590,7 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("            idt_older: self.stamp_state.idt_older.to_vec(),\n");
     out.push_str("            idt_input_previous: self.stamp_state.idt_input_previous.to_vec(),\n");
     out.push_str("            idt_initialized: self.stamp_state.idt_initialized.to_vec(),\n");
+    out.push_str("            event_variables,\n");
     out.push_str(&extensions.checkpoint_capture_fields);
     out.push_str("        }\n");
     out.push_str("    }\n\n");
@@ -520,9 +601,20 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("        if state.idt_previous.len() != Self::IDT_STATE_COUNT || state.idt_older.len() != Self::IDT_STATE_COUNT || state.idt_input_previous.len() != Self::IDT_STATE_COUNT || state.idt_initialized.len() != Self::IDT_STATE_COUNT {\n");
     out.push_str("            return Err(format!(\"generated idt checkpoint shape mismatch: expected {}, found {} / {} / {} / {}\", Self::IDT_STATE_COUNT, state.idt_previous.len(), state.idt_older.len(), state.idt_input_previous.len(), state.idt_initialized.len()));\n");
     out.push_str("        }\n");
+    let persistent_event_lane_count =
+        event_state_count.saturating_add(extensions.persistent_event_lane_count);
+    out.push_str(&format!(
+        "        if state.event_variables.len() != {persistent_event_lane_count} {{\n"
+    ));
+    out.push_str(&format!("            return Err(format!(\"generated event-state checkpoint shape mismatch: expected {persistent_event_lane_count}, found {{}}\", state.event_variables.len()));\n"));
+    out.push_str("        }\n");
     out.push_str("        if state.ddt_previous.iter().chain(&state.ddt_older).chain(&state.ddt_derivative_previous).chain(&state.idt_previous).chain(&state.idt_older).chain(&state.idt_input_previous).chain(&state.limiter_anchor).any(|value| !value.is_finite()) {\n");
     out.push_str("            return Err(\"generated Verilog-A checkpoint contains non-finite persistent state\".to_string());\n");
     out.push_str("        }\n");
+    out.push_str("        if state.event_variables.iter().any(|value| value.is_nan()) {\n");
+    out.push_str("            return Err(\"generated Verilog-A checkpoint event state contains NaN\".to_string());\n");
+    out.push_str("        }\n");
+    out.push_str(&extensions.checkpoint_event_validate);
     out.push_str(&extensions.checkpoint_shape_checks);
     out.push_str("        Ok(())\n");
     out.push_str("    }\n\n");
@@ -555,6 +647,15 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str(
         "        self.stamp_state.idt_initialized.copy_from_slice(&state.idt_initialized);\n",
     );
+    if event_state_count > 0 {
+        out.push_str(
+            "        self.event_state_accepted.copy_from_slice(&state.event_variables[..Self::EVENT_STATE_COUNT]);\n",
+        );
+        out.push_str(
+            "        self.event_state_candidate.copy_from_slice(&state.event_variables[..Self::EVENT_STATE_COUNT]);\n",
+        );
+    }
+    out.push_str(&extensions.checkpoint_event_restore);
     out.push_str("        self.stamp_state.ddt_candidate_valid.fill(false);\n");
     out.push_str("        self.stamp_state.idt_candidate_valid.fill(false);\n");
     out.push_str(&extensions.checkpoint_restore_fields);
@@ -805,10 +906,25 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("        self.ddt_coefficients = ddt_coefficients;\n");
     out.push_str("    }\n\n");
     out.push_str("    #[inline]\n");
+    out.push_str("    pub fn begin_event_state_evaluation(&mut self) {\n");
+    if event_state_count > 0 {
+        out.push_str(
+            "        self.event_state_candidate.copy_from_slice(&*self.event_state_accepted);\n",
+        );
+    }
+    out.push_str(&extensions.begin_event_state_evaluation);
+    out.push_str("    }\n\n");
+    out.push_str("    #[inline]\n");
     out.push_str("    pub fn begin_stateful_evaluation(&mut self) {\n");
+    out.push_str("        self.begin_event_state_evaluation();\n");
     out.push_str("        self.normalize_integration_candidates();\n");
     out.push_str("    }\n\n");
     out.push_str("    pub fn validate_advance_state(&self) -> Result<(), String> {\n");
+    if event_state_count > 0 {
+        out.push_str("        if self.event_state_accepted.iter().chain(&*self.event_state_candidate).any(|value| value.is_nan()) {\n");
+        out.push_str("            return Err(\"generated event-state accepted/candidate storage contains NaN\".to_string());\n");
+        out.push_str("        }\n");
+    }
     out.push_str("        let mut index = 0usize;\n");
     out.push_str("        while index < Self::DDT_STATE_COUNT {\n");
     out.push_str("            for (lane, value) in [(\"previous\", self.stamp_state.ddt_previous[index]), (\"older\", self.stamp_state.ddt_older[index]), (\"derivative_previous\", self.stamp_state.ddt_derivative_previous[index])] {\n");
@@ -833,10 +949,17 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("            }\n");
     out.push_str("            index += 1;\n");
     out.push_str("        }\n");
+    out.push_str(&extensions.validate_advance_state);
     out.push_str("        Ok(())\n");
     out.push_str("    }\n\n");
     out.push_str("    pub fn apply_validated_advance_state(&mut self) {\n");
     out.push_str("        debug_assert!(self.validate_advance_state().is_ok());\n");
+    if event_state_count > 0 {
+        out.push_str(
+            "        self.event_state_accepted.copy_from_slice(&*self.event_state_candidate);\n",
+        );
+    }
+    out.push_str(&extensions.apply_advance_state);
     out.push_str("        let mut index = 0usize;\n");
     out.push_str("        while index < Self::DDT_STATE_COUNT {\n");
     out.push_str("            if self.stamp_state.ddt_candidate_valid[index] {\n");
@@ -1235,7 +1358,7 @@ pub(super) fn finalize_checkpoint_identity(
     // Do not salt this identity with the compiler build digest: unrelated
     // compiler changes must not invalidate persisted state or every generated
     // model crate in Cargo's cache.
-    hasher.update(b"rspice-generated-persistent-state-v3\0");
+    hasher.update(b"rspice-generated-persistent-state-v4\0");
     hash_identity_field(&mut hasher, device.module_name.as_bytes());
     hash_identity_field(&mut hasher, device.public_model_name.as_bytes());
     hash_identity_field(&mut hasher, device.folder_name.as_bytes());

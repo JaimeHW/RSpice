@@ -66,6 +66,9 @@ pub struct CfgModel {
     /// a bias-, time-, or state-dependent guard remains topology-active even on
     /// an untaken path.
     pub activations: Vec<Option<ValueId>>,
+    /// Final values of event-controlled procedural variables at function exit,
+    /// in dense accepted-state slot order.
+    pub event_state_candidates: Vec<ValueId>,
     /// Every noise source the body writes, in the order the body writes them.
     ///
     /// Kept apart from `residuals` because noise contributes nothing to the
@@ -114,7 +117,7 @@ impl CfgModel {
     /// in MIR. Nothing is recomputed here that MIR already decided.
     pub fn from_hir(hir: &HirModel, mir: &MirModel) -> Result<Self, Vec<IrDiagnostic>> {
         let mut lowerer = CfgLowerer::new(hir, mir);
-        let (function, residuals, activations, noise) = lowerer.lower()?;
+        let (function, residuals, activations, event_state_candidates, noise) = lowerer.lower()?;
         // Errors only. A warning that failed the lowering would be an error
         // wearing a different word.
         if lowerer
@@ -129,6 +132,7 @@ impl CfgModel {
             function,
             residuals,
             activations,
+            event_state_candidates,
             noise,
             warnings: lowerer.diagnostics,
         })
@@ -174,6 +178,7 @@ enum LeafKey {
     RealConstant(u64),
     Parameter(ParamId),
     ParameterGiven(ParamId),
+    EventState(u32),
     Temperature,
     ThermalVoltage,
     Multiplicity,
@@ -300,12 +305,18 @@ fn hir_expr_is_instance_static(
                 // `IrExpr::Analysis`, which is instance-static. Require the
                 // literal query here rather than blessing arbitrary call
                 // arguments as topology controls.
-                ("analysis", 1) => matches!(
-                    hir.expressions
-                        .get(usize::from(args[0]))
-                        .map(|argument| &argument.kind),
-                    Some(HirExprKind::StringLiteral { .. })
-                ),
+                ("analysis", count) if count > 0 => args.iter().copied().all(|argument| {
+                    matches!(
+                        hir.expressions
+                            .get(usize::from(argument))
+                            .map(|argument| &argument.kind),
+                        Some(HirExprKind::StringLiteral { value })
+                            if !matches!(
+                                value.to_ascii_lowercase().as_str(),
+                                "__rspice_initial_step" | "__rspice_final_step"
+                            )
+                    )
+                }),
                 // These are the calls legacy lowering converts to pure
                 // `IrExpr::Call` (or `Limexp`) values. Calls are not pure by
                 // default in Verilog-A: ddt/idt/ddx, delays, event operators,
@@ -538,6 +549,7 @@ impl<'a> CfgLowerer<'a> {
             CfgFunction,
             Vec<ValueId>,
             Vec<Option<ValueId>>,
+            Vec<ValueId>,
             Vec<CfgNoiseSource>,
         ),
         Vec<IrDiagnostic>,
@@ -549,6 +561,23 @@ impl<'a> CfgLowerer<'a> {
         // Every residual starts at zero so an untaken branch needs no special
         // case: the join simply merges the value that was never updated.
         let zero = self.real_constant(0.0);
+        let event_state_variables = self
+            .hir
+            .variables
+            .iter()
+            .filter(|variable| variable.is_state)
+            .map(|variable| variable.id)
+            .collect::<Vec<_>>();
+        for (slot, variable) in event_state_variables.iter().copied().enumerate() {
+            let slot = u32::try_from(slot).expect("event-state slot count fits u32");
+            let accepted = self.leaf(
+                LeafKey::EventState(slot),
+                CfgValueType::Real,
+                CfgValueKind::EventState(slot),
+            );
+            self.builder
+                .write_variable(CfgVariable::Local(variable), entry, accepted);
+        }
         for index in 0..self.hir.contributions.len() {
             let contribution = ContributionId::from(index);
             self.builder
@@ -578,6 +607,14 @@ impl<'a> CfgLowerer<'a> {
                 Some(self.builder.read_variable(variable, exit).unwrap_or(zero))
             })
             .collect();
+        let event_state_candidates = event_state_variables
+            .iter()
+            .map(|variable| {
+                self.builder
+                    .read_variable(CfgVariable::Local(*variable), exit)
+                    .unwrap_or(zero)
+            })
+            .collect::<Vec<_>>();
 
         // A noise source's variables are given their zero here, once the body
         // has been walked and it is known which exist. `write_variable` records
@@ -599,6 +636,7 @@ impl<'a> CfgLowerer<'a> {
         }
         let mut outputs = residuals.clone();
         outputs.extend(activations.iter().flatten().copied());
+        outputs.extend(event_state_candidates.iter().copied());
         for source in &pending {
             for variable in source.variables() {
                 outputs.push(self.builder.read_variable(variable, exit).unwrap_or(zero));
@@ -614,7 +652,7 @@ impl<'a> CfgLowerer<'a> {
                 let contribution_count = self.hir.contributions.len();
                 let (residuals, remaining) = outputs.split_at(contribution_count);
                 let activation_count = activations.iter().flatten().count();
-                let (mapped_activations, noise) = remaining.split_at(activation_count);
+                let (mapped_activations, remaining) = remaining.split_at(activation_count);
                 let mut mapped_activations = mapped_activations.iter().copied();
                 let activations = activations
                     .iter()
@@ -623,10 +661,13 @@ impl<'a> CfgLowerer<'a> {
                     })
                     .collect();
                 debug_assert!(mapped_activations.next().is_none());
+                let (event_state_candidates, noise) =
+                    remaining.split_at(event_state_candidates.len());
                 Ok((
                     function,
                     residuals.to_vec(),
                     activations,
+                    event_state_candidates.to_vec(),
                     resolve_noise(pending, noise),
                 ))
             }
@@ -1807,7 +1848,102 @@ impl<'a> CfgLowerer<'a> {
                     },
                 )
             }
-            ("analysis", 1) => self.analysis_call(args[0], span),
+            ("cross", 1..=5) => {
+                let input = self.expr(args[0]);
+                let direction = args
+                    .get(1)
+                    .map(|argument| self.expr(*argument))
+                    .unwrap_or_else(|| self.real_constant(0.0));
+                let time_tol = args
+                    .get(2)
+                    .map(|argument| self.expr(*argument))
+                    .unwrap_or_else(|| self.real_constant(0.0));
+                let expr_tol = args
+                    .get(3)
+                    .map(|argument| self.expr(*argument))
+                    .unwrap_or_else(|| self.real_constant(0.0));
+                let enable = args
+                    .get(4)
+                    .map(|argument| self.expr(*argument))
+                    .unwrap_or_else(|| self.real_constant(1.0));
+                self.builder.push(
+                    self.block,
+                    CfgValueType::Real,
+                    CfgValueKind::Cross {
+                        operator: expression,
+                        input,
+                        direction,
+                        time_tol,
+                        expr_tol,
+                        enable,
+                    },
+                )
+            }
+            ("above", 1..=4) => {
+                let input = self.expr(args[0]);
+                let time_tol = args
+                    .get(1)
+                    .map(|argument| self.expr(*argument))
+                    .unwrap_or_else(|| self.real_constant(0.0));
+                let expr_tol = args
+                    .get(2)
+                    .map(|argument| self.expr(*argument))
+                    .unwrap_or_else(|| self.real_constant(0.0));
+                let enable = args
+                    .get(3)
+                    .map(|argument| self.expr(*argument))
+                    .unwrap_or_else(|| self.real_constant(1.0));
+                self.builder.push(
+                    self.block,
+                    CfgValueType::Real,
+                    CfgValueKind::Above {
+                        operator: expression,
+                        input,
+                        time_tol,
+                        expr_tol,
+                        enable,
+                    },
+                )
+            }
+            ("timer", 1..=4) => {
+                let start = self.expr(args[0]);
+                let period = args
+                    .get(1)
+                    .map(|argument| self.expr(*argument))
+                    .unwrap_or_else(|| self.real_constant(0.0));
+                let time_tol = args
+                    .get(2)
+                    .map(|argument| self.expr(*argument))
+                    .unwrap_or_else(|| self.real_constant(0.0));
+                let enable = args
+                    .get(3)
+                    .map(|argument| self.expr(*argument))
+                    .unwrap_or_else(|| self.real_constant(1.0));
+                self.builder.push(
+                    self.block,
+                    CfgValueType::Real,
+                    CfgValueKind::Timer {
+                        operator: expression,
+                        start,
+                        period,
+                        time_tol,
+                        enable,
+                    },
+                )
+            }
+            ("analysis", count) if count > 0 => {
+                let mut arguments = args.iter();
+                let first = self.analysis_call(
+                    *arguments.next().expect("nonempty analysis argument list"),
+                    span,
+                );
+                let mut combined = first;
+                for argument in arguments {
+                    let right = self.analysis_call(*argument, span);
+                    combined = self.binary(CfgBinaryOp::Or, combined, right);
+                }
+                combined
+            }
             ("ddx", 2) => self.ddx(args[0], args[1], span),
             ("expm1", 1) => {
                 let input = self.expr(args[0]);

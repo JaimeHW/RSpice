@@ -276,6 +276,15 @@ fn event_control_records_only_body_writes_and_covers_dynamic_arrays() {
     expected.dedup();
 
     assert_eq!(module.event_state_variables, expected);
+    assert!(
+        module
+            .event_state_variables
+            .iter()
+            .all(|slot| module.variables[*slot].is_state),
+        "every accepted/candidate event slot must carry canonical state metadata"
+    );
+    assert!(!module.variables[ordinary].is_state);
+    assert!(!module.variables[selector].is_state);
     assert!(!module.event_state_variables.contains(&ordinary));
     assert!(!module.event_state_variables.contains(&selector));
     assert!(
@@ -317,6 +326,8 @@ fn event_control_collects_runtime_loop_body_and_control_writes() {
     let mut expected = vec![i, count];
     expected.sort_unstable();
     assert_eq!(module.event_state_variables, expected);
+    assert!(module.variables[i].is_state);
+    assert!(module.variables[count].is_state);
 }
 
 #[test]

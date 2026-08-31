@@ -134,6 +134,9 @@ pub enum CfgValueKind {
     BlockParameter,
     Parameter(ParamId),
     ParameterGiven(ParamId),
+    /// Accepted procedural state for a variable written by an event-controlled
+    /// body. The dense slot is stable within one generated model.
+    EventState(u32),
     Temperature,
     ThermalVoltage,
     Multiplicity,
@@ -177,6 +180,34 @@ pub enum CfgValueKind {
     /// reason [`Self::DdtScale`] exists: a second `idt` would claim a second
     /// slot for a quantity with no history of its own.
     IdtScale,
+    /// `cross(expr, direction, time_tol, expr_tol, enable)`, evaluated from
+    /// accepted detector history into a speculative candidate lane.
+    Cross {
+        operator: ExprId,
+        input: ValueId,
+        direction: ValueId,
+        time_tol: ValueId,
+        expr_tol: ValueId,
+        enable: ValueId,
+    },
+    /// `above(expr, time_tol, expr_tol, enable)`, including its initial-positive
+    /// equilibrium behavior.
+    Above {
+        operator: ExprId,
+        input: ValueId,
+        time_tol: ValueId,
+        expr_tol: ValueId,
+        enable: ValueId,
+    },
+    /// `timer(start, period, time_tol, enable)`, which also requests the next
+    /// exact transient breakpoint.
+    Timer {
+        operator: ExprId,
+        start: ValueId,
+        period: ValueId,
+        time_tol: ValueId,
+        enable: ValueId,
+    },
     /// Newton limiting; carries an affine correction lane in the derivative
     /// pass whether or not `proposed` depends on an unknown.
     ///
@@ -296,6 +327,28 @@ impl CfgValueKind {
             }
             Self::LaneScalar { input, scalar, .. } => vec![*input, *scalar],
             Self::Idt { input, ic, .. } => vec![*input, *ic],
+            Self::Cross {
+                input,
+                direction,
+                time_tol,
+                expr_tol,
+                enable,
+                ..
+            } => vec![*input, *direction, *time_tol, *expr_tol, *enable],
+            Self::Above {
+                input,
+                time_tol,
+                expr_tol,
+                enable,
+                ..
+            } => vec![*input, *time_tol, *expr_tol, *enable],
+            Self::Timer {
+                start,
+                period,
+                time_tol,
+                enable,
+                ..
+            } => vec![*start, *period, *time_tol, *enable],
             Self::Limit {
                 proposed,
                 candidate,
@@ -327,6 +380,44 @@ impl CfgValueKind {
             Self::Idt { input, ic, .. } => {
                 *input = map(*input);
                 *ic = map(*ic);
+            }
+            Self::Cross {
+                input,
+                direction,
+                time_tol,
+                expr_tol,
+                enable,
+                ..
+            } => {
+                *input = map(*input);
+                *direction = map(*direction);
+                *time_tol = map(*time_tol);
+                *expr_tol = map(*expr_tol);
+                *enable = map(*enable);
+            }
+            Self::Above {
+                input,
+                time_tol,
+                expr_tol,
+                enable,
+                ..
+            } => {
+                *input = map(*input);
+                *time_tol = map(*time_tol);
+                *expr_tol = map(*expr_tol);
+                *enable = map(*enable);
+            }
+            Self::Timer {
+                start,
+                period,
+                time_tol,
+                enable,
+                ..
+            } => {
+                *start = map(*start);
+                *period = map(*period);
+                *time_tol = map(*time_tol);
+                *enable = map(*enable);
             }
             Self::Limit {
                 proposed,
@@ -574,6 +665,7 @@ fn is_leaf(kind: &CfgValueKind) -> bool {
             | CfgValueKind::BooleanConstant(_)
             | CfgValueKind::Parameter(_)
             | CfgValueKind::ParameterGiven(_)
+            | CfgValueKind::EventState(_)
             | CfgValueKind::Temperature
             | CfgValueKind::ThermalVoltage
             | CfgValueKind::Multiplicity

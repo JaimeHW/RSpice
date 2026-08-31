@@ -263,6 +263,8 @@ fn inputs(bias: &BiasPoint) -> CfgEvalInputs<f64> {
     CfgEvalInputs {
         parameters: bias.parameters.clone(),
         parameter_given: vec![false; bias.parameters.len()],
+        event_state: Vec::new(),
+        event_controls: HashMap::new(),
         node_potentials: bias.node_potentials.clone(),
         branch_flows: bias.branch_flows.clone(),
         branch_unknown_flows: bias.branch_unknown_flows.clone(),
@@ -495,6 +497,8 @@ fn complex_inputs(bias: &BiasPoint) -> CfgEvalInputs<ComplexStep> {
     CfgEvalInputs {
         parameters: lift(&bias.parameters),
         parameter_given: vec![false; bias.parameters.len()],
+        event_state: Vec::new(),
+        event_controls: HashMap::new(),
         node_potentials: lift(&bias.node_potentials),
         branch_flows: lift(&bias.branch_flows),
         branch_unknown_flows: lift(&bias.branch_unknown_flows),

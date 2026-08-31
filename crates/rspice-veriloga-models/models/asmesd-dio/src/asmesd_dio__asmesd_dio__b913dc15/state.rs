@@ -440,8 +440,9 @@ impl Instance {
 	pub const VARIABLE_COUNT: usize = 83;
 	pub const DDT_STATE_COUNT: usize = 6;
 	pub const IDT_STATE_COUNT: usize = 0;
+	pub const EVENT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "b92faa40d276c7ccd6e5b92a2848bdd20ae802777bca3bdad00ca3d86e87b01a";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "3b8b5b8efbba256848894d0436cea9299a3cf893e0ba820875a9ebdcbc55050d";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
 	pub fn new(nodes: &[usize]) -> Self {
@@ -551,6 +552,7 @@ impl Instance {
 
 	#[doc(hidden)]
 	pub fn capture_persistent_state(&self) -> GeneratedVerilogAPersistentState {
+		let event_variables = Vec::new();
 		GeneratedVerilogAPersistentState {
 			ddt_previous: self.stamp_state.ddt_previous.to_vec(),
 			ddt_older: self.stamp_state.ddt_older.to_vec(),
@@ -560,6 +562,7 @@ impl Instance {
 			idt_older: self.stamp_state.idt_older.to_vec(),
 			idt_input_previous: self.stamp_state.idt_input_previous.to_vec(),
 			idt_initialized: self.stamp_state.idt_initialized.to_vec(),
+			event_variables,
 			limiter_anchor: Vec::new(),
 			limiter_initialized: Vec::new(),
 		}
@@ -573,8 +576,14 @@ impl Instance {
 		if state.idt_previous.len() != Self::IDT_STATE_COUNT || state.idt_older.len() != Self::IDT_STATE_COUNT || state.idt_input_previous.len() != Self::IDT_STATE_COUNT || state.idt_initialized.len() != Self::IDT_STATE_COUNT {
 			return Err(format!("generated idt checkpoint shape mismatch: expected {}, found {} / {} / {} / {}", Self::IDT_STATE_COUNT, state.idt_previous.len(), state.idt_older.len(), state.idt_input_previous.len(), state.idt_initialized.len()));
 		}
+		if state.event_variables.len() != 0 {
+			return Err(format!("generated event-state checkpoint shape mismatch: expected 0, found {}", state.event_variables.len()));
+		}
 		if state.ddt_previous.iter().chain(&state.ddt_older).chain(&state.ddt_derivative_previous).chain(&state.idt_previous).chain(&state.idt_older).chain(&state.idt_input_previous).chain(&state.limiter_anchor).any(|value| !value.is_finite()) {
 			return Err("generated Verilog-A checkpoint contains non-finite persistent state".to_string());
+		}
+		if state.event_variables.iter().any(|value| value.is_nan()) {
+			return Err("generated Verilog-A checkpoint event state contains NaN".to_string());
 		}
 		Ok(())
 	}
@@ -792,7 +801,12 @@ impl Instance {
 	}
 
 	#[inline]
+	pub fn begin_event_state_evaluation(&mut self) {
+	}
+
+	#[inline]
 	pub fn begin_stateful_evaluation(&mut self) {
+		self.begin_event_state_evaluation();
 		self.normalize_integration_candidates();
 	}
 
