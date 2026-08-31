@@ -1471,10 +1471,13 @@ fn unlowered_constructs_refuse_by_name() {
              \x20   initial begin : work i = 0; q = 4'b0000; end",
             "module-level",
         ),
+        // A process-local `real` lowers now — Verilog-AMS LRM 2.4 section 3.7
+        // brought real values into the discrete domain and section 6.5.3's own
+        // example reads a `wreal` into one. A `string` still does not.
         (
             "    reg q;\n\
-             \x20   initial begin : work real r; r = 1.0; q = 1'b0; end",
-            "process-local `real`",
+             \x20   initial begin : work string s; q = 1'b0; end",
+            "process-local `string`",
         ),
         (
             "    reg [3:0] q;\n\
