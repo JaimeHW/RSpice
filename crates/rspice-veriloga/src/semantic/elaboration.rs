@@ -119,6 +119,9 @@ struct ScopeMap {
     branches: HashMap<SmolStr, SmolStr>,
     port_connected: HashMap<SmolStr, bool>,
     instance_path: Option<SmolStr>,
+    /// `(global base, local count)` for this concrete module occurrence.
+    /// The root is not rewritten and therefore leaves this unset.
+    noise_process_range: Option<(u32, u32)>,
 }
 
 impl ScopeMap {
@@ -186,6 +189,7 @@ struct HierarchyElaborator<'a> {
     flattened: AnalyzedModule,
     used_names: HashSet<SmolStr>,
     next_name: usize,
+    next_noise_process: u32,
 }
 
 impl<'a> HierarchyElaborator<'a> {
@@ -207,16 +211,19 @@ impl<'a> HierarchyElaborator<'a> {
         used_names.extend(flattened.ground_nodes.iter().cloned());
         used_names.extend(flattened.branches.iter().map(|item| item.name.clone()));
         used_names.extend(flattened.arrays.keys().cloned());
+        let next_noise_process = flattened.noise_process_count;
         Self {
             analyzed,
             source_modules,
             flattened,
             used_names,
             next_name: 0,
+            next_noise_process,
         }
     }
 
-    fn finish(self) -> AnalyzedModule {
+    fn finish(mut self) -> AnalyzedModule {
+        self.flattened.noise_process_count = self.next_noise_process;
         self.flattened
     }
 
@@ -308,8 +315,18 @@ impl<'a> HierarchyElaborator<'a> {
         let connections = self.bind_connections(instance, child, parent_scope, path)?;
         let overrides = bind_parameter_overrides(instance, child, path)?;
         self.validate_parameter_array_overrides(child, parent_scope, &overrides, path)?;
+        let noise_process_base = self.next_noise_process;
+        self.next_noise_process = self
+            .next_noise_process
+            .checked_add(child.noise_process_count)
+            .ok_or_else(|| {
+                internal_error(format!(
+                    "module hierarchy at instance '{path}' exceeds the noise-process identity range"
+                ))
+            })?;
         let mut scope = ScopeMap {
             instance_path: Some(path.into()),
+            noise_process_range: Some((noise_process_base, child.noise_process_count)),
             ..ScopeMap::default()
         };
         scope.nodes.insert(
@@ -1535,6 +1552,23 @@ fn rewrite_noise_source(noise: &NoiseSource, scope: &ScopeMap) -> CompileResult<
             None => name.clone(),
         })
     };
+    let remap_process_id = |process_id: Option<u32>| -> CompileResult<Option<u32>> {
+        let Some(process_id) = process_id else {
+            return Ok(None);
+        };
+        let Some((base, count)) = scope.noise_process_range else {
+            return Ok(Some(process_id));
+        };
+        if process_id >= count {
+            return Err(internal_error(format!(
+                "noise process {process_id} exceeds module-local process count {count} at instance '{}'",
+                scope.instance_path.as_deref().unwrap_or("<root>")
+            )));
+        }
+        Ok(Some(base.checked_add(process_id).ok_or_else(|| {
+            internal_error("hierarchy noise-process identity overflow".into())
+        })?))
+    };
     Ok(match noise {
         NoiseSource::White {
             process_id,
@@ -1542,7 +1576,7 @@ fn rewrite_noise_source(noise: &NoiseSource, scope: &ScopeMap) -> CompileResult<
             name,
             span,
         } => NoiseSource::White {
-            process_id: *process_id,
+            process_id: remap_process_id(*process_id)?,
             power: Box::new(rewrite_expression(power, scope)?),
             name: qualified_name(name),
             span: *span,
@@ -1554,7 +1588,7 @@ fn rewrite_noise_source(noise: &NoiseSource, scope: &ScopeMap) -> CompileResult<
             name,
             span,
         } => NoiseSource::Flicker {
-            process_id: *process_id,
+            process_id: remap_process_id(*process_id)?,
             power: Box::new(rewrite_expression(power, scope)?),
             exponent: Box::new(rewrite_expression(exponent, scope)?),
             name: qualified_name(name),
@@ -1567,7 +1601,7 @@ fn rewrite_noise_source(noise: &NoiseSource, scope: &ScopeMap) -> CompileResult<
             name,
             span,
         } => NoiseSource::Table {
-            process_id: *process_id,
+            process_id: remap_process_id(*process_id)?,
             data: rewrite_expressions(data, scope)?,
             log_interp: *log_interp,
             name: qualified_name(name),

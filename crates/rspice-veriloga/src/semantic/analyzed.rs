@@ -39,6 +39,10 @@ pub struct SemanticWarning {
 pub struct AnalyzedModule {
     pub name: SmolStr,
     pub default_transition: f64,
+    /// Number of semantic noise processes allocated in this module. Process
+    /// IDs are dense from zero and are remapped per instance during hierarchy
+    /// elaboration so repeated children never alias one another.
+    pub noise_process_count: u32,
     pub ports: Vec<AnalyzedPort>,
     pub parameters: Vec<AnalyzedParameter>,
     /// Parameter aliases (aliasparam): alternate instance-facing names

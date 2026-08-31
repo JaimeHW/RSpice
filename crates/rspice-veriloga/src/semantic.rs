@@ -405,6 +405,7 @@ impl SemanticAnalyzer {
         let mut analyzed = AnalyzedModule {
             name: module.name.clone(),
             default_transition,
+            noise_process_count: 0,
             ports: Vec::new(),
             parameters: Vec::new(),
             param_aliases: Vec::new(),
@@ -1211,6 +1212,7 @@ impl SemanticAnalyzer {
         }
 
         analyzed.symbol_table = self.symbols.clone();
+        analyzed.noise_process_count = self.next_noise_process;
         Ok(analyzed)
     }
 

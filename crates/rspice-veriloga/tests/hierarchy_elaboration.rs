@@ -4,6 +4,7 @@ mod support;
 
 use rspice_veriloga::canonical_ir::HirExprKind;
 use rspice_veriloga::{CompilerOptions, RuntimeQualificationOptions, VerilogACompiler};
+use std::collections::HashSet;
 use support::DeviceFixture;
 
 fn compile_selected(source: &str, module: &str) -> DeviceFixture {
@@ -324,6 +325,106 @@ endmodule
     assert_eq!(names.len(), 2);
     assert_ne!(names[0], names[1]);
     assert!(names.iter().all(|name| name.ends_with(":thermal")));
+    assert_eq!(
+        model
+            .noise_sources
+            .iter()
+            .map(|source| source.process_id)
+            .collect::<Vec<_>>(),
+        vec![0, 1]
+    );
+}
+
+#[test]
+fn hierarchy_noise_process_ids_are_dense_across_root_and_repeated_children() {
+    let source = r#"
+`include "disciplines.vams"
+module noisy_child(p, n);
+    inout p, n; electrical p, n;
+    real process;
+    analog begin
+        process = white_noise(1.0, "child");
+        I(p, n) <+ process + process;
+    end
+endmodule
+module noisy_parent(p, n);
+    inout p, n; electrical p, n;
+    analog I(p, n) <+ white_noise(2.0, "root");
+    noisy_child first(p, n);
+    noisy_child second(p, n);
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler
+        .compile_module(source, Some("noisy_parent"))
+        .expect("root and repeated noisy children compile");
+    let artifact = compiler
+        .compile_canonical_ir_module(source, Some("noisy_parent"))
+        .expect("canonical noisy hierarchy compiles");
+    let runtime_ids = model
+        .noise_sources
+        .iter()
+        .map(|source| source.process_id)
+        .collect::<Vec<_>>();
+    assert_eq!(runtime_ids, vec![0, 1, 2]);
+
+    let mut canonical_ids = artifact
+        .hir
+        .expressions
+        .iter()
+        .filter_map(|expression| match expression.kind {
+            HirExprKind::NoiseSource { process_id, .. } => Some(process_id as usize),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    canonical_ids.sort_unstable();
+    canonical_ids.dedup();
+    assert_eq!(canonical_ids, runtime_ids);
+    compiler
+        .compile_runtime(source, Some("noisy_parent"))
+        .expect("bytecode and canonical noisy hierarchy artifacts match");
+}
+
+#[test]
+fn nested_repeated_noisy_children_receive_distinct_process_ids() {
+    let source = r#"
+`include "disciplines.vams"
+module noisy_leaf(p, n);
+    inout p, n; electrical p, n;
+    analog I(p, n) <+ white_noise(1.0, "leaf");
+endmodule
+module noisy_pair(p, n);
+    inout p, n; electrical p, n;
+    noisy_leaf left(p, n);
+    noisy_leaf right(p, n);
+endmodule
+module noisy_tree(p, n);
+    inout p, n; electrical p, n;
+    noisy_pair first(p, n);
+    noisy_pair second(p, n);
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler
+        .compile_module(source, Some("noisy_tree"))
+        .expect("nested repeated noisy hierarchy compiles");
+    assert_eq!(
+        model
+            .noise_sources
+            .iter()
+            .map(|source| source.process_id)
+            .collect::<Vec<_>>(),
+        vec![0, 1, 2, 3]
+    );
+    let names = model
+        .noise_sources
+        .iter()
+        .map(|source| source.name.as_deref().expect("qualified leaf label"))
+        .collect::<HashSet<_>>();
+    assert_eq!(names.len(), 4);
+    compiler
+        .compile_runtime(source, Some("noisy_tree"))
+        .expect("nested bytecode and canonical artifacts match");
 }
 
 #[test]
