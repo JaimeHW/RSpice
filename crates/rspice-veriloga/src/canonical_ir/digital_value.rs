@@ -142,6 +142,26 @@ pub const NOT_TABLE: [FourStateBit; 4] = [
     O, Z, X, X,
 ];
 
+/// The conditional operator's ambiguous merge, IEEE 1364-2005 section 4.1.13
+/// table 4-6.
+///
+/// Not a bitwise operator, and here anyway, because it is a section 4.1 truth
+/// table and the alternative is a private transcription in the interpreter that
+/// no test compares against the document.
+///
+/// Reached only when the condition itself is `x` or `z`: the standard then
+/// evaluates *both* arms and merges them bit by bit, keeping a bit the two arms
+/// agree on and yielding `x` where they do not. Rows are the `then` operand,
+/// columns the `else` one. Note this is not [`XNOR_TABLE`] — agreement on `0`
+/// gives `0` here, where XNOR gives `1`.
+pub const CONDITIONAL_TABLE: [[FourStateBit; 4]; 4] = [
+    //        0  1  x  z
+    /* 0 */ [Z, X, X, X],
+    /* 1 */ [X, O, X, X],
+    /* x */ [X, X, X, X],
+    /* z */ [X, X, X, X],
+];
+
 /// Apply a binary bitwise truth table to one bit pair.
 pub const fn apply_binary(
     table: &[[FourStateBit; 4]; 4],
@@ -566,6 +586,43 @@ pub fn shift(op: ShiftOp, value: &FourStateValue, count: &FourStateValue) -> Fou
     out
 }
 
+/// The conditional operator (`?:`), IEEE 1364-2005 section 4.1.13.
+///
+/// A known condition selects an arm. An ambiguous one selects neither: both
+/// arms are evaluated and merged through [`CONDITIONAL_TABLE`], so a bit the
+/// two arms agree on survives and one they disagree on becomes `x`. This is why
+/// `x ? 1'b1 : 1'b1` is `1` rather than `x` — the answer does not depend on the
+/// condition, so not knowing the condition costs nothing.
+///
+/// The result width is the wider arm's, per section 5.4.1.
+pub fn conditional(
+    condition: &FourStateValue,
+    then_value: &FourStateValue,
+    else_value: &FourStateValue,
+) -> FourStateValue {
+    let width = then_value.width().max(else_value.width());
+    let then_value = then_value.resized(width);
+    let else_value = else_value.resized(width);
+    match truth(condition) {
+        FourStateBit::One => then_value,
+        FourStateBit::Zero => else_value,
+        FourStateBit::Unknown | FourStateBit::HighImpedance => {
+            let mut out = FourStateValue::zero(width);
+            for index in 0..width {
+                out.set_bit(
+                    index,
+                    apply_binary(
+                        &CONDITIONAL_TABLE,
+                        then_value.bit(index),
+                        else_value.bit(index),
+                    ),
+                );
+            }
+            out
+        }
+    }
+}
+
 /// Select bits `[msb:lsb]` of a value, IEEE 1364-2005 section 4.2.1.
 ///
 /// Bits outside the value are `x`, which is the standard's rule for an
@@ -915,6 +972,64 @@ mod tests {
         // Reaching past the declared width reads `x`, not a wrapped bit.
         assert_eq!(part_select(&value, 5, 4).spelling(), "xx");
         assert_eq!(part_select(&value, 4, 3).spelling(), "x1");
+    }
+
+    /// IEEE 1364-2005 section 4.1.13: a known condition selects an arm; an
+    /// ambiguous one merges both through table 4-6.
+    #[test]
+    fn the_conditional_operator_merges_its_arms_when_the_condition_is_unknown() {
+        assert_eq!(
+            conditional(&parse("1"), &parse("1010"), &parse("0101")).spelling(),
+            "1010"
+        );
+        assert_eq!(
+            conditional(&parse("0"), &parse("1010"), &parse("0101")).spelling(),
+            "0101"
+        );
+        // Bits the arms agree on survive an unknown condition; the rest are `x`.
+        assert_eq!(
+            conditional(&parse("x"), &parse("1100"), &parse("1010")).spelling(),
+            "1xx0"
+        );
+        assert_eq!(
+            conditional(&parse("z"), &parse("1100"), &parse("1010")).spelling(),
+            "1xx0"
+        );
+        // Agreement is enough on its own: the condition never has to be known.
+        assert_eq!(
+            conditional(&parse("x"), &parse("1010"), &parse("1010")).spelling(),
+            "1010"
+        );
+        // Agreeing on an ambiguous bit is not agreement.
+        assert_eq!(
+            conditional(&parse("x"), &parse("1x"), &parse("1x")).spelling(),
+            "1x"
+        );
+        // A wide condition is reduced by its truth value, not its low bit.
+        assert_eq!(
+            conditional(&parse("0010"), &parse("11"), &parse("00")).spelling(),
+            "11"
+        );
+    }
+
+    /// Table 4-6 is its own table: agreement on `0` yields `0`, where XNOR — the
+    /// other table whose diagonal is "the operands match" — yields `1`.
+    #[test]
+    fn the_conditional_table_is_not_the_xnor_table() {
+        assert_eq!(apply_binary(&CONDITIONAL_TABLE, Z, Z), Z);
+        assert_eq!(apply_binary(&XNOR_TABLE, Z, Z), O);
+        for left in TABLE_ORDER {
+            for right in TABLE_ORDER {
+                let merged = apply_binary(&CONDITIONAL_TABLE, left, right);
+                let expected = if left == right && !matches!(left, X | FourStateBit::HighImpedance)
+                {
+                    left
+                } else {
+                    X
+                };
+                assert_eq!(merged, expected, "{left:?} ? : {right:?}");
+            }
+        }
     }
 
     #[test]
