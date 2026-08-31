@@ -149,13 +149,19 @@ use rspice_core::analysis::harmonic_balance::{
 /// report (`SchedulerLimits`, `TimeSlotReport`), and the scheduler itself
 /// (`EventScheduler` with six operations, `SchedulerContext` with three).
 ///
-/// These are public for a reason this test's usual rule does not cover: the
-/// kernel has no in-crate consumer until XSPICE is rehosted on it, so
-/// `pub(crate)` would make every one of them dead code under `-D warnings`.
-/// The integration test `event_scheduler_kernel.rs` is the consumer that
-/// keeps them honest in the meantime. When the rehost lands and the analog
-/// engine calls this module directly, most of this surface should narrow.
-const MAX_PUBLIC_ITEMS: usize = 4291;
+/// These are public for a reason this test's usual rule does not cover:
+/// `event_scheduler_kernel.rs` is an integration test, so it can only reach
+/// the kernel through the crate's public face. The kernel's ordering and
+/// determinism guarantees are the substrate everything digital rests on and
+/// that test is what holds them, so the surface it drives stays public.
+///
+/// The latest +3 is what rehosting XSPICE on the kernel needs from it:
+/// `schedule_superseding_at` (a driver replacing its own pending output),
+/// `run_due_events` (executing everything due at or before a bound the analog
+/// engine names), and `note_delta_cycle` (an outer settle loop marking one
+/// iteration so a network that will not quiet is diagnosed rather than
+/// looping). Each is driven by the same integration test.
+const MAX_PUBLIC_ITEMS: usize = 4294;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

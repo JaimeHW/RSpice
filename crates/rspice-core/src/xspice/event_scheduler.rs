@@ -385,7 +385,7 @@ pub struct TimeSlotReport {
 
 /// Scheduling state, split out so an executing event can schedule through
 /// [`SchedulerContext`] while the driver loop owns the event it popped.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 struct EventQueues {
     /// Events at ticks after the current one, keyed by the full total order so
     /// the key type *is* the ordering specification.
@@ -396,6 +396,11 @@ struct EventQueues {
     next_sequence: u64,
     /// Activation counts at the current tick, for the oscillation report.
     activations: BTreeMap<EventTarget, u64>,
+    /// Where each driver's unexecuted events sit, by tick and then in schedule
+    /// order. This is the index [`EventScheduler::schedule_superseding_at`]
+    /// consults; without it, superseding a driver's own pending output would
+    /// mean scanning the whole queue.
+    driver_events: BTreeMap<EventTarget, BTreeMap<u64, Vec<(SchedulerRegion, u64)>>>,
 }
 
 impl EventQueues {
@@ -415,6 +420,12 @@ impl EventQueues {
     ) -> u64 {
         let sequence = self.next_sequence;
         self.next_sequence += 1;
+        self.driver_events
+            .entry(target.clone())
+            .or_default()
+            .entry(tick)
+            .or_default()
+            .push((region, sequence));
         let event = ScheduledEvent {
             tick,
             region,
@@ -436,9 +447,64 @@ impl EventQueues {
 
     /// Take the lowest-sequence active event.
     fn pop_active(&mut self) -> Option<ScheduledEvent> {
-        self.slot[SchedulerRegion::Active.index()]
+        let event = self.slot[SchedulerRegion::Active.index()]
             .pop_first()
-            .map(|(_, event)| event)
+            .map(|(_, event)| event)?;
+        self.forget_driver_event(&event.target, event.tick, event.sequence);
+        Some(event)
+    }
+
+    /// Drop one event from the driver index, pruning the empty levels above it.
+    fn forget_driver_event(&mut self, target: &EventTarget, tick: u64, sequence: u64) {
+        let Some(ticks) = self.driver_events.get_mut(target) else {
+            return;
+        };
+        if let Some(entries) = ticks.get_mut(&tick) {
+            entries.retain(|(_, pending)| *pending != sequence);
+            if entries.is_empty() {
+                ticks.remove(&tick);
+            }
+        }
+        if ticks.is_empty() {
+            self.driver_events.remove(target);
+        }
+    }
+
+    /// Remove one unexecuted event wherever it is held.
+    ///
+    /// A promoted event sits in the active queue while its `region` field
+    /// still names the region it was scheduled into, so the slot cannot be
+    /// indexed by that field; all four queues are checked instead. There are
+    /// four of them, so this stays a constant number of lookups.
+    fn remove_scheduled(&mut self, tick: u64, region: SchedulerRegion, sequence: u64) {
+        if self.future.remove(&(tick, region, sequence)).is_some() {
+            return;
+        }
+        for queue in self.slot.iter_mut() {
+            if queue.remove(&sequence).is_some() {
+                return;
+            }
+        }
+    }
+
+    /// Cancel every unexecuted event of `target` at or after `tick`, and
+    /// report how many were cancelled.
+    fn supersede_driver(&mut self, target: &EventTarget, tick: u64) -> usize {
+        let Some(ticks) = self.driver_events.get_mut(target) else {
+            return 0;
+        };
+        let superseded = ticks.split_off(&tick);
+        if ticks.is_empty() {
+            self.driver_events.remove(target);
+        }
+        let mut cancelled = 0;
+        for (superseded_tick, entries) in superseded {
+            for (region, sequence) in entries {
+                self.remove_scheduled(superseded_tick, region, sequence);
+                cancelled += 1;
+            }
+        }
+        cancelled
     }
 
     /// Promote the first non-empty later region into the active region.
@@ -460,8 +526,22 @@ impl EventQueues {
         false
     }
 
-    /// Move every future event at `tick` into the slot queues.
-    fn open_slot(&mut self, tick: u64) {
+    /// Move the earliest pending tick at or before `bound` into the slot
+    /// queues, reporting whether anything moved.
+    ///
+    /// One tick at a time, never a range: a slot queue is keyed by sequence
+    /// alone, because within one tick sequence is the whole tie-break after
+    /// the region. Emptying a span of ticks into it at once would order them
+    /// by creation instead of by time, so the due-slot mode opens the next
+    /// tick only once the current one has gone quiet.
+    fn open_next_due_tick(&mut self, bound: u64) -> bool {
+        let Some(((tick, _, _), _)) = self.future.first_key_value() else {
+            return false;
+        };
+        let tick = *tick;
+        if tick > bound {
+            return false;
+        }
         let upper = match tick.checked_add(1) {
             Some(next) => self.future.split_off(&(next, SchedulerRegion::Active, 0)),
             None => BTreeMap::new(),
@@ -470,6 +550,7 @@ impl EventQueues {
         for (_, event) in due {
             self.slot[event.region.index()].insert(event.sequence, event);
         }
+        true
     }
 }
 
@@ -479,7 +560,7 @@ impl EventQueues {
 /// the other is every later tick, keyed by the total order. Advancing is
 /// [`Self::run_time_slot`], which jumps straight to the next tick that has an
 /// event rather than stepping through empty ones.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EventScheduler {
     queues: EventQueues,
     resolution: TimeResolution,
@@ -488,6 +569,12 @@ pub struct EventScheduler {
     current_tick: u64,
     /// Whether any slot has run. Until one has, tick 0 is still schedulable.
     started: bool,
+    /// Delta cycles counted against the open due slot. Only the due-slot mode
+    /// uses this; [`Self::run_time_slot`] settles a tick inside one call and
+    /// counts in a local.
+    slot_delta_cycles: u32,
+    /// Events executed against the open due slot, for the same reason.
+    slot_events_executed: u64,
 }
 
 impl EventScheduler {
@@ -499,6 +586,8 @@ impl EventScheduler {
             limits,
             current_tick: 0,
             started: false,
+            slot_delta_cycles: 0,
+            slot_events_executed: 0,
         }
     }
 
@@ -554,6 +643,157 @@ impl EventScheduler {
         Ok(self.queues.insert(None, tick, region, target, value))
     }
 
+    /// Schedule an event that replaces this driver's own pending output.
+    ///
+    /// Every unexecuted event of `target` at a tick at or after `tick` is
+    /// cancelled first; the returned count is how many were. A co-driver on
+    /// the same node is untouched, because [`EventTarget`] identity includes
+    /// the instance and the port, so two drivers of one node are two targets.
+    ///
+    /// This is inertial-style cancellation: an output that changes its mind
+    /// before its earlier output has been delivered replaces it rather than
+    /// queueing behind it. It is what the XSPICE queue has always done, and
+    /// what a Verilog inertial delay does with a pulse narrower than the
+    /// delay. Transport delay, which queues instead, is a separate mode this
+    /// method deliberately does not offer.
+    ///
+    /// Unlike [`Self::schedule_at`] this takes no horizon. A code model dates
+    /// its output from an input crossing it interpolated *inside* the accepted
+    /// analog step, so the output can be dated before the timepoint being
+    /// settled and is still due at it, not late for it. The due-slot mode
+    /// ([`Self::run_due_events`]) is what delivers such an event, and refusing
+    /// it here would drop output the analog path has always seen.
+    pub fn schedule_superseding_at(
+        &mut self,
+        tick: u64,
+        region: SchedulerRegion,
+        target: EventTarget,
+        value: EventValue,
+    ) -> usize {
+        let cancelled = self.queues.supersede_driver(&target, tick);
+        let open_slot = self.started.then_some(self.current_tick);
+        self.queues.insert(open_slot, tick, region, target, value);
+        cancelled
+    }
+
+    /// Execute every event due at or before `bound_tick`.
+    ///
+    /// This is the mode for an event world driven by an outer loop rather than
+    /// by its own clock: the analog engine names the timepoint being settled,
+    /// and everything dated at or before it is due now. Events at several
+    /// distinct ticks can therefore run in one call; they still run in
+    /// `(tick, region, sequence)` order, so the result is the order they would
+    /// have had if each tick had run its own slot.
+    ///
+    /// Successive calls with the same `bound_tick` continue one slot and
+    /// accumulate its accounting, which is what makes the oscillation
+    /// diagnostic meaningful when the settling is driven from outside: the
+    /// caller marks each iteration with [`Self::note_delta_cycle`]. A
+    /// different bound opens a fresh slot. The bound may move backwards — a
+    /// rejected analog step retries at a smaller timepoint — and that opens a
+    /// fresh slot too.
+    pub fn run_due_events<F>(
+        &mut self,
+        bound_tick: u64,
+        mut execute: F,
+    ) -> Result<TimeSlotReport, SchedulerError>
+    where
+        F: FnMut(&ScheduledEvent, &mut SchedulerContext<'_>),
+    {
+        self.open_due_slot(bound_tick);
+
+        loop {
+            let Some(event) = self.queues.pop_active() else {
+                if self.queues.promote() {
+                    self.slot_delta_cycles += 1;
+                    if self.slot_delta_cycles > self.limits.max_delta_cycles_per_tick {
+                        return Err(self.oscillation(
+                            bound_tick,
+                            OscillationCause::DeltaCycleLimit,
+                            self.slot_delta_cycles,
+                            self.slot_events_executed,
+                        ));
+                    }
+                    continue;
+                }
+                // The current tick has gone quiet in every region, so the next
+                // one under the bound may open. This is also what picks up an
+                // event `execute` back-dated below the bound, which
+                // `SchedulerContext` routes to the future tier.
+                if self.queues.open_next_due_tick(bound_tick) {
+                    continue;
+                }
+                break;
+            };
+
+            self.slot_events_executed += 1;
+            if self.slot_events_executed > self.limits.max_events_per_tick {
+                return Err(self.oscillation(
+                    bound_tick,
+                    OscillationCause::EventLimit,
+                    self.slot_delta_cycles,
+                    self.slot_events_executed,
+                ));
+            }
+            *self
+                .queues
+                .activations
+                .entry(event.target.clone())
+                .or_insert(0) += 1;
+
+            let mut context = SchedulerContext {
+                queues: &mut self.queues,
+                current_tick: bound_tick,
+            };
+            execute(&event, &mut context);
+        }
+
+        Ok(TimeSlotReport {
+            tick: bound_tick,
+            delta_cycles: self.slot_delta_cycles,
+            events_executed: self.slot_events_executed,
+        })
+    }
+
+    /// Record one delta cycle of the due slot bounded by `bound_tick`.
+    ///
+    /// An outer settle loop calls this once per iteration. Delta settling is
+    /// unbounded in the standard, so a zero-delay loop is a hang rather than a
+    /// diagnosis; this is where that hang is converted into
+    /// [`SchedulerError::Oscillation`] naming the drivers responsible.
+    ///
+    /// It is a separate call from [`Self::run_due_events`] because the outer
+    /// loop drains the queue several times per iteration — once before it
+    /// walks its processes and once after each of them — and counting a delta
+    /// per drain would make the ceiling depend on how many processes the
+    /// design has rather than on how deep the settling is.
+    pub fn note_delta_cycle(&mut self, bound_tick: u64) -> Result<(), SchedulerError> {
+        self.open_due_slot(bound_tick);
+        self.slot_delta_cycles += 1;
+        if self.slot_delta_cycles > self.limits.max_delta_cycles_per_tick {
+            return Err(self.oscillation(
+                bound_tick,
+                OscillationCause::DeltaCycleLimit,
+                self.slot_delta_cycles,
+                self.slot_events_executed,
+            ));
+        }
+        Ok(())
+    }
+
+    /// Open the due slot at `bound_tick`, resetting per-slot accounting when
+    /// the bound moves. Continuing the same bound keeps it.
+    fn open_due_slot(&mut self, bound_tick: u64) {
+        if self.started && self.current_tick == bound_tick {
+            return;
+        }
+        self.current_tick = bound_tick;
+        self.started = true;
+        self.slot_delta_cycles = 0;
+        self.slot_events_executed = 0;
+        self.queues.activations.clear();
+    }
+
     /// Run the next tick that has events, to quiescence.
     ///
     /// Returns `Ok(None)` when nothing is pending. Otherwise the tick's slot is
@@ -574,9 +814,14 @@ impl EventScheduler {
 
         self.current_tick = tick;
         self.started = true;
-        self.queues.open_slot(tick);
+        self.queues.open_next_due_tick(tick);
         self.queues.activations.clear();
 
+        // A tick settles inside this call, so the counters are local. The
+        // per-slot fields are cleared so that a scheduler driven both ways
+        // does not carry one mode's accounting into the other's.
+        self.slot_delta_cycles = 0;
+        self.slot_events_executed = 0;
         let mut delta_cycles: u32 = 0;
         let mut events_executed: u64 = 0;
 

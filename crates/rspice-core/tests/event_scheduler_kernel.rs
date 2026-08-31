@@ -687,6 +687,272 @@ fn the_last_representable_tick_is_scheduled_into_the_future_tier() {
 }
 
 //=============================================================================
+// Driver supersession and the outer-loop due slot
+//=============================================================================
+
+/// Run every event due at or before `bound`, returning `(tick, port, value)`.
+fn drain_due(scheduler: &mut EventScheduler, bound: u64) -> Vec<(u64, String, EventValue)> {
+    let mut seen = Vec::new();
+    scheduler
+        .run_due_events(bound, |event, _| {
+            seen.push((event.tick, event.target.port_name.clone(), event.value))
+        })
+        .expect("a due slot with no feedback settles");
+    seen
+}
+
+#[test]
+fn a_later_output_supersedes_this_driver_but_not_a_co_driver() {
+    let mut scheduler = scheduler();
+    let driver = target("a_driver", "out", 1, 0);
+
+    scheduler.schedule_superseding_at(5, SchedulerRegion::Active, driver.clone(), digital(0));
+    scheduler.schedule_superseding_at(20, SchedulerRegion::Active, driver.clone(), digital(1));
+    // Same node, different port: a co-driver, so untouched by the supersede.
+    scheduler.schedule_superseding_at(
+        20,
+        SchedulerRegion::Active,
+        target("a_driver", "other", 1, 0),
+        digital(2),
+    );
+
+    // Deciding on 10 cancels the driver's own event at 20 and leaves the one
+    // at 5, which is already committed to a tick this one does not reach back
+    // to.
+    let cancelled =
+        scheduler.schedule_superseding_at(10, SchedulerRegion::Active, driver.clone(), digital(2));
+    assert_eq!(cancelled, 1, "only this driver's event at 20 is cancelled");
+    assert_eq!(scheduler.pending(), 3);
+
+    let drained = drain_due(&mut scheduler, 20);
+    let values: Vec<_> = drained.iter().map(|(_, _, value)| *value).collect();
+    assert!(values.contains(&digital(0)), "the event at 5 survives");
+    assert!(values.contains(&digital(2)), "the superseding event runs");
+    assert!(
+        drained
+            .iter()
+            .any(|(tick, port, _)| *tick == 20 && port == "other"),
+        "the co-driver keeps its event at 20"
+    );
+    assert!(
+        !drained
+            .iter()
+            .any(|(tick, port, _)| *tick == 20 && port == "out"),
+        "the superseded output must not be delivered"
+    );
+}
+
+#[test]
+fn superseding_at_the_same_tick_replaces_the_pending_value() {
+    let mut scheduler = scheduler();
+    let driver = target("a_driver", "out", 1, 0);
+
+    scheduler.schedule_superseding_at(7, SchedulerRegion::Active, driver.clone(), digital(0));
+    let cancelled =
+        scheduler.schedule_superseding_at(7, SchedulerRegion::Active, driver.clone(), digital(1));
+
+    assert_eq!(cancelled, 1);
+    assert_eq!(
+        drain_due(&mut scheduler, 7),
+        vec![(7, "out".to_string(), digital(1))]
+    );
+}
+
+#[test]
+fn an_executed_event_is_no_longer_superseded() {
+    let mut scheduler = scheduler();
+    let driver = target("a_driver", "out", 1, 0);
+
+    scheduler.schedule_superseding_at(3, SchedulerRegion::Active, driver.clone(), digital(0));
+    assert_eq!(drain_due(&mut scheduler, 3).len(), 1);
+
+    // Nothing is left to cancel: the value is already in the world.
+    let cancelled =
+        scheduler.schedule_superseding_at(3, SchedulerRegion::Active, driver.clone(), digital(1));
+    assert_eq!(cancelled, 0);
+    assert_eq!(scheduler.pending(), 1);
+}
+
+#[test]
+fn a_due_slot_runs_several_ticks_in_one_call_in_total_order() {
+    let mut scheduler = scheduler();
+    for tick in [30u64, 10, 20] {
+        scheduler.schedule_superseding_at(
+            tick,
+            SchedulerRegion::Active,
+            target("dut", "p", 1, tick as usize),
+            digital(1),
+        );
+    }
+
+    let ticks: Vec<u64> = drain_due(&mut scheduler, 25)
+        .into_iter()
+        .map(|(tick, _, _)| tick)
+        .collect();
+    assert_eq!(
+        ticks,
+        vec![10, 20],
+        "everything at or under the bound, in order"
+    );
+    assert_eq!(scheduler.next_tick(), Some(30));
+}
+
+#[test]
+fn a_due_slot_delivers_an_event_dated_before_the_bound_it_already_reached() {
+    // A code model interpolates an input crossing inside the accepted analog
+    // step and dates its output from that crossing, which lands before the
+    // timepoint being settled. `schedule_at` refuses that; the superseding
+    // schedule admits it and the next drain delivers it.
+    let mut scheduler = scheduler();
+    scheduler.schedule_superseding_at(
+        100,
+        SchedulerRegion::Active,
+        target("dut", "seed", 1, 0),
+        digital(1),
+    );
+    assert_eq!(drain_due(&mut scheduler, 100).len(), 1);
+
+    assert!(matches!(
+        scheduler.schedule_at(
+            60,
+            SchedulerRegion::Active,
+            target("dut", "back", 1, 0),
+            digital(0)
+        ),
+        Err(SchedulerError::ScheduleInThePast { .. })
+    ));
+
+    scheduler.schedule_superseding_at(
+        60,
+        SchedulerRegion::Active,
+        target("dut", "back", 1, 0),
+        digital(0),
+    );
+    assert_eq!(
+        drain_due(&mut scheduler, 100),
+        vec![(60, "back".to_string(), digital(0))]
+    );
+}
+
+#[test]
+fn an_outer_settle_loop_that_will_not_quiet_is_diagnosed_with_its_drivers() {
+    let limits = SchedulerLimits {
+        max_delta_cycles_per_tick: 32,
+        max_events_per_tick: 1_000_000,
+        max_reported_oscillating_entities: 4,
+    };
+    let mut scheduler = EventScheduler::new(TimeResolution::default(), limits);
+
+    // The shape the XSPICE settle loop has: drain, evaluate, schedule again at
+    // the same timepoint, mark a delta, repeat. Nothing here ever quiets.
+    let mut error = None;
+    for cycle in 0..1_000 {
+        scheduler.schedule_superseding_at(
+            9,
+            SchedulerRegion::Active,
+            target("osc_a", "q", 1, 0),
+            digital((cycle % 2) as u8),
+        );
+        scheduler.schedule_superseding_at(
+            9,
+            SchedulerRegion::Active,
+            target("osc_b", "q", 2, 0),
+            digital((cycle % 2) as u8),
+        );
+        if cycle == 0 {
+            scheduler.schedule_superseding_at(
+                9,
+                SchedulerRegion::Active,
+                target("quiet", "q", 3, 0),
+                digital(1),
+            );
+        }
+        scheduler
+            .run_due_events(9, |_, _| {})
+            .expect("draining never oscillates on its own here");
+        if let Err(reported) = scheduler.note_delta_cycle(9) {
+            error = Some(reported);
+            break;
+        }
+    }
+
+    let Some(SchedulerError::Oscillation(diagnostic)) = error else {
+        panic!("an outer loop that never quiets must be diagnosed, got {error:?}");
+    };
+    assert_eq!(diagnostic.tick, 9);
+    assert_eq!(diagnostic.cause, OscillationCause::DeltaCycleLimit);
+    assert_eq!(diagnostic.delta_cycles, 33);
+    let named: Vec<&str> = diagnostic
+        .entities
+        .iter()
+        .map(|(target, _)| target.instance.as_str())
+        .collect();
+    assert_eq!(
+        &named[..2],
+        &["osc_a", "osc_b"],
+        "the loop is named before the bystander, got {named:?}"
+    );
+    assert!(diagnostic.entities.iter().all(|(_, count)| *count > 0));
+}
+
+#[test]
+fn moving_the_due_bound_opens_a_fresh_slot() {
+    let limits = SchedulerLimits {
+        max_delta_cycles_per_tick: 4,
+        ..SchedulerLimits::default()
+    };
+    let mut scheduler = EventScheduler::new(TimeResolution::default(), limits);
+
+    for _ in 0..4 {
+        scheduler.note_delta_cycle(1).expect("under the ceiling");
+    }
+    // A retried analog step settles a different timepoint, so its budget is
+    // its own — including a bound that moved backwards.
+    scheduler.note_delta_cycle(0).expect("a fresh slot");
+    for _ in 0..3 {
+        scheduler
+            .note_delta_cycle(0)
+            .expect("still under the ceiling");
+    }
+    assert!(matches!(
+        scheduler.note_delta_cycle(0),
+        Err(SchedulerError::Oscillation(_))
+    ));
+}
+
+#[test]
+fn a_cloned_scheduler_keeps_the_ordering_of_the_original() {
+    // Transient trials snapshot the scheduler and restore it when the step is
+    // rejected, so a clone has to be the same queue, not just the same events.
+    let mut scheduler = scheduler();
+    for tick in [4u64, 1, 9] {
+        scheduler.schedule_superseding_at(
+            tick,
+            SchedulerRegion::Active,
+            target("dut", "p", 1, tick as usize),
+            digital(1),
+        );
+    }
+
+    let mut restored = scheduler.clone();
+    scheduler.schedule_superseding_at(
+        1,
+        SchedulerRegion::Active,
+        target("dut", "p", 1, 1),
+        digital(0),
+    );
+
+    assert_eq!(
+        drain_due(&mut restored, 9)
+            .into_iter()
+            .map(|(tick, _, value)| (tick, value))
+            .collect::<Vec<_>>(),
+        vec![(1, digital(1)), (4, digital(1)), (9, digital(1))],
+        "the clone must not see the supersede applied to the original"
+    );
+}
+
+//=============================================================================
 // Determinism
 //=============================================================================
 
