@@ -16,10 +16,15 @@
 # Every case is deliberately two-state-clean except `xz_propagation.v`, which
 # exists precisely to cover the four-state rules and is therefore Icarus-only.
 #
-# There is no RSpice contract column yet. Nothing in RSpice executes digital
-# Verilog, so every case would carry the same value and the column would be
-# scaffolding. It arrives with the CFG interpreter (W2.3), at the same commit
-# that removes the harness's `RspiceExecutionUnimplemented` refusal.
+# There is still no RSpice column, and now for the opposite reason. RSpice does
+# execute this corpus: the harness's RSpice arm compiles each design through the
+# Verilog-A front end and runs it on the native digital host. What each case
+# must produce — a trace, row by row, or a named refusal for a construct the
+# front end does not implement yet — is pinned in `EXPECTED` in
+# `crates/rspice-conformance/tests/verilog_oracles.rs`, beside the derivation of
+# every number. That is a contract with far more in it than a column could hold,
+# and putting a weaker summary here as well would give a case two statements of
+# what it must do.
 
 c17.v	iverilog,verilator	ISCAS85 c17, exhaustive truth table over five inputs
 gate_primitives.v	iverilog,verilator	all eight gate primitives against their operator spellings

@@ -22,7 +22,14 @@ rust-version.workspace = true
 # surface. Verilog-A tooling depends on this crate with `default-features =
 # false` so it can reuse only the generated-model oracle and benchmark harness
 # without compiling unrelated ngspice/Xyce runners or their corpora.
-default = ["circuit-suites"]
+default = ["circuit-suites", "verilog-digital"]
+# The digital Verilog oracle harness's own arm. `rspice-core/veriloga` is what
+# links the front end that compiles a corpus case and the host that runs it;
+# without it the RSpice arm has nothing to call and reports so by name rather
+# than being quietly absent. In the default set because the harness's whole
+# point is comparing RSpice against an oracle, and a default build in which
+# RSpice cannot participate would make every oracle run a self-check.
+verilog-digital = ["rspice-core/veriloga"]
 # Keep the authoritative default census honest by linking every generated
 # capability required by an admitted deck. Select the canonical VBIC
 # three-terminal, external-thermal, and four-terminal artifacts plus their

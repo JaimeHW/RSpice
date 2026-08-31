@@ -1,26 +1,29 @@
 //! Running one case through one engine, and comparing two engines on it.
 //!
-//! # The RSpice arm refuses on purpose
+//! # The RSpice arm
 //!
 //! [`run_case`] dispatches on [`VerilogEngine`], and the
-//! [`VerilogEngine::Rspice`] arm returns
-//! [`RunError::RspiceExecutionUnimplemented`]. That is not a placeholder to be
-//! tidied up later; it is the whole reason this module has the shape it has.
+//! [`VerilogEngine::Rspice`] arm compiles the case's design through the
+//! Verilog-A front end and runs it on the native digital host. It goes through
+//! [`compare_engines`] exactly as an oracle does — same trace grammar, same
+//! parser, same comparator — because that comparison was built and exercised
+//! against two oracles before this arm existed. Nothing about it had to be
+//! invented once there was an implementation in hand, which is when inventing
+//! it would have been most likely to go wrong: the temptation with a fresh
+//! implementation and a deadline is to build the comparison that makes it pass.
 //!
-//! Nothing in RSpice executes digital Verilog yet. The plumbing that will
-//! compare RSpice against an oracle is nevertheless finished and exercised
-//! today, because [`compare_engines`] does not care which engines it is given:
-//! it runs both, parses both traces, and diffs them. Two oracles go through it
-//! now; RSpice and an oracle go through the same code the moment `run_case`
-//! learns the third arm. Nothing about the comparison has to be invented at
-//! that point, which is when inventing it would be most likely to go wrong —
-//! the temptation, with a fresh implementation in hand and a deadline, is to
-//! build the comparison that makes it pass.
+//! In particular the arm does not hand the comparator a [`Trace`] it built
+//! directly. It renders the same text the generated testbench makes an oracle
+//! print and hands *that* to [`parse_trace`], so a formatting difference is a
+//! failure here rather than a tolerance in the comparator.
 //!
-//! The refusal is a named variant rather than a panic or a `None` so that the
-//! test asserting it (`rspice_execution_is_not_implemented_yet`) fails loudly
-//! when the arm is implemented. That failing test is the checklist item saying
-//! the harness now has a third participant.
+//! ## What it refuses
+//!
+//! A construct the front end cannot compile, or a design the host cannot run,
+//! becomes [`RunError::RspiceRefused`] carrying the engine's own diagnostic.
+//! That is a distinct variant from an oracle being absent and from a design
+//! being broken, and it is never a trace: a corpus case RSpice cannot execute
+//! must not be able to pass by producing nothing.
 //!
 //! # Isolation
 //!
@@ -65,12 +68,25 @@ pub struct RunOutcome {
 /// Everything that can stop a case from producing a trace.
 #[derive(Debug, Clone)]
 pub enum RunError {
-    /// RSpice cannot execute digital Verilog yet.
+    /// RSpice refused to compile or run this case, and said why.
     ///
-    /// Removed by W2.3, the CFG interpreter. Until then this is the honest
-    /// answer, and it is a distinct variant so that nothing can mistake it for
-    /// a tool being absent or a design being broken.
-    RspiceExecutionUnimplemented,
+    /// A distinct variant so that nothing can mistake it for a tool being
+    /// absent or a design being broken: it is the system under test declining
+    /// a construct, which is the outcome the fail-closed rule demands when the
+    /// alternative is a plausible wrong answer.
+    RspiceRefused {
+        /// The case that was refused.
+        case: String,
+        /// The engine's own diagnostic.
+        detail: String,
+    },
+    /// The build has no digital Verilog execution compiled in.
+    ///
+    /// The `verilog-digital` feature forwards `rspice-core/veriloga`, which is
+    /// what links the front end and the host. Without it there is nothing to
+    /// call, and saying so is better than reporting an empty trace that would
+    /// agree with anything.
+    RspiceNotCompiledIn,
     /// An oracle was asked for but is not installed.
     OracleUnavailable(Box<OracleAvailability>),
     /// The manifest does not list this engine for this case — the X/Z case
@@ -101,10 +117,13 @@ pub enum RunError {
 impl std::fmt::Display for RunError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::RspiceExecutionUnimplemented => write!(
+            Self::RspiceRefused { case, detail } => {
+                write!(f, "RSpice refused case '{case}': {detail}")
+            }
+            Self::RspiceNotCompiledIn => write!(
                 f,
-                "RSpice does not execute digital Verilog yet; the oracle harness is in place \
-                 and this arm is enabled by W2.3 (the CFG interpreter)"
+                "this build has no digital Verilog execution; enable the `verilog-digital` \
+                 feature, which forwards `rspice-core/veriloga`"
             ),
             Self::OracleUnavailable(availability) => write!(f, "{}", availability.diagnostic()),
             Self::CaseNotAdmitted { case, engine } => write!(
@@ -144,8 +163,9 @@ pub fn run_case(
     timeout_ms: u64,
 ) -> Result<RunOutcome, RunError> {
     match engine {
-        // The one arm that is deliberately absent. See the module docs.
-        VerilogEngine::Rspice => Err(RunError::RspiceExecutionUnimplemented),
+        // The system under test. It needs no toolchain and no scratch
+        // directory: the front end and the host are compiled into this binary.
+        VerilogEngine::Rspice => run_rspice(case),
         VerilogEngine::Icarus | VerilogEngine::Verilator => {
             if !case.admits(engine) {
                 return Err(RunError::CaseNotAdmitted {
@@ -160,10 +180,96 @@ pub fn run_case(
             match engine {
                 VerilogEngine::Icarus => run_icarus(case, tools, &bench_dir, timeout_ms),
                 VerilogEngine::Verilator => run_verilator(case, tools, &bench_dir, timeout_ms),
-                VerilogEngine::Rspice => Err(RunError::RspiceExecutionUnimplemented),
+                VerilogEngine::Rspice => run_rspice(case),
             }
         }
     }
+}
+
+/// Compile one case through the Verilog-A front end and run it on the native
+/// digital host.
+///
+/// The stimulus is translated rather than reused: `rspice-core` cannot see this
+/// crate's types, and a conformance suite that handed the engine its own case
+/// representation would be testing the engine against the harness's idea of a
+/// stimulus rather than against the `.stim` file both oracles are given.
+#[cfg(feature = "verilog-digital")]
+fn run_rspice(case: &Case) -> Result<RunOutcome, RunError> {
+    use rspice_core::xspice::verilog::{
+        DigitalClock, DigitalPort, DigitalStimulus, run_digital_verilog,
+    };
+    use std::time::Instant;
+
+    let source = fs::read_to_string(&case.source).map_err(|err| {
+        RunError::Harness(format!("cannot read '{}': {err}", case.source.display()))
+    })?;
+
+    let port = |port: &super::corpus::CasePort| DigitalPort {
+        name: port.name.clone(),
+        width: port.width,
+    };
+    let stimulus = DigitalStimulus {
+        module: Some(case.stimulus.module.clone()),
+        inputs: case
+            .stimulus
+            .driven_inputs()
+            .into_iter()
+            .map(port)
+            .collect(),
+        outputs: case
+            .stimulus
+            .observed_outputs()
+            .into_iter()
+            .map(port)
+            .collect(),
+        clock: case.stimulus.clock.as_ref().map(|clock| DigitalClock {
+            port: clock.port.clone(),
+            half_period: clock.half_period,
+        }),
+        step: case.stimulus.step,
+        settle: case.stimulus.settle,
+        vectors: case.stimulus.vectors.clone(),
+    };
+
+    let started = Instant::now();
+    let report =
+        run_digital_verilog(&source, &stimulus).map_err(|error| RunError::RspiceRefused {
+            case: case.name.clone(),
+            detail: error.to_string(),
+        })?;
+    let simulate_ms = started.elapsed().as_millis();
+
+    // Rendered to the same text an oracle prints and read back with the same
+    // parser, rather than assembled into a `Trace` directly. A `Trace` built
+    // here would be compared against one that had been through `parse_trace`,
+    // and the difference between the two is exactly the class of formatting
+    // defect the generated testbench exists to rule out.
+    let mut text = String::from(testbench::TRACE_HEADER);
+    text.push('\n');
+    for observation in &report.observations {
+        text.push_str(&format!("@{}", observation.step));
+        for (name, value) in &observation.values {
+            text.push_str(&format!(" {name}={value}"));
+        }
+        text.push('\n');
+    }
+    let trace = parse_trace(&text).map_err(|error| RunError::Trace {
+        engine: VerilogEngine::Rspice,
+        error,
+    })?;
+
+    Ok(RunOutcome {
+        engine: VerilogEngine::Rspice,
+        case: case.name.clone(),
+        trace,
+        compile_ms: 0,
+        simulate_ms,
+    })
+}
+
+#[cfg(not(feature = "verilog-digital"))]
+fn run_rspice(_case: &Case) -> Result<RunOutcome, RunError> {
+    Err(RunError::RspiceNotCompiledIn)
 }
 
 /// Write the generated testbench into a fresh scratch directory.
@@ -385,60 +491,93 @@ mod tests {
         corpus.case("c17").expect("c17 is in the corpus").clone()
     }
 
-    /// The refusal that W2.3 removes.
+    /// The arm runs, needs no toolchain, and leaves no debris.
     ///
-    /// When the CFG interpreter can execute this corpus, this test fails. That
-    /// failure is the point: it is the one place that has to be revisited, and
-    /// it says so rather than letting a newly working arm go unnoticed behind a
-    /// harness that still reports "not implemented".
+    /// This replaces the test that asserted the arm was unimplemented. That
+    /// test's job was to fail the moment the arm became real; it has done it,
+    /// and what stands in its place is the property the arm now has to keep.
+    #[cfg(feature = "verilog-digital")]
     #[test]
-    fn rspice_execution_is_not_implemented_yet() {
+    fn rspice_executes_a_case_without_a_toolchain_or_a_scratch_directory() {
         let case = any_case();
-        let workspace = std::env::temp_dir().join("rspice-verilog-refusal-probe");
+        let workspace = std::env::temp_dir().join("rspice-verilog-arm-probe");
 
-        let error = run_case(&case, VerilogEngine::Rspice, None, &workspace, 1_000)
-            .expect_err("RSpice cannot execute digital Verilog yet");
+        let outcome = run_case(&case, VerilogEngine::Rspice, None, &workspace, 1_000)
+            .expect("c17 is compiled and run in this process");
 
-        assert!(
-            matches!(error, RunError::RspiceExecutionUnimplemented),
-            "expected the named refusal, got {error:?}"
-        );
-        let message = error.to_string();
-        assert!(
-            message.contains("does not execute digital Verilog yet"),
-            "{message}"
-        );
-        assert!(message.contains("W2.3"), "{message}");
-        // Nothing was written: the refusal happens before any scratch directory
-        // is created, so it cannot leave debris on a machine that only ever
-        // reaches this arm.
+        assert_eq!(outcome.engine, VerilogEngine::Rspice);
+        assert_eq!(outcome.trace.rows.len(), case.stimulus.vectors.len());
+        // The front end and the host are linked into this binary, so nothing
+        // is compiled on disk and nothing is left behind.
         assert!(
             !workspace.exists(),
-            "the refusal must not touch the filesystem"
+            "the RSpice arm must not touch the filesystem"
         );
     }
 
+    /// A construct RSpice cannot compile is a named refusal, never a trace.
+    ///
+    /// Fail-closed is the whole rule: a corpus case the engine cannot execute
+    /// must not be able to pass by producing nothing, and the diagnostic has to
+    /// name the construct so the gap is actionable rather than a mystery.
+    #[cfg(feature = "verilog-digital")]
     #[test]
-    fn comparison_plumbing_propagates_the_refusal_rather_than_reporting_agreement() {
-        let case = any_case();
+    fn a_construct_rspice_cannot_compile_is_refused_by_name() {
+        let corpus = Corpus::load(&corpus_dir()).expect("corpus loads");
+        let case = corpus
+            .case("ripple_adder")
+            .expect("the generate-unrolled case is in the corpus");
+        let workspace = std::env::temp_dir().join("rspice-verilog-refusal-probe");
+
+        let error = run_case(case, VerilogEngine::Rspice, None, &workspace, 1_000)
+            .expect_err("generate regions have no elaborated form yet");
+
+        let RunError::RspiceRefused { case: name, detail } = &error else {
+            panic!("expected the named refusal, got {error:?}");
+        };
+        assert_eq!(name, "ripple_adder");
+        assert!(detail.contains("genvar"), "{detail}");
+    }
+
+    /// The plumbing must propagate a refusal rather than treat an unrunnable
+    /// engine as producing an empty trace, which would then agree with
+    /// anything.
+    #[cfg(feature = "verilog-digital")]
+    #[test]
+    fn comparison_plumbing_propagates_a_refusal_rather_than_reporting_agreement() {
+        let corpus = Corpus::load(&corpus_dir()).expect("corpus loads");
+        let case = corpus.case("ripple_adder").expect("in the corpus");
         let workspace = std::env::temp_dir().join("rspice-verilog-refusal-probe-compare");
 
-        // The failure this guards against is the plumbing treating an
-        // unrunnable engine as producing an empty trace, which would then
-        // "agree" with anything.
         let error = compare_engines(
+            case,
+            (VerilogEngine::Rspice, None),
+            (VerilogEngine::Rspice, None),
+            &workspace,
+            1_000,
+        )
+        .expect_err("a comparison of a case RSpice refuses cannot succeed");
+
+        assert!(matches!(error, RunError::RspiceRefused { .. }), "{error:?}");
+    }
+
+    /// RSpice compared against itself agrees, which is the weakest thing the
+    /// comparator can say and the one thing a broken comparator would get
+    /// wrong.
+    #[cfg(feature = "verilog-digital")]
+    #[test]
+    fn comparing_rspice_against_itself_reports_agreement() {
+        let case = any_case();
+        let workspace = std::env::temp_dir().join("rspice-verilog-self-compare");
+        let divergences = compare_engines(
             &case,
             (VerilogEngine::Rspice, None),
             (VerilogEngine::Rspice, None),
             &workspace,
             1_000,
         )
-        .expect_err("a comparison involving RSpice cannot succeed yet");
-
-        assert!(
-            matches!(error, RunError::RspiceExecutionUnimplemented),
-            "{error:?}"
-        );
+        .expect("c17 runs");
+        assert!(divergences.is_empty());
     }
 
     #[test]
