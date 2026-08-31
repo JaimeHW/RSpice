@@ -4614,7 +4614,7 @@ fn reject_unsupported_kinds(
                 "digital process execution: `{}` process {} is lowered but this \
                  backend has no way to run one yet",
                 process.kind.keyword(),
-                process.id
+                process.id.index()
             ),
         ));
     }

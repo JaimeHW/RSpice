@@ -639,13 +639,45 @@ fn the_device_path_refuses_a_lowered_process() {
          \x20   reg q;\n\
          \x20   always @(posedge clk) q <= 1'b1;",
     );
-    let error = VerilogACompiler::new(CompilerOptions::default())
-        .compile_runtime(&source, None)
-        .expect_err("a module with a process must not generate a device");
+    let artifact = VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir(&source)
+        .expect("the artifact itself is built; the refusal is downstream of it");
+    assert_eq!(artifact.digital.processes.len(), 1);
+
+    let error = rspice_veriloga::rust_backend::canonical::generate_device(
+        &artifact,
+        &rspice_veriloga::rust_backend::RustTranspileOptions::default(),
+    )
+    .expect_err("a module with a process must not generate a device");
     let rendered = error.to_string();
     assert!(
-        rendered.contains("digital process execution") || rendered.contains("no executable form"),
+        rendered.contains("digital process execution"),
         "the refusal must name process execution: {rendered}"
+    );
+    assert!(
+        rendered.contains("always") && rendered.contains("process 0"),
+        "the refusal must name the process it refused: {rendered}"
+    );
+}
+
+/// The bytecode path refuses earlier and for a different reason: it has no
+/// representation for a process at all, so it never sees a lowered one.
+///
+/// Worth pinning separately, because the two refusals are easy to confuse and
+/// a test that accepted either would not notice the emitter's going missing.
+#[test]
+fn the_bytecode_path_still_refuses_before_lowering() {
+    let source = digital_module(
+        "    wire clk;\n\
+         \x20   reg q;\n\
+         \x20   always @(posedge clk) q <= 1'b1;",
+    );
+    let error = VerilogACompiler::new(CompilerOptions::default())
+        .compile(&source)
+        .expect_err("the bytecode builder has no representation for a process");
+    assert_eq!(
+        error.diagnostic_code(),
+        "VA-CODEGEN-UNSUPPORTED-AMS-DIGITAL"
     );
 }
 
