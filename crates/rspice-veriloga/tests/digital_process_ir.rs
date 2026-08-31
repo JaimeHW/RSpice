@@ -1374,6 +1374,39 @@ fn a_variable_output_port_drives_the_connected_net_through_an_implicit_assignmen
     );
 }
 
+/// A design with no continuous-domain content anywhere — the shape an actual
+/// Verilog netlist has — elaborates and lowers like any other.
+///
+/// Every other fixture here hangs its digital section off a module with an
+/// analog body, because that is what a Verilog-AMS device is. This one has
+/// none, and is worth pinning separately: nothing in the elaboration or the
+/// lowering may depend on there being an analog half to hang from.
+#[test]
+fn a_design_with_no_analog_content_elaborates() {
+    let plan = VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir_module(
+            &format!(
+                "{NAND2}\n\
+                 module top(y, a, b);\n\
+                 \x20   output y;\n\
+                 \x20   input a, b;\n\
+                 \x20   wire y, a, b, n1;\n\
+                 \x20   nand2 g1(n1, a, b);\n\
+                 \x20   nand2 g2(y, n1, n1);\n\
+                 endmodule\n"
+            ),
+            Some("top"),
+        )
+        .expect("a purely digital design must elaborate")
+        .digital;
+    assert_eq!(
+        signal_names(&plan),
+        vec!["y", "a", "b", "n1", "g1.t", "g2.t"]
+    );
+    assert_eq!(plan.processes.len(), 4);
+    assert_eq!(plan.drivers.len(), 4);
+}
+
 /// A design with no hierarchy produces exactly the plan it always did: the
 /// compiled module's own signals keep their names and their positions, and
 /// nothing about the elaboration is visible.
