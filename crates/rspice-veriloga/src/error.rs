@@ -54,9 +54,20 @@ pub enum CompileError {
     #[error(transparent)]
     Cancelled(#[from] crate::metrics::PipelineCancelled),
 
-    /// Multiple errors collected during compilation
-    #[error("Compilation failed with {} error(s)", .0.len())]
+    /// Multiple errors collected during compilation. The display enumerates
+    /// every collected diagnostic: the whole point of accumulating instead of
+    /// stopping at the first error is that the author sees all of them.
+    #[error("Compilation failed with {} error(s):\n{}", .0.len(), join_collected_errors(.0))]
     Multiple(Vec<CompileError>),
+}
+
+/// One collected diagnostic per line, in the order the analyzer recorded them.
+fn join_collected_errors(errors: &[CompileError]) -> String {
+    errors
+        .iter()
+        .map(|error| format!("  - {error}"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 impl CompileError {

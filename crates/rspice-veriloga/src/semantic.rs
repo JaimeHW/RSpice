@@ -1140,14 +1140,14 @@ impl SemanticAnalyzer {
         // analysis, while `final_step` is a per-analysis filtered transient
         // event, so the two are not the same event.
         if let Some(block) = &module.analog_final {
-            return Err(CompileError::Semantic(SemanticError::new(
+            self.record_error_at(
                 SemanticErrorKind::UnsupportedFeature(
                     "`analog final` is parsed but never executed by this compiler; remove the \
                      block or move its work into the analog block"
                         .to_owned(),
                 ),
                 block.span,
-            )));
+            );
         }
 
         // Phase 11: analog initial runs before the main analog block

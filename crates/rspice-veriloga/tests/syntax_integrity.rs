@@ -257,6 +257,39 @@ endmodule
     );
 }
 
+/// The `analog final` refusal is recorded, not returned, so it cannot mask
+/// the other diagnostics the analyzer accumulates for the same module.
+#[test]
+fn analog_final_refusal_reports_alongside_other_semantic_errors() {
+    let error = VerilogACompiler::new(CompilerOptions::default())
+        .compile(
+            r#"
+`include "disciplines.vams"
+module dropped_final_and_bad_default(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer k = 1.5;
+    real total;
+    analog final begin
+        total = 1.0;
+    end
+    analog I(p, n) <+ k * V(p, n);
+endmodule
+"#,
+        )
+        .expect_err("both defects must refuse the module");
+    let message = error.to_string();
+    for needle in [
+        "`analog final` is parsed but never executed",
+        "default of parameter 'k'",
+    ] {
+        assert!(
+            message.contains(needle),
+            "expected diagnostic containing {needle:?}, got {message:?}"
+        );
+    }
+}
+
 /// Refusing bare `initial` and `analog final` must not disturb the block that
 /// shares their keywords and does have a consumer.
 #[test]
