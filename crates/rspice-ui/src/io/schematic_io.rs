@@ -208,6 +208,12 @@ impl From<std::io::Error> for SchematicIoError {
 /// Standard file filter for RSpice schematic files
 pub const SCHEMATIC_FILTER: (&str, &[&str]) = ("RSpice Schematic", &["rsch", "json"]);
 
+/// Hard boundary for one standalone schematic file.
+///
+/// Standalone schematics use the same ceiling as project and browser imports,
+/// preventing a corrupt or hostile file from causing an unbounded allocation.
+pub const MAX_SCHEMATIC_FILE_BYTES: u64 = crate::io::project_io::MAX_PROJECT_FILE_BYTES;
+
 // =============================================================================
 // Native File Dialog Functions
 // =============================================================================
@@ -440,16 +446,87 @@ pub fn load_schematic_file(path: &Path) -> Result<SchematicFile, SchematicIoErro
     }
 
     let file = File::open(path)?;
-    let mut reader = BufReader::new(file);
-    let mut contents = String::new();
-    reader.read_to_string(&mut contents)?;
+    let advertised_bytes = file.metadata()?.len();
+    let contents = read_schematic_text_with_limit(
+        BufReader::new(file),
+        advertised_bytes,
+        MAX_SCHEMATIC_FILE_BYTES,
+    )?;
 
     serde_json::from_str(&contents).map_err(|e| SchematicIoError::ParseError(e.to_string()))
+}
+
+fn read_schematic_text_with_limit(
+    reader: impl Read,
+    advertised_bytes: u64,
+    max_bytes: u64,
+) -> Result<String, SchematicIoError> {
+    if advertised_bytes > max_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "schematic is {advertised_bytes} bytes; the supported maximum is {max_bytes} bytes"
+            ),
+        )
+        .into());
+    }
+
+    // Trust metadata only for a modest capacity hint. The bounded reader still
+    // consumes one byte past the ceiling so a file that grows after metadata
+    // inspection is rejected without loading the rest of it.
+    let initial_capacity = advertised_bytes.min(8 * 1024 * 1024) as usize;
+    let mut bytes = Vec::with_capacity(initial_capacity);
+    reader
+        .take(max_bytes.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > max_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "schematic grew beyond the supported {max_bytes} byte maximum while it was being read"
+            ),
+        )
+        .into());
+    }
+
+    String::from_utf8(bytes).map_err(|error| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, error.utf8_error()).into()
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct Unreadable;
+
+    impl Read for Unreadable {
+        fn read(&mut self, _buffer: &mut [u8]) -> std::io::Result<usize> {
+            panic!("metadata preflight must reject before reading")
+        }
+    }
+
+    #[test]
+    fn bounded_schematic_read_rejects_advertised_size_before_reading() {
+        let error = read_schematic_text_with_limit(Unreadable, 9, 8).unwrap_err();
+        assert!(matches!(error, SchematicIoError::Io(message) if
+            message.contains("schematic is 9 bytes") && message.contains("maximum is 8 bytes")));
+    }
+
+    #[test]
+    fn bounded_schematic_read_accepts_exact_limit() {
+        let contents = read_schematic_text_with_limit(std::io::Cursor::new(b"12345678"), 8, 8)
+            .expect("a schematic at the exact byte limit is accepted");
+        assert_eq!(contents, "12345678");
+    }
+
+    #[test]
+    fn bounded_schematic_read_rejects_growth_past_limit() {
+        let error =
+            read_schematic_text_with_limit(std::io::Cursor::new(b"123456789"), 8, 8).unwrap_err();
+        assert!(matches!(error, SchematicIoError::Io(message) if
+            message.contains("grew beyond") && message.contains("8 byte maximum")));
+    }
 
     fn documentation_shape_fixture() -> Vec<crate::state::DocumentationShape> {
         use crate::state::{DocumentationShape, DocumentationShapeGeometry, Point};
