@@ -4011,4 +4011,309 @@ mod tests {
             solution
         );
     }
+
+    //=========================================================================
+    // Rollback exactness for the shared instance list
+    //=========================================================================
+    //
+    // Sharing an instance with its rollback snapshot is only sound if the
+    // restored deck is the captured deck. These check something stronger than
+    // equal values: that every restored instance is the *same allocation* the
+    // capture took. Identity implies equality across all forty-odd context
+    // fields at once, and unlike a field-by-field comparison it cannot fall out
+    // of date when a field is added.
+    //
+    // The captured snapshot stays alive until each assertion runs, so no
+    // captured address can be recycled underneath one.
+
+    /// A gate whose output is a pure function of its digital input, i.e. one
+    /// the settle dispatch may skip while its input net is quiet.
+    struct QuietGateModel;
+
+    impl CodeModel for QuietGateModel {
+        fn name(&self) -> &str {
+            "quiet_gate_model"
+        }
+
+        fn ports(&self) -> &[PortSpec] {
+            use std::sync::OnceLock;
+            static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
+            PORTS.get_or_init(|| {
+                vec![
+                    PortSpec::input("in", PortType::Digital),
+                    PortSpec::output("out", PortType::Digital),
+                ]
+            })
+        }
+
+        fn parameters(&self) -> &[ParamSpec] {
+            &[]
+        }
+
+        fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
+            Ok(())
+        }
+
+        fn evaluate(&self, _ctx: &mut CmContext) -> CmResult<()> {
+            Ok(())
+        }
+    }
+
+    fn quiet_gate_instance(name: &str, input: NodeId, output: NodeId) -> XspiceInstance {
+        XspiceInstance::new(
+            name,
+            Arc::new(QuietGateModel),
+            vec![
+                PortConnection::Digital(input),
+                PortConnection::Digital(output),
+            ],
+            &[],
+            &[],
+            &[],
+            &[],
+        )
+        .expect("quiet gate instance should construct")
+    }
+
+    /// Event-pure gates alongside a model that moves on time rather than on
+    /// input events, which is the asymmetry the guards have to survive.
+    fn mixed_event_and_time_driven_circuit() -> CircuitData {
+        let mut circuit = CircuitData::new();
+        circuit.get_or_create_node("n1");
+        circuit.get_or_create_node("n2");
+        circuit.get_or_create_node("n3");
+        circuit.add_xspice_instance(quiet_gate_instance("Ag0", 1, 2));
+        circuit.add_xspice_instance(quiet_gate_instance("Ag1", 2, 3));
+        // Requests a breakpoint and drives an analog output on every
+        // evaluation, with no event input to go quiet.
+        circuit.add_xspice_instance(breakpoint_instance());
+        circuit.add_xspice_instance(quiet_gate_instance("Ag2", 3, 1));
+        circuit
+    }
+
+    fn instance_addresses(circuit: &CircuitData) -> Vec<*const XspiceInstance> {
+        circuit
+            .xspice_instances
+            .iter()
+            .map(|instance| std::ptr::from_ref(&**instance))
+            .collect()
+    }
+
+    /// Drive one instance the way the settle loop does, which is what moves its
+    /// context time and leaves it owing an advance.
+    fn evaluate_instance_at(circuit: &mut CircuitData, index: usize, time: Value) {
+        circuit.xspice_instances[index]
+            .make_mut()
+            .evaluate(
+                time,
+                1.0e-9,
+                AnalysisType::Transient,
+                EvaluationPhase::RollbackableProbe,
+            )
+            .expect("the test models evaluate cleanly");
+    }
+
+    fn instance_time(circuit: &CircuitData, index: usize) -> Value {
+        circuit.xspice_instances[index]
+            .checkpoint_state()
+            .context
+            .time
+    }
+
+    #[test]
+    fn a_restored_attempt_returns_the_exact_instance_allocations_it_captured() {
+        let mut circuit = mixed_event_and_time_driven_circuit();
+        let captured = circuit.transient_trial_state_snapshot();
+        let at_capture = instance_addresses(&circuit);
+
+        // A rejected attempt writes through some instances and not others.
+        evaluate_instance_at(&mut circuit, 0, 8.0e-9);
+        circuit.xspice_instances[2].make_mut().accept_timestep();
+
+        let during_attempt = instance_addresses(&circuit);
+        assert_ne!(
+            during_attempt[0], at_capture[0],
+            "a write must copy away from the captured allocation, or the \
+             snapshot is observing the attempt and this test proves nothing"
+        );
+        assert_ne!(during_attempt[2], at_capture[2]);
+        assert_eq!(
+            during_attempt[1], at_capture[1],
+            "an instance nothing wrote to must still be shared with the capture"
+        );
+        assert_eq!(during_attempt[3], at_capture[3]);
+
+        circuit.restore_nonlinear_state(captured);
+
+        assert_eq!(
+            instance_addresses(&circuit),
+            at_capture,
+            "every instance — written during the attempt or not — must come \
+             back as the allocation the capture took"
+        );
+        assert_eq!(
+            instance_time(&circuit, 0),
+            0.0,
+            "the written instance must read as it did before the attempt"
+        );
+    }
+
+    #[test]
+    fn repeated_reject_cycles_and_an_interleaved_merit_checkpoint_do_not_drift() {
+        let mut circuit = mixed_event_and_time_driven_circuit();
+        let at_step_start = instance_addresses(&circuit);
+
+        for round in 0..5usize {
+            let attempt = circuit.transient_trial_state_snapshot();
+
+            // Rotate which instances the attempt disturbs, so no single
+            // instance is always the untouched one.
+            let first = round % circuit.xspice_instances.len();
+            let attempt_time = 1.0e-9 * (round + 1) as Value;
+            evaluate_instance_at(&mut circuit, first, attempt_time);
+
+            // A merit checkpoint nested inside the attempt, taken and rolled
+            // back the way a line search does.
+            let merit = circuit.nonlinear_state_snapshot();
+            let second = (round + 2) % circuit.xspice_instances.len();
+            evaluate_instance_at(&mut circuit, second, 9.0e-8);
+            circuit.restore_nonlinear_state(merit);
+            assert_eq!(
+                instance_time(&circuit, second),
+                if second == first { attempt_time } else { 0.0 },
+                "round {round}: a rejected merit probe must restore the \
+                 attempt's state, not the step's"
+            );
+
+            circuit.restore_nonlinear_state(attempt);
+            assert_eq!(
+                instance_addresses(&circuit),
+                at_step_start,
+                "round {round}: repeated attempt/reject cycles must keep \
+                 landing on the same allocations, with no drift"
+            );
+        }
+    }
+
+    #[test]
+    fn refreshing_a_reused_snapshot_recaptures_the_live_instances() {
+        let mut circuit = mixed_event_and_time_driven_circuit();
+        let mut reused = circuit.transient_trial_state_snapshot();
+
+        // An accepted step moves the deck on; the reused buffer must follow it
+        // rather than keep pinning the state it first captured.
+        evaluate_instance_at(&mut circuit, 1, 3.0e-9);
+        circuit.refresh_transient_trial_state_snapshot(&mut reused);
+        let after_refresh = instance_addresses(&circuit);
+
+        // A later attempt is rejected off that refreshed base.
+        evaluate_instance_at(&mut circuit, 1, 5.0e-9);
+        circuit.restore_nonlinear_state(reused);
+
+        assert_eq!(
+            instance_addresses(&circuit),
+            after_refresh,
+            "a refreshed snapshot must roll back to the state it was \
+             refreshed from, not to the state it was first captured from"
+        );
+        assert_eq!(
+            instance_time(&circuit, 1),
+            3.0e-9,
+            "the refresh is the new rollback base"
+        );
+    }
+
+    #[test]
+    fn a_time_driven_model_is_never_treated_as_quiet() {
+        let mut circuit = mixed_event_and_time_driven_circuit();
+        let mut matrix =
+            StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).expect("1x1 matrix should construct");
+        let mut rhs = vec![0.0];
+        circuit.stamp_xspice_transient_trial(
+            &mut matrix,
+            &mut rhs,
+            1.0e-9,
+            1.0e-9,
+            &[0.0, 0.0, 0.0],
+        );
+        circuit.accept_xspice_transient_timestep_with_coefficients(
+            2.0e-9,
+            1.0e-9,
+            &[0.0, 0.0, 0.0],
+            &crate::numerics::integration::CompanionCoefficients::backward_euler(),
+            false,
+        );
+
+        // The breakpoint sweep skips an instance whose queue is empty. A model
+        // that requests one on every evaluation must not be swept past.
+        let breakpoints = circuit.take_xspice_requested_breakpoints();
+        assert_eq!(
+            breakpoints.len(),
+            1,
+            "the time-driven model's breakpoint request must survive a sweep \
+             that skips the quiet gates around it"
+        );
+        assert!((breakpoints[0] - 3.0e-9).abs() < 1.0e-21);
+
+        // Its accept moved it, so the accept sweep must not have judged it a
+        // no-op either.
+        assert!(
+            circuit.xspice_instances[2].accept_timestep_is_noop(),
+            "having been advanced, a further advance would now be a no-op"
+        );
+    }
+
+    #[test]
+    fn the_accept_sweep_only_skips_an_advance_that_would_write_nothing() {
+        let mut circuit = mixed_event_and_time_driven_circuit();
+
+        // Freshly built: nothing has evaluated, so nothing is owed an advance.
+        for instance in &circuit.xspice_instances {
+            assert!(
+                instance.accept_timestep_is_noop(),
+                "a freshly built instance has nothing to advance"
+            );
+        }
+
+        // Move an instance's time forward the way an evaluation does, and the
+        // guard must stop claiming the advance is free.
+        evaluate_instance_at(&mut circuit, 0, 7.0e-9);
+        assert!(
+            !circuit.xspice_instances[0].accept_timestep_is_noop(),
+            "an instance whose time moved is owed an advance"
+        );
+
+        // Hold a capture across the sweep, so an instance the sweep writes to
+        // has to copy away from it and an instance it skips does not. Without
+        // a live snapshot every instance is unshared and the sweep would
+        // write in place either way, proving nothing.
+        let captured = circuit.transient_trial_state_snapshot();
+        let at_capture = instance_addresses(&circuit);
+
+        circuit.accept_xspice_timestep();
+        assert_ne!(
+            std::ptr::from_ref(&*circuit.xspice_instances[0]),
+            at_capture[0],
+            "the owed advance must actually have been performed"
+        );
+        assert_eq!(
+            std::ptr::from_ref(&*circuit.xspice_instances[1]),
+            at_capture[1],
+            "an instance owed nothing must be left untouched by the sweep"
+        );
+        assert!(
+            circuit.xspice_instances[0].accept_timestep_is_noop(),
+            "and once performed, the same advance is a no-op again"
+        );
+
+        // The skipped instances are still the captured allocations, so the
+        // sweep costs one copy rather than four.
+        circuit.restore_nonlinear_state(captured);
+        assert_eq!(instance_addresses(&circuit), at_capture);
+        assert_eq!(
+            instance_time(&circuit, 0),
+            7.0e-9,
+            "and the accept is rolled back with everything else"
+        );
+    }
 }
