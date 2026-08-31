@@ -111,6 +111,89 @@ mod tests {
         );
     }
 
+    /// **D5 clause 1**, the half `tests/sync_contract.rs` cannot reach.
+    ///
+    /// Conservative lockstep says the digital world executes only at analog
+    /// timepoints the integrator accepts. Nothing in the event path enforces
+    /// that directly — the settle loop drains at whatever bound it is handed,
+    /// including a Newton trial's candidate time. What makes the rejected
+    /// trial harmless is that the scheduler rides in this snapshot, so a
+    /// discarded attempt's event execution is undone with the rest of the
+    /// device state.
+    ///
+    /// That is a one-line entry in a struct with forty fields, and a
+    /// refactor that dropped it would leave every existing test passing while
+    /// silently breaking D5: a rejected step's events would stay executed.
+    /// This is the assertion that fails instead.
+    ///
+    /// Both snapshot flavours are checked. `transient_trial_state_snapshot` is
+    /// the one the transient loop actually takes per attempt; it omits the
+    /// fixed reactive stores, and the event queue must *not* be omitted with
+    /// them.
+    #[test]
+    fn xspice_event_queue_survives_the_nonlinear_state_round_trip() {
+        fn queue_two_events(circuit: &mut CircuitData) {
+            circuit.xspice_event_queue.schedule(
+                2.0e-9,
+                1,
+                "out",
+                "u1",
+                0,
+                crate::xspice::EventValue::Digital(DigitalValue::one()),
+            );
+            circuit.xspice_event_queue.schedule(
+                4.0e-9,
+                2,
+                "out",
+                "u2",
+                0,
+                crate::xspice::EventValue::Digital(DigitalValue::zero()),
+            );
+        }
+
+        for (label, take_snapshot) in [
+            (
+                "nonlinear_state_snapshot",
+                CircuitData::nonlinear_state_snapshot
+                    as fn(&CircuitData) -> NonlinearDeviceStateSnapshot,
+            ),
+            (
+                "transient_trial_state_snapshot",
+                CircuitData::transient_trial_state_snapshot
+                    as fn(&CircuitData) -> NonlinearDeviceStateSnapshot,
+            ),
+        ] {
+            let mut circuit = CircuitData::new();
+            queue_two_events(&mut circuit);
+
+            let accepted = take_snapshot(&circuit);
+
+            // The rejected attempt executes both events.
+            circuit
+                .xspice_event_queue
+                .run_due_events(4.0e-9, |_| {})
+                .expect("a queue nothing feeds back into settles");
+            assert!(
+                circuit.xspice_event_queue.is_empty(),
+                "{label}: the attempt must actually consume the queue, or this proves nothing"
+            );
+
+            circuit.restore_nonlinear_state(accepted);
+
+            assert_eq!(
+                circuit.xspice_event_queue.len(),
+                2,
+                "{label}: a rejected step must leave every event pending again"
+            );
+            assert_eq!(
+                circuit.xspice_event_queue.next_event_time(),
+                Some(2.0e-9),
+                "{label}: the restored queue must present the same next event time, \
+                 which is what the retry's breakpoint is placed from"
+            );
+        }
+    }
+
     #[cfg(feature = "veriloga-builtins-base")]
     #[test]
     fn generated_simparam_gmin_is_solver_controlled_and_not_rolled_back() {
