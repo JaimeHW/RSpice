@@ -88,7 +88,19 @@ use super::*;
 // injection. A version-30 artifact has neither the schema marker nor those
 // routing programs, so accepting it would silently revert repeated uses of one
 // process to independent sources and lose cancellation/correlation.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 31;
+// Version 32 gives the discrete domain a second value type: Verilog-AMS
+// LRM 2.4 section 3.7's real net. `wreal`, and the four resolved spellings
+// beside it, declare a net carrying a real rather than four-state bits; a
+// plan signal now records which, a real net starts at 0.0 rather than at
+// `z`, and real arithmetic, real comparison and a real conditional are
+// three new value kinds a process function can hold. A version-31 artifact
+// could not contain any of them — `wreal` was refused at the keyword — so
+// nothing cached is being reinterpreted here. What changes is the *shape*
+// of the record: a plan serialized by version 32 carries a field version
+// 31's reader does not know, and a version-31 plan decodes under version 32
+// only because that field defaults. Rebuilding rather than leaning on the
+// default is the fail-closed reading, so the record's identity changes.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 32;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
