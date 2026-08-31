@@ -18,7 +18,13 @@ const ACTIVE_OFFSET: i32 = std::mem::offset_of!(NativeStampKernelIo, program_act
 const JACOBIANS_OFFSET: i32 = std::mem::offset_of!(NativeStampKernelIo, jacobians) as i32;
 
 #[cfg(windows)]
-const DRIVER_FRAME_BYTES: i32 = 32;
+const DRIVER_FRAME_BYTES: i32 = 64;
+#[cfg(windows)]
+const DRIVER_CONTEXT_SLOT: i32 = 32;
+#[cfg(windows)]
+const DRIVER_VARIABLES_SLOT: i32 = 40;
+#[cfg(windows)]
+const DRIVER_IO_SLOT: i32 = 48;
 #[cfg(not(windows))]
 const DRIVER_FRAME_BYTES: i32 = 0;
 
@@ -133,10 +139,19 @@ fn compile_kernel_artifact(
             &encoder,
             DRIVER_FRAME_BYTES as u32,
         );
+        // Keep private, immutable copies above the Win64 shadow space. The
+        // driver invokes independently generated sibling entries, so it does
+        // not let one malformed or future emitter path turn a corrupted
+        // nonvolatile register into an unchecked write through a caller-owned
+        // simulation buffer.
+        encoder.mov_m64_base_disp32_r64(Gpr::Rsp, DRIVER_CONTEXT_SLOT, Gpr::R12);
+        encoder.mov_m64_base_disp32_r64(Gpr::Rsp, DRIVER_VARIABLES_SLOT, Gpr::R13);
+        encoder.mov_m64_base_disp32_r64(Gpr::Rsp, DRIVER_IO_SLOT, Gpr::R14);
     }
     let windows_unwind_prologue_size = current_windows_unwind_code_offset(&encoder);
 
     emit_entry_call(&mut encoder, driver_image_offset, assignment)?;
+    restore_internal_args(&mut encoder);
     abort_branches.push(emit_abort_if_failed(&mut encoder, runtime_failed_offset));
 
     let mut jacobian_index = 0usize;
@@ -150,6 +165,7 @@ fn compile_kernel_artifact(
         let skip_stamp = encoder.jcc_rel32_placeholder(ConditionCode::Equal);
 
         emit_entry_call(&mut encoder, driver_image_offset, *value_entry)?;
+        restore_internal_args(&mut encoder);
         abort_branches.push(emit_abort_if_failed(&mut encoder, runtime_failed_offset));
         let finite_value = emit_branch_if_finite(&mut encoder, stamp_index, &mut abort_branches);
         patch_local_branch(&mut encoder, finite_value)?;
@@ -179,6 +195,7 @@ fn compile_kernel_artifact(
         if let Some(stamp_jacobians) = jacobians.map(|entries| &entries[stamp_index]) {
             for entry in stamp_jacobians {
                 emit_entry_call(&mut encoder, driver_image_offset, *entry)?;
+                restore_internal_args(&mut encoder);
                 abort_branches.push(emit_abort_if_failed(&mut encoder, runtime_failed_offset));
                 let jacobian_disp = word_offset(jacobian_index, "Jacobian value")?;
                 encoder.mov_r64_m64_base_disp32(Gpr::R11, Gpr::R14, JACOBIANS_OFFSET);
@@ -206,6 +223,17 @@ fn compile_kernel_artifact(
     let artifact = CompiledX64Function::code_only(bytes, windows_unwind);
     super::verify_x64_function_artifact(&artifact, &format!("{driver_name} driver"))?;
     Ok(artifact)
+}
+
+fn restore_internal_args(encoder: &mut X64Encoder) {
+    #[cfg(windows)]
+    {
+        encoder.mov_r64_m64_base_disp32(Gpr::R12, Gpr::Rsp, DRIVER_CONTEXT_SLOT);
+        encoder.mov_r64_m64_base_disp32(Gpr::R13, Gpr::Rsp, DRIVER_VARIABLES_SLOT);
+        encoder.mov_r64_m64_base_disp32(Gpr::R14, Gpr::Rsp, DRIVER_IO_SLOT);
+    }
+    #[cfg(not(windows))]
+    let _ = encoder;
 }
 
 fn current_windows_unwind_code_offset(encoder: &X64Encoder) -> u8 {
@@ -449,5 +477,35 @@ mod tests {
         )
         .expect("compile stamp driver");
         assert!(bytes.len() < stamp_bytes.len());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn win64_driver_restores_private_arguments_after_every_sibling_call() {
+        use super::restore_internal_args;
+        use crate::native::x64::encoder::X64Encoder;
+
+        let bytes = compile_stamp_kernel(
+            256,
+            CodeOffset::new(0),
+            &[CodeOffset::new(16), CodeOffset::new(32)],
+            &[
+                vec![CodeOffset::new(48), CodeOffset::new(64)],
+                vec![CodeOffset::new(80)],
+            ],
+            &[None, Some((0, 1))],
+        )
+        .expect("compile hardened Win64 driver");
+
+        let mut expected = X64Encoder::new();
+        restore_internal_args(&mut expected);
+        let expected = expected.into_bytes();
+        let restore_count = bytes
+            .windows(expected.len())
+            .filter(|window| *window == expected)
+            .count();
+
+        // One assignment, two values, and three Jacobian entries.
+        assert_eq!(restore_count, 6);
     }
 }
