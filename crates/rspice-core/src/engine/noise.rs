@@ -860,7 +860,7 @@ impl Engine {
                     );
                 });
             }
-            return instances;
+            instances
         }
         #[cfg(not(all(
             feature = "veriloga-builtins-base",

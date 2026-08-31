@@ -894,14 +894,14 @@ impl BuiltinVerilogAInstance {
     }
 
     /// True when the deck marked this instance `OFF`.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "veriloga-model-ekv-va"))]
     #[inline]
     pub(crate) fn is_initially_off(&self) -> bool {
         self.initial_off
     }
 
     /// True while the `OFF` startup state still owns the next evaluation.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "veriloga-model-ekv-va"))]
     #[inline]
     pub(crate) fn initial_off_seed_pending(&self) -> bool {
         self.initial_off && self.initial_off_seed_pending
