@@ -42,6 +42,25 @@ pub mod ngspice;
 #[cfg(feature = "circuit-suites")]
 pub mod xyce;
 
+/// Digital Verilog checked against Icarus Verilog and Verilator.
+///
+/// A fourth kind again, and the boundary drawn above — oracle versus no oracle
+/// — puts it firmly on the oracle side while it shares almost nothing else with
+/// [`ngspice`] and [`xyce`]. Those two consume a reference *file* another
+/// simulator published once; this one runs two other simulators live and diffs
+/// them against each other. That difference is why it does not implement the
+/// quintet either: with the oracle in the loop there is no checked-in reference
+/// format to select and no tolerance to model, because logic values are
+/// compared exactly or not at all.
+///
+/// Ungated, unlike its neighbours. It depends on nothing in `rspice-core` — the
+/// corpus is Verilog, the oracles are other people's binaries, and the whole
+/// module is text generation and process control. Gating it on
+/// `circuit-suites` would hide it from exactly the build that wants it: the
+/// Verilog-A tooling depends on this crate with `default-features = false`, and
+/// the digital front end is grown from that side.
+pub mod verilog;
+
 /// The generated Verilog-A built-ins, checked against captured fingerprints
 /// and a finite-difference derivative oracle.
 ///

@@ -22,8 +22,8 @@
 //! ## Corpora
 //!
 //! Deck corpora are vendored at the workspace root, not inside this crate:
-//! `tests/ngspice/`, `tests/xyce/`, `tests/gf180mcu/`, `tests/iscas85/`, and
-//! `tests/paranoia/`.
+//! `tests/ngspice/`, `tests/xyce/`, `tests/gf180mcu/`, `tests/iscas85/`,
+//! `tests/paranoia/`, and `tests/verilog/`.
 //! They are shared data with their own licensing and provenance files, and
 //! they outlive any one runner. Each carries an `RSPICE-VENDORING.md`
 //! recording what was trimmed and why; `tests/paranoia/`'s in particular
@@ -40,6 +40,8 @@
 //!   ISCAS85 for scale, the ngspice examples for dialect breadth
 //! - `suites::veriloga` — the generated Verilog-A built-ins, behind
 //!   `veriloga-builtins-base`
+//! - [`suites::verilog`] — digital Verilog against Icarus Verilog and
+//!   Verilator, run live rather than read from a file
 //!
 //! Three different instruments, and it is worth being precise about which
 //! answers what. The first two compare RSpice against *another simulator's*
@@ -50,7 +52,16 @@
 //! the thing under test is a code generator and there is no second simulator
 //! computing the same Jacobian to ask.
 //!
-//! [`suites::execution`] is the weakest of the four and says so: its corpora
+//! [`suites::verilog`] is a fifth shape again: its oracles are *programs*, not
+//! published output, so it runs two other simulators on every case and diffs
+//! them against each other. That buys something a checked-in reference cannot —
+//! a disagreement between two independent implementations is visible before
+//! RSpice is involved at all — and costs something a checked-in reference does
+//! not: with neither binary installed, which is the current state everywhere
+//! including CI, the suite can only check itself. It says so loudly rather than
+//! passing quietly.
+//!
+//! [`suites::execution`] is the weakest of these and says so: its corpora
 //! ship no reference data, so it can only establish that a deck loaded, built,
 //! and either ran or refused cleanly. It earns its place because the decks
 //! themselves are unlike the others — a reference suite's decks are, by
