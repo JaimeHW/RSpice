@@ -252,6 +252,15 @@ impl Builder {
         });
     }
 
+    /// Drive an existing net from a one-input gate.
+    ///
+    /// The common shape at a port: a `buf` or a `not` between the net a
+    /// circuit computed on and the port it is observed through.
+    pub fn drive_from(&mut self, kind: Gate, output: &str, input: &str) {
+        let inputs = [input.to_string()];
+        self.drive(kind, output, &inputs);
+    }
+
     /// Drive a fresh wire from a gate and return it.
     pub fn gate(&mut self, kind: Gate, prefix: &str, inputs: &[String]) -> String {
         let output = self.fresh(prefix);
@@ -331,7 +340,7 @@ impl Builder {
     /// Join scalar nets onto a vector port with `buf`.
     pub fn join(&mut self, port: &str, bits: &[String]) {
         for (index, net) in bits.iter().enumerate() {
-            self.drive(Gate::Buf, &format!("{port}[{index}]"), &[net.clone()]);
+            self.drive_from(Gate::Buf, &format!("{port}[{index}]"), net);
         }
     }
 
@@ -391,7 +400,7 @@ impl Builder {
             let buffers: Vec<String> = (0..branches)
                 .map(|_| {
                     let out = self.fresh("fob");
-                    self.drive(Gate::Buf, &out, &[net.clone()]);
+                    self.drive_from(Gate::Buf, &out, &net);
                     out
                 })
                 .collect();

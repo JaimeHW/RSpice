@@ -392,7 +392,7 @@ pub fn secded16() -> Design {
                     .map(|(index, _)| d[index].clone()),
             );
             let value = xor_tree_n(&mut n, "syn", &terms);
-            n.drive(Gate::Buf, &format!("syn[{m}]"), &[value.clone()]);
+            n.drive_from(Gate::Buf, &format!("syn[{m}]"), &value);
             value
         })
         .collect();
@@ -411,7 +411,7 @@ pub fn secded16() -> Design {
     let nonzero = or_tree(&mut n, "nz", &syndrome);
     let clean = inv(&mut n, "npchk", &pchk);
     let correct = and2(&mut n, "sec", &nonzero, &pchk);
-    n.drive(Gate::Buf, "sec", &[correct.clone()]);
+    n.drive_from(Gate::Buf, "sec", &correct);
     n.drive(Gate::And, "ded", &[nonzero, clean]);
 
     let mut corrected = Vec::with_capacity(DATA);
@@ -428,7 +428,7 @@ pub fn secded16() -> Design {
         let hit = n.gate(Gate::And, "hit", &literals);
         let flip = and2(&mut n, "flip", &hit, &correct);
         let value = xor2n(&mut n, "q", &d[index], &flip);
-        n.drive(Gate::Buf, &format!("q[{index}]"), &[value.clone()]);
+        n.drive_from(Gate::Buf, &format!("q[{index}]"), &value);
         corrected.push(value);
     }
 
@@ -566,11 +566,11 @@ pub fn alu8() -> Design {
             operand[i].clone(),
         ];
         let value = mux_onehot(&mut n, "mux", &sel, &sources, 2);
-        n.drive(Gate::Buf, &format!("y[{i}]"), &[value.clone()]);
+        n.drive_from(Gate::Buf, &format!("y[{i}]"), &value);
         result.push(value);
     }
 
-    n.drive(Gate::Buf, "cout", &[carries[WIDTH - 1].clone()]);
+    n.drive_from(Gate::Buf, "cout", &carries[WIDTH - 1]);
 
     let raw_ovf = xor2n(&mut n, "ovf", &carries[WIDTH - 1], &carries[WIDTH - 2]);
     // --- redundant cone, deliberate and documented -------------------------

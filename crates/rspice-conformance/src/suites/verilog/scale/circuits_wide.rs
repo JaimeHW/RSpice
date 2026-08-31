@@ -27,11 +27,31 @@ pub struct AluCore {
     pub par: String,
 }
 
+/// The constant nets a module keeps for the cells that need one.
+///
+/// A tie cell each way, declared once per module and passed to whatever needs
+/// a hard zero or a hard one: the second-operand multiplexer, the shifters'
+/// fill, and the comparator's leading prefix.
+pub struct Rails {
+    pub lo: String,
+    pub hi: String,
+}
+
+impl Rails {
+    /// Declare both rails in `n`.
+    pub fn new(n: &mut Builder) -> Self {
+        Self {
+            lo: n.tie("lo", false),
+            hi: n.tie("hi", true),
+        }
+    }
+}
+
 /// A `width`-bit sixteen-function ALU, built into `n`.
 ///
-/// `sel` is the one-hot function select, `cy` the carry in, and `lo`/`hi` the
-/// constant nets the second-operand mux needs. The carry chain runs whatever
-/// the function is, so `cout` and `ovf` always describe the arithmetic path.
+/// `sel` is the one-hot function select and `cy` the carry in. The carry chain
+/// runs whatever the function is, so `cout` and `ovf` always describe the
+/// arithmetic path.
 ///
 /// The shifters are three-stage barrels driven by `b[2:0]`: `shl` is a
 /// zero-filling left shift by that amount and `shr` the matching right shift.
@@ -44,9 +64,10 @@ pub fn alu_core(
     b: &[String],
     sel: &[String],
     cy: &str,
-    lo: &str,
-    hi: &str,
+    rails: &Rails,
 ) -> AluCore {
+    let lo = rails.lo.as_str();
+    let hi = rails.hi.as_str();
     let width = a.len();
     assert_eq!(width, b.len(), "an ALU's operands must be the same width");
     assert_eq!(sel.len(), 16, "the core decodes sixteen functions");
@@ -150,9 +171,8 @@ fn barrel(
 ) -> Vec<String> {
     let width = data.len();
     let mut current = data.to_vec();
-    for stage in 0..3usize {
+    for (stage, select) in amount.iter().take(3).enumerate() {
         let distance = 1usize << stage;
-        let select = &amount[stage];
         let clear = inv(n, p, select);
         current = (0..width)
             .map(|i| {
@@ -268,11 +288,10 @@ pub fn alu12c() -> Design {
     for name in ["cout", "ovf", "zero", "neg", "par"] {
         dp.output(name, 1);
     }
-    let lo = dp.tie("lo", false);
-    let hi = dp.tie("hi", true);
+    let rails = Rails::new(&mut dp);
     let carry_in = or2(&mut dp, "cy", "cin", "cyf");
     let core = alu_core(
-        &mut dp, "c", &a_names, &b_names, &sel_names, &carry_in, &lo, &hi,
+        &mut dp, "c", &a_names, &b_names, &sel_names, &carry_in, &rails,
     );
     for (index, net) in core.y.iter().enumerate() {
         dp.drive(Gate::And, &y_names[index], &[net.clone(), "oe".to_string()]);
@@ -357,7 +376,7 @@ pub fn alu12c() -> Design {
 
     top.join("y", &y_wires);
     for (index, name) in ["cout", "ovf", "zero", "neg", "par"].iter().enumerate() {
-        top.drive(Gate::Buf, name, &[flag_wires[index].clone()]);
+        top.drive_from(Gate::Buf, name, &flag_wires[index]);
     }
 
     design(
@@ -416,11 +435,12 @@ pub fn alu8bcd() -> Design {
     let a = bits("a", 8);
     let b = bits("b", 8);
     let f = bits("f", 4);
-    let lo = n.tie("lo", false);
-    let hi = n.tie("hi", true);
+    let rails = Rails::new(&mut n);
+    let lo = rails.lo.clone();
+    let hi = rails.hi.clone();
 
     let sel = decode16(&mut n, "dec", &f);
-    let core = alu_core(&mut n, "c", &a, &b, &sel, "cin", &lo, &hi);
+    let core = alu_core(&mut n, "c", &a, &b, &sel, "cin", &rails);
 
     // --- decimal path ----------------------------------------------------
     let subtract = n.buffer("sb", &sel[1]);
@@ -486,9 +506,16 @@ pub fn alu8bcd() -> Design {
     let use_bcd = and2(&mut n, "ub", &arith, "dec");
     let keep_binary = n.not("ub", &use_bcd);
     let mut result = Vec::with_capacity(WIDTH);
-    for i in 0..WIDTH {
-        let value = mux2(&mut n, "ysel", &use_bcd, &keep_binary, &core.y[i], &bcd[i]);
-        n.drive(Gate::Buf, &format!("y[{i}]"), &[value.clone()]);
+    for (i, decimal_bit) in bcd.iter().enumerate() {
+        let value = mux2(
+            &mut n,
+            "ysel",
+            &use_bcd,
+            &keep_binary,
+            &core.y[i],
+            decimal_bit,
+        );
+        n.drive_from(Gate::Buf, &format!("y[{i}]"), &value);
         result.push(value);
     }
     let cout = mux2(
@@ -500,7 +527,7 @@ pub fn alu8bcd() -> Design {
         &bcd_cout,
     );
     n.drive(Gate::Buf, "cout", &[cout]);
-    n.drive(Gate::Buf, "ovf", &[core.ovf.clone()]);
+    n.drive_from(Gate::Buf, "ovf", &core.ovf);
 
     let any = or_tree(&mut n, "z", &result);
     n.drive(Gate::Not, "zero", &[any]);
@@ -570,17 +597,16 @@ pub fn alu9d() -> Design {
     for name in ["cout", "ovf", "zero"] {
         slice.output(name, 1);
     }
-    let lo = slice.tie("lo", false);
-    let hi = slice.tie("hi", true);
+    let rails = Rails::new(&mut slice);
     let core = alu_core(
-        &mut slice, "c", &a_names, &b_names, &sel_names, "cin", &lo, &hi,
+        &mut slice, "c", &a_names, &b_names, &sel_names, "cin", &rails,
     );
     for (index, net) in core.y.iter().enumerate() {
-        slice.drive(Gate::Buf, &y_names[index], &[net.clone()]);
+        slice.drive_from(Gate::Buf, &y_names[index], net);
     }
-    slice.drive(Gate::Buf, "cout", &[core.cout.clone()]);
-    slice.drive(Gate::Buf, "ovf", &[core.ovf.clone()]);
-    slice.drive(Gate::Buf, "zero", &[core.zero.clone()]);
+    slice.drive_from(Gate::Buf, "cout", &core.cout);
+    slice.drive_from(Gate::Buf, "ovf", &core.ovf);
+    slice.drive_from(Gate::Buf, "zero", &core.zero);
     slice.limit_fanout(4, &[]);
 
     let mut cmp = Builder::new("alu9d_cmp");
@@ -702,7 +728,7 @@ pub fn alu9d() -> Design {
     }
     top.instance("alu9d_cmp", "u_cmp", &cmp_conns);
     for (index, name) in ["eq", "lt", "gt"].iter().enumerate() {
-        top.drive(Gate::Buf, name, &[cmp_out[index].clone()]);
+        top.drive_from(Gate::Buf, name, &cmp_out[index]);
     }
 
     design(
@@ -802,7 +828,7 @@ pub fn mul16() -> Design {
         let addend = &partial[i];
         let mut next = Vec::with_capacity(WIDTH + 1);
         let mut carry = String::new();
-        for bit in 0..WIDTH {
+        for (bit, product_term) in addend.iter().enumerate() {
             // The shifted accumulator: bit `bit` of `acc >> 1`. Every row
             // after the first leaves seventeen bits behind, so only the first
             // shift has a vacated position to fill with zero.
@@ -815,7 +841,7 @@ pub fn mul16() -> Design {
                     &format!("u_ha{i}"),
                     &[
                         ("a", left),
-                        ("b", addend[bit].clone()),
+                        ("b", product_term.clone()),
                         ("s", sum.clone()),
                         ("c", cout.clone()),
                     ],
@@ -826,7 +852,7 @@ pub fn mul16() -> Design {
                     &format!("u_fa{i}_{bit}"),
                     &[
                         ("a", left),
-                        ("b", addend[bit].clone()),
+                        ("b", product_term.clone()),
                         ("ci", carry.clone()),
                         ("s", sum.clone()),
                         ("co", cout.clone()),
@@ -844,7 +870,7 @@ pub fn mul16() -> Design {
         product[WIDTH + index] = net.clone();
     }
     for (index, net) in product.iter().enumerate() {
-        top.drive(Gate::Buf, &format!("p[{index}]"), &[net.clone()]);
+        top.drive_from(Gate::Buf, &format!("p[{index}]"), net);
     }
     top.limit_fanout(4, &[]);
 

@@ -642,10 +642,10 @@ mod tests {
         assert_eq!(clean["q"], data);
 
         // Flip each data bit in turn; each one must come back.
-        for index in 0..32 {
+        for (index, position) in positions.iter().enumerate() {
             let out = evaluate("sec32", &values(&[("d", data ^ 1 << index), ("c", check)]));
             assert_eq!(out["q"], data, "data bit {index}");
-            assert_eq!(out["syn"], u64::from(positions[index]));
+            assert_eq!(out["syn"], u64::from(*position));
             assert_eq!(out["err"], 1);
         }
         // Flip each check bit; the data must be left alone.

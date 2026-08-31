@@ -79,7 +79,7 @@ impl Lcg {
         Self(seed)
     }
 
-    pub fn next(&mut self) -> u64 {
+    pub fn next_u64(&mut self) -> u64 {
         self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
         let mut z = self.0;
         z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
@@ -89,7 +89,7 @@ impl Lcg {
 
     /// The next value, truncated to `width` bits.
     pub fn bits(&mut self, width: u32) -> u64 {
-        self.next() & mask(width)
+        self.next_u64() & mask(width)
     }
 }
 
@@ -851,9 +851,9 @@ mod tests {
         // The first three outputs from seed zero. Pinned so a well-meaning
         // edit to the generator cannot quietly reshuffle every vector set.
         let mut rng = Lcg::new(0);
-        assert_eq!(rng.next(), 0xE220_A839_7B1D_CDAF);
-        assert_eq!(rng.next(), 0x6E78_9E6A_A1B9_65F4);
-        assert_eq!(rng.next(), 0x06C4_5D18_8009_454F);
+        assert_eq!(rng.next_u64(), 0xE220_A839_7B1D_CDAF);
+        assert_eq!(rng.next_u64(), 0x6E78_9E6A_A1B9_65F4);
+        assert_eq!(rng.next_u64(), 0x06C4_5D18_8009_454F);
     }
 
     #[test]

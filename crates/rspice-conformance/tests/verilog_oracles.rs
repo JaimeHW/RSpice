@@ -49,7 +49,10 @@ const REQUIRED_CASES: [(&str, &str); 13] = [
     ("dff_register", "posedge clocking and asynchronous reset"),
     ("nba_ordering", "blocking versus non-blocking assignment"),
     ("xz_propagation", "four-state X and Z propagation"),
-    ("case_forms", "case, casez and casex, and an implicit sensitivity list"),
+    (
+        "case_forms",
+        "case, casez and casex, and an implicit sensitivity list",
+    ),
     ("loop_forms", "the for, while and repeat loops"),
     (
         "delay_forms",
@@ -64,7 +67,10 @@ const REQUIRED_CASES: [(&str, &str); 13] = [
         "unnamed, multi-instance, n-input and multi-output gate spellings",
     ),
     ("bus_forms", "two continuous drivers resolving on one net"),
-    ("edge_forms", "negedge sensitivity and a register before its first write"),
+    (
+        "edge_forms",
+        "negedge sensitivity and a register before its first write",
+    ),
 ];
 
 /// Cases whose answer depends on x or z, and which Verilator therefore cannot

@@ -237,7 +237,7 @@ mod tests {
         let outputs = build(&mut b);
         for (index, net) in outputs.iter().enumerate() {
             b.output(&format!("o{index}"), 1);
-            b.drive(Gate::Buf, &format!("o{index}"), &[net.clone()]);
+            b.drive_from(Gate::Buf, &format!("o{index}"), net);
         }
         let module = b.finish();
 
