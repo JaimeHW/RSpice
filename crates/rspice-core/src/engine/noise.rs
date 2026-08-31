@@ -3,10 +3,10 @@ use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::noise::{
     Bsim3FlickerNoise, Bsim4FlickerNoise, CorrelatedNoisePair, NoiseContribution, NoisePort,
-    NoiseResult, NoiseSource, PortNoiseCorrelationResult,
+    NoiseResult, NoiseSource, NoiseSourceType, PortNoiseCorrelationResult, T_NOMINAL,
 };
 use crate::{CircuitData, Complex64, Netlist, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::f64::consts::PI;
 
 #[derive(Clone, Copy)]
@@ -37,7 +37,117 @@ struct BinaryScaledComplex {
     exponent: i32,
 }
 
+#[derive(Clone, Copy, Default)]
+struct CompensatedComplex {
+    sum: Complex64,
+    correction: Complex64,
+}
+
+impl CompensatedComplex {
+    fn add_component(sum: &mut Value, correction: &mut Value, value: Value) {
+        let next = *sum + value;
+        if sum.abs() >= value.abs() {
+            *correction += (*sum - next) + value;
+        } else {
+            *correction += (value - next) + *sum;
+        }
+        *sum = next;
+    }
+
+    fn add(&mut self, value: Complex64) {
+        Self::add_component(&mut self.sum.re, &mut self.correction.re, value.re);
+        Self::add_component(&mut self.sum.im, &mut self.correction.im, value.im);
+    }
+
+    fn total(self) -> Complex64 {
+        self.sum + self.correction
+    }
+}
+
+/// Exponent-binned compensated sum. Opposite large terms cancel inside their
+/// binary-exponent bin before lower-magnitude bins are combined, retaining a
+/// physically meaningful residual such as `[1e16, 1, -1e16]`.
+#[derive(Default)]
+struct ComplexBinAccumulator {
+    real_bins: BTreeMap<i32, CompensatedComplex>,
+    imaginary_bins: BTreeMap<i32, CompensatedComplex>,
+}
+
 impl Engine {
+    fn add_complex_bin(
+        accumulator: &mut ComplexBinAccumulator,
+        value: Complex64,
+        label: &str,
+        frequency: Value,
+    ) -> Result<(), SimulationError> {
+        if !value.re.is_finite() || !value.im.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "Noise source '{label}' has a non-finite coherent injection at {frequency} Hz"
+            )));
+        }
+        for (component, bins, imaginary) in [
+            (value.re, &mut accumulator.real_bins, false),
+            (value.im, &mut accumulator.imaginary_bins, true),
+        ] {
+            if component == 0.0 {
+                continue;
+            }
+            let (_, exponent) = Self::decompose_positive(component.abs());
+            let normalized = component / Self::binary_power(exponent);
+            let normalized = if imaginary {
+                Complex64::new(0.0, normalized)
+            } else {
+                Complex64::new(normalized, 0.0)
+            };
+            bins.entry(exponent).or_default().add(normalized);
+        }
+        Ok(())
+    }
+
+    fn finish_complex_bins(
+        accumulator: ComplexBinAccumulator,
+        label: &str,
+        frequency: Value,
+    ) -> Result<Complex64, SimulationError> {
+        fn finish_component(bins: BTreeMap<i32, CompensatedComplex>, imaginary: bool) -> Value {
+            let totals = bins
+                .into_iter()
+                .map(|(exponent, bin)| {
+                    let value = bin.total();
+                    (exponent, if imaginary { value.im } else { value.re })
+                })
+                .filter(|(_, value)| *value != 0.0)
+                .collect::<Vec<_>>();
+            let Some(max_exponent) = totals.iter().map(|(exponent, _)| *exponent).max() else {
+                return 0.0;
+            };
+            let mut sum = 0.0;
+            let mut correction = 0.0;
+            for (exponent, value) in totals {
+                let difference = max_exponent - exponent;
+                if difference <= 1074 {
+                    CompensatedComplex::add_component(
+                        &mut sum,
+                        &mut correction,
+                        value * Engine::binary_power(-difference),
+                    );
+                }
+            }
+            (sum + correction) * Engine::binary_power(max_exponent)
+        }
+
+        let result = Complex64::new(
+            finish_component(accumulator.real_bins, false),
+            finish_component(accumulator.imaginary_bins, true),
+        );
+        if !result.re.is_finite() || !result.im.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "Noise source '{label}' coherent injection sum overflowed at {frequency} Hz"
+            )));
+        }
+        Ok(result)
+    }
+
     fn binary_power(exponent: i32) -> Value {
         debug_assert!((-1074..=1023).contains(&exponent));
         if exponent >= -1022 {
@@ -1482,6 +1592,9 @@ impl Engine {
         // ordinary system unknown here, so both kinds inject the same way.
         #[cfg(feature = "veriloga")]
         for device in circuit.veriloga_devices().iter() {
+            if device.uses_grouped_noise_processes() {
+                continue;
+            }
             let mut probe = device.clone();
             let instance = probe.name.clone();
             probe.try_set_analysis_type(3).map_err(|err| {
@@ -1550,6 +1663,112 @@ impl Engine {
         let _ = (circuit, dc_solution, &mut noise_sources);
 
         Ok(noise_sources)
+    }
+
+    #[cfg(feature = "veriloga")]
+    fn try_collect_veriloga_noise_processes_at_frequency(
+        circuit: &CircuitData,
+        dc_solution: &[Value],
+        frequency: Value,
+    ) -> Result<Vec<(String, rspice_veriloga::device::EvaluatedNoiseProcess)>, SimulationError>
+    {
+        let mut processes = Vec::new();
+        for device in circuit.veriloga_devices().iter() {
+            if !device.has_grouped_noise_processes() {
+                continue;
+            }
+            let mut probe = device.clone();
+            let instance = probe.name.to_string();
+            probe.try_set_analysis_type(3).map_err(|err| {
+                SimulationError::Circuit(format!(
+                    "Verilog-A device '{instance}' noise analysis setup failed: {err}"
+                ))
+            })?;
+            let evaluated = probe
+                .try_noise_processes_at_frequency(dc_solution, frequency)
+                .map_err(|err| {
+                    SimulationError::Circuit(format!(
+                        "Verilog-A device '{instance}' coherent noise evaluation failed at {frequency:e} Hz: {err}"
+                    ))
+                })?;
+            processes.extend(
+                evaluated
+                    .into_iter()
+                    .map(|process| (instance.clone(), process)),
+            );
+        }
+        Ok(processes)
+    }
+
+    #[cfg(feature = "veriloga")]
+    fn grouped_veriloga_noise_contribution_catalog(
+        circuit: &CircuitData,
+    ) -> Vec<crate::analysis::NoiseSourceIdentity> {
+        let mut catalog = Vec::new();
+        for device in circuit.veriloga_devices().iter() {
+            let instance = device.name.to_string();
+            for (_, label) in device.grouped_noise_process_catalog() {
+                catalog.push(crate::analysis::NoiseSourceIdentity::mechanism(
+                    instance.clone(),
+                    Self::canonical_veriloga_noise_mechanism(&label),
+                ));
+            }
+        }
+        catalog
+    }
+
+    #[cfg(not(feature = "veriloga"))]
+    fn grouped_veriloga_noise_contribution_catalog(
+        _circuit: &CircuitData,
+    ) -> Vec<crate::analysis::NoiseSourceIdentity> {
+        Vec::new()
+    }
+
+    #[cfg(not(feature = "veriloga"))]
+    fn try_collect_veriloga_noise_processes_at_frequency(
+        _circuit: &CircuitData,
+        _dc_solution: &[Value],
+        _frequency: Value,
+    ) -> Result<Vec<(String, ())>, SimulationError> {
+        Ok(Vec::new())
+    }
+
+    #[cfg(feature = "veriloga")]
+    fn runtime_veriloga_device_names(circuit: &CircuitData) -> HashSet<String> {
+        circuit
+            .veriloga_devices()
+            .iter()
+            .filter(|device| device.has_grouped_noise_processes())
+            .map(|device| device.name.to_ascii_lowercase())
+            .collect()
+    }
+
+    #[cfg(not(feature = "veriloga"))]
+    fn runtime_veriloga_device_names(_circuit: &CircuitData) -> HashSet<String> {
+        HashSet::new()
+    }
+
+    #[cfg(feature = "veriloga")]
+    fn evaluated_veriloga_process_density(
+        instance: &str,
+        process: &rspice_veriloga::device::EvaluatedNoiseProcess,
+        frequency: Value,
+    ) -> Result<Value, SimulationError> {
+        let source = match (&process.table, process.exponent) {
+            (Some((points, log_interp)), _) => NoiseSource::tabulated(
+                instance.to_owned(),
+                0,
+                0,
+                process.psd,
+                points.clone(),
+                *log_interp,
+            ),
+            (None, None) => NoiseSource::white(instance.to_owned(), 0, 0, process.psd),
+            (None, Some(exponent)) => {
+                NoiseSource::flicker_psd(instance.to_owned(), 0, 0, process.psd, exponent)
+            }
+        };
+        Self::evaluated_noise_density(&source, frequency, T_NOMINAL)
     }
 
     fn has_veriloga_noise_devices(circuit: &CircuitData) -> bool {
@@ -2909,6 +3128,7 @@ impl Engine {
             &mut correlated_noise_sources,
             engine.config.spice_dialect,
         );
+        let runtime_veriloga_device_names = Self::runtime_veriloga_device_names(&circuit);
         let mut branch_matrix_indices = Vec::with_capacity(port_sources.len());
         for source_name in port_sources {
             let source_index = circuit
@@ -2995,6 +3215,12 @@ impl Engine {
                     sources.1.as_slice()
                 });
             let point_correlated_noise_sources = correlated_noise_sources.as_slice();
+            #[cfg(feature = "veriloga")]
+            let point_veriloga_processes = Self::try_collect_veriloga_noise_processes_at_frequency(
+                &circuit,
+                &dc_solution,
+                frequency,
+            )?;
             let mut covariance = vec![vec![zero; num_ports]; num_ports];
             let mut compensation = vec![vec![zero; num_ports]; num_ports];
 
@@ -3038,6 +3264,11 @@ impl Engine {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
+                if runtime_veriloga_device_names
+                    .contains(&source.identity.device.to_ascii_lowercase())
+                {
+                    continue;
+                }
                 let source_temperature =
                     Self::elementary_noise_temperature(temperature, absolute_temperature);
                 let density = Self::evaluated_noise_density(source, frequency, source_temperature)?;
@@ -3049,6 +3280,40 @@ impl Engine {
                     .into_iter()
                     .map(|gain| gain * scale)
                     .collect::<Vec<_>>();
+                Self::add_port_noise_outer_product(&mut covariance, &mut compensation, &amplitude)?;
+            }
+
+            #[cfg(feature = "veriloga")]
+            for (instance, process) in &point_veriloga_processes {
+                let density =
+                    Self::evaluated_veriloga_process_density(instance, process, frequency)?;
+                if density == 0.0 {
+                    continue;
+                }
+                let mut amplitude_sums = (0..num_ports)
+                    .map(|_| ComplexBinAccumulator::default())
+                    .collect::<Vec<_>>();
+                for injection in &process.injections {
+                    for (slot, transfer) in solve_transfer(injection.node_pos, injection.node_neg)?
+                        .into_iter()
+                        .enumerate()
+                    {
+                        Self::add_complex_bin(
+                            &mut amplitude_sums[slot],
+                            transfer * injection.gain,
+                            &process.name,
+                            frequency,
+                        )?;
+                    }
+                }
+                let scale = density.sqrt();
+                let amplitude = amplitude_sums
+                    .into_iter()
+                    .map(|sum| {
+                        Self::finish_complex_bins(sum, &process.name, frequency)
+                            .map(|value| value * scale)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
                 Self::add_port_noise_outer_product(&mut covariance, &mut compensation, &amplitude)?;
             }
 
@@ -3360,11 +3625,13 @@ impl Engine {
             &elementary_absolute_temperatures,
             engine.config.spice_dialect,
         )?;
+        let grouped_veriloga_catalog = Self::grouped_veriloga_noise_contribution_catalog(&circuit);
         let maximum_elementary_sources = final_veriloga_noise_sources
             .as_ref()
             .map_or(noise_sources.len(), |sources| {
                 noise_sources.len().max(sources.0.len())
-            });
+            })
+            .saturating_add(grouped_veriloga_catalog.len());
         engine.ensure_result_shape(
             frequencies.len(),
             circuit
@@ -3391,6 +3658,7 @@ impl Engine {
         if let Some((final_sources, _)) = &final_veriloga_noise_sources {
             contribution_catalog.extend(final_sources.iter().map(|source| source.identity.clone()));
         }
+        contribution_catalog.extend(grouped_veriloga_catalog);
         for mos in &circuit.mosfets.devices {
             contribution_catalog.extend(["RD", "RS", "ID", "FN"].map(|mechanism| {
                 crate::analysis::NoiseSourceIdentity::mechanism(&mos.name, mechanism)
@@ -3494,6 +3762,7 @@ impl Engine {
         // excitation: all independent sources, magnitudes, and phases.
         let ac_excitation_rhs = Self::build_ac_excitation_rhs(&circuit);
         let noise_dialect = engine.config.spice_dialect;
+        let runtime_veriloga_device_names = Self::runtime_veriloga_device_names(&circuit);
 
         // Solve one frequency using caller-owned workspaces. Keeping every
         // mutable cache/work vector explicit lets the sequential path reuse a
@@ -3547,6 +3816,12 @@ impl Engine {
                     sources.1.as_slice()
                 });
             let point_correlated_noise_sources = correlated_noise_sources.as_slice();
+            #[cfg(feature = "veriloga")]
+            let point_veriloga_processes = Self::try_collect_veriloga_noise_processes_at_frequency(
+                circuit,
+                &dc_solution,
+                freq,
+            )?;
 
             match ac_matrix.solve_into(&ac_excitation_rhs, ac_solution) {
                 Ok(()) => {}
@@ -3616,6 +3891,11 @@ impl Engine {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
+                if runtime_veriloga_device_names
+                    .contains(&source.identity.device.to_ascii_lowercase())
+                {
+                    continue;
+                }
                 let source_temperature =
                     Self::elementary_noise_temperature(temperature, absolute_temperature);
                 let si = Self::evaluated_noise_density(source, freq, source_temperature)?;
@@ -3645,6 +3925,61 @@ impl Engine {
                 contributions.push(NoiseContribution {
                     identity: source.identity.clone(),
                     noise_type: source.noise_type,
+                    output_contribution: output_v2,
+                    input_contribution: 0.0,
+                    percentage: 0.0,
+                });
+            }
+
+            #[cfg(feature = "veriloga")]
+            for (instance, process) in &point_veriloga_processes {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                let density = Self::evaluated_veriloga_process_density(instance, process, freq)?;
+                let mut transfer_sum = ComplexBinAccumulator::default();
+                for injection in &process.injections {
+                    Self::add_complex_bin(
+                        &mut transfer_sum,
+                        Self::noise_transfer_from_adjoint(
+                            transfer_solution,
+                            injection.node_pos,
+                            injection.node_neg,
+                        ) * injection.gain,
+                        &process.name,
+                        freq,
+                    )?;
+                }
+                let transfer = Self::finish_complex_bins(transfer_sum, &process.name, freq)?;
+                let identity = crate::analysis::NoiseSourceIdentity::mechanism(
+                    instance.clone(),
+                    Self::canonical_veriloga_noise_mechanism(&process.name),
+                );
+                let output_v2 = if density > 0.0 {
+                    Self::transferred_noise_density(
+                        &Self::noise_source_label(&identity),
+                        density,
+                        transfer,
+                        freq,
+                    )?
+                } else {
+                    0.0
+                };
+                if output_v2 > 0.0 {
+                    Self::add_noise_density(
+                        &mut total_noise_v2_hz,
+                        &mut total_noise_compensation,
+                        output_v2,
+                        freq,
+                    )?;
+                }
+                contributions.push(NoiseContribution {
+                    identity,
+                    noise_type: match process.table {
+                        Some(_) => NoiseSourceType::Table,
+                        None if process.exponent.is_some() => NoiseSourceType::Flicker,
+                        None => NoiseSourceType::White,
+                    },
                     output_contribution: output_v2,
                     input_contribution: 0.0,
                     percentage: 0.0,
@@ -3837,7 +4172,31 @@ mod tests {
     use super::super::super::Engine;
     #[cfg(feature = "veriloga-builtins-base")]
     use super::CollectedNoiseSources;
+    use super::ComplexBinAccumulator;
     use crate::Netlist;
+
+    #[test]
+    fn coherent_complex_bins_preserve_tiny_imaginary_residual_after_huge_real_cancellation() {
+        let mut sum = ComplexBinAccumulator::default();
+        Engine::add_complex_bin(
+            &mut sum,
+            crate::Complex64::new(1.0e308, 1.0e-308),
+            "complex-residual",
+            1.0,
+        )
+        .expect("first finite injection accumulates");
+        Engine::add_complex_bin(
+            &mut sum,
+            crate::Complex64::new(-1.0e308, 0.0),
+            "complex-residual",
+            1.0,
+        )
+        .expect("canceling finite injection accumulates");
+        let result = Engine::finish_complex_bins(sum, "complex-residual", 1.0)
+            .expect("finite coherent sum completes");
+        assert_eq!(result.re, 0.0);
+        assert_eq!(result.im.to_bits(), 1.0e-308_f64.to_bits());
+    }
 
     #[test]
     fn ordinary_noise_rejects_every_misaligned_branch_resistor_noise_vector() {

@@ -8184,11 +8184,30 @@ impl Engine {
                                 not(feature = "veriloga-native"),
                                 not(all(feature = "veriloga-wasm-jit", target_arch = "wasm32"))
                             ))]
-                            let mut device = crate::device::veriloga::VerilogADevice::try_new(
-                                element.name.clone(),
-                                std::sync::Arc::clone(model),
-                                &node_ids,
-                            )
+                            let mut device = {
+                                match entry.canonical_ir.as_deref() {
+                                    Some(canonical_ir) => crate::device::veriloga::VerilogADevice::try_new_with_canonical_ir(
+                                        element.name.clone(),
+                                        std::sync::Arc::clone(model),
+                                        canonical_ir,
+                                        &node_ids,
+                                    ),
+                                    None
+                                        if model.noise_process_schema >= 1
+                                            && !model.noise_sources.is_empty() =>
+                                    {
+                                        Err(rspice_veriloga::vm::VmError::InvalidModel(format!(
+                                            "Verilog-A device '{}' grouped-noise model '{}' requires canonical IR",
+                                            element.name, model.name
+                                        )))
+                                    }
+                                    None => crate::device::veriloga::VerilogADevice::try_new(
+                                        element.name.clone(),
+                                        std::sync::Arc::clone(model),
+                                        &node_ids,
+                                    ),
+                                }
+                            }
                             .map_err(|err| {
                                 SimulationError::Circuit(format!(
                                     "Verilog-A device '{}' parameter default resolution failed: {}",
