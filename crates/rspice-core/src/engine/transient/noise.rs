@@ -26,6 +26,41 @@ use crate::netlist::{Element, ElementKind, Netlist, SourceSpec};
 /// silently degrading the spectrum.
 const MAX_NOISE_SAMPLES: usize = 1 << 22;
 
+/// Convert a floating sample-grid quotient only after proving that the final
+/// count, including the generator's required tail points, fits the hard cap.
+/// Rust's float-to-integer cast saturates, and adding the tail afterward can
+/// then overflow or wrap; neither behavior is an acceptable resource check.
+fn checked_noise_sample_count(
+    source_kind: &str,
+    name: &str,
+    quotient: Value,
+    required_tail: usize,
+    ratio_name: &str,
+    remedy: &str,
+) -> Result<usize, String> {
+    let maximum_grid_count = MAX_NOISE_SAMPLES.saturating_sub(required_tail);
+    if !quotient.is_finite() {
+        return Err(format!(
+            "{source_kind} source '{name}' has a non-finite sample count from {ratio_name}; \
+             the limit is {MAX_NOISE_SAMPLES}. {remedy}"
+        ));
+    }
+
+    // A transient stop before the source's first sample retains the historic
+    // one/two-tail-point behavior rather than manufacturing a negative count.
+    let grid_count = quotient.ceil().max(0.0);
+    if grid_count > maximum_grid_count as Value {
+        return Err(format!(
+            "{source_kind} source '{name}' sample count from {ratio_name} exceeds the limit of \
+             {MAX_NOISE_SAMPLES} (including {required_tail} required tail samples). {remedy}"
+        ));
+    }
+
+    // Both the cast and addition are safe because the floating value was
+    // bounded against MAX_NOISE_SAMPLES - required_tail above.
+    Ok(grid_count as usize + required_tail)
+}
+
 /// Replace every TRNOISE/TRRANDOM source with a generated PWL sample train
 /// covering `[0, tstop]`. Returns `None` when the netlist contains neither
 /// source type (the common case — zero cost, no clone).
@@ -170,14 +205,14 @@ fn generate_noise_points(
 
     // One sample past tstop so interpolation never extrapolates.
     let effective_nt = if nt > 0.0 { nt } else { tstop.max(1e-12) };
-    let n = (tstop / effective_nt).ceil() as usize + 2;
-    if n > MAX_NOISE_SAMPLES {
-        return Err(format!(
-            "TRNOISE source '{}' would need {} samples (tstop/NT); the limit is {}. \
-             Raise NT or shorten the transient.",
-            name, n, MAX_NOISE_SAMPLES
-        ));
-    }
+    let n = checked_noise_sample_count(
+        "TRNOISE",
+        name,
+        tstop / effective_nt,
+        2,
+        "tstop/NT",
+        "Raise NT or shorten the transient.",
+    )?;
 
     let mut rng = SplitMix64::new(seed);
     let mut samples = vec![0.0f64; n];
@@ -296,13 +331,20 @@ fn generate_trrandom_points(
             name
         ));
     }
-    let count = ((tstop - delay).max(0.0) / sample_interval).ceil() as usize + 1;
-    if count > MAX_NOISE_SAMPLES {
-        return Err(format!(
-            "TRRANDOM source '{}' would need {} samples; the limit is {}",
-            name, count, MAX_NOISE_SAMPLES
-        ));
-    }
+    let available_duration = tstop - delay;
+    let quotient = if available_duration.is_finite() {
+        available_duration.max(0.0) / sample_interval
+    } else {
+        available_duration
+    };
+    let count = checked_noise_sample_count(
+        "TRRANDOM",
+        name,
+        quotient,
+        1,
+        "(tstop-delay)/TS",
+        "Raise TS, delay the source, or shorten the transient.",
+    )?;
     let mut rng = SplitMix64::new(seed);
     let mut points = vec![(0.0, parameter2)];
     if delay > 0.0 {
@@ -506,6 +548,92 @@ mod tests {
             err.contains("Raise NT"),
             "diagnostic explains the fix: {err}"
         );
+    }
+
+    #[test]
+    fn sample_count_boundaries_include_required_tail_points() {
+        assert_eq!(
+            checked_noise_sample_count(
+                "TRNOISE",
+                "vn",
+                (MAX_NOISE_SAMPLES - 2) as Value,
+                2,
+                "tstop/NT",
+                "Raise NT.",
+            )
+            .unwrap(),
+            MAX_NOISE_SAMPLES
+        );
+        assert!(
+            checked_noise_sample_count(
+                "TRNOISE",
+                "vn",
+                (MAX_NOISE_SAMPLES - 1) as Value,
+                2,
+                "tstop/NT",
+                "Raise NT.",
+            )
+            .is_err()
+        );
+        assert_eq!(
+            checked_noise_sample_count(
+                "TRRANDOM",
+                "vr",
+                (MAX_NOISE_SAMPLES - 1) as Value,
+                1,
+                "(tstop-delay)/TS",
+                "Raise TS.",
+            )
+            .unwrap(),
+            MAX_NOISE_SAMPLES
+        );
+        assert!(
+            checked_noise_sample_count(
+                "TRRANDOM",
+                "vr",
+                MAX_NOISE_SAMPLES as Value,
+                1,
+                "(tstop-delay)/TS",
+                "Raise TS.",
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn trnoise_extreme_ratio_is_rejected_before_integer_conversion() {
+        let error = generate_noise_points(
+            1.0,
+            f64::MIN_POSITIVE,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            f64::MAX,
+            1,
+            "vextreme",
+        )
+        .expect_err("an infinite tstop/NT quotient must be rejected");
+        assert!(error.contains("TRNOISE source 'vextreme'"), "{error}");
+        assert!(error.contains("non-finite sample count"), "{error}");
+    }
+
+    #[test]
+    fn trrandom_extreme_ratio_is_rejected_before_integer_conversion() {
+        let error = generate_trrandom_points(
+            1,
+            f64::MIN_POSITIVE,
+            -f64::MAX,
+            1.0,
+            0.0,
+            f64::MAX,
+            1,
+            "vrextreme",
+        )
+        .expect_err("an overflowed (tstop-delay)/TS quotient must be rejected");
+        assert!(error.contains("TRRANDOM source 'vrextreme'"), "{error}");
+        assert!(error.contains("non-finite sample count"), "{error}");
     }
 
     #[test]
