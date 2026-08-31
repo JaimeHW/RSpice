@@ -77,8 +77,12 @@
 //!   instance drive what it must not (section 12.3.9.1);
 //! * a continuous assignment that drives a port its own module receives as an
 //!   input (section 12.3.9.1);
-//! * a port of a digital module with no `wire` or `reg` declaration, because
-//!   the default net type of section 12.3.3 is not implemented;
+//! * a port of a digital module that reaches here with no discrete-domain
+//!   declaration at all. Section 12.3.3's implicit net covers every port the
+//!   author did not declare, so this is a residual guard rather than a
+//!   language restriction: what can still reach it is a port the analyzer
+//!   deliberately left out of the digital table, such as one declared with a
+//!   discipline;
 //! * an instantiation cycle, as a typed error rather than a stack overflow;
 //! * a module that mixes discrete and continuous content, and an analog module
 //!   instantiated inside a digital one — mixed-signal elaboration is a later
@@ -363,9 +367,12 @@ impl DigitalElaborator<'_> {
             else {
                 return Err(semantic_error(
                     SemanticErrorKind::UnsupportedFeature(format!(
-                        "port `{}` of the digital module `{}` has no `wire` or `reg` \
-                         declaration; the default net type of IEEE 1364-2005 section 12.3.3 \
-                         is not implemented, so declare the port's net explicitly",
+                        "port `{}` of the digital module `{}` has no discrete-domain \
+                         declaration; IEEE 1364-2005 section 12.3.3's implicit net covers a \
+                         port the author did not declare, so a port reaching here is one the \
+                         analyzer left out of the digital table — a port carrying a \
+                         discipline, which is a continuous-domain port and cannot be \
+                         connected to a digital instance",
                         port.name, instance.module
                     )),
                     instance.span,

@@ -16,6 +16,90 @@ use crate::error::{ParseError, ParseErrorKind};
 use crate::lexer::TokenKind;
 use smol_str::SmolStr;
 
+/// The gate primitives of IEEE 1364-2005 section 7.2 this compiler accepts.
+///
+/// The eight combinational ones. The tristate family (`bufif0`, `notif1`, ...),
+/// the MOS switches, and the pull gates are absent, and a design naming one is
+/// refused as an undefined module rather than silently becoming something else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum GatePrimitive {
+    And,
+    Nand,
+    Or,
+    Nor,
+    Xor,
+    Xnor,
+    Buf,
+    Not,
+}
+
+impl GatePrimitive {
+    /// The gate a name in module-instance position denotes, if it denotes one.
+    ///
+    /// Recognized by name because every one of these is a reserved word of IEEE
+    /// 1364-2005 annex B, so a module cannot legally be called one. This lexer
+    /// does not reserve them — they were identifiers before there was a digital
+    /// grammar — which is why the check is here rather than on a token kind.
+    pub(super) fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "and" => Self::And,
+            "nand" => Self::Nand,
+            "or" => Self::Or,
+            "nor" => Self::Nor,
+            "xor" => Self::Xor,
+            "xnor" => Self::Xnor,
+            "buf" => Self::Buf,
+            "not" => Self::Not,
+            _ => return None,
+        })
+    }
+
+    pub(super) const fn keyword(self) -> &'static str {
+        match self {
+            Self::And => "and",
+            Self::Nand => "nand",
+            Self::Or => "or",
+            Self::Nor => "nor",
+            Self::Xor => "xor",
+            Self::Xnor => "xnor",
+            Self::Buf => "buf",
+            Self::Not => "not",
+        }
+    }
+
+    /// Whether the gate drives its *last* terminal's value onto every other
+    /// one, which is what section 7.4 makes `buf` and `not` do.
+    const fn is_buffer(self) -> bool {
+        matches!(self, Self::Buf | Self::Not)
+    }
+
+    /// The operator that combines two inputs, before any inversion.
+    ///
+    /// A buffer has one input and never reaches the fold, so its operator is
+    /// never applied; naming AND here keeps the function total rather than
+    /// adding an unreachable arm that a later reader has to check.
+    const fn combining_op(self) -> BinaryOp {
+        match self {
+            Self::And | Self::Nand | Self::Buf | Self::Not => BinaryOp::BitAnd,
+            Self::Or | Self::Nor => BinaryOp::BitOr,
+            Self::Xor | Self::Xnor => BinaryOp::BitXor,
+        }
+    }
+
+    /// Whether the combined value is inverted on the way out.
+    const fn inverts(self) -> bool {
+        matches!(self, Self::Nand | Self::Nor | Self::Xnor | Self::Not)
+    }
+
+    /// The fewest terminals the gate can be written with.
+    ///
+    /// Two either way: an n-input gate needs an output and at least one input
+    /// to be meaningful, and a buffer needs at least one output and its input.
+    const fn minimum_terminals(self) -> usize {
+        2
+    }
+}
+
 impl Parser<'_> {
     // ------------------------------------------------------------------
     // Shared declaration fragments
@@ -178,6 +262,193 @@ impl Parser<'_> {
             delay,
             span: start.extend(self.previous_span()),
         })
+    }
+
+    // ------------------------------------------------------------------
+    // Gate primitives
+    // ------------------------------------------------------------------
+
+    /// `gate [#delay] [name] (terminals) [, [name] (terminals)]* ;`
+    ///
+    /// Each instance becomes one continuous assignment per driven output, which
+    /// is what a gate primitive *is*: IEEE 1364-2005 section 7.2 defines the
+    /// eight of them by the truth tables of section 4.1, and section 6.1's
+    /// continuous assignment is a driver evaluating those same tables. Lowering
+    /// them to the construct that already exists means a design cannot get a
+    /// different answer from `nand g (y, a, b)` than from `assign y = ~(a & b)`
+    /// — which is exactly the disagreement a front end with two paths has two
+    /// chances to produce.
+    ///
+    /// The gate's own delay is carried onto the assignment rather than dropped;
+    /// the lowering refuses it there, by name, for the reason it refuses one on
+    /// an `assign`.
+    pub(super) fn parse_gate_instantiation(
+        &mut self,
+        gate: GatePrimitive,
+    ) -> Result<Vec<ContinuousAssign>, ParseError> {
+        let start = self.current_span();
+        self.advance(); // consume the gate keyword
+
+        // A drive-strength specification `(strong1, weak0)` selects between
+        // strengths this compiler's one-strength resolution cannot represent,
+        // so it is refused rather than ignored: ignoring it would silently
+        // resolve a contention the design meant to decide.
+        if self.check(TokenKind::LParen) && self.strength_specification_follows() {
+            return Err(ParseError::new(
+                ParseErrorKind::UnsupportedConstruct {
+                    context: format!("`{}` gate", gate.keyword()),
+                    found: "a drive-strength specification; this compiler resolves nets at one \
+                            strength, so a strength that changes the resolution cannot be \
+                            honoured"
+                        .to_string(),
+                },
+                self.current_span(),
+            ));
+        }
+
+        let delay = if self.match_token(TokenKind::Hash) {
+            Some(self.parse_delay_value()?)
+        } else {
+            None
+        };
+
+        let mut assignments = Vec::new();
+        loop {
+            // The instance name is optional (section 7.1), so a `(` here opens
+            // the terminal list of an unnamed instance.
+            if !self.check(TokenKind::LParen) {
+                self.expect_identifier("gate instance name")?;
+            }
+            let instance_start = self.current_span();
+            self.expect(TokenKind::LParen)?;
+            let mut terminals = Vec::new();
+            loop {
+                terminals.push(self.parse_expression()?);
+                if !self.match_token(TokenKind::Comma) {
+                    break;
+                }
+            }
+            self.expect(TokenKind::RParen)?;
+            let span = instance_start.extend(self.previous_span());
+            assignments.extend(self.gate_assignments(gate, terminals, delay.clone(), span)?);
+
+            if !self.match_token(TokenKind::Comma) {
+                break;
+            }
+        }
+        self.expect(TokenKind::Semicolon)?;
+
+        let declaration = start.extend(self.previous_span());
+        for assignment in &mut assignments {
+            assignment.span = declaration;
+        }
+        Ok(assignments)
+    }
+
+    /// Whether the parenthesis under the cursor opens a drive-strength
+    /// specification rather than a terminal list.
+    ///
+    /// A strength spec is two strength keywords separated by a comma, and every
+    /// one of those words is an identifier to this lexer. Looking for the first
+    /// one is enough: no terminal expression can begin with `supply0`.
+    fn strength_specification_follows(&self) -> bool {
+        const STRENGTHS: [&str; 8] = [
+            "supply0", "supply1", "strong0", "strong1", "pull0", "pull1", "weak0", "weak1",
+        ];
+        self.tokens
+            .get(self.pos + 1)
+            .and_then(|token| token.text.as_deref())
+            .is_some_and(|text| STRENGTHS.contains(&text))
+    }
+
+    /// Turn one gate instance's terminal list into its driving assignments.
+    fn gate_assignments(
+        &self,
+        gate: GatePrimitive,
+        terminals: Vec<Expression>,
+        delay: Option<Expression>,
+        span: crate::source::Span,
+    ) -> Result<Vec<ContinuousAssign>, ParseError> {
+        let minimum = gate.minimum_terminals();
+        if terminals.len() < minimum {
+            return Err(ParseError::new(
+                ParseErrorKind::UnsupportedConstruct {
+                    context: format!("`{}` gate", gate.keyword()),
+                    found: format!(
+                        "{} terminal(s); IEEE 1364-2005 section 7.2 requires at least {minimum}",
+                        terminals.len()
+                    ),
+                },
+                span,
+            ));
+        }
+
+        // Sections 7.3 and 7.4 split the eight gates by where the input is: an
+        // n-input gate drives its first terminal from the rest, while `buf` and
+        // `not` drive every terminal but the last from that last one.
+        let (outputs, inputs): (Vec<&Expression>, Vec<&Expression>) = if gate.is_buffer() {
+            let (outputs, input) = terminals.split_at(terminals.len() - 1);
+            (outputs.iter().collect(), input.iter().collect())
+        } else {
+            let (output, inputs) = terminals.split_at(1);
+            (output.iter().collect(), inputs.iter().collect())
+        };
+
+        let mut value = inputs[0].clone();
+        for input in &inputs[1..] {
+            value = Expression::Binary(BinaryExpr {
+                op: gate.combining_op(),
+                left: Box::new(value),
+                right: Box::new((*input).clone()),
+                span,
+            });
+        }
+        if gate.inverts() {
+            value = Expression::Unary(UnaryExpr {
+                op: UnaryOp::BitNot,
+                operand: Box::new(value),
+                span,
+            });
+        }
+
+        outputs
+            .into_iter()
+            .map(|output| {
+                Ok(ContinuousAssign {
+                    target: Self::terminal_as_lvalue(output, gate)?,
+                    value: value.clone(),
+                    delay: delay.clone(),
+                    span,
+                })
+            })
+            .collect()
+    }
+
+    /// A gate's output terminal, as an assignment target.
+    fn terminal_as_lvalue(
+        terminal: &Expression,
+        gate: GatePrimitive,
+    ) -> Result<DigitalLValue, ParseError> {
+        match terminal {
+            Expression::Identifier(identifier) => Ok(DigitalLValue::Identifier {
+                name: identifier.name.clone(),
+                span: identifier.span,
+            }),
+            Expression::ArrayAccess(access) => Ok(DigitalLValue::BitSelect {
+                name: access.array.clone(),
+                index: access.index.clone(),
+                span: access.span,
+            }),
+            other => Err(ParseError::new(
+                ParseErrorKind::UnsupportedConstruct {
+                    context: format!("`{}` gate output", gate.keyword()),
+                    found: "an expression; a gate drives a net, so its output terminal must be \
+                            a name or a bit select of one"
+                        .to_string(),
+                },
+                other.span(),
+            )),
+        }
     }
 
     // ------------------------------------------------------------------

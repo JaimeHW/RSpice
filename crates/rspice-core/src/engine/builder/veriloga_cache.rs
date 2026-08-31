@@ -39,7 +39,16 @@ use super::*;
 // Version 26 adds generalized transient integration and exact accepted history
 // to compiled Laplace filters. Cached version-25 realizations do not carry the
 // older state and derivative lanes required by trapezoidal and Gear-2 stepping.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 26;
+// Version 27 widens the digital front end at the declaration boundary. A port
+// with no net declaration of its own is now the implicit net of IEEE 1364-2005
+// section 12.3.3 rather than an undeclared name; `output reg [3:0] q;` is now
+// section 12.3.4's compact spelling of the two-declaration form; a packed range
+// and a replication count may name a parameter, which section 12.2 fixes at
+// elaboration; and the eight gate primitives of section 7.2 lower to the same
+// drivers their operator spellings do. Source that version 26 refused now
+// compiles, and a structural design's artifact is a different artifact, so the
+// record's identity has to change.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 27;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

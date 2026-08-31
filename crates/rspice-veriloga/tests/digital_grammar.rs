@@ -1249,17 +1249,6 @@ fn unelaborated_instance_constructs_refuse_by_name() {
             vec!["receives through an input port", "12.3.9.1"],
         ),
         (
-            "a port with no net declaration",
-            hierarchy(
-                "module gate(y, a);\n\
-                 \x20   output y;\n     input a;\n     wire y;\n\
-                 \x20   assign y = 1'b0;\n\
-                 endmodule\n",
-                "    wire x, z;\n     gate g1(z, x);",
-            ),
-            vec!["has no `wire` or `reg` declaration", "12.3.3"],
-        ),
-        (
             "an unknown named port",
             hierarchy(NAND2, "    wire a, b, y;\n     nand2 g1(.q(y));"),
             vec!["Undeclared symbol: 'q'"],
@@ -1333,4 +1322,273 @@ fn the_two_connection_forms_elaborate_to_the_same_plan() {
     assert_eq!(ordered.digital.signals, named.digital.signals);
     assert_eq!(ordered.digital.drivers, named.digital.drivers);
     assert_eq!(ordered.digital.processes, named.digital.processes);
+}
+
+// ===========================================================================
+// Section 12.3 port declarations, and section 7.2 gate primitives
+// ===========================================================================
+
+/// The digital plan a source compiles to, by module name.
+#[cfg(feature = "native")]
+fn plan(source: &str, module: &str) -> rspice_veriloga::canonical_ir::CanonicalDigitalPlan {
+    VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir_module(source, Some(module))
+        .unwrap_or_else(|error| panic!("this module must compile: {error}"))
+        .digital
+}
+
+/// One signal's identity and shape, without the span: name, width, declared
+/// bounds, and whether a procedural assignment may write it.
+#[cfg(feature = "native")]
+type SignalShape = (String, u32, Option<(i64, i64)>, bool);
+
+/// Every signal's shape, in declaration order.
+///
+/// Two spellings of one declaration are different text and therefore different
+/// offsets, so a comparison that included the span would only ever say the two
+/// sources are not the same source.
+#[cfg(feature = "native")]
+fn shapes(plan: &rspice_veriloga::canonical_ir::CanonicalDigitalPlan) -> Vec<SignalShape> {
+    plan.signals
+        .iter()
+        .map(|signal| {
+            (
+                signal.name.to_string(),
+                signal.width,
+                signal.bounds,
+                signal.procedurally_assignable,
+            )
+        })
+        .collect()
+}
+
+/// One driver's identity, target and owning process, without the span.
+#[cfg(feature = "native")]
+type DriverShape = (
+    rspice_veriloga::canonical_ir::DigitalDriverId,
+    rspice_veriloga::canonical_ir::DigitalWriteTarget,
+    rspice_veriloga::canonical_ir::DigitalProcessId,
+);
+
+/// Every driver's shape, in declaration order.
+#[cfg(feature = "native")]
+fn driver_shapes(plan: &rspice_veriloga::canonical_ir::CanonicalDigitalPlan) -> Vec<DriverShape> {
+    plan.drivers
+        .iter()
+        .map(|driver| (driver.id, driver.target.clone(), driver.process))
+        .collect()
+}
+
+/// A signal's declared width, or `None` if the plan has no such signal.
+#[cfg(feature = "native")]
+fn width_of(plan: &rspice_veriloga::canonical_ir::CanonicalDigitalPlan, name: &str) -> Option<u32> {
+    plan.signals
+        .iter()
+        .find(|signal| signal.name == name)
+        .map(|signal| signal.width)
+}
+
+/// IEEE 1364-2005 section 12.3.3: a port with no net or variable declaration of
+/// its own is implicitly a net of the port's declared range.
+///
+/// A purely structural design declares nothing else at all, so without the
+/// implicit net its ports would be absent from the plan and every reference to
+/// one would be an undeclared name.
+#[cfg(feature = "native")]
+#[test]
+fn a_port_with_no_declaration_of_its_own_is_an_implicit_net() {
+    let plan = plan(
+        "module implicit(a, b, y);\n\
+         \x20   input a;\n\
+         \x20   input [3:0] b;\n\
+         \x20   output y;\n\
+         \x20   assign y = a & b[0];\n\
+         endmodule\n",
+        "implicit",
+    );
+    assert_eq!(width_of(&plan, "a"), Some(1));
+    // The implicit net takes the port's declared range, not a scalar default.
+    assert_eq!(width_of(&plan, "b"), Some(4));
+    assert_eq!(width_of(&plan, "y"), Some(1));
+    assert_eq!(plan.drivers.len(), 1, "one `assign` is one driver");
+}
+
+/// Section 12.3.4's compact form. `output reg [3:0] q;` and the two-declaration
+/// spelling it stands for must produce the same plan, or a design would mean
+/// something different depending on which way its author wrote it.
+#[cfg(feature = "native")]
+#[test]
+fn a_typed_port_declaration_means_the_same_as_the_two_declaration_form() {
+    const BODY: &str = "\x20   always @(posedge clk) q <= d;\nendmodule\n";
+    let compact = plan(
+        &format!(
+            "module compact(clk, d, q);\n\
+             \x20   input clk;\n     input [3:0] d;\n     output reg [3:0] q;\n{BODY}"
+        ),
+        "compact",
+    );
+    let separate = plan(
+        &format!(
+            "module compact(clk, d, q);\n\
+             \x20   input clk;\n     input [3:0] d;\n     output [3:0] q;\n\
+             \x20   reg [3:0] q;\n{BODY}"
+        ),
+        "compact",
+    );
+    // Compared on everything but the span: the two spellings are different
+    // text, so a `reg` declared on the port and one declared beside it point at
+    // different offsets while declaring the same signal.
+    assert_eq!(shapes(&compact), shapes(&separate));
+    assert_eq!(compact.processes.len(), separate.processes.len());
+    assert_eq!(width_of(&compact, "q"), Some(4));
+    assert!(
+        compact
+            .signals
+            .iter()
+            .any(|signal| signal.name == "q" && signal.procedurally_assignable),
+        "a `reg` port must be procedurally assignable"
+    );
+}
+
+/// A packed range and a replication count may name a parameter, because IEEE
+/// 1364-2005 section 12.2 fixes a parameter at elaboration. The analog half
+/// deliberately treats a parameter as a per-instance runtime value, so this is
+/// the one place the two halves read the same declaration differently.
+#[cfg(feature = "native")]
+#[test]
+fn a_parameter_may_size_a_packed_range_and_a_replication() {
+    let plan = plan(
+        "module sized(clk, q);\n\
+         \x20   parameter WIDTH = 6;\n\
+         \x20   input clk;\n\
+         \x20   output reg [WIDTH-1:0] q;\n\
+         \x20   always @(posedge clk) q <= {WIDTH{1'b1}};\n\
+         endmodule\n",
+        "sized",
+    );
+    assert_eq!(width_of(&plan, "q"), Some(6));
+}
+
+/// Section 7.2's eight gate primitives are defined by the same truth tables
+/// section 4.1 gives the operators, so `nand g (y, a, b)` and
+/// `assign y = ~(a & b)` must lower to the same driver. Two paths to one
+/// meaning is two chances to disagree; this is the pin that says there is one
+/// path.
+#[cfg(feature = "native")]
+#[test]
+fn a_gate_primitive_lowers_to_the_operator_form_of_itself() {
+    for (gate, operator) in [
+        ("and  u (y, a, b);", "assign y = a & b;"),
+        ("nand u (y, a, b);", "assign y = ~(a & b);"),
+        ("or   u (y, a, b);", "assign y = a | b;"),
+        ("nor  u (y, a, b);", "assign y = ~(a | b);"),
+        ("xor  u (y, a, b);", "assign y = a ^ b;"),
+        ("xnor u (y, a, b);", "assign y = ~(a ^ b);"),
+        ("buf  u (y, a);", "assign y = a;"),
+        ("not  u (y, a);", "assign y = ~a;"),
+    ] {
+        let source = |body: &str| {
+            format!(
+                "module g(a, b, y);\n     input a, b;\n     output y;\n\x20   {body}\nendmodule\n"
+            )
+        };
+        let from_gate = plan(&source(gate), "g");
+        let from_operator = plan(&source(operator), "g");
+        // The whole control-flow graph, value for value — everything except
+        // where in the text it came from, which is the one thing the two
+        // spellings genuinely differ about.
+        let functions = |plan: &rspice_veriloga::canonical_ir::CanonicalDigitalPlan| {
+            plan.processes
+                .iter()
+                .map(|process| {
+                    (
+                        process.id,
+                        process.kind,
+                        process.function.clone(),
+                        process.static_sensitivity.clone(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            functions(&from_gate),
+            functions(&from_operator),
+            "`{gate}` and `{operator}` must lower to the same process function"
+        );
+        assert_eq!(driver_shapes(&from_gate), driver_shapes(&from_operator));
+    }
+}
+
+/// Section 7.4 puts a buffer's input last and lets every earlier terminal be an
+/// output, which is the opposite of every other gate and the one shape a reader
+/// has to check rather than assume.
+#[cfg(feature = "native")]
+#[test]
+fn a_buffer_drives_every_terminal_but_its_last() {
+    let plan = plan(
+        "module b(a, y, z);\n\
+         \x20   input a;\n     output y, z;\n\
+         \x20   buf u (y, z, a);\n\
+         endmodule\n",
+        "b",
+    );
+    assert_eq!(plan.drivers.len(), 2, "two outputs are two drivers");
+    let driven: Vec<&str> = plan
+        .drivers
+        .iter()
+        .map(|driver| {
+            plan.signal(driver.id.signal)
+                .expect("declared")
+                .name
+                .as_str()
+        })
+        .collect();
+    assert_eq!(driven, vec!["y", "z"]);
+}
+
+/// An unnamed gate instance is legal (section 7.1) and one declaration may
+/// carry several instances.
+#[cfg(feature = "native")]
+#[test]
+fn a_gate_declaration_may_be_unnamed_and_may_carry_several_instances() {
+    let plan = plan(
+        "module g(a, b, y, z);\n\
+         \x20   input a, b;\n     output y, z;\n\
+         \x20   nand (y, a, b), g2 (z, a, b);\n\
+         endmodule\n",
+        "g",
+    );
+    assert_eq!(plan.drivers.len(), 2);
+}
+
+/// A gate delay is a transport delay on the driver, which is what an
+/// `assign #2` is, and it is refused with the same words rather than dropped.
+#[cfg(feature = "native")]
+#[test]
+fn a_gate_delay_is_refused_by_name() {
+    let error = VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir_module(
+            "module g(a, b, y);\n\
+             \x20   input a, b;\n     output y;\n\
+             \x20   nand #2 u (y, a, b);\n\
+             endmodule\n",
+            Some("g"),
+        )
+        .expect_err("a gate delay has no lowered form")
+        .to_string();
+    assert!(error.contains("delay"), "{error}");
+}
+
+/// A drive-strength specification selects between strengths this compiler's
+/// one-strength resolution cannot represent. Ignoring it would silently resolve
+/// a contention the design meant to decide.
+#[test]
+fn a_gate_drive_strength_is_refused_by_name() {
+    let error = parse_error(
+        "module g(a, b, y);\n\
+         \x20   input a, b;\n     output y;\n\
+         \x20   nand (strong1, weak0) u (y, a, b);\n\
+         endmodule\n",
+    );
+    assert!(error.contains("strength"), "{error}");
 }

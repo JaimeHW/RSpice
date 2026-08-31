@@ -19,6 +19,7 @@ struct AnsiPortContext {
     discipline: Option<SmolStr>,
     signedness: Signedness,
     range: Option<VectorRange>,
+    net_type: Option<PortNetType>,
 }
 
 /// Parser for Verilog-A/AMS
@@ -169,7 +170,19 @@ impl<'a> Parser<'a> {
                 };
 
                 if let Some(direction) = direction {
-                    // ANSI style: direction [discipline] [signed] [range] name
+                    // ANSI style: direction [wire|reg] [discipline] [signed]
+                    // [range] name
+                    let net_type = match self.current().kind {
+                        TokenKind::Wire => {
+                            self.advance();
+                            Some(PortNetType::Wire)
+                        }
+                        TokenKind::Reg => {
+                            self.advance();
+                            Some(PortNetType::Reg)
+                        }
+                        _ => None,
+                    };
                     let discipline: Option<SmolStr> = if self.is_discipline_keyword()
                         || (self.check(TokenKind::Identifier)
                             && self.peek_is(TokenKind::Identifier))
@@ -186,19 +199,23 @@ impl<'a> Parser<'a> {
                         name: name.clone(),
                         span,
                     });
-                    module.port_declarations.push(PortDeclaration {
+                    let declaration = PortDeclaration {
                         direction,
                         discipline: discipline.clone(),
                         range: range.clone(),
                         signedness,
+                        net_type,
                         names: vec![name],
                         span: span.extend(self.previous_span()),
-                    });
+                    };
+                    Self::expand_port_net_type(module, &declaration);
+                    module.port_declarations.push(declaration);
                     ansi_context = Some(AnsiPortContext {
                         direction,
                         discipline,
                         signedness,
                         range,
+                        net_type,
                     });
                 } else {
                     let name: SmolStr = self.expect_identifier("port name")?.into();
@@ -210,14 +227,17 @@ impl<'a> Parser<'a> {
                     // discipline, and vector shape of the preceding declared
                     // port.
                     if let Some(context) = &ansi_context {
-                        module.port_declarations.push(PortDeclaration {
+                        let declaration = PortDeclaration {
                             direction: context.direction,
                             discipline: context.discipline.clone(),
                             range: context.range.clone(),
                             signedness: context.signedness,
+                            net_type: context.net_type,
                             names: vec![name],
                             span: span.extend(self.previous_span()),
-                        });
+                        };
+                        Self::expand_port_net_type(module, &declaration);
+                        module.port_declarations.push(declaration);
                     }
                 }
 
@@ -316,6 +336,7 @@ impl<'a> Parser<'a> {
         match self.current().kind {
             TokenKind::Input | TokenKind::Output | TokenKind::Inout => {
                 let decl = self.parse_port_declaration()?;
+                Self::expand_port_net_type(module, &decl);
                 module.port_declarations.push(decl);
             }
             TokenKind::Parameter => {
@@ -473,6 +494,17 @@ impl<'a> Parser<'a> {
                 module.nets.push(net);
                 return Ok(());
             }
+        }
+
+        // A gate primitive instantiation. Checked before the module-instance
+        // branch because the two have the same shape and only the name tells
+        // them apart: `nand g10 (N10, N1, N3);` reads exactly like an instance
+        // of a module called `nand`, and IEEE 1364-2005 annex B reserves the
+        // word so no such module can exist.
+        if let Some(gate) = digital::GatePrimitive::from_name(&first_text) {
+            let assignments = self.parse_gate_instantiation(gate)?;
+            module.continuous_assigns.extend(assignments);
+            return Ok(());
         }
 
         // Module instance declaration:
@@ -672,6 +704,23 @@ impl<'a> Parser<'a> {
             _ => return Err(self.error(ParseErrorKind::InvalidPort)),
         };
 
+        // IEEE 1364-2005 section 12.3.4's compact form: the port carries its
+        // own net or variable type. Read before the discipline because both are
+        // optional and only one of them can be present — a discipline is a
+        // Verilog-AMS spelling and `wire`/`reg` are reserved words, so neither
+        // can be mistaken for the other.
+        let net_type = match self.current().kind {
+            TokenKind::Wire => {
+                self.advance();
+                Some(PortNetType::Wire)
+            }
+            TokenKind::Reg => {
+                self.advance();
+                Some(PortNetType::Reg)
+            }
+            _ => None,
+        };
+
         // Optional discipline. User-defined disciplines are identifiers, so
         // distinguish `inout foo bar;` from `inout foo, bar;` by requiring
         // two adjacent identifiers, matching ANSI port-list parsing.
@@ -702,9 +751,49 @@ impl<'a> Parser<'a> {
             discipline: discipline.map(|s| s.into()),
             range,
             signedness,
+            net_type,
             names,
             span: start.extend(self.previous_span()),
         })
+    }
+
+    /// The separate declaration a section 12.3.4 compact port stands for.
+    ///
+    /// `output reg [3:0] q;` and `output [3:0] q; reg [3:0] q;` are the same
+    /// declaration written two ways, so the compact form is expanded here into
+    /// the pair the rest of the compiler already understands rather than being
+    /// given a second representation everything downstream would have to know
+    /// about.
+    fn expand_port_net_type(module: &mut Module, declaration: &PortDeclaration) {
+        let Some(net_type) = declaration.net_type else {
+            return;
+        };
+        let items: Vec<DigitalDeclItem> = declaration
+            .names
+            .iter()
+            .map(|name| DigitalDeclItem {
+                name: name.clone(),
+                dimensions: Vec::new(),
+                init: None,
+                span: declaration.span,
+            })
+            .collect();
+        match net_type {
+            PortNetType::Wire => module.digital_nets.push(DigitalNetDecl {
+                kind: DigitalNetKind::Wire,
+                signedness: declaration.signedness,
+                range: declaration.range.clone(),
+                items,
+                span: declaration.span,
+            }),
+            PortNetType::Reg => module.digital_variables.push(DigitalVariableDecl {
+                kind: DigitalVariableKind::Reg,
+                signedness: declaration.signedness,
+                range: declaration.range.clone(),
+                items,
+                span: declaration.span,
+            }),
+        }
     }
 
     /// Parse a parameter declaration (one or more comma-separated assignments)

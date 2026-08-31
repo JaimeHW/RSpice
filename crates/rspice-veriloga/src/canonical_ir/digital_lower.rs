@@ -202,11 +202,18 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
         id
     };
 
+    // An instance frame's body is lowered against no constants at all. The
+    // table on `AnalyzedDigital` belongs to the module the artifact is being
+    // built for, and folding a child's `WIDTH` with the parent's would be a
+    // wrong answer rather than a refused one; a child that needs a constant
+    // reports that it cannot resolve it.
+    let no_constants: HashMap<SmolStr, i64> = HashMap::new();
+
     let mut processes = Vec::new();
     let mut drivers = Vec::new();
     for process in &digital.processes {
         let id = DigitalProcessId::from(usize::try_from(process.id.0).unwrap_or(usize::MAX));
-        match lower_process(process, id, &signals, &module_scope) {
+        match lower_process(process, id, &signals, &module_scope, &digital.constants) {
             Ok(lowered) => processes.push(lowered),
             Err(mut errors) => diagnostics.append(&mut errors),
         }
@@ -216,6 +223,7 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
             assignment,
             &signals,
             &module_scope,
+            &digital.constants,
             allocate(),
             &mut drivers,
         ) {
@@ -225,13 +233,20 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
     }
     for (instance, scope) in digital.instances.iter().zip(&frame_scopes) {
         for process in &instance.processes {
-            match lower_process(process, allocate(), &signals, scope) {
+            match lower_process(process, allocate(), &signals, scope, &no_constants) {
                 Ok(lowered) => processes.push(lowered),
                 Err(mut errors) => diagnostics.append(&mut errors),
             }
         }
         for assignment in &instance.continuous_assigns {
-            match lower_continuous_assign(assignment, &signals, scope, allocate(), &mut drivers) {
+            match lower_continuous_assign(
+                assignment,
+                &signals,
+                scope,
+                &no_constants,
+                allocate(),
+                &mut drivers,
+            ) {
                 Ok(lowered) => processes.push(lowered),
                 Err(mut errors) => diagnostics.append(&mut errors),
             }
@@ -241,6 +256,7 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
                 assignment,
                 &signals,
                 &elaborated_scope,
+                &no_constants,
                 allocate(),
                 &mut drivers,
             ) {
@@ -280,12 +296,14 @@ fn lower_continuous_assign(
     assignment: &crate::semantic::AnalyzedContinuousAssign,
     signals: &[DigitalSignal],
     index: &HashMap<&str, DigitalSignalId>,
+    constants: &HashMap<SmolStr, i64>,
     id: DigitalProcessId,
     drivers: &mut Vec<DigitalDriver>,
 ) -> Result<CfgDigitalProcess, Vec<IrDiagnostic>> {
     let mut lowerer = ProcessLowerer {
         signals,
         index,
+        constants,
         builder: SsaBuilder::new(),
         diagnostics: Vec::new(),
         locals: Vec::new(),
@@ -403,10 +421,12 @@ fn lower_process(
     id: DigitalProcessId,
     signals: &[DigitalSignal],
     index: &HashMap<&str, DigitalSignalId>,
+    constants: &HashMap<SmolStr, i64>,
 ) -> Result<CfgDigitalProcess, Vec<IrDiagnostic>> {
     let mut lowerer = ProcessLowerer {
         signals,
         index,
+        constants,
         builder: SsaBuilder::new(),
         diagnostics: Vec::new(),
         locals: Vec::new(),
@@ -514,6 +534,15 @@ struct ProcessLocal {
 struct ProcessLowerer<'a> {
     signals: &'a [DigitalSignal],
     index: &'a HashMap<&'a str, DigitalSignalId>,
+    /// The elaboration-time constants a name in this body may denote.
+    ///
+    /// IEEE 1364-2005 section 12.2 fixes a parameter's value at elaboration, so
+    /// `reg [WIDTH-1:0] q` and `{WIDTH{1'b0}}` are constant expressions. The
+    /// table is the *declaring* module's, which is why it travels with the
+    /// scope rather than being read out of one place: an instance frame's body
+    /// is lowered against an empty table so a child's `WIDTH` can never be
+    /// folded with a parent's.
+    constants: &'a HashMap<SmolStr, i64>,
     builder: SsaBuilder,
     diagnostics: Vec<IrDiagnostic>,
     /// Every variable declared in the process, by id.
@@ -709,7 +738,7 @@ impl ProcessLowerer<'_> {
         for declaration in &inner.digital_variables {
             let width = match &declaration.range {
                 None => Some(1),
-                Some(range) => match (constant_of(&range.msb), constant_of(&range.lsb)) {
+                Some(range) => match (self.constant(&range.msb), self.constant(&range.lsb)) {
                     (Some(msb), Some(lsb)) => Some(msb.abs_diff(lsb) as u32 + 1),
                     _ => {
                         self.error(
@@ -1300,7 +1329,7 @@ impl ProcessLowerer<'_> {
             },
             DigitalLValue::BitSelect { .. } => 1,
             DigitalLValue::PartSelect { msb, lsb, .. } => {
-                match (constant_of(msb), constant_of(lsb)) {
+                match (self.constant(msb), self.constant(lsb)) {
                     (Some(msb), Some(lsb)) => msb.abs_diff(lsb) as u32 + 1,
                     _ => 1,
                 }
@@ -1368,7 +1397,7 @@ impl ProcessLowerer<'_> {
     /// the `Wait` that consumes it is the terminator of a block it would
     /// otherwise have to be placed in.
     fn delay(&mut self, expression: &Expression) -> ValueId {
-        let value = match constant_of(expression) {
+        let value = match self.constant(expression) {
             Some(value) => i32::try_from(value).unwrap_or(i32::MAX),
             None => {
                 self.error(
@@ -1581,7 +1610,9 @@ impl ProcessLowerer<'_> {
                 // IEEE 1364-2005 section 4.1.14 requires a constant
                 // replication count, so the repetition is expanded here and
                 // the IR needs no replication node.
-                let Some(count) = constant_of(&replication.count).filter(|count| *count >= 0)
+                let Some(count) = self
+                    .constant(&replication.count)
+                    .filter(|count| *count >= 0)
                 else {
                     self.error(
                         "a replication count must be a non-negative constant",
@@ -1779,8 +1810,43 @@ impl ProcessLowerer<'_> {
         )
     }
 
+    /// The constant value of an expression in *this* body's scope.
+    ///
+    /// A literal, or a name the declaring module gave an integer parameter or
+    /// localparam — IEEE 1364-2005 section 12.2 fixes both at elaboration. A
+    /// name that also denotes a signal is never folded: a signal is a runtime
+    /// value, and reading one as a constant would replace a whole design's
+    /// behaviour with one number.
+    fn constant(&self, expression: &Expression) -> Option<i64> {
+        if let Expression::Identifier(identifier) = expression {
+            if self.index.contains_key(identifier.name.as_str()) {
+                return None;
+            }
+            return self.constants.get(&identifier.name).copied();
+        }
+        if let Expression::Unary(unary) = expression {
+            return match unary.op {
+                UnaryOp::Neg => self.constant(&unary.operand).map(|value| -value),
+                UnaryOp::Pos => self.constant(&unary.operand),
+                _ => None,
+            };
+        }
+        if let Expression::Binary(binary) = expression {
+            let left = self.constant(&binary.left)?;
+            let right = self.constant(&binary.right)?;
+            return match binary.op {
+                BinaryOp::Add => left.checked_add(right),
+                BinaryOp::Sub => left.checked_sub(right),
+                BinaryOp::Mul => left.checked_mul(right),
+                BinaryOp::Div => left.checked_div(right),
+                _ => None,
+            };
+        }
+        constant_of(expression)
+    }
+
     fn constant_index(&mut self, expression: &Expression) -> Option<i64> {
-        match constant_of(expression) {
+        match self.constant(expression) {
             Some(index) => Some(index),
             None => {
                 self.error(

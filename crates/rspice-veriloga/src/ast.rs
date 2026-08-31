@@ -152,10 +152,30 @@ pub struct PortDeclaration {
     /// Whether the port was declared `signed`. Continuous-domain ports never
     /// are.
     pub signedness: Signedness,
+    /// The net or variable type written on the port itself.
+    ///
+    /// IEEE 1364-2005 section 12.3.4 lets a port declaration carry its own
+    /// type — `output reg [3:0] q;` — as an alternative to the two-declaration
+    /// form `output [3:0] q; reg [3:0] q;`. The two mean the same thing, and
+    /// the parser records which spelling was used so the module item can
+    /// synthesize the second declaration the compact form stands for.
+    ///
+    /// `None` is a port with no type of its own, which section 12.3.3 makes an
+    /// implicit net.
+    pub net_type: Option<PortNetType>,
     /// Port names
     pub names: Vec<SmolStr>,
     /// Source span
     pub span: Span,
+}
+
+/// A net or variable type written on a port declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PortNetType {
+    /// `output wire y;`
+    Wire,
+    /// `output reg [3:0] q;`
+    Reg,
 }
 
 /// Port direction

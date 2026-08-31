@@ -49,6 +49,20 @@ pub struct AnalyzedDigital {
     /// order, and every entry is already resolved against the scope it was
     /// instantiated in; see [`crate::semantic::digital_elaborate`].
     pub instances: Vec<ElaboratedDigitalInstance>,
+    /// Integer-valued parameters and localparams of *this* module, by name.
+    ///
+    /// IEEE 1364-2005 section 12.2 fixes a parameter at elaboration, so the
+    /// places a discrete-domain construct needs a constant — a replication
+    /// count, a part-select bound, a delay — may name one. The analog half
+    /// deliberately treats a parameter as a per-instance runtime value and
+    /// folds nothing, which is why this is a separate table rather than a
+    /// widening of the invariant environment.
+    ///
+    /// Only the compiled module's own. An elaborated instance's body is
+    /// lowered against an empty table, so a child's `{WIDTH{1'b0}}` is refused
+    /// rather than folded with the *parent's* `WIDTH` — which would be a wrong
+    /// answer wearing a right one's clothes.
+    pub constants: HashMap<SmolStr, i64>,
 }
 
 impl AnalyzedDigital {
@@ -443,6 +457,7 @@ impl SemanticAnalyzer {
             // what it instantiates; hierarchy elaboration fills this in on the
             // module it selects.
             instances: Vec::new(),
+            constants: self.digital_constants(module),
         };
     }
 
@@ -480,7 +495,88 @@ impl SemanticAnalyzer {
                 );
             }
         }
+        self.push_implicit_port_nets(module, &mut signals, &mut seen);
         signals
+    }
+
+    /// The module's integer parameters and localparams, by name.
+    ///
+    /// Read out of the declarations rather than out of the analyzer's constant
+    /// environments so the table names exactly what this module declares: the
+    /// environments accumulate, and a table that inherited a neighbour's
+    /// parameter would fold a name this module never wrote.
+    ///
+    /// A non-integer default is skipped rather than rounded. Every place this
+    /// table is consulted wants a bit position or a repetition count, and there
+    /// is no defensible integer for `parameter GAIN = 2.5`.
+    fn digital_constants(&self, module: &Module) -> HashMap<SmolStr, i64> {
+        let mut constants = HashMap::new();
+        let declarations = module.parameters.iter().chain(&module.localparams);
+        for parameter in declarations {
+            let Some(default) = &parameter.default else {
+                continue;
+            };
+            let Some(value) = self.eval_const_parameter_default(default) else {
+                continue;
+            };
+            if value.fract() != 0.0 || !value.is_finite() {
+                continue;
+            }
+            constants.insert(parameter.name.clone(), value as i64);
+        }
+        constants
+    }
+
+    /// Declare the ports that nothing else declared.
+    ///
+    /// IEEE 1364-2005 section 12.3.3: a port with no net or variable
+    /// declaration of its own is implicitly a net of the port's declared range.
+    /// A structural design — `module c17 (N1, N2, N22); input N1, N2; output
+    /// N22; ... endmodule` — declares nothing else at all, so without this its
+    /// ports would be absent from the plan and every reference to one would be
+    /// an undeclared name.
+    ///
+    /// Runs after the explicit declarations so that the two-declaration form of
+    /// section 12.3.4 still wins: `output q; reg q;` has already put `q` in as
+    /// a variable, and this adds nothing.
+    ///
+    /// A port carrying a *discipline* is a continuous-domain port and is not a
+    /// digital net, so it is skipped — as is a port that appears in an analog
+    /// net declaration, which is the other spelling of the same thing. Without
+    /// both exclusions a mixed module's `electrical p, n;` would gain a
+    /// four-state wire apiece.
+    fn push_implicit_port_nets(
+        &mut self,
+        module: &Module,
+        signals: &mut Vec<AnalyzedDigitalSignal>,
+        seen: &mut HashMap<SmolStr, Span>,
+    ) {
+        let analog: std::collections::HashSet<&SmolStr> = module
+            .nets
+            .iter()
+            .flat_map(|net| net.names.iter())
+            .collect();
+        for declaration in &module.port_declarations {
+            if declaration.discipline.is_some() {
+                continue;
+            }
+            let bounds = self.resolve_vector_range(declaration.range.as_ref(), "wire");
+            for name in &declaration.names {
+                if seen.contains_key(name) || analog.contains(name) {
+                    continue;
+                }
+                seen.insert(name.clone(), declaration.span);
+                signals.push(AnalyzedDigitalSignal {
+                    name: name.clone(),
+                    class: DigitalSignalClass::Net(DigitalNetKind::Wire),
+                    signedness: declaration.signedness,
+                    range: bounds,
+                    width: bounds.map_or(1, VectorBounds::width),
+                    redeclares_port: true,
+                    span: declaration.span,
+                });
+            }
+        }
     }
 
     fn push_digital_signal(
@@ -551,6 +647,28 @@ impl SemanticAnalyzer {
     ///
     /// IEEE 1364-2005 section 4.2.1 requires both bounds to be constant
     /// expressions, and permits either direction.
+    ///
+    /// # Why a `parameter` counts as one here and not in the analog half
+    ///
+    /// The two halves disagree about what a parameter is, and both are right.
+    /// A Verilog-A model parameter is a per-instance runtime value — the same
+    /// compiled device serves a hundred instances with a hundred values — so
+    /// nothing continuous-domain may fold it, and `eval_const_invariant`
+    /// deliberately does not see one.
+    ///
+    /// A packed range is not a continuous-domain quantity. IEEE 1364-2005
+    /// section 12.2 fixes a parameter's value at *elaboration*, and the width
+    /// of `reg [WIDTH-1:0] q;` is decided then and cannot vary afterwards: a
+    /// four-bit signal and a five-bit signal are different entries in the plan,
+    /// not one entry with a runtime width. So a digital range is resolved
+    /// against the declared defaults, which is what elaborating the top module
+    /// with no overrides means.
+    ///
+    /// What that does not yet cover is an instance *override* reaching a
+    /// digital range — `child #(.WIDTH(8)) u1 (...)` — which would elaborate
+    /// the child's signals at a different width than its own default says.
+    /// Hierarchy elaboration refuses a parameter override on a digital instance
+    /// rather than applying the default silently.
     fn resolve_vector_range(
         &mut self,
         range: Option<&VectorRange>,
@@ -558,8 +676,10 @@ impl SemanticAnalyzer {
     ) -> Option<VectorBounds> {
         let range = range?;
         let (Some(msb), Some(lsb)) = (
-            self.eval_const_invariant(&range.msb),
-            self.eval_const_invariant(&range.lsb),
+            self.eval_const_invariant(&range.msb)
+                .or_else(|| self.eval_const_parameter_default(&range.msb)),
+            self.eval_const_invariant(&range.lsb)
+                .or_else(|| self.eval_const_parameter_default(&range.lsb)),
         ) else {
             self.record_error_at(
                 SemanticErrorKind::UnsupportedFeature(format!(
