@@ -68,25 +68,42 @@ pub fn ac_sweep_frequencies(
         FreqVariation::Lin => delta * SWEEP_RELTOL,
         _ => delta * fstop * SWEEP_RELTOL,
     };
+    // Adding the endpoint tolerance can overflow even though both authored
+    // endpoints are finite. An infinite loop bound would admit the first
+    // overflowed frequency forever (`inf <= inf`). The tolerance is only an
+    // endpoint-rounding allowance, so falling back to the exact finite stop is
+    // the only meaningful behavior when that addition overflows.
+    let sweep_limit = match fstop + freq_tol {
+        limit if limit.is_finite() => limit,
+        _ => fstop,
+    };
 
     let mut frequencies = Vec::new();
     let mut freq = fstart;
-    while freq <= fstop + freq_tol {
+    while freq <= sweep_limit {
         frequencies.push(freq);
-        match variation {
+        let next = match variation {
             FreqVariation::Lin => {
                 if delta == 0.0 {
                     break;
                 }
-                freq += delta;
+                freq + delta
             }
             _ => {
                 if delta == 1.0 {
                     break;
                 }
-                freq *= delta;
+                freq * delta
             }
+        };
+        // A representable positive delta/ratio can still fail to advance a
+        // large floating-point frequency, and the step after the largest
+        // finite value can overflow. Neither result can add a valid sweep
+        // point; accepting either would make this loop non-terminating.
+        if !next.is_finite() || next <= freq {
+            break;
         }
+        freq = next;
     }
     frequencies
 }
@@ -199,5 +216,20 @@ mod tests {
             ac_sweep_frequencies(FreqVariation::Oct, 10, 5.0e3, 5.0e3),
             vec![5.0e3]
         );
+    }
+
+    #[test]
+    fn extreme_linear_sweep_never_admits_an_infinite_frequency() {
+        let frequencies = ac_sweep_frequencies(FreqVariation::Lin, 3, 0.0, Value::MAX);
+        assert_eq!(frequencies, vec![0.0, Value::MAX / 2.0, Value::MAX]);
+        assert!(frequencies.iter().all(|frequency| frequency.is_finite()));
+    }
+
+    #[test]
+    fn linear_sweep_stops_when_rounding_prevents_forward_progress() {
+        let start = 1.0e300;
+        let stop = 1.000_000_000_000_001e300;
+        let frequencies = ac_sweep_frequencies(FreqVariation::Lin, usize::MAX, start, stop);
+        assert_eq!(frequencies, vec![start]);
     }
 }
