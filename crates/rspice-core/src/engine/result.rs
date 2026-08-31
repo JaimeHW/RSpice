@@ -516,10 +516,6 @@ impl TransientResult {
     /// [`Self::try_voltage_at`] for checked access.
     #[track_caller]
     pub fn voltage_at(&self, node: usize, time_index: usize) -> Value {
-        if node == 0 {
-            return 0.0;
-        }
-
         self.try_voltage_at(node, time_index).unwrap_or_else(|| {
             panic!(
                 "node {} / time index {} out of range for TransientResult with {} nodes and {} samples",
@@ -532,9 +528,14 @@ impl TransientResult {
     }
 
     /// Get voltage at a node at a specific time index, returning `None` when
-    /// the node or index is invalid.
+    /// the node or index is invalid. Ground (node 0) is `Some(0.0)` at every
+    /// stored time point.
     pub fn try_voltage_at(&self, node: usize, time_index: usize) -> Option<Value> {
-        if node == 0 || node > self.num_nodes {
+        self.time.get(time_index)?;
+        if node == 0 {
+            return Some(0.0);
+        }
+        if node > self.num_nodes {
             return None;
         }
         self.voltages
@@ -687,6 +688,34 @@ mod tests {
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
         }
+    }
+
+    #[test]
+    fn voltage_access_checks_time_before_synthesizing_ground() {
+        let result = result_on_grid(vec![0.0, 1.0]);
+
+        assert_eq!(result.try_voltage_at(0, 0), Some(0.0));
+        assert_eq!(result.try_voltage_at(0, 1), Some(0.0));
+        assert_eq!(result.try_voltage_at_named("0", 1), Some(0.0));
+        assert_eq!(result.voltage_at(0, 1), 0.0);
+
+        assert_eq!(result.try_voltage_at(0, 2), None);
+        assert_eq!(result.try_voltage_at_named("0", 2), None);
+        let panic = std::panic::catch_unwind(|| result.voltage_at(0, 2));
+        assert!(
+            panic.is_err(),
+            "unchecked ground access must reject invalid time indices"
+        );
+    }
+
+    #[test]
+    fn voltage_access_rejects_samples_outside_the_time_grid() {
+        let mut result = result_on_grid(vec![0.0, 1.0]);
+        result.voltages[0].push(4.0);
+
+        assert_eq!(result.try_voltage_at(1, 1), Some(2.0));
+        assert_eq!(result.try_voltage_at(1, 2), None);
+        assert_eq!(result.try_voltage_at(2, 0), None);
     }
 
     #[test]
