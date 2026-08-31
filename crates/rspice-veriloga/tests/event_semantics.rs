@@ -381,3 +381,120 @@ endmodule
         .expect_err("non-string step-event filter must be rejected");
     assert!(error.to_string().contains("string literals"), "{error}");
 }
+
+/// `@(posedge expr)` has no digital solver behind it, so it compiles to the
+/// analog `cross` operator — a continuous zero-crossing detector on the value
+/// of the operand, which is not edge detection.
+///
+/// That reading is the conventional Verilog-A one and is kept, but it changes
+/// what the source means, so it is said out loud on the compile report rather
+/// than applied in silence.
+#[test]
+fn edge_events_on_continuous_signals_report_their_cross_interpretation() {
+    let report = rspice_veriloga::VerilogACompiler::default()
+        .compile_runtime(
+            r#"
+`include "disciplines.vams"
+module edge_on_continuous(p, n);
+    inout p, n;
+    electrical p, n;
+    real hits;
+    analog begin
+        hits = 0.0;
+        @(posedge V(p, n)) hits = 1.0;
+        @(negedge V(p, n)) hits = 2.0;
+        I(p, n) <+ hits * V(p, n);
+    end
+endmodule
+"#,
+            Some("edge_on_continuous"),
+        )
+        .expect("an edge event on a continuous signal still compiles");
+
+    let edge_diagnostics: Vec<_> = report
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "VA-SEM-EDGE-EVENT-AS-CROSS")
+        .collect();
+    assert_eq!(
+        edge_diagnostics.len(),
+        2,
+        "both edge events must be reported: {:?}",
+        report.diagnostics
+    );
+    assert!(edge_diagnostics[0].message.contains("posedge"));
+    assert!(edge_diagnostics[0].message.contains("cross"));
+    assert!(edge_diagnostics[1].message.contains("negedge"));
+    for diagnostic in edge_diagnostics {
+        assert!(
+            diagnostic.span.is_some(),
+            "an edge event is pinned to its source position"
+        );
+    }
+}
+
+/// On a discrete-discipline signal the `cross` reading is simply wrong: a
+/// digital net carries no continuous value to cross zero, so the event would
+/// never fire. Refuse it instead of stamping a detector that does nothing.
+#[test]
+fn edge_events_on_discrete_signals_are_refused() {
+    for keyword in ["posedge", "negedge"] {
+        let source = format!(
+            r#"
+`include "disciplines.vams"
+discipline digital_wire
+    domain discrete;
+enddiscipline
+module edge_on_discrete(p, n);
+    inout p, n;
+    electrical p, n;
+    digital_wire clk;
+    real hits;
+    analog begin
+        hits = 0.0;
+        @({keyword} clk) hits = 1.0;
+        I(p, n) <+ hits * V(p, n);
+    end
+endmodule
+"#
+        );
+        let error = rspice_veriloga::VerilogACompiler::default()
+            .compile_module(&source, Some("edge_on_discrete"))
+            .expect_err("a digital edge event must not compile to a cross detector");
+        let message = error.to_string();
+        assert!(
+            message.contains(&format!("`{keyword} clk`")),
+            "expected the refused construct to be named, got {message:?}"
+        );
+        assert!(
+            message.contains("discrete-discipline"),
+            "expected the discipline domain to be named, got {message:?}"
+        );
+    }
+}
+
+/// The built-in `logic` discipline is discrete too, and reaches the same
+/// refusal without any user discipline declaration.
+#[test]
+fn edge_events_on_the_builtin_logic_discipline_are_refused() {
+    let error = rspice_veriloga::VerilogACompiler::default()
+        .compile_module(
+            r#"
+`include "disciplines.vams"
+module edge_on_logic(p, n);
+    inout p, n;
+    electrical p, n;
+    logic clk;
+    real hits;
+    analog begin
+        hits = 0.0;
+        @(posedge clk) hits = 1.0;
+        I(p, n) <+ hits * V(p, n);
+    end
+endmodule
+"#,
+            Some("edge_on_logic"),
+        )
+        .expect_err("a digital edge event must not compile to a cross detector");
+    assert!(error.to_string().contains("`posedge clk`"), "{error}");
+}

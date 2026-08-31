@@ -57,6 +57,9 @@ impl ConstantValue {
 /// Diagnostic code for a system task that parses and is then discarded.
 const NO_EFFECT_SYSTEM_TASK_CODE: &str = "VA-SEM-NO-EFFECT-SYSTEM-TASK";
 
+/// Diagnostic code for `posedge`/`negedge` lowered to an analog `cross`.
+const EDGE_EVENT_AS_CROSS_CODE: &str = "VA-SEM-EDGE-EVENT-AS-CROSS";
+
 mod analyzed;
 mod elaboration;
 mod symbols;
@@ -2862,6 +2865,7 @@ impl SemanticAnalyzer {
                 }))
             }
             EventExpr::Posedge { signal, span } => {
+                self.qualify_edge_event_operand("posedge", signal, *span)?;
                 let signal = self.lower_expression_with_side_effects(signal, module, sink)?;
                 EventLowering::Guard(Expression::Call(CallExpr {
                     name: "cross".into(),
@@ -2870,6 +2874,7 @@ impl SemanticAnalyzer {
                 }))
             }
             EventExpr::Negedge { signal, span } => {
+                self.qualify_edge_event_operand("negedge", signal, *span)?;
                 let signal = self.lower_expression_with_side_effects(signal, module, sink)?;
                 EventLowering::Guard(Expression::Call(CallExpr {
                     name: "cross".into(),
@@ -2942,6 +2947,63 @@ impl SemanticAnalyzer {
                 }
             }
         })
+    }
+
+    /// Decide what a `posedge`/`negedge` operand means before it is lowered.
+    ///
+    /// This compiler has no digital solver, so an edge event can only be
+    /// approximated by the analog `cross` operator — a continuous zero-crossing
+    /// detector on the *value* of the operand. That approximation is the
+    /// conventional Verilog-A reading of `@(posedge expr)` and is kept, but it
+    /// is not silent: an accepted edge event records why the source now means
+    /// something else.
+    ///
+    /// On a discrete-discipline signal the approximation is simply wrong. A
+    /// digital net has no continuous value to cross zero, so `cross` would
+    /// stamp a detector on a quantity the solver never integrates and the event
+    /// would never fire. That is refused instead of miscompiled.
+    fn qualify_edge_event_operand(
+        &mut self,
+        keyword: &str,
+        signal: &Expression,
+        span: Span,
+    ) -> CompileResult<()> {
+        if let Some(net) = self.discrete_net_operand(signal) {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::UnsupportedFeature(format!(
+                    "`{keyword} {net}` is a digital edge event on a discrete-discipline signal; \
+                     this compiler has no digital solver and will not approximate it with the \
+                     analog `cross` operator"
+                )),
+                span,
+            )));
+        }
+        self.warn(
+            EDGE_EVENT_AS_CROSS_CODE,
+            format!(
+                "`{keyword}` is compiled as `cross(...)` for Verilog-A compatibility: it fires on \
+                 a continuous zero crossing of the operand, not on a digital signal edge."
+            ),
+            span,
+        );
+        Ok(())
+    }
+
+    /// The name of the operand when it is a net or port of a discrete-domain
+    /// discipline (the built-in `logic`, or any user discipline declared
+    /// `domain discrete`).
+    fn discrete_net_operand(&self, signal: &Expression) -> Option<SmolStr> {
+        let Expression::Identifier(identifier) = signal else {
+            return None;
+        };
+        let symbol = self.symbols.lookup(identifier.name.as_str())?;
+        if !matches!(symbol.kind, SymbolKind::Node | SymbolKind::Port) {
+            return None;
+        }
+        let discipline = self
+            .disciplines
+            .get_discipline(symbol.attrs.discipline.as_deref()?)?;
+        (discipline.domain == Domain::Discrete).then(|| identifier.name.clone())
     }
 
     fn filter_step_event(phase: Expression, analyses: &[StringLit], span: Span) -> Expression {
