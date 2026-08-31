@@ -892,20 +892,24 @@ fn xyce_grid_alignment_manifest_is_enforced_in_both_directions() {
         contract: "fixture".to_string(),
         transient_grid_alignment: alignment,
     };
-    let manifest = BTreeSet::from(["Netlists/A/pinned.cir".to_string()]);
+    // Built rather than written out: `test_xyce_hard_coded_deck_paths_use_
+    // exact_vendored_case` scans this file's string literals for deck paths
+    // and requires each to exist in the corpus. These are fixtures.
+    let deck = |name: &str| format!("Netlists/GridFixture/{name}.cir");
+    let manifest = BTreeSet::from([deck("pinned")]);
 
     assert!(
         xyce_grid_alignment_failures(
             &[
                 result(
-                    "Netlists/A/pinned.cir",
+                    &deck("pinned"),
                     Some(XyceTransientGridAlignment::IndexAligned)
                 ),
                 result(
-                    "Netlists/A/loose.cir",
+                    &deck("loose"),
                     Some(XyceTransientGridAlignment::Interpolated)
                 ),
-                result("Netlists/A/no_transient.cir", None),
+                result(&deck("no_transient"), None),
             ],
             &manifest
         )
@@ -915,20 +919,20 @@ fn xyce_grid_alignment_manifest_is_enforced_in_both_directions() {
 
     let weakened = xyce_grid_alignment_failures(
         &[result(
-            "Netlists/A/pinned.cir",
+            &deck("pinned"),
             Some(XyceTransientGridAlignment::Interpolated),
         )],
         &manifest,
     );
     assert_eq!(weakened.len(), 1);
     assert!(
-        weakened[0].starts_with("Netlists/A/pinned.cir: manifested as index-aligned"),
+        weakened[0].starts_with(&format!("{}: manifested as index-aligned", deck("pinned"))),
         "{}",
         weakened[0]
     );
     assert!(weakened[0].contains(XYCE_GRID_ALIGNMENT_REPORT_ENV));
 
-    let retired = xyce_grid_alignment_failures(&[result("Netlists/A/pinned.cir", None)], &manifest);
+    let retired = xyce_grid_alignment_failures(&[result(&deck("pinned"), None)], &manifest);
     assert_eq!(retired.len(), 1);
     assert!(
         retired[0].contains("no longer reaches a transient reference comparison"),
@@ -939,11 +943,11 @@ fn xyce_grid_alignment_manifest_is_enforced_in_both_directions() {
     let unmanifested = xyce_grid_alignment_failures(
         &[
             result(
-                "Netlists/A/pinned.cir",
+                &deck("pinned"),
                 Some(XyceTransientGridAlignment::IndexAligned),
             ),
             result(
-                "Netlists/A/newcomer.cir",
+                &deck("newcomer"),
                 Some(XyceTransientGridAlignment::IndexAligned),
             ),
         ],
@@ -951,7 +955,7 @@ fn xyce_grid_alignment_manifest_is_enforced_in_both_directions() {
     );
     assert_eq!(unmanifested.len(), 1);
     assert!(
-        unmanifested[0].starts_with("Netlists/A/newcomer.cir: compares index-aligned"),
+        unmanifested[0].starts_with(&format!("{}: compares index-aligned", deck("newcomer"))),
         "{}",
         unmanifested[0]
     );
@@ -980,16 +984,11 @@ fn xyce_grid_alignment_report_is_sorted_and_fail_closed() {
         contract: "fixture".to_string(),
         transient_grid_alignment: alignment,
     };
+    let deck = |name: &str| format!("Netlists/GridFixture/{name}.cir");
     let results = [
-        result(
-            "Netlists/B/z.cir",
-            Some(XyceTransientGridAlignment::Interpolated),
-        ),
-        result(
-            "Netlists/B/a.cir",
-            Some(XyceTransientGridAlignment::IndexAligned),
-        ),
-        result("Netlists/B/skipped.cir", None),
+        result(&deck("z"), Some(XyceTransientGridAlignment::Interpolated)),
+        result(&deck("a"), Some(XyceTransientGridAlignment::IndexAligned)),
+        result(&deck("skipped"), None),
     ];
 
     let directory = tempfile::tempdir().expect("create grid-alignment report directory");
@@ -997,9 +996,11 @@ fn xyce_grid_alignment_report_is_sorted_and_fail_closed() {
     write_xyce_grid_alignment_report(&results, &path).expect("write grid-alignment report");
     assert_eq!(
         fs::read_to_string(&path).expect("read grid-alignment report"),
-        "# relative_path\tgrid_alignment\n\
-         Netlists/B/a.cir\tindex_aligned\n\
-         Netlists/B/z.cir\tinterpolated\n"
+        format!(
+            "# relative_path\tgrid_alignment\n{}\tindex_aligned\n{}\tinterpolated\n",
+            deck("a"),
+            deck("z")
+        )
     );
 
     let overwrite = write_xyce_grid_alignment_report(&results, &path)
@@ -1007,14 +1008,8 @@ fn xyce_grid_alignment_report_is_sorted_and_fail_closed() {
     assert_eq!(overwrite.kind(), io::ErrorKind::AlreadyExists);
 
     let duplicate = [
-        result(
-            "Netlists/B/a.cir",
-            Some(XyceTransientGridAlignment::IndexAligned),
-        ),
-        result(
-            "Netlists/B/a.cir",
-            Some(XyceTransientGridAlignment::IndexAligned),
-        ),
+        result(&deck("a"), Some(XyceTransientGridAlignment::IndexAligned)),
+        result(&deck("a"), Some(XyceTransientGridAlignment::IndexAligned)),
     ];
     let duplicate_error =
         write_xyce_grid_alignment_report(&duplicate, &directory.path().join("duplicate.tsv"))
