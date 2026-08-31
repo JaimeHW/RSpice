@@ -34,7 +34,8 @@ pub(super) fn canonical_model_preprocess(
 	let AK=parameters[40];
 	let AP=parameters[37];
 	let AR=parameters[1];
-	let AS=0f64;
+	let AS=0.0;
+	let AT=0.0;
 	let mut oU=0.0;
 	let mut oAD=false;
 	let mut oAE=false;
@@ -97,14 +98,15 @@ pub(super) fn canonical_model_preprocess(
 	let AN=M== N;
 	let AO=J== N;
 	let AQ=parameters[36]* AP;
-	let AT=if AR!=0.0{
-	AS
+	let AV=if AR!=0.0{
+	let AU=AS+ AT;
+	AU
 	}else{
 	N
 	};
-	let AU=AP> N;
-	let AV=AA/ (Z* 8.617333262e-5f64);
-    [D, E, F, G, I, K, M, O as u8 as f64, R, T as u8 as f64, oU, W as u8 as f64, Z, AA, oAD as u8 as f64, oAH, oAE as u8 as f64, oAI, AG as u8 as f64, oAJ, AL as u8 as f64, oAM, AN as u8 as f64, AO as u8 as f64, AQ, AU as u8 as f64, AV, AT]
+	let AW=AP> N;
+	let AX=AA/ (Z* 8.617333262e-5f64);
+    [D, E, F, G, I, K, M, O as u8 as f64, R, T as u8 as f64, oU, W as u8 as f64, Z, AA, oAD as u8 as f64, oAH, oAE as u8 as f64, oAI, AG as u8 as f64, oAJ, AL as u8 as f64, oAM, AN as u8 as f64, AO as u8 as f64, AQ, AW as u8 as f64, AX, AV]
 }
 
 pub(super) fn canonical_instance_preprocess(

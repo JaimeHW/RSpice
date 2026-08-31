@@ -1389,6 +1389,295 @@ impl GeneratedBuiltinKind {
         }
     }
 
+    pub fn grouped_noise_process_descriptors(&self) -> &'static [super::GeneratedNoiseProcessDescriptor] {
+        match self {
+            #[cfg(all(feature = "veriloga-model-diode-cmc", feature = "veriloga-builtins-noise"))]
+            Self::Device0(_) => &diode_cmc__diode_cmc__cdfab304::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-epfl-hemt-10a", feature = "veriloga-builtins-noise"))]
+            Self::Device1(_) => &epfl_hemt__epfl_hemt_10a__671606cd::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-juncap200", feature = "veriloga-builtins-noise"))]
+            Self::Device2(_) => &juncap200__juncap200__94ba75b4::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-psp104tva", feature = "veriloga-builtins-noise"))]
+            Self::Device3(_) => &psp104t__psp104tva__0878692d::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-psp104va", feature = "veriloga-builtins-noise"))]
+            Self::Device4(_) => &psp104__psp104va__75652357::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-pspnqs104va", feature = "veriloga-builtins-noise"))]
+            Self::Device5(_) => &psp104_nqs__pspnqs104va__1d25ee14::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-angelov", feature = "veriloga-builtins-noise"))]
+            Self::Device6(_) => &angelov__angelov__98b92059::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-angelov-gan", feature = "veriloga-builtins-noise"))]
+            Self::Device7(_) => &angelov_gan__angelov_gan__98687686::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-asmesd", feature = "veriloga-builtins-noise"))]
+            Self::Device8(_) => &asmesd__asmesd__fbe2f3a4::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-asmesd-dio", feature = "veriloga-builtins-noise"))]
+            Self::Device9(_) => &asmesd_dio__asmesd_dio__b913dc15::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-asmhemt", feature = "veriloga-builtins-noise"))]
+            Self::Device10(_) => &asmhemt__asmhemt__9d86ed5b::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-bjt505-va", feature = "veriloga-builtins-noise"))]
+            Self::Device11(_) => &bjt505__bjt505_va__6ac090e2::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-bjt505t-va", feature = "veriloga-builtins-noise"))]
+            Self::Device12(_) => &bjt505t__bjt505t_va__48d754e7::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-bjtd505-va", feature = "veriloga-builtins-noise"))]
+            Self::Device13(_) => &bjtd505__bjtd505_va__3cb9ae22::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-bjtd505t-va", feature = "veriloga-builtins-noise"))]
+            Self::Device14(_) => &bjtd505t__bjtd505t_va__06e24760::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-bsimbulk", feature = "veriloga-builtins-noise"))]
+            Self::Device15(_) => &bsimbulk__bsimbulk__0f953aae::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-bsimcmg-va", feature = "veriloga-builtins-noise"))]
+            Self::Device16(_) => &bsimcmg__bsimcmg_va__f3a4082f::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-bsimimg", feature = "veriloga-builtins-noise"))]
+            Self::Device17(_) => &bsimimg__bsimimg__25eb6a31::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-bsimsoi-18c250bc", feature = "veriloga-builtins-noise"))]
+            Self::Device18(_) => &bsimsoi__bsimsoi__18c250bc::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-bsimsoi-e2aff994", feature = "veriloga-builtins-noise"))]
+            Self::Device19(_) => &bsimsoi__bsimsoi__e2aff994::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-bsimsoi-va", feature = "veriloga-builtins-noise"))]
+            Self::Device20(_) => &bsimsoi__bsimsoi_va__3b1f6b5e::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-ekv3-rf", feature = "veriloga-builtins-noise"))]
+            Self::Device21(_) => &ekv3__ekv3_rf__958cd2b2::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-ekv-va", feature = "veriloga-builtins-noise"))]
+            Self::Device22(_) => &ekv26_sdext_verilog_a__ekv_va__0f1ec77e::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-hicuml0va", feature = "veriloga-builtins-noise"))]
+            Self::Device23(_) => &hicuml0_v2p1p0__hicuml0va__91cb3377::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-hicuml2va", feature = "veriloga-builtins-noise"))]
+            Self::Device24(_) => &hicuml2_v320__hicuml2va__25e676cf::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-hisimhv-n4-va", feature = "veriloga-builtins-noise"))]
+            Self::Device25(_) => &hisimhv_n4__hisimhv_n4_va__69344dcf::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-hisimhv-n5-va", feature = "veriloga-builtins-noise"))]
+            Self::Device26(_) => &hisimhv_n5__hisimhv_n5_va__89bf8539::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-hisimhv-va", feature = "veriloga-builtins-noise"))]
+            Self::Device27(_) => &hisimhv__hisimhv_va__57d0ff0e::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-hisimsoi-va-5be18005", feature = "veriloga-builtins-noise"))]
+            Self::Device28(_) => &hisimsoi__hisimsoi_va__5be18005::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-hisimsoi-va-242bc21d", feature = "veriloga-builtins-noise"))]
+            Self::Device29(_) => &hisimsoi_n4__hisimsoi_va__242bc21d::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-hisimsoi-va-38074d06", feature = "veriloga-builtins-noise"))]
+            Self::Device30(_) => &hisimsoi_n5__hisimsoi_va__38074d06::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-hisimsotb-va", feature = "veriloga-builtins-noise"))]
+            Self::Device31(_) => &hisimsotb__hisimsotb_va__41200697::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-l-utsoi-832ce87d", feature = "veriloga-builtins-noise"))]
+            Self::Device32(_) => &l_utsoi_102__l_utsoi__832ce87d::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-l-utsoi-485e0ac9", feature = "veriloga-builtins-noise"))]
+            Self::Device33(_) => &l_utsoi_102_nqs__l_utsoi__485e0ac9::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-mosvar", feature = "veriloga-builtins-noise"))]
+            Self::Device34(_) => &mosvar__mosvar__0a88ed4a::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-mvsg-cmc", feature = "veriloga-builtins-noise"))]
+            Self::Device35(_) => &mvsg_cmc_4__mvsg_cmc__7d7f784b::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-r2-cmc", feature = "veriloga-builtins-noise"))]
+            Self::Device36(_) => &r2_cmc__r2_cmc__bc71a915::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-r2-et-cmc", feature = "veriloga-builtins-noise"))]
+            Self::Device37(_) => &r2_et_cmc__r2_et_cmc__a8425039::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-r3-cmc", feature = "veriloga-builtins-noise"))]
+            Self::Device38(_) => &r3_cmc__r3_cmc__2e3554ae::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-vbic13", feature = "veriloga-builtins-noise"))]
+            Self::Device39(_) => &vbic_3t__vbic13__aa00e2e7::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-vbic13-3t-et", feature = "veriloga-builtins-noise"))]
+            Self::Device40(_) => &vbic_3t_et__vbic13_3t_et__bd2f63d4::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-vbic13-4t", feature = "veriloga-builtins-noise"))]
+            Self::Device41(_) => &vbic_1p3__vbic13_4t__132cb4e0::GROUPED_NOISE_PROCESSES,
+            #[cfg(all(feature = "veriloga-model-vbic-4t-et-cf", feature = "veriloga-builtins-noise"))]
+            Self::Device42(_) => &vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::GROUPED_NOISE_PROCESSES,
+            #[cfg(feature = "veriloga-builtins-noise")]
+            Self::__NonExhaustive(value) => match *value {},
+            #[cfg(not(feature = "veriloga-builtins-noise"))]
+            _ => &[],
+        }
+    }
+
+    pub fn grouped_noise_injection_descriptors(&self) -> &'static [super::GeneratedNoiseInjectionDescriptor] {
+        match self {
+            #[cfg(all(feature = "veriloga-model-diode-cmc", feature = "veriloga-builtins-noise"))]
+            Self::Device0(_) => &diode_cmc__diode_cmc__cdfab304::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-epfl-hemt-10a", feature = "veriloga-builtins-noise"))]
+            Self::Device1(_) => &epfl_hemt__epfl_hemt_10a__671606cd::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-juncap200", feature = "veriloga-builtins-noise"))]
+            Self::Device2(_) => &juncap200__juncap200__94ba75b4::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-psp104tva", feature = "veriloga-builtins-noise"))]
+            Self::Device3(_) => &psp104t__psp104tva__0878692d::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-psp104va", feature = "veriloga-builtins-noise"))]
+            Self::Device4(_) => &psp104__psp104va__75652357::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-pspnqs104va", feature = "veriloga-builtins-noise"))]
+            Self::Device5(_) => &psp104_nqs__pspnqs104va__1d25ee14::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-angelov", feature = "veriloga-builtins-noise"))]
+            Self::Device6(_) => &angelov__angelov__98b92059::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-angelov-gan", feature = "veriloga-builtins-noise"))]
+            Self::Device7(_) => &angelov_gan__angelov_gan__98687686::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-asmesd", feature = "veriloga-builtins-noise"))]
+            Self::Device8(_) => &asmesd__asmesd__fbe2f3a4::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-asmesd-dio", feature = "veriloga-builtins-noise"))]
+            Self::Device9(_) => &asmesd_dio__asmesd_dio__b913dc15::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-asmhemt", feature = "veriloga-builtins-noise"))]
+            Self::Device10(_) => &asmhemt__asmhemt__9d86ed5b::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-bjt505-va", feature = "veriloga-builtins-noise"))]
+            Self::Device11(_) => &bjt505__bjt505_va__6ac090e2::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-bjt505t-va", feature = "veriloga-builtins-noise"))]
+            Self::Device12(_) => &bjt505t__bjt505t_va__48d754e7::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-bjtd505-va", feature = "veriloga-builtins-noise"))]
+            Self::Device13(_) => &bjtd505__bjtd505_va__3cb9ae22::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-bjtd505t-va", feature = "veriloga-builtins-noise"))]
+            Self::Device14(_) => &bjtd505t__bjtd505t_va__06e24760::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-bsimbulk", feature = "veriloga-builtins-noise"))]
+            Self::Device15(_) => &bsimbulk__bsimbulk__0f953aae::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-bsimcmg-va", feature = "veriloga-builtins-noise"))]
+            Self::Device16(_) => &bsimcmg__bsimcmg_va__f3a4082f::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-bsimimg", feature = "veriloga-builtins-noise"))]
+            Self::Device17(_) => &bsimimg__bsimimg__25eb6a31::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-bsimsoi-18c250bc", feature = "veriloga-builtins-noise"))]
+            Self::Device18(_) => &bsimsoi__bsimsoi__18c250bc::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-bsimsoi-e2aff994", feature = "veriloga-builtins-noise"))]
+            Self::Device19(_) => &bsimsoi__bsimsoi__e2aff994::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-bsimsoi-va", feature = "veriloga-builtins-noise"))]
+            Self::Device20(_) => &bsimsoi__bsimsoi_va__3b1f6b5e::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-ekv3-rf", feature = "veriloga-builtins-noise"))]
+            Self::Device21(_) => &ekv3__ekv3_rf__958cd2b2::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-ekv-va", feature = "veriloga-builtins-noise"))]
+            Self::Device22(_) => &ekv26_sdext_verilog_a__ekv_va__0f1ec77e::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-hicuml0va", feature = "veriloga-builtins-noise"))]
+            Self::Device23(_) => &hicuml0_v2p1p0__hicuml0va__91cb3377::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-hicuml2va", feature = "veriloga-builtins-noise"))]
+            Self::Device24(_) => &hicuml2_v320__hicuml2va__25e676cf::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-hisimhv-n4-va", feature = "veriloga-builtins-noise"))]
+            Self::Device25(_) => &hisimhv_n4__hisimhv_n4_va__69344dcf::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-hisimhv-n5-va", feature = "veriloga-builtins-noise"))]
+            Self::Device26(_) => &hisimhv_n5__hisimhv_n5_va__89bf8539::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-hisimhv-va", feature = "veriloga-builtins-noise"))]
+            Self::Device27(_) => &hisimhv__hisimhv_va__57d0ff0e::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-hisimsoi-va-5be18005", feature = "veriloga-builtins-noise"))]
+            Self::Device28(_) => &hisimsoi__hisimsoi_va__5be18005::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-hisimsoi-va-242bc21d", feature = "veriloga-builtins-noise"))]
+            Self::Device29(_) => &hisimsoi_n4__hisimsoi_va__242bc21d::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-hisimsoi-va-38074d06", feature = "veriloga-builtins-noise"))]
+            Self::Device30(_) => &hisimsoi_n5__hisimsoi_va__38074d06::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-hisimsotb-va", feature = "veriloga-builtins-noise"))]
+            Self::Device31(_) => &hisimsotb__hisimsotb_va__41200697::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-l-utsoi-832ce87d", feature = "veriloga-builtins-noise"))]
+            Self::Device32(_) => &l_utsoi_102__l_utsoi__832ce87d::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-l-utsoi-485e0ac9", feature = "veriloga-builtins-noise"))]
+            Self::Device33(_) => &l_utsoi_102_nqs__l_utsoi__485e0ac9::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-mosvar", feature = "veriloga-builtins-noise"))]
+            Self::Device34(_) => &mosvar__mosvar__0a88ed4a::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-mvsg-cmc", feature = "veriloga-builtins-noise"))]
+            Self::Device35(_) => &mvsg_cmc_4__mvsg_cmc__7d7f784b::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-r2-cmc", feature = "veriloga-builtins-noise"))]
+            Self::Device36(_) => &r2_cmc__r2_cmc__bc71a915::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-r2-et-cmc", feature = "veriloga-builtins-noise"))]
+            Self::Device37(_) => &r2_et_cmc__r2_et_cmc__a8425039::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-r3-cmc", feature = "veriloga-builtins-noise"))]
+            Self::Device38(_) => &r3_cmc__r3_cmc__2e3554ae::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-vbic13", feature = "veriloga-builtins-noise"))]
+            Self::Device39(_) => &vbic_3t__vbic13__aa00e2e7::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-vbic13-3t-et", feature = "veriloga-builtins-noise"))]
+            Self::Device40(_) => &vbic_3t_et__vbic13_3t_et__bd2f63d4::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-vbic13-4t", feature = "veriloga-builtins-noise"))]
+            Self::Device41(_) => &vbic_1p3__vbic13_4t__132cb4e0::GROUPED_NOISE_INJECTIONS,
+            #[cfg(all(feature = "veriloga-model-vbic-4t-et-cf", feature = "veriloga-builtins-noise"))]
+            Self::Device42(_) => &vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::GROUPED_NOISE_INJECTIONS,
+            #[cfg(feature = "veriloga-builtins-noise")]
+            Self::__NonExhaustive(value) => match *value {},
+            #[cfg(not(feature = "veriloga-builtins-noise"))]
+            _ => &[],
+        }
+    }
+
+    pub fn evaluate_noise_processes_at_frequency(&self, ctx: &super::GeneratedEvalContext<'_>, frequency_hz: f64, visitor: &mut dyn super::GeneratedNoiseProcessVisitor) -> Result<(), super::GeneratedNoiseEvaluationError> {
+        let _ = (&ctx, frequency_hz, &visitor);
+        match self {
+            #[cfg(all(feature = "veriloga-model-diode-cmc", feature = "veriloga-builtins-noise"))]
+            Self::Device0(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-epfl-hemt-10a", feature = "veriloga-builtins-noise"))]
+            Self::Device1(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-juncap200", feature = "veriloga-builtins-noise"))]
+            Self::Device2(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-psp104tva", feature = "veriloga-builtins-noise"))]
+            Self::Device3(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-psp104va", feature = "veriloga-builtins-noise"))]
+            Self::Device4(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-pspnqs104va", feature = "veriloga-builtins-noise"))]
+            Self::Device5(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-angelov", feature = "veriloga-builtins-noise"))]
+            Self::Device6(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-angelov-gan", feature = "veriloga-builtins-noise"))]
+            Self::Device7(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-asmesd", feature = "veriloga-builtins-noise"))]
+            Self::Device8(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-asmesd-dio", feature = "veriloga-builtins-noise"))]
+            Self::Device9(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-asmhemt", feature = "veriloga-builtins-noise"))]
+            Self::Device10(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-bjt505-va", feature = "veriloga-builtins-noise"))]
+            Self::Device11(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-bjt505t-va", feature = "veriloga-builtins-noise"))]
+            Self::Device12(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-bjtd505-va", feature = "veriloga-builtins-noise"))]
+            Self::Device13(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-bjtd505t-va", feature = "veriloga-builtins-noise"))]
+            Self::Device14(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-bsimbulk", feature = "veriloga-builtins-noise"))]
+            Self::Device15(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-bsimcmg-va", feature = "veriloga-builtins-noise"))]
+            Self::Device16(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-bsimimg", feature = "veriloga-builtins-noise"))]
+            Self::Device17(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-bsimsoi-18c250bc", feature = "veriloga-builtins-noise"))]
+            Self::Device18(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-bsimsoi-e2aff994", feature = "veriloga-builtins-noise"))]
+            Self::Device19(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-bsimsoi-va", feature = "veriloga-builtins-noise"))]
+            Self::Device20(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-ekv3-rf", feature = "veriloga-builtins-noise"))]
+            Self::Device21(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-ekv-va", feature = "veriloga-builtins-noise"))]
+            Self::Device22(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-hicuml0va", feature = "veriloga-builtins-noise"))]
+            Self::Device23(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-hicuml2va", feature = "veriloga-builtins-noise"))]
+            Self::Device24(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-hisimhv-n4-va", feature = "veriloga-builtins-noise"))]
+            Self::Device25(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-hisimhv-n5-va", feature = "veriloga-builtins-noise"))]
+            Self::Device26(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-hisimhv-va", feature = "veriloga-builtins-noise"))]
+            Self::Device27(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-hisimsoi-va-5be18005", feature = "veriloga-builtins-noise"))]
+            Self::Device28(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-hisimsoi-va-242bc21d", feature = "veriloga-builtins-noise"))]
+            Self::Device29(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-hisimsoi-va-38074d06", feature = "veriloga-builtins-noise"))]
+            Self::Device30(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-hisimsotb-va", feature = "veriloga-builtins-noise"))]
+            Self::Device31(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-l-utsoi-832ce87d", feature = "veriloga-builtins-noise"))]
+            Self::Device32(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-l-utsoi-485e0ac9", feature = "veriloga-builtins-noise"))]
+            Self::Device33(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-mosvar", feature = "veriloga-builtins-noise"))]
+            Self::Device34(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-mvsg-cmc", feature = "veriloga-builtins-noise"))]
+            Self::Device35(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-r2-cmc", feature = "veriloga-builtins-noise"))]
+            Self::Device36(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-r2-et-cmc", feature = "veriloga-builtins-noise"))]
+            Self::Device37(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-r3-cmc", feature = "veriloga-builtins-noise"))]
+            Self::Device38(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-vbic13", feature = "veriloga-builtins-noise"))]
+            Self::Device39(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-vbic13-3t-et", feature = "veriloga-builtins-noise"))]
+            Self::Device40(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-vbic13-4t", feature = "veriloga-builtins-noise"))]
+            Self::Device41(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(all(feature = "veriloga-model-vbic-4t-et-cf", feature = "veriloga-builtins-noise"))]
+            Self::Device42(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),
+            #[cfg(feature = "veriloga-builtins-noise")]
+            Self::__NonExhaustive(value) => match *value {},
+            #[cfg(not(feature = "veriloga-builtins-noise"))]
+            _ => {
+                let _ = (ctx, frequency_hz, visitor);
+                Ok(())
+            }
+        }
+    }
+
     pub fn stamp(&mut self, ctx: &super::GeneratedEvalContext<'_>, stamper: &mut super::GeneratedStamper<'_>) {
         let _ = (&ctx, &stamper);
         match self {

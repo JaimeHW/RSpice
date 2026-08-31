@@ -5364,7 +5364,7 @@ impl Instance {
 		let AOM=staged[191];
 		let AOU=staged[192];
 		let AOV=staged[193];
-		let APN=0f64;
+		let APN=0.0;
 		let G=F* (node_potentials[0]- node_potentials[1]);
 		let H=(L2([1f64,0.0])- L2([0.0,1f64]))* F;
 		let N;

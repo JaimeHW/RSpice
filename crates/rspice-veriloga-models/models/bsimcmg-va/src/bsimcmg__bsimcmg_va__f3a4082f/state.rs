@@ -4408,7 +4408,7 @@ impl Instance {
 	pub const VARIABLE_COUNT: usize = 2668;
 	pub const DDT_STATE_COUNT: usize = 28;
 	pub const IDT_STATE_COUNT: usize = 0;
-	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([50, 7, 162, 54, 108, 183, 150, 213, 176, 20, 162, 243, 22, 16, 186, 143, 53, 13, 131, 58, 17, 219, 41, 255, 44, 97, 168, 84, 148, 21, 108, 43]);
+	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([147, 163, 147, 211, 184, 157, 133, 200, 44, 104, 192, 86, 114, 1, 211, 45, 88, 29, 128, 193, 67, 145, 47, 140, 80, 200, 243, 39, 240, 37, 31, 222]);
 	pub const EVENT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "d259efe62194a05fcf113b59b080a99394b4d7867c48c0f9eb2895657040dc95";

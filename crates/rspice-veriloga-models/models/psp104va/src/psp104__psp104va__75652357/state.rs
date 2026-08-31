@@ -1092,7 +1092,7 @@ pub struct Instance {
 	pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
 	pub(crate) canonical_reactive: Box<[f64; 106]>,
 	pub(crate) canonical_model_values: Option<std::sync::Arc<CanonicalModelValues>>,
-	pub(crate) canonical_staged: Box<[f64; 1651]>,
+	pub(crate) canonical_staged: Box<[f64; 1652]>,
 	pub(crate) canonical_instance_valid: bool,
 	pub(crate) canonical_temperature_valid: bool,
 	pub(crate) canonical_temperature: f64,
@@ -2064,7 +2064,7 @@ impl Instance {
 	pub const VARIABLE_COUNT: usize = 2913;
 	pub const DDT_STATE_COUNT: usize = 11;
 	pub const IDT_STATE_COUNT: usize = 0;
-	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([32, 44, 36, 239, 17, 111, 151, 66, 86, 165, 155, 58, 198, 30, 2, 147, 252, 171, 39, 213, 141, 71, 100, 242, 122, 21, 133, 252, 165, 193, 51, 46]);
+	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([62, 8, 55, 44, 56, 33, 141, 217, 108, 125, 36, 223, 252, 5, 57, 13, 145, 26, 220, 243, 139, 125, 253, 127, 74, 122, 200, 12, 40, 249, 211, 109]);
 	pub const EVENT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "a45d1e909473c1f7f47598d91bab5797586fa45eb6dee49f3a3b26ab7dae98dd";

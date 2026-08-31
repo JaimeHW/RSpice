@@ -82,22 +82,22 @@ pub(super) fn canonical_model_preprocess(
 	let HB=parameters[126];
 	let HK=parameters[37];
 	let HN=parameters[213];
-	let HP=0f64;
-	let HY=0f64;
-	let IB=0f64;
-	let IG=0f64;
-	let IH=0f64;
+	let HP=0.0;
+	let HY=0.0;
+	let IB=0.0;
+	let IG=0.0;
+	let IH=0.0;
 	let II=0f64;
 	let IJ=0f64;
 	let IQ=true;
 	let IR=0f64;
-	let IS=0f64;
+	let IS=0.0;
 	let IZ=0f64;
-	let JA=0f64;
+	let JA=0.0;
 	let JF=0f64;
-	let JJ=0f64;
-	let JL=0f64;
-	let JM=0f64;
+	let JJ=0.0;
+	let JL=0.0;
+	let JM=0.0;
 	let JN=0f64;
 	let JO=0f64;
 	let mut oAE=false;
@@ -4052,12 +4052,12 @@ impl Instance {
 		let FGS=L2([0f64;2]);
 		let FGZ=staged[428];
 		let FHC=staged[429];
-		let FPQ=0f64;
-		let FPR=0f64;
-		let FPS=0f64;
-		let FPT=0f64;
-		let FPU=0f64;
-		let FPV=0f64;
+		let FPQ=0.0;
+		let FPR=0.0;
+		let FPS=0.0;
+		let FPT=0.0;
+		let FPU=0.0;
+		let FPV=0.0;
 		if I{
 		loop{
 		if !J{

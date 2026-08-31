@@ -1196,20 +1196,20 @@ impl Instance {
 		let BIP=1e-54f64;
 		let BJK=node_potentials[10];
 		let BJM=parameters[17];
-		let BRI=0f64;
-		let BRJ=0f64;
-		let BRK=0f64;
-		let BRL=0f64;
-		let BRM=0f64;
-		let BRN=0f64;
-		let BRO=0f64;
-		let BRP=0f64;
-		let BRQ=0f64;
-		let BRR=0f64;
-		let BRS=0f64;
-		let BRT=0f64;
-		let BRU=0f64;
-		let BRV=0f64;
+		let BRI=0.0;
+		let BRJ=0.0;
+		let BRK=0.0;
+		let BRL=0.0;
+		let BRM=0.0;
+		let BRN=0.0;
+		let BRO=0.0;
+		let BRP=0.0;
+		let BRQ=0.0;
+		let BRR=0.0;
+		let BRS=0.0;
+		let BRT=0.0;
+		let BRU=0.0;
+		let BRV=0.0;
 		if A{
 		if !B{
 		if C{

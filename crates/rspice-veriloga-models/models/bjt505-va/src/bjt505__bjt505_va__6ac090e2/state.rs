@@ -422,7 +422,7 @@ impl<const DDT: usize, const IDT: usize> StampState<DDT, IDT> {
 	}
 }
 
-pub(crate) type CanonicalModelValues = [f64; 120];
+pub(crate) type CanonicalModelValues = [f64; 119];
 pub struct Instance {
 	pub nodes: [usize; 12],
 	pub branches: [usize; 2],
@@ -437,7 +437,7 @@ pub struct Instance {
 	pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
 	pub(crate) canonical_reactive: Box<[f64; 102]>,
 	pub(crate) canonical_model_values: Option<std::sync::Arc<CanonicalModelValues>>,
-	pub(crate) canonical_staged: Box<[f64; 232]>,
+	pub(crate) canonical_staged: Box<[f64; 231]>,
 	pub(crate) canonical_instance_valid: bool,
 	pub(crate) canonical_temperature_valid: bool,
 	pub(crate) canonical_temperature: f64,
@@ -640,7 +640,7 @@ impl Instance {
 	pub const VARIABLE_COUNT: usize = 616;
 	pub const DDT_STATE_COUNT: usize = 10;
 	pub const IDT_STATE_COUNT: usize = 0;
-	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([26, 255, 136, 183, 117, 76, 32, 86, 33, 190, 245, 88, 175, 115, 165, 112, 187, 134, 41, 141, 144, 242, 233, 66, 129, 40, 149, 227, 182, 222, 84, 92]);
+	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([122, 241, 227, 43, 93, 244, 107, 135, 193, 66, 128, 65, 115, 235, 120, 35, 142, 13, 4, 187, 101, 104, 7, 139, 41, 135, 20, 136, 47, 101, 151, 134]);
 	pub const EVENT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "898487a6ce9c4be3b3daec1872fbbb5dde31ab7e2610b4f4dbad06f949088ee7";
