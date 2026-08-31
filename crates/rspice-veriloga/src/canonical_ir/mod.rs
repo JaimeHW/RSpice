@@ -24,6 +24,7 @@ pub mod cfg_eval;
 pub mod cfg_lower;
 pub mod cfg_opt;
 pub mod diagnostic;
+pub mod digital_value;
 pub mod hir;
 pub mod ids;
 pub mod metadata;
