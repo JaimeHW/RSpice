@@ -1197,6 +1197,16 @@ impl SsaBuilder {
         id
     }
 
+    /// The type of a value defined so far.
+    ///
+    /// A lowering that computes a result width from its operands' widths needs
+    /// to read them back while the function is still under construction.
+    pub fn value_type_of(&self, value: ValueId) -> Option<CfgValueType> {
+        self.values
+            .get(usize::from(value))
+            .map(|value| value.value_type)
+    }
+
     /// Define a value without placing it in a block.
     ///
     /// For leaves — constants, parameters, node potentials — which every block

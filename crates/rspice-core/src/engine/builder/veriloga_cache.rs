@@ -16,7 +16,13 @@ use super::*;
 // subset (`always`, `initial`, `reg`, `wire`, `assign`, four-state literals,
 // vector ranges) now parses and is semantically analyzed, so the same source
 // text produces a different parse than version 21 did.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 22;
+// Version 23 gives the digital subset a canonical form: `always` and
+// `initial` processes lower to CFG functions with a `Wait` terminator, and the
+// artifact carries them in a new `digital` field. The same source that
+// version 22 refused at the artifact boundary now produces an artifact, so the
+// record's identity has to change even though a continuous-domain model's
+// artifact is byte-identical to the one version 22 wrote.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 23;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

@@ -4603,6 +4603,22 @@ fn reject_unsupported_kinds(
     artifact: &CanonicalIrArtifact,
     function: &CfgFunction,
 ) -> Result<(), RustBackendError> {
+    // A process has a canonical form now, but no executable one: this backend
+    // emits a device that the analog solver calls, and a process is not called
+    // — it suspends and resumes on events. Emitting only the analog half of a
+    // module that has processes would produce a device that compiles, runs,
+    // and is silently short of what its author wrote.
+    if let Some(process) = artifact.digital.processes.first() {
+        return Err(unsupported(
+            artifact,
+            format!(
+                "digital process execution: `{}` process {} is lowered but this \
+                 backend has no way to run one yet",
+                process.kind.keyword(),
+                process.id
+            ),
+        ));
+    }
     for value in &function.values {
         if let CfgValueKind::BranchFlow(branch) = &value.kind {
             return Err(unsupported(

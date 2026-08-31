@@ -11,6 +11,7 @@ use smol_str::SmolStr;
 use std::fmt::Write;
 
 use super::CanonicalNoiseSourcePlan;
+use super::digital::CanonicalDigitalPlan;
 use super::{
     CANONICAL_IR_SCHEMA_VERSION, CanonicalMetadata, CanonicalValueType, CompilerPhase,
     HirAnalogOperator, HirArray, HirAssignment, HirBranch, HirContribution, HirContributionKind,
@@ -30,6 +31,13 @@ pub struct CanonicalIrArtifact {
     pub noise_sources: CanonicalNoiseSourcePlan,
     pub hir: HirModel,
     pub mir: MirModel,
+    /// The module's discrete-domain half, lowered to process functions.
+    ///
+    /// Skipped entirely when empty, so an artifact for a continuous-domain
+    /// model serializes exactly as it did before processes existed — which is
+    /// what keeps the shipped models' regenerated output byte-identical.
+    #[serde(default, skip_serializing_if = "CanonicalDigitalPlan::is_empty")]
+    pub digital: CanonicalDigitalPlan,
 }
 
 impl CanonicalIrArtifact {
@@ -63,7 +71,20 @@ impl CanonicalIrArtifact {
             noise_sources,
             hir,
             mir,
+            digital: CanonicalDigitalPlan::default(),
         })
+    }
+
+    /// Attach the lowered discrete-domain plan.
+    ///
+    /// Separate from [`Self::from_parts_with_noise_plan`] because the analog
+    /// levels are built from HIR and MIR while the plan is built from the
+    /// analyzed module, and threading the analyzed module through the analog
+    /// constructors to reach one field would give every analog caller an
+    /// argument it has no use for.
+    pub fn with_digital(mut self, digital: CanonicalDigitalPlan) -> Self {
+        self.digital = digital;
+        self
     }
 
     pub fn validate(&self) -> IrValidationResult {

@@ -30,10 +30,18 @@ pub(crate) fn elaborate_executable_module<'a>(
     analyzed: &'a AnalyzedFile,
     selected: &'a AnalyzedModule,
 ) -> CompileResult<Cow<'a, AnalyzedModule>> {
-    // Elaboration is the funnel every executable path shares, so it is where
-    // the digital refusal covers a module that is selected directly as well as
-    // one pulled in as a child instance further down.
-    super::reject_digital_content(selected)?;
+    // The selected module's own digital content is no longer refused here.
+    // Processes have a canonical form, and each executable path now refuses
+    // at the point it would have to run one — the bytecode IR builder because
+    // it has no representation for a process at all, the Rust backend because
+    // it emits a device the solver calls rather than a coroutine the event
+    // kernel resumes.
+    //
+    // A *child* instance is still refused, below. Flattening a hierarchy
+    // rewrites the analog body into the parent's scope, and there is no such
+    // rewrite for a process: its sensitivity list names signals that would
+    // have to be re-homed, and dropping it silently is exactly what this
+    // refusal exists to prevent.
     let source_modules = source_modules(analyzed)?;
     let root = source_modules.get(&selected.name).copied().ok_or_else(|| {
         internal_error(format!(

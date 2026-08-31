@@ -896,22 +896,43 @@ fn continuous_domain_modules_still_compile() {
 mod canonical_ir_boundary {
     use super::*;
 
-    /// The canonical-IR path refuses the same module, because HIR, MIR, the
-    /// CFG, and every backend on them describe a continuous-domain device.
+    /// The canonical-IR path no longer refuses a process: it lowers one.
+    ///
+    /// This is where the boundary used to be. It moved outward once processes
+    /// had a canonical form, and the artifact now carries the lowered process
+    /// rather than the compiler declining to build one.
     #[test]
-    fn canonical_ir_construction_refuses_digital_modules() {
+    fn canonical_ir_construction_lowers_digital_modules() {
         let source = digital_module(
             "    wire clk;\n\
              \x20   reg q;\n\
              \x20   always @(posedge clk) q <= 1'b1;",
         );
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(&source)
+            .expect("canonical IR must lower a digital module");
+        assert_eq!(artifact.digital.processes.len(), 1);
+        assert_eq!(artifact.digital.signals.len(), 2);
+    }
+
+    /// A continuous assignment still has no lowered form, and says so by name
+    /// rather than being dropped from the artifact.
+    #[test]
+    fn canonical_ir_construction_refuses_a_continuous_assignment() {
+        let source = digital_module(
+            "    wire a, b;\n\
+             \x20   wire y;\n\
+             \x20   assign y = a & b;",
+        );
         let error = VerilogACompiler::new(CompilerOptions::default())
             .compile_canonical_ir(&source)
-            .expect_err("canonical IR must refuse a digital module");
-        assert_eq!(
-            error.diagnostic_code(),
-            "VA-CODEGEN-UNSUPPORTED-AMS-DIGITAL"
+            .expect_err("a continuous assignment must be refused");
+        let rendered = error.to_string();
+        assert!(
+            rendered.contains("continuous assignment to `y`"),
+            "{rendered}"
         );
+        assert!(rendered.contains("has no lowered form yet"), "{rendered}");
     }
 
     /// The runtime path, which is what feeds the JIT and generated-Rust

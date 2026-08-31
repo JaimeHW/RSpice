@@ -996,12 +996,15 @@ impl VerilogACompiler {
         module: &semantic::AnalyzedModule,
         measurements: &mut metrics::MetricsRecorder,
     ) -> CompileResult<canonical_ir::CanonicalIrArtifact> {
-        // The canonical-IR backend's fail-closed boundary for digital content.
-        // HIR, MIR, the CFG, and every backend built on them describe a
-        // continuous-domain device; lowering only the analog half of a module
-        // that also has processes would emit exactly that device, silently
-        // short of what the author wrote.
-        semantic::reject_digital_content(module)?;
+        // Processes now have a canonical form, so this level no longer refuses
+        // them: it lowers them, and the refusal moves outward to the backends
+        // that would have to *run* one. What is refused here is what still has
+        // no lowered form at all — a continuous assignment — because an
+        // artifact that silently omitted a driver would describe a different
+        // circuit, which is the failure the old blanket refusal existed to
+        // prevent.
+        let digital = canonical_ir::digital_lower::lower(&module.digital)
+            .map_err(Self::canonical_ir_error)?;
         let trace = compiler_phase_trace_enabled();
         let metadata = canonical_ir::CanonicalMetadata::for_source(source_package, source);
         measurements.checkpoint(PipelinePhase::HirLowering)?;
@@ -1033,7 +1036,8 @@ impl VerilogACompiler {
             mir,
             noise_sources,
         )
-        .map_err(Self::canonical_ir_error)?;
+        .map_err(Self::canonical_ir_error)?
+        .with_digital(digital);
         measurements.record(PipelinePhase::IntegrityValidation, phase_started.elapsed())?;
         Ok(artifact)
     }
