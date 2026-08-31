@@ -12631,6 +12631,27 @@ mod tests {
     }
 
     #[test]
+    fn differential_ic_and_nodeset_targets_fail_closed() {
+        for directive in [".IC V(OUT,REF)=1", ".NODESET V(OUT,REF)=1"] {
+            let source =
+                format!("differential startup target\nV1 OUT 0 1\nV2 REF 0 0\n{directive}\n.END\n");
+            let error = match Netlist::parse(&source) {
+                Err(error) => error,
+                Ok(_) => panic!("{directive} must not discard its reference node"),
+            };
+            let message = error.to_string();
+            assert!(
+                message.contains("Differential startup target V(OUT,REF) is not supported"),
+                "unexpected {directive} diagnostic: {message}"
+            );
+            assert!(
+                message.contains("require one node referenced to ground"),
+                "{directive} diagnostic must prescribe supported syntax: {message}"
+            );
+        }
+    }
+
+    #[test]
     fn subckt_instance_params_resolve_same_line_expressions_after_overrides() {
         let netlist = Netlist::parse(
             "subckt instance parameter precedence\n\

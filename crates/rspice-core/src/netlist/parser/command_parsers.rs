@@ -1413,8 +1413,13 @@ fn parse_voltage_hint_target(
 
         let (node, authored_node) = expect_node_with_authored_spelling(stream, line_num)?;
         if stream.consume(&TokenKind::Comma) {
-            // Optional reference node (e.g. V(out,0)); currently ignored.
-            let _ = expect_node(stream, line_num)?;
+            let reference = expect_node(stream, line_num)?;
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "Differential startup target V({node},{reference}) is not supported; .IC and .NODESET require one node referenced to ground"
+                ),
+            });
         }
 
         if !stream.consume(&TokenKind::RParen) {
