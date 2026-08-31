@@ -1927,6 +1927,84 @@ pub struct GeneratedNoiseDescriptor {
     pub table_log_interp: bool,
 }
 
+/// One semantic noise process. Unlike [`GeneratedNoiseDescriptor`], this does
+/// not identify an injection: a process can drive several equations
+/// coherently and each injection is described separately below.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GeneratedNoiseProcessDescriptor {
+    pub process_id: usize,
+    pub label: Option<&'static str>,
+    pub kind: GeneratedNoiseKind,
+    pub table_len: usize,
+    pub table_log_interp: bool,
+}
+
+/// One circuit injection of a generated semantic noise process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GeneratedNoiseInjectionDescriptor {
+    pub process_id: usize,
+    pub equation: usize,
+    pub is_current: bool,
+    pub branch_ordinal: Option<usize>,
+    pub pos: GeneratedNoiseEndpoint,
+    pub neg: GeneratedNoiseEndpoint,
+}
+
+/// ABI-stable complex number used by generated noise code without adding a
+/// complex-number crate to every generated model package.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct GeneratedNoiseComplex {
+    pub re: Value,
+    pub im: Value,
+}
+
+impl GeneratedNoiseComplex {
+    #[inline]
+    pub fn is_finite(self) -> bool {
+        self.re.is_finite() && self.im.is_finite()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GeneratedNoiseInjectionEvaluation {
+    /// Index into the generated module's `GROUPED_NOISE_INJECTIONS` table.
+    pub descriptor: usize,
+    pub gain: GeneratedNoiseComplex,
+}
+
+/// Allocation-free grouped process result valid for the visitor call.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GeneratedNoiseProcessEvaluationRef<'a> {
+    pub active: bool,
+    pub psd: Value,
+    pub exponent: Option<Value>,
+    pub table_operands: &'a [Value],
+    pub injections: &'a [GeneratedNoiseInjectionEvaluation],
+}
+
+pub trait GeneratedNoiseProcessVisitor {
+    /// Return `false` to stop after this process.
+    fn visit_process(
+        &mut self,
+        index: usize,
+        evaluation: GeneratedNoiseProcessEvaluationRef<'_>,
+    ) -> bool;
+}
+
+impl<F> GeneratedNoiseProcessVisitor for F
+where
+    F: for<'a> FnMut(usize, GeneratedNoiseProcessEvaluationRef<'a>) -> bool,
+{
+    #[inline]
+    fn visit_process(
+        &mut self,
+        index: usize,
+        evaluation: GeneratedNoiseProcessEvaluationRef<'_>,
+    ) -> bool {
+        self(index, evaluation)
+    }
+}
+
 /// Evaluated, frequency-independent data for one generated noise primitive.
 ///
 /// Table operands retain their canonical flat ordering. Interpretation and
@@ -1988,6 +2066,24 @@ pub enum GeneratedNoiseEvaluationError {
         index: usize,
         count: usize,
     },
+    ProcessIndexOutOfRange {
+        index: usize,
+        count: usize,
+    },
+    ProcessIdMismatch {
+        index: usize,
+        process_id: usize,
+    },
+    InjectionIndexOutOfRange {
+        process: usize,
+        injection: usize,
+        count: usize,
+    },
+    InjectionProcessMismatch {
+        process: usize,
+        injection: usize,
+        owner: usize,
+    },
     NonFinite {
         index: usize,
         quantity: &'static str,
@@ -1999,6 +2095,15 @@ pub enum GeneratedNoiseEvaluationError {
     },
     InvalidMultiplicity {
         value: Value,
+    },
+    InvalidFrequency {
+        value: Value,
+    },
+    NonFiniteGain {
+        process: usize,
+        injection: usize,
+        re: Value,
+        im: Value,
     },
     AnalogLoopLimit {
         iterations: usize,
@@ -2012,6 +2117,30 @@ impl std::fmt::Display for GeneratedNoiseEvaluationError {
             Self::SourceIndexOutOfRange { index, count } => write!(
                 f,
                 "generated Verilog-A noise source index {index} is outside the {count}-source catalog"
+            ),
+            Self::ProcessIndexOutOfRange { index, count } => write!(
+                f,
+                "generated Verilog-A noise process index {index} is outside the {count}-process catalog"
+            ),
+            Self::ProcessIdMismatch { index, process_id } => write!(
+                f,
+                "generated Verilog-A noise process descriptor {index} declares noncanonical process ID {process_id}"
+            ),
+            Self::InjectionIndexOutOfRange {
+                process,
+                injection,
+                count,
+            } => write!(
+                f,
+                "generated Verilog-A noise process {process} references injection {injection} outside the {count}-injection catalog"
+            ),
+            Self::InjectionProcessMismatch {
+                process,
+                injection,
+                owner,
+            } => write!(
+                f,
+                "generated Verilog-A noise process {process} references injection {injection} owned by process {owner}"
             ),
             Self::NonFinite {
                 index,
@@ -2028,6 +2157,19 @@ impl std::fmt::Display for GeneratedNoiseEvaluationError {
             Self::InvalidMultiplicity { value } => write!(
                 f,
                 "generated Verilog-A noise evaluation requires a finite positive multiplicity, found {value}"
+            ),
+            Self::InvalidFrequency { value } => write!(
+                f,
+                "generated Verilog-A grouped noise evaluation requires a finite nonnegative frequency, found {value}"
+            ),
+            Self::NonFiniteGain {
+                process,
+                injection,
+                re,
+                im,
+            } => write!(
+                f,
+                "generated Verilog-A noise process {process} injection {injection} produced non-finite gain ({re}, {im})"
             ),
             Self::AnalogLoopLimit { iterations, limit } => write!(
                 f,
@@ -2059,6 +2201,13 @@ pub enum GeneratedNoiseInjection {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GeneratedMappedNoiseDescriptor {
     pub descriptor: GeneratedNoiseDescriptor,
+    pub injection: GeneratedNoiseInjection,
+}
+
+/// Grouped-process injection metadata paired with concrete instance topology.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GeneratedMappedNoiseInjectionDescriptor {
+    pub descriptor: GeneratedNoiseInjectionDescriptor,
     pub injection: GeneratedNoiseInjection,
 }
 
@@ -2143,6 +2292,40 @@ impl GeneratedNoiseDescriptor {
             GeneratedNoiseInjection::Potential { branch }
         };
         Ok(GeneratedMappedNoiseDescriptor {
+            descriptor: self,
+            injection,
+        })
+    }
+}
+
+impl GeneratedNoiseInjectionDescriptor {
+    /// Validate and map one grouped-process injection without assuming an
+    /// engine matrix layout. Ground is represented by circuit node zero.
+    pub fn map_topology(
+        self,
+        nodes: &[usize],
+        branches: &[usize],
+    ) -> Result<GeneratedMappedNoiseInjectionDescriptor, GeneratedNoiseTopologyError> {
+        let node_pos = map_generated_noise_endpoint(self.pos, "positive", nodes)?;
+        let node_neg = map_generated_noise_endpoint(self.neg, "negative", nodes)?;
+        let injection = if self.is_current {
+            if let Some(branch_ordinal) = self.branch_ordinal {
+                return Err(GeneratedNoiseTopologyError::CurrentSourceHasBranch { branch_ordinal });
+            }
+            GeneratedNoiseInjection::Current { node_pos, node_neg }
+        } else {
+            let branch_ordinal = self
+                .branch_ordinal
+                .ok_or(GeneratedNoiseTopologyError::PotentialSourceMissingBranch)?;
+            let branch = branches.get(branch_ordinal).copied().ok_or(
+                GeneratedNoiseTopologyError::BranchOrdinalOutOfRange {
+                    branch_ordinal,
+                    branch_count: branches.len(),
+                },
+            )?;
+            GeneratedNoiseInjection::Potential { branch }
+        };
+        Ok(GeneratedMappedNoiseInjectionDescriptor {
             descriptor: self,
             injection,
         })

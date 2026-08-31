@@ -41,7 +41,7 @@ pub(super) fn generate_mod_file() -> String {
         "mod stamp;",
         "",
         "#[cfg(feature = \"veriloga-builtins-noise\")]",
-        "pub use noise::{GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError, GeneratedNoiseEvaluationRef, GeneratedNoiseKind, GeneratedNoiseVisitor, NOISE_SOURCES};",
+        "pub use noise::{GeneratedNoiseComplex, GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError, GeneratedNoiseEvaluationRef, GeneratedNoiseInjectionDescriptor, GeneratedNoiseInjectionEvaluation, GeneratedNoiseKind, GeneratedNoiseProcessDescriptor, GeneratedNoiseProcessEvaluationRef, GeneratedNoiseProcessVisitor, GeneratedNoiseVisitor, GROUPED_NOISE_INJECTIONS, GROUPED_NOISE_PROCESSES, NOISE_SOURCES};",
         "pub use state::{Instance, Parameters};",
         "",
     ]

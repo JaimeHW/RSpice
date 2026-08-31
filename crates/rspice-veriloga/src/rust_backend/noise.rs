@@ -12,11 +12,14 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
+use crate::canonical_ir::ad::lane_liveness;
 use crate::canonical_ir::{
-    CanonicalIrArtifact, CanonicalNoiseSourceKind, ExprId, HirAnalogOperator, HirAssignment,
-    HirExprKind, HirLoop, HirStatement, NodeId,
+    AdSeed, CanonicalIrArtifact, CanonicalNoiseSourceKind, CfgBinaryOp, CfgFunction, CfgTerminator,
+    CfgUnaryOp, CfgValueKind, ExprId, HirAnalogOperator, HirAssignment, HirExprKind, HirLoop,
+    HirStatement, MirEquationKind, NodeId, ValueId, differentiate,
 };
 
+use super::emit::{EmitBindings, emit_body, lane_runtime_types};
 use super::expr::{
     BranchCurrentSlot, LoweredVariable, branch_pair_key, lower_noise_value_expr,
     parameter_field_names,
@@ -122,7 +125,7 @@ pub(super) fn generate_noise_file(
     out.push_str("use super::state::Instance;\n");
     writeln!(
         out,
-        "use {}::GeneratedEvalContext;\npub use {}::{{GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError, GeneratedNoiseEvaluationRef, GeneratedNoiseKind, GeneratedNoiseVisitor}};\n",
+        "use {}::GeneratedEvalContext;\npub use {}::{{GeneratedNoiseComplex, GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError, GeneratedNoiseEvaluationRef, GeneratedNoiseInjectionDescriptor, GeneratedNoiseInjectionEvaluation, GeneratedNoiseKind, GeneratedNoiseProcessDescriptor, GeneratedNoiseProcessEvaluationRef, GeneratedNoiseProcessVisitor, GeneratedNoiseVisitor}};\n",
         options.runtime_path, options.runtime_path
     )
     .expect("write generated noise imports");
@@ -138,6 +141,7 @@ pub(super) fn generate_noise_file(
              \x20   }\n\
              }\n",
         );
+        out.push_str(&grouped_noise_extension(artifact, options)?);
         return Ok(GeneratedRustFile {
             relative_path: "noise.rs".to_string(),
             contents: out,
@@ -345,6 +349,7 @@ pub(super) fn generate_noise_file(
     out.push_str("        Ok(())\n    }\n");
     out.push_str(&helper_methods);
     out.push_str("}\n");
+    out.push_str(&grouped_noise_extension(artifact, options)?);
 
     Ok(GeneratedRustFile {
         relative_path: "noise.rs".to_string(),
@@ -413,6 +418,486 @@ pub(super) fn descriptor_table(artifact: &CanonicalIrArtifact) -> String {
     }
     out.push_str("];\n");
     out
+}
+
+#[derive(Debug)]
+struct GroupedNoiseProcessPlan {
+    process_id: usize,
+    label: Option<String>,
+    kind: CanonicalNoiseSourceKind,
+    table_log_interp: bool,
+    active: usize,
+    psd: usize,
+    exponent: Option<usize>,
+    table: Vec<usize>,
+    injections: Vec<GroupedNoiseInjectionPlan>,
+}
+
+#[derive(Debug)]
+struct GroupedNoiseInjectionPlan {
+    descriptor: usize,
+    real: Option<usize>,
+    reactive: Option<usize>,
+}
+
+#[derive(Debug)]
+struct GroupedNoisePlan {
+    function: CfgFunction,
+    outputs: Vec<ValueId>,
+    processes: Vec<GroupedNoiseProcessPlan>,
+    descriptors: Vec<(usize, usize)>,
+}
+
+/// Emit the additive grouped-noise ABI implemented by newly generated model
+/// crates. The scalar descriptor/evaluator above deliberately remains intact:
+/// checked-in artifacts generated before this capability continue to compile,
+/// and a registry can select this path only when the new tables are present.
+pub(super) fn grouped_noise_extension(
+    artifact: &CanonicalIrArtifact,
+    options: &RustTranspileOptions,
+) -> Result<String, RustBackendError> {
+    let Some(plan) = plan_grouped_noise(artifact)? else {
+        return Ok(
+            "\npub static GROUPED_NOISE_PROCESSES: [GeneratedNoiseProcessDescriptor; 0] = [];\n\
+             pub static GROUPED_NOISE_INJECTIONS: [GeneratedNoiseInjectionDescriptor; 0] = [];\n\n\
+             impl Instance {\n\
+             \x20   pub fn evaluate_noise_processes_at_frequency(&self, _ctx: &GeneratedEvalContext<'_>, frequency_hz: f64, _visitor: &mut dyn GeneratedNoiseProcessVisitor) -> Result<(), GeneratedNoiseEvaluationError> {\n\
+             \x20       if !frequency_hz.is_finite() || frequency_hz < 0.0 { return Err(GeneratedNoiseEvaluationError::InvalidFrequency { value: frequency_hz }); }\n\
+             \x20       Ok(())\n\
+             \x20   }\n\
+             }\n"
+                .to_string(),
+        );
+    };
+    let mut out = String::new();
+    let lane_types = lane_runtime_types(&plan.function);
+    if !lane_types.is_empty() {
+        writeln!(
+            out,
+            "\nuse {}::{{{}}};",
+            options.runtime_path,
+            lane_types.into_iter().collect::<Vec<_>>().join(", ")
+        )
+        .expect("write grouped lane imports");
+    }
+    let potential_leaders = potential_branch_leaders(artifact);
+    writeln!(
+        out,
+        "\npub static GROUPED_NOISE_PROCESSES: [GeneratedNoiseProcessDescriptor; {}] = [",
+        plan.processes.len()
+    )
+    .expect("write grouped noise process header");
+    for process in &plan.processes {
+        writeln!(
+            out,
+            "    GeneratedNoiseProcessDescriptor {{ process_id: {}, label: {}, kind: GeneratedNoiseKind::{}, table_len: {}, table_log_interp: {} }},",
+            process.process_id,
+            option_str(process.label.as_deref()),
+            noise_kind(process.kind),
+            process.table.len(),
+            process.table_log_interp,
+        )
+        .expect("write grouped process descriptor");
+    }
+    out.push_str("];\n");
+    writeln!(
+        out,
+        "pub static GROUPED_NOISE_INJECTIONS: [GeneratedNoiseInjectionDescriptor; {}] = [",
+        plan.descriptors.len()
+    )
+    .expect("write grouped injection header");
+    for &(process, equation_index) in &plan.descriptors {
+        let equation = &artifact.mir.equations[equation_index];
+        let is_current = equation.kind == MirEquationKind::Current;
+        let branch_ordinal = if is_current {
+            None
+        } else {
+            potential_leaders.get(equation_index).copied().flatten()
+        };
+        let pos = equation.branch.pos_node;
+        let neg = equation.branch.neg_node;
+        let pos_name = pos.map_or("0", |node| {
+            artifact.mir.nodes[usize::from(node)].name.as_str()
+        });
+        let neg_name = neg.map_or("0", |node| {
+            artifact.mir.nodes[usize::from(node)].name.as_str()
+        });
+        let pos_internal =
+            pos.is_some_and(|node| !artifact.mir.nodes[usize::from(node)].is_external);
+        let neg_internal =
+            neg.is_some_and(|node| !artifact.mir.nodes[usize::from(node)].is_external);
+        writeln!(
+            out,
+            "    GeneratedNoiseInjectionDescriptor {{ process_id: {process}, equation: {equation_index}, is_current: {is_current}, branch_ordinal: {}, pos: {}, neg: {} }},",
+            option_usize(branch_ordinal),
+            endpoint_literal(pos, pos_name, pos_internal),
+            endpoint_literal(neg, neg_name, neg_internal),
+        )
+        .expect("write grouped injection descriptor");
+    }
+    out.push_str("];\n\nimpl Instance {\n");
+    out.push_str(
+        "    pub fn evaluate_noise_processes_at_frequency(&self, ctx: &GeneratedEvalContext<'_>, frequency_hz: f64, visitor: &mut dyn GeneratedNoiseProcessVisitor) -> Result<(), GeneratedNoiseEvaluationError> {\n\
+         \x20       if !frequency_hz.is_finite() || frequency_hz < 0.0 {\n\
+         \x20           return Err(GeneratedNoiseEvaluationError::InvalidFrequency { value: frequency_hz });\n\
+         \x20       }\n\
+         \x20       if !self.multiplicity.is_finite() || self.multiplicity <= 0.0 {\n\
+         \x20           return Err(GeneratedNoiseEvaluationError::InvalidMultiplicity { value: self.multiplicity });\n\
+         \x20       }\n\
+         \x20       let parameters = &self.params.values;\n\
+         \x20       let parameter_given = &*self.param_given;\n\
+         \x20       let temperature = ctx.temperature();\n\
+         \x20       let thermal_voltage = ctx.thermal_voltage();\n\
+         \x20       let multiplicity = self.multiplicity;\n\
+         \x20       let time = self.time;\n",
+    );
+    if plan
+        .function
+        .values
+        .iter()
+        .any(|value| matches!(value.kind, CfgValueKind::EventState(_)))
+    {
+        out.push_str("        let event_state = &*self.event_state_accepted;\n");
+    }
+    writeln!(
+        out,
+        "        let node_potentials: [f64; {}] = [{}];",
+        artifact.mir.nodes.len(),
+        (0..artifact.mir.nodes.len())
+            .map(|index| format!("ctx.node_voltage(self.nodes[{index}])"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+    .expect("write grouped node potentials");
+    out.push_str("        let branch_flows: [f64; 0] = [];\n");
+    writeln!(
+        out,
+        "        let branch_unknown_flows: [f64; {}] = [{}];",
+        artifact.mir.branch_unknowns.len(),
+        (0..artifact.mir.branch_unknowns.len())
+            .map(|index| format!("ctx.branch_current(self.branches[{index}])"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+    .expect("write grouped branch flows");
+    let mut bindings = EmitBindings {
+        analysis: "ctx.analysis".into(),
+        simparam: "ctx.simparam_or".into(),
+        ..EmitBindings::default()
+    };
+    // The grouped slice rejects dynamic state below; these names make any
+    // accidental reintroduction a generated compile error instead of silently
+    // binding transient history during a noise sweep.
+    bindings.ddt = "grouped_noise_ddt_is_unsupported".into();
+    bindings.idt = "grouped_noise_idt_is_unsupported".into();
+    let (body, values) = emit_body(&plan.function, &plan.outputs, &bindings)
+        .map_err(|error| unsupported(artifact, format!("grouped noise body: {error}")))?;
+    emit_lines(
+        &mut out,
+        &body.lines().map(str::to_owned).collect::<Vec<_>>(),
+        8,
+    );
+    out.push_str("        let omega = core::f64::consts::TAU * frequency_hz;\n");
+    for (process_index, process) in plan.processes.iter().enumerate() {
+        let active = &values[process.active];
+        let psd = &values[process.psd];
+        writeln!(
+            out,
+            "        let process_{process_index}_active = {active} != 0.0;"
+        )
+        .expect("write grouped activation");
+        writeln!(
+            out,
+            "        let process_{process_index}_psd = ({psd}).abs();"
+        )
+        .expect("write grouped psd");
+        emit_finite_check(
+            &mut out,
+            process_index,
+            "psd",
+            &format!("process_{process_index}_psd"),
+            8,
+        );
+        let exponent = process
+            .exponent
+            .map(|position| values[position].clone())
+            .map_or_else(|| "None".to_string(), |value| format!("Some({value})"));
+        writeln!(
+            out,
+            "        let process_{process_index}_exponent: Option<f64> = {exponent};"
+        )
+        .expect("write grouped exponent");
+        emit_optional_finite_check(
+            &mut out,
+            process_index,
+            "exponent",
+            &format!("process_{process_index}_exponent"),
+            8,
+        );
+        let table = process
+            .table
+            .iter()
+            .map(|position| values[*position].clone())
+            .collect::<Vec<_>>()
+            .join(", ");
+        writeln!(
+            out,
+            "        let process_{process_index}_table = [{table}];"
+        )
+        .expect("write grouped table");
+        for (local, injection) in process.injections.iter().enumerate() {
+            let real = injection
+                .real
+                .map(|position| values[position].as_str())
+                .unwrap_or("0.0");
+            let reactive = injection
+                .reactive
+                .map(|position| values[position].as_str())
+                .unwrap_or("0.0");
+            let equation_index = plan.descriptors[injection.descriptor].1;
+            let equation_kind = artifact.mir.equations[equation_index].kind;
+            let rhs_sign = noise_rhs_sign(equation_kind);
+            let multiplicity_scale = if equation_kind == MirEquationKind::Current {
+                "self.multiplicity.sqrt()"
+            } else {
+                "self.multiplicity.sqrt().recip()"
+            };
+            writeln!(
+                out,
+                "        let process_{process_index}_gain_{local} = GeneratedNoiseComplex {{ re: ({real}) * {rhs_sign:.1} * {multiplicity_scale}, im: omega * ({reactive}) * {rhs_sign:.1} * {multiplicity_scale} }};"
+            )
+            .expect("write grouped gain");
+            writeln!(
+                out,
+                "        if !process_{process_index}_gain_{local}.is_finite() {{ return Err(GeneratedNoiseEvaluationError::NonFiniteGain {{ process: {process_index}, injection: {local}, re: process_{process_index}_gain_{local}.re, im: process_{process_index}_gain_{local}.im }}); }}"
+            )
+            .expect("write grouped gain validation");
+        }
+        let injections = process
+            .injections
+            .iter()
+            .enumerate()
+            .map(|(local, injection)| {
+                format!(
+                    "GeneratedNoiseInjectionEvaluation {{ descriptor: {}, gain: process_{process_index}_gain_{local} }}",
+                    injection.descriptor
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        writeln!(
+            out,
+            "        let process_{process_index}_injections = [{injections}];"
+        )
+        .expect("write grouped injections");
+        writeln!(
+            out,
+            "        if !visitor.visit_process({process_index}, GeneratedNoiseProcessEvaluationRef {{ active: process_{process_index}_active, psd: process_{process_index}_psd, exponent: process_{process_index}_exponent, table_operands: &process_{process_index}_table, injections: &process_{process_index}_injections }}) {{ return Ok(()); }}"
+        )
+        .expect("write grouped visitor");
+    }
+    out.push_str("        Ok(())\n    }\n}\n");
+    Ok(out)
+}
+
+fn plan_grouped_noise(
+    artifact: &CanonicalIrArtifact,
+) -> Result<Option<GroupedNoisePlan>, RustBackendError> {
+    let mut cfg = crate::canonical_ir::CfgModel::from_hir(&artifact.hir, &artifact.mir).map_err(
+        |diagnostics| unsupported(artifact, format!("grouped noise CFG: {diagnostics:?}")),
+    )?;
+    if cfg.noise_processes.is_empty() {
+        return Ok(None);
+    }
+    if artifact
+        .mir
+        .equations
+        .iter()
+        .any(|equation| equation.kind == MirEquationKind::Indirect)
+    {
+        return Err(unsupported(
+            artifact,
+            "grouped noise routed through an indirect contribution",
+        ));
+    }
+    if cfg
+        .function
+        .values
+        .iter()
+        .any(|value| matches!(value.kind, CfgValueKind::BranchFlow(_)))
+    {
+        return Err(unsupported(
+            artifact,
+            "grouped noise depending on an unresolved flow probe",
+        ));
+    }
+    for (expected, process) in cfg.noise_processes.iter().enumerate() {
+        if process.process_id as usize != expected {
+            return Err(unsupported(
+                artifact,
+                format!(
+                    "grouped noise process IDs are not dense: expected {expected}, found {}",
+                    process.process_id
+                ),
+            ));
+        }
+    }
+    let seeds = cfg
+        .noise_processes
+        .iter()
+        .map(|process| AdSeed::NoiseProcess(process.process_id))
+        .collect::<Vec<_>>();
+    validate_linear_noise_routing(artifact, &cfg.function, &seeds)?;
+    let residuals = artifact
+        .mir
+        .equations
+        .iter()
+        .map(|equation| cfg.residuals[usize::from(equation.contribution)])
+        .collect::<Vec<_>>();
+    let charges = super::canonical::stored_charges(&mut cfg.function, &residuals);
+    let mut differentiated = differentiate(&cfg.function, &seeds).map_err(|error| {
+        unsupported(artifact, format!("grouped noise differentiation: {error}"))
+    })?;
+    let conduction_rows = residuals
+        .iter()
+        .map(|residual| differentiated.derivative_row(*residual))
+        .collect::<Vec<_>>();
+    let reactive_rows = charges
+        .iter()
+        .map(|charge| charge.map_or_else(Vec::new, |charge| differentiated.derivative_row(charge)))
+        .collect::<Vec<_>>();
+
+    let mut wanted = Vec::new();
+    let mut processes = Vec::with_capacity(cfg.noise_processes.len());
+    let mut descriptors = Vec::new();
+    let mut place = |value: ValueId| {
+        wanted.push(value);
+        wanted.len() - 1
+    };
+    for (process_index, process) in cfg.noise_processes.iter().enumerate() {
+        let active = place(process.active);
+        let psd = place(process.psd);
+        let exponent = process.exponent.map(&mut place);
+        let table = process.table.iter().copied().map(&mut place).collect();
+        let mut injections = Vec::new();
+        for equation in 0..residuals.len() {
+            // A pure ddt contribution belongs entirely to the reactive lane;
+            // using its transient companion derivative as a real gain here
+            // would make noise depend on the last timestep.
+            let real = if charges[equation].is_some() {
+                None
+            } else {
+                conduction_rows[equation][process_index]
+            };
+            let reactive = reactive_rows[equation]
+                .get(process_index)
+                .copied()
+                .flatten();
+            let nonzero = |value: Option<ValueId>| {
+                value.filter(|value| {
+                    !matches!(
+                        differentiated.function.value(*value).kind,
+                        CfgValueKind::RealConstant(constant) if constant == 0.0
+                    )
+                })
+            };
+            let real = nonzero(real);
+            let reactive = nonzero(reactive);
+            if real.is_none() && reactive.is_none() {
+                continue;
+            }
+            let descriptor = descriptors.len();
+            descriptors.push((process_index, equation));
+            injections.push(GroupedNoiseInjectionPlan {
+                descriptor,
+                real: real.map(&mut place),
+                reactive: reactive.map(&mut place),
+            });
+        }
+        processes.push(GroupedNoiseProcessPlan {
+            process_id: process.process_id as usize,
+            label: process.label.as_ref().map(ToString::to_string),
+            kind: process.kind,
+            table_log_interp: process.log_interp,
+            active,
+            psd,
+            exponent,
+            table,
+            injections,
+        });
+    }
+    let (function, outputs) = crate::canonical_ir::optimize_cfg(&differentiated.function, &wanted);
+    Ok(Some(GroupedNoisePlan {
+        function,
+        outputs,
+        processes,
+        descriptors,
+    }))
+}
+
+fn validate_linear_noise_routing(
+    artifact: &CanonicalIrArtifact,
+    function: &CfgFunction,
+    seeds: &[AdSeed],
+) -> Result<(), RustBackendError> {
+    let live = lane_liveness(function, seeds);
+    let depends = |value: ValueId| !live[usize::from(value)].is_empty();
+    for block in &function.blocks {
+        if let CfgTerminator::Branch { condition, .. } = block.terminator
+            && depends(condition)
+        {
+            return Err(unsupported(
+                artifact,
+                "a noise process used as control flow in generated Rust",
+            ));
+        }
+    }
+    for value in &function.values {
+        if !depends(value.id) {
+            continue;
+        }
+        let valid = match &value.kind {
+            CfgValueKind::NoiseProcess(_)
+            | CfgValueKind::BlockParameter
+            | CfgValueKind::Ddt { .. }
+            | CfgValueKind::LaneSplat(_)
+            | CfgValueKind::LaneWiden { .. }
+            | CfgValueKind::LaneBinary { .. }
+            | CfgValueKind::LaneScalar { .. }
+            | CfgValueKind::LaneExtract { .. } => true,
+            CfgValueKind::Unary {
+                op: CfgUnaryOp::Neg,
+                ..
+            } => true,
+            CfgValueKind::Binary { op, left, right }
+                if matches!(op, CfgBinaryOp::Add | CfgBinaryOp::Sub) =>
+            {
+                let _ = (left, right);
+                true
+            }
+            CfgValueKind::Binary {
+                op: CfgBinaryOp::Mul,
+                left,
+                right,
+            } => !(depends(*left) && depends(*right)),
+            CfgValueKind::Binary {
+                op: CfgBinaryOp::Div,
+                right,
+                ..
+            } => !depends(*right),
+            _ => false,
+        };
+        if !valid {
+            return Err(unsupported(
+                artifact,
+                format!(
+                    "nonlinear or stateful generated-Rust routing of noise process at CFG value {} ({:?})",
+                    value.id, value.kind
+                ),
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1106,11 +1591,11 @@ fn expr_is_instance_static(
     true
 }
 
-fn unsupported(artifact: &CanonicalIrArtifact, feature: &str) -> RustBackendError {
+fn unsupported(artifact: &CanonicalIrArtifact, feature: impl Into<String>) -> RustBackendError {
     RustBackendError::unsupported(
         artifact.metadata.source_package.as_str(),
         artifact.mir.module_name.as_str(),
-        feature,
+        feature.into(),
     )
 }
 
@@ -1244,6 +1729,17 @@ fn noise_kind(kind: CanonicalNoiseSourceKind) -> &'static str {
         CanonicalNoiseSourceKind::White => "White",
         CanonicalNoiseSourceKind::Flicker => "Flicker",
         CanonicalNoiseSourceKind::Table => "Table",
+    }
+}
+
+#[inline]
+fn noise_rhs_sign(kind: MirEquationKind) -> f64 {
+    match kind {
+        MirEquationKind::Current => -1.0,
+        MirEquationKind::Potential => 1.0,
+        // Planning rejects indirect equations before emission because their
+        // engine-neutral generated topology is not representable yet.
+        MirEquationKind::Indirect => -1.0,
     }
 }
 
@@ -1388,6 +1884,169 @@ endmodule
         assert!(
             super::noise_liveness_expression_walks(&artifact) <= artifact.hir.expressions.len(),
             "cached liveness must walk each expression root at most once"
+        );
+    }
+}
+
+#[cfg(test)]
+mod grouped_process_tests {
+    use std::collections::{HashMap, HashSet};
+
+    use crate::canonical_ir::{CfgEvalInputs, evaluate_cfg};
+
+    fn evaluated_process_powers(source: &str) -> Vec<(u32, f64)> {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(source)
+            .expect("grouped-noise fixture compiles");
+        let plan = super::plan_grouped_noise(&artifact)
+            .expect("grouped-noise planning succeeds")
+            .expect("fixture has a grouped process");
+        let inputs = CfgEvalInputs {
+            parameters: artifact
+                .mir
+                .parameters
+                .iter()
+                .map(|parameter| parameter.default.unwrap_or(0.0))
+                .collect(),
+            parameter_given: vec![false; artifact.mir.parameters.len()],
+            port_connected: vec![true; artifact.hir.ports.len()],
+            event_state: Vec::new(),
+            node_potentials: vec![0.0; artifact.mir.nodes.len()],
+            branch_flows: vec![0.0; artifact.mir.branches.len()],
+            branch_unknown_flows: vec![0.0; artifact.mir.branch_unknowns.len()],
+            temperature: 300.15,
+            thermal_voltage: 300.15 * 1.380649e-23 / 1.602176634e-19,
+            multiplicity: 1.0,
+            time: 0.0,
+            analyses: HashSet::from(["noise".into(), "smallsig".into()]),
+            simparams: HashMap::new(),
+            ddt: 0.0,
+            ddt_scale: 0.0,
+            idt: 0.0,
+            idt_scale: 0.0,
+            event_controls: Default::default(),
+            staged: Vec::new(),
+        };
+        let snapshot = evaluate_cfg(&plan.function, &inputs).expect("evaluate grouped plan");
+        let value = |position: usize| {
+            snapshot
+                .value(plan.outputs[position])
+                .expect("grouped output is defined")
+        };
+        plan.processes
+            .iter()
+            .enumerate()
+            .map(|(process, output)| {
+                let psd = value(output.psd).abs();
+                let gain_power = output
+                    .injections
+                    .iter()
+                    .map(|injection| {
+                        let re = injection.real.map(&value).unwrap_or(0.0);
+                        let im = injection.reactive.map(&value).unwrap_or(0.0);
+                        re * re + im * im
+                    })
+                    .sum::<f64>();
+                (process as u32, psd * gain_power)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn assigned_reuse_is_coherent_and_same_label_processes_are_independent() {
+        let reused = evaluated_process_powers(
+            r#"
+module reused(p, n);
+    inout p, n; electrical p, n; real x;
+    analog begin
+        x = white_noise(1.0, "same");
+        I(p, n) <+ x + x;
+    end
+endmodule
+"#,
+        );
+        assert_eq!(reused, vec![(0, 4.0)]);
+
+        let distinct = evaluated_process_powers(
+            r#"
+module distinct(p, n);
+    inout p, n; electrical p, n; real x, y;
+    analog begin
+        x = white_noise(1.0, "same");
+        y = white_noise(1.0, "same");
+        I(p, n) <+ x + y;
+    end
+endmodule
+"#,
+        );
+        assert_eq!(distinct, vec![(0, 1.0), (1, 1.0)]);
+        assert_eq!(distinct.iter().map(|(_, power)| power).sum::<f64>(), 2.0);
+    }
+
+    #[test]
+    fn opposite_injections_of_one_process_cancel() {
+        let canceled = evaluated_process_powers(
+            r#"
+module canceled(p, n);
+    inout p, n; electrical p, n; real x;
+    analog begin
+        x = white_noise(3.0, "one");
+        I(p, n) <+ x - x;
+    end
+endmodule
+"#,
+        );
+        assert_eq!(canceled, vec![(0, 0.0)]);
+    }
+
+    #[test]
+    fn mixed_current_and_potential_injections_use_opposite_rhs_signs() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module mixed_rhs(p, n, q);
+    inout p, n, q; electrical p, n, q; real x;
+    analog begin
+        x = white_noise(1.0, "mixed");
+        I(p, n) <+ x;
+        V(q, n) <+ x;
+    end
+endmodule
+"#,
+            )
+            .expect("mixed current/potential fixture compiles");
+        let generated = super::grouped_noise_extension(
+            &artifact,
+            &crate::rust_backend::RustTranspileOptions::default(),
+        )
+        .expect("mixed grouped-noise emission succeeds");
+        let gain_lines = generated
+            .lines()
+            .filter(|line| line.contains("GeneratedNoiseComplex { re:"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            super::noise_rhs_sign(crate::canonical_ir::MirEquationKind::Current),
+            -1.0
+        );
+        assert_eq!(
+            super::noise_rhs_sign(crate::canonical_ir::MirEquationKind::Potential),
+            1.0
+        );
+        assert_eq!(gain_lines.len(), 2, "{generated}");
+        assert!(
+            gain_lines.iter().any(|line| line.contains("* -1.0 *")),
+            "current-equation gain must carry the -RHS orientation: {generated}"
+        );
+        assert!(
+            gain_lines.iter().any(|line| line.contains("* 1.0 *")),
+            "potential-equation gain must carry the +RHS orientation: {generated}"
+        );
+        assert_eq!(
+            super::noise_rhs_sign(crate::canonical_ir::MirEquationKind::Current)
+                + super::noise_rhs_sign(crate::canonical_ir::MirEquationKind::Potential),
+            0.0,
+            "equal mixed current/potential transfer paths must cancel coherently"
         );
     }
 }

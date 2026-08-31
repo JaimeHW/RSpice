@@ -593,6 +593,9 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                     "branch unknown",
                     usize::from(unknown),
                 ))?,
+            // Noise primitives have no large-signal value. Their unit
+            // derivative is materialized only by the AD pass.
+            CfgValueKind::NoiseProcess(_) => S::from_f64(0.0),
             // Static evaluation: the operator's own value is supplied, and the
             // input is still evaluated because it may have side conditions the
             // path depends on.

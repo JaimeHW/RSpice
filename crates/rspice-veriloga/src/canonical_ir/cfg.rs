@@ -194,6 +194,10 @@ pub enum CfgValueKind {
     NodePotential(NodeId),
     BranchFlow(BranchId),
     BranchUnknownFlow(BranchUnknownId),
+    /// Unit-amplitude representative of one semantic noise process.
+    /// Its large-signal value is identically zero; AD uses the identity to
+    /// recover coherent routing gains without changing DC/transient behavior.
+    NoiseProcess(u32),
     /// Time derivative of `input`, keyed by the source operator so its state
     /// slot survives any reordering the passes do.
     Ddt {
@@ -566,6 +570,7 @@ impl CfgValueKind {
             | Self::NodePotential(_)
             | Self::BranchFlow(_)
             | Self::BranchUnknownFlow(_)
+            | Self::NoiseProcess(_)
             | Self::Ddt { .. }
             | Self::DdtScale
             | Self::Idt { .. }
@@ -1193,6 +1198,7 @@ fn is_leaf(kind: &CfgValueKind) -> bool {
             | CfgValueKind::NodePotential(_)
             | CfgValueKind::BranchFlow(_)
             | CfgValueKind::BranchUnknownFlow(_)
+            | CfgValueKind::NoiseProcess(_)
             | CfgValueKind::LaneSplat(_)
             | CfgValueKind::Staged { .. }
             // Digital constants are leaves for the same reason a real constant

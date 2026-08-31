@@ -2359,6 +2359,20 @@ mod tests {
                 .contains("Self::Device1(device) => device.evaluate_noise_sources(ctx, visitor)"),
             "{registry}"
         );
+        assert!(
+            registry.contains("Self::Device0(_) => &first_model::GROUPED_NOISE_PROCESSES"),
+            "{registry}"
+        );
+        assert!(
+            registry.contains("Self::Device1(_) => &second_model::GROUPED_NOISE_INJECTIONS"),
+            "{registry}"
+        );
+        assert!(
+            registry.contains(
+                "Self::Device0(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor)"
+            ),
+            "{registry}"
+        );
 
         fs::remove_dir_all(root).expect("remove registry fixture");
     }
@@ -2501,6 +2515,9 @@ mod tests {
             ),
             "{registry}"
         );
+        assert!(registry.contains("pub fn grouped_noise_process_descriptors"));
+        assert!(registry.contains("pub fn grouped_noise_injection_descriptors"));
+        assert!(registry.contains("pub fn evaluate_noise_processes_at_frequency"));
         assert!(registry.contains("        Ok(())"), "{registry}");
 
         fs::remove_dir_all(root).expect("remove empty registry fixture");
@@ -2843,6 +2860,79 @@ fn write_registry(
         );
         out.push_str(
             "            #[cfg(not(feature = \"veriloga-builtins-noise\"))]\n            _ => {\n                let _ = (ctx, visitor);\n                Ok(())\n            }\n",
+        );
+        out.push_str("        }\n");
+    }
+    out.push_str("    }\n");
+    out.push('\n');
+    out.push_str(
+        "    pub fn grouped_noise_process_descriptors(&self) -> &'static [super::GeneratedNoiseProcessDescriptor] {\n",
+    );
+    if devices.is_empty() {
+        out.push_str("        let _ = self;\n");
+        out.push_str("        &[]\n");
+    } else {
+        out.push_str("        match self {\n");
+        for (index, (device, feature)) in devices.iter().zip(&feature_names).enumerate() {
+            writeln!(
+                out,
+                "            #[cfg(all(feature = {feature:?}, feature = \"veriloga-builtins-noise\"))]\n            Self::Device{index}(_) => &{}::GROUPED_NOISE_PROCESSES,",
+                device.folder_name,
+            )?;
+        }
+        out.push_str(
+            "            #[cfg(feature = \"veriloga-builtins-noise\")]\n            Self::__NonExhaustive(value) => match *value {},\n",
+        );
+        out.push_str(
+            "            #[cfg(not(feature = \"veriloga-builtins-noise\"))]\n            _ => &[],\n",
+        );
+        out.push_str("        }\n");
+    }
+    out.push_str("    }\n\n");
+    out.push_str(
+        "    pub fn grouped_noise_injection_descriptors(&self) -> &'static [super::GeneratedNoiseInjectionDescriptor] {\n",
+    );
+    if devices.is_empty() {
+        out.push_str("        let _ = self;\n");
+        out.push_str("        &[]\n");
+    } else {
+        out.push_str("        match self {\n");
+        for (index, (device, feature)) in devices.iter().zip(&feature_names).enumerate() {
+            writeln!(
+                out,
+                "            #[cfg(all(feature = {feature:?}, feature = \"veriloga-builtins-noise\"))]\n            Self::Device{index}(_) => &{}::GROUPED_NOISE_INJECTIONS,",
+                device.folder_name,
+            )?;
+        }
+        out.push_str(
+            "            #[cfg(feature = \"veriloga-builtins-noise\")]\n            Self::__NonExhaustive(value) => match *value {},\n",
+        );
+        out.push_str(
+            "            #[cfg(not(feature = \"veriloga-builtins-noise\"))]\n            _ => &[],\n",
+        );
+        out.push_str("        }\n");
+    }
+    out.push_str("    }\n\n");
+    out.push_str(
+        "    pub fn evaluate_noise_processes_at_frequency(&self, ctx: &super::GeneratedEvalContext<'_>, frequency_hz: f64, visitor: &mut dyn super::GeneratedNoiseProcessVisitor) -> Result<(), super::GeneratedNoiseEvaluationError> {\n",
+    );
+    out.push_str("        let _ = (&ctx, frequency_hz, &visitor);\n");
+    if devices.is_empty() {
+        out.push_str("        let _ = self;\n");
+        out.push_str("        Ok(())\n");
+    } else {
+        out.push_str("        match self {\n");
+        for (index, feature) in feature_names.iter().enumerate() {
+            writeln!(
+                out,
+                "            #[cfg(all(feature = {feature:?}, feature = \"veriloga-builtins-noise\"))]\n            Self::Device{index}(device) => device.evaluate_noise_processes_at_frequency(ctx, frequency_hz, visitor),"
+            )?;
+        }
+        out.push_str(
+            "            #[cfg(feature = \"veriloga-builtins-noise\")]\n            Self::__NonExhaustive(value) => match *value {},\n",
+        );
+        out.push_str(
+            "            #[cfg(not(feature = \"veriloga-builtins-noise\"))]\n            _ => {\n                let _ = (ctx, frequency_hz, visitor);\n                Ok(())\n            }\n",
         );
         out.push_str("        }\n");
     }

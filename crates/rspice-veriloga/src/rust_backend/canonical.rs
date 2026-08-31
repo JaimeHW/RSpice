@@ -427,6 +427,7 @@ fn kernel_region_metrics(
             CfgValueKind::BranchUnknownFlow(branch) => {
                 write!(out, "unknown:{}", unknown_indices[branch])
             }
+            CfgValueKind::NoiseProcess(process) => write!(out, "noise-process:{process}"),
             CfgValueKind::Ddt { operator, .. } => {
                 write!(out, "ddt:{}", operator_indices[operator])
             }
@@ -2499,7 +2500,7 @@ impl ModelPlan {
         );
         let _ = writeln!(
             out,
-            "use {}::GeneratedEvalContext;\npub use {}::{{GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError, GeneratedNoiseEvaluationRef, GeneratedNoiseKind, GeneratedNoiseVisitor}};\n",
+            "use {}::GeneratedEvalContext;\npub use {}::{{GeneratedNoiseComplex, GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError, GeneratedNoiseEvaluationRef, GeneratedNoiseInjectionDescriptor, GeneratedNoiseInjectionEvaluation, GeneratedNoiseKind, GeneratedNoiseProcessDescriptor, GeneratedNoiseProcessEvaluationRef, GeneratedNoiseProcessVisitor, GeneratedNoiseVisitor}};\n",
             options.runtime_path, options.runtime_path
         );
         let shared_stages = noise
@@ -2704,6 +2705,7 @@ impl ModelPlan {
             );
         }
         out.push_str("        Ok(())\n    }\n}\n");
+        out.push_str(&super::noise::grouped_noise_extension(artifact, options)?);
 
         Ok(GeneratedRustFile {
             relative_path: "noise.rs".to_string(),
@@ -4178,7 +4180,10 @@ impl Wants {
 /// charge with conduction in one statement: separating those needs the reactive
 /// part tracked through the arithmetic, and calling the whole expression a
 /// charge would put conduction into the reactive matrix.
-fn stored_charges(function: &mut CfgFunction, residuals: &[ValueId]) -> Vec<Option<ValueId>> {
+pub(super) fn stored_charges(
+    function: &mut CfgFunction,
+    residuals: &[ValueId],
+) -> Vec<Option<ValueId>> {
     let reaches = values_reaching_a_ddt(function);
     let mut insertions: Vec<(ValueId, ValueId)> = Vec::new();
     let charges: Vec<Option<ValueId>> = residuals
@@ -4948,6 +4953,7 @@ endmodule
                 parameter_given: Vec::new(),
                 event_state: Vec::new(),
                 event_controls: HashMap::new(),
+                port_connected: vec![true],
                 node_potentials: vec![0.75],
                 branch_flows: Vec::new(),
                 branch_unknown_flows: Vec::new(),

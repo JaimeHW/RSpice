@@ -850,6 +850,81 @@ assert_eq!(disabled.0, vec![(true, 1.5), (false, 0.0)]);
 }
 
 #[test]
+fn generated_grouped_noise_preserves_process_identity_coherence_and_rhs_orientation() {
+    let (state, stamp, noise) = generated_parts(
+        r#"
+module grouped_processes(p, n, q);
+    inout p, n, q;
+    electrical p, n, q;
+    real reused, first, second, cancelled;
+    analog begin
+        reused = white_noise(1.0, "reused");
+        first = white_noise(1.0, "same");
+        second = white_noise(1.0, "same");
+        cancelled = white_noise(1.0, "cancelled");
+        I(p, n) <+ reused + reused + first + second + cancelled - cancelled;
+        V(q, n) <+ reused;
+    end
+endmodule
+"#,
+        "grouped process identity",
+    );
+    let body = r#"
+#[derive(Default)]
+struct Capture(Vec<(bool, f64, Vec<(usize, f64, f64)>)>);
+impl runtime::GeneratedNoiseProcessVisitor for Capture {
+    fn visit_process(
+        &mut self,
+        _index: usize,
+        value: runtime::GeneratedNoiseProcessEvaluationRef<'_>,
+    ) -> bool {
+        self.0.push((
+            value.active,
+            value.psd,
+            value.injections
+                .iter()
+                .map(|injection| (injection.descriptor, injection.gain.re, injection.gain.im))
+                .collect(),
+        ));
+        true
+    }
+}
+
+assert_eq!(device::noise::GROUPED_NOISE_PROCESSES.len(), 4);
+assert_eq!(device::noise::GROUPED_NOISE_PROCESSES[1].label, Some("same"));
+assert_eq!(device::noise::GROUPED_NOISE_PROCESSES[2].label, Some("same"));
+assert_eq!(device::noise::GROUPED_NOISE_PROCESSES[1].process_id, 1);
+assert_eq!(device::noise::GROUPED_NOISE_PROCESSES[2].process_id, 2);
+
+let mut instance = device::state::Instance::new(&[0, 1, 2]);
+instance.set_branch_indices(&[3]);
+instance.finalize_parameters().unwrap();
+let voltages = [0.0, 0.0, 0.0, 0.0];
+let ctx = runtime::GeneratedEvalContext { voltages: &voltages, temperature: 300.15 };
+let mut capture = Capture::default();
+instance.evaluate_noise_processes_at_frequency(&ctx, 1.0, &mut capture).unwrap();
+
+assert_eq!(capture.0.len(), 4);
+assert_eq!(capture.0[0].0, true);
+assert_eq!(capture.0[0].1, 1.0);
+assert_eq!(capture.0[0].2.len(), 2);
+let mut reused_gains = capture.0[0].2.iter().map(|entry| entry.1).collect::<Vec<_>>();
+reused_gains.sort_by(f64::total_cmp);
+assert_eq!(reused_gains, vec![-2.0, 1.0],
+    "current residual uses -RHS orientation while potential uses +RHS");
+assert_eq!(capture.0[1].2.len(), 1);
+assert_eq!(capture.0[1].2[0].1, -1.0);
+assert_eq!(capture.0[2].2.len(), 1);
+assert_eq!(capture.0[2].2[0].1, -1.0);
+assert!(capture.0[3].2.iter().all(|entry| entry.1 == 0.0 && entry.2 == 0.0),
+    "a fully cancelled process may retain a zero lane but must inject no amplitude");
+assert!(capture.0.iter().all(|process| process.2.iter().all(|entry| entry.2 == 0.0)));
+"#;
+    run_generated_main("grouped process identity", &state, &stamp, &noise, body)
+        .unwrap_or_else(|report| panic!("grouped process identity probe failed:\n{report}"));
+}
+
+#[test]
 fn generated_dynamic_potential_guards_keep_static_prefix_topology() {
     let (state, stamp, noise) = generated_parts(
         r#"
@@ -4162,6 +4237,50 @@ pub mod runtime {
         pub table_log_interp: bool,
     }
 
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct GeneratedNoiseProcessDescriptor {
+        pub process_id: usize,
+        pub label: Option<&'static str>,
+        pub kind: GeneratedNoiseKind,
+        pub table_len: usize,
+        pub table_log_interp: bool,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct GeneratedNoiseInjectionDescriptor {
+        pub process_id: usize,
+        pub equation: usize,
+        pub is_current: bool,
+        pub branch_ordinal: Option<usize>,
+        pub pos: GeneratedNoiseEndpoint,
+        pub neg: GeneratedNoiseEndpoint,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Default)]
+    pub struct GeneratedNoiseComplex { pub re: Value, pub im: Value }
+    impl GeneratedNoiseComplex {
+        pub fn is_finite(self) -> bool { self.re.is_finite() && self.im.is_finite() }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub struct GeneratedNoiseInjectionEvaluation {
+        pub descriptor: usize,
+        pub gain: GeneratedNoiseComplex,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub struct GeneratedNoiseProcessEvaluationRef<'a> {
+        pub active: bool,
+        pub psd: Value,
+        pub exponent: Option<Value>,
+        pub table_operands: &'a [Value],
+        pub injections: &'a [GeneratedNoiseInjectionEvaluation],
+    }
+
+    pub trait GeneratedNoiseProcessVisitor {
+        fn visit_process(&mut self, index: usize, evaluation: GeneratedNoiseProcessEvaluationRef<'_>) -> bool;
+    }
+
     #[derive(Debug, Clone, PartialEq)]
     pub struct GeneratedNoiseEvaluation {
         pub active: bool,
@@ -4188,6 +4307,8 @@ pub mod runtime {
         NonFinite { index: usize, quantity: &'static str, value: Value },
         NegativePower { index: usize, value: Value },
         InvalidMultiplicity { value: Value },
+        InvalidFrequency { value: Value },
+        NonFiniteGain { process: usize, injection: usize, re: Value, im: Value },
     }
 }
 "#;

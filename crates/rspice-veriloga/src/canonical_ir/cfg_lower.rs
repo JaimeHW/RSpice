@@ -330,6 +330,7 @@ enum LeafKey {
     NodePotential(NodeId),
     BranchFlow(BranchId),
     BranchUnknownFlow(BranchUnknownId),
+    NoiseProcess(u32),
 }
 
 struct CfgLowerer<'a> {
@@ -1802,7 +1803,11 @@ impl<'a> CfgLowerer<'a> {
             self.builder.write_variable(*variable, block, value);
         }
         self.noise_processes.push(pending);
-        self.real_constant(0.0)
+        self.leaf(
+            LeafKey::NoiseProcess(process_id),
+            CfgValueType::Real,
+            CfgValueKind::NoiseProcess(process_id),
+        )
     }
 
     fn identifier(&mut self, name: &SmolStr, span: SourceSpanRef) -> ValueId {

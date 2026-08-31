@@ -1572,6 +1572,7 @@ impl Emitter<'_> {
                 bindings.branch_unknown_flows,
                 usize::from(*unknown)
             ),
+            CfgValueKind::NoiseProcess(_) => "0.0".into(),
             CfgValueKind::Ddt { operator, input } => format!(
                 "{}({}, {})",
                 bindings.ddt,

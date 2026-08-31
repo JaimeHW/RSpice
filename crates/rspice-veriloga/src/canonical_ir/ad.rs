@@ -73,6 +73,9 @@ use super::{BlockId, BranchUnknownId, NodeId, ShapeId, ValueId};
 pub enum AdSeed {
     NodePotential(NodeId),
     BranchUnknownFlow(BranchUnknownId),
+    /// One independent syntactic noise process. Labels intentionally do not
+    /// participate in this identity.
+    NoiseProcess(u32),
     /// Not an unknown at all, and it must not reach the matrix.
     ///
     /// It is the directional affine correction stateful Newton limiting
@@ -487,6 +490,7 @@ fn seed_lanes(function: &CfgFunction, lanes: &[AdSeed]) -> Vec<(ValueId, usize)>
             let seed = match value.kind {
                 CfgValueKind::NodePotential(node) => AdSeed::NodePotential(node),
                 CfgValueKind::BranchUnknownFlow(unknown) => AdSeed::BranchUnknownFlow(unknown),
+                CfgValueKind::NoiseProcess(process) => AdSeed::NoiseProcess(process),
                 _ => return None,
             };
             index_of.get(&seed).map(|lane| (value.id, *lane))
