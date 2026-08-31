@@ -515,28 +515,58 @@ mod tests {
         );
     }
 
+    /// A case naming a construct the front end does not implement.
+    ///
+    /// Not a corpus entry. Every corpus entry runs, which is the point of the
+    /// corpus; what is under test here is the *arm*, and the arm's contract is
+    /// that a design it cannot compile becomes a named refusal rather than an
+    /// empty trace. So the design is written here, out of a construct chosen for
+    /// being firmly outside the language subset this engine executes — IEEE
+    /// 1364-2005 section 9.8.2's `fork`/`join`, which needs concurrent process
+    /// spawning the kernel has no notion of.
+    ///
+    /// The case borrows a corpus entry's stimulus so the harness has ports to
+    /// drive, and points at its own source. Nothing about the stimulus matters:
+    /// the refusal happens at compile time, before a vector is applied.
+    #[cfg(feature = "verilog-digital")]
+    fn unimplementable_case(directory: &std::path::Path) -> Case {
+        const DESIGN: &str = "module refuses (clk, q);\n\
+             \x20 input clk;\n\
+             \x20 output q;\n\
+             \x20 reg q;\n\
+             \x20 always @(posedge clk) fork q <= 1'b1; join\n\
+             endmodule\n";
+
+        fs::create_dir_all(directory).expect("scratch directory");
+        let source = directory.join("refuses.v");
+        fs::write(&source, DESIGN).expect("write the refused design");
+
+        let mut case = any_case();
+        case.name = "refuses".to_string();
+        case.source = source;
+        case.stimulus.module = "refuses".to_string();
+        case
+    }
+
     /// A construct RSpice cannot compile is a named refusal, never a trace.
     ///
-    /// Fail-closed is the whole rule: a corpus case the engine cannot execute
-    /// must not be able to pass by producing nothing, and the diagnostic has to
-    /// name the construct so the gap is actionable rather than a mystery.
+    /// Fail-closed is the whole rule: a design the engine cannot execute must
+    /// not be able to pass by producing nothing, and the diagnostic has to name
+    /// the construct so the gap is actionable rather than a mystery.
     #[cfg(feature = "verilog-digital")]
     #[test]
     fn a_construct_rspice_cannot_compile_is_refused_by_name() {
-        let corpus = Corpus::load(&corpus_dir()).expect("corpus loads");
-        let case = corpus
-            .case("ripple_adder")
-            .expect("the generate-unrolled case is in the corpus");
         let workspace = std::env::temp_dir().join("rspice-verilog-refusal-probe");
+        let case = unimplementable_case(&workspace);
 
-        let error = run_case(case, VerilogEngine::Rspice, None, &workspace, 1_000)
-            .expect_err("generate regions have no elaborated form yet");
+        let error = run_case(&case, VerilogEngine::Rspice, None, &workspace, 1_000)
+            .expect_err("`fork`/`join` has no executable form");
 
         let RunError::RspiceRefused { case: name, detail } = &error else {
             panic!("expected the named refusal, got {error:?}");
         };
-        assert_eq!(name, "ripple_adder");
-        assert!(detail.contains("genvar"), "{detail}");
+        assert_eq!(name, "refuses");
+        assert!(detail.contains("fork"), "{detail}");
     }
 
     /// The plumbing must propagate a refusal rather than treat an unrunnable
@@ -545,12 +575,11 @@ mod tests {
     #[cfg(feature = "verilog-digital")]
     #[test]
     fn comparison_plumbing_propagates_a_refusal_rather_than_reporting_agreement() {
-        let corpus = Corpus::load(&corpus_dir()).expect("corpus loads");
-        let case = corpus.case("ripple_adder").expect("in the corpus");
         let workspace = std::env::temp_dir().join("rspice-verilog-refusal-probe-compare");
+        let case = unimplementable_case(&workspace);
 
         let error = compare_engines(
-            case,
+            &case,
             (VerilogEngine::Rspice, None),
             (VerilogEngine::Rspice, None),
             &workspace,

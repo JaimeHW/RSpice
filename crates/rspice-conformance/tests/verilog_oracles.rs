@@ -424,19 +424,18 @@ fn identity(tools: &OracleTools) -> String {
 // RSpice
 // ===========================================================================
 
-/// What RSpice must do with one corpus case.
-enum Expected {
-    /// One row per vector, each written the way the trace grammar writes it:
-    /// the observed outputs in stimulus order, `name=value`, space separated.
-    Trace(&'static [&'static str]),
-    /// The case must be refused, with a diagnostic containing this fragment.
-    ///
-    /// A refusal is a legitimate answer for a construct the front end does not
-    /// implement, and the fragment is what makes it an *actionable* one: the
-    /// test fails if the gap moves, rather than silently accepting whatever new
-    /// reason the engine invents for not running the case.
-    Refused(&'static str),
-}
+/// What RSpice must do with one corpus case: one trace row per vector, each
+/// written the way the trace grammar writes it — the observed outputs in
+/// stimulus order, `name=value`, space separated.
+///
+/// Every case in the corpus has one. There is deliberately no way to spell
+/// "this case is refused" here any more: the corpus exists to say what this
+/// engine does with the language, and a corpus entry it cannot execute is a
+/// gap, not an expectation. The refusal *path* is still exercised — see
+/// `suites::verilog::run`'s own tests, which build a design out of a construct
+/// the front end does not implement and check that it refuses by name rather
+/// than producing an empty trace that would agree with anything.
+type Expected = &'static [&'static str];
 
 /// Expectations for every case in the corpus, derived without running RSpice.
 ///
@@ -469,14 +468,41 @@ enum Expected {
 ///   swap pair alternates because both right-hand sides read the pre-edge
 ///   values. `bl2` leading `nb2` by two observations is the assertion.
 ///
-/// * **gate_primitives**, **ripple_adder**, **xz_propagation** — refused. Each
-///   names one construct the front end does not implement, and the fragment
-///   pins which one, so a case moving from refused to running is a visible
-///   change rather than a silent one.
+/// * **gate_primitives** — the eight-row truth table of `(a, b, c)`, evaluated
+///   by hand from the module's own eighteen expressions. The gate-instantiated
+///   and operator-spelled halves are *not* two derivations: each row asserts
+///   that `g_and` and `o_and` are the same bit, so a front end with two paths
+///   fails the row rather than agreeing with itself. `wide` is
+///   `{a, b, c, 1'b1} ^ 4'b1010`, worked bit by bit — `(a^1)(b^0)(c^1)(1^0)`,
+///   most significant first. `mux` is `c ? a : b`. `reduce` is `^{a, b, c}`,
+///   the parity of the three inputs, which IEEE 1364-2005 section 4.1.10
+///   defines as the XOR table folded across the concatenation's bits.
+///
+/// * **ripple_adder** — eight-bit `a + b + cin`, computed in decimal per
+///   vector and written back in binary, with `cout` the ninth bit. Each row's
+///   comment names the carry behaviour the stimulus chose it for. Nothing about
+///   the *structure* is assumed: the design builds the sum out of eight
+///   `full_adder` instances through a generate loop, and the assertion is that
+///   the structure computes the arithmetic — which is why the expectation is
+///   arithmetic rather than a stage-by-stage trace.
+///
+/// * **xz_propagation** — read off the four-state rules the module's own header
+///   names, one at a time. `and_x` is `a & 1'bx`, which section 4.1.9's AND
+///   table makes `0` when `a` is `0` (the controlling value) and `x` when `a`
+///   is `1`; `or_x` is the dual. `bus` has two conditional drivers, and its
+///   value is section 7.9's resolution of their contributions: `z` when neither
+///   drives, the driven value when exactly one does, and `x` on contention.
+///   `eq_case` is `1` in every row and `eq_log` is `x` in every row, because
+///   section 4.1.8 makes `===` total over all four states and `==` unknown as
+///   soon as either operand has one — the standing check that the two operators
+///   have not been unified. `sel` walks the `casez` arms: section 9.5.1 makes a
+///   `?` in a case item a don't-care, so `4'b1???` matches any selector whose
+///   top bit is `1`, `4'b01??` the next, `4'b001?` the next, and `4'b0001` and
+///   `4'b0000` reach the default.
 const EXPECTED: [(&str, Expected); 6] = [
     (
         "c17",
-        Expected::Trace(&[
+        &[
             "N22=0 N23=0",
             "N22=0 N23=1",
             "N22=0 N23=0",
@@ -509,11 +535,11 @@ const EXPECTED: [(&str, Expected); 6] = [
             "N22=1 N23=1",
             "N22=1 N23=0",
             "N22=1 N23=0",
-        ]),
+        ],
     ),
     (
         "dff_register",
-        Expected::Trace(&[
+        &[
             // Reset asserted, twice.
             "q=0000 q_delayed=0000",
             "q=0000 q_delayed=0000",
@@ -533,11 +559,11 @@ const EXPECTED: [(&str, Expected); 6] = [
             // Asynchronous reset from a non-zero state.
             "q=0000 q_delayed=0000",
             "q=1100 q_delayed=0000",
-        ]),
+        ],
     ),
     (
         "nba_ordering",
-        Expected::Trace(&[
+        &[
             // Synchronous reset, held two clocks. The swap pair is seeded with
             // two different values and alternates from there.
             "nb2=0000 bl2=0000 swap_x=0101 swap_y=1010",
@@ -554,15 +580,70 @@ const EXPECTED: [(&str, Expected); 6] = [
             // `din` held, so both pipelines drain to the same steady value.
             "nb2=1111 bl2=1111 swap_x=1010 swap_y=0101",
             "nb2=1111 bl2=1111 swap_x=0101 swap_y=1010",
-        ]),
+        ],
     ),
-    // `a ~^ b`, the binary XNOR operator of section 4.1.9, and the `^{...}`
-    // reduction of section 4.1.10.
-    ("gate_primitives", Expected::Refused("Expected RParen")),
-    // Generate regions, section 12.4.
-    ("ripple_adder", Expected::Refused("genvar")),
-    // `===` and `!==`, the case-equality operators of section 4.1.8.
-    ("xz_propagation", Expected::Refused("Invalid expression")),
+    (
+        "gate_primitives",
+        &[
+            "g_and=0 g_or=0 g_nand=1 g_nor=1 g_xor=0 g_xnor=1 g_buf=0 g_not=1 o_and=0 o_or=0 \
+             o_nand=1 o_nor=1 o_xor=0 o_xnor=1 o_buf=0 o_not=1 wide=1011 mux=0 reduce=0",
+            "g_and=0 g_or=0 g_nand=1 g_nor=1 g_xor=0 g_xnor=1 g_buf=0 g_not=1 o_and=0 o_or=0 \
+             o_nand=1 o_nor=1 o_xor=0 o_xnor=1 o_buf=0 o_not=1 wide=1001 mux=0 reduce=1",
+            "g_and=0 g_or=1 g_nand=1 g_nor=0 g_xor=1 g_xnor=0 g_buf=0 g_not=1 o_and=0 o_or=1 \
+             o_nand=1 o_nor=0 o_xor=1 o_xnor=0 o_buf=0 o_not=1 wide=1111 mux=1 reduce=1",
+            "g_and=0 g_or=1 g_nand=1 g_nor=0 g_xor=1 g_xnor=0 g_buf=0 g_not=1 o_and=0 o_or=1 \
+             o_nand=1 o_nor=0 o_xor=1 o_xnor=0 o_buf=0 o_not=1 wide=1101 mux=0 reduce=0",
+            "g_and=0 g_or=1 g_nand=1 g_nor=0 g_xor=1 g_xnor=0 g_buf=1 g_not=0 o_and=0 o_or=1 \
+             o_nand=1 o_nor=0 o_xor=1 o_xnor=0 o_buf=1 o_not=0 wide=0011 mux=0 reduce=1",
+            "g_and=0 g_or=1 g_nand=1 g_nor=0 g_xor=1 g_xnor=0 g_buf=1 g_not=0 o_and=0 o_or=1 \
+             o_nand=1 o_nor=0 o_xor=1 o_xnor=0 o_buf=1 o_not=0 wide=0001 mux=1 reduce=0",
+            "g_and=1 g_or=1 g_nand=0 g_nor=0 g_xor=0 g_xnor=1 g_buf=1 g_not=0 o_and=1 o_or=1 \
+             o_nand=0 o_nor=0 o_xor=0 o_xnor=1 o_buf=1 o_not=0 wide=0111 mux=1 reduce=0",
+            "g_and=1 g_or=1 g_nand=0 g_nor=0 g_xor=0 g_xnor=1 g_buf=1 g_not=0 o_and=1 o_or=1 \
+             o_nand=0 o_nor=0 o_xor=0 o_xnor=1 o_buf=1 o_not=0 wide=0101 mux=1 reduce=1",
+        ],
+    ),
+    (
+        "ripple_adder",
+        &[
+            // 0 + 0 + 0
+            "sum=00000000 cout=0",
+            // 255 + 1 = 256: the carry ripples all eight stages and falls out.
+            "sum=00000000 cout=1",
+            // 255 + 255 + 1 = 511, which is 0x1FF.
+            "sum=11111111 cout=1",
+            // 0x55 + 0xAA = 0xFF, with no stage generating a carry.
+            "sum=11111111 cout=0",
+            // 0xAA + 0x55 + 1 = 0x100.
+            "sum=00000000 cout=1",
+            // 0x0F + 1 = 0x10: the carry ripples four stages and stops.
+            "sum=00010000 cout=0",
+            // 0x80 + 0x80 = 0x100, generated only in the top stage.
+            "sum=00000000 cout=1",
+            // 0x7F + 1 = 0x80, the signed-overflow boundary.
+            "sum=10000000 cout=0",
+            // 0 + 0 + 1: `cin` alone, and no stage carries.
+            "sum=00000001 cout=0",
+            // 255 + 0 + 1 = 0x100: `cin` injected under a full row of ones.
+            "sum=00000000 cout=1",
+        ],
+    ),
+    (
+        "xz_propagation",
+        &[
+            "and_x=0 or_x=x bus=z eq_case=1 eq_log=x sel=00",
+            "and_x=x or_x=1 bus=z eq_case=1 eq_log=x sel=00",
+            "and_x=0 or_x=x bus=z eq_case=1 eq_log=x sel=11",
+            "and_x=0 or_x=x bus=1 eq_case=1 eq_log=x sel=10",
+            "and_x=0 or_x=x bus=0 eq_case=1 eq_log=x sel=01",
+            "and_x=0 or_x=x bus=x eq_case=1 eq_log=x sel=00",
+            "and_x=x or_x=1 bus=z eq_case=1 eq_log=x sel=11",
+            "and_x=x or_x=1 bus=z eq_case=1 eq_log=x sel=10",
+            "and_x=x or_x=1 bus=z eq_case=1 eq_log=x sel=01",
+            "and_x=x or_x=1 bus=z eq_case=1 eq_log=x sel=00",
+            "and_x=x or_x=1 bus=z eq_case=1 eq_log=x sel=00",
+        ],
+    ),
 ];
 
 /// One trace row, written the way [`EXPECTED`] writes it.
@@ -600,39 +681,23 @@ fn rspice_matches_its_independently_derived_expectations() {
             None,
             &workspace,
             DEFAULT_TIMEOUT_MS,
-        );
+        )
+        .unwrap_or_else(|err| panic!("case '{name}' must run on RSpice: {err}"));
 
-        match expected {
-            Expected::Trace(rows) => {
-                let outcome =
-                    outcome.unwrap_or_else(|err| panic!("case '{name}' must run on RSpice: {err}"));
-                assert_eq!(
-                    outcome.trace.rows.len(),
-                    case.stimulus.vectors.len(),
-                    "case '{name}': one observation per vector"
-                );
-                let actual: Vec<String> = outcome.trace.rows.iter().map(row_text).collect();
-                assert_eq!(
-                    actual,
-                    rows.iter()
-                        .map(|row| (*row).to_string())
-                        .collect::<Vec<_>>(),
-                    "case '{name}' disagrees with the expectation derived from its source"
-                );
-            }
-            Expected::Refused(fragment) => {
-                let error = outcome
-                    .err()
-                    .unwrap_or_else(|| panic!("case '{name}' must be refused, not run"));
-                let RunError::RspiceRefused { detail, .. } = &error else {
-                    panic!("case '{name}' must be refused by name, got {error:?}");
-                };
-                assert!(
-                    detail.contains(fragment),
-                    "case '{name}' must still be refused for {fragment:?}, got {detail:?}"
-                );
-            }
-        }
+        assert_eq!(
+            outcome.trace.rows.len(),
+            case.stimulus.vectors.len(),
+            "case '{name}': one observation per vector"
+        );
+        let actual: Vec<String> = outcome.trace.rows.iter().map(row_text).collect();
+        assert_eq!(
+            actual,
+            expected
+                .iter()
+                .map(|row| (*row).to_string())
+                .collect::<Vec<_>>(),
+            "case '{name}' disagrees with the expectation derived from its source"
+        );
     }
 
     // Nothing on disk: the RSpice arm compiles and runs in this process.
