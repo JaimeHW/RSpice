@@ -678,6 +678,15 @@ impl EventScheduler {
     /// settled and is still due at it, not late for it. The due-slot mode
     /// ([`Self::run_due_events`]) is what delivers such an event, and refusing
     /// it here would drop output the analog path has always seen.
+    ///
+    /// Like [`Self::schedule_at`], the event lands in the future tier and is
+    /// picked up when its tick opens, because this method is reachable only
+    /// from outside a running slot: an event executing inside one schedules
+    /// through [`SchedulerContext`], which does not offer supersession. Placing
+    /// an event straight into the open slot from out here would put it ahead of
+    /// every event the drain has not opened yet, including one dated *earlier*
+    /// — the interpolated-crossing case above — and that is the one ordering
+    /// [`Self::run_due_events`] promises cannot happen.
     pub fn schedule_superseding_at(
         &mut self,
         tick: u64,
@@ -686,8 +695,7 @@ impl EventScheduler {
         value: EventValue,
     ) -> usize {
         let cancelled = self.queues.supersede_driver(&target, tick);
-        let open_slot = self.started.then_some(self.current_tick);
-        self.queues.insert(open_slot, tick, region, target, value);
+        self.queues.insert(None, tick, region, target, value);
         cancelled
     }
 
