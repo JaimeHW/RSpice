@@ -49,9 +49,14 @@ jobs:
           cargo test --locked -p rspice-conformance --release
           --test xyce_regression --test y_device_policy
       - name: Conformance suite unit tests (release)
+        # `verilog_oracles` runs with --nocapture because most of what it has
+        # to say when the oracles are absent is printed rather than asserted:
+        # which programs were probed, and what to install. Captured, a skip is
+        # indistinguishable from a pass.
         run: >-
           cargo test --locked -p rspice-conformance --lib
-          --test ngspice_oracle_audit --release
+          --test ngspice_oracle_audit --test verilog_oracles --release
+          -- --nocapture
       - name: GF180MCU device corpus (release)
         # A released Apache-2.0 foundry PDK: BSIM4 through the vendor's own
         # subcircuit wrappers and corner libraries, across four temperatures.

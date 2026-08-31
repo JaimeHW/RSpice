@@ -153,9 +153,18 @@ jobs:
         # Targets are named explicitly rather than using `--tests`: that would
         # also pull in `ngspice_regression` and `xyce_regression`, the vendored
         # deck corpora, which belong to nightly.
+        #
+        # `verilog_oracles` belongs in the fast tier because it is cheap here
+        # for a specific reason: neither Icarus Verilog nor Verilator is on this
+        # image, so the oracle arm reports its absence and returns, leaving the
+        # corpus-integrity and testbench-generation checks. Installing the two
+        # binaries is what makes it a real conformance step, and the step to
+        # pair with that is setting RSPICE_VERILOG_ORACLES_REQUIRED=1 so a
+        # later disappearance fails instead of silently going back to skipping.
         run: >-
           cargo test --locked -p rspice-conformance --lib
           --test ngspice_oracle_audit --test y_device_policy
+          --test verilog_oracles
       - name: Oracle-free corpora (routine tier)
         # The execution corpora are cheap here only because the expensive
         # decks opt out: every ISCAS85 deck is marked `!extended` and is
