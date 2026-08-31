@@ -73,13 +73,20 @@ impl AcAnalysisConfig {
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
 
-        if self.start_freq <= 0.0 {
+        if !self.start_freq.is_finite() {
+            errors.push("Start frequency must be finite".to_string());
+        } else if self.start_freq <= 0.0 {
             errors.push("Start frequency must be positive".to_string());
         }
-        if self.stop_freq <= 0.0 {
+        if !self.stop_freq.is_finite() {
+            errors.push("Stop frequency must be finite".to_string());
+        } else if self.stop_freq <= 0.0 {
             errors.push("Stop frequency must be positive".to_string());
         }
-        if self.start_freq >= self.stop_freq {
+        if self.start_freq.is_finite()
+            && self.stop_freq.is_finite()
+            && self.start_freq >= self.stop_freq
+        {
             errors.push("Start frequency must be less than stop frequency".to_string());
         }
         if self.num_points == 0 {
@@ -104,5 +111,37 @@ impl AcAnalysisConfig {
             self.start_freq,
             self.stop_freq,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validation_rejects_non_finite_frequency_bounds() {
+        for (start_freq, stop_freq) in [
+            (f64::NAN, 1.0),
+            (f64::INFINITY, 1.0),
+            (f64::NEG_INFINITY, 1.0),
+            (1.0, f64::NAN),
+            (1.0, f64::INFINITY),
+            (1.0, f64::NEG_INFINITY),
+        ] {
+            let config = AcAnalysisConfig {
+                start_freq,
+                stop_freq,
+                ..AcAnalysisConfig::default()
+            };
+            assert!(
+                config.validate().is_err(),
+                "accepted start={start_freq}, stop={stop_freq}"
+            );
+        }
+    }
+
+    #[test]
+    fn validation_keeps_finite_positive_ordered_bounds() {
+        assert!(AcAnalysisConfig::default().validate().is_ok());
     }
 }
