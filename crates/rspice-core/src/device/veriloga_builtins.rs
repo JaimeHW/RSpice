@@ -35,22 +35,60 @@ pub use rspice_veriloga_runtime::{
     GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, GENERATED_VERILOGA_V27_COMBINED_IDENTITY_ALIASES,
     GeneratedAnalysisKind, GeneratedDdtCoefficients, GeneratedDerivative, GeneratedEvalContext,
     GeneratedEvaluationError, GeneratedEvaluationMode, GeneratedMappedNoiseDescriptor,
-    GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseEvaluation,
-    GeneratedNoiseEvaluationError, GeneratedNoiseEvaluationRef, GeneratedNoiseInjection,
-    GeneratedNoiseKind, GeneratedNoiseTopologyError, GeneratedReactiveStamper,
-    GeneratedSimulationParameters, GeneratedStampLane, GeneratedStamper, GeneratedStaticStampCache,
-    GeneratedVerilogAAcceptedStateShapeIdentity, GeneratedVerilogACompatibilityCatalogEntry,
-    GeneratedVerilogAEvaluationError, GeneratedVerilogAInstanceCheckpoint,
-    GeneratedVerilogAModelDescriptor, GeneratedVerilogAParameterBound,
-    GeneratedVerilogAParameterDescriptor, GeneratedVerilogAParameterScope,
-    GeneratedVerilogAPersistentState, GeneratedVerilogARollbackState,
-    GeneratedVerilogATerminalDescriptor, GeneratedVerilogATerminalDirection, Value,
-    generated_veriloga_checkpoint_compatibility_entry, generated_veriloga_compatibility_entry,
-    generated_veriloga_v26_compatibility_entry, generated_veriloga_wire_compatibility_entry,
-    validate_generated_veriloga_compatibility_catalog,
+    GeneratedMappedNoiseInjectionDescriptor, GeneratedNoiseComplex, GeneratedNoiseDescriptor,
+    GeneratedNoiseEndpoint, GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError,
+    GeneratedNoiseEvaluationRef, GeneratedNoiseInjection, GeneratedNoiseInjectionDescriptor,
+    GeneratedNoiseInjectionEvaluation, GeneratedNoiseKind, GeneratedNoiseProcessDescriptor,
+    GeneratedNoiseProcessEvaluationRef, GeneratedNoiseProcessVisitor, GeneratedNoiseTopologyError,
+    GeneratedReactiveStamper, GeneratedSimulationParameters, GeneratedStampLane, GeneratedStamper,
+    GeneratedStaticStampCache, GeneratedVerilogAAcceptedStateShapeIdentity,
+    GeneratedVerilogACompatibilityCatalogEntry, GeneratedVerilogAEvaluationError,
+    GeneratedVerilogAInstanceCheckpoint, GeneratedVerilogAModelDescriptor,
+    GeneratedVerilogAParameterBound, GeneratedVerilogAParameterDescriptor,
+    GeneratedVerilogAParameterScope, GeneratedVerilogAPersistentState,
+    GeneratedVerilogARollbackState, GeneratedVerilogATerminalDescriptor,
+    GeneratedVerilogATerminalDirection, Value, generated_veriloga_checkpoint_compatibility_entry,
+    generated_veriloga_compatibility_entry, generated_veriloga_v26_compatibility_entry,
+    generated_veriloga_wire_compatibility_entry, validate_generated_veriloga_compatibility_catalog,
 };
 #[cfg(feature = "veriloga-builtins-base")]
 use rspice_veriloga_runtime::{GeneratedParameterAssignment, GeneratedParameterOrigin};
+
+/// Compatibility extension for catalogs produced before grouped generated
+/// noise existed. Newly generated registries expose inherent methods with the
+/// same signatures, which Rust selects in preference to this explicit empty
+/// capability implementation.
+#[cfg(feature = "veriloga-builtins-base")]
+trait LegacyGeneratedGroupedNoiseRegistry {
+    fn grouped_noise_process_descriptors(&self) -> &'static [GeneratedNoiseProcessDescriptor];
+    fn grouped_noise_injection_descriptors(&self) -> &'static [GeneratedNoiseInjectionDescriptor];
+    fn evaluate_noise_processes_at_frequency(
+        &self,
+        ctx: &GeneratedEvalContext<'_>,
+        frequency_hz: Value,
+        visitor: &mut dyn GeneratedNoiseProcessVisitor,
+    ) -> Result<(), GeneratedNoiseEvaluationError>;
+}
+
+#[cfg(feature = "veriloga-builtins-base")]
+impl LegacyGeneratedGroupedNoiseRegistry for builtins::GeneratedBuiltinKind {
+    fn grouped_noise_process_descriptors(&self) -> &'static [GeneratedNoiseProcessDescriptor] {
+        &[]
+    }
+
+    fn grouped_noise_injection_descriptors(&self) -> &'static [GeneratedNoiseInjectionDescriptor] {
+        &[]
+    }
+
+    fn evaluate_noise_processes_at_frequency(
+        &self,
+        _ctx: &GeneratedEvalContext<'_>,
+        _frequency_hz: Value,
+        _visitor: &mut dyn GeneratedNoiseProcessVisitor,
+    ) -> Result<(), GeneratedNoiseEvaluationError> {
+        Ok(())
+    }
+}
 
 #[cfg(feature = "veriloga-builtins-base")]
 #[derive(Debug, Clone)]
@@ -245,6 +283,24 @@ impl<'a> GeneratedDdtLanes<'a> {
 pub struct BuiltinEvaluatedNoiseSource {
     pub mapped: GeneratedMappedNoiseDescriptor,
     pub evaluation: GeneratedNoiseEvaluation,
+}
+
+#[cfg(feature = "veriloga-builtins-base")]
+#[derive(Debug, Clone, PartialEq)]
+pub struct BuiltinEvaluatedNoiseInjection {
+    pub mapped: GeneratedMappedNoiseInjectionDescriptor,
+    pub gain: GeneratedNoiseComplex,
+}
+
+#[cfg(feature = "veriloga-builtins-base")]
+#[derive(Debug, Clone, PartialEq)]
+pub struct BuiltinEvaluatedNoiseProcess {
+    pub descriptor: GeneratedNoiseProcessDescriptor,
+    pub active: bool,
+    pub psd: Value,
+    pub exponent: Option<Value>,
+    pub table_operands: Vec<Value>,
+    pub injections: Vec<BuiltinEvaluatedNoiseInjection>,
 }
 
 #[cfg(feature = "veriloga-builtins-base")]
@@ -930,6 +986,61 @@ impl BuiltinVerilogAInstance {
         self.kind.noise_descriptors()
     }
 
+    /// Whether this generated artifact exposes the additive coherent-process
+    /// ABI. A process with fully cancelling routing legitimately has no
+    /// injections, so the process table — not the injection table — is the
+    /// compatibility signal used by catalogs generated before that ABI.
+    #[inline]
+    pub fn has_grouped_noise_processes(&self) -> bool {
+        Self::grouped_noise_capability(self.kind.grouped_noise_process_descriptors())
+    }
+
+    #[inline]
+    fn grouped_noise_capability(processes: &[GeneratedNoiseProcessDescriptor]) -> bool {
+        !processes.is_empty()
+    }
+
+    fn validate_grouped_noise_catalog(
+        processes: &[GeneratedNoiseProcessDescriptor],
+        injections: &[GeneratedNoiseInjectionDescriptor],
+    ) -> Result<(), GeneratedNoiseEvaluationError> {
+        for (index, process) in processes.iter().enumerate() {
+            if process.process_id != index {
+                return Err(GeneratedNoiseEvaluationError::ProcessIdMismatch {
+                    index,
+                    process_id: process.process_id,
+                });
+            }
+        }
+        if let Some(injection) = injections
+            .iter()
+            .find(|injection| injection.process_id >= processes.len())
+        {
+            return Err(GeneratedNoiseEvaluationError::ProcessIndexOutOfRange {
+                index: injection.process_id,
+                count: processes.len(),
+            });
+        }
+        Ok(())
+    }
+
+    pub fn grouped_noise_process_catalog(&self) -> Vec<(usize, &'static str)> {
+        if !self.has_grouped_noise_processes() {
+            return Vec::new();
+        }
+        self.kind
+            .grouped_noise_process_descriptors()
+            .iter()
+            .filter(|process| {
+                self.kind
+                    .grouped_noise_injection_descriptors()
+                    .iter()
+                    .any(|injection| injection.process_id == process.process_id)
+            })
+            .map(|process| (process.process_id, process.label.unwrap_or("NOISE")))
+            .collect()
+    }
+
     /// CSC locations this instance writes through, after [`Self::link_static_stamps`].
     #[inline]
     pub fn linked_slot_count(&self) -> usize {
@@ -1173,6 +1284,25 @@ impl BuiltinVerilogAInstance {
                     GeneratedNoiseEvaluationError::InvalidMultiplicity { .. } => {
                         (0, "<device multiplicity>")
                     }
+                    GeneratedNoiseEvaluationError::InvalidFrequency { .. } => (0, "<frequency>"),
+                    GeneratedNoiseEvaluationError::NonFiniteGain { process, .. } => (
+                        *process,
+                        self.kind
+                            .grouped_noise_process_descriptors()
+                            .get(*process)
+                            .and_then(|descriptor| descriptor.label)
+                            .unwrap_or("<grouped process>"),
+                    ),
+                    GeneratedNoiseEvaluationError::ProcessIndexOutOfRange { index, .. } => {
+                        (*index, "<grouped process>")
+                    }
+                    GeneratedNoiseEvaluationError::ProcessIdMismatch { index, .. } => {
+                        (*index, "<grouped process>")
+                    }
+                    GeneratedNoiseEvaluationError::InjectionIndexOutOfRange { process, .. }
+                    | GeneratedNoiseEvaluationError::InjectionProcessMismatch { process, .. } => {
+                        (*process, "<grouped process>")
+                    }
                     GeneratedNoiseEvaluationError::AnalogLoopLimit { .. } => (0, "<analog loop>"),
                 };
                 BuiltinNoiseEvaluationError::Evaluation {
@@ -1200,6 +1330,179 @@ impl BuiltinVerilogAInstance {
             return Err(error);
         }
         debug_assert_eq!(evaluated.len(), descriptors.len());
+        Ok(evaluated)
+    }
+
+    pub fn evaluate_noise_processes_at_frequency(
+        &self,
+        voltages: &[Value],
+        num_nodes: usize,
+        frequency_hz: Value,
+        simparams: GeneratedSimulationParameters,
+    ) -> Result<Vec<BuiltinEvaluatedNoiseProcess>, BuiltinNoiseEvaluationError> {
+        if !self.has_grouped_noise_processes() {
+            return Ok(Vec::new());
+        }
+        let ctx = GeneratedEvalContext::with_analysis_step_and_simparams(
+            voltages,
+            self.temperature,
+            num_nodes,
+            GeneratedAnalysisKind::Noise,
+            self.analysis_initial_step,
+            self.analysis_final_step,
+            simparams,
+        );
+        let processes = self.kind.grouped_noise_process_descriptors();
+        let injections = self.kind.grouped_noise_injection_descriptors();
+        Self::validate_grouped_noise_catalog(processes, injections).map_err(|source| {
+            let index = match source {
+                GeneratedNoiseEvaluationError::ProcessIdMismatch { index, .. }
+                | GeneratedNoiseEvaluationError::ProcessIndexOutOfRange { index, .. } => index,
+                _ => unreachable!("grouped catalog validator returned a non-catalog error"),
+            };
+            BuiltinNoiseEvaluationError::Evaluation {
+                index,
+                mechanism: processes
+                    .get(index)
+                    .and_then(|descriptor| descriptor.label)
+                    .unwrap_or("<grouped process>"),
+                source,
+            }
+        })?;
+        let mut evaluated = Vec::with_capacity(processes.len());
+        let mut visitor_error = None;
+        self.kind
+            .evaluate_noise_processes_at_frequency(
+                &ctx,
+                frequency_hz,
+                &mut |index, evaluation: GeneratedNoiseProcessEvaluationRef<'_>| {
+                    let Some(descriptor) = processes.get(index).copied() else {
+                        visitor_error = Some(BuiltinNoiseEvaluationError::Evaluation {
+                            index,
+                            mechanism: "<missing grouped process>",
+                            source: GeneratedNoiseEvaluationError::ProcessIndexOutOfRange {
+                                index,
+                                count: processes.len(),
+                            },
+                        });
+                        return false;
+                    };
+                    if descriptor.process_id != index {
+                        visitor_error = Some(BuiltinNoiseEvaluationError::Evaluation {
+                            index,
+                            mechanism: descriptor.label.unwrap_or("<grouped process>"),
+                            source: GeneratedNoiseEvaluationError::ProcessIdMismatch {
+                                index,
+                                process_id: descriptor.process_id,
+                            },
+                        });
+                        return false;
+                    }
+                    let mechanism = descriptor.label.unwrap_or("<grouped process>");
+                    let mut mapped_injections = Vec::with_capacity(evaluation.injections.len());
+                    for injection in evaluation.injections {
+                        let Some(injection_descriptor) =
+                            injections.get(injection.descriptor).copied()
+                        else {
+                            visitor_error = Some(BuiltinNoiseEvaluationError::Evaluation {
+                                index,
+                                mechanism,
+                                source: GeneratedNoiseEvaluationError::InjectionIndexOutOfRange {
+                                    process: descriptor.process_id,
+                                    injection: injection.descriptor,
+                                    count: injections.len(),
+                                },
+                            });
+                            return false;
+                        };
+                        if injection_descriptor.process_id != descriptor.process_id {
+                            visitor_error = Some(BuiltinNoiseEvaluationError::Evaluation {
+                                index,
+                                mechanism,
+                                source: GeneratedNoiseEvaluationError::InjectionProcessMismatch {
+                                    process: descriptor.process_id,
+                                    injection: injection.descriptor,
+                                    owner: injection_descriptor.process_id,
+                                },
+                            });
+                            return false;
+                        }
+                        let mapped =
+                            match injection_descriptor.map_topology(&self.nodes, &self.branches) {
+                                Ok(mapped) => mapped,
+                                Err(source) => {
+                                    visitor_error = Some(BuiltinNoiseEvaluationError::Topology {
+                                        index: injection.descriptor,
+                                        mechanism,
+                                        source,
+                                    });
+                                    return false;
+                                }
+                            };
+                        mapped_injections.push(BuiltinEvaluatedNoiseInjection {
+                            mapped,
+                            gain: injection.gain,
+                        });
+                    }
+                    evaluated.push(BuiltinEvaluatedNoiseProcess {
+                        descriptor,
+                        active: evaluation.active,
+                        psd: evaluation.psd,
+                        exponent: evaluation.exponent,
+                        table_operands: evaluation.table_operands.to_vec(),
+                        injections: mapped_injections,
+                    });
+                    true
+                },
+            )
+            .map_err(|source| {
+                let (index, mechanism) = match &source {
+                    GeneratedNoiseEvaluationError::SourceIndexOutOfRange { index, .. }
+                    | GeneratedNoiseEvaluationError::NonFinite { index, .. }
+                    | GeneratedNoiseEvaluationError::NegativePower { index, .. }
+                    | GeneratedNoiseEvaluationError::ProcessIndexOutOfRange { index, .. }
+                    | GeneratedNoiseEvaluationError::ProcessIdMismatch { index, .. } => (
+                        *index,
+                        processes
+                            .get(*index)
+                            .and_then(|descriptor| descriptor.label)
+                            .unwrap_or("<grouped process>"),
+                    ),
+                    GeneratedNoiseEvaluationError::InjectionIndexOutOfRange { process, .. }
+                    | GeneratedNoiseEvaluationError::InjectionProcessMismatch { process, .. }
+                    | GeneratedNoiseEvaluationError::NonFiniteGain { process, .. } => (
+                        *process,
+                        processes
+                            .get(*process)
+                            .and_then(|descriptor| descriptor.label)
+                            .unwrap_or("<grouped process>"),
+                    ),
+                    GeneratedNoiseEvaluationError::InvalidMultiplicity { .. } => {
+                        (0, "<device multiplicity>")
+                    }
+                    GeneratedNoiseEvaluationError::InvalidFrequency { .. } => (0, "<frequency>"),
+                    GeneratedNoiseEvaluationError::AnalogLoopLimit { .. } => (0, "<analog loop>"),
+                };
+                BuiltinNoiseEvaluationError::Evaluation {
+                    index,
+                    mechanism,
+                    source,
+                }
+            })?;
+        if let Some(GeneratedEvaluationError::AnalogLoopLimit {
+            iterations, limit, ..
+        }) = ctx.take_evaluation_error()
+        {
+            return Err(BuiltinNoiseEvaluationError::Evaluation {
+                index: 0,
+                mechanism: "<analog loop>",
+                source: GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations, limit },
+            });
+        }
+        if let Some(error) = visitor_error {
+            return Err(error);
+        }
+        debug_assert_eq!(evaluated.len(), processes.len());
         Ok(evaluated)
     }
 
@@ -1749,7 +2052,8 @@ mod tests {
 
     #[cfg(feature = "veriloga-builtins-base")]
     use super::{
-        BuiltinVerilogADevices, GeneratedVerilogAAcceptedStateShapeIdentity, instantiate_builtin,
+        BuiltinVerilogADevices, BuiltinVerilogAInstance, GeneratedNoiseProcessDescriptor,
+        GeneratedVerilogAAcceptedStateShapeIdentity, instantiate_builtin,
     };
 
     /// An `OFF` instance is evaluated at its cut-off state until Newton moves.
@@ -2522,6 +2826,45 @@ mod tests {
             GeneratedNoiseInjection::Current {
                 node_pos: 73,
                 node_neg: 0,
+            }
+        );
+    }
+
+    #[cfg(feature = "veriloga-builtins-base")]
+    #[test]
+    fn grouped_noise_capability_survives_fully_cancelled_routing() {
+        let processes = [GeneratedNoiseProcessDescriptor {
+            process_id: 0,
+            label: Some("cancelled"),
+            kind: GeneratedNoiseKind::White,
+            table_len: 0,
+            table_log_interp: false,
+        }];
+
+        assert!(BuiltinVerilogAInstance::grouped_noise_capability(
+            &processes
+        ));
+        assert!(!BuiltinVerilogAInstance::grouped_noise_capability(&[]));
+    }
+
+    #[cfg(feature = "veriloga-builtins-base")]
+    #[test]
+    fn grouped_noise_catalog_rejects_non_dense_duplicate_process_ids() {
+        let process = |process_id| GeneratedNoiseProcessDescriptor {
+            process_id,
+            label: Some("duplicate"),
+            kind: GeneratedNoiseKind::White,
+            table_len: 0,
+            table_log_interp: false,
+        };
+        let error =
+            BuiltinVerilogAInstance::validate_grouped_noise_catalog(&[process(0), process(0)], &[])
+                .expect_err("duplicate process ID must fail closed");
+        assert_eq!(
+            error,
+            super::GeneratedNoiseEvaluationError::ProcessIdMismatch {
+                index: 1,
+                process_id: 0,
             }
         );
     }
