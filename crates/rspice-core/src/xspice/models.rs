@@ -185,6 +185,8 @@ pub use digital::{
     NumericallyControlledOscillator, SrFlipFlop, SrLatch, TFlipFlop,
 };
 
+pub(crate) use digital::PspiceDigitalStimulus;
+
 pub use lookup::{PiecewiseLinear, PiecewiseLinearTimeSeries};
 
 pub use file_source::{FileSource, FileSourceAlias};

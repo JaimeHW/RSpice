@@ -13,6 +13,7 @@ mod lookup;
 mod memory;
 mod oscillators;
 mod process;
+mod pspice_stim;
 mod sequential;
 mod sources;
 
@@ -26,6 +27,7 @@ pub use lookup::{DigitalGenericLookupTable, DigitalLookupTable};
 pub use memory::DigitalRam;
 pub use oscillators::{DigitalOscillator, DigitalPwmOscillator, NumericallyControlledOscillator};
 pub use process::DigitalProcess;
+pub(crate) use pspice_stim::PspiceDigitalStimulus;
 pub use sequential::{
     DFlipFlop, DLatch, DigitalFrequencyDivider, JkFlipFlop, SrFlipFlop, SrLatch, TFlipFlop,
 };

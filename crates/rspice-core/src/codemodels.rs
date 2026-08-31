@@ -85,6 +85,7 @@ pub(crate) const BUILTIN_MODEL_NAMES: &[&str] = &[
     "oneshot",
     "potentiometer",
     "print_param_types",
+    "pspice_d_stim",
     "pswitch",
     "pwl",
     "pwlts",
