@@ -60,7 +60,16 @@ use super::*;
 // source it compiled can produce a different artifact — a concatenation holding
 // a sized literal is a different width and therefore a different value — so the
 // record's identity has to change.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 28;
+// Version 29 sizes a digital expression by its context, IEEE 1364-2005 section
+// 5.4.1. The assignment's left-hand side is part of the expression's context,
+// so the operands of a context-determined operator are extended to the width of
+// the largest expression including the target and the operation runs at that
+// width; an unsized literal takes a context wider than its 32-bit floor. A
+// version-28 artifact computed `a * b` at the operand width and widened the
+// product afterwards, which is a different number rather than a narrower one —
+// `{cout, sum} = a + b` had a `cout` that could never be 1 — so every cached
+// digital artifact has to be rebuilt and the record's identity has to change.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 29;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
