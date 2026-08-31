@@ -1832,10 +1832,27 @@ fn the_remaining_process_refusals_name_themselves() {
              \x20   initial for (i = 0; i < 4; i = i + 1) q[i] = 1'b0;",
             "module-level",
         ),
+        // A process-local `real` lowers now — Verilog-AMS LRM 2.4 section
+        // 6.5.3's own example reads a `wreal` into one. A `string` still does
+        // not, and stands in its place.
         (
             "    reg q;\n\
-             \x20   initial begin : work real r; r = 1.0; q = 1'b0; end",
-            "process-local `real`",
+             \x20   initial begin : work string s; q = 1'b0; end",
+            "process-local `string`",
+        ),
+        // What a real *cannot* do is meet a four-state value inside one
+        // operator. Section 3.7 converts between the two with an explicit
+        // `$realtobits`/`$bitstoreal`, and there is no implicit conversion to
+        // invent for an `x`.
+        (
+            "    reg [3:0] q;\n\
+             \x20   initial begin : work real r; r = 1.0; q = r; end",
+            "a real value has no four-state form here",
+        ),
+        (
+            "    reg q;\n\
+             \x20   initial begin : work real r; r = 1.0 + q; q = 1'b0; end",
+            "a four-state operand in a real expression has no conversion",
         ),
         (
             "    reg q;\n\

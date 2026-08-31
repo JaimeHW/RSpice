@@ -94,7 +94,8 @@ use super::digital::{
     DigitalWriteSelect, DigitalWriteTarget,
 };
 use super::digital_value::{
-    ArithmeticOp, BitwiseOp, DigitalCaseMatch, FourStateValue, LogicalOp, RelationalOp, ShiftOp,
+    ArithmeticOp, BitwiseOp, DigitalCaseMatch, FourStateValue, LogicalOp, RealArithmeticOp,
+    RealCompareOp, RelationalOp, ShiftOp,
 };
 use super::ids::{BlockId, DigitalLocalId, DigitalProcessId, DigitalSignalId, ValueId};
 use crate::ast::DigitalProcessKind as AstKind;
@@ -284,6 +285,8 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
         }
     }
 
+    diagnostics.extend(reject_overdriven_real_nets(&signals, &drivers));
+
     if !diagnostics.is_empty() {
         return Err(diagnostics);
     }
@@ -292,6 +295,53 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
         processes,
         drivers,
     })
+}
+
+/// Refuse a plain `wreal` that more than one driver drives.
+///
+/// Verilog-AMS LRM 2.4 section 6.5.3: "There can be a maximum of one driver of
+/// a real-valued net." Section 3.7 gives no resolution function to combine two
+/// with — the LRM has none — so a second driver is a refusal and not a
+/// resolution problem, and refusing it here is the same kind of check as
+/// refusing a driver on an `input` port: a property of the declarations, fixed
+/// before anything runs.
+///
+/// Which is why this is *not* the store's job, and does not contradict the
+/// split that keeps IEEE 1364-2005 table 4-1 in the kernel. The store owns
+/// what value a net takes from the drivers it legally has; this owns whether
+/// the net may have them. A net declared `wrealsum`, `wrealavg`, `wrealmin` or
+/// `wrealmax` says it may, and is not checked here at all — its fold is the
+/// store's, exactly as a `wire`'s is.
+fn reject_overdriven_real_nets(
+    signals: &[DigitalSignal],
+    drivers: &[DigitalDriver],
+) -> Vec<IrDiagnostic> {
+    let mut diagnostics = Vec::new();
+    for signal in signals {
+        if signal.kind != DigitalSignalKind::Real(DigitalRealResolution::Single) {
+            continue;
+        }
+        let on_this_net: Vec<&DigitalDriver> = drivers
+            .iter()
+            .filter(|driver| driver.id.signal == signal.id)
+            .collect();
+        let Some(second) = on_this_net.get(1) else {
+            continue;
+        };
+        let count = on_this_net.len();
+        diagnostics.push(IrDiagnostic::error(
+            CompilerPhase::CfgLowering,
+            format!(
+                "`{}` is a `wreal` with {count} drivers; Verilog-AMS LRM 2.4 section 6.5.3 \
+                 permits a maximum of one driver of a real-valued net, and the standard defines \
+                 no resolution to combine two — declare it `wrealsum`, `wrealavg`, `wrealmin` \
+                 or `wrealmax` to say which one you want",
+                signal.name
+            ),
+            second.span,
+        ));
+    }
+    diagnostics
 }
 
 /// Lower one continuous assignment into a driver process.
@@ -341,8 +391,16 @@ fn lower_continuous_assign(
     // The driven net is the assignment's left-hand side, and section 5.4.1
     // does not distinguish a continuous assignment from a procedural one:
     // `assign p = a * b;` with an eight-bit `p` multiplies at eight bits.
-    let context = lowerer.lvalue_width(&assignment.assignment.target);
-    let value = lowerer.assigned_value(entry, &assignment.assignment.value, context);
+    //
+    // Except when the net is a `wreal`, which has no width to impose. Then the
+    // right-hand side is lowered in the real domain, which is what Verilog-AMS
+    // LRM 2.4 section 3.7's `assign wrstim = stim;` means.
+    let value = if lowerer.lvalue_is_real(&assignment.assignment.target) {
+        lowerer.real_expression(entry, &assignment.assignment.value)
+    } else {
+        let context = lowerer.lvalue_width(&assignment.assignment.target);
+        lowerer.assigned_value(entry, &assignment.assignment.value, context)
+    };
     lowerer.drive(entry, &assignment.assignment.target, value, id, drivers);
 
     let mut reads = BTreeSet::new();
@@ -558,6 +616,12 @@ struct ProcessLocal {
     /// `None` for a counter the lowering invented, which no source name can
     /// reach and which therefore cannot be shadowed or read by mistake.
     name: Option<SmolStr>,
+    /// Whether the variable holds a real rather than four-state bits.
+    ///
+    /// A `real` declared inside a process (IEEE 1364-2005 section 3.9.1), which
+    /// is what the Verilog-AMS LRM 2.4 section 6.5.3 example reads a `wreal`
+    /// into. Its `width` is zero, the way every real quantity's is here.
+    real: bool,
     width: u32,
     /// Whether reading it yields a signed value, IEEE 1364-2005 table 5-21.
     ///
@@ -677,6 +741,17 @@ impl ProcessLowerer<'_> {
         self.locals[usize::from(id)].signed
     }
 
+    fn local_is_real(&self, id: DigitalLocalId) -> bool {
+        self.locals[usize::from(id)].real
+    }
+
+    /// Whether a signal the plan declares carries a real value.
+    fn real_signal(&self, signal: DigitalSignalId) -> bool {
+        self.signals
+            .get(usize::from(signal))
+            .is_some_and(|signal| signal.kind.is_real())
+    }
+
     /// Declare a local and give it its initial value in `block`.
     ///
     /// The initial value is written at the declaration, which makes every
@@ -701,6 +776,7 @@ impl ProcessLowerer<'_> {
         let id = DigitalLocalId::from(self.locals.len());
         self.locals.push(ProcessLocal {
             name,
+            real: false,
             width,
             signed,
             span,
@@ -725,6 +801,43 @@ impl ProcessLowerer<'_> {
         id
     }
 
+    /// Declare a process-local `real` and give it its initial value in `block`.
+    ///
+    /// The four-state twin of [`Self::declare_local`], separate because almost
+    /// every line of it differs: the SSA type is [`CfgValueType::Real`], the
+    /// initial value is a real rather than an all-`x` pattern, and there is no
+    /// width or signedness to carry.
+    ///
+    /// The unwritten value is `0.0`. IEEE 1364-2005 section 3.9.1 makes a
+    /// `real` variable's initial value zero — it has no `x` to start at, which
+    /// is exactly why it needs its own answer here rather than the section
+    /// 4.2.2 one a `reg` gets.
+    fn declare_real_local(
+        &mut self,
+        block: BlockId,
+        name: Option<SmolStr>,
+        span: Span,
+        initial: Option<ValueId>,
+    ) -> DigitalLocalId {
+        let id = DigitalLocalId::from(self.locals.len());
+        self.locals.push(ProcessLocal {
+            name,
+            real: true,
+            width: 0,
+            signed: false,
+            span,
+        });
+        let variable = CfgVariable::DigitalLocal(id);
+        self.builder
+            .declare_variable(variable, CfgValueType::Real);
+        let initial = initial.unwrap_or_else(|| self.real_constant(0.0));
+        self.builder.write_variable(variable, block, initial);
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.push(id);
+        }
+        id
+    }
+
     /// Read a local's current value in `block`.
     ///
     /// A local always has a definition — the declaration wrote one — so a
@@ -736,7 +849,7 @@ impl ProcessLowerer<'_> {
             Some(value) => value,
             None => {
                 let local = &self.locals[usize::from(id)];
-                let (width, span) = (local.width, local.span);
+                let (real, width, span) = (local.real, local.width, local.span);
                 let name = local.name.clone();
                 self.error(
                     format!(
@@ -745,7 +858,11 @@ impl ProcessLowerer<'_> {
                     ),
                     span,
                 );
-                self.unknown(width)
+                if real {
+                    self.real_constant(0.0)
+                } else {
+                    self.unknown(width)
+                }
             }
         }
     }
@@ -757,6 +874,13 @@ impl ProcessLowerer<'_> {
     /// to the target's width by [`Self::assigned_value`] before it gets here,
     /// so a narrower value arriving at this point is an unsigned one.
     fn write_local(&mut self, block: BlockId, id: DigitalLocalId, value: ValueId) {
+        // A real local has no width to resize to: section 5.2.1's rule is
+        // about bits, and the value arriving here has none.
+        if self.local_is_real(id) {
+            self.builder
+                .write_variable(CfgVariable::DigitalLocal(id), block, value);
+            return;
+        }
         let width = self.local_width(id);
         let value = self.resize(block, value, width, false);
         self.builder
@@ -800,6 +924,31 @@ impl ProcessLowerer<'_> {
     /// Lower the declarations of one `begin`/`end` block.
     fn declare_block_locals(&mut self, block: BlockId, inner: &crate::ast::DigitalBlock) {
         for declaration in &inner.variables {
+            // A `real` is not a narrow four-state value and does not go through
+            // the width machinery at all: it is declared, initialized and read
+            // in the real domain, which is what lets a process hold what a
+            // `wreal` gave it (Verilog-AMS LRM 2.4 section 6.5.3's own example
+            // reads one into a `real residue`).
+            if matches!(declaration.var_type, crate::ast::VarType::Real) {
+                for item in &declaration.items {
+                    if !item.dimensions.is_empty() {
+                        self.error(
+                            format!(
+                                "an array `{}` inside a process has no lowered form yet",
+                                item.name
+                            ),
+                            item.span,
+                        );
+                        continue;
+                    }
+                    let initial = item
+                        .init
+                        .as_ref()
+                        .map(|init| self.real_expression(block, init));
+                    self.declare_real_local(block, Some(item.name.clone()), item.span, initial);
+                }
+                continue;
+            }
             let width = match declaration.var_type {
                 // IEEE 1364-2005 section 3.9: an `integer` is a 32-bit
                 // variable. It is four-state here rather than the IR's own
@@ -808,15 +957,8 @@ impl ProcessLowerer<'_> {
                 crate::ast::VarType::Integer => 32,
                 crate::ast::VarType::Real | crate::ast::VarType::String => {
                     self.error(
-                        format!(
-                            "a process-local `{}` has no lowered form yet: a process \
-                             computes in four-state values",
-                            if matches!(declaration.var_type, crate::ast::VarType::Real) {
-                                "real"
-                            } else {
-                                "string"
-                            }
-                        ),
+                        "a process-local `string` has no lowered form yet: a process \
+                         computes in four-state and real values",
                         declaration.span,
                     );
                     continue;
@@ -1206,8 +1348,15 @@ impl ProcessLowerer<'_> {
     /// which is why the value node is emitted into the current block and only
     /// the write lands after the wait.
     fn assign(&mut self, block: BlockId, assign: &DigitalAssign, nonblocking: bool) -> BlockId {
-        let context = self.lvalue_width(&assign.target);
-        let mut carried = [self.assigned_value(block, &assign.value, context)];
+        // A real target takes the real half of the expression grammar and none
+        // of the section 5.4.1 sizing: there is no width for the target to seed
+        // and no truncation for the write to apply.
+        let mut carried = if self.lvalue_is_real(&assign.target) {
+            [self.real_expression(block, &assign.value)]
+        } else {
+            let context = self.lvalue_width(&assign.target);
+            [self.assigned_value(block, &assign.value, context)]
+        };
         let block = match &assign.timing {
             // The value crosses the suspension as a resume argument; without
             // that the write would read a value the interpreter no longer has.
@@ -1258,6 +1407,9 @@ impl ProcessLowerer<'_> {
     /// the defect this fixes did not fail loudly, it wrote `x` into the top of
     /// every concatenation target narrower than the sum of its parts.
     fn write(&mut self, block: BlockId, target: &DigitalLValue, value: ValueId, nonblocking: bool) {
+        if self.refuse_real_in_concatenation(target) {
+            return;
+        }
         match target {
             DigitalLValue::Concat { elements, .. } => {
                 let widths: Vec<u32> = elements
@@ -1347,6 +1499,9 @@ impl ProcessLowerer<'_> {
         process: DigitalProcessId,
         drivers: &mut Vec<DigitalDriver>,
     ) {
+        if self.refuse_real_in_concatenation(target) {
+            return;
+        }
         match target {
             DigitalLValue::Concat { elements, .. } => {
                 let widths: Vec<u32> = elements
@@ -1646,6 +1801,274 @@ impl ProcessLowerer<'_> {
     }
 
     // ------------------------------------------------------------------
+    // Real expressions
+    // ------------------------------------------------------------------
+    //
+    // # Where the section 5.4.1 machinery hands off
+    //
+    // It does not run at all on a real. IEEE 1364-2005 sections 5.4.1 and
+    // 5.4.2 size and sign an expression in bits, and section 5.1's table of
+    // operators excludes real operands from every operator whose answer
+    // depends on a bit pattern. A real has no width to maximise, no sign bit to
+    // extend from, and no truncation to apply at an assignment — so the
+    // two-pass `self_width` / `sized` walk is not "trivially satisfied" for one
+    // but inapplicable, and giving it a real to size would invite a zero width
+    // to propagate through it.
+    //
+    // The seam is therefore a *classification*, made once per expression by
+    // [`Self::is_real_expression`], and every caller that could receive either
+    // branches on it before entering `sized`:
+    //
+    //   * an assignment or driver whose target is real lowers its right-hand
+    //     side with [`Self::real_expression`] and never calls `assigned_value`;
+    //   * `sized` refuses a real that reached a position wanting bits;
+    //   * a comparison inspects its operands first, because `a > 0.5` is a real
+    //     expression's operands under a four-state result;
+    //   * a branch condition converts a real with `!= 0.0`, section 9.4's
+    //     "nonzero known value".
+    //
+    // # And the two domains never mix inside one operator
+    //
+    // Verilog-AMS LRM 2.4 section 3.7 is explicit that a `wreal` "cannot be
+    // connected to any other wires, although connection to explicitly declared
+    // 64-bit wires can be done via system tasks `$realtobits` and
+    // `$bitstoreal`". The standard's answer to real-versus-bits is an explicit
+    // call, not a coercion — so a mixed operand pair is refused by name here
+    // rather than converted. There is no honest conversion to make: a
+    // four-state value holding `x` has no real, and inventing one would put a
+    // number where the design said it did not know.
+
+    /// Whether an expression's value is a real rather than four-state bits.
+    ///
+    /// Pure, and the counterpart of [`Self::self_width`] for the other domain:
+    /// consulted before anything is emitted, so that the choice of which
+    /// lowering an expression gets is made once.
+    ///
+    /// A comparison is deliberately *not* real however real its operands are —
+    /// section 5.4.2 rule (g) makes every comparison one unsigned bit — and
+    /// neither is a logical operator or a reduction.
+    fn is_real_expression(&self, expression: &Expression) -> bool {
+        match expression {
+            Expression::Number(number) => is_real_literal(&number.raw),
+            Expression::Identifier(identifier) => match self.lookup_local(&identifier.name) {
+                Some(local) => self.local_is_real(local),
+                None => self
+                    .index
+                    .get(identifier.name.as_str())
+                    .is_some_and(|signal| self.real_signal(*signal)),
+            },
+            // Section 5.1 permits real operands for `+ - * /`; the result is
+            // real when either operand is. A mixed pair is caught in
+            // `real_expression`, which is where a diagnostic can name it.
+            Expression::Binary(binary) => {
+                matches!(
+                    binary.op,
+                    BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div
+                ) && (self.is_real_expression(&binary.left)
+                    || self.is_real_expression(&binary.right))
+            }
+            Expression::Unary(unary) => {
+                matches!(unary.op, UnaryOp::Neg | UnaryOp::Pos)
+                    && self.is_real_expression(&unary.operand)
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether an assignment target holds a real.
+    fn lvalue_is_real(&self, target: &DigitalLValue) -> bool {
+        match target {
+            DigitalLValue::Identifier { name, .. } => match self.lookup_local(name) {
+                Some(local) => self.local_is_real(local),
+                None => self
+                    .index
+                    .get(name.as_str())
+                    .is_some_and(|signal| self.real_signal(*signal)),
+            },
+            // A select names bits, and a real has none. The refusal is the
+            // analyzer's; reporting `false` here sends the target down the
+            // four-state path, which is where that refusal already lives.
+            _ => false,
+        }
+    }
+
+    /// A real literal, as a leaf.
+    fn real_constant(&mut self, value: f64) -> ValueId {
+        self.builder
+            .push_leaf(CfgValueType::Real, CfgValueKind::RealConstant(value))
+    }
+
+    /// Lower an expression that must produce a real.
+    ///
+    /// The whole real half of the expression grammar, and deliberately small:
+    /// what is not here is refused by name, because a real-number model that
+    /// silently lost an operator would produce a plausible waveform and no way
+    /// to tell it was wrong.
+    fn real_expression(&mut self, block: BlockId, expression: &Expression) -> ValueId {
+        match expression {
+            Expression::Number(number) if is_real_literal(&number.raw) => {
+                self.real_constant(number.value)
+            }
+            Expression::Identifier(identifier) => {
+                if let Some(local) = self.lookup_local(&identifier.name) {
+                    if self.local_is_real(local) {
+                        return self.read_local(block, local);
+                    }
+                    return self.not_a_real(
+                        &identifier.name,
+                        "a four-state process-local",
+                        identifier.span,
+                    );
+                }
+                match self.index.get(identifier.name.as_str()).copied() {
+                    Some(signal) if self.real_signal(signal) => self.builder.push(
+                        block,
+                        CfgValueType::Real,
+                        CfgValueKind::DigitalRealSignalRead { signal },
+                    ),
+                    Some(_) => self.not_a_real(
+                        &identifier.name,
+                        "a four-state signal",
+                        identifier.span,
+                    ),
+                    None => {
+                        self.error(
+                            format!("`{}` is not a discrete-domain signal", identifier.name),
+                            identifier.span,
+                        );
+                        self.real_constant(0.0)
+                    }
+                }
+            }
+            Expression::Binary(binary) => {
+                let op = match binary.op {
+                    BinaryOp::Add => RealArithmeticOp::Add,
+                    BinaryOp::Sub => RealArithmeticOp::Sub,
+                    BinaryOp::Mul => RealArithmeticOp::Mul,
+                    BinaryOp::Div => RealArithmeticOp::Div,
+                    // Section 5.1 excludes real operands from `%`, the bitwise
+                    // and shift operators, and `**`; a logical `&&` reaches
+                    // here only when its own result was misclassified.
+                    _ => {
+                        self.error(
+                            "this operator has no real-valued form: IEEE 1364-2005 section 5.1 \
+                             admits real operands for `+ - * /` and the comparisons, and for \
+                             nothing that depends on a bit pattern",
+                            binary.span,
+                        );
+                        return self.real_constant(0.0);
+                    }
+                };
+                let left = self.real_operand(block, &binary.left);
+                let right = self.real_operand(block, &binary.right);
+                self.builder.push(
+                    block,
+                    CfgValueType::Real,
+                    CfgValueKind::DigitalRealArithmetic { op, left, right },
+                )
+            }
+            Expression::Unary(unary) if matches!(unary.op, UnaryOp::Pos) => {
+                self.real_operand(block, &unary.operand)
+            }
+            Expression::Unary(unary) if matches!(unary.op, UnaryOp::Neg) => {
+                // `0.0 - x` rather than a negation node: the IR has an operator
+                // that means exactly this, and a second one that also meant it
+                // would be a second place to get `-0.0` wrong.
+                let zero = self.real_constant(0.0);
+                let operand = self.real_operand(block, &unary.operand);
+                self.builder.push(
+                    block,
+                    CfgValueType::Real,
+                    CfgValueKind::DigitalRealArithmetic {
+                        op: RealArithmeticOp::Sub,
+                        left: zero,
+                        right: operand,
+                    },
+                )
+            }
+            // A `?:` whose arms are real. IEEE 1364-2005 section 5.1.13 merges
+            // the two arms bitwise when the condition is `x` or `z`, and there
+            // is no real-valued form of a bitwise merge; picking an arm instead
+            // would answer a question the standard answered differently. Write
+            // the `if`/`else` this stands for, which section 9.4 does define.
+            Expression::Conditional(conditional) => {
+                self.error(
+                    "a `?:` with real arms has no lowered form: IEEE 1364-2005 section 5.1.13 \
+                     merges the arms bitwise when the condition is ambiguous, and a real has no \
+                     bits to merge; write the `if`/`else` it stands for",
+                    conditional.span,
+                );
+                self.real_constant(0.0)
+            }
+            other => {
+                self.error(
+                    "this expression form has no real-valued lowering",
+                    other.span(),
+                );
+                self.real_constant(0.0)
+            }
+        }
+    }
+
+    /// Lower one operand of a real operator, refusing a four-state one by name.
+    fn real_operand(&mut self, block: BlockId, expression: &Expression) -> ValueId {
+        if self.is_real_expression(expression) {
+            return self.real_expression(block, expression);
+        }
+        // A whole-number literal beside a real is the one four-state operand
+        // that is not ambiguous — `x` cannot reach it — but admitting it would
+        // put the conversion rule in one place and refuse it in every other,
+        // which is worse than refusing it here too. `2.0` says the same thing
+        // and says it in one domain.
+        self.error(
+            "a four-state operand in a real expression has no conversion: Verilog-AMS LRM 2.4 \
+             section 3.7 converts between a real and bits with the explicit `$realtobits` and \
+             `$bitstoreal`, and an implicit one would have to invent a real for `x`",
+            expression.span(),
+        );
+        self.real_constant(0.0)
+    }
+
+    /// Refuse a concatenation target with a real element, reporting whether it
+    /// was refused.
+    ///
+    /// IEEE 1364-2005 section 5.1 does not admit a real operand in a
+    /// concatenation, and the reason is the same on the left-hand side as on
+    /// the right: a concatenation is a statement about bit positions, and a
+    /// real occupies none. `{a, r} = ...` would have to invent a width for `r`
+    /// to slice the right-hand side at.
+    fn refuse_real_in_concatenation(&mut self, target: &DigitalLValue) -> bool {
+        let DigitalLValue::Concat { elements, .. } = target else {
+            return false;
+        };
+        let mut refused = false;
+        for element in elements {
+            if self.lvalue_is_real(element) {
+                self.error(
+                    "a real-valued name cannot be part of a concatenation target: IEEE \
+                     1364-2005 section 5.1 admits no real operand in a concatenation, which \
+                     divides a value by bit position",
+                    element.span(),
+                );
+                refused = true;
+            }
+        }
+        refused
+    }
+
+    /// Refuse a four-state name used where a real was needed.
+    fn not_a_real(&mut self, name: &str, what: &str, span: Span) -> ValueId {
+        self.error(
+            format!(
+                "`{name}` is {what} and carries no real value; Verilog-AMS LRM 2.4 section 3.7 \
+                 converts bits to a real with `$realtobits`/`$bitstoreal` rather than implicitly"
+            ),
+            span,
+        );
+        self.real_constant(0.0)
+    }
+
+    // ------------------------------------------------------------------
     // Expressions
     // ------------------------------------------------------------------
 
@@ -1661,6 +2084,24 @@ impl ProcessLowerer<'_> {
     /// The CFG's `Branch` reads a truth value, so a wider four-state value is
     /// reduced to one bit here rather than at every branch site.
     fn condition(&mut self, block: BlockId, expression: &Expression) -> ValueId {
+        // IEEE 1364-2005 section 9.4: a condition is true when it evaluates to
+        // a nonzero known value. For a real that is the whole rule — there is
+        // no `x` to fall to the `else` for — so `!= 0.0` is the conversion, and
+        // it is exact rather than tolerance-based because the standard's test
+        // is an equality with zero and not a nearness to it.
+        if self.is_real_expression(expression) {
+            let value = self.real_expression(block, expression);
+            let zero = self.real_constant(0.0);
+            return self.builder.push(
+                block,
+                CfgValueType::FourState { width: 1 },
+                CfgValueKind::DigitalRealCompare {
+                    op: RealCompareOp::Ne,
+                    left: value,
+                    right: zero,
+                },
+            );
+        }
         let value = self.expression(block, expression);
         self.truth_value(block, value)
     }
@@ -1769,6 +2210,18 @@ impl ProcessLowerer<'_> {
     /// the signedness the comparison node carries. Emitting the resize would
     /// state the rule twice and mean it once.
     fn sized(&mut self, block: BlockId, expression: &Expression, context: Context) -> ValueId {
+        // A real that reached a position wanting bits. Everything below sizes
+        // and extends in bits, and a real has none — so it stops here by name
+        // rather than being sized to zero and silently disappearing.
+        if self.is_real_expression(expression) {
+            self.error(
+                "a real value has no four-state form here: Verilog-AMS LRM 2.4 section 3.7 \
+                 converts one to bits with the explicit `$realtobits`, and this position needs \
+                 bits",
+                expression.span(),
+            );
+            return self.unknown(context.width.max(1));
+        }
         let width = self.self_width(expression).max(context.width);
         let inner = Context {
             width,
@@ -2436,6 +2889,21 @@ impl ProcessLowerer<'_> {
         context: Context,
     ) -> ValueId {
         let width = context.width;
+        // A comparison between reals. It is not itself a real expression —
+        // section 5.4.2 rule (g) makes its result one unsigned bit — so it
+        // reaches here through the ordinary four-state path and its *operands*
+        // are what decide which comparison node is emitted.
+        if let Some(op) = real_compare_op(binary.op)
+            && (self.is_real_expression(&binary.left) || self.is_real_expression(&binary.right))
+        {
+            let left = self.real_operand(block, &binary.left);
+            let right = self.real_operand(block, &binary.right);
+            return self.builder.push(
+                block,
+                CfgValueType::FourState { width: 1 },
+                CfgValueKind::DigitalRealCompare { op, left, right },
+            );
+        }
         let kind = match binary.op {
             BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor => {
                 let op = match binary.op {
@@ -2645,6 +3113,36 @@ impl ProcessLowerer<'_> {
             }
         }
     }
+}
+
+/// Whether a numeric literal's source spelling is a *real* constant.
+///
+/// IEEE 1364-2005 section 2.5.2: a real constant is written either with a
+/// decimal point between digits or with an exponent. Read from the raw
+/// spelling, not from the decoded value, because that is where the distinction
+/// survives — `2.0` and `2` decode to the same `f64` and are different
+/// constants, one real and one a 32-bit integer.
+///
+/// A based literal is never one: `4'd2` carries a base marker, and section
+/// 2.5.2 gives real constants no bases.
+fn is_real_literal(raw: &str) -> bool {
+    if raw.contains('\'') {
+        return false;
+    }
+    raw.contains('.') || raw.contains(['e', 'E'])
+}
+
+/// The real comparison an operator spells, if it spells one.
+const fn real_compare_op(op: BinaryOp) -> Option<RealCompareOp> {
+    Some(match op {
+        BinaryOp::Lt => RealCompareOp::Lt,
+        BinaryOp::Le => RealCompareOp::Le,
+        BinaryOp::Gt => RealCompareOp::Gt,
+        BinaryOp::Ge => RealCompareOp::Ge,
+        BinaryOp::Eq => RealCompareOp::Eq,
+        BinaryOp::Ne => RealCompareOp::Ne,
+        _ => return None,
+    })
 }
 
 /// The constant value of an expression, when it has one.
