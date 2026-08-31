@@ -67,7 +67,7 @@ endmodule
 }
 
 #[test]
-fn zero_delay_absdelay_preserves_history_for_a_later_parameter_change() {
+fn absdelay_rejects_nonpositive_delay() {
     let mut device = device(
         r#"
 `include "disciplines.vams"
@@ -81,13 +81,18 @@ endmodule
     );
     device.set_analysis_type(2);
 
-    for (time, voltage) in [(0.0, 1.0), (1.0, 2.0)] {
-        assert_eq!(evaluate(&mut device, time, voltage), voltage);
-        device.advance_state();
-    }
+    device.set_time(0.0);
+    device.update_voltages(&[1.0]);
+    let zero = device
+        .try_evaluate()
+        .expect_err("zero absdelay td must fail closed");
+    assert!(zero.to_string().contains("strictly positive"));
 
-    assert!(device.set_parameter("td", 2.0));
-    assert_eq!(evaluate(&mut device, 2.0, 3.0), 1.0);
+    assert!(device.set_parameter("td", -1.0));
+    let negative = device
+        .try_evaluate()
+        .expect_err("negative absdelay td must fail closed");
+    assert!(negative.to_string().contains("strictly positive"));
 }
 
 #[test]
@@ -114,7 +119,119 @@ endmodule
     let repeated = evaluate(&mut device, 2.0, 1.0);
     assert!((first - 0.5).abs() < 1.0e-12, "first={first}");
     assert_eq!(first.to_bits(), repeated.to_bits());
-    assert_eq!(alternate.to_bits(), 0.0_f64.to_bits());
+    assert_eq!(alternate.to_bits(), first.to_bits());
+}
+
+#[test]
+fn transition_promotes_the_operating_point_before_first_transient_candidate() {
+    let mut device = device(
+        r#"
+`include "disciplines.vams"
+module transition_op_startup(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ transition(V(p, n), 0.0, 2.0, 2.0);
+endmodule
+"#,
+    );
+
+    device.set_analysis_type(0);
+    assert_eq!(evaluate(&mut device, 0.0, 5.0).to_bits(), 5.0_f64.to_bits());
+    let op_jacobians = device
+        .try_compute_jacobian()
+        .expect("transition operating-point Jacobian succeeds");
+    assert_eq!(op_jacobians.len(), 4, "jacobians={op_jacobians:?}");
+    assert!(
+        op_jacobians
+            .iter()
+            .all(|entry| entry.value.abs().to_bits() == 1.0_f64.to_bits()),
+        "jacobians={op_jacobians:?}"
+    );
+
+    device.set_analysis_type(2);
+    assert_eq!(evaluate(&mut device, 0.0, 5.0).to_bits(), 5.0_f64.to_bits());
+    device.advance_state();
+    assert_eq!(evaluate(&mut device, 1.0, 7.0).to_bits(), 5.0_f64.to_bits());
+}
+
+#[test]
+fn transition_omitted_fall_time_reuses_the_effective_rise_time() {
+    let mut device = device(
+        r#"
+`include "disciplines.vams"
+module transition_fall_default(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ transition(V(p, n), 0.0, 2.0);
+endmodule
+"#,
+    );
+    device.set_analysis_type(2);
+
+    assert_eq!(evaluate(&mut device, 0.0, 1.0).to_bits(), 1.0_f64.to_bits());
+    device.advance_state();
+    assert_eq!(evaluate(&mut device, 1.0, 0.0).to_bits(), 1.0_f64.to_bits());
+    device.advance_state();
+    assert_eq!(evaluate(&mut device, 2.0, 0.0).to_bits(), 0.5_f64.to_bits());
+    device.advance_state();
+    assert_eq!(evaluate(&mut device, 3.0, 0.0).to_bits(), 0.0_f64.to_bits());
+}
+
+#[test]
+fn transition_finite_ramp_has_zero_transient_input_jacobian() {
+    let mut device = device(
+        r#"
+`include "disciplines.vams"
+module transition_ramp_jacobian(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ transition(V(p, n), 0.0, 2.0, 2.0);
+endmodule
+"#,
+    );
+    device.set_analysis_type(2);
+
+    assert_eq!(evaluate(&mut device, 0.0, 0.0), 0.0);
+    device.advance_state();
+    assert_eq!(evaluate(&mut device, 1.0, 1.0), 0.0);
+    let jacobians = device
+        .try_compute_jacobian()
+        .expect("transition ramp Jacobian succeeds");
+    assert_eq!(jacobians.len(), 4, "jacobians={jacobians:?}");
+    assert!(
+        jacobians.iter().all(|entry| entry.value == 0.0),
+        "finite transition ramp must be history-driven: {jacobians:?}"
+    );
+}
+
+#[test]
+fn transition_instantaneous_candidate_has_unity_transient_input_jacobian() {
+    let mut device = device(
+        r#"
+`include "disciplines.vams"
+`default_transition 0.0
+module transition_direct_jacobian(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ transition(V(p, n));
+endmodule
+"#,
+    );
+    device.set_analysis_type(2);
+
+    assert_eq!(evaluate(&mut device, 0.0, 0.0), 0.0);
+    device.advance_state();
+    assert_eq!(evaluate(&mut device, 1.0, 1.0), 1.0);
+    let jacobians = device
+        .try_compute_jacobian()
+        .expect("instantaneous transition Jacobian succeeds");
+    assert_eq!(jacobians.len(), 4, "jacobians={jacobians:?}");
+    assert!(
+        jacobians
+            .iter()
+            .all(|entry| entry.value.abs().to_bits() == 1.0_f64.to_bits()),
+        "instantaneous transition must track its input: {jacobians:?}"
+    );
 }
 
 #[test]

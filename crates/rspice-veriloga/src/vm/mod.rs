@@ -20,6 +20,7 @@ pub use executor::Vm;
 #[cfg(all(feature = "wasm-jit", any(target_arch = "wasm32", test)))]
 pub(crate) use executor::{execute_zi_state, execute_zi_state_derivative};
 pub(crate) use filters::{
-    CrossCheckpoint, DelayCheckpoint, SlewCheckpoint, TransitionCheckpoint, timer_event_evaluation,
+    CrossCheckpoint, DelayCheckpoint, DelayConfiguration, PendingTransitionCheckpoint,
+    SlewCheckpoint, TransitionCheckpoint, TransitionSegmentCheckpoint, timer_event_evaluation,
 };
 pub use filters::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};

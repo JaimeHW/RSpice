@@ -84,6 +84,52 @@ impl SlewSiteId {
     }
 }
 
+/// Stable identity of one logical `transition` operator in the source tree.
+/// The primal expression and its generated Jacobian action retain this
+/// identity so both programs inspect the same transactional filter candidate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct TransitionSiteId {
+    pub source: u32,
+    pub start: u32,
+    pub end: u32,
+    /// Deterministic preorder ordinal used to disambiguate equal spans.
+    pub ordinal: u32,
+}
+
+impl TransitionSiteId {
+    pub fn from_span(span: crate::source::Span) -> Self {
+        Self {
+            source: span.source.raw(),
+            start: span.start,
+            end: span.end,
+            ordinal: 0,
+        }
+    }
+}
+
+/// Stable identity of one logical `absdelay` operator in the source tree.
+/// The primal expression and its generated Jacobian action retain this
+/// identity so both programs address the same transactional delay buffer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AbsDelaySiteId {
+    pub source: u32,
+    pub start: u32,
+    pub end: u32,
+    /// Deterministic preorder ordinal used to disambiguate equal spans.
+    pub ordinal: u32,
+}
+
+impl AbsDelaySiteId {
+    pub fn from_span(span: crate::source::Span) -> Self {
+        Self {
+            source: span.source.raw(),
+            start: span.start,
+            end: span.end,
+            ordinal: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ZiPolynomialDefinition {
     Coefficients(Vec<IrExpr>),
@@ -280,6 +326,19 @@ pub enum DerivativeWrt {
     BranchCurrent(usize),
 }
 
+/// Independent solver quantity selected by a symbolic `ddx` expression.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DdxAxis {
+    Potential {
+        pos: Option<usize>,
+        neg: Option<usize>,
+    },
+    BranchCurrent {
+        ordinal: usize,
+        reversed: bool,
+    },
+}
+
 /// IR Expression tree
 #[derive(Debug, Clone)]
 pub enum IrExpr {
@@ -362,14 +421,40 @@ pub enum IrExpr {
     /// Returns the value of expr delayed by delay_time seconds
     /// Uses a circular buffer for transient analysis
     AbsDelay {
+        site: AbsDelaySiteId,
         expr: Box<IrExpr>,
         delay_time: Box<IrExpr>,
+        max_delay: Option<Box<IrExpr>>,
+    },
+    /// Exact local first-derivative action of one `absdelay` candidate.
+    /// Higher derivative orders are retained only so bytecode lowering can
+    /// reject them explicitly instead of emitting a silently wrong Hessian.
+    AbsDelayDerivative {
+        site: AbsDelaySiteId,
+        input: Box<IrExpr>,
+        input_derivative: Box<IrExpr>,
+        delay_time: Box<IrExpr>,
+        delay_derivative: Box<IrExpr>,
+        max_delay: Option<Box<IrExpr>>,
+        derivative_order: u8,
     },
     /// transition - piecewise-linear signal smoothing
     /// Args: (expr, delay, rise_time, fall_time)
     /// Smoothly transitions between values over rise/fall times
     Transition {
+        site: TransitionSiteId,
         expr: Box<IrExpr>,
+        delay: Option<Box<IrExpr>>,
+        rise_time: Option<Box<IrExpr>>,
+        fall_time: Option<Box<IrExpr>>,
+    },
+    /// Exact read-only local derivative action of one `transition` candidate.
+    /// Timing operands are primal-only because the LRM requires the Jacobian
+    /// action here to be the candidate's input coefficient times `d(input)`.
+    TransitionDerivative {
+        site: TransitionSiteId,
+        input: Box<IrExpr>,
+        input_derivative: Box<IrExpr>,
         delay: Option<Box<IrExpr>>,
         rise_time: Option<Box<IrExpr>>,
         fall_time: Option<Box<IrExpr>>,
@@ -510,17 +595,10 @@ pub enum IrExpr {
         first_transition: Box<IrExpr>,
         direct_assignment: bool,
     },
-    /// ddx(expr, V(node)) / ddx(expr, V(a,b)) - symbolic partial
-    /// derivative w.r.t. a node potential or a branch potential
-    /// difference. Resolved to an explicit derivative expression during
-    /// device IR construction (where assignment chains are known).
-    Ddx {
-        expr: Box<IrExpr>,
-        pos: usize,
-        /// For V(a,b) probes the derivative antisymmetrizes over the
-        /// pair: (d/dVa - d/dVb)/2
-        neg: Option<usize>,
-    },
+    /// Symbolic partial derivative with respect to a branch potential or a
+    /// solver-owned branch flow. Resolved to an explicit derivative expression
+    /// during device IR construction (where assignment chains are known).
+    Ddx { expr: Box<IrExpr>, axis: DdxAxis },
     /// Companion-model Jacobian factor for ddt: operand / dt in transient,
     /// zero at DC (backward Euler)
     DdtCompanion(Box<IrExpr>),
@@ -801,9 +879,16 @@ impl DeviceIR {
         let mut zi_site_ordinal = 0_u32;
         let mut laplace_site_ordinal = 0_u32;
         let mut slew_site_ordinal = 0_u32;
+        let mut transition_site_ordinal = 0_u32;
+        let mut absdelay_site_ordinal = 0_u32;
         autodiff::assign_zi_site_ordinals_in_items(&mut items, &mut zi_site_ordinal);
         autodiff::assign_laplace_site_ordinals_in_items(&mut items, &mut laplace_site_ordinal);
         autodiff::assign_slew_site_ordinals_in_items(&mut items, &mut slew_site_ordinal);
+        autodiff::assign_transition_site_ordinals_in_items(
+            &mut items,
+            &mut transition_site_ordinal,
+        );
+        autodiff::assign_absdelay_site_ordinals_in_items(&mut items, &mut absdelay_site_ordinal);
         ir.assignments = items;
 
         // Pre-pass over contributions: parse branch refs and register a
@@ -923,6 +1008,8 @@ impl DeviceIR {
             autodiff::assign_zi_site_ordinals(&mut expr, &mut zi_site_ordinal);
             autodiff::assign_laplace_site_ordinals(&mut expr, &mut laplace_site_ordinal);
             autodiff::assign_slew_site_ordinals(&mut expr, &mut slew_site_ordinal);
+            autodiff::assign_transition_site_ordinals(&mut expr, &mut transition_site_ordinal);
+            autodiff::assign_absdelay_site_ordinals(&mut expr, &mut absdelay_site_ordinal);
             let expr = autodiff::rewrite_branch_probes(&expr, &branch_table);
             let expr = autodiff::resolve_ddx(&expr, &shadows);
 
@@ -1244,8 +1331,29 @@ impl DeviceIR {
                 IrExpr::TableLookup { input, .. } | IrExpr::TableDerivative { input, .. } => {
                     contains_ddt(input)
                 }
-                IrExpr::AbsDelay { expr, delay_time } => {
-                    contains_ddt(expr) || contains_ddt(delay_time)
+                IrExpr::AbsDelay {
+                    expr,
+                    delay_time,
+                    max_delay,
+                    ..
+                } => {
+                    contains_ddt(expr)
+                        || contains_ddt(delay_time)
+                        || max_delay.as_deref().is_some_and(contains_ddt)
+                }
+                IrExpr::AbsDelayDerivative {
+                    input,
+                    input_derivative,
+                    delay_time,
+                    delay_derivative,
+                    max_delay,
+                    ..
+                } => {
+                    contains_ddt(input)
+                        || contains_ddt(input_derivative)
+                        || contains_ddt(delay_time)
+                        || contains_ddt(delay_derivative)
+                        || max_delay.as_deref().is_some_and(contains_ddt)
                 }
                 IrExpr::Transition { expr, .. }
                 | IrExpr::LaplaceZP { expr, .. }
@@ -1255,6 +1363,20 @@ impl DeviceIR {
                 | IrExpr::ZiFilter { expr, .. }
                 | IrExpr::ZiFilterDerivative { expr, .. }
                 | IrExpr::Ddx { expr, .. } => contains_ddt(expr),
+                IrExpr::TransitionDerivative {
+                    input,
+                    input_derivative,
+                    delay,
+                    rise_time,
+                    fall_time,
+                    ..
+                } => {
+                    contains_ddt(input)
+                        || contains_ddt(input_derivative)
+                        || delay.as_deref().is_some_and(contains_ddt)
+                        || rise_time.as_deref().is_some_and(contains_ddt)
+                        || fall_time.as_deref().is_some_and(contains_ddt)
+                }
                 IrExpr::Slew {
                     expr,
                     max_pos_slew,
@@ -1918,7 +2040,26 @@ pub mod autodiff {
             // The condition only selects; the branches carry the slope
             IrExpr::Conditional(_, t, e) => recurse(t) | recurse(e),
             IrExpr::TableLookup { input, .. } => recurse(input),
-            IrExpr::AbsDelay { expr, .. } => recurse(expr),
+            IrExpr::AbsDelay {
+                expr,
+                delay_time,
+                max_delay,
+                ..
+            } => recurse(expr) | recurse(delay_time) | max_delay.as_deref().map_or(0, recurse),
+            IrExpr::AbsDelayDerivative {
+                input,
+                input_derivative,
+                delay_time,
+                delay_derivative,
+                max_delay,
+                ..
+            } => {
+                recurse(input)
+                    | recurse(input_derivative)
+                    | recurse(delay_time)
+                    | recurse(delay_derivative)
+                    | max_delay.as_deref().map_or(0, recurse)
+            }
             IrExpr::Transition { expr, .. }
             | IrExpr::LaplaceZP { expr, .. }
             | IrExpr::LaplaceND { expr, .. }
@@ -1927,6 +2068,20 @@ pub mod autodiff {
             | IrExpr::ZiFilter { expr, .. }
             | IrExpr::ZiFilterDerivative { expr, .. }
             | IrExpr::Ddx { expr, .. } => recurse(expr),
+            IrExpr::TransitionDerivative {
+                input,
+                input_derivative,
+                delay,
+                rise_time,
+                fall_time,
+                ..
+            } => {
+                recurse(input)
+                    | recurse(input_derivative)
+                    | delay.as_deref().map_or(0, recurse)
+                    | rise_time.as_deref().map_or(0, recurse)
+                    | fall_time.as_deref().map_or(0, recurse)
+            }
             IrExpr::Slew {
                 expr,
                 max_pos_slew,
@@ -2320,10 +2475,13 @@ pub mod autodiff {
             })
             .collect();
         let mut shadow_index: HashMap<SmolStr, usize> = HashMap::new();
-        for (name, mask) in &deps {
-            if array_member.contains(name) {
-                continue;
-            }
+        let mut scalar_shadow_layout = deps
+            .iter()
+            .filter(|(name, _)| !array_member.contains(*name))
+            .map(|(name, mask)| (name.clone(), *mask))
+            .collect::<Vec<_>>();
+        scalar_shadow_layout.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+        for (name, mask) in &scalar_shadow_layout {
             for wrt in axes(num_nodes, num_branches) {
                 if mask & axis_bit(&wrt, num_nodes) == 0 {
                     continue;
@@ -2336,10 +2494,14 @@ pub mod autodiff {
                 });
             }
         }
-        for (name, mask) in &second_deps {
-            if array_member.contains(name) {
-                continue;
-            }
+        for (name, _) in scalar_shadow_layout
+            .iter()
+            .filter(|(name, _)| second_deps.contains_key(name))
+        {
+            let mask = second_deps
+                .get(name)
+                .copied()
+                .expect("filtered scalar second-derivative layout has a dependency mask");
             for first in axes(num_nodes, num_branches) {
                 if mask & axis_bit(&first, num_nodes) == 0 {
                     continue;
@@ -2521,19 +2683,40 @@ pub mod autodiff {
     /// Resolve ddx() operators into explicit derivative expressions
     pub fn resolve_ddx(expr: &IrExpr, shadows: &ShadowContext) -> IrExpr {
         map_expr(expr, &mut |e| {
-            if let IrExpr::Ddx { expr, pos, neg } = e {
+            if let IrExpr::Ddx { expr, axis } = e {
                 let inner = resolve_ddx(expr, shadows);
-                let d_pos = simplify(differentiate_with_shadows(
-                    &inner,
-                    &DerivativeWrt::Voltage(*pos),
-                    shadows,
-                ));
-                Some(match neg {
-                    None => d_pos,
+                Some(match axis {
+                    DdxAxis::Potential {
+                        pos: Some(pos),
+                        neg: None,
+                    } => simplify(differentiate_with_shadows(
+                        &inner,
+                        &DerivativeWrt::Voltage(*pos),
+                        shadows,
+                    )),
+                    DdxAxis::Potential {
+                        pos: None,
+                        neg: Some(neg),
+                    } => simplify(IrExpr::Unary(
+                        UnaryOp::Neg,
+                        Box::new(differentiate_with_shadows(
+                            &inner,
+                            &DerivativeWrt::Voltage(*neg),
+                            shadows,
+                        )),
+                    )),
                     // ddx(f, V(a,b)): when f depends on the pair only
                     // through V(a)-V(b), (df/dVa - df/dVb)/2 is exactly
-                    // df/d(Va-Vb)
-                    Some(neg) => {
+                    // df/d(Va-Vb).
+                    DdxAxis::Potential {
+                        pos: Some(pos),
+                        neg: Some(neg),
+                    } => {
+                        let d_pos = simplify(differentiate_with_shadows(
+                            &inner,
+                            &DerivativeWrt::Voltage(*pos),
+                            shadows,
+                        ));
                         let d_neg = simplify(differentiate_with_shadows(
                             &inner,
                             &DerivativeWrt::Voltage(*neg),
@@ -2548,6 +2731,22 @@ pub mod autodiff {
                                 Box::new(d_neg),
                             )),
                         ))
+                    }
+                    DdxAxis::Potential {
+                        pos: None,
+                        neg: None,
+                    } => IrExpr::Const(0.0),
+                    DdxAxis::BranchCurrent { ordinal, reversed } => {
+                        let derivative = simplify(differentiate_with_shadows(
+                            &inner,
+                            &DerivativeWrt::BranchCurrent(*ordinal),
+                            shadows,
+                        ));
+                        if *reversed {
+                            simplify(IrExpr::Unary(UnaryOp::Neg, Box::new(derivative)))
+                        } else {
+                            derivative
+                        }
                     }
                 })
             } else {
@@ -2624,17 +2823,58 @@ pub mod autodiff {
                 x_data: x_data.clone(),
                 y_data: y_data.clone(),
             },
-            IrExpr::AbsDelay { expr, delay_time } => IrExpr::AbsDelay {
+            IrExpr::AbsDelay {
+                site,
+                expr,
+                delay_time,
+                max_delay,
+            } => IrExpr::AbsDelay {
+                site: *site,
                 expr: Box::new(map_expr(expr, f)),
                 delay_time: Box::new(map_expr(delay_time, f)),
+                max_delay: max_delay.as_ref().map(|e| Box::new(map_expr(e, f))),
+            },
+            IrExpr::AbsDelayDerivative {
+                site,
+                input,
+                input_derivative,
+                delay_time,
+                delay_derivative,
+                max_delay,
+                derivative_order,
+            } => IrExpr::AbsDelayDerivative {
+                site: *site,
+                input: Box::new(map_expr(input, f)),
+                input_derivative: Box::new(map_expr(input_derivative, f)),
+                delay_time: Box::new(map_expr(delay_time, f)),
+                delay_derivative: Box::new(map_expr(delay_derivative, f)),
+                max_delay: max_delay.as_ref().map(|e| Box::new(map_expr(e, f))),
+                derivative_order: *derivative_order,
             },
             IrExpr::Transition {
+                site,
                 expr,
                 delay,
                 rise_time,
                 fall_time,
             } => IrExpr::Transition {
+                site: *site,
                 expr: Box::new(map_expr(expr, f)),
+                delay: delay.as_ref().map(|e| Box::new(map_expr(e, f))),
+                rise_time: rise_time.as_ref().map(|e| Box::new(map_expr(e, f))),
+                fall_time: fall_time.as_ref().map(|e| Box::new(map_expr(e, f))),
+            },
+            IrExpr::TransitionDerivative {
+                site,
+                input,
+                input_derivative,
+                delay,
+                rise_time,
+                fall_time,
+            } => IrExpr::TransitionDerivative {
+                site: *site,
+                input: Box::new(map_expr(input, f)),
+                input_derivative: Box::new(map_expr(input_derivative, f)),
                 delay: delay.as_ref().map(|e| Box::new(map_expr(e, f))),
                 rise_time: rise_time.as_ref().map(|e| Box::new(map_expr(e, f))),
                 fall_time: fall_time.as_ref().map(|e| Box::new(map_expr(e, f))),
@@ -2671,10 +2911,9 @@ pub mod autodiff {
                     .as_ref()
                     .map(|e| Box::new(map_expr(e, f))),
             },
-            IrExpr::Ddx { expr, pos, neg } => IrExpr::Ddx {
+            IrExpr::Ddx { expr, axis } => IrExpr::Ddx {
                 expr: Box::new(map_expr(expr, f)),
-                pos: *pos,
-                neg: *neg,
+                axis: *axis,
             },
             IrExpr::LaplaceND {
                 site,
@@ -2918,6 +3157,88 @@ pub mod autodiff {
                 IrAssignmentItem::Loop { condition, body } => {
                     assign_slew_site_ordinals(condition, next);
                     assign_slew_site_ordinals_in_items(body, next);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn assign_transition_site_ordinals(expr: &mut IrExpr, next: &mut u32) {
+        *expr = map_expr(expr, &mut |node| match node {
+            IrExpr::Transition {
+                site,
+                expr,
+                delay,
+                rise_time,
+                fall_time,
+            } => {
+                let mut assigned = *site;
+                assigned.ordinal = *next;
+                *next = next
+                    .checked_add(1)
+                    .expect("transition site ordinal overflow");
+                Some(IrExpr::Transition {
+                    site: assigned,
+                    expr: expr.clone(),
+                    delay: delay.clone(),
+                    rise_time: rise_time.clone(),
+                    fall_time: fall_time.clone(),
+                })
+            }
+            _ => None,
+        });
+    }
+
+    pub(crate) fn assign_transition_site_ordinals_in_items(
+        items: &mut [IrAssignmentItem],
+        next: &mut u32,
+    ) {
+        for item in items {
+            match item {
+                IrAssignmentItem::Assign(assignment) => {
+                    assign_transition_site_ordinals(&mut assignment.expr, next);
+                }
+                IrAssignmentItem::Loop { condition, body } => {
+                    assign_transition_site_ordinals(condition, next);
+                    assign_transition_site_ordinals_in_items(body, next);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn assign_absdelay_site_ordinals(expr: &mut IrExpr, next: &mut u32) {
+        *expr = map_expr(expr, &mut |node| match node {
+            IrExpr::AbsDelay {
+                site,
+                expr,
+                delay_time,
+                max_delay,
+            } => {
+                let mut assigned = *site;
+                assigned.ordinal = *next;
+                *next = next.checked_add(1).expect("absdelay site ordinal overflow");
+                Some(IrExpr::AbsDelay {
+                    site: assigned,
+                    expr: expr.clone(),
+                    delay_time: delay_time.clone(),
+                    max_delay: max_delay.clone(),
+                })
+            }
+            _ => None,
+        });
+    }
+
+    pub(crate) fn assign_absdelay_site_ordinals_in_items(
+        items: &mut [IrAssignmentItem],
+        next: &mut u32,
+    ) {
+        for item in items {
+            match item {
+                IrAssignmentItem::Assign(assignment) => {
+                    assign_absdelay_site_ordinals(&mut assignment.expr, next);
+                }
+                IrAssignmentItem::Loop { condition, body } => {
+                    assign_absdelay_site_ordinals(condition, next);
+                    assign_absdelay_site_ordinals_in_items(body, next);
                 }
             }
         }
@@ -3389,8 +3710,72 @@ pub mod autodiff {
                 )
             }
 
-            // Smoothing and delay operators pass DC small-signal through.
-            IrExpr::Transition { expr, .. } | IrExpr::AbsDelay { expr, .. } => differentiate(expr),
+            // Transport delay passes the DC small-signal through. Transition
+            // instead needs the exact accepted-state-dependent transient
+            // coefficient: zero on delayed/history-driven ramps and one only
+            // on an instantaneous direct candidate. Keep the primal operands
+            // and site correlated so the runtime can compute that coefficient
+            // read-only even if the derivative executes before the primal.
+            IrExpr::AbsDelay {
+                site,
+                expr,
+                delay_time,
+                max_delay,
+            } => IrExpr::AbsDelayDerivative {
+                site: *site,
+                input: expr.clone(),
+                input_derivative: Box::new(differentiate(expr)),
+                delay_time: delay_time.clone(),
+                delay_derivative: Box::new(differentiate(delay_time)),
+                max_delay: max_delay.clone(),
+                derivative_order: 1,
+            },
+            IrExpr::AbsDelayDerivative {
+                site,
+                input,
+                input_derivative,
+                delay_time,
+                delay_derivative,
+                max_delay,
+                derivative_order,
+            } => IrExpr::AbsDelayDerivative {
+                site: *site,
+                input: input.clone(),
+                input_derivative: Box::new(differentiate(input_derivative)),
+                delay_time: delay_time.clone(),
+                delay_derivative: Box::new(differentiate(delay_derivative)),
+                max_delay: max_delay.clone(),
+                derivative_order: derivative_order.saturating_add(1),
+            },
+            IrExpr::Transition {
+                site,
+                expr,
+                delay,
+                rise_time,
+                fall_time,
+            } => IrExpr::TransitionDerivative {
+                site: *site,
+                input: expr.clone(),
+                input_derivative: Box::new(differentiate(expr)),
+                delay: delay.clone(),
+                rise_time: rise_time.clone(),
+                fall_time: fall_time.clone(),
+            },
+            IrExpr::TransitionDerivative {
+                site,
+                input,
+                input_derivative,
+                delay,
+                rise_time,
+                fall_time,
+            } => IrExpr::TransitionDerivative {
+                site: *site,
+                input: input.clone(),
+                input_derivative: Box::new(differentiate(input_derivative)),
+                delay: delay.clone(),
+                rise_time: rise_time.clone(),
+                fall_time: fall_time.clone(),
+            },
 
             // `slew` has a branch-exact transient derivative: the first
             // argument tracks directly when unsaturated, while a saturated

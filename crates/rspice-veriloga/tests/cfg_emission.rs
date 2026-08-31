@@ -131,6 +131,110 @@ endmodule
 }
 
 #[test]
+fn solver_branch_flow_ddx_emits_portably_and_matches_the_interpreter() {
+    let artifact = artifact(
+        r#"
+module emitted_flow_ddx(p, n, ctrl, out);
+    inout p, n, ctrl, out;
+    electrical p, n, ctrl, out;
+    branch (p, n) sense;
+    analog begin
+        V(sense) <+ 0.25;
+        I(out, n) <+ ddx(I(sense) * I(sense) + V(ctrl, n) * I(sense), I(sense));
+    end
+endmodule
+"#,
+    );
+    let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).expect("lowers");
+    let lanes: Vec<AdSeed> = (0..artifact.mir.nodes.len())
+        .map(|index| AdSeed::NodePotential(index.into()))
+        .chain(
+            (0..artifact.mir.branch_unknowns.len())
+                .map(|index| AdSeed::BranchUnknownFlow(index.into())),
+        )
+        .collect();
+    let mut differentiated = differentiate(&cfg.function, &lanes).expect("differentiates");
+    let residual = cfg.residuals[1];
+    let row = differentiated.derivative_row(residual);
+    let branch_lane = lanes.len() - 1;
+    let mut wanted = vec![residual];
+    wanted.push(row[2].expect("ddx has a ctrl-voltage Jacobian"));
+    wanted.push(row[branch_lane].expect("ddx has a branch-flow Jacobian"));
+    let (optimized, wanted) = optimize_cfg(&differentiated.function, &wanted);
+    let (body, names) = emit_body(&optimized, &wanted, &EmitBindings::default()).expect("emits");
+
+    let mut bias = bias(&artifact);
+    bias.node_potentials[1] = -0.2;
+    bias.node_potentials[2] = 0.9;
+    bias.branch_unknown_flows[0] = 0.37;
+    let expected = evaluate_cfg(&optimized, &inputs(&bias)).expect("interprets");
+    let expected: Vec<f64> = wanted
+        .iter()
+        .map(|value| expected.value(*value).expect("defined"))
+        .collect();
+    let actual = compile_and_run(
+        &scratch("flow_ddx"),
+        "flow_ddx",
+        &program(&body, &names, &bias),
+    );
+    assert_eq!(actual.len(), expected.len());
+    for (emitted, interpreted) in actual.iter().zip(expected) {
+        assert!(bit_identical(*emitted, interpreted));
+    }
+    assert!(
+        (actual[1] - 1.0).abs() <= 1.0e-12,
+        "ctrl Jacobian: {actual:?}"
+    );
+    assert!(
+        (actual[2] - 2.0).abs() <= 1.0e-12,
+        "flow Jacobian: {actual:?}"
+    );
+
+    let step = 1.0e-6;
+    let mut plus_ctrl = bias.clone();
+    plus_ctrl.node_potentials[2] += step;
+    let plus_ctrl = compile_and_run(
+        &scratch("flow_ddx_plus_ctrl"),
+        "flow_ddx_plus_ctrl",
+        &program(&body, &names, &plus_ctrl),
+    );
+    let mut minus_ctrl = bias.clone();
+    minus_ctrl.node_potentials[2] -= step;
+    let minus_ctrl = compile_and_run(
+        &scratch("flow_ddx_minus_ctrl"),
+        "flow_ddx_minus_ctrl",
+        &program(&body, &names, &minus_ctrl),
+    );
+    let numeric_ctrl = (plus_ctrl[0] - minus_ctrl[0]) / (2.0 * step);
+    assert!(
+        (actual[1] - numeric_ctrl).abs() <= 1.0e-9,
+        "portable ctrl stamp={} finite difference={numeric_ctrl}",
+        actual[1]
+    );
+
+    let mut plus_flow = bias.clone();
+    plus_flow.branch_unknown_flows[0] += step;
+    let plus_flow = compile_and_run(
+        &scratch("flow_ddx_plus_flow"),
+        "flow_ddx_plus_flow",
+        &program(&body, &names, &plus_flow),
+    );
+    let mut minus_flow = bias;
+    minus_flow.branch_unknown_flows[0] -= step;
+    let minus_flow = compile_and_run(
+        &scratch("flow_ddx_minus_flow"),
+        "flow_ddx_minus_flow",
+        &program(&body, &names, &minus_flow),
+    );
+    let numeric_flow = (plus_flow[0] - minus_flow[0]) / (2.0 * step);
+    assert!(
+        (actual[2] - numeric_flow).abs() <= 1.0e-9,
+        "portable flow stamp={} finite difference={numeric_flow}",
+        actual[2]
+    );
+}
+
+#[test]
 fn single_value_straight_line_merges_are_typed_if_expressions() {
     let artifact = artifact(
         r#"
@@ -154,7 +258,7 @@ endmodule
     let (body, _) = emit_body(&optimized, &wanted, &EmitBindings::default()).expect("emits");
 
     assert!(
-        body.lines().any(|line| line.contains(" = if ")),
+        body.lines().any(|line| line.contains("=if ")),
         "a single-value straight-line merge should be one typed if expression:\n{body}"
     );
 }
@@ -222,7 +326,7 @@ endmodule
     let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).expect("lowers");
     let (optimized, wanted) = optimize_cfg(&cfg.function, &cfg.residuals);
     let (body, _) = emit_body(&optimized, &wanted, &EmitBindings::default()).expect("emits");
-    let before_loop = body.split("loop {").next().expect("loop prefix");
+    let before_loop = body.split("loop{").next().expect("loop prefix");
 
     for declaration in before_loop
         .lines()
@@ -231,14 +335,14 @@ endmodule
     {
         let name = declaration
             .strip_prefix("let mut ")
-            .and_then(|line| line.split_once(" = "))
+            .and_then(|line| line.split_once('='))
             .map(|(name, _)| name)
             .expect("mutable declaration");
         assert!(
             !before_loop
                 .lines()
                 .map(str::trim)
-                .any(|line| line.starts_with(&format!("{name} = "))),
+                .any(|line| line.starts_with(&format!("{name}="))),
             "an unconditional loop entry must initialize {name} directly:\n{body}"
         );
     }
@@ -368,6 +472,7 @@ fn scratch(name: &str) -> PathBuf {
     directory
 }
 
+#[derive(Clone)]
 struct Bias {
     parameters: Vec<f64>,
     node_potentials: Vec<f64>,

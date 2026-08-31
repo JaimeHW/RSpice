@@ -51,6 +51,7 @@ use super::{
     BlockId, BranchId, BranchUnknownId, ContributionId, DigitalLocalId, DigitalSignalId, ExprId,
     NodeId, ParamId, ShapeId, ValueId, VariableId,
 };
+use crate::ir::TransitionSiteId;
 
 /// What SSA tracks a definition for.
 ///
@@ -145,6 +146,23 @@ pub enum CfgBinaryOp {
     Or,
 }
 
+/// Independent solver quantity named by a `ddx` probe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CfgDdxAxis {
+    /// Potential difference. A two-ended probe is the differential coordinate
+    /// `(Vp - Vn)` with common mode held fixed.
+    Potential {
+        pos_node: Option<NodeId>,
+        neg_node: Option<NodeId>,
+    },
+    /// Flow of a branch whose potential/indirect contribution introduced a
+    /// solver-owned branch-current unknown.
+    BranchFlow {
+        unknown: BranchUnknownId,
+        reversed: bool,
+    },
+}
+
 /// What an SSA value is.
 ///
 /// Deliberately without a `Select`: a conditional is a [`CfgTerminator::Branch`]
@@ -204,6 +222,25 @@ pub enum CfgValueKind {
     /// reason [`Self::DdtScale`] exists: a second `idt` would claim a second
     /// slot for a quantity with no history of its own.
     IdtScale,
+    /// Transactional piecewise-linear transition candidate.
+    Transition {
+        site: TransitionSiteId,
+        input: ValueId,
+        delay: ValueId,
+        rise: ValueId,
+        fall: ValueId,
+    },
+    /// Exact read-only local Jacobian action for the correlated transition
+    /// candidate. The timing operands are primal-only; the runtime coefficient
+    /// multiplies `input_derivative`.
+    TransitionDerivative {
+        site: TransitionSiteId,
+        input: ValueId,
+        input_derivative: ValueId,
+        delay: ValueId,
+        rise: ValueId,
+        fall: ValueId,
+    },
     /// `cross(expr, direction, time_tol, expr_tol, enable)`, evaluated from
     /// accepted detector history into a speculative candidate lane.
     Cross {
@@ -245,8 +282,8 @@ pub enum CfgValueKind {
         /// Which limiting function the source named, e.g. `pnjlim`.
         selector: smol_str::SmolStr,
     },
-    /// `ddx(value, V(pos, neg))` — one entry of the Jacobian, read back into
-    /// the model.
+    /// `ddx(value, probe)` — one entry of the Jacobian, read back into the
+    /// model.
     ///
     /// Left symbolic here because the lanes it names do not exist until the
     /// derivative pass runs; that pass replaces it with the lane itself. A
@@ -254,8 +291,7 @@ pub enum CfgValueKind {
     /// backend already computes, and this is how it gets the same one.
     Ddx {
         value: ValueId,
-        pos_node: Option<NodeId>,
-        neg_node: Option<NodeId>,
+        axis: CfgDdxAxis,
     },
     /// The value this `$limit` returned on the previous Newton iteration.
     ///
@@ -512,6 +548,8 @@ impl CfgValueKind {
             | Self::Cross { .. }
             | Self::Above { .. }
             | Self::Timer { .. }
+            | Self::Transition { .. }
+            | Self::TransitionDerivative { .. }
             | Self::Limit { .. }
             | Self::Ddx { .. }
             | Self::LimitPrevious { .. }
@@ -566,6 +604,21 @@ impl CfgValueKind {
             }
             Self::LaneScalar { input, scalar, .. } => vec![*input, *scalar],
             Self::Idt { input, ic, .. } => vec![*input, *ic],
+            Self::Transition {
+                input,
+                delay,
+                rise,
+                fall,
+                ..
+            } => vec![*input, *delay, *rise, *fall],
+            Self::TransitionDerivative {
+                input,
+                input_derivative,
+                delay,
+                rise,
+                fall,
+                ..
+            } => vec![*input, *input_derivative, *delay, *rise, *fall],
             Self::Cross {
                 input,
                 direction,
@@ -642,6 +695,32 @@ impl CfgValueKind {
             Self::Idt { input, ic, .. } => {
                 *input = map(*input);
                 *ic = map(*ic);
+            }
+            Self::Transition {
+                input,
+                delay,
+                rise,
+                fall,
+                ..
+            } => {
+                *input = map(*input);
+                *delay = map(*delay);
+                *rise = map(*rise);
+                *fall = map(*fall);
+            }
+            Self::TransitionDerivative {
+                input,
+                input_derivative,
+                delay,
+                rise,
+                fall,
+                ..
+            } => {
+                *input = map(*input);
+                *input_derivative = map(*input_derivative);
+                *delay = map(*delay);
+                *rise = map(*rise);
+                *fall = map(*fall);
             }
             Self::Cross {
                 input,
@@ -1198,6 +1277,7 @@ pub enum CfgValidationError {
     /// the pass says so instead of quietly contributing a zero row to the
     /// Jacobian.
     DigitalValueInDerivative(ValueId),
+    NestedDdx(ValueId),
 }
 
 impl std::fmt::Display for CfgValidationError {
@@ -1221,6 +1301,10 @@ impl std::fmt::Display for CfgValidationError {
             Self::DigitalValueInDerivative(value) => write!(
                 f,
                 "{value} is a discrete-domain value and cannot be differentiated"
+            ),
+            Self::NestedDdx(value) => write!(
+                f,
+                "{value} applies ddx to a value that already depends on ddx; nested ddx is not supported"
             ),
         }
     }

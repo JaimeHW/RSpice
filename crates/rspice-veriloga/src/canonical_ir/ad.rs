@@ -63,7 +63,7 @@ use std::collections::{HashMap, HashSet};
 use crate::metrics::{NoPipelineControl, PipelineCancelled, PipelineControl, PipelinePhase};
 
 use super::cfg::{
-    CfgBinaryOp, CfgBlock, CfgFunction, CfgInstruction, CfgTerminator, CfgUnaryOp,
+    CfgBinaryOp, CfgBlock, CfgDdxAxis, CfgFunction, CfgInstruction, CfgTerminator, CfgUnaryOp,
     CfgValidationError, CfgValue, CfgValueKind, CfgValueType,
 };
 use super::{BlockId, BranchUnknownId, NodeId, ShapeId, ValueId};
@@ -268,6 +268,16 @@ impl LaneLiveness {
         }
     }
 
+    fn contains(&self, value: ValueId, lane: usize) -> bool {
+        match &self.storage {
+            LaneLivenessStorage::Dense(bits) => {
+                let index = usize::from(value) * self.words_per_value + lane / u64::BITS as usize;
+                bits[index] & (1_u64 << (lane % u64::BITS as usize)) != 0
+            }
+            LaneLivenessStorage::Sparse(sets) => sets[usize::from(value)].contains(&lane),
+        }
+    }
+
     fn lanes(&self, value: ValueId) -> Vec<usize> {
         match &self.storage {
             LaneLivenessStorage::Dense(bits) => {
@@ -381,6 +391,14 @@ fn lane_liveness_with_control(
                     CfgValueKind::Unary { input, .. } | CfgValueKind::Ddt { input, .. } => {
                         changed |= live.union_from(value.id, *input);
                     }
+                    CfgValueKind::Transition { input, .. } => {
+                        changed |= live.union_from(value.id, *input);
+                    }
+                    CfgValueKind::TransitionDerivative {
+                        input_derivative, ..
+                    } => {
+                        changed |= live.union_from(value.id, *input_derivative);
+                    }
                     CfgValueKind::Binary { left, right, .. } => {
                         changed |= live.union_from(value.id, *left);
                         changed |= live.union_from(value.id, *right);
@@ -418,7 +436,11 @@ fn differentiable(kind: &CfgValueKind) -> bool {
         // `$limit` is differentiable, but [`lane_liveness`] answers it ahead of
         // this rather than through it: its lanes are `proposed`'s plus the
         // correction lane, not every operand's.
-        CfgValueKind::Ddt { .. } | CfgValueKind::Idt { .. } | CfgValueKind::Limit { .. } => true,
+        CfgValueKind::Ddt { .. }
+        | CfgValueKind::Idt { .. }
+        | CfgValueKind::Transition { .. }
+        | CfgValueKind::TransitionDerivative { .. }
+        | CfgValueKind::Limit { .. } => true,
         // The previous iterate is a constant as far as this iteration's Newton
         // step is concerned; that is what makes limiting a damping and not a
         // change of equations.
@@ -510,6 +532,793 @@ fn outgoing(block: &CfgBlock) -> Vec<(BlockId, Vec<ValueId>)> {
     }
 }
 
+/// Resolve every first-order `ddx` readback into ordinary scalar CFG before
+/// the packed Jacobian pass runs.
+///
+/// This preliminary directional pass is what makes a solution-dependent
+/// `ddx` safe in an equation. Once the readback is ordinary scalar arithmetic,
+/// the packed pass differentiates it normally and therefore stamps the second
+/// derivative instead of a plausible-looking zero. A `ddx` whose operand
+/// already depends on another `ddx` would require a higher-order jet; reject
+/// that bounded case rather than silently truncating it.
+fn resolve_ddx_primal_with_control(
+    function: &CfgFunction,
+    second_order_roots: Option<&[ValueId]>,
+    control: &dyn PipelineControl,
+) -> Result<CfgFunction, DifferentiationError> {
+    let second_order = match second_order_roots {
+        Some(roots) => ancestors_of(function, roots),
+        None => vec![true; function.values.len()],
+    };
+    let mut seeds = Vec::new();
+    for value in &function.values {
+        if !second_order[usize::from(value.id)] {
+            continue;
+        }
+        let CfgValueKind::Ddx { axis, .. } = value.kind else {
+            continue;
+        };
+        for seed in ddx_axis_seeds(axis) {
+            if !seeds.contains(&seed) {
+                seeds.push(seed);
+            }
+        }
+    }
+    if seeds.is_empty() {
+        return Ok(function.clone());
+    }
+
+    reject_nested_ddx(function).map_err(DifferentiationError::Validation)?;
+    let forward = lane_liveness_with_control(function, &seeds, control)
+        .map_err(DifferentiationError::Cancelled)?;
+    let requested = ddx_direction_liveness(function, &seeds, &second_order, control)
+        .map_err(DifferentiationError::Cancelled)?;
+    let mut active = LaneLiveness::new(function.values.len(), seeds.len());
+    for value in &function.values {
+        for lane in requested.lanes(value.id) {
+            if forward.contains(value.id, lane) {
+                active.insert(value.id, lane);
+            }
+        }
+    }
+    let mut builder = ScalarDdxBuilder::new(function, seeds, active, second_order);
+    builder.add_block_parameters();
+    builder
+        .rewrite_blocks(control)
+        .map_err(DifferentiationError::Cancelled)?;
+    let resolved = CfgFunction {
+        entry: function.entry,
+        blocks: builder.blocks,
+        values: builder.values,
+        shapes: function.shapes.clone(),
+    };
+    resolved
+        .validate()
+        .map_err(DifferentiationError::Validation)?;
+    Ok(resolved)
+}
+
+/// Values whose primals can reach one of `roots`. Merge inputs participate in
+/// the walk, so a `ddx` selected by a conditional equation is still recognized
+/// as stamp-relevant.
+fn ancestors_of(function: &CfgFunction, roots: &[ValueId]) -> Vec<bool> {
+    let incoming = incoming_arguments(function);
+    let mut ancestors = vec![false; function.values.len()];
+    for root in roots {
+        if let Some(slot) = ancestors.get_mut(usize::from(*root)) {
+            *slot = true;
+        }
+    }
+    loop {
+        let mut changed = false;
+        for value in function.values.iter().rev() {
+            if !ancestors[usize::from(value.id)] {
+                continue;
+            }
+            let dependencies = match &value.kind {
+                CfgValueKind::BlockParameter => {
+                    incoming.get(&value.id).cloned().unwrap_or_default()
+                }
+                kind => kind.operands(),
+            };
+            for dependency in dependencies {
+                let slot = &mut ancestors[usize::from(dependency)];
+                if !*slot {
+                    *slot = true;
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            return ancestors;
+        }
+    }
+}
+
+/// Directional shadows are needed only on paths feeding a `ddx` operand. A
+/// forward solution-dependence pass alone reaches every later value in a large
+/// compact model and used to materialize model-wide shadows for a readback near
+/// the end of one equation. This reverse pass keeps the higher-order work to
+/// the actual operand slice and to the particular axes each readback names.
+fn ddx_direction_liveness(
+    function: &CfgFunction,
+    seeds: &[AdSeed],
+    second_order: &[bool],
+    control: &dyn PipelineControl,
+) -> Result<LaneLiveness, PipelineCancelled> {
+    let seed_indices: HashMap<AdSeed, usize> = seeds
+        .iter()
+        .enumerate()
+        .map(|(index, seed)| (*seed, index))
+        .collect();
+    let incoming = incoming_arguments(function);
+    let mut needed = LaneLiveness::new(function.values.len(), seeds.len());
+    for value in &function.values {
+        if !second_order[usize::from(value.id)] {
+            continue;
+        }
+        if let CfgValueKind::Ddx {
+            value: operand,
+            axis,
+        } = value.kind
+        {
+            for seed in ddx_axis_seeds(axis) {
+                if let Some(lane) = seed_indices.get(&seed) {
+                    needed.insert(operand, *lane);
+                }
+            }
+        }
+    }
+
+    loop {
+        let mut changed = false;
+        for (ordinal, value) in function.values.iter().enumerate().rev() {
+            if ordinal.is_multiple_of(1024) {
+                check_cancelled(control)?;
+            }
+            match &value.kind {
+                CfgValueKind::BlockParameter => {
+                    if let Some(arguments) = incoming.get(&value.id) {
+                        for argument in arguments {
+                            changed |= needed.union_from(*argument, value.id);
+                        }
+                    }
+                }
+                CfgValueKind::Limit { proposed, .. } => {
+                    changed |= needed.union_from(*proposed, value.id);
+                }
+                CfgValueKind::Unary { input, .. } if differentiable(&value.kind) => {
+                    changed |= needed.union_from(*input, value.id);
+                }
+                CfgValueKind::Ddt { input, .. } | CfgValueKind::Idt { input, .. } => {
+                    changed |= needed.union_from(*input, value.id);
+                }
+                CfgValueKind::Transition { input, .. } => {
+                    changed |= needed.union_from(*input, value.id);
+                }
+                CfgValueKind::TransitionDerivative {
+                    input_derivative, ..
+                } => {
+                    changed |= needed.union_from(*input_derivative, value.id);
+                }
+                CfgValueKind::Binary {
+                    op: CfgBinaryOp::Mod,
+                    left,
+                    ..
+                } => {
+                    changed |= needed.union_from(*left, value.id);
+                }
+                CfgValueKind::Binary { left, right, op } if !is_predicate(*op) => {
+                    changed |= needed.union_from(*left, value.id);
+                    changed |= needed.union_from(*right, value.id);
+                }
+                _ => {}
+            }
+        }
+        if !changed {
+            return Ok(needed);
+        }
+        check_cancelled(control)?;
+    }
+}
+
+fn ddx_axis_seeds(axis: CfgDdxAxis) -> Vec<AdSeed> {
+    match axis {
+        CfgDdxAxis::Potential { pos_node, neg_node } => {
+            let mut seeds = Vec::with_capacity(2);
+            if let Some(node) = pos_node {
+                seeds.push(AdSeed::NodePotential(node));
+            }
+            if let Some(node) = neg_node
+                && !seeds.contains(&AdSeed::NodePotential(node))
+            {
+                seeds.push(AdSeed::NodePotential(node));
+            }
+            seeds
+        }
+        CfgDdxAxis::BranchFlow { unknown, .. } => {
+            vec![AdSeed::BranchUnknownFlow(unknown)]
+        }
+    }
+}
+
+fn reject_nested_ddx(function: &CfgFunction) -> Result<(), CfgValidationError> {
+    let incoming = incoming_arguments(function);
+    let mut reaches_ddx = vec![false; function.values.len()];
+    loop {
+        let mut changed = false;
+        for value in &function.values {
+            let reaches = match &value.kind {
+                CfgValueKind::Ddx { .. } => true,
+                CfgValueKind::BlockParameter => incoming.get(&value.id).is_some_and(|arguments| {
+                    arguments
+                        .iter()
+                        .any(|argument| reaches_ddx[usize::from(*argument)])
+                }),
+                kind => kind
+                    .operands()
+                    .iter()
+                    .any(|operand| reaches_ddx[usize::from(*operand)]),
+            };
+            let slot = &mut reaches_ddx[usize::from(value.id)];
+            if reaches && !*slot {
+                *slot = true;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    for value in &function.values {
+        if let CfgValueKind::Ddx { value: operand, .. } = value.kind
+            && reaches_ddx[usize::from(operand)]
+        {
+            return Err(CfgValidationError::NestedDdx(value.id));
+        }
+    }
+    Ok(())
+}
+
+/// Sparse scalar forward mode used only to materialize `ddx` primals. The
+/// ordinary packed pass follows it and differentiates these expressions again.
+struct ScalarDdxBuilder<'a> {
+    source: &'a CfgFunction,
+    seeds: Vec<AdSeed>,
+    seed_indices: HashMap<AdSeed, usize>,
+    live: LaneLiveness,
+    second_order: Vec<bool>,
+    values: Vec<CfgValue>,
+    blocks: Vec<CfgBlock>,
+    derivatives: Vec<Option<ValueId>>,
+    constants: HashMap<u64, ValueId>,
+    one: ValueId,
+    ddt_scale: Option<ValueId>,
+    idt_scale: Option<ValueId>,
+    added_params: HashMap<BlockId, Vec<(usize, usize)>>,
+    emitted: Vec<CfgInstruction>,
+}
+
+impl<'a> ScalarDdxBuilder<'a> {
+    fn new(
+        source: &'a CfgFunction,
+        seeds: Vec<AdSeed>,
+        live: LaneLiveness,
+        second_order: Vec<bool>,
+    ) -> Self {
+        let mut values = source.values.clone();
+        let mut constants: HashMap<u64, ValueId> = values
+            .iter()
+            .filter_map(|value| match value.kind {
+                CfgValueKind::RealConstant(constant) => Some((constant.to_bits(), value.id)),
+                _ => None,
+            })
+            .collect();
+        let one = constants
+            .get(&1.0_f64.to_bits())
+            .copied()
+            .unwrap_or_else(|| {
+                let id = ValueId::from(values.len());
+                values.push(CfgValue {
+                    id,
+                    value_type: CfgValueType::Real,
+                    kind: CfgValueKind::RealConstant(1.0),
+                });
+                constants.insert(1.0_f64.to_bits(), id);
+                id
+            });
+        let source_value_count = source.values.len();
+        let lane_count = seeds.len();
+        let seed_indices = seeds
+            .iter()
+            .enumerate()
+            .map(|(index, seed)| (*seed, index))
+            .collect();
+        let mut builder = Self {
+            source,
+            seeds,
+            seed_indices,
+            live,
+            second_order,
+            values,
+            blocks: source.blocks.clone(),
+            derivatives: vec![None; source_value_count * lane_count],
+            constants,
+            one,
+            ddt_scale: None,
+            idt_scale: None,
+            added_params: HashMap::new(),
+            emitted: Vec::new(),
+        };
+        for (value, lane) in seed_lanes(source, &builder.seeds) {
+            builder.set_derivative(value, lane, Some(one));
+        }
+        builder
+    }
+
+    fn derivative_index(&self, value: ValueId, lane: usize) -> usize {
+        usize::from(value) * self.seeds.len() + lane
+    }
+
+    fn derivative(&self, value: ValueId, lane: usize) -> Option<ValueId> {
+        self.derivatives[self.derivative_index(value, lane)]
+    }
+
+    fn set_derivative(&mut self, value: ValueId, lane: usize, derivative: Option<ValueId>) {
+        let index = self.derivative_index(value, lane);
+        self.derivatives[index] = derivative;
+    }
+
+    fn add_block_parameters(&mut self) {
+        for block in &self.source.blocks {
+            let mut added = Vec::new();
+            for (position, param) in block.params.iter().enumerate() {
+                for lane in self.live.lanes(*param) {
+                    let derivative =
+                        self.new_value(CfgValueType::Real, CfgValueKind::BlockParameter);
+                    self.blocks[usize::from(block.id)].params.push(derivative);
+                    self.set_derivative(*param, lane, Some(derivative));
+                    added.push((position, lane));
+                }
+            }
+            self.added_params.insert(block.id, added);
+        }
+    }
+
+    fn rewrite_blocks(&mut self, control: &dyn PipelineControl) -> Result<(), PipelineCancelled> {
+        for block in reverse_postorder(self.source) {
+            check_cancelled(control)?;
+            self.emitted = Vec::new();
+            for (ordinal, instruction) in self.source.block(block).instructions.iter().enumerate() {
+                if ordinal.is_multiple_of(1024) {
+                    check_cancelled(control)?;
+                }
+                let result = instruction.result;
+                let original = self.source.value(result).kind.clone();
+                if self.second_order[usize::from(result)]
+                    && let CfgValueKind::Ddx { value, axis } = original
+                {
+                    let resolved = self.resolve_ddx_kind(value, axis);
+                    self.values[usize::from(result)].kind = resolved;
+                    self.emitted.push(CfgInstruction { result });
+                    continue;
+                }
+                self.emitted.push(CfgInstruction { result });
+                for lane in self.live.lanes(result) {
+                    let derivative = self.scalar_rule(&original, lane);
+                    self.set_derivative(result, lane, derivative);
+                }
+            }
+            let terminator = self.rewrite_terminator(block);
+            self.blocks[usize::from(block)].instructions = std::mem::take(&mut self.emitted);
+            self.blocks[usize::from(block)].terminator = terminator;
+        }
+        Ok(())
+    }
+
+    fn resolve_ddx_kind(&mut self, value: ValueId, axis: CfgDdxAxis) -> CfgValueKind {
+        let components: Vec<(AdSeed, f64)> = match axis {
+            CfgDdxAxis::Potential {
+                pos_node: Some(pos),
+                neg_node: Some(neg),
+            } if pos != neg => vec![
+                (AdSeed::NodePotential(pos), 0.5),
+                (AdSeed::NodePotential(neg), -0.5),
+            ],
+            CfgDdxAxis::Potential {
+                pos_node: Some(pos),
+                neg_node: _,
+            } => vec![(AdSeed::NodePotential(pos), 1.0)],
+            CfgDdxAxis::Potential {
+                pos_node: None,
+                neg_node: Some(neg),
+            } => vec![(AdSeed::NodePotential(neg), -1.0)],
+            CfgDdxAxis::Potential {
+                pos_node: None,
+                neg_node: None,
+            } => Vec::new(),
+            CfgDdxAxis::BranchFlow { unknown, reversed } => vec![(
+                AdSeed::BranchUnknownFlow(unknown),
+                if reversed { -1.0 } else { 1.0 },
+            )],
+        };
+        let mut terms = Vec::with_capacity(components.len());
+        for (seed, coefficient) in components {
+            let Some(lane) = self.seed_indices.get(&seed).copied() else {
+                continue;
+            };
+            let Some(derivative) = self.derivative(value, lane) else {
+                continue;
+            };
+            let term = match coefficient {
+                1.0 => derivative,
+                -1.0 => self.push_unary(CfgUnaryOp::Neg, derivative),
+                coefficient => {
+                    let coefficient = self.constant(coefficient);
+                    self.push_binary(CfgBinaryOp::Mul, coefficient, derivative)
+                }
+            };
+            terms.push(term);
+        }
+        match terms.as_slice() {
+            [] => CfgValueKind::RealConstant(0.0),
+            [only] => CfgValueKind::Binary {
+                op: CfgBinaryOp::Mul,
+                left: self.one,
+                right: *only,
+            },
+            [left, right] => CfgValueKind::Binary {
+                op: CfgBinaryOp::Add,
+                left: *left,
+                right: *right,
+            },
+            _ => unreachable!("a ddx axis has at most two components"),
+        }
+    }
+
+    fn rewrite_terminator(&mut self, block: BlockId) -> CfgTerminator {
+        match self.source.block(block).terminator.clone() {
+            CfgTerminator::Jump { target, mut args } => {
+                args.extend(self.derivative_arguments(target, &args));
+                CfgTerminator::Jump { target, args }
+            }
+            CfgTerminator::Branch {
+                condition,
+                then_target,
+                mut then_args,
+                else_target,
+                mut else_args,
+            } => {
+                then_args.extend(self.derivative_arguments(then_target, &then_args));
+                else_args.extend(self.derivative_arguments(else_target, &else_args));
+                CfgTerminator::Branch {
+                    condition,
+                    then_target,
+                    then_args,
+                    else_target,
+                    else_args,
+                }
+            }
+            other => other,
+        }
+    }
+
+    fn derivative_arguments(&mut self, target: BlockId, args: &[ValueId]) -> Vec<ValueId> {
+        let added = self.added_params.get(&target).cloned().unwrap_or_default();
+        added
+            .into_iter()
+            .map(|(position, lane)| {
+                args.get(position)
+                    .and_then(|argument| self.derivative(*argument, lane))
+                    .unwrap_or_else(|| self.constant(0.0))
+            })
+            .collect()
+    }
+
+    fn scalar_rule(&mut self, kind: &CfgValueKind, lane: usize) -> Option<ValueId> {
+        match kind {
+            CfgValueKind::Unary { op, input } => {
+                let derivative = self.derivative(*input, lane)?;
+                let factor = self.unary_factor(*op, *input);
+                Some(self.push_binary(CfgBinaryOp::Mul, derivative, factor))
+            }
+            CfgValueKind::Binary { op, left, right } => self.binary_rule(*op, *left, *right, lane),
+            CfgValueKind::Ddt { input, .. } => {
+                let derivative = self.derivative(*input, lane)?;
+                let scale = self.ddt_scale();
+                Some(self.push_binary(CfgBinaryOp::Mul, derivative, scale))
+            }
+            CfgValueKind::Idt { input, .. } => {
+                let derivative = self.derivative(*input, lane)?;
+                let scale = self.idt_scale();
+                Some(self.push_binary(CfgBinaryOp::Mul, derivative, scale))
+            }
+            CfgValueKind::Transition {
+                site,
+                input,
+                delay,
+                rise,
+                fall,
+            } => {
+                let input_derivative = self.derivative(*input, lane)?;
+                Some(self.push(
+                    CfgValueType::Real,
+                    CfgValueKind::TransitionDerivative {
+                        site: *site,
+                        input: *input,
+                        input_derivative,
+                        delay: *delay,
+                        rise: *rise,
+                        fall: *fall,
+                    },
+                ))
+            }
+            CfgValueKind::TransitionDerivative {
+                site,
+                input,
+                input_derivative,
+                delay,
+                rise,
+                fall,
+            } => {
+                let derivative = self.derivative(*input_derivative, lane)?;
+                Some(self.push(
+                    CfgValueType::Real,
+                    CfgValueKind::TransitionDerivative {
+                        site: *site,
+                        input: *input,
+                        input_derivative: derivative,
+                        delay: *delay,
+                        rise: *rise,
+                        fall: *fall,
+                    },
+                ))
+            }
+            CfgValueKind::Limit { proposed, .. } => self.derivative(*proposed, lane),
+            _ => None,
+        }
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn binary_rule(
+        &mut self,
+        op: CfgBinaryOp,
+        left: ValueId,
+        right: ValueId,
+        lane: usize,
+    ) -> Option<ValueId> {
+        let d_left = self.derivative(left, lane);
+        let d_right = self.derivative(right, lane);
+        match op {
+            CfgBinaryOp::Add => match (d_left, d_right) {
+                (Some(a), Some(b)) => Some(self.push_binary(CfgBinaryOp::Add, a, b)),
+                (Some(only), None) | (None, Some(only)) => Some(only),
+                (None, None) => None,
+            },
+            CfgBinaryOp::Sub => match (d_left, d_right) {
+                (Some(a), Some(b)) => Some(self.push_binary(CfgBinaryOp::Sub, a, b)),
+                (Some(only), None) => Some(only),
+                (None, Some(only)) => Some(self.push_unary(CfgUnaryOp::Neg, only)),
+                (None, None) => None,
+            },
+            CfgBinaryOp::Mul => match (d_left, d_right) {
+                (Some(a), Some(b)) => {
+                    let first = self.push_binary(CfgBinaryOp::Mul, a, right);
+                    let second = self.push_binary(CfgBinaryOp::Mul, b, left);
+                    Some(self.push_binary(CfgBinaryOp::Add, first, second))
+                }
+                (Some(a), None) => Some(self.push_binary(CfgBinaryOp::Mul, a, right)),
+                (None, Some(b)) => Some(self.push_binary(CfgBinaryOp::Mul, b, left)),
+                (None, None) => None,
+            },
+            CfgBinaryOp::Div => {
+                let numerator = match (d_left, d_right) {
+                    (Some(a), Some(b)) => {
+                        let quotient = self.push_binary(CfgBinaryOp::Div, left, right);
+                        let scaled = self.push_binary(CfgBinaryOp::Mul, quotient, b);
+                        self.push_binary(CfgBinaryOp::Sub, a, scaled)
+                    }
+                    (Some(a), None) => a,
+                    (None, Some(b)) => {
+                        let quotient = self.push_binary(CfgBinaryOp::Div, left, right);
+                        let scaled = self.push_binary(CfgBinaryOp::Mul, quotient, b);
+                        self.push_unary(CfgUnaryOp::Neg, scaled)
+                    }
+                    (None, None) => return None,
+                };
+                Some(self.push_binary(CfgBinaryOp::Div, numerator, right))
+            }
+            CfgBinaryOp::Pow => {
+                let from_base = d_left.map(|derivative| {
+                    let exponent = self.push_binary(CfgBinaryOp::Sub, right, self.one);
+                    let reduced = self.push_binary(CfgBinaryOp::Pow, left, exponent);
+                    let factor = self.push_binary(CfgBinaryOp::Mul, right, reduced);
+                    self.push_binary(CfgBinaryOp::Mul, derivative, factor)
+                });
+                let from_exponent = d_right.map(|derivative| {
+                    let power = self.push_binary(CfgBinaryOp::Pow, left, right);
+                    let logarithm = self.push_unary(CfgUnaryOp::Ln, left);
+                    let factor = self.push_binary(CfgBinaryOp::Mul, power, logarithm);
+                    self.push_binary(CfgBinaryOp::Mul, derivative, factor)
+                });
+                match (from_base, from_exponent) {
+                    (Some(a), Some(b)) => Some(self.push_binary(CfgBinaryOp::Add, a, b)),
+                    (Some(only), None) | (None, Some(only)) => Some(only),
+                    (None, None) => None,
+                }
+            }
+            CfgBinaryOp::Mod => d_left,
+            CfgBinaryOp::Min | CfgBinaryOp::Max => {
+                let comparison = if op == CfgBinaryOp::Min {
+                    CfgBinaryOp::Le
+                } else {
+                    CfgBinaryOp::Ge
+                };
+                let takes_left = self.push_typed(CfgValueType::Boolean, comparison, left, right);
+                match (d_left, d_right) {
+                    (Some(a), Some(b)) => {
+                        let difference = self.push_binary(CfgBinaryOp::Sub, a, b);
+                        let selected = self.push_binary(CfgBinaryOp::Mul, difference, takes_left);
+                        Some(self.push_binary(CfgBinaryOp::Add, b, selected))
+                    }
+                    (Some(a), None) => Some(self.push_binary(CfgBinaryOp::Mul, a, takes_left)),
+                    (None, Some(b)) => {
+                        let takes_right = self.push_binary(CfgBinaryOp::Sub, self.one, takes_left);
+                        Some(self.push_binary(CfgBinaryOp::Mul, b, takes_right))
+                    }
+                    (None, None) => None,
+                }
+            }
+            other => {
+                debug_assert!(is_predicate(other), "unhandled scalar derivative rule");
+                None
+            }
+        }
+    }
+
+    fn unary_factor(&mut self, op: CfgUnaryOp, input: ValueId) -> ValueId {
+        match op {
+            CfgUnaryOp::Neg => self.constant(-1.0),
+            CfgUnaryOp::Exp => self.push_unary(CfgUnaryOp::Exp, input),
+            CfgUnaryOp::LimExp => self.push_unary(CfgUnaryOp::LimExp, input),
+            CfgUnaryOp::LimitedExp => self.push_unary(CfgUnaryOp::LimitedExpDerivative, input),
+            CfgUnaryOp::LimitedExpDerivative => self.constant(0.0),
+            CfgUnaryOp::Ln => self.push_binary(CfgBinaryOp::Div, self.one, input),
+            CfgUnaryOp::Log10 => {
+                let ln_ten = self.constant(std::f64::consts::LN_10);
+                let denominator = self.push_binary(CfgBinaryOp::Mul, input, ln_ten);
+                self.push_binary(CfgBinaryOp::Div, self.one, denominator)
+            }
+            CfgUnaryOp::Sqrt => {
+                let root = self.push_unary(CfgUnaryOp::Sqrt, input);
+                let two = self.constant(2.0);
+                let denominator = self.push_binary(CfgBinaryOp::Mul, two, root);
+                self.push_binary(CfgBinaryOp::Div, self.one, denominator)
+            }
+            CfgUnaryOp::Abs => {
+                let zero = self.constant(0.0);
+                let positive = self.push_typed(CfgValueType::Boolean, CfgBinaryOp::Ge, input, zero);
+                let two = self.constant(2.0);
+                let doubled = self.push_binary(CfgBinaryOp::Mul, two, positive);
+                self.push_binary(CfgBinaryOp::Sub, doubled, self.one)
+            }
+            CfgUnaryOp::Sin => self.push_unary(CfgUnaryOp::Cos, input),
+            CfgUnaryOp::Cos => {
+                let sine = self.push_unary(CfgUnaryOp::Sin, input);
+                let minus_one = self.constant(-1.0);
+                self.push_binary(CfgBinaryOp::Mul, minus_one, sine)
+            }
+            CfgUnaryOp::Tan => {
+                let cosine = self.push_unary(CfgUnaryOp::Cos, input);
+                let squared = self.push_binary(CfgBinaryOp::Mul, cosine, cosine);
+                self.push_binary(CfgBinaryOp::Div, self.one, squared)
+            }
+            CfgUnaryOp::Sinh => self.push_unary(CfgUnaryOp::Cosh, input),
+            CfgUnaryOp::Cosh => self.push_unary(CfgUnaryOp::Sinh, input),
+            CfgUnaryOp::Tanh => {
+                let tangent = self.push_unary(CfgUnaryOp::Tanh, input);
+                let squared = self.push_binary(CfgBinaryOp::Mul, tangent, tangent);
+                self.push_binary(CfgBinaryOp::Sub, self.one, squared)
+            }
+            CfgUnaryOp::Asin | CfgUnaryOp::Acos => {
+                let squared = self.push_binary(CfgBinaryOp::Mul, input, input);
+                let difference = self.push_binary(CfgBinaryOp::Sub, self.one, squared);
+                let root = self.push_unary(CfgUnaryOp::Sqrt, difference);
+                let numerator = if matches!(op, CfgUnaryOp::Acos) {
+                    self.constant(-1.0)
+                } else {
+                    self.one
+                };
+                self.push_binary(CfgBinaryOp::Div, numerator, root)
+            }
+            CfgUnaryOp::Atan => {
+                let squared = self.push_binary(CfgBinaryOp::Mul, input, input);
+                let denominator = self.push_binary(CfgBinaryOp::Add, self.one, squared);
+                self.push_binary(CfgBinaryOp::Div, self.one, denominator)
+            }
+            CfgUnaryOp::Asinh => {
+                let squared = self.push_binary(CfgBinaryOp::Mul, input, input);
+                let sum = self.push_binary(CfgBinaryOp::Add, self.one, squared);
+                let root = self.push_unary(CfgUnaryOp::Sqrt, sum);
+                self.push_binary(CfgBinaryOp::Div, self.one, root)
+            }
+            CfgUnaryOp::Acosh => {
+                let squared = self.push_binary(CfgBinaryOp::Mul, input, input);
+                let difference = self.push_binary(CfgBinaryOp::Sub, squared, self.one);
+                let root = self.push_unary(CfgUnaryOp::Sqrt, difference);
+                self.push_binary(CfgBinaryOp::Div, self.one, root)
+            }
+            CfgUnaryOp::Atanh => {
+                let squared = self.push_binary(CfgBinaryOp::Mul, input, input);
+                let denominator = self.push_binary(CfgBinaryOp::Sub, self.one, squared);
+                self.push_binary(CfgBinaryOp::Div, self.one, denominator)
+            }
+            CfgUnaryOp::Not | CfgUnaryOp::Floor | CfgUnaryOp::Ceil => self.constant(0.0),
+        }
+    }
+
+    fn ddt_scale(&mut self) -> ValueId {
+        if let Some(value) = self.ddt_scale {
+            return value;
+        }
+        let value = self.new_value(CfgValueType::Real, CfgValueKind::DdtScale);
+        self.ddt_scale = Some(value);
+        value
+    }
+
+    fn idt_scale(&mut self) -> ValueId {
+        if let Some(value) = self.idt_scale {
+            return value;
+        }
+        let value = self.new_value(CfgValueType::Real, CfgValueKind::IdtScale);
+        self.idt_scale = Some(value);
+        value
+    }
+
+    fn constant(&mut self, value: f64) -> ValueId {
+        if let Some(existing) = self.constants.get(&value.to_bits()) {
+            return *existing;
+        }
+        let id = self.new_value(CfgValueType::Real, CfgValueKind::RealConstant(value));
+        self.constants.insert(value.to_bits(), id);
+        id
+    }
+
+    fn new_value(&mut self, value_type: CfgValueType, kind: CfgValueKind) -> ValueId {
+        let id = ValueId::from(self.values.len());
+        self.values.push(CfgValue {
+            id,
+            value_type,
+            kind,
+        });
+        id
+    }
+
+    fn push(&mut self, value_type: CfgValueType, kind: CfgValueKind) -> ValueId {
+        let id = self.new_value(value_type, kind);
+        self.emitted.push(CfgInstruction { result: id });
+        id
+    }
+
+    fn push_binary(&mut self, op: CfgBinaryOp, left: ValueId, right: ValueId) -> ValueId {
+        self.push_typed(CfgValueType::Real, op, left, right)
+    }
+
+    fn push_typed(
+        &mut self,
+        value_type: CfgValueType,
+        op: CfgBinaryOp,
+        left: ValueId,
+        right: ValueId,
+    ) -> ValueId {
+        self.push(value_type, CfgValueKind::Binary { op, left, right })
+    }
+
+    fn push_unary(&mut self, op: CfgUnaryOp, input: ValueId) -> ValueId {
+        self.push(CfgValueType::Real, CfgValueKind::Unary { op, input })
+    }
+}
+
 /// Differentiate `function` with respect to `lanes`.
 pub fn differentiate(
     function: &CfgFunction,
@@ -534,6 +1343,29 @@ pub(crate) fn differentiate_with_control(
     lanes: &[AdSeed],
     control: &dyn PipelineControl,
 ) -> Result<AdFunction, DifferentiationError> {
+    differentiate_with_control_for_optional_roots(function, lanes, None, control)
+}
+
+/// Differentiate a generated stamp while expanding second-order `ddx` work
+/// only for values that can reach the residual or charge rows the backend will
+/// extract. Other `ddx` readbacks (notably noise/reporting expressions) are
+/// still resolved by the packed first-order pass, but do not inflate the stamp
+/// with second derivatives no caller observes.
+pub(crate) fn differentiate_with_control_for_roots(
+    function: &CfgFunction,
+    lanes: &[AdSeed],
+    roots: &[ValueId],
+    control: &dyn PipelineControl,
+) -> Result<AdFunction, DifferentiationError> {
+    differentiate_with_control_for_optional_roots(function, lanes, Some(roots), control)
+}
+
+fn differentiate_with_control_for_optional_roots(
+    function: &CfgFunction,
+    lanes: &[AdSeed],
+    roots: Option<&[ValueId]>,
+    control: &dyn PipelineControl,
+) -> Result<AdFunction, DifferentiationError> {
     // Refuse a discrete-domain value up front rather than letting one fall
     // through `differentiable`'s catch-all, which would report `false` and
     // leave a silent zero where a derivative should be. The check is one pass
@@ -547,10 +1379,11 @@ pub(crate) fn differentiate_with_control(
             CfgValidationError::DigitalValueInDerivative(value.id),
         ));
     }
-    let live = lane_liveness_with_control(function, lanes, control)
+    let resolved = resolve_ddx_primal_with_control(function, roots, control)?;
+    let live = lane_liveness_with_control(&resolved, lanes, control)
         .map_err(DifferentiationError::Cancelled)?;
-    let mut builder =
-        AdBuilder::new(function, lanes, &live, control).map_err(DifferentiationError::Cancelled)?;
+    let mut builder = AdBuilder::new(&resolved, lanes, &live, control)
+        .map_err(DifferentiationError::Cancelled)?;
     builder
         .add_block_parameters(control)
         .map_err(DifferentiationError::Cancelled)?;
@@ -841,13 +1674,8 @@ impl<'a> AdBuilder<'a> {
                 }
                 let result = instruction.result;
                 // Read-outs have to land before the instruction that reads them.
-                if let CfgValueKind::Ddx {
-                    value,
-                    pos_node,
-                    neg_node,
-                } = self.source.value(result).kind
-                {
-                    self.resolve_ddx(result, value, pos_node, neg_node);
+                if let CfgValueKind::Ddx { value, axis } = self.source.value(result).kind {
+                    self.resolve_ddx(result, value, axis);
                 }
                 self.emitted.push(CfgInstruction { result });
                 let derivative = self.rule(result);
@@ -862,50 +1690,74 @@ impl<'a> AdBuilder<'a> {
 
     /// Turn a `ddx` into the lane it names.
     ///
-    /// `ddx(f, V(p, n))` is `∂f/∂p − ∂f/∂n`, which this pass has just computed.
+    /// `ddx(f, V(p, n))` is `(∂f/∂p − ∂f/∂n)/2`: changing the differential
+    /// voltage holds common mode fixed, so each endpoint moves by half the
+    /// requested change. A branch-flow probe selects its solver-owned branch
+    /// lane directly, with orientation applied.
     /// Reading it back rather than lowering it separately is what lets a model
     /// asking for its own transconductance get the entry the backend already
     /// produces instead of a second, separately maintained one.
     ///
     /// A lane the value does not carry is a structural zero and folds away here.
-    fn resolve_ddx(
-        &mut self,
-        result: ValueId,
-        value: ValueId,
-        pos_node: Option<NodeId>,
-        neg_node: Option<NodeId>,
-    ) {
-        let positive = self.extract_node_lane(value, pos_node);
-        let negative = self.extract_node_lane(value, neg_node);
-        let kind = match (positive, negative) {
-            (Some(positive), Some(negative)) => CfgValueKind::Binary {
-                op: CfgBinaryOp::Sub,
-                left: positive,
-                right: negative,
-            },
-            // The instruction has to define something, so the identity is
-            // written out rather than aliased; simplification collapses it.
-            (Some(positive), None) => CfgValueKind::Binary {
-                op: CfgBinaryOp::Mul,
-                left: self.one,
-                right: positive,
-            },
-            (None, Some(negative)) => CfgValueKind::Unary {
-                op: CfgUnaryOp::Neg,
-                input: negative,
-            },
-            (None, None) => CfgValueKind::RealConstant(0.0),
+    fn resolve_ddx(&mut self, result: ValueId, value: ValueId, axis: CfgDdxAxis) {
+        let kind = match axis {
+            CfgDdxAxis::Potential { pos_node, neg_node } => {
+                let positive = self.extract_lane(value, pos_node.map(AdSeed::NodePotential));
+                let negative = self.extract_lane(value, neg_node.map(AdSeed::NodePotential));
+                if neg_node.is_some() {
+                    match (positive, negative) {
+                        (None, None) => CfgValueKind::RealConstant(0.0),
+                        (positive, negative) => {
+                            let positive = positive.unwrap_or_else(|| self.constant(0.0));
+                            let negative = negative.unwrap_or_else(|| self.constant(0.0));
+                            let difference = self.push(
+                                CfgValueType::Real,
+                                CfgValueKind::Binary {
+                                    op: CfgBinaryOp::Sub,
+                                    left: positive,
+                                    right: negative,
+                                },
+                            );
+                            CfgValueKind::Binary {
+                                op: CfgBinaryOp::Mul,
+                                left: self.constant(0.5),
+                                right: difference,
+                            }
+                        }
+                    }
+                } else {
+                    match positive {
+                        Some(positive) => CfgValueKind::Binary {
+                            op: CfgBinaryOp::Mul,
+                            left: self.one,
+                            right: positive,
+                        },
+                        None => CfgValueKind::RealConstant(0.0),
+                    }
+                }
+            }
+            CfgDdxAxis::BranchFlow { unknown, reversed } => {
+                match self.extract_lane(value, Some(AdSeed::BranchUnknownFlow(unknown))) {
+                    Some(derivative) if reversed => CfgValueKind::Unary {
+                        op: CfgUnaryOp::Neg,
+                        input: derivative,
+                    },
+                    Some(derivative) => CfgValueKind::Binary {
+                        op: CfgBinaryOp::Mul,
+                        left: self.one,
+                        right: derivative,
+                    },
+                    None => CfgValueKind::RealConstant(0.0),
+                }
+            }
         };
         self.values[usize::from(result)].kind = kind;
     }
 
-    /// The scalar partial of `value` with respect to a node's potential.
-    fn extract_node_lane(&mut self, value: ValueId, node: Option<NodeId>) -> Option<ValueId> {
-        let node = node?;
-        let lane = self
-            .lanes
-            .iter()
-            .position(|seed| *seed == AdSeed::NodePotential(node))?;
+    /// The scalar partial of `value` with respect to one solver unknown.
+    fn extract_lane(&mut self, value: ValueId, seed: Option<AdSeed>) -> Option<ValueId> {
+        let seed = seed?;
+        let lane = self.lanes.iter().position(|candidate| *candidate == seed)?;
         let lane = u32::try_from(lane).ok()?;
         let array = self.derivatives[usize::from(value)]?;
         let shape = self.shape_of(array)?;
@@ -1015,6 +1867,47 @@ impl<'a> AdBuilder<'a> {
                 let derivative = self.derivatives[usize::from(*input)]?;
                 let scale = self.idt_scale();
                 Some(self.scale(derivative, scale))
+            }
+            CfgValueKind::Transition {
+                site,
+                input,
+                delay,
+                rise,
+                fall,
+            } => {
+                let input_derivative = self.derivatives[usize::from(*input)]?;
+                Some(self.push(
+                    CfgValueType::Lanes(target),
+                    CfgValueKind::TransitionDerivative {
+                        site: *site,
+                        input: *input,
+                        input_derivative,
+                        delay: *delay,
+                        rise: *rise,
+                        fall: *fall,
+                    },
+                ))
+            }
+            CfgValueKind::TransitionDerivative {
+                site,
+                input,
+                input_derivative,
+                delay,
+                rise,
+                fall,
+            } => {
+                let derivative = self.derivatives[usize::from(*input_derivative)]?;
+                Some(self.push(
+                    CfgValueType::Lanes(target),
+                    CfgValueKind::TransitionDerivative {
+                        site: *site,
+                        input: *input,
+                        input_derivative: derivative,
+                        delay: *delay,
+                        rise: *rise,
+                        fall: *fall,
+                    },
+                ))
             }
             // The classic SPICE convention pinned by the compiler contract: what
             // `$limit` returned takes the *proposed* value's slope. `dL/dv := 1`

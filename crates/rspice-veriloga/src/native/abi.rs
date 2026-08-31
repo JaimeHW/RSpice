@@ -1599,8 +1599,24 @@ pub unsafe extern "C" fn rspice_transition_state_native(
     let delay = operands[1];
     let rise_time = operands[2];
     let fall_time = operands[3];
-    if ctx.analysis_type != 2 {
+    if let Err(error) =
+        crate::vm::TransitionFilter::validate_operands(input, ctx.time, delay, rise_time, fall_time)
+    {
+        set_native_context_error(ctx, format!("native transition: {error}"));
+        return 0.0;
+    }
+    if matches!(ctx.analysis_type, 1 | 3) {
         return input;
+    }
+    if !matches!(ctx.analysis_type, 0 | 2 | 4) {
+        set_native_context_error(
+            ctx,
+            format!(
+                "native transition helper received invalid analysis type {}",
+                ctx.analysis_type
+            ),
+        );
+        return 0.0;
     }
 
     if ctx.transition_filters.is_null() {
@@ -1626,13 +1642,114 @@ pub unsafe extern "C" fn rspice_transition_state_native(
     let filters = unsafe {
         std::slice::from_raw_parts_mut(ctx.transition_filters, ctx.transition_filters_len)
     };
-    filters[filter_id].eval(
-        input,
+    let result = if ctx.analysis_type == 2 {
+        filters[filter_id].eval(input, ctx.time, delay, rise_time, fall_time)
+    } else {
+        filters[filter_id].eval_operating_point(input, ctx.time, delay, rise_time, fall_time)
+    };
+    match result {
+        Ok(value) => value,
+        Err(error) => {
+            set_native_context_error(ctx, format!("native transition: {error}"));
+            0.0
+        }
+    }
+}
+
+/// Read-only exact local derivative of a native transition candidate.
+///
+/// `operands` contains input, input derivative, delay, rise time, and fall
+/// time. Transient mode recomputes the candidate branch from accepted state;
+/// operating-point and small-signal modes return the unity action required by
+/// the LRM without touching transition history.
+///
+/// # Safety
+/// Called from verified JIT code with a valid context and five operands.
+#[unsafe(export_name = "rspice_transition_derivative_native")]
+pub unsafe extern "C" fn rspice_transition_derivative_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    filter_id: usize,
+) -> f64 {
+    if ctx.is_null() {
+        set_native_context_error_ptr(
+            ctx,
+            "native transition derivative helper missing EvalContext; no interpreter fallback",
+        );
+        return 0.0;
+    }
+    let ctx = unsafe { &*ctx };
+    if operands.is_null() {
+        set_native_context_error(
+            ctx,
+            "native transition derivative helper missing operands; no interpreter fallback",
+        );
+        return 0.0;
+    }
+    let operands = unsafe { std::slice::from_raw_parts(operands, 5) };
+    if !matches!(ctx.analysis_type, 0..=4) {
+        set_native_context_error(
+            ctx,
+            format!(
+                "native transition derivative helper received invalid analysis type {}",
+                ctx.analysis_type
+            ),
+        );
+        return 0.0;
+    }
+
+    if ctx.analysis_type != 2 {
+        match crate::vm::TransitionFilter::validate_operands(
+            operands[0],
+            ctx.time,
+            operands[2],
+            operands[3],
+            operands[4],
+        ) {
+            Ok(()) if operands[1].is_finite() => return operands[1],
+            Ok(()) => {
+                set_native_context_error(
+                    ctx,
+                    format!(
+                        "native transition derivative: input derivative must be finite, got {}",
+                        operands[1]
+                    ),
+                );
+                return 0.0;
+            }
+            Err(error) => {
+                set_native_context_error(ctx, format!("native transition derivative: {error}"));
+                return 0.0;
+            }
+        }
+    }
+
+    if ctx.transition_filters.is_null() || filter_id >= ctx.transition_filters_len {
+        set_native_context_error(
+            ctx,
+            format!(
+                "native transition derivative helper filter {filter_id} outside available filter storage; no interpreter fallback"
+            ),
+        );
+        return 0.0;
+    }
+    let filters =
+        unsafe { std::slice::from_raw_parts(ctx.transition_filters, ctx.transition_filters_len) };
+    match filters[filter_id].eval_derivative(
+        operands[0],
+        operands[1],
         ctx.time,
-        delay.max(0.0),
-        rise_time.max(0.0),
-        fall_time.max(0.0),
-    )
+        operands[2],
+        operands[3],
+        operands[4],
+        ctx.analysis_type,
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            set_native_context_error(ctx, format!("native transition derivative: {error}"));
+            0.0
+        }
+    }
 }
 
 /// External helper function for native x64 slew-rate filters.
@@ -1819,6 +1936,43 @@ pub unsafe extern "C" fn rspice_absdelay_state_native(
     ctx: *const EvalContext,
     buffer_id: usize,
 ) -> f64 {
+    unsafe { rspice_absdelay_native_impl(operands, ctx, buffer_id, false, false) }
+}
+
+#[unsafe(export_name = "rspice_absdelay_state_max_native")]
+pub unsafe extern "C" fn rspice_absdelay_state_max_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    buffer_id: usize,
+) -> f64 {
+    unsafe { rspice_absdelay_native_impl(operands, ctx, buffer_id, true, false) }
+}
+
+#[unsafe(export_name = "rspice_absdelay_derivative_native")]
+pub unsafe extern "C" fn rspice_absdelay_derivative_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    buffer_id: usize,
+) -> f64 {
+    unsafe { rspice_absdelay_native_impl(operands, ctx, buffer_id, false, true) }
+}
+
+#[unsafe(export_name = "rspice_absdelay_derivative_max_native")]
+pub unsafe extern "C" fn rspice_absdelay_derivative_max_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    buffer_id: usize,
+) -> f64 {
+    unsafe { rspice_absdelay_native_impl(operands, ctx, buffer_id, true, true) }
+}
+
+unsafe fn rspice_absdelay_native_impl(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    buffer_id: usize,
+    has_max_delay: bool,
+    derivative: bool,
+) -> f64 {
     if ctx.is_null() {
         set_native_context_error_ptr(
             ctx,
@@ -1835,11 +1989,39 @@ pub unsafe extern "C" fn rspice_absdelay_state_native(
         return 0.0;
     }
 
-    let operands = unsafe { std::slice::from_raw_parts(operands, 2) };
+    let operand_count = match (has_max_delay, derivative) {
+        (false, false) => 2,
+        (true, false) => 3,
+        (false, true) => 4,
+        (true, true) => 5,
+    };
+    let operands = unsafe { std::slice::from_raw_parts(operands, operand_count) };
     let input = operands[0];
-    let delay_time = operands[1];
+    let (input_derivative, delay_time, delay_derivative, max_delay) = if derivative {
+        (
+            operands[1],
+            operands[2],
+            operands[3],
+            if has_max_delay {
+                Some(operands[4])
+            } else {
+                None
+            },
+        )
+    } else {
+        (
+            0.0,
+            operands[1],
+            0.0,
+            if has_max_delay {
+                Some(operands[2])
+            } else {
+                None
+            },
+        )
+    };
     if ctx.analysis_type != 2 {
-        return input;
+        return if derivative { input_derivative } else { input };
     }
 
     if ctx.delay_buffers.is_null() {
@@ -1864,7 +2046,22 @@ pub unsafe extern "C" fn rspice_absdelay_state_native(
 
     let buffers =
         unsafe { std::slice::from_raw_parts_mut(ctx.delay_buffers, ctx.delay_buffers_len) };
-    buffers[buffer_id].eval(ctx.time, input, delay_time)
+    match buffers[buffer_id].eval_with_coefficients(ctx.time, input, delay_time, max_delay) {
+        Ok(evaluation) => {
+            if derivative {
+                evaluation.delay_coefficient.mul_add(
+                    delay_derivative,
+                    evaluation.input_coefficient * input_derivative,
+                )
+            } else {
+                evaluation.output
+            }
+        }
+        Err(error) => {
+            set_native_context_error(ctx, error);
+            0.0
+        }
+    }
 }
 
 /// External helper function for native x64 threshold-crossing detectors.
@@ -2188,14 +2385,15 @@ fn dynamic_variable_bounds_error(
 mod tests {
     use super::{
         EvalContext, INTEGER_CAST_DESCRIPTOR, NativeRuntimeStatus, integer_binary_descriptor,
-        rspice_above_state_native, rspice_absdelay_state_native, rspice_cross_state_native,
+        rspice_above_state_native, rspice_absdelay_derivative_max_native,
+        rspice_absdelay_state_max_native, rspice_absdelay_state_native, rspice_cross_state_native,
         rspice_ddt_state_native, rspice_dynamic_variable_slot_native, rspice_idt_state_native,
         rspice_integer_operation_native, rspice_laplace_derivative_native,
         rspice_laplace_step_native, rspice_last_crossing_state_native,
         rspice_limiter_previous_native, rspice_limiter_store_native,
         rspice_native_dynamic_variable_error, rspice_slew_state_native,
         rspice_table_derivative_native, rspice_table_lookup_native, rspice_timer_state_native,
-        rspice_transition_state_native, rspice_zi_step_native,
+        rspice_transition_derivative_native, rspice_transition_state_native, rspice_zi_step_native,
     };
     use crate::codegen::LookupTable;
     use crate::integer_runtime::IntegerBinaryOperation;
@@ -2741,9 +2939,10 @@ mod tests {
     }
 
     #[test]
-    fn transition_native_helper_passes_input_through_outside_transient() {
+    fn transition_native_helper_passes_input_through_in_small_signal_analysis() {
         let operands = [1.25, 0.2, 0.4, 0.4];
-        let ctx = empty_eval_context();
+        let mut ctx = empty_eval_context();
+        ctx.analysis_type = 1;
         ctx.clear_runtime_error();
 
         let value = unsafe { rspice_transition_state_native(operands.as_ptr(), &ctx, 7) };
@@ -2779,6 +2978,10 @@ mod tests {
     fn transition_native_helper_uses_vm_transition_filter_state() {
         let operands = [1.0, 0.2, 0.4, 0.4];
         let mut filters = [TransitionFilter::default()];
+        filters[0]
+            .eval_operating_point(0.0, 0.0, 0.2, 0.4, 0.4)
+            .unwrap();
+        filters[0].promote_operating_point_candidate();
         let mut ctx = empty_eval_context();
         ctx.analysis_type = 2;
         ctx.transition_filters = filters.as_mut_ptr();
@@ -2801,6 +3004,78 @@ mod tests {
         let done = unsafe { rspice_transition_state_native(operands.as_ptr(), &ctx, 0) };
         assert!((done - 1.0).abs() < 1.0e-12, "done transition: {done}");
         assert!(ctx.take_runtime_error().is_none());
+    }
+
+    #[test]
+    fn transition_native_helper_rejects_invalid_timing_without_clamping() {
+        let operands = [1.0, -0.2, 0.4, 0.4];
+        let mut filters = [TransitionFilter::default()];
+        let mut ctx = empty_eval_context();
+        ctx.analysis_type = 2;
+        ctx.transition_filters = filters.as_mut_ptr();
+        ctx.transition_filters_len = filters.len();
+        ctx.clear_runtime_error();
+
+        assert_eq!(
+            unsafe { rspice_transition_state_native(operands.as_ptr(), &ctx, 0) },
+            0.0
+        );
+        let error = ctx
+            .take_runtime_error()
+            .expect("negative transition timing must set the native error channel");
+        assert!(
+            error.contains("delay") && error.contains("non-negative"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn transition_native_derivative_is_branch_exact_and_read_only() {
+        let mut filters = [TransitionFilter::default()];
+        filters[0]
+            .eval_operating_point(0.0, 0.0, 0.0, 1.0, 1.0)
+            .unwrap();
+        filters[0].promote_operating_point_candidate();
+        let accepted = filters[0].checkpoint();
+        let mut ctx = empty_eval_context();
+        ctx.analysis_type = 2;
+        ctx.time = 1.0;
+        ctx.transition_filters = filters.as_mut_ptr();
+        ctx.transition_filters_len = filters.len();
+
+        let delayed = [1.0, 3.0, 1.0, 2.0, 2.0];
+        assert_eq!(
+            unsafe { rspice_transition_derivative_native(delayed.as_ptr(), &ctx, 0) },
+            0.0
+        );
+        let ramp = [1.0, 3.0, 0.0, 2.0, 2.0];
+        assert_eq!(
+            unsafe { rspice_transition_derivative_native(ramp.as_ptr(), &ctx, 0) },
+            0.0
+        );
+        let instantaneous = [1.0, 3.0, 0.0, 0.0, 0.0];
+        assert_eq!(
+            unsafe { rspice_transition_derivative_native(instantaneous.as_ptr(), &ctx, 0) },
+            3.0
+        );
+        assert_eq!(filters[0].checkpoint(), accepted);
+        assert!(ctx.take_runtime_error().is_none());
+    }
+
+    #[test]
+    fn transition_native_derivative_is_unity_in_small_signal_analysis() {
+        let operands = [1.0, 3.0, 5.0, 2.0, 2.0];
+        let mut ctx = empty_eval_context();
+        for analysis_type in [0, 1, 3, 4] {
+            ctx.analysis_type = analysis_type;
+            ctx.clear_runtime_error();
+            assert_eq!(
+                unsafe { rspice_transition_derivative_native(operands.as_ptr(), &ctx, 0) },
+                3.0,
+                "analysis {analysis_type}"
+            );
+            assert!(ctx.take_runtime_error().is_none());
+        }
     }
 
     #[test]
@@ -2967,7 +3242,7 @@ mod tests {
             unsafe { rspice_absdelay_state_native(operands.as_ptr(), &ctx, 0) }.to_bits(),
             0.0_f64.to_bits()
         );
-        buffers[0].commit();
+        buffers[0].commit().unwrap();
 
         ctx.time = 0.5;
         operands[0] = 1.0;
@@ -2975,13 +3250,13 @@ mod tests {
             unsafe { rspice_absdelay_state_native(operands.as_ptr(), &ctx, 0) }.to_bits(),
             0.0_f64.to_bits()
         );
-        buffers[0].commit();
+        buffers[0].commit().unwrap();
 
         ctx.time = 1.0;
         operands[0] = 3.0;
         let delayed = unsafe { rspice_absdelay_state_native(operands.as_ptr(), &ctx, 0) };
         assert!((delayed - 1.0).abs() < 1.0e-12, "delayed: {delayed}");
-        buffers[0].commit();
+        buffers[0].commit().unwrap();
 
         ctx.time = 1.25;
         operands[0] = 5.0;
@@ -2990,6 +3265,29 @@ mod tests {
             (interpolated - 2.0).abs() < 1.0e-12,
             "interpolated delay: {interpolated}"
         );
+        assert!(ctx.take_runtime_error().is_none());
+    }
+
+    #[test]
+    fn absdelay_native_max_and_derivative_helpers_use_exact_coefficients() {
+        let mut buffers = [DelayBuffer::default()];
+        let mut ctx = empty_eval_context();
+        ctx.analysis_type = 2;
+        ctx.delay_buffers = buffers.as_mut_ptr();
+        ctx.delay_buffers_len = buffers.len();
+
+        for (time, input) in [(0.0, 0.0), (1.0, 10.0)] {
+            ctx.time = time;
+            let operands = [input, 0.5, 2.0];
+            unsafe { rspice_absdelay_state_max_native(operands.as_ptr(), &ctx, 0) };
+            buffers[0].commit().expect("accept absdelay sample");
+        }
+
+        ctx.time = 2.0;
+        let operands = [20.0, 2.0, 0.5, 3.0, 2.0];
+        let derivative =
+            unsafe { rspice_absdelay_derivative_max_native(operands.as_ptr(), &ctx, 0) };
+        assert_eq!(derivative, -29.0);
         assert!(ctx.take_runtime_error().is_none());
     }
 

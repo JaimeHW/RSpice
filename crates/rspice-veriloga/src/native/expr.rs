@@ -107,9 +107,13 @@ pub(crate) enum NativeOp {
     ZiStateDerivative(ZiRuntimeLayout),
     TimerState(usize),
     TransitionState(usize),
+    TransitionStateDerivative(usize),
     SlewState(usize),
     SlewStateDerivative(usize),
     AbsDelayState(usize),
+    AbsDelayStateMax(usize),
+    AbsDelayStateDerivative(usize),
+    AbsDelayStateDerivativeMax(usize),
     CrossState(usize),
     AboveState(usize),
     LastCrossingState(usize),
@@ -212,6 +216,15 @@ pub(crate) struct PriorCurrentProbe {
 pub(crate) enum CanonicalDerivativeAxis {
     Node(NodeId),
     Branch(usize),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DdxProjection {
+    Potential(Option<NodeId>, Option<NodeId>),
+    Branch {
+        runtime_index: usize,
+        inverted: bool,
+    },
 }
 
 impl CanonicalDerivativeAxis {
@@ -1203,11 +1216,20 @@ impl CanonicalStateOperator {
                 Some(*slot)
             }
             (Self::IdtMod, Instruction::IdtModState(slot)) => Some(*slot),
-            (Self::Transition, Instruction::TransitionState(slot)) => Some(*slot),
+            (
+                Self::Transition,
+                Instruction::TransitionState(slot) | Instruction::TransitionStateDerivative(slot),
+            ) => Some(*slot),
             (Self::Slew, Instruction::SlewState(slot) | Instruction::SlewStateDerivative(slot)) => {
                 Some(*slot)
             }
-            (Self::Absdelay, Instruction::AbsDelayState(slot)) => Some(*slot),
+            (
+                Self::Absdelay,
+                Instruction::AbsDelayState(slot)
+                | Instruction::AbsDelayStateMax(slot)
+                | Instruction::AbsDelayStateDerivative(slot)
+                | Instruction::AbsDelayStateDerivativeMax(slot),
+            ) => Some(*slot),
             (
                 Self::Laplace,
                 Instruction::LaplaceState(slot) | Instruction::LaplaceStateDerivative(slot),
@@ -1264,7 +1286,11 @@ impl CanonicalStateOperator {
                     modulus: Some(_), ..
                 },
             ) => true,
-            (Self::Transition, HirAnalogOperator::Transition { .. }) => true,
+            (
+                Self::Transition,
+                HirAnalogOperator::Transition { .. }
+                | HirAnalogOperator::TransitionDerivative { .. },
+            ) => true,
             (
                 Self::Slew,
                 HirAnalogOperator::Slew {
@@ -1741,9 +1767,25 @@ fn collect_canonical_state_operator_children(
             rise,
             fall,
             tolerance,
+            ..
         } => {
             collect_canonical_state_exprs(model, mir, *expr, operator, slots)?;
             for child in [*delay, *rise, *fall, *tolerance].into_iter().flatten() {
+                collect_canonical_state_exprs(model, mir, child, operator, slots)?;
+            }
+        }
+        HirAnalogOperator::TransitionDerivative {
+            input,
+            input_derivative,
+            delay,
+            rise,
+            fall,
+            ..
+        } => {
+            for child in [Some(*input), Some(*input_derivative), *delay, *rise, *fall]
+                .into_iter()
+                .flatten()
+            {
                 collect_canonical_state_exprs(model, mir, child, operator, slots)?;
             }
         }
@@ -2157,6 +2199,17 @@ impl NativeProgram {
                     depth -= 3;
                     ops.push(NativeOp::TransitionState(*filter_id));
                 }
+                Instruction::TransitionStateDerivative(filter_id) => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        5,
+                    )?;
+                    depth -= 4;
+                    ops.push(NativeOp::TransitionStateDerivative(*filter_id));
+                }
                 Instruction::SlewState(filter_id) => {
                     require_stack(
                         model.clone(),
@@ -2189,6 +2242,39 @@ impl NativeProgram {
                     )?;
                     depth -= 1;
                     ops.push(NativeOp::AbsDelayState(*buffer_id));
+                }
+                Instruction::AbsDelayStateMax(buffer_id) => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        3,
+                    )?;
+                    depth -= 2;
+                    ops.push(NativeOp::AbsDelayStateMax(*buffer_id));
+                }
+                Instruction::AbsDelayStateDerivative(buffer_id) => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        4,
+                    )?;
+                    depth -= 3;
+                    ops.push(NativeOp::AbsDelayStateDerivative(*buffer_id));
+                }
+                Instruction::AbsDelayStateDerivativeMax(buffer_id) => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        5,
+                    )?;
+                    depth -= 4;
+                    ops.push(NativeOp::AbsDelayStateDerivativeMax(*buffer_id));
                 }
                 Instruction::CrossState(detector_id) => {
                     require_stack(
@@ -3095,7 +3181,23 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 rise,
                 fall,
                 tolerance,
+                ..
             } => self.lower_transition_operator(expr_id, *expr, *delay, *rise, *fall, *tolerance),
+            HirAnalogOperator::TransitionDerivative {
+                input,
+                input_derivative,
+                delay,
+                rise,
+                fall,
+                ..
+            } => self.lower_transition_derivative_operator(
+                expr_id,
+                *input,
+                *input_derivative,
+                *delay,
+                *rise,
+                *fall,
+            ),
             HirAnalogOperator::Slew {
                 expr,
                 max_rise,
@@ -3105,7 +3207,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 expr,
                 delay,
                 max_delay,
-            } => self.lower_absdelay_operator(expr_id, *expr, Some(*delay), *max_delay),
+            } => self.lower_absdelay_operator(expr_id, *expr, *delay, *max_delay),
             HirAnalogOperator::Ddx { expr, probe } => self.lower_ddx_projection(*expr, *probe),
             HirAnalogOperator::Limexp { expr } => {
                 self.lower(*expr)?;
@@ -3192,20 +3294,30 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     }
 
     fn lower_ddx_projection(&mut self, expr: ExprId, probe: ExprId) -> JitResult<()> {
-        let (pos, neg) = self.ddx_probe_nodes(probe)?;
-        if let Some(pos) = pos {
-            self.lower_derivative(expr, CanonicalDerivativeAxis::Node(pos))?;
-        } else {
-            self.push(NativeOp::Const(0.0))?;
+        match self.ddx_probe_projection(probe)? {
+            DdxProjection::Potential(pos, neg) => {
+                if let Some(pos) = pos {
+                    self.lower_derivative(expr, CanonicalDerivativeAxis::Node(pos))?;
+                } else {
+                    self.push(NativeOp::Const(0.0))?;
+                }
+                if let Some(neg) = neg {
+                    self.lower_derivative(expr, CanonicalDerivativeAxis::Node(neg))?;
+                    self.append_arithmetic("Sub")?;
+                    self.push(NativeOp::Const(0.5))?;
+                    self.append_arithmetic("Mul")?;
+                }
+            }
+            DdxProjection::Branch {
+                runtime_index,
+                inverted,
+            } => {
+                self.lower_derivative(expr, CanonicalDerivativeAxis::Branch(runtime_index))?;
+                if inverted {
+                    self.append_unary(NativeOp::Neg)?;
+                }
+            }
         }
-
-        if let Some(neg) = neg {
-            self.lower_derivative(expr, CanonicalDerivativeAxis::Node(neg))?;
-            self.append_arithmetic("Sub")?;
-            self.push(NativeOp::Const(0.5))?;
-            self.append_arithmetic("Mul")?;
-        }
-
         Ok(())
     }
 
@@ -3215,20 +3327,34 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         probe: ExprId,
         wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
-        let (pos, neg) = self.ddx_probe_nodes(probe)?;
-        if let Some(pos) = pos {
-            self.lower_second_derivative(expr, CanonicalDerivativeAxis::Node(pos), wrt)?;
-        } else {
-            self.push(NativeOp::Const(0.0))?;
+        match self.ddx_probe_projection(probe)? {
+            DdxProjection::Potential(pos, neg) => {
+                if let Some(pos) = pos {
+                    self.lower_second_derivative(expr, CanonicalDerivativeAxis::Node(pos), wrt)?;
+                } else {
+                    self.push(NativeOp::Const(0.0))?;
+                }
+                if let Some(neg) = neg {
+                    self.lower_second_derivative(expr, CanonicalDerivativeAxis::Node(neg), wrt)?;
+                    self.append_arithmetic("Sub")?;
+                    self.push(NativeOp::Const(0.5))?;
+                    self.append_arithmetic("Mul")?;
+                }
+            }
+            DdxProjection::Branch {
+                runtime_index,
+                inverted,
+            } => {
+                self.lower_second_derivative(
+                    expr,
+                    CanonicalDerivativeAxis::Branch(runtime_index),
+                    wrt,
+                )?;
+                if inverted {
+                    self.append_unary(NativeOp::Neg)?;
+                }
+            }
         }
-
-        if let Some(neg) = neg {
-            self.lower_second_derivative(expr, CanonicalDerivativeAxis::Node(neg), wrt)?;
-            self.append_arithmetic("Sub")?;
-            self.push(NativeOp::Const(0.5))?;
-            self.append_arithmetic("Mul")?;
-        }
-
         Ok(())
     }
 
@@ -3239,44 +3365,94 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         first: CanonicalDerivativeAxis,
         second: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
-        let (pos, neg) = self.ddx_probe_nodes(probe)?;
-        if let Some(pos) = pos {
-            self.lower_third_derivative(expr, CanonicalDerivativeAxis::Node(pos), first, second)?;
-        } else {
-            self.push(NativeOp::Const(0.0))?;
+        match self.ddx_probe_projection(probe)? {
+            DdxProjection::Potential(pos, neg) => {
+                if let Some(pos) = pos {
+                    self.lower_third_derivative(
+                        expr,
+                        CanonicalDerivativeAxis::Node(pos),
+                        first,
+                        second,
+                    )?;
+                } else {
+                    self.push(NativeOp::Const(0.0))?;
+                }
+                if let Some(neg) = neg {
+                    self.lower_third_derivative(
+                        expr,
+                        CanonicalDerivativeAxis::Node(neg),
+                        first,
+                        second,
+                    )?;
+                    self.append_arithmetic("Sub")?;
+                    self.push(NativeOp::Const(0.5))?;
+                    self.append_arithmetic("Mul")?;
+                }
+            }
+            DdxProjection::Branch {
+                runtime_index,
+                inverted,
+            } => {
+                self.lower_third_derivative(
+                    expr,
+                    CanonicalDerivativeAxis::Branch(runtime_index),
+                    first,
+                    second,
+                )?;
+                if inverted {
+                    self.append_unary(NativeOp::Neg)?;
+                }
+            }
         }
-
-        if let Some(neg) = neg {
-            self.lower_third_derivative(expr, CanonicalDerivativeAxis::Node(neg), first, second)?;
-            self.append_arithmetic("Sub")?;
-            self.push(NativeOp::Const(0.5))?;
-            self.append_arithmetic("Mul")?;
-        }
-
         Ok(())
     }
 
-    fn ddx_probe_nodes(&self, probe: ExprId) -> JitResult<(Option<NodeId>, Option<NodeId>)> {
+    fn ddx_probe_projection(&self, probe: ExprId) -> JitResult<DdxProjection> {
         let expression = self.expression(probe)?;
         match &expression.kind {
-            HirExprKind::BranchAccess { access, pos, neg } if !is_flow_access(access) => Ok((
+            HirExprKind::BranchAccess { access, pos, neg } if is_flow_access(access) => {
+                let mapping = self
+                    .resolve_current_branch_runtime_mapping(pos.as_str(), neg.as_deref())?
+                    .ok_or_else(|| {
+                        self.unsupported(
+                            "ddx flow probe requires a solver-owned branch-current unknown",
+                        )
+                    })?;
+                Ok(DdxProjection::Branch {
+                    runtime_index: mapping.runtime_index,
+                    inverted: mapping.inverted,
+                })
+            }
+            HirExprKind::BranchAccess { pos, neg, .. } => Ok(DdxProjection::Potential(
                 self.branch_endpoint(pos.as_str())?,
                 neg.as_deref()
                     .map(|node| self.branch_endpoint(node))
                     .transpose()?
                     .flatten(),
             )),
-            HirExprKind::NamedBranchAccess { access, name } if !is_flow_access(access) => {
+            HirExprKind::NamedBranchAccess { access, name } if is_flow_access(access) => {
+                let unknown = self.named_branch_unknown(name).ok_or_else(|| {
+                    self.unsupported(format!(
+                        "ddx flow probe I(<{name}>) requires a solver-owned branch-current unknown"
+                    ))
+                })?;
+                let mapping = self.map_canonical_branch_unknown(usize::from(unknown.id))?;
+                Ok(DdxProjection::Branch {
+                    runtime_index: mapping.runtime_index,
+                    inverted: mapping.inverted,
+                })
+            }
+            HirExprKind::NamedBranchAccess { name, .. } => {
                 let branch = self
                     .mir
                     .branches
                     .iter()
                     .find(|branch| branch.name.as_str() == name.as_str())
                     .ok_or_else(|| self.unsupported(format!("unknown ddx probe branch {name}")))?;
-                Ok((branch.pos_node, branch.neg_node))
+                Ok(DdxProjection::Potential(branch.pos_node, branch.neg_node))
             }
             other => Err(self.unsupported(format!(
-                "ddx probe must be a voltage access, found {}",
+                "ddx probe must be a branch potential or solver-owned branch flow, found {}",
                 expression_kind_name(other)
             ))),
         }
@@ -4023,6 +4199,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             | HirAnalogOperator::Transition { expr, .. } => {
                 self.expr_derivative_is_zero(*expr, wrt)
             }
+            HirAnalogOperator::TransitionDerivative {
+                input_derivative, ..
+            } => self.expr_derivative_is_zero(*input_derivative, wrt),
             HirAnalogOperator::Ddx { .. } | HirAnalogOperator::LastCrossing { .. } => Ok(false),
         }
     }
@@ -4070,6 +4249,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             | HirAnalogOperator::Transition { expr, .. } => {
                 self.expr_second_derivative_is_zero(*expr, first, second)
             }
+            HirAnalogOperator::TransitionDerivative {
+                input_derivative, ..
+            } => self.expr_second_derivative_is_zero(*input_derivative, first, second),
             HirAnalogOperator::Limexp { expr } => Ok(self
                 .expr_second_derivative_is_zero(*expr, first, second)?
                 && (self.expr_derivative_is_zero(*expr, first)?
@@ -4866,7 +5048,20 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 };
                 self.lower_slew_derivative_operator(expr_id, expr, max_rise, max_fall, wrt)
             }
-            "transition" | "absdelay" => self.lower_state_passthrough_derivative(name, args, wrt),
+            "transition" => self.lower_state_passthrough_derivative(name, args, wrt),
+            "absdelay" => {
+                let (expr, delay, max_delay) = match args {
+                    [expr, delay] => (*expr, *delay, None),
+                    [expr, delay, max_delay] => (*expr, *delay, Some(*max_delay)),
+                    _ => {
+                        return Err(self.unsupported(format!(
+                            "analog operator absdelay expects two or three operands, found {}",
+                            args.len()
+                        )));
+                    }
+                };
+                self.lower_absdelay_derivative_operator(expr_id, expr, delay, max_delay, wrt)
+            }
             "laplace_zp" | "laplace_zd" | "laplace_np" | "laplace_nd" => {
                 self.lower_laplace_call_derivative(normalized.as_str(), name, args, wrt)
             }
@@ -5044,11 +5239,13 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     expr_id, expr, max_rise, max_fall, first, second,
                 )
             }
-            "transition" | "absdelay" => {
-                let max_args = if normalized == "transition" { 5 } else { 3 };
-                self.require_intrinsic_arity_range(name, args, 1, max_args)?;
+            "transition" => {
+                self.require_intrinsic_arity_range(name, args, 1, 5)?;
                 self.lower_second_derivative(args[0], first, second)
             }
+            "absdelay" => Err(self.unsupported(format!(
+                "second derivative of absdelay at expression {expr_id}"
+            ))),
             "laplace_zp" | "laplace_zd" | "laplace_np" | "laplace_nd" => self
                 .lower_laplace_call_second_derivative(
                     normalized.as_str(),
@@ -6015,8 +6212,76 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.lower_derivative(*expr, wrt)?;
                 self.append_unary(NativeOp::IdtJacobian)
             }
-            HirAnalogOperator::Absdelay { expr, .. }
-            | HirAnalogOperator::Transition { expr, .. } => self.lower_derivative(*expr, wrt),
+            HirAnalogOperator::Absdelay {
+                expr,
+                delay,
+                max_delay,
+            } => self.lower_absdelay_derivative_operator(expr_id, *expr, *delay, *max_delay, wrt),
+            HirAnalogOperator::Transition {
+                expr,
+                delay,
+                rise,
+                fall,
+                ..
+            } => {
+                let Some(slot) = self.limits.canonical_transition_slot(expr_id) else {
+                    return Err(self.unsupported(format!(
+                        "analog operator transition derivative expression {expr_id} filter slot"
+                    )));
+                };
+                self.lower(*expr)?;
+                self.lower_derivative(*expr, wrt)?;
+                for timing in [*delay, *rise, *fall] {
+                    if let Some(timing) = timing {
+                        self.lower(timing)?;
+                    } else {
+                        self.push(NativeOp::Const(0.0))?;
+                    }
+                }
+                require_stack(
+                    self.model.clone(),
+                    self.entry_kind,
+                    "canonical transition derivative",
+                    self.depth,
+                    5,
+                )?;
+                self.depth -= 4;
+                self.ops.push(NativeOp::TransitionStateDerivative(slot));
+                Ok(())
+            }
+            HirAnalogOperator::TransitionDerivative {
+                input,
+                input_derivative,
+                delay,
+                rise,
+                fall,
+                ..
+            } => {
+                let Some(slot) = self.limits.canonical_transition_slot(expr_id) else {
+                    return Err(self.unsupported(format!(
+                        "analog operator transition higher derivative expression {expr_id} filter slot"
+                    )));
+                };
+                self.lower(*input)?;
+                self.lower_derivative(*input_derivative, wrt)?;
+                for timing in [*delay, *rise, *fall] {
+                    if let Some(timing) = timing {
+                        self.lower(timing)?;
+                    } else {
+                        self.push(NativeOp::Const(0.0))?;
+                    }
+                }
+                require_stack(
+                    self.model.clone(),
+                    self.entry_kind,
+                    "canonical transition higher derivative",
+                    self.depth,
+                    5,
+                )?;
+                self.depth -= 4;
+                self.ops.push(NativeOp::TransitionStateDerivative(slot));
+                Ok(())
+            }
             HirAnalogOperator::Slew {
                 expr,
                 max_rise,
@@ -6065,9 +6330,73 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     lowerer.append_unary(NativeOp::UnaryMath(UnaryMathOp::Exp))
                 },
             ),
-            HirAnalogOperator::Absdelay { expr, .. }
-            | HirAnalogOperator::Transition { expr, .. } => {
-                self.lower_second_derivative(*expr, first, second)
+            HirAnalogOperator::Absdelay { .. } => Err(self.unsupported(format!(
+                "second derivative of absdelay at expression {expr_id}"
+            ))),
+            HirAnalogOperator::Transition {
+                expr,
+                delay,
+                rise,
+                fall,
+                ..
+            } => {
+                let Some(slot) = self.limits.canonical_transition_slot(expr_id) else {
+                    return Err(self.unsupported(format!(
+                        "analog operator transition second derivative expression {expr_id} filter slot"
+                    )));
+                };
+                self.lower(*expr)?;
+                self.lower_second_derivative(*expr, first, second)?;
+                for timing in [*delay, *rise, *fall] {
+                    if let Some(timing) = timing {
+                        self.lower(timing)?;
+                    } else {
+                        self.push(NativeOp::Const(0.0))?;
+                    }
+                }
+                require_stack(
+                    self.model.clone(),
+                    self.entry_kind,
+                    "canonical transition second derivative",
+                    self.depth,
+                    5,
+                )?;
+                self.depth -= 4;
+                self.ops.push(NativeOp::TransitionStateDerivative(slot));
+                Ok(())
+            }
+            HirAnalogOperator::TransitionDerivative {
+                input,
+                input_derivative,
+                delay,
+                rise,
+                fall,
+                ..
+            } => {
+                let Some(slot) = self.limits.canonical_transition_slot(expr_id) else {
+                    return Err(self.unsupported(format!(
+                        "analog operator transition derivative second derivative expression {expr_id} filter slot"
+                    )));
+                };
+                self.lower(*input)?;
+                self.lower_second_derivative(*input_derivative, first, second)?;
+                for timing in [*delay, *rise, *fall] {
+                    if let Some(timing) = timing {
+                        self.lower(timing)?;
+                    } else {
+                        self.push(NativeOp::Const(0.0))?;
+                    }
+                }
+                require_stack(
+                    self.model.clone(),
+                    self.entry_kind,
+                    "canonical transition derivative second derivative",
+                    self.depth,
+                    5,
+                )?;
+                self.depth -= 4;
+                self.ops.push(NativeOp::TransitionStateDerivative(slot));
+                Ok(())
             }
             HirAnalogOperator::Slew {
                 expr,
@@ -6825,6 +7154,41 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         Ok(())
     }
 
+    fn lower_transition_derivative_operator(
+        &mut self,
+        expr_id: ExprId,
+        input: ExprId,
+        input_derivative: ExprId,
+        delay: Option<ExprId>,
+        rise: Option<ExprId>,
+        fall: Option<ExprId>,
+    ) -> JitResult<()> {
+        let Some(slot) = self.limits.canonical_transition_slot(expr_id) else {
+            return Err(self.unsupported(format!(
+                "analog operator transition derivative expression {expr_id} filter slot"
+            )));
+        };
+        self.lower(input)?;
+        self.lower(input_derivative)?;
+        for timing in [delay, rise, fall] {
+            if let Some(timing) = timing {
+                self.lower(timing)?;
+            } else {
+                self.push(NativeOp::Const(0.0))?;
+            }
+        }
+        require_stack(
+            self.model.clone(),
+            self.entry_kind,
+            "canonical transition derivative",
+            self.depth,
+            5,
+        )?;
+        self.depth -= 4;
+        self.ops.push(NativeOp::TransitionStateDerivative(slot));
+        Ok(())
+    }
+
     fn lower_slew_call(&mut self, expr_id: ExprId, args: &[ExprId]) -> JitResult<()> {
         let (expr, max_rise, max_fall) = match args {
             [expr] => (*expr, None, None),
@@ -6974,12 +7338,11 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 
     fn lower_absdelay_call(&mut self, expr_id: ExprId, args: &[ExprId]) -> JitResult<()> {
         let (expr, delay, max_delay) = match args {
-            [expr] => (*expr, None, None),
-            [expr, delay] => (*expr, Some(*delay), None),
-            [expr, delay, max_delay] => (*expr, Some(*delay), Some(*max_delay)),
+            [expr, delay] => (*expr, *delay, None),
+            [expr, delay, max_delay] => (*expr, *delay, Some(*max_delay)),
             _ => {
                 return Err(self.unsupported(format!(
-                    "analog operator absdelay expects one to three operands, found {}",
+                    "analog operator absdelay expects two or three operands, found {}",
                     args.len()
                 )));
             }
@@ -6991,8 +7354,8 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         &mut self,
         expr_id: ExprId,
         expr: ExprId,
-        delay: Option<ExprId>,
-        _max_delay: Option<ExprId>,
+        delay: ExprId,
+        max_delay: Option<ExprId>,
     ) -> JitResult<()> {
         let Some(slot) = self.limits.canonical_absdelay_slot(expr_id) else {
             return Err(self.unsupported(format!(
@@ -7000,13 +7363,64 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             )));
         };
         self.lower(expr)?;
-        if let Some(delay) = delay {
-            self.lower(delay)?;
+        self.lower(delay)?;
+        if let Some(max_delay) = max_delay {
+            self.lower(max_delay)?;
+            require_stack(
+                self.model.clone(),
+                self.entry_kind,
+                "canonical absdelay with maxdelay",
+                self.depth,
+                3,
+            )?;
+            self.depth -= 2;
+            self.ops.push(NativeOp::AbsDelayStateMax(slot));
         } else {
-            self.push(NativeOp::Const(0.0))?;
+            self.pop_binary("canonical absdelay")?;
+            self.ops.push(NativeOp::AbsDelayState(slot));
         }
-        self.pop_binary("canonical absdelay")?;
-        self.ops.push(NativeOp::AbsDelayState(slot));
+        Ok(())
+    }
+
+    fn lower_absdelay_derivative_operator(
+        &mut self,
+        expr_id: ExprId,
+        expr: ExprId,
+        delay: ExprId,
+        max_delay: Option<ExprId>,
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        let Some(slot) = self.limits.canonical_absdelay_slot(expr_id) else {
+            return Err(self.unsupported(format!(
+                "analog operator absdelay derivative expression {expr_id} buffer slot"
+            )));
+        };
+        self.lower(expr)?;
+        self.lower_derivative(expr, wrt)?;
+        self.lower(delay)?;
+        self.lower_derivative(delay, wrt)?;
+        if let Some(max_delay) = max_delay {
+            self.lower(max_delay)?;
+            require_stack(
+                self.model.clone(),
+                self.entry_kind,
+                "canonical absdelay derivative with maxdelay",
+                self.depth,
+                5,
+            )?;
+            self.depth -= 4;
+            self.ops.push(NativeOp::AbsDelayStateDerivativeMax(slot));
+        } else {
+            require_stack(
+                self.model.clone(),
+                self.entry_kind,
+                "canonical absdelay derivative",
+                self.depth,
+                4,
+            )?;
+            self.depth -= 3;
+            self.ops.push(NativeOp::AbsDelayStateDerivative(slot));
+        }
         Ok(())
     }
 
@@ -8265,22 +8679,19 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             .transpose()?
             .flatten();
 
-        let Some(branch_unknown) = self
-            .mir
-            .branch_unknowns
-            .iter()
-            .find(|branch_unknown| branch_unknown.equation == self.equation_id)
-        else {
-            return Ok(None);
-        };
-
-        let same_direction = branch_unknown.pos_node == pos && branch_unknown.neg_node == neg;
-        let opposite_direction = branch_unknown.pos_node == neg && branch_unknown.neg_node == pos;
-        if same_direction || opposite_direction {
-            return Ok(Some((usize::from(branch_unknown.id), opposite_direction)));
-        }
-
-        Ok(None)
+        // A probe may appear in any equation, not only in the potential
+        // contribution that introduced the unknown. Preserve MIR order so
+        // duplicate conditional potential contributions select the same leader
+        // unknown as canonical CFG lowering and the generated backend.
+        Ok(self.mir.branch_unknowns.iter().find_map(|branch_unknown| {
+            if branch_unknown.pos_node == pos && branch_unknown.neg_node == neg {
+                Some((usize::from(branch_unknown.id), false))
+            } else if branch_unknown.pos_node == neg && branch_unknown.neg_node == pos {
+                Some((usize::from(branch_unknown.id), true))
+            } else {
+                None
+            }
+        }))
     }
 
     fn branch_endpoint(&self, name: &str) -> JitResult<Option<NodeId>> {
@@ -8682,7 +9093,7 @@ fn normalize_intrinsic_name(name: &str) -> String {
 }
 
 fn is_flow_access(access: &str) -> bool {
-    matches!(access, "I" | "Pwr" | "F" | "Tau" | "MMF" | "Flow")
+    crate::disciplines::is_standard_flow_access(access)
 }
 
 fn expression_kind_name(kind: &HirExprKind) -> &'static str {
@@ -8718,6 +9129,7 @@ fn analog_operator_name(op: &HirAnalogOperator) -> &'static str {
         HirAnalogOperator::Limexp { .. } => "limexp",
         HirAnalogOperator::Absdelay { .. } => "absdelay",
         HirAnalogOperator::Transition { .. } => "transition",
+        HirAnalogOperator::TransitionDerivative { .. } => "transition_derivative",
         HirAnalogOperator::Slew { .. } => "slew",
         HirAnalogOperator::LastCrossing { .. } => "last_crossing",
     }
@@ -8891,9 +9303,13 @@ pub(crate) fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::ZiStateDerivative(_) => "ZiStateDerivative",
         NativeOp::TimerState(_) => "TimerState",
         NativeOp::TransitionState(_) => "TransitionState",
+        NativeOp::TransitionStateDerivative(_) => "TransitionStateDerivative",
         NativeOp::SlewState(_) => "SlewState",
         NativeOp::SlewStateDerivative(_) => "SlewStateDerivative",
         NativeOp::AbsDelayState(_) => "AbsDelayState",
+        NativeOp::AbsDelayStateMax(_) => "AbsDelayStateMax",
+        NativeOp::AbsDelayStateDerivative(_) => "AbsDelayStateDerivative",
+        NativeOp::AbsDelayStateDerivativeMax(_) => "AbsDelayStateDerivativeMax",
         NativeOp::CrossState(_) => "CrossState",
         NativeOp::AboveState(_) => "AboveState",
         NativeOp::LastCrossingState(_) => "LastCrossingState",
@@ -9859,12 +10275,15 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::FlickerNoise
         | NativeOp::IdtState(_) => (2, 1),
 
-        NativeOp::SlewState(_) | NativeOp::IfElse => (3, 1),
+        NativeOp::SlewState(_) | NativeOp::AbsDelayStateMax(_) | NativeOp::IfElse => (3, 1),
         NativeOp::TransitionState(_)
         | NativeOp::TimerState(_)
         | NativeOp::AboveState(_)
+        | NativeOp::AbsDelayStateDerivative(_)
         | NativeOp::IdtModState(_) => (4, 1),
-        NativeOp::CrossState(_) => (5, 1),
+        NativeOp::TransitionStateDerivative(_)
+        | NativeOp::AbsDelayStateDerivativeMax(_)
+        | NativeOp::CrossState(_) => (5, 1),
         NativeOp::SlewStateDerivative(_) => (6, 1),
     }
 }
@@ -10061,7 +10480,11 @@ fn instruction_name(instruction: &Instruction) -> &'static str {
         Instruction::CanonicalLimitState(_) => "CanonicalLimitState",
         Instruction::TableLookup(_) => "TableLookup",
         Instruction::AbsDelayState(_) => "AbsDelayState",
+        Instruction::AbsDelayStateMax(_) => "AbsDelayStateMax",
+        Instruction::AbsDelayStateDerivative(_) => "AbsDelayStateDerivative",
+        Instruction::AbsDelayStateDerivativeMax(_) => "AbsDelayStateDerivativeMax",
         Instruction::TransitionState(_) => "TransitionState",
+        Instruction::TransitionStateDerivative(_) => "TransitionStateDerivative",
         Instruction::SlewState(_) => "SlewState",
         Instruction::SlewStateDerivative(_) => "SlewStateDerivative",
         Instruction::CrossState(_) => "CrossState",

@@ -1717,9 +1717,13 @@ fn helper_descriptor(op: NativeOp) -> WasmJitResult<HelperDescriptor> {
         }
         NativeOp::TimerState(index) => set_index(&mut descriptor, 422, index)?,
         NativeOp::TransitionState(index) => set_index(&mut descriptor, 423, index)?,
+        NativeOp::TransitionStateDerivative(index) => set_index(&mut descriptor, 446, index)?,
         NativeOp::SlewState(index) => set_index(&mut descriptor, 424, index)?,
         NativeOp::SlewStateDerivative(index) => set_index(&mut descriptor, 445, index)?,
         NativeOp::AbsDelayState(index) => set_index(&mut descriptor, 425, index)?,
+        NativeOp::AbsDelayStateMax(index) => set_index(&mut descriptor, 447, index)?,
+        NativeOp::AbsDelayStateDerivative(index) => set_index(&mut descriptor, 448, index)?,
+        NativeOp::AbsDelayStateDerivativeMax(index) => set_index(&mut descriptor, 449, index)?,
         NativeOp::CrossState(index) => set_index(&mut descriptor, 426, index)?,
         NativeOp::AboveState(index) => set_index(&mut descriptor, 427, index)?,
         NativeOp::LastCrossingState(index) => set_index(&mut descriptor, 428, index)?,
@@ -2054,6 +2058,152 @@ mod tests {
         assert_eq!(descriptor.aux0, 7);
         assert_eq!(descriptor.aux1, 0);
         assert_eq!(descriptor.aux2, 0);
+    }
+
+    #[test]
+    fn transition_derivative_descriptor_is_pinned_to_scalar_opcode_446() {
+        let descriptor = helper_descriptor(NativeOp::TransitionStateDerivative(7))
+            .expect("encode transition derivative helper descriptor");
+        assert_eq!(descriptor.opcode, 446);
+        assert_eq!(descriptor.aux0, 7);
+        assert_eq!(descriptor.aux1, 0);
+        assert_eq!(descriptor.aux2, 0);
+    }
+
+    #[test]
+    fn absdelay_extended_descriptors_are_pinned_to_scalar_opcodes() {
+        for (op, opcode) in [
+            (NativeOp::AbsDelayStateMax(7), 447),
+            (NativeOp::AbsDelayStateDerivative(7), 448),
+            (NativeOp::AbsDelayStateDerivativeMax(7), 449),
+        ] {
+            let descriptor = helper_descriptor(op).expect("encode absdelay helper descriptor");
+            assert_eq!(descriptor.opcode, opcode);
+            assert_eq!(descriptor.aux0, 7);
+            assert_eq!(descriptor.aux1, 0);
+            assert_eq!(descriptor.aux2, 0);
+        }
+    }
+
+    #[test]
+    fn generated_module_routes_transition_derivative_through_opcode_446() {
+        const OPERANDS: [f64; 5] = [1.5, -2.0, 0.25, 0.5, 0.75];
+        let mut ops = OPERANDS
+            .into_iter()
+            .map(NativeOp::Const)
+            .collect::<Vec<_>>();
+        ops.push(NativeOp::TransitionStateDerivative(9));
+        let bytes = emit_verified_value_program(&program(ops, 5))
+            .expect("encode transition derivative module");
+
+        let engine = Engine::default();
+        let module = Module::new(&engine, bytes.as_slice())
+            .expect("compile transition derivative module in wasmi");
+        let mut store = Store::new(&engine, TestHostState::default());
+        let memory = Memory::new(&mut store, MemoryType::new(1, None))
+            .expect("allocate imported primary memory");
+        store.data_mut().memory = Some(memory);
+        let mut linker = Linker::new(&engine);
+        linker
+            .define(WASM_JIT_IMPORT_MODULE, WASM_JIT_MEMORY_IMPORT, memory)
+            .expect("define primary memory import");
+        linker
+            .func_wrap(
+                WASM_JIT_IMPORT_MODULE,
+                WASM_JIT_EVAL_HELPER_IMPORT,
+                |frame_offset: i32,
+                 opcode: i32,
+                 aux0: i32,
+                 aux1: i32,
+                 aux2: i64,
+                 op0: f64,
+                 op1: f64,
+                 op2: f64,
+                 op3: f64,
+                 op4: f64|
+                 -> f64 {
+                    assert_eq!(frame_offset, 0);
+                    assert_eq!(opcode, 446);
+                    assert_eq!(aux0, 9);
+                    assert_eq!(aux1, 0);
+                    assert_eq!(aux2, 0);
+                    let actual = [op0, op1, op2, op3, op4];
+                    for (index, (actual, expected)) in actual
+                        .iter()
+                        .copied()
+                        .zip(OPERANDS.iter().copied())
+                        .enumerate()
+                    {
+                        assert_eq!(
+                            actual.to_bits(),
+                            expected.to_bits(),
+                            "scalar operand {index} changed sign or value"
+                        );
+                    }
+                    op1
+                },
+            )
+            .expect("define transition derivative scalar helper import");
+        linker
+            .func_wrap(
+                WASM_JIT_IMPORT_MODULE,
+                WASM_JIT_SLICE_HELPER_IMPORT,
+                |_: i32, _: i32, _: i32, _: i32, _: i64, _: i32| -> f64 {
+                    panic!("five-operand transition derivative must use the scalar helper")
+                },
+            )
+            .expect("define slice helper import");
+        linker
+            .func_wrap(
+                WASM_JIT_IMPORT_MODULE,
+                WASM_JIT_MATH1_IMPORT,
+                |opcode: i32, value: f64| -> f64 { super::super::runtime::math1_v1(opcode, value) },
+            )
+            .expect("define unary math import");
+        linker
+            .func_wrap(
+                WASM_JIT_IMPORT_MODULE,
+                WASM_JIT_MATH2_IMPORT,
+                |opcode: i32, left: f64, right: f64| -> f64 {
+                    super::super::runtime::math2_v1(opcode, left, right)
+                },
+            )
+            .expect("define binary math import");
+        let instance = linker
+            .instantiate_and_start(&mut store, &module)
+            .expect("instantiate transition derivative module");
+
+        let frame_len = WASM_JIT_EVAL_FRAME_BYTES as usize;
+        let mut frame = vec![0_u8; frame_len];
+        frame[FRAME_MAGIC_OFFSET as usize..FRAME_MAGIC_OFFSET as usize + 4]
+            .copy_from_slice(&WASM_JIT_FRAME_MAGIC.to_le_bytes());
+        frame[FRAME_ABI_VERSION_OFFSET as usize..FRAME_ABI_VERSION_OFFSET as usize + 4]
+            .copy_from_slice(&WASM_JIT_ABI_VERSION.to_le_bytes());
+        frame[FRAME_BYTE_LEN_OFFSET as usize..FRAME_BYTE_LEN_OFFSET as usize + 4].copy_from_slice(
+            &u32::try_from(frame_len)
+                .expect("test frame length fits wasm32")
+                .to_le_bytes(),
+        );
+        memory
+            .write(&mut store, 0, &frame)
+            .expect("write transition derivative frame");
+
+        let entry = instance
+            .get_typed_func::<i32, i32>(&store, WASM_JIT_VALUE_EXPORT)
+            .expect("resolve transition derivative export");
+        assert_eq!(
+            entry
+                .call(&mut store, 0)
+                .expect("execute transition derivative"),
+            WASM_JIT_STATUS_OK
+        );
+        let result = f64::from_le_bytes(
+            memory.data(&store)
+                [FRAME_RESULT_OFFSET as usize..FRAME_RESULT_OFFSET as usize + size_of::<f64>()]
+                .try_into()
+                .expect("complete transition derivative result"),
+        );
+        assert_eq!(result.to_bits(), (-2.0_f64).to_bits());
     }
 
     #[test]
@@ -2880,9 +3030,13 @@ mod tests {
             NativeOp::ZiStateDerivative(crate::codegen::ZiRuntimeLayout::unit_coefficients(0)),
             NativeOp::TimerState(0),
             NativeOp::TransitionState(0),
+            NativeOp::TransitionStateDerivative(0),
             NativeOp::SlewState(0),
             NativeOp::SlewStateDerivative(0),
             NativeOp::AbsDelayState(0),
+            NativeOp::AbsDelayStateMax(0),
+            NativeOp::AbsDelayStateDerivative(0),
+            NativeOp::AbsDelayStateDerivativeMax(0),
             NativeOp::CrossState(0),
             NativeOp::AboveState(0),
             NativeOp::LastCrossingState(0),

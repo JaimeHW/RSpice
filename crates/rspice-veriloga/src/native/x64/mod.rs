@@ -307,10 +307,10 @@ fn compile_model_plan(model: &CompiledModel, plan: &NativeModelPlan) -> JitResul
     let value_entries_image_end = image.len();
 
     let evaluation_kernel = align_image_for_entry(&mut image, &mut entry_starts);
-    let evaluation_kernel_artifact = codegen::compile_fused_evaluation_kernel_artifact(
+    let evaluation_kernel_artifact = driver::compile_evaluation_kernel_artifact(
         evaluation_kernel.as_usize(),
         assignment,
-        &plan.stamp_values,
+        &stamp_values,
         &plan.published_current_pairs,
     )?;
     append_compiled_function_at_offset(
@@ -5333,10 +5333,14 @@ endmodule
                     | Instruction::CanonicalLimitState(idx) => {
                         update_max_slot(&mut max_state, *idx);
                     }
-                    Instruction::AbsDelayState(idx) => {
+                    Instruction::AbsDelayState(idx)
+                    | Instruction::AbsDelayStateMax(idx)
+                    | Instruction::AbsDelayStateDerivative(idx)
+                    | Instruction::AbsDelayStateDerivativeMax(idx) => {
                         update_max_slot(&mut max_delay_buffer, *idx);
                     }
-                    Instruction::TransitionState(idx) => {
+                    Instruction::TransitionState(idx)
+                    | Instruction::TransitionStateDerivative(idx) => {
                         update_max_slot(&mut max_transition_filter, *idx);
                     }
                     Instruction::SlewState(idx) | Instruction::SlewStateDerivative(idx) => {

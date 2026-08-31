@@ -11,8 +11,9 @@ use crate::ast::{
     AnalogOperator, ArrayLiteralElement, BinaryOp, BranchAccess, CallExpr, Expression, Identifier,
     NumberLit, SystemFunction,
 };
+use crate::disciplines::is_standard_flow_access;
 use crate::error::{CodeGenError, CodeGenErrorKind, CompileResult};
-use crate::ir::{BranchRef, IrExpr, IrFunction};
+use crate::ir::{BranchRef, DdxAxis, IrExpr, IrFunction};
 use crate::semantic::AnalyzedModule;
 use num_complex::Complex64;
 use smol_str::SmolStr;
@@ -176,16 +177,6 @@ fn validate_laplace_roots(
         .map_err(|error| laplace_error(operator, error))
 }
 
-fn reject_flow_ddx_probe(access: &str) -> CompileResult<()> {
-    if matches!(access, "I" | "Pwr" | "F" | "Tau" | "MMF" | "Flow") {
-        return Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
-            "ddx with a flow probe (differentiate w.r.t. a potential instead)".into(),
-        ))
-        .into());
-    }
-    Ok(())
-}
-
 fn validate_arg_range(
     name: &str,
     actual: usize,
@@ -319,6 +310,9 @@ pub struct ConversionContext {
     node_map: HashMap<SmolStr, usize>,
     /// Map from named branch to its (pos, neg) node indices
     branch_map: HashMap<SmolStr, (usize, usize)>,
+    /// Normalized branch pairs carrying solver-owned current unknowns, mapped
+    /// to (ordinal, authored positive endpoint).
+    branch_current_map: HashMap<(usize, usize), (usize, usize)>,
     /// Map from parameter name to index
     param_map: HashMap<SmolStr, usize>,
     /// Map from variable name to index
@@ -373,6 +367,32 @@ impl ConversionContext {
             }
         }
 
+        let mut branch_current_map = HashMap::new();
+        for contribution in &module.contributions {
+            if contribution.is_current && !contribution.indirect {
+                continue;
+            }
+            let mut endpoints = contribution.branch.split(',').map(str::trim);
+            let Some(pos) = endpoints
+                .next()
+                .and_then(|name| node_map.get(name).copied())
+            else {
+                continue;
+            };
+            let Some(neg) = endpoints
+                .next()
+                .map(|name| node_map.get(name).copied())
+                .unwrap_or(Some(GROUND_NODE))
+            else {
+                continue;
+            };
+            let key = (pos.min(neg), pos.max(neg));
+            if !branch_current_map.contains_key(&key) {
+                let ordinal = branch_current_map.len();
+                branch_current_map.insert(key, (ordinal, pos));
+            }
+        }
+
         // Map parameter names to indices
         for (idx, param) in module.parameters.iter().enumerate() {
             param_map.insert(param.name.clone(), idx);
@@ -392,6 +412,7 @@ impl ConversionContext {
         Self {
             node_map,
             branch_map,
+            branch_current_map,
             param_map,
             var_map,
             arrays,
@@ -409,6 +430,13 @@ impl ConversionContext {
     /// Resolve a named branch to its (pos, neg) node indices
     pub fn branch_nodes(&self, name: &str) -> Option<(usize, usize)> {
         self.branch_map.get(name).copied()
+    }
+
+    fn branch_current_axis(&self, pos: usize, neg: usize) -> Option<(usize, bool)> {
+        let key = (pos.min(neg), pos.max(neg));
+        self.branch_current_map
+            .get(&key)
+            .map(|(ordinal, authored_pos)| (*ordinal, pos != *authored_pos))
     }
 
     /// Get parameter index by name
@@ -503,6 +531,87 @@ impl<'a> ExprConverter<'a> {
         match args.get(index) {
             None | Some(Expression::NullArgument(_)) => Ok(None),
             Some(expression) => self.convert(expression).map(Box::new).map(Some),
+        }
+    }
+
+    /// Resolve the independent solver quantity named by a `ddx` probe. A flow
+    /// is legal only when topology gives it a branch-current unknown; inferred
+    /// contribution and terminal currents are dependent values, not axes.
+    fn convert_ddx_probe(&self, probe: &BranchAccess) -> CompileResult<DdxAxis> {
+        let unknown_node = |name: &str| {
+            CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                "Unknown node: {name}"
+            )))
+        };
+        let unknown_branch_or_node = |name: &str| {
+            CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                "Unknown branch or node: {name}"
+            )))
+        };
+        match probe {
+            BranchAccess::Nodes {
+                access, pos, neg, ..
+            } => {
+                let (pos_node, neg_node) = if neg.is_none()
+                    && let Some((pos_node, neg_node)) = self.ctx.branch_nodes(pos)
+                {
+                    (pos_node, neg_node)
+                } else {
+                    let pos_node = self.ctx.node_index(pos).ok_or_else(|| unknown_node(pos))?;
+                    let neg_node = neg
+                        .as_ref()
+                        .map(|node| self.ctx.node_index(node).ok_or_else(|| unknown_node(node)))
+                        .transpose()?
+                        .unwrap_or_else(|| self.ctx.ground());
+                    (pos_node, neg_node)
+                };
+                if is_standard_flow_access(access) {
+                    let Some((ordinal, reversed)) =
+                        self.ctx.branch_current_axis(pos_node, neg_node)
+                    else {
+                        return Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
+                            "ddx flow probe requires a solver-owned branch-current unknown from a potential or indirect contribution".into(),
+                        ))
+                        .into());
+                    };
+                    Ok(DdxAxis::BranchCurrent { ordinal, reversed })
+                } else {
+                    Ok(DdxAxis::Potential {
+                        pos: (pos_node != self.ctx.ground()).then_some(pos_node),
+                        neg: (neg_node != self.ctx.ground()).then_some(neg_node),
+                    })
+                }
+            }
+            BranchAccess::Branch { access, name, .. } => {
+                let (pos_node, neg_node) = if let Some(nodes) = self.ctx.branch_nodes(name) {
+                    nodes
+                } else {
+                    (
+                        self.ctx
+                            .node_index(name)
+                            .ok_or_else(|| unknown_branch_or_node(name))?,
+                        self.ctx.ground(),
+                    )
+                };
+                if is_standard_flow_access(access) {
+                    let Some((ordinal, reversed)) =
+                        self.ctx.branch_current_axis(pos_node, neg_node)
+                    else {
+                        return Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
+                            format!(
+                                "ddx flow probe I(<{name}>) requires a solver-owned branch-current unknown from a potential or indirect contribution"
+                            ),
+                        ))
+                        .into());
+                    };
+                    Ok(DdxAxis::BranchCurrent { ordinal, reversed })
+                } else {
+                    Ok(DdxAxis::Potential {
+                        pos: (pos_node != self.ctx.ground()).then_some(pos_node),
+                        neg: (neg_node != self.ctx.ground()).then_some(neg_node),
+                    })
+                }
+            }
         }
     }
 
@@ -738,24 +847,18 @@ impl<'a> ExprConverter<'a> {
                 })
             }
             "absdelay" => {
-                // absdelay(expr, delay_time) - transport delay
-                // Returns value of expr delayed by delay_time seconds
-                if func.args.is_empty() {
-                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                        "absdelay requires at least one argument".into(),
-                    ))
-                    .into());
-                }
+                validate_arg_range(&func.name, func.args.len(), 2, Some(3))?;
                 let expr = self.convert(&func.args[0])?;
-                let delay_time = if func.args.len() > 1 {
-                    self.convert(&func.args[1])?
-                } else {
-                    // Default delay of 0 (no delay)
-                    IrExpr::Const(0.0)
-                };
+                let delay_time = self.convert(&func.args[1])?;
                 Ok(IrExpr::AbsDelay {
+                    site: crate::ir::AbsDelaySiteId::from_span(func.span),
                     expr: Box::new(expr),
                     delay_time: Box::new(delay_time),
+                    max_delay: func
+                        .args
+                        .get(2)
+                        .map(|value| self.convert(value).map(Box::new))
+                        .transpose()?,
                 })
             }
             "transition" => {
@@ -783,6 +886,7 @@ impl<'a> ExprConverter<'a> {
                     None
                 };
                 Ok(IrExpr::Transition {
+                    site: crate::ir::TransitionSiteId::from_span(func.span),
                     expr: Box::new(expr),
                     delay,
                     rise_time,
@@ -1074,51 +1178,11 @@ impl<'a> ExprConverter<'a> {
                 validate_arg_range(&call.name, call.args.len(), 2, Some(2))?;
                 let inner = self.convert(require_arg(0)?)?;
                 let probe = require_arg(1)?;
-                let unknown_node = |name: &str| {
-                    CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
-                        "Unknown node: {name}"
-                    )))
-                };
-                let unknown_branch_or_node = |name: &str| {
-                    CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
-                        "Unknown branch or node: {name}"
-                    )))
-                };
-                let (pos_node, neg_node) = match probe {
-                    Expression::BranchAccess(BranchAccess::Nodes {
-                        access, pos, neg, ..
-                    }) => {
-                        reject_flow_ddx_probe(access)?;
-                        if neg.is_none()
-                            && let Some((pos_node, neg_node)) = self.ctx.branch_nodes(pos)
-                        {
-                            (pos_node, Some(neg_node))
-                        } else {
-                            let pos_node =
-                                self.ctx.node_index(pos).ok_or_else(|| unknown_node(pos))?;
-                            let neg_node = neg
-                                .as_ref()
-                                .map(|n| self.ctx.node_index(n).ok_or_else(|| unknown_node(n)))
-                                .transpose()?;
-                            (pos_node, neg_node)
-                        }
-                    }
-                    Expression::BranchAccess(BranchAccess::Branch { access, name, .. }) => {
-                        reject_flow_ddx_probe(access)?;
-                        if let Some((pos_node, neg_node)) = self.ctx.branch_nodes(name) {
-                            (pos_node, Some(neg_node))
-                        } else {
-                            (
-                                self.ctx
-                                    .node_index(name)
-                                    .ok_or_else(|| unknown_branch_or_node(name))?,
-                                None,
-                            )
-                        }
-                    }
+                let axis = match probe {
+                    Expression::BranchAccess(probe) => self.convert_ddx_probe(probe)?,
                     _ => {
                         return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                            "ddx probe must be a branch access like V(node), V(a,b), or V(<branch>)"
+                            "ddx probe must be a branch access like V(node), V(a,b), V(<branch>), or I(<solver-owned-branch>)"
                                 .into(),
                         ))
                         .into());
@@ -1126,22 +1190,22 @@ impl<'a> ExprConverter<'a> {
                 };
                 Ok(IrExpr::Ddx {
                     expr: Box::new(inner),
-                    pos: pos_node,
-                    neg: neg_node,
+                    axis,
                 })
             }
             "absdelay" => {
-                validate_arg_range(&call.name, call.args.len(), 1, Some(3))?;
+                validate_arg_range(&call.name, call.args.len(), 2, Some(3))?;
                 let expr = self.convert(require_arg(0)?)?;
-                let delay = call
-                    .args
-                    .get(1)
-                    .map(|arg| self.convert(arg))
-                    .transpose()?
-                    .unwrap_or(IrExpr::Const(0.0));
+                let delay = self.convert(require_arg(1)?)?;
                 Ok(IrExpr::AbsDelay {
+                    site: crate::ir::AbsDelaySiteId::from_span(call.span),
                     expr: Box::new(expr),
                     delay_time: Box::new(delay),
+                    max_delay: call
+                        .args
+                        .get(2)
+                        .map(|value| self.convert(value).map(Box::new))
+                        .transpose()?,
                 })
             }
             "transition" => {
@@ -1156,6 +1220,7 @@ impl<'a> ExprConverter<'a> {
                         .map(Box::new))
                 };
                 Ok(IrExpr::Transition {
+                    site: crate::ir::TransitionSiteId::from_span(call.span),
                     expr: Box::new(expr),
                     delay: opt(1)?,
                     rise_time: opt(2)?,
@@ -2014,7 +2079,7 @@ impl<'a> ExprConverter<'a> {
     /// flow accesses (I, Pwr, ...) read the branch flow.
     fn access_to_ir(access: &str, pos: usize, neg: usize) -> CompileResult<IrExpr> {
         match access {
-            "I" | "Pwr" | "F" | "Tau" | "MMF" | "Flow" => Ok(IrExpr::Current(pos, neg)),
+            access if is_standard_flow_access(access) => Ok(IrExpr::Current(pos, neg)),
             // All potential-natured accesses behave like V over the unified
             // node space
             _ => Ok(IrExpr::Voltage(pos, neg)),
@@ -2116,32 +2181,51 @@ impl<'a> ExprConverter<'a> {
                     None => Ok(IrExpr::Idt(Box::new(inner), ic_expr)),
                 }
             }
-            // KNOWN DEFECT: this returns `expr` itself rather than its partial
-            // derivative with respect to `probe`, so any model relying on
-            // ddx() gets a wrong number from this pipeline instead of an error.
-            // It is not refused here only because 24 of the 43 generated model
-            // sources call ddx(), and failing closed would drop them from the
-            // catalog. `codegen/generator.rs` already rejects an unresolved
-            // `IrExpr::Ddx`, which is the contract this branch should meet once
-            // symbolic differentiation is implemented. Do not add callers.
             AnalogOperator::Ddx { expr, probe, .. } => {
                 let inner = self.convert(expr)?;
-                let _ = probe;
-                Ok(inner)
+                let axis = self.convert_ddx_probe(probe)?;
+                Ok(IrExpr::Ddx {
+                    expr: Box::new(inner),
+                    axis,
+                })
             }
-            // These three discarded their defining argument — the delay, the
-            // smoothing window, the rate limit — and returned the raw
-            // expression, which is a plausible wrong answer rather than a
-            // refusal. No model source in models/veriloga/ uses any of them,
-            // so refusing costs no catalog coverage.
-            AnalogOperator::Absdelay { .. } | AnalogOperator::Transition { .. } => {
-                Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
-                    "absdelay()/transition(): timing operators are not lowered; \
-                         their delay and smoothing would be silently ignored"
-                        .into(),
-                ))
-                .into())
-            }
+            AnalogOperator::Absdelay {
+                expr,
+                delay,
+                max_delay,
+                span,
+            } => Ok(IrExpr::AbsDelay {
+                site: crate::ir::AbsDelaySiteId::from_span(*span),
+                expr: Box::new(self.convert(expr)?),
+                delay_time: Box::new(self.convert(delay)?),
+                max_delay: max_delay
+                    .as_deref()
+                    .map(|value| self.convert(value).map(Box::new))
+                    .transpose()?,
+            }),
+            AnalogOperator::Transition {
+                expr,
+                delay,
+                rise,
+                fall,
+                span,
+                ..
+            } => Ok(IrExpr::Transition {
+                site: crate::ir::TransitionSiteId::from_span(*span),
+                expr: Box::new(self.convert(expr)?),
+                delay: delay
+                    .as_deref()
+                    .map(|value| self.convert(value).map(Box::new))
+                    .transpose()?,
+                rise_time: rise
+                    .as_deref()
+                    .map(|value| self.convert(value).map(Box::new))
+                    .transpose()?,
+                fall_time: fall
+                    .as_deref()
+                    .map(|value| self.convert(value).map(Box::new))
+                    .transpose()?,
+            }),
             AnalogOperator::Slew {
                 expr,
                 max_rise,
@@ -2596,6 +2680,7 @@ mod tests {
         ConversionContext {
             node_map: HashMap::new(),
             branch_map: HashMap::new(),
+            branch_current_map: HashMap::new(),
             param_map: HashMap::new(),
             var_map: HashMap::new(),
             arrays: HashMap::new(),
@@ -2887,6 +2972,209 @@ mod tests {
             CodeGenErrorKind::InvalidExpression(ref detail)
                 if detail.contains("offset argument requires a modulus")
         ));
+    }
+
+    #[test]
+    fn public_ddx_ast_retains_a_symbolic_derivative_instead_of_its_operand() {
+        let mut context = empty_context();
+        context.node_map.insert("p".into(), 0);
+        context.node_map.insert("n".into(), 1);
+        context.num_terminals = 2;
+        let converter = ExprConverter::new(&context);
+        let voltage = || {
+            Expression::BranchAccess(BranchAccess::Nodes {
+                access: "V".into(),
+                pos: "p".into(),
+                neg: Some("n".into()),
+                span: Span::dummy(),
+            })
+        };
+        let expression = Expression::AnalogOperator(AnalogOperator::Ddx {
+            expr: Box::new(Expression::Binary(BinaryExpr {
+                op: BinaryOp::Mul,
+                left: Box::new(voltage()),
+                right: Box::new(voltage()),
+                span: Span::dummy(),
+            })),
+            probe: BranchAccess::Nodes {
+                access: "V".into(),
+                pos: "p".into(),
+                neg: Some("n".into()),
+                span: Span::dummy(),
+            },
+            span: Span::dummy(),
+        });
+
+        let converted = converter
+            .convert(&expression)
+            .expect("typed ddx potential probe must lower symbolically");
+        assert!(matches!(
+            converted,
+            IrExpr::Ddx {
+                axis: DdxAxis::Potential {
+                    pos: Some(0),
+                    neg: Some(1),
+                },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn public_ddx_ast_fails_closed_for_an_unrepresentable_flow_axis() {
+        let mut context = empty_context();
+        context.node_map.insert("p".into(), 0);
+        context.node_map.insert("n".into(), 1);
+        context.num_terminals = 2;
+        let converter = ExprConverter::new(&context);
+        let expression = Expression::AnalogOperator(AnalogOperator::Ddx {
+            expr: Box::new(number(1.0)),
+            probe: BranchAccess::Nodes {
+                access: "I".into(),
+                pos: "p".into(),
+                neg: Some("n".into()),
+                span: Span::dummy(),
+            },
+            span: Span::dummy(),
+        });
+
+        let error = converter
+            .convert(&expression)
+            .expect_err("dependent flow must not become a ddx axis")
+            .to_string();
+        assert!(
+            error.contains("requires a solver-owned branch-current unknown"),
+            "{error}"
+        );
+        assert!(!error.contains("Unknown node"), "{error}");
+    }
+
+    #[test]
+    fn public_ddx_ast_retains_a_valid_branch_current_axis() {
+        let mut context = empty_context();
+        context.node_map.insert("p".into(), 0);
+        context.node_map.insert("n".into(), 1);
+        context.branch_current_map.insert((0, 1), (0, 0));
+        context.num_terminals = 2;
+        let converter = ExprConverter::new(&context);
+        let expression = Expression::AnalogOperator(AnalogOperator::Ddx {
+            expr: Box::new(Expression::BranchAccess(BranchAccess::Nodes {
+                access: "I".into(),
+                pos: "p".into(),
+                neg: Some("n".into()),
+                span: Span::dummy(),
+            })),
+            probe: BranchAccess::Nodes {
+                access: "I".into(),
+                pos: "p".into(),
+                neg: Some("n".into()),
+                span: Span::dummy(),
+            },
+            span: Span::dummy(),
+        });
+
+        assert!(matches!(
+            converter
+                .convert(&expression)
+                .expect("solver branch flow is a valid ddx axis"),
+            IrExpr::Ddx {
+                axis: DdxAxis::BranchCurrent {
+                    ordinal: 0,
+                    reversed: false,
+                },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn public_ddx_ast_classifies_magnetic_mmf_as_potential_and_phi_as_flow() {
+        let mut context = empty_context();
+        context.node_map.insert("p".into(), 0);
+        context.node_map.insert("n".into(), 1);
+        context.branch_current_map.insert((0, 1), (0, 0));
+        context.num_terminals = 2;
+        let converter = ExprConverter::new(&context);
+        let ddx = |access: &str| {
+            Expression::AnalogOperator(AnalogOperator::Ddx {
+                expr: Box::new(number(1.0)),
+                probe: BranchAccess::Nodes {
+                    access: access.into(),
+                    pos: "p".into(),
+                    neg: Some("n".into()),
+                    span: Span::dummy(),
+                },
+                span: Span::dummy(),
+            })
+        };
+
+        assert!(matches!(
+            converter.convert(&ddx("MMF")).expect("MMF is a potential"),
+            IrExpr::Ddx {
+                axis: DdxAxis::Potential { .. },
+                ..
+            }
+        ));
+        assert!(matches!(
+            converter
+                .convert(&ddx("Phi"))
+                .expect("Phi is a solver-owned magnetic flow"),
+            IrExpr::Ddx {
+                axis: DdxAxis::BranchCurrent { .. },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn public_transition_ast_retains_a_site_correlated_derivative_carrier() {
+        let mut context = empty_context();
+        context.node_map.insert("p".into(), 0);
+        context.node_map.insert("n".into(), 1);
+        context.num_terminals = 2;
+        let converter = ExprConverter::new(&context);
+        let expression = Expression::AnalogOperator(AnalogOperator::Transition {
+            expr: Box::new(Expression::BranchAccess(BranchAccess::Nodes {
+                access: "V".into(),
+                pos: "p".into(),
+                neg: Some("n".into()),
+                span: Span::dummy(),
+            })),
+            delay: Some(Box::new(number(1.0e-9))),
+            rise: Some(Box::new(number(2.0e-9))),
+            fall: Some(Box::new(number(3.0e-9))),
+            tolerance: None,
+            span: Span::dummy(),
+        });
+        let mut primal = converter
+            .convert(&expression)
+            .expect("typed transition AST must retain its dynamic operator");
+        let mut next = 0;
+        crate::ir::autodiff::assign_transition_site_ordinals(&mut primal, &mut next);
+        let derivative =
+            crate::ir::autodiff::differentiate(&primal, &crate::ir::DerivativeWrt::Voltage(0));
+
+        let IrExpr::Transition {
+            site: primal_site, ..
+        } = primal
+        else {
+            panic!("typed transition must remain a primal transition carrier");
+        };
+        let IrExpr::TransitionDerivative {
+            site,
+            input_derivative,
+            delay,
+            rise_time,
+            fall_time,
+            ..
+        } = derivative
+        else {
+            panic!("transition derivative must remain a runtime carrier");
+        };
+        assert_eq!(site, primal_site);
+        assert_eq!(site.ordinal, 0);
+        assert!(matches!(*input_derivative, IrExpr::Const(1.0)));
+        assert!(delay.is_some() && rise_time.is_some() && fall_time.is_some());
     }
 
     #[test]

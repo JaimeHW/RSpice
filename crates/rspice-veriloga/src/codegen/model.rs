@@ -23,8 +23,14 @@ pub struct CodeGenerator {
     pub(super) limit_state_count: std::cell::Cell<usize>,
     /// Stateful slot allocator for `absdelay`.
     pub(super) delay_buffer_count: std::cell::Cell<usize>,
+    /// Stable logical absdelay site to transactional delay-buffer slot.
+    pub(super) absdelay_sites:
+        std::cell::RefCell<std::collections::HashMap<crate::ir::AbsDelaySiteId, usize>>,
     /// Stateful slot allocator for `transition`.
     pub(super) transition_filter_count: std::cell::Cell<usize>,
+    /// Stable logical transition site to transactional filter slot.
+    pub(super) transition_sites:
+        std::cell::RefCell<std::collections::HashMap<crate::ir::TransitionSiteId, usize>>,
     /// Stateful slot allocator for `slew`.
     pub(super) slew_filter_count: std::cell::Cell<usize>,
     /// Stable logical slew site to transactional filter slot.
@@ -753,4 +759,22 @@ pub enum Instruction {
     ///
     /// Appended to preserve every preceding serialized discriminant.
     SlewStateDerivative(usize),
+    /// Read-only exact Jacobian action of one `transition` candidate.
+    /// Stack: `[input, input derivative, delay, rise time, fall time]`
+    /// -> `[output derivative]`.
+    ///
+    /// Appended to preserve every preceding serialized discriminant.
+    TransitionStateDerivative(usize),
+    /// Absolute delay with an explicit maximum-delay operand.
+    /// Stack: `[expr, delay_time, max_delay] -> [delayed_value]`.
+    ///
+    /// Appended to preserve every preceding serialized discriminant.
+    AbsDelayStateMax(usize),
+    /// Exact first derivative of absolute delay without maxdelay.
+    /// Stack: `[expr, d_expr, delay_time, d_delay_time] -> [d_delayed_value]`.
+    AbsDelayStateDerivative(usize),
+    /// Exact first derivative of absolute delay with maxdelay.
+    /// Stack: `[expr, d_expr, delay_time, d_delay_time, max_delay]`
+    /// -> `[d_delayed_value]`.
+    AbsDelayStateDerivativeMax(usize),
 }

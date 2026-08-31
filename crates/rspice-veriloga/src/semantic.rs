@@ -4950,6 +4950,53 @@ impl SemanticAnalyzer {
         Ok(lowered)
     }
 
+    /// Materialize transition timing defaults before IR construction so the
+    /// runtime receives the module-scoped `default_transition` value without
+    /// extending the compact four-operand VM instruction. Explicit zero rise
+    /// or fall values select the same default; an omitted fall reuses the
+    /// effective rise time as required by VAMS-2023 4.5.8.
+    fn materialize_transition_defaults(&self, args: &mut Vec<Expression>, span: Span) {
+        debug_assert!((1..=4).contains(&args.len()));
+        if args.len() == 1 {
+            args.push(Self::number_expr(0.0, span));
+        }
+        let raw_rise = args
+            .get(2)
+            .cloned()
+            .unwrap_or_else(|| Self::number_expr(self.current_default_transition, span));
+        let effective_rise = self.materialize_transition_time_default(raw_rise, span);
+        let raw_fall = args
+            .get(3)
+            .cloned()
+            .unwrap_or_else(|| effective_rise.clone());
+        let effective_fall = self.materialize_transition_time_default(raw_fall, span);
+        if args.len() == 2 {
+            args.push(effective_rise);
+        } else {
+            args[2] = effective_rise;
+        }
+        if args.len() == 3 {
+            args.push(effective_fall);
+        } else {
+            args[3] = effective_fall;
+        }
+    }
+
+    fn materialize_transition_time_default(&self, value: Expression, span: Span) -> Expression {
+        let condition = Expression::Binary(BinaryExpr {
+            op: BinaryOp::Eq,
+            left: Box::new(value.clone()),
+            right: Box::new(Self::number_expr(0.0, span)),
+            span,
+        });
+        Expression::Conditional(ConditionalExpr {
+            condition: Box::new(condition),
+            then_expr: Box::new(Self::number_expr(self.current_default_transition, span)),
+            else_expr: Box::new(value),
+            span,
+        })
+    }
+
     /// Rewrite an expression: apply substitutions (block locals, loop
     /// variables) and inline calls to user-defined analog functions.
     fn lower_expression(&mut self, expr: &Expression) -> CompileResult<Expression> {
@@ -5074,6 +5121,27 @@ impl SemanticAnalyzer {
                 self.validate_builtin_call_arity(call)?;
                 self.validate_null_arguments(call)?;
                 self.validate_filter_vector_operands(call)?;
+                if call.name.eq_ignore_ascii_case("absdelay")
+                    && let Some(max_delay) = call.args.get(2)
+                    && !self.expression_is_simulation_invariant(max_delay)
+                {
+                    return Err(CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::InvalidAnalogOperator(
+                            "absdelay maxdelay must be constant for the duration of an analysis"
+                                .into(),
+                        ),
+                        max_delay.span(),
+                    )));
+                }
+                if call.name.eq_ignore_ascii_case("transition") && call.args.len() == 5 {
+                    return Err(CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::UnsupportedFeature(
+                            "transition time_tol is parsed but exact tolerance-controlled corner placement is not implemented; omit the fifth operand instead of silently discarding it"
+                                .into(),
+                        ),
+                        call.args[4].span(),
+                    )));
+                }
                 let call = self.materialize_filter_call_replication(call)?;
                 if is_zi_operator_name(&call.name) {
                     self.validate_zi_operand_budget(&call)?;
@@ -5140,6 +5208,9 @@ impl SemanticAnalyzer {
                         .iter()
                         .map(|a| self.lower_expression(a))
                         .collect::<CompileResult<Vec<_>>>()?;
+                    if call.name.eq_ignore_ascii_case("transition") {
+                        self.materialize_transition_defaults(&mut args, call.span);
+                    }
                     // Materialize the declaration-order-scoped default now.
                     // Hierarchy flattening may later combine modules authored
                     // under different directives into one analyzed module.
@@ -5309,12 +5380,25 @@ impl SemanticAnalyzer {
                 delay,
                 max_delay,
                 span,
-            } => AnalogOperator::Absdelay {
-                expr: Box::new(self.lower_expression(expr)?),
-                delay: Box::new(self.lower_expression(delay)?),
-                max_delay: lower_optional(self, max_delay)?,
-                span: *span,
-            },
+            } => {
+                if let Some(max_delay) = max_delay
+                    && !self.expression_is_simulation_invariant(max_delay)
+                {
+                    return Err(CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::InvalidAnalogOperator(
+                            "absdelay maxdelay must be constant for the duration of an analysis"
+                                .into(),
+                        ),
+                        max_delay.span(),
+                    )));
+                }
+                AnalogOperator::Absdelay {
+                    expr: Box::new(self.lower_expression(expr)?),
+                    delay: Box::new(self.lower_expression(delay)?),
+                    max_delay: lower_optional(self, max_delay)?,
+                    span: *span,
+                }
+            }
             AnalogOperator::Transition {
                 expr,
                 delay,
@@ -5322,14 +5406,40 @@ impl SemanticAnalyzer {
                 fall,
                 tolerance,
                 span,
-            } => AnalogOperator::Transition {
-                expr: Box::new(self.lower_expression(expr)?),
-                delay: lower_optional(self, delay)?,
-                rise: lower_optional(self, rise)?,
-                fall: lower_optional(self, fall)?,
-                tolerance: lower_optional(self, tolerance)?,
-                span: *span,
-            },
+            } => {
+                if let Some(tolerance) = tolerance {
+                    return Err(CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::UnsupportedFeature(
+                            "transition time_tol is parsed but exact tolerance-controlled corner placement is not implemented; omit the fifth operand instead of silently discarding it"
+                                .into(),
+                        ),
+                        tolerance.span(),
+                    )));
+                }
+                let mut operands = vec![self.lower_expression(expr)?];
+                operands.push(match delay {
+                    Some(delay) => self.lower_expression(delay)?,
+                    None => Self::number_expr(0.0, *span),
+                });
+                if rise.is_some() || fall.is_some() {
+                    operands.push(match rise {
+                        Some(rise) => self.lower_expression(rise)?,
+                        None => Self::number_expr(self.current_default_transition, *span),
+                    });
+                }
+                if let Some(fall) = fall {
+                    operands.push(self.lower_expression(fall)?);
+                }
+                self.materialize_transition_defaults(&mut operands, *span);
+                AnalogOperator::Transition {
+                    expr: Box::new(operands.remove(0)),
+                    delay: Some(Box::new(operands.remove(0))),
+                    rise: Some(Box::new(operands.remove(0))),
+                    fall: Some(Box::new(operands.remove(0))),
+                    tolerance: None,
+                    span: *span,
+                }
+            }
             AnalogOperator::Slew {
                 expr,
                 max_rise,

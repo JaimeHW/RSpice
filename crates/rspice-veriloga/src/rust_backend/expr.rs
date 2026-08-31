@@ -1303,9 +1303,21 @@ fn push_analog_operator_children(op: &HirAnalogOperator, children: &mut Vec<Expr
             rise,
             fall,
             tolerance,
+            ..
         } => {
             children.push(*expr);
             children.extend([*delay, *rise, *fall, *tolerance].into_iter().flatten());
+        }
+        HirAnalogOperator::TransitionDerivative {
+            input,
+            input_derivative,
+            delay,
+            rise,
+            fall,
+            ..
+        } => {
+            children.extend([*input, *input_derivative]);
+            children.extend([*delay, *rise, *fall].into_iter().flatten());
         }
         HirAnalogOperator::Slew {
             expr,

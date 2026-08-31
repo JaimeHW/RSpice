@@ -1151,8 +1151,13 @@ fn preallocate_context(context: &mut VmContext, model: &CompiledModel) {
                 | Instruction::IdtModState(idx)
                 | Instruction::LimitState(idx)
                 | Instruction::CanonicalLimitState(idx) => update_max_slot(&mut max_state, *idx),
-                Instruction::AbsDelayState(idx) => update_max_slot(&mut max_delay_buffer, *idx),
-                Instruction::TransitionState(idx) => {
+                Instruction::AbsDelayState(idx)
+                | Instruction::AbsDelayStateMax(idx)
+                | Instruction::AbsDelayStateDerivative(idx)
+                | Instruction::AbsDelayStateDerivativeMax(idx) => {
+                    update_max_slot(&mut max_delay_buffer, *idx)
+                }
+                Instruction::TransitionState(idx) | Instruction::TransitionStateDerivative(idx) => {
                     update_max_slot(&mut max_transition_filter, *idx);
                 }
                 Instruction::SlewState(idx) | Instruction::SlewStateDerivative(idx) => {
@@ -1460,12 +1465,13 @@ fn take_native_error(ctx: &mut EvalContext, phase: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{NativeBenchConfig, benchmark_failures, timing_stats};
+    use super::{DENSE_MODEL_SOURCE, NativeBenchConfig, benchmark_failures, timing_stats};
     #[cfg(any(
         target_arch = "x86_64",
         all(target_arch = "aarch64", target_os = "macos")
     ))]
     use super::{run_dense_entrypoint_case, run_device_evaluate_case, run_device_stamp_case};
+    use crate::{CompilerOptions, VerilogACompiler};
 
     fn smoke_config() -> NativeBenchConfig {
         NativeBenchConfig {
@@ -1519,6 +1525,31 @@ mod tests {
         assert!(report.checksum_native.is_finite());
         assert!(report.checksum_bytecode.is_finite());
         assert!(report.native_code_bytes > 0);
+    }
+
+    #[test]
+    fn dense_model_recompilation_preserves_runtime_variable_layout() {
+        let expected = VerilogACompiler::new(CompilerOptions::default())
+            .compile(DENSE_MODEL_SOURCE)
+            .expect("compile dense layout reference")
+            .variable_names;
+        assert!(
+            expected.iter().any(|name| name.contains('@')),
+            "fixture must exercise generated derivative-shadow slots"
+        );
+
+        for iteration in 0..32 {
+            let actual = VerilogACompiler::new(CompilerOptions::default())
+                .compile(DENSE_MODEL_SOURCE)
+                .unwrap_or_else(|error| {
+                    panic!("compile dense layout iteration {iteration}: {error}")
+                })
+                .variable_names;
+            assert_eq!(
+                actual, expected,
+                "identical source changed runtime variable-slot layout at iteration {iteration}"
+            );
+        }
     }
 
     #[test]

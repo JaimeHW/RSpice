@@ -2194,6 +2194,17 @@ endmodule
     assert!(device.is_using_native());
     device.set_analysis_type(2);
 
+    device.set_time(0.0);
+    device.update_voltages(&[0.0]);
+    assert_eq!(
+        device
+            .try_evaluate()
+            .expect("canonical transition startup evaluation succeeds")[0]
+            .to_bits(),
+        0.0_f64.to_bits()
+    );
+    device.advance_state();
+
     for (time, expected) in [(1.0, 0.0), (1.4, 0.5), (1.6, 1.0)] {
         device.set_time(time);
         device.update_voltages(&[1.0]);
@@ -2210,7 +2221,7 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
-fn native_device_with_canonical_ir_accepts_transition_tolerance_without_fallback() {
+fn transition_time_tolerance_is_rejected_before_native_lowering() {
     let source = r#"
 `include "disciplines.vams"
 module native_canonical_transition_tol(p, n);
@@ -2219,21 +2230,17 @@ module native_canonical_transition_tol(p, n);
     analog I(p, n) <+ transition(V(p, n) > 0.5, 0.2, 0.4, 0.4, 1.0e-6);
 endmodule
 "#;
-    let mut device = canonical_device_from_source("CTRNTOL1", source);
-    device.set_analysis_type(2);
-
-    for (time, expected) in [(1.0, 0.0), (1.4, 0.5), (1.6, 1.0)] {
-        device.set_time(time);
-        device.update_voltages(&[1.0]);
-        let currents = device
-            .try_evaluate()
-            .expect("canonical transition tolerance evaluation succeeds");
-        assert!(
-            (currents[0] - expected).abs() < 1e-12,
-            "time: {time}, currents: {currents:?}"
-        );
-        device.advance_state();
-    }
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let error = compiler
+        .compile(source)
+        .expect_err("unsupported transition time_tol must fail before native lowering");
+    let diagnostic = error.to_string();
+    assert!(
+        diagnostic.contains(
+            "transition time_tol is parsed but exact tolerance-controlled corner placement is not implemented; omit the fifth operand instead of silently discarding it"
+        ),
+        "unexpected diagnostic: {diagnostic}"
+    );
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -2855,6 +2862,116 @@ endmodule
         .try_evaluate()
         .expect("canonical ddx current evaluation succeeds");
     assert_eq!(currents[0].to_bits(), 6.0_f64.to_bits());
+
+    let (matrix, rhs) = stamp_device(&mut device, &[3.0]);
+    let jacobian = matrix.get(&(0, 0)).copied().unwrap_or_default();
+    assert_eq!(
+        jacobian.to_bits(),
+        2.0_f64.to_bits(),
+        "native ddx stamp must carry the second derivative: {matrix:?}"
+    );
+    assert!(
+        rhs.values().map(|value| value.abs()).sum::<f64>() <= 1.0e-12,
+        "linearized ddx residual should have zero affine remainder: {rhs:?}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_solver_branch_flow_ddx_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_flow_ddx(p, n, ctrl, out, reverse, monitor);
+    inout p, n, ctrl, out, reverse, monitor;
+    electrical p, n, ctrl, out, reverse, monitor;
+    branch (p, n) sense;
+    analog begin
+        V(sense) <+ 0.25;
+        I(out, n) <+ ddx(I(sense) * I(sense) + V(ctrl, n) * I(sense), I(sense));
+        I(reverse, n) <+ ddx(I(sense) * I(sense) + V(ctrl, n) * I(sense), I(n, p));
+        I(monitor, n) <+ I(sense) * I(sense) + V(ctrl, n) * I(sense);
+    end
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler
+        .compile(source)
+        .expect("portable model accepts a solver-owned flow ddx axis");
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("canonical model accepts a solver-owned flow ddx axis");
+    let mut device = VerilogADevice::try_new_with_canonical_ir(
+        "FLOWDDX1",
+        model,
+        &artifact,
+        &[1, 0, 2, 3, 4, 5],
+    )
+    .expect("flow ddx compiles to native code without fallback");
+    assert!(device.is_using_native());
+    device.set_branch_current_indices(&[6]);
+
+    let branch_flow = 0.37;
+    let ctrl_voltage = 0.9;
+    device.update_all_voltages(&[0.2, ctrl_voltage, 0.0, 0.0, 0.0, branch_flow]);
+    let values = device
+        .try_evaluate()
+        .expect("native flow ddx evaluation succeeds");
+    let expected = 2.0 * branch_flow + ctrl_voltage;
+    assert!(
+        (values[1] - expected).abs() <= 1.0e-12 * expected.abs().max(1.0),
+        "native flow ddx={} expected={expected}; all contributions={values:?}",
+        values[1]
+    );
+    assert!(
+        (values[2] + expected).abs() <= 1.0e-12 * expected.abs().max(1.0),
+        "reversed native flow ddx={} expected={}; all contributions={values:?}",
+        values[2],
+        -expected
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_classifies_magnetic_phi_as_flow_and_mmf_as_potential() {
+    let source = r#"
+`include "disciplines.vams"
+module native_magnetic_ddx(p, n, out, monitor);
+    inout p, n, out, monitor;
+    magnetic p, n;
+    electrical out, monitor;
+    branch (p, n) sense;
+    analog begin
+        MMF(sense) <+ 0.25;
+        I(out) <+ ddx(Phi(sense) * Phi(sense) + MMF(sense) * Phi(sense), Phi(sense));
+        I(monitor) <+ Phi(sense) * Phi(sense) + MMF(sense) * Phi(sense);
+    end
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler
+        .compile(source)
+        .expect("portable compiler classifies Phi as magnetic flow");
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("canonical compiler classifies Phi as magnetic flow");
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("MAGNETICDDX1", model, &artifact, &[1, 0, 2, 3])
+            .expect("magnetic ddx compiles to native code without fallback");
+    assert!(device.is_using_native());
+    device.set_branch_current_indices(&[4]);
+
+    let mmf = 0.8;
+    let phi = 0.37;
+    device.update_all_voltages(&[mmf, 0.0, 0.0, phi]);
+    let values = device
+        .try_evaluate()
+        .expect("native magnetic ddx evaluates");
+    let expected = 2.0 * phi + mmf;
+    assert!(
+        (values[1] - expected).abs() <= 1.0e-12 * expected.abs().max(1.0),
+        "native magnetic ddx={} expected={expected}; contributions={values:?}",
+        values[1]
+    );
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -3620,6 +3737,17 @@ fn native_device_executes_transition_assignments_without_fallback() {
     assert!(device.is_using_native());
     device.set_analysis_type(2);
 
+    device.set_time(0.0);
+    device.update_voltages(&[0.0]);
+    assert_eq!(
+        device
+            .try_evaluate()
+            .expect("native transition startup evaluation succeeds")[0]
+            .to_bits(),
+        0.0_f64.to_bits()
+    );
+    device.advance_state();
+
     for (time, expected) in [(1.0, 0.0), (1.4, 0.5), (1.6, 1.0)] {
         device.set_time(time);
         device.update_voltages(&[1.0]);
@@ -3710,7 +3838,7 @@ fn native_device_executes_absdelay_assignments_without_fallback() {
 
 #[cfg(target_arch = "x86_64")]
 #[test]
-fn native_zero_delay_absdelay_preserves_history_for_a_later_parameter_change() {
+fn native_absdelay_rejects_nonpositive_delay() {
     let source = r#"
 `include "disciplines.vams"
 module native_dynamic_delay_history(p, n);
@@ -3726,25 +3854,18 @@ endmodule
     assert!(device.is_using_native());
     device.set_analysis_type(2);
 
-    for (time, voltage) in [(0.0, 1.0), (1.0, 2.0)] {
-        device.set_time(time);
-        device.update_voltages(&[voltage]);
-        assert_eq!(
-            device.try_evaluate().expect("zero-delay native evaluation")[0],
-            voltage
-        );
-        device.advance_state();
-    }
+    device.set_time(0.0);
+    device.update_voltages(&[1.0]);
+    let zero = device
+        .try_evaluate()
+        .expect_err("zero absdelay td must fail closed");
+    assert!(zero.to_string().contains("strictly positive"));
 
-    assert!(device.set_parameter("td", 2.0));
-    device.set_time(2.0);
-    device.update_voltages(&[3.0]);
-    assert_eq!(
-        device
-            .try_evaluate()
-            .expect("positive-delay native evaluation")[0],
-        1.0
-    );
+    assert!(device.set_parameter("td", -1.0));
+    let negative = device
+        .try_evaluate()
+        .expect_err("negative absdelay td must fail closed");
+    assert!(negative.to_string().contains("strictly positive"));
 }
 
 #[cfg(target_arch = "x86_64")]

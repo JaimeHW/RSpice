@@ -11,6 +11,8 @@
 //! last accepted state and exposes a separate commit.
 
 use crate::timing_contract::SlewRateMagnitudes;
+use std::collections::VecDeque;
+use std::sync::Arc;
 
 /// A stateful operator's speculative primal result and its exact local
 /// coefficient with respect to the current input argument.
@@ -24,33 +26,73 @@ pub(crate) struct StatefulEvaluation {
     pub input_coefficient: f64,
 }
 
-/// Circular buffer for absdelay transport delay implementation.
+/// Maximum number of accepted samples retained by one `absdelay` site.
 ///
-/// Stores a history of (time, value) pairs to enable looking up
-/// delayed values via linear interpolation.
-#[derive(Debug, Clone)]
-pub struct DelayBuffer {
-    /// Buffer capacity (max samples)
-    pub(crate) capacity: usize,
-    /// Circular buffer of (time, value) pairs
-    samples: Vec<(f64, f64)>,
-    /// Current write position
-    write_pos: usize,
-    /// Number of samples currently stored
-    pub(crate) count: usize,
-    /// Candidate sample produced by the current Newton evaluation.
-    ///
-    /// This is deliberately separate from the circular history. Repeated
-    /// evaluations of one timepoint must not consume transport-delay history;
-    /// the candidate enters the committed history only when the simulator
-    /// accepts the timestep.
-    candidate: Option<(f64, f64)>,
+/// The time horizon is normally the tighter bound, but an adaptive solver can
+/// accept arbitrarily many points inside a finite interval. Refusing an
+/// over-budget candidate is preferable to either unbounded allocation or
+/// silently discarding interpolation data.
+const MAX_DELAY_HISTORY_SAMPLES: usize = 1_048_576;
+
+/// The definition frozen by the first accepted transient evaluation.
+///
+/// With the optional `maxdelay` omitted, Verilog-A freezes `td` itself. With
+/// `maxdelay` present, `td` remains a runtime input but is clamped to the
+/// accepted maximum.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DelayConfiguration {
+    Fixed { delay: f64 },
+    Bounded { max_delay: f64 },
 }
 
-/// Accepted transport-delay history. Speculative Newton candidates are never
+impl DelayConfiguration {
+    fn retention(self) -> f64 {
+        match self {
+            Self::Fixed { delay } => delay,
+            Self::Bounded { max_delay } => max_delay,
+        }
+    }
+}
+
+/// A speculative transport-delay sample and the definition it would freeze
+/// if this is the first accepted evaluation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DelayCandidate {
+    time: f64,
+    value: f64,
+    configuration: DelayConfiguration,
+}
+
+/// A transport-delay candidate's exact local affine coefficients.
+///
+/// Accepted history and the frozen definition are constants. The two
+/// coefficients are with respect to the current `expr` and `td` arguments.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct DelayEvaluation {
+    pub output: f64,
+    pub input_coefficient: f64,
+    pub delay_coefficient: f64,
+}
+
+/// Accepted/candidate state for the Verilog-A `absdelay` operator.
+///
+/// Accepted samples are strictly increasing and begin at time zero. The
+/// candidate is separate so repeated Newton evaluations and rejected steps do
+/// not mutate trajectory history. Accepted history is pruned to the configured
+/// delay horizon while retaining the predecessor needed for exact linear
+/// interpolation.
+#[derive(Debug, Clone)]
+pub struct DelayBuffer {
+    samples: VecDeque<(f64, f64)>,
+    configuration: Option<DelayConfiguration>,
+    candidate: Option<DelayCandidate>,
+}
+
+/// Accepted transport-delay state. Speculative Newton candidates are never
 /// part of a checkpoint.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DelayCheckpoint {
+    pub configuration: Option<DelayConfiguration>,
     pub samples: Vec<(f64, f64)>,
 }
 
@@ -121,214 +163,333 @@ pub(crate) fn timer_event_evaluation(
 }
 
 impl DelayBuffer {
-    /// Create a new delay buffer with specified capacity.
+    /// Create a delay buffer with an allocation hint, not a retention limit.
     pub fn new(capacity: usize) -> Self {
         Self {
-            capacity: capacity.max(2),
-            samples: vec![(0.0, 0.0); capacity.max(2)],
-            write_pos: 0,
-            count: 0,
+            samples: VecDeque::with_capacity(capacity.min(MAX_DELAY_HISTORY_SAMPLES)),
+            configuration: None,
             candidate: None,
         }
     }
 
-    /// Record a sample at the given time.
-    pub fn record(&mut self, time: f64, value: f64) {
-        if self.count == self.capacity {
-            // Preserve the entire accepted history. A fixed sample count is
-            // not a valid delay horizon because timestep control is adaptive.
-            // The optional absdelay max-delay argument is applied separately
-            // as a time-domain retention bound.
-            let new_capacity = self.capacity.saturating_mul(2).max(self.capacity + 1);
-            let mut grown = vec![(0.0, 0.0); new_capacity];
-            for (index, slot) in grown.iter_mut().enumerate().take(self.count) {
-                *slot = self.samples[(self.write_pos + index) % self.capacity];
-            }
-            self.samples = grown;
-            self.capacity = new_capacity;
-            self.write_pos = self.count;
-        }
-        self.samples[self.write_pos] = (time, value);
-        self.write_pos = (self.write_pos + 1) % self.capacity;
-        if self.count < self.capacity {
-            self.count += 1;
-        }
-    }
-
     /// Evaluate a delayed value without mutating accepted history.
-    pub fn eval(&mut self, time: f64, value: f64, delay: f64) -> f64 {
-        self.eval_with_input_coefficient(time, value, delay).output
-    }
-
-    /// Evaluate a transport-delay candidate and expose its exact local input
-    /// coefficient without changing accepted history.
-    pub(crate) fn eval_with_input_coefficient(
+    pub fn eval(
         &mut self,
         time: f64,
         value: f64,
         delay: f64,
-    ) -> StatefulEvaluation {
-        let evaluation = self.candidate_evaluation(time, value, delay);
-        self.candidate = Some((time, value));
-        evaluation
+        max_delay: Option<f64>,
+    ) -> Result<f64, String> {
+        Ok(self
+            .eval_with_coefficients(time, value, delay, max_delay)?
+            .output)
     }
 
-    fn candidate_evaluation(&self, time: f64, value: f64, delay: f64) -> StatefulEvaluation {
-        if delay <= 0.0 {
-            StatefulEvaluation {
-                output: value,
-                input_coefficient: 1.0,
-            }
-        } else {
-            let (output, input_coefficient) =
-                self.lookup_delayed_affine(time, delay, Some((time, value, 1.0)));
-            StatefulEvaluation {
-                output,
-                input_coefficient,
-            }
-        }
-    }
-
-    /// Start one complete device evaluation pass.
-    ///
-    /// A speculative sample belongs only to the pass that produced it. If a
-    /// later Newton pass skips this operator, the earlier sample must not be
-    /// admitted into accepted delay history.
-    pub(crate) fn begin_evaluation(&mut self) {
-        self.candidate = None;
-    }
-
-    /// Validate the candidate that would be committed, without changing
-    /// either accepted or speculative state.
-    pub(crate) fn validate_commit(&self, accepted_time: f64) -> Result<(), String> {
-        let Some((time, value)) = self.candidate else {
-            return Ok(());
-        };
-        if !time.is_finite() || !value.is_finite() {
-            return Err("delay candidate sample is not finite".into());
-        }
-        if time != accepted_time {
+    /// Evaluate a candidate and expose exact current-input and delay
+    /// coefficients without changing accepted history.
+    pub(crate) fn eval_with_coefficients(
+        &mut self,
+        time: f64,
+        value: f64,
+        delay: f64,
+        max_delay: Option<f64>,
+    ) -> Result<DelayEvaluation, String> {
+        Self::validate_runtime(time, value, delay, max_delay)?;
+        if self
+            .samples
+            .back()
+            .is_some_and(|(accepted_time, _)| time < *accepted_time)
+        {
             return Err(format!(
-                "delay candidate time {time} does not equal accepted time {accepted_time}"
+                "absdelay evaluation time {time} precedes the latest accepted sample at {}",
+                self.samples.back().map_or(0.0, |sample| sample.0)
+            ));
+        }
+
+        let (configuration, effective_delay, delay_scale) =
+            self.resolve_configuration(delay, max_delay)?;
+        let evaluation = self.candidate_evaluation(time, value, effective_delay, delay_scale)?;
+        self.candidate = Some(DelayCandidate {
+            time,
+            value,
+            configuration,
+        });
+        Ok(evaluation)
+    }
+
+    fn validate_runtime(
+        time: f64,
+        value: f64,
+        delay: f64,
+        max_delay: Option<f64>,
+    ) -> Result<(), String> {
+        if !time.is_finite() || time < 0.0 {
+            return Err(format!(
+                "absdelay evaluation time must be finite and non-negative, got {time}"
+            ));
+        }
+        if !value.is_finite() {
+            return Err(format!("absdelay input must be finite, got {value}"));
+        }
+        if !delay.is_finite() || delay <= 0.0 {
+            return Err(format!(
+                "absdelay td must be finite and strictly positive, got {delay}"
+            ));
+        }
+        if max_delay.is_some_and(|maximum| !maximum.is_finite() || maximum <= 0.0) {
+            return Err(format!(
+                "absdelay maxdelay must be finite and strictly positive, got {}",
+                max_delay.unwrap_or(f64::NAN)
             ));
         }
         Ok(())
     }
 
-    /// Commit the latest candidate after the transient step is accepted.
-    pub fn commit(&mut self) {
-        if let Some((time, value)) = self.candidate.take() {
-            // An accepted-time reevaluation replaces the existing endpoint
-            // instead of adding a duplicate timestamp.
-            if self.count > 0 {
-                let newest = if self.count == self.capacity {
-                    (self.write_pos + self.capacity - 1) % self.capacity
-                } else {
-                    self.count - 1
-                };
-                if self.samples[newest].0 == time {
-                    self.samples[newest] = (time, value);
-                    return;
+    fn resolve_configuration(
+        &self,
+        delay: f64,
+        max_delay: Option<f64>,
+    ) -> Result<(DelayConfiguration, f64, f64), String> {
+        match (self.configuration, max_delay) {
+            (None, None) => Ok((DelayConfiguration::Fixed { delay }, delay, 0.0)),
+            (None, Some(maximum)) => {
+                let effective = delay.min(maximum);
+                let derivative = if delay < maximum { 1.0 } else { 0.0 };
+                Ok((
+                    DelayConfiguration::Bounded { max_delay: maximum },
+                    effective,
+                    derivative,
+                ))
+            }
+            (Some(configuration @ DelayConfiguration::Fixed { delay: fixed }), None) => {
+                Ok((configuration, fixed, 0.0))
+            }
+            (
+                Some(configuration @ DelayConfiguration::Bounded { max_delay: maximum }),
+                Some(_),
+            ) => {
+                let effective = delay.min(maximum);
+                let derivative = if delay < maximum { 1.0 } else { 0.0 };
+                Ok((configuration, effective, derivative))
+            }
+            (Some(DelayConfiguration::Fixed { .. }), Some(_)) => Err(
+                "absdelay call changed from omitted maxdelay to present maxdelay after initialization"
+                    .into(),
+            ),
+            (Some(DelayConfiguration::Bounded { .. }), None) => Err(
+                "absdelay call changed from present maxdelay to omitted maxdelay after initialization"
+                    .into(),
+            ),
+        }
+    }
+
+    fn candidate_evaluation(
+        &self,
+        time: f64,
+        value: f64,
+        effective_delay: f64,
+        delay_scale: f64,
+    ) -> Result<DelayEvaluation, String> {
+        if self.samples.is_empty() {
+            if time != 0.0 {
+                return Err(format!(
+                    "absdelay requires an accepted time-zero anchor before evaluation at {time}"
+                ));
+            }
+            return Ok(DelayEvaluation {
+                output: value,
+                input_coefficient: 1.0,
+                delay_coefficient: 0.0,
+            });
+        }
+
+        let unclamped_target = time - effective_delay;
+        if unclamped_target > 0.0 && unclamped_target == time {
+            return Err(format!(
+                "absdelay td {effective_delay} is not representable relative to time {time}"
+            ));
+        }
+        let target = unclamped_target.max(0.0);
+        let target_delay_derivative = if unclamped_target > 0.0 {
+            -delay_scale
+        } else {
+            // The time-zero clamp and its exact kink are deterministic: the
+            // anchored branch has zero local delay derivative.
+            0.0
+        };
+        self.interpolate(target, (time, value), target_delay_derivative)
+    }
+
+    fn interpolate(
+        &self,
+        target: f64,
+        candidate: (f64, f64),
+        target_delay_derivative: f64,
+    ) -> Result<DelayEvaluation, String> {
+        let mut left = None;
+        let mut right = None;
+        for &(sample_time, sample_value) in &self.samples {
+            if sample_time <= target {
+                left = Some((sample_time, sample_value, 0.0));
+            } else {
+                right = Some((sample_time, sample_value, 0.0));
+                break;
+            }
+        }
+        if candidate.0 <= target {
+            left = Some((candidate.0, candidate.1, 1.0));
+        } else if right.is_none() {
+            right = Some((candidate.0, candidate.1, 1.0));
+        }
+
+        let evaluation = match (left, right) {
+            (
+                Some((left_time, left_value, left_input)),
+                Some((right_time, right_value, right_input)),
+            ) => {
+                let interval = right_time - left_time;
+                if !(interval.is_finite() && interval > 0.0) {
+                    return Err("absdelay interpolation interval is not representable".into());
+                }
+                let alpha = ((target - left_time) / interval).clamp(0.0, 1.0);
+                let one_minus_alpha = 1.0 - alpha;
+                let output = alpha.mul_add(right_value, one_minus_alpha * left_value);
+                let input_coefficient = alpha.mul_add(right_input, one_minus_alpha * left_input);
+                let slope = (right_value - left_value) / interval;
+                DelayEvaluation {
+                    output,
+                    input_coefficient,
+                    delay_coefficient: slope * target_delay_derivative,
                 }
             }
-            self.record(time, value);
+            (Some((_, output, input_coefficient)), None)
+            | (None, Some((_, output, input_coefficient))) => DelayEvaluation {
+                output,
+                input_coefficient,
+                delay_coefficient: 0.0,
+            },
+            (None, None) => {
+                return Err("absdelay has no time-zero anchor or candidate sample".into());
+            }
+        };
+        if !evaluation.output.is_finite()
+            || !evaluation.input_coefficient.is_finite()
+            || !evaluation.delay_coefficient.is_finite()
+        {
+            return Err("absdelay interpolation produced an unrepresentable result".into());
         }
+        Ok(evaluation)
     }
 
-    /// Get the delayed value at (current_time - delay).
-    ///
-    /// Uses linear interpolation between stored samples.
-    /// If delay exceeds buffer history, returns oldest value.
-    /// If delay is zero or negative, returns current value (or most recent).
-    pub fn get_delayed(&self, current_time: f64, delay: f64) -> f64 {
-        self.lookup_delayed(current_time, delay, None)
-    }
-
-    fn lookup_delayed(&self, current_time: f64, delay: f64, candidate: Option<(f64, f64)>) -> f64 {
-        self.lookup_delayed_affine(
-            current_time,
-            delay,
-            candidate.map(|(time, value)| (time, value, 0.0)),
-        )
-        .0
-    }
-
-    fn lookup_delayed_affine(
-        &self,
-        current_time: f64,
-        delay: f64,
-        candidate: Option<(f64, f64, f64)>,
-    ) -> (f64, f64) {
-        if self.count == 0 && candidate.is_none() {
-            return (0.0, 0.0);
-        }
-
-        let target_time = current_time - delay;
-
-        // Find the two samples bracketing target_time.
-        // Samples are stored in circular order, so we need to search.
-        let mut before: Option<(f64, f64, f64)> = None;
-        let mut after: Option<(f64, f64, f64)> = None;
-
-        for i in 0..self.count {
-            let idx = if self.count == self.capacity {
-                (self.write_pos + i) % self.capacity
-            } else {
-                i
-            };
-            let (t, v) = self.samples[idx];
-
-            if t <= target_time {
-                before = Some((t, v, 0.0));
-            }
-            if t >= target_time && after.is_none() {
-                after = Some((t, v, 0.0));
-            }
-        }
-
-        if let Some((t, v, coefficient)) = candidate {
-            if t <= target_time {
-                before = Some((t, v, coefficient));
-            }
-            if t >= target_time
-                && after
-                    .map(|(after_time, _, _)| t < after_time)
-                    .unwrap_or(true)
-            {
-                after = Some((t, v, coefficient));
-            }
-        }
-
-        match (before, after) {
-            (Some((t0, v0, c0)), Some((t1, v1, c1))) if t0 != t1 => {
-                // Linear interpolation.
-                let alpha = (target_time - t0) / (t1 - t0);
-                (v0 + alpha * (v1 - v0), c0 + alpha * (c1 - c0))
-            }
-            (Some((_, value, coefficient)), _) => (value, coefficient),
-            (_, Some((_, value, coefficient))) => (value, coefficient),
-            _ => (0.0, 0.0),
-        }
-    }
-
-    /// Clear the buffer.
-    pub fn clear(&mut self) {
-        self.count = 0;
-        self.write_pos = 0;
+    /// Start one complete device evaluation pass, rolling back any earlier
+    /// candidate from a rejected or incomplete Newton pass.
+    pub(crate) fn begin_evaluation(&mut self) {
         self.candidate = None;
     }
 
-    pub(crate) fn checkpoint(&self) -> DelayCheckpoint {
-        let mut samples = Vec::with_capacity(self.count);
-        for index in 0..self.count {
-            let physical = if self.count == self.capacity {
-                (self.write_pos + index) % self.capacity
-            } else {
-                index
-            };
-            samples.push(self.samples[physical]);
+    /// Validate the candidate that would be committed without mutation.
+    pub(crate) fn validate_commit(&self, accepted_time: f64) -> Result<(), String> {
+        let Some(candidate) = self.candidate else {
+            return Ok(());
+        };
+        if candidate.time != accepted_time {
+            return Err(format!(
+                "delay candidate time {} does not equal accepted time {accepted_time}",
+                candidate.time
+            ));
         }
-        DelayCheckpoint { samples }
+        if let Some((latest_time, _)) = self.samples.back() {
+            if candidate.time <= *latest_time {
+                return Err(format!(
+                    "delay candidate time {} is not strictly after latest accepted time {latest_time}",
+                    candidate.time
+                ));
+            }
+        } else if candidate.time != 0.0 {
+            return Err(format!(
+                "delay's first accepted sample must be the time-zero anchor, got {}",
+                candidate.time
+            ));
+        }
+        if self
+            .configuration
+            .is_some_and(|accepted| accepted != candidate.configuration)
+        {
+            return Err("delay candidate configuration differs from accepted configuration".into());
+        }
+
+        let cutoff = (candidate.time - candidate.configuration.retention()).max(0.0);
+        let retained = self.retained_sample_count(cutoff);
+        if retained >= MAX_DELAY_HISTORY_SAMPLES {
+            return Err(format!(
+                "delay history requires more than the supported {MAX_DELAY_HISTORY_SAMPLES} accepted samples inside its configured horizon"
+            ));
+        }
+        Ok(())
+    }
+
+    /// Commit a candidate for direct users that do not use the VM's two-phase
+    /// accepted-state transaction.
+    pub fn commit(&mut self) -> Result<(), String> {
+        let Some(candidate) = self.candidate else {
+            return Ok(());
+        };
+        self.validate_commit(candidate.time)?;
+        self.apply_validated_commit();
+        Ok(())
+    }
+
+    /// Apply a candidate after the VM has validated every device atomically.
+    pub(crate) fn apply_validated_commit(&mut self) {
+        let Some(candidate) = self.candidate.take() else {
+            return;
+        };
+        if self.configuration.is_none() {
+            self.configuration = Some(candidate.configuration);
+        }
+        self.samples.push_back((candidate.time, candidate.value));
+        self.prune(candidate.time, candidate.configuration.retention());
+    }
+
+    fn retained_sample_count(&self, cutoff: f64) -> usize {
+        let removable = self
+            .samples
+            .iter()
+            .zip(self.samples.iter().skip(1))
+            .take_while(|(_, next)| next.0 < cutoff)
+            .count();
+        self.samples.len() - removable
+    }
+
+    fn prune(&mut self, accepted_time: f64, retention: f64) {
+        let cutoff = (accepted_time - retention).max(0.0);
+        while self.samples.len() >= 2 && self.samples[1].0 < cutoff {
+            self.samples.pop_front();
+        }
+    }
+
+    /// Clear accepted definition, history, and speculative state.
+    pub fn clear(&mut self) {
+        self.samples.clear();
+        self.configuration = None;
+        self.candidate = None;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn allocation_capacity(&self) -> usize {
+        self.samples.capacity()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn accepted_sample_count(&self) -> usize {
+        self.samples.len()
+    }
+
+    pub(crate) fn checkpoint(&self) -> DelayCheckpoint {
+        DelayCheckpoint {
+            configuration: self.configuration,
+            samples: self.samples.iter().copied().collect(),
+        }
     }
 
     pub(crate) fn validate_checkpoint_ready(&self) -> Result<(), String> {
@@ -339,6 +500,26 @@ impl DelayBuffer {
     }
 
     pub(crate) fn validate_checkpoint(checkpoint: &DelayCheckpoint) -> Result<(), String> {
+        if checkpoint.samples.len() > MAX_DELAY_HISTORY_SAMPLES {
+            return Err(format!(
+                "delay checkpoint exceeds the supported {MAX_DELAY_HISTORY_SAMPLES} samples"
+            ));
+        }
+        match checkpoint.configuration {
+            Some(configuration) => {
+                let retention = configuration.retention();
+                if !retention.is_finite() || retention <= 0.0 {
+                    return Err("delay checkpoint configuration is not finite and positive".into());
+                }
+                if checkpoint.samples.is_empty() {
+                    return Err("configured delay checkpoint has no accepted samples".into());
+                }
+            }
+            None if !checkpoint.samples.is_empty() => {
+                return Err("unconfigured delay checkpoint contains accepted samples".into());
+            }
+            None => return Ok(()),
+        }
         let mut previous = None;
         for (index, &(time, value)) in checkpoint.samples.iter().enumerate() {
             if !time.is_finite() || !value.is_finite() {
@@ -351,17 +532,20 @@ impl DelayBuffer {
             }
             previous = Some(time);
         }
+        if checkpoint
+            .samples
+            .first()
+            .is_some_and(|sample| sample.0 < 0.0)
+        {
+            return Err("delay checkpoint contains a negative sample time".into());
+        }
         Ok(())
     }
 
     pub(crate) fn restore_checkpoint(&mut self, checkpoint: &DelayCheckpoint) {
-        let capacity = checkpoint.samples.len().max(2);
-        self.capacity = capacity;
         self.samples.clear();
-        self.samples.resize(capacity, (0.0, 0.0));
-        self.samples[..checkpoint.samples.len()].copy_from_slice(&checkpoint.samples);
-        self.count = checkpoint.samples.len();
-        self.write_pos = self.count % capacity;
+        self.samples.extend(checkpoint.samples.iter().copied());
+        self.configuration = checkpoint.configuration;
         self.candidate = None;
     }
 }
@@ -423,74 +607,184 @@ mod tests {
     }
 
     #[test]
-    fn delay_history_grows_without_dropping_accepted_samples() {
+    fn delay_history_is_time_bounded_and_retains_the_interpolation_predecessor() {
         let mut buffer = DelayBuffer::new(2);
         for time in 0..4096 {
-            buffer.record(time as f64, time as f64);
+            buffer
+                .eval(time as f64, time as f64, 1.0, Some(2.0))
+                .unwrap();
+            buffer.commit().unwrap();
         }
 
-        assert_eq!(buffer.get_delayed(4095.0, 4095.0), 0.0);
-        assert_eq!(buffer.get_delayed(4095.0, 2047.5), 2047.5);
+        assert_eq!(
+            buffer.checkpoint().samples,
+            vec![
+                (4092.0, 4092.0),
+                (4093.0, 4093.0),
+                (4094.0, 4094.0),
+                (4095.0, 4095.0)
+            ]
+        );
+        let interpolation = buffer
+            .eval_with_coefficients(4096.0, 4096.0, 2.0, Some(2.0))
+            .unwrap();
+        assert_eq!(interpolation.output, 4094.0);
     }
 
     #[test]
-    fn delay_candidate_reports_exact_input_interpolation_coefficient() {
-        let mut empty = DelayBuffer::new(2);
-        let evaluation = empty.eval_with_input_coefficient(2.0, 7.0, 0.5);
-        assert_eq!(evaluation.output, 7.0);
-        assert_eq!(evaluation.input_coefficient, 1.0);
+    fn delay_candidate_reports_exact_input_and_delay_coefficients() {
+        let mut buffer = DelayBuffer::new(2);
+        buffer.eval(0.0, 0.0, 0.5, Some(10.0)).unwrap();
+        buffer.commit().unwrap();
+        buffer.eval(1.0, 2.0, 0.5, Some(10.0)).unwrap();
+        buffer.commit().unwrap();
+        let accepted_before = buffer.checkpoint();
 
-        let mut interpolating = DelayBuffer::new(2);
-        interpolating.record(0.0, 0.0);
-        let accepted_before = interpolating.checkpoint();
-        let evaluation = interpolating.eval_with_input_coefficient(2.0, 2.0, 0.5);
-        assert_eq!(evaluation.output, 1.5);
-        assert_eq!(evaluation.input_coefficient, 0.75);
-        assert_eq!(interpolating.checkpoint(), accepted_before);
+        let evaluation = buffer
+            .eval_with_coefficients(2.0, 6.0, 0.5, Some(10.0))
+            .unwrap();
+        assert_eq!(evaluation.output, 4.0);
+        assert_eq!(evaluation.input_coefficient, 0.5);
+        assert_eq!(evaluation.delay_coefficient, -4.0);
+        assert_eq!(buffer.checkpoint(), accepted_before);
 
         let epsilon = 1.0e-6;
-        let upper = interpolating.eval(2.0, 2.0 + epsilon, 0.5);
-        let lower = interpolating.eval(2.0, 2.0 - epsilon, 0.5);
+        let upper = buffer.eval(2.0, 6.0 + epsilon, 0.5, Some(10.0)).unwrap();
+        let lower = buffer.eval(2.0, 6.0 - epsilon, 0.5, Some(10.0)).unwrap();
         let finite_difference = (upper - lower) / (2.0 * epsilon);
         assert!((finite_difference - evaluation.input_coefficient).abs() <= 1.0e-9);
+
+        let upper = buffer.eval(2.0, 6.0, 0.5 + epsilon, Some(10.0)).unwrap();
+        let lower = buffer.eval(2.0, 6.0, 0.5 - epsilon, Some(10.0)).unwrap();
+        let finite_difference = (upper - lower) / (2.0 * epsilon);
+        assert!((finite_difference - evaluation.delay_coefficient).abs() <= 1.0e-9);
     }
 
     #[test]
-    fn delay_candidate_coefficient_covers_history_only_and_zero_delay() {
+    fn delay_kinks_choose_the_anchored_and_right_hand_branches_deterministically() {
         let mut buffer = DelayBuffer::new(2);
-        buffer.record(0.0, 0.0);
-        buffer.record(1.0, 1.0);
+        buffer.eval(0.0, 0.0, 1.0, Some(5.0)).unwrap();
+        buffer.commit().unwrap();
+        buffer.eval(1.0, 2.0, 1.0, Some(5.0)).unwrap();
+        buffer.commit().unwrap();
 
-        let history_only = buffer.eval_with_input_coefficient(2.0, 3.0, 1.5);
-        assert_eq!(history_only.output, 0.5);
-        assert_eq!(history_only.input_coefficient, 0.0);
+        let anchor = buffer
+            .eval_with_coefficients(1.0, 99.0, 1.0, Some(5.0))
+            .unwrap();
+        assert_eq!(anchor.output, 0.0);
+        assert_eq!(anchor.input_coefficient, 0.0);
+        assert_eq!(anchor.delay_coefficient, 0.0);
 
-        let direct = buffer.eval_with_input_coefficient(2.0, 3.0, 0.0);
-        assert_eq!(direct.output, 3.0);
-        assert_eq!(direct.input_coefficient, 1.0);
+        let exact_sample = buffer
+            .eval_with_coefficients(2.0, 6.0, 1.0, Some(5.0))
+            .unwrap();
+        assert_eq!(exact_sample.output, 2.0);
+        assert_eq!(exact_sample.input_coefficient, 0.0);
+        assert_eq!(
+            exact_sample.delay_coefficient, -4.0,
+            "an exact interior sample uses the causal right-hand segment"
+        );
+
+        let mut maximum = DelayBuffer::new(2);
+        maximum.eval(0.0, 0.0, 1.0, Some(1.0)).unwrap();
+        maximum.commit().unwrap();
+        maximum.eval(1.0, 2.0, 1.0, Some(1.0)).unwrap();
+        maximum.commit().unwrap();
+        let maximum_kink = maximum
+            .eval_with_coefficients(2.0, 6.0, 1.0, Some(1.0))
+            .unwrap();
+        assert_eq!(maximum_kink.output, 2.0);
+        assert_eq!(
+            maximum_kink.delay_coefficient, 0.0,
+            "td == maxdelay uses the saturated branch"
+        );
+    }
+
+    #[test]
+    fn omitted_delay_and_present_maximum_freeze_only_on_acceptance() {
+        let mut fixed = DelayBuffer::new(2);
+        fixed.eval(0.0, 0.0, 1.0, None).unwrap();
+        assert_eq!(fixed.checkpoint().configuration, None);
+        fixed.begin_evaluation();
+        fixed.eval(0.0, 0.0, 2.0, None).unwrap();
+        fixed.commit().unwrap();
+        assert_eq!(
+            fixed.checkpoint().configuration,
+            Some(super::DelayConfiguration::Fixed { delay: 2.0 })
+        );
+        fixed.eval(1.0, 1.0, 0.1, None).unwrap();
+        fixed.commit().unwrap();
+        let frozen = fixed.eval_with_coefficients(3.0, 3.0, 0.1, None).unwrap();
+        assert_eq!(frozen.output, 1.0);
+        assert_eq!(frozen.delay_coefficient, 0.0);
+
+        let mut bounded = DelayBuffer::new(2);
+        bounded.eval(0.0, 0.0, 1.0, Some(3.0)).unwrap();
+        assert_eq!(bounded.checkpoint().configuration, None);
+        bounded.commit().unwrap();
+        bounded.eval(1.0, 1.0, 1.0, Some(99.0)).unwrap();
+        bounded.commit().unwrap();
+        let clamped = bounded
+            .eval_with_coefficients(4.0, 4.0, 4.0, Some(99.0))
+            .unwrap();
+        assert_eq!(clamped.output, 1.0);
+        assert_eq!(clamped.delay_coefficient, 0.0);
+        assert_eq!(
+            bounded.checkpoint().configuration,
+            Some(super::DelayConfiguration::Bounded { max_delay: 3.0 })
+        );
+    }
+
+    #[test]
+    fn delay_rejects_invalid_and_nonmonotonic_state_without_mutating_history() {
+        let mut buffer = DelayBuffer::new(2);
+        for invalid in [
+            buffer.eval(0.0, 1.0, 0.0, None),
+            buffer.eval(0.0, 1.0, f64::NAN, None),
+            buffer.eval(0.0, 1.0, 1.0, Some(f64::INFINITY)),
+        ] {
+            assert!(invalid.is_err());
+        }
+        buffer.eval(0.0, 0.0, 1.0, None).unwrap();
+        buffer.commit().unwrap();
+        buffer.eval(1.0, 1.0, 1.0, None).unwrap();
+        buffer.commit().unwrap();
+        let accepted = buffer.checkpoint();
+
+        assert!(buffer.eval(0.5, 2.0, 1.0, None).is_err());
+        assert_eq!(buffer.checkpoint(), accepted);
+        buffer.eval(1.0, 2.0, 1.0, None).unwrap();
+        assert!(buffer.commit().is_err());
+        assert_eq!(buffer.checkpoint(), accepted);
+        buffer.begin_evaluation();
+        assert!(buffer.validate_checkpoint_ready().is_ok());
     }
 
     #[test]
     fn transition_candidate_reports_branch_exact_input_coefficient() {
         let mut transition = TransitionFilter::default();
+        transition
+            .eval_operating_point(0.0, 0.0, 0.0, 2.0, 2.0)
+            .unwrap();
+        transition.promote_operating_point_candidate();
         let accepted_before = transition.checkpoint();
 
-        let before_start = transition.eval_with_input_coefficient(1.0, 1.0, 1.0, 2.0, 2.0);
+        let before_start = transition
+            .eval_with_input_coefficient(1.0, 1.0, 1.0, 2.0, 2.0)
+            .unwrap();
         assert_eq!(before_start.output, 0.0);
         assert_eq!(before_start.input_coefficient, 0.0);
         assert_eq!(transition.checkpoint(), accepted_before);
 
-        let ramp = transition.eval_with_input_coefficient(1.0, 1.0, -1.0, 2.0, 2.0);
-        assert_eq!(ramp.output, 0.5);
-        assert_eq!(ramp.input_coefficient, 0.5);
+        let ramp_start = transition
+            .eval_with_input_coefficient(1.0, 1.0, 0.0, 2.0, 2.0)
+            .unwrap();
+        assert_eq!(ramp_start.output, 0.0);
+        assert_eq!(ramp_start.input_coefficient, 0.0);
 
-        let epsilon = 1.0e-6;
-        let upper = transition.eval(1.0 + epsilon, 1.0, -1.0, 2.0, 2.0);
-        let lower = transition.eval(1.0 - epsilon, 1.0, -1.0, 2.0, 2.0);
-        let finite_difference = (upper - lower) / (2.0 * epsilon);
-        assert!((finite_difference - ramp.input_coefficient).abs() <= 1.0e-9);
-
-        let instantaneous = transition.eval_with_input_coefficient(1.0, 1.0, 0.0, 0.0, 0.0);
+        let instantaneous = transition
+            .eval_with_input_coefficient(1.0, 1.0, 0.0, 0.0, 0.0)
+            .unwrap();
         assert_eq!(instantaneous.output, 1.0);
         assert_eq!(instantaneous.input_coefficient, 1.0);
     }
@@ -498,12 +792,249 @@ mod tests {
     #[test]
     fn unchanged_transition_target_has_no_current_input_coefficient() {
         let mut transition = TransitionFilter::default();
-        transition.eval(1.0, 1.0, 0.0, 0.0, 0.0);
+        transition
+            .eval_operating_point(1.0, 0.0, 0.0, 1.0, 1.0)
+            .unwrap();
+        transition.promote_operating_point_candidate();
+        transition.eval(1.0, 1.0, 0.0, 0.0, 0.0).unwrap();
         transition.commit();
 
-        let evaluation = transition.eval_with_input_coefficient(1.0, 2.0, 0.0, 1.0, 1.0);
+        let evaluation = transition
+            .eval_with_input_coefficient(1.0, 2.0, 0.0, 1.0, 1.0)
+            .unwrap();
         assert_eq!(evaluation.output, 1.0);
         assert_eq!(evaluation.input_coefficient, 0.0);
+    }
+
+    #[test]
+    fn transition_derivative_is_branch_exact_and_read_only() {
+        let transition = seeded_transition(0.0);
+        let accepted = transition.checkpoint();
+
+        assert_eq!(
+            transition.eval_derivative(1.0, 3.0, 1.0, 1.0, 2.0, 2.0, 2),
+            Ok(0.0),
+            "delayed output depends only on accepted history"
+        );
+        assert_eq!(
+            transition.eval_derivative(1.0, 3.0, 1.0, 0.0, 2.0, 2.0, 2),
+            Ok(0.0),
+            "a finite active ramp depends only on accepted history"
+        );
+        assert_eq!(
+            transition.eval_derivative(1.0, 3.0, 1.0, 0.0, 0.0, 0.0, 2),
+            Ok(3.0),
+            "an instantaneous transition tracks the current input"
+        );
+        let direct = seeded_transition(1.0);
+        for _ in 0..16 {
+            assert_eq!(
+                direct.eval_derivative(1.0, 3.0, 1.0, 0.0, 0.0, 0.0, 2),
+                Ok(3.0),
+                "an unchanged direct transition must retain a nonsingular Jacobian"
+            );
+        }
+        for analysis_type in [0, 1, 3, 4] {
+            assert_eq!(
+                transition.eval_derivative(1.0, 3.0, 1.0, 1.0, 2.0, 2.0, analysis_type),
+                Ok(3.0),
+                "analysis {analysis_type} must use unity small-signal action"
+            );
+        }
+        assert_eq!(transition.checkpoint(), accepted);
+
+        let mut cancelling = seeded_transition(0.0);
+        cancelling.eval(2.0, 0.0, 0.0, 2.0, 2.0).unwrap();
+        cancelling.commit();
+        cancelling.eval(2.0, 1.0, 0.0, 2.0, 2.0).unwrap();
+        cancelling.commit();
+        let active = cancelling.checkpoint();
+        assert_eq!(active.output, 1.0);
+        assert!(active.active.is_some());
+        assert_eq!(
+            cancelling.eval_derivative(1.0, 3.0, 1.0, 0.0, 0.0, 0.0, 2),
+            Ok(3.0),
+            "an instantaneous history cancellation still maps output directly to input"
+        );
+        assert_eq!(cancelling.checkpoint(), active);
+    }
+
+    fn seeded_transition(value: f64) -> TransitionFilter {
+        let mut filter = TransitionFilter::default();
+        filter
+            .eval_operating_point(value, 0.0, 0.0, 1.0, 1.0)
+            .unwrap();
+        filter.promote_operating_point_candidate();
+        filter
+    }
+
+    #[test]
+    fn transition_keeps_ordered_pending_transport_events_and_cancels_only_later_work() {
+        let mut filter = seeded_transition(0.0);
+        filter.eval(1.0, 0.1, 2.0, 1.0, 1.0).unwrap();
+        filter.commit();
+        filter.eval(0.0, 0.2, 2.0, 1.0, 1.0).unwrap();
+        filter.commit();
+        filter.eval(2.0, 0.3, 1.85, 1.0, 1.0).unwrap();
+        filter.commit();
+
+        let checkpoint = filter.checkpoint();
+        let starts: Vec<_> = checkpoint
+            .pending
+            .iter()
+            .map(|event| event.start_time)
+            .collect();
+        assert_eq!(starts, vec![2.1, 2.15]);
+        assert_eq!(filter.next_event_time(0.3), Some(2.1));
+
+        assert_eq!(filter.eval(2.0, 2.1, 1.85, 1.0, 1.0), Ok(0.0));
+        filter.commit();
+        assert_eq!(filter.next_event_time(2.1), Some(2.15));
+        let output = filter.eval(2.0, 2.15, 1.85, 1.0, 1.0).unwrap();
+        assert!((output - 0.05).abs() < 1.0e-12, "output={output}");
+        filter.commit();
+        assert_eq!(filter.next_event_time(2.15), Some(3.125));
+    }
+
+    #[test]
+    fn transition_interruption_uses_lrm_origin_and_destination_slope_rules() {
+        let mut continuing = seeded_transition(0.0);
+        continuing.eval(1.0, 1.0, 0.0, 2.0, 2.0).unwrap();
+        continuing.commit();
+        assert_eq!(continuing.eval(2.0, 2.0, 0.0, 4.0, 4.0), Ok(0.5));
+        continuing.commit();
+        assert_eq!(continuing.next_event_time(2.0), Some(5.0));
+        assert_eq!(continuing.eval(2.0, 3.0, 0.0, 4.0, 4.0), Ok(1.0));
+
+        let mut reversing = seeded_transition(0.0);
+        reversing.eval(2.0, 1.0, 0.0, 4.0, 4.0).unwrap();
+        reversing.commit();
+        assert_eq!(reversing.eval(-1.0, 2.0, 0.0, 2.0, 2.0), Ok(0.5));
+        reversing.commit();
+        assert_eq!(reversing.next_event_time(2.0), Some(3.0));
+        assert_eq!(reversing.eval(-1.0, 2.5, 0.0, 2.0, 2.0), Ok(-0.25));
+    }
+
+    #[test]
+    fn immediate_transition_cancels_pending_work_and_exact_target_cancels_active_ramp() {
+        let mut filter = seeded_transition(0.0);
+        filter.eval(1.0, 1.0, 5.0, 2.0, 2.0).unwrap();
+        filter.commit();
+        filter.eval(2.0, 2.0, 5.0, 2.0, 2.0).unwrap();
+        filter.commit();
+        assert_eq!(filter.checkpoint().pending.len(), 2);
+
+        filter.eval(3.0, 3.0, 0.0, 2.0, 2.0).unwrap();
+        filter.commit();
+        assert!(filter.checkpoint().pending.is_empty());
+        assert_eq!(filter.next_event_time(3.0), Some(5.0));
+        assert_eq!(filter.eval(1.5, 4.0, 0.0, 2.0, 2.0), Ok(1.5));
+        filter.commit();
+        assert_eq!(filter.next_event_time(4.0), None);
+    }
+
+    #[test]
+    fn transition_rejects_invalid_timing_without_mutating_accepted_history() {
+        let mut filter = seeded_transition(0.0);
+        let accepted = filter.checkpoint();
+        for result in [
+            filter.eval(1.0, 1.0, -1.0, 1.0, 1.0),
+            filter.eval(1.0, 1.0, 0.0, f64::NAN, 1.0),
+            filter.eval(1.0, 1.0, 0.0, 1.0, f64::INFINITY),
+        ] {
+            assert!(result.is_err());
+            assert_eq!(filter.checkpoint(), accepted);
+        }
+    }
+
+    /// Focused transition hot-path benchmark. Run with:
+    /// `cargo test -p rspice-veriloga --release --lib
+    /// transition_candidate_microbenchmark -- --ignored --nocapture`.
+    ///
+    /// This deliberately measures repeated Newton candidates with a queued
+    /// event. The accepted queue is shared copy-on-write, so a read-only
+    /// reevaluation must not allocate or copy arbitrary pending history.
+    #[test]
+    #[ignore = "manual runtime microbenchmark"]
+    fn transition_candidate_microbenchmark() {
+        const ITERATIONS: usize = 1_000_000;
+        const QUEUED_EVENTS: usize = 64;
+        let mut filter = seeded_transition(0.0);
+        for index in 1..=QUEUED_EVENTS {
+            let time = index as f64 * 1.0e-3;
+            filter.eval(index as f64, time, 100.0, 0.4, 0.6).unwrap();
+            filter.commit();
+        }
+        assert_eq!(filter.committed.pending.len(), QUEUED_EVENTS);
+
+        let started = std::time::Instant::now();
+        let mut checksum = 0.0;
+        for _ in 0..ITERATIONS {
+            checksum += std::hint::black_box(
+                filter
+                    .eval(
+                        std::hint::black_box(QUEUED_EVENTS as f64),
+                        0.1,
+                        100.0,
+                        0.4,
+                        0.6,
+                    )
+                    .unwrap(),
+            );
+        }
+        let cow_elapsed = started.elapsed();
+        let cow_ns = cow_elapsed.as_nanos() as f64 / ITERATIONS as f64;
+
+        let started = std::time::Instant::now();
+        let mut derivative_checksum = 0.0;
+        for _ in 0..ITERATIONS {
+            derivative_checksum += std::hint::black_box(
+                filter
+                    .eval_derivative(
+                        std::hint::black_box(QUEUED_EVENTS as f64),
+                        1.0,
+                        0.1,
+                        100.0,
+                        0.4,
+                        0.6,
+                        2,
+                    )
+                    .unwrap(),
+            );
+        }
+        let derivative_elapsed = started.elapsed();
+        let derivative_ns = derivative_elapsed.as_nanos() as f64 / ITERATIONS as f64;
+
+        // Paired reference for the pre-COW representation: eagerly clone the
+        // full accepted queue on every speculative Newton evaluation before
+        // running the identical candidate. This keeps the comparison inside
+        // one optimized binary and avoids machine/load drift between commits.
+        let started = std::time::Instant::now();
+        let mut eager_checksum = 0_usize;
+        for _ in 0..ITERATIONS {
+            let copied = std::hint::black_box(filter.committed.pending.as_ref().clone());
+            eager_checksum ^= std::hint::black_box(copied.len());
+            checksum += std::hint::black_box(
+                filter
+                    .eval(
+                        std::hint::black_box(QUEUED_EVENTS as f64),
+                        0.1,
+                        100.0,
+                        0.4,
+                        0.6,
+                    )
+                    .unwrap(),
+            );
+        }
+        let eager_elapsed = started.elapsed();
+        let eager_ns = eager_elapsed.as_nanos() as f64 / ITERATIONS as f64;
+        eprintln!(
+            "transition_candidate_microbenchmark iterations={ITERATIONS} queued_events={QUEUED_EVENTS} cow_elapsed={cow_elapsed:?} cow_ns_per_candidate={cow_ns:.3} derivative_elapsed={derivative_elapsed:?} derivative_ns_per_candidate={derivative_ns:.3} eager_reference_elapsed={eager_elapsed:?} eager_reference_ns_per_candidate={eager_ns:.3} avoided_eager_copy_ratio={:.3} checksum={checksum} derivative_checksum={derivative_checksum} eager_checksum={eager_checksum}",
+            eager_ns / cow_ns,
+        );
+        assert_eq!(checksum.to_bits(), 0.0_f64.to_bits());
+        assert_eq!(derivative_checksum.to_bits(), 0.0_f64.to_bits());
+        assert_eq!(eager_checksum, 0);
     }
 
     #[test]
@@ -654,9 +1185,13 @@ mod tests {
     #[test]
     fn stateful_filter_candidates_do_not_mutate_committed_state() {
         let mut transition = TransitionFilter::default();
-        assert_eq!(transition.eval(1.0, 1.0, 0.0, 2.0, 2.0), 0.0);
-        assert_eq!(transition.eval(2.0, 1.0, 0.0, 2.0, 2.0), 0.0);
-        assert_eq!(transition.eval(1.0, 1.0, 0.0, 2.0, 2.0), 0.0);
+        transition
+            .eval_operating_point(0.0, 0.0, 0.0, 2.0, 2.0)
+            .unwrap();
+        transition.promote_operating_point_candidate();
+        assert_eq!(transition.eval(1.0, 1.0, 0.0, 2.0, 2.0), Ok(0.0));
+        assert_eq!(transition.eval(2.0, 1.0, 0.0, 2.0, 2.0), Ok(0.0));
+        assert_eq!(transition.eval(1.0, 1.0, 0.0, 2.0, 2.0), Ok(0.0));
 
         let mut slew = SlewFilter::default();
         slew.eval_operating_point(0.0, 0.0);
@@ -787,37 +1322,51 @@ impl Default for DelayBuffer {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct TransitionState {
-    /// Current output value
-    pub output: f64,
-    /// Target value we're transitioning to
-    pub target: f64,
-    /// Time when transition started
-    pub start_time: f64,
-    /// Time when transition ends
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TransitionSegmentCheckpoint {
+    pub origin_time: f64,
+    pub origin_value: f64,
+    pub destination: f64,
     pub end_time: f64,
-    /// Initial value at start of transition
-    pub start_value: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct TransitionCheckpoint {
-    pub output: f64,
-    pub target: f64,
+pub struct PendingTransitionCheckpoint {
     pub start_time: f64,
-    pub end_time: f64,
-    pub start_value: f64,
+    pub destination: f64,
+    pub rise_time: f64,
+    pub fall_time: f64,
+}
+
+#[derive(Debug, Clone)]
+struct TransitionState {
+    input: f64,
+    output: f64,
+    time: f64,
+    active: Option<TransitionSegmentCheckpoint>,
+    pending: Arc<VecDeque<PendingTransitionCheckpoint>>,
+    initialized: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransitionCheckpoint {
+    pub input: f64,
+    pub output: f64,
+    pub time: f64,
+    pub active: Option<TransitionSegmentCheckpoint>,
+    pub pending: Vec<PendingTransitionCheckpoint>,
+    pub initialized: bool,
 }
 
 impl Default for TransitionState {
     fn default() -> Self {
         Self {
+            input: 0.0,
             output: 0.0,
-            target: 0.0,
-            start_time: 0.0,
-            end_time: 0.0,
-            start_value: 0.0,
+            time: 0.0,
+            active: None,
+            pending: Arc::new(VecDeque::new()),
+            initialized: false,
         }
     }
 }
@@ -844,9 +1393,9 @@ impl TransitionFilter {
         delay: f64,
         rise_time: f64,
         fall_time: f64,
-    ) -> f64 {
+    ) -> Result<f64, String> {
         self.eval_with_input_coefficient(input, time, delay, rise_time, fall_time)
-            .output
+            .map(|evaluation| evaluation.output)
     }
 
     /// Evaluate a transition candidate and expose its exact local input
@@ -858,13 +1407,49 @@ impl TransitionFilter {
         delay: f64,
         rise_time: f64,
         fall_time: f64,
-    ) -> StatefulEvaluation {
+    ) -> Result<StatefulEvaluation, String> {
         let (state, evaluation) =
-            self.candidate_evaluation(input, time, delay, rise_time, fall_time);
+            self.candidate_evaluation(input, time, delay, rise_time, fall_time)?;
         self.candidate = state;
         self.candidate_time = time;
         self.candidate_valid = true;
-        evaluation
+        Ok(evaluation)
+    }
+
+    /// Read-only exact local Jacobian action for one transition candidate.
+    ///
+    /// Transient evaluation recomputes the same branch from accepted history
+    /// as the primal candidate. Delayed and finite-duration segments therefore
+    /// have zero dependence on the current Newton input, while an
+    /// instantaneous direct transition has unit dependence. Operating-point
+    /// and small-signal analyses use the LRM unity approximation.
+    pub(crate) fn eval_derivative(
+        &self,
+        input: f64,
+        input_derivative: f64,
+        time: f64,
+        delay: f64,
+        rise_time: f64,
+        fall_time: f64,
+        analysis_type: u8,
+    ) -> Result<f64, String> {
+        if !input_derivative.is_finite() {
+            return Err(format!(
+                "transition input derivative must be finite, got {input_derivative}"
+            ));
+        }
+        match analysis_type {
+            2 => self
+                .candidate_evaluation(input, time, delay, rise_time, fall_time)
+                .map(|(_, evaluation)| evaluation.input_coefficient * input_derivative),
+            0 | 1 | 3 | 4 => {
+                Self::validate_operands(input, time, delay, rise_time, fall_time)?;
+                Ok(input_derivative)
+            }
+            _ => Err(format!(
+                "transition derivative received invalid analysis type {analysis_type}"
+            )),
+        }
     }
 
     fn candidate_evaluation(
@@ -874,49 +1459,256 @@ impl TransitionFilter {
         delay: f64,
         rise_time: f64,
         fall_time: f64,
-    ) -> (TransitionState, StatefulEvaluation) {
-        let mut state = self.committed;
-        // Check if input target changed.
-        let target_changed = (input - state.target).abs() > 1e-15;
-        if target_changed {
-            // New transition started.
-            let trans_time = if input > state.output {
-                rise_time
-            } else {
-                fall_time
+    ) -> Result<(TransitionState, StatefulEvaluation), String> {
+        Self::validate_operands(input, time, delay, rise_time, fall_time)?;
+        let mut state = self.committed.clone();
+        if !state.initialized {
+            state = TransitionState {
+                input,
+                output: input,
+                time,
+                active: None,
+                pending: Arc::new(VecDeque::new()),
+                initialized: true,
             };
-            state.target = input;
-            state.start_value = state.output;
-            state.start_time = time + delay;
-            state.end_time = state.start_time + trans_time;
+            return Ok((
+                state,
+                StatefulEvaluation {
+                    output: input,
+                    input_coefficient: 1.0,
+                },
+            ));
+        }
+        if time < state.time {
+            return Err(format!(
+                "transition candidate time {time} precedes accepted time {}",
+                state.time
+            ));
         }
 
-        // Compute output based on current transition state.
-        let (output, input_coefficient) = if time < state.start_time {
-            // Before transition starts.
-            (state.output, 0.0)
-        } else if time >= state.end_time || (state.end_time - state.start_time).abs() < 1e-15 {
-            // Transition complete or instantaneous.
-            state.output = state.target;
-            (state.target, if target_changed { 1.0 } else { 0.0 })
+        Self::advance_to(&mut state, time)?;
+        let input_changed = input != state.input;
+        let mut input_coefficient = if delay == 0.0
+            && rise_time == 0.0
+            && fall_time == 0.0
+            && state.active.is_none()
+            && state.pending.is_empty()
+            && state.output == input
+        {
+            1.0
         } else {
-            // In transition - linear interpolation.
-            let t = (time - state.start_time) / (state.end_time - state.start_time);
-            state.output = state.start_value + t * (state.target - state.start_value);
-            (state.output, if target_changed { t } else { 0.0 })
+            0.0
         };
-        (
-            state,
+        if input_changed {
+            let start_time = time + delay;
+            if !start_time.is_finite() {
+                return Err("transition delay produces a non-finite event time".into());
+            }
+            let event = PendingTransitionCheckpoint {
+                start_time,
+                destination: input,
+                rise_time,
+                fall_time,
+            };
+            state.input = input;
+            if delay == 0.0 {
+                Arc::make_mut(&mut state.pending).clear();
+                input_coefficient = Self::apply_transition(&mut state, event)?;
+            } else {
+                let pending = Arc::make_mut(&mut state.pending);
+                while pending
+                    .back()
+                    .is_some_and(|scheduled| scheduled.start_time >= start_time)
+                {
+                    pending.pop_back();
+                }
+                pending.push_back(event);
+            }
+        }
+        state.time = time;
+        Ok((
+            state.clone(),
             StatefulEvaluation {
-                output,
+                output: state.output,
                 input_coefficient,
             },
-        )
+        ))
+    }
+
+    pub(crate) fn validate_operands(
+        input: f64,
+        time: f64,
+        delay: f64,
+        rise_time: f64,
+        fall_time: f64,
+    ) -> Result<(), String> {
+        if !input.is_finite() {
+            return Err(format!("transition input must be finite, got {input}"));
+        }
+        if !time.is_finite() || time < 0.0 {
+            return Err(format!(
+                "transition evaluation time must be finite and non-negative, got {time}"
+            ));
+        }
+        for (name, value) in [
+            ("delay", delay),
+            ("rise time", rise_time),
+            ("fall time", fall_time),
+        ] {
+            if !value.is_finite() || value < 0.0 {
+                return Err(format!(
+                    "transition {name} must be finite and non-negative, got {value}"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn output_at(state: &TransitionState, time: f64) -> f64 {
+        let Some(active) = state.active else {
+            return state.output;
+        };
+        if time >= active.end_time {
+            return active.destination;
+        }
+        let duration = active.end_time - active.origin_time;
+        let fraction = (time - active.origin_time) / duration;
+        active.origin_value + fraction * (active.destination - active.origin_value)
+    }
+
+    fn advance_to(state: &mut TransitionState, time: f64) -> Result<(), String> {
+        loop {
+            let Some(event) = state.pending.front().copied() else {
+                break;
+            };
+            if event.start_time > time {
+                break;
+            }
+            state.output = Self::output_at(state, event.start_time);
+            if state
+                .active
+                .is_some_and(|active| event.start_time >= active.end_time)
+            {
+                state.active = None;
+            }
+            Arc::make_mut(&mut state.pending).pop_front();
+            Self::apply_transition(state, event)?;
+        }
+
+        state.output = Self::output_at(state, time);
+        if state.active.is_some_and(|active| time >= active.end_time) {
+            state.active = None;
+        }
+        state.time = time;
+        Ok(())
+    }
+
+    /// Apply one transition at its exact leading corner. The interruption
+    /// rules follow VAMS-2023 4.5.8: continuing in the same direction uses
+    /// the original origin to establish the new slope, while reversing uses
+    /// the original destination. The resulting line is shifted through the
+    /// interruption point so repeated interruptions retain the required
+    /// effective origin.
+    fn apply_transition(
+        state: &mut TransitionState,
+        event: PendingTransitionCheckpoint,
+    ) -> Result<f64, String> {
+        let output = state.output;
+        if event.destination == output {
+            state.active = None;
+            state.output = event.destination;
+            return Ok(if event.rise_time == 0.0 && event.fall_time == 0.0 {
+                // With no smoothing on either side the operator is the
+                // identity even when a history cancellation happens to land
+                // exactly on the candidate input. Keeping unity here avoids
+                // a branch-dependent singular Jacobian at that base point.
+                1.0
+            } else {
+                0.0
+            });
+        }
+
+        let transition_time = if event.destination > output {
+            event.rise_time
+        } else {
+            event.fall_time
+        };
+        if transition_time == 0.0 {
+            state.active = None;
+            state.output = event.destination;
+            return Ok(1.0);
+        }
+
+        let reference = match state.active {
+            Some(active) if event.start_time < active.end_time => {
+                let was_rising = active.destination > active.origin_value;
+                let reverses = if was_rising {
+                    event.destination < output
+                } else {
+                    event.destination > output
+                };
+                if reverses {
+                    active.destination
+                } else {
+                    active.origin_value
+                }
+            }
+            _ => output,
+        };
+        let slope = (event.destination - reference) / transition_time;
+        if !slope.is_finite() || slope == 0.0 {
+            return Err("transition interruption produced an invalid slope".into());
+        }
+        let origin_time = event.start_time + (reference - output) / slope;
+        let end_time = event.start_time + (event.destination - output) / slope;
+        if !origin_time.is_finite() || !end_time.is_finite() || end_time <= event.start_time {
+            return Err("transition interruption produced an invalid corner time".into());
+        }
+        state.active = Some(TransitionSegmentCheckpoint {
+            origin_time,
+            origin_value: reference,
+            destination: event.destination,
+            end_time,
+        });
+        state.output = output;
+        Ok(0.0)
+    }
+
+    /// Record the final operating-point Newton candidate. It becomes the
+    /// accepted transient seed only when the engine activates integration.
+    pub(crate) fn eval_operating_point(
+        &mut self,
+        input: f64,
+        time: f64,
+        delay: f64,
+        rise_time: f64,
+        fall_time: f64,
+    ) -> Result<f64, String> {
+        Self::validate_operands(input, time, delay, rise_time, fall_time)?;
+        self.candidate = TransitionState {
+            input,
+            output: input,
+            time,
+            active: None,
+            pending: Arc::new(VecDeque::new()),
+            initialized: true,
+        };
+        self.candidate_time = time;
+        self.candidate_valid = true;
+        Ok(input)
+    }
+
+    pub(crate) fn promote_operating_point_candidate(&mut self) {
+        if self.candidate_valid {
+            self.committed = self.candidate.clone();
+        }
+        self.candidate = self.committed.clone();
+        self.candidate_valid = false;
     }
 
     pub fn commit(&mut self) {
         if self.candidate_valid {
-            self.committed = self.candidate;
+            self.committed = self.candidate.clone();
             self.candidate_valid = false;
         }
     }
@@ -931,13 +1723,7 @@ impl TransitionFilter {
         if !self.candidate_valid {
             return Ok(());
         }
-        Self::validate_checkpoint(&TransitionCheckpoint {
-            output: self.candidate.output,
-            target: self.candidate.target,
-            start_time: self.candidate.start_time,
-            end_time: self.candidate.end_time,
-            start_value: self.candidate.start_value,
-        })?;
+        Self::validate_checkpoint(&Self::checkpoint_from_state(&self.candidate))?;
         if self.candidate_time != accepted_time {
             return Err(format!(
                 "transition candidate time {} does not equal accepted time {accepted_time}",
@@ -953,13 +1739,34 @@ impl TransitionFilter {
     }
 
     pub(crate) fn checkpoint(&self) -> TransitionCheckpoint {
+        Self::checkpoint_from_state(&self.committed)
+    }
+
+    fn checkpoint_from_state(state: &TransitionState) -> TransitionCheckpoint {
         TransitionCheckpoint {
-            output: self.committed.output,
-            target: self.committed.target,
-            start_time: self.committed.start_time,
-            end_time: self.committed.end_time,
-            start_value: self.committed.start_value,
+            input: state.input,
+            output: state.output,
+            time: state.time,
+            active: state.active,
+            pending: state.pending.iter().copied().collect(),
+            initialized: state.initialized,
         }
+    }
+
+    /// Exact accepted leading/trailing corner strictly after `time`.
+    pub(crate) fn next_event_time(&self, time: f64) -> Option<f64> {
+        let pending = self
+            .committed
+            .pending
+            .front()
+            .map(|event| event.start_time)
+            .filter(|event| *event > time);
+        let active = self
+            .committed
+            .active
+            .map(|segment| segment.end_time)
+            .filter(|event| *event > time);
+        [pending, active].into_iter().flatten().reduce(f64::min)
     }
 
     pub(crate) fn validate_checkpoint_ready(&self) -> Result<(), String> {
@@ -970,31 +1777,66 @@ impl TransitionFilter {
     }
 
     pub(crate) fn validate_checkpoint(checkpoint: &TransitionCheckpoint) -> Result<(), String> {
-        let values = [
-            checkpoint.output,
-            checkpoint.target,
-            checkpoint.start_time,
-            checkpoint.end_time,
-            checkpoint.start_value,
-        ];
-        if values.iter().any(|value| !value.is_finite()) {
+        if [checkpoint.input, checkpoint.output, checkpoint.time]
+            .iter()
+            .any(|value| !value.is_finite())
+        {
             return Err("transition accepted state is not finite".into());
         }
-        if checkpoint.end_time < checkpoint.start_time {
-            return Err("transition end time precedes its start time".into());
+        if checkpoint.time < 0.0 {
+            return Err("transition accepted time is negative".into());
+        }
+        if !checkpoint.initialized
+            && (checkpoint.active.is_some() || !checkpoint.pending.is_empty())
+        {
+            return Err("uninitialized transition contains active or pending state".into());
+        }
+        if let Some(active) = checkpoint.active {
+            if [
+                active.origin_time,
+                active.origin_value,
+                active.destination,
+                active.end_time,
+            ]
+            .iter()
+            .any(|value| !value.is_finite())
+                || active.end_time <= checkpoint.time
+                || active.end_time <= active.origin_time
+            {
+                return Err("transition active segment has invalid corners".into());
+            }
+        }
+        let mut previous = checkpoint.time;
+        for event in &checkpoint.pending {
+            if [
+                event.start_time,
+                event.destination,
+                event.rise_time,
+                event.fall_time,
+            ]
+            .iter()
+            .any(|value| !value.is_finite())
+                || event.start_time <= previous
+                || event.rise_time < 0.0
+                || event.fall_time < 0.0
+            {
+                return Err("transition pending queue is invalid or unordered".into());
+            }
+            previous = event.start_time;
         }
         Ok(())
     }
 
     pub(crate) fn restore_checkpoint(&mut self, checkpoint: &TransitionCheckpoint) {
         self.committed = TransitionState {
+            input: checkpoint.input,
             output: checkpoint.output,
-            target: checkpoint.target,
-            start_time: checkpoint.start_time,
-            end_time: checkpoint.end_time,
-            start_value: checkpoint.start_value,
+            time: checkpoint.time,
+            active: checkpoint.active,
+            pending: Arc::new(checkpoint.pending.iter().copied().collect()),
+            initialized: checkpoint.initialized,
         };
-        self.candidate = self.committed;
+        self.candidate = self.committed.clone();
         self.candidate_time = 0.0;
         self.candidate_valid = false;
     }

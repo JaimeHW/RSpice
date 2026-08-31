@@ -552,17 +552,10 @@ fn complex_inputs(bias: &BiasPoint) -> CfgEvalInputs<ComplexStep> {
     }
 }
 
-/// `ddx` reads back a Jacobian entry the pass already computed.
-///
-/// It is checked by value rather than in the sweep above because the pass
-/// deliberately treats it as constant when differentiating: `ddx` is a
-/// first-order readback, so propagating through it would mean carrying second
-/// derivatives for every model that reports a transconductance. The level being
-/// replaced makes the same choice, and so does every tool this one is measured
-/// against.
-///
-/// What must be exact is the entry itself, including which lane it names and
-/// which way round the two nodes go — the part `resolve_ddx` can get wrong.
+/// `ddx` reads back a first derivative, and an equation that consumes it must
+/// stamp the corresponding second derivative. Both the value and its Jacobian
+/// are checked: treating the readback as a constant produces the right current
+/// here and a dangerously plausible zero matrix entry.
 #[test]
 fn ddx_reads_back_the_jacobian_entry_it_names() {
     let artifact = artifact(
@@ -584,7 +577,8 @@ endmodule
     let lanes: Vec<AdSeed> = (0..artifact.mir.nodes.len())
         .map(|index| AdSeed::NodePotential(index.into()))
         .collect();
-    let differentiated = differentiate(&cfg.function, &lanes).expect("must differentiate");
+    let mut differentiated = differentiate(&cfg.function, &lanes).expect("must differentiate");
+    let readback_row = differentiated.derivative_row(cfg.residuals[1]);
 
     let bias = bias_point(&artifact);
     let snapshot = evaluate_cfg(&differentiated.function, &inputs(&bias)).expect("must evaluate");
@@ -600,6 +594,302 @@ endmodule
         (actual - expected).abs() <= 1.0e-12 * expected.abs(),
         "ddx read back {actual}, but d(ids)/d(V(g)) is {expected}"
     );
+    let expected_second = 1.0e-3 * 2.0 * beta;
+    let stamped_second = readback_row[0]
+        .and_then(|value| snapshot.value(value))
+        .unwrap_or(0.0);
+    assert!(
+        (stamped_second - expected_second).abs() <= 1.0e-12 * expected_second.abs(),
+        "ddx Jacobian is {stamped_second}, expected the analytic second derivative {expected_second}"
+    );
+    let numeric_second = difference(
+        &differentiated.function,
+        &bias,
+        AdSeed::NodePotential(0usize.into()),
+        cfg.residuals[1],
+    );
+    assert!(
+        (stamped_second - numeric_second).abs()
+            <= 1.0e-7 * stamped_second.abs().max(numeric_second.abs()),
+        "ddx Jacobian is {stamped_second} by rule and {numeric_second} by finite difference"
+    );
+}
+
+#[test]
+fn differential_voltage_ddx_holds_common_mode_fixed() {
+    let artifact = artifact(
+        r#"
+module differential_readback(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ ddx(V(p, n) * V(p, n), V(p, n));
+endmodule
+"#,
+    );
+    let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).expect("fixture must lower");
+    let lanes: Vec<AdSeed> = (0..artifact.mir.nodes.len())
+        .map(|index| AdSeed::NodePotential(index.into()))
+        .collect();
+    let differentiated = differentiate(&cfg.function, &lanes).expect("must differentiate");
+    let mut bias = bias_point(&artifact);
+    bias.node_potentials[0] = 1.7;
+    bias.node_potentials[1] = -0.4;
+    let snapshot =
+        evaluate_cfg(&differentiated.function, &inputs(&bias)).expect("must evaluate readback");
+
+    let expected = 2.0 * (bias.node_potentials[0] - bias.node_potentials[1]);
+    let actual = snapshot
+        .value(cfg.residuals[0])
+        .expect("the contribution is defined");
+    assert!(
+        (actual - expected).abs() <= 1.0e-12 * expected.abs().max(1.0),
+        "d/dV(p,n) must move p and n symmetrically: actual={actual} expected={expected}"
+    );
+}
+
+#[test]
+fn ground_first_ddx_keeps_its_sign_through_a_cfg_merge() {
+    let artifact = artifact(
+        r#"
+module ground_first_merge(p);
+    inout p;
+    electrical p;
+    real x;
+    analog begin
+        if (V(p) > 0.0)
+            x = V(0, p) * V(0, p) * V(0, p);
+        else
+            x = 2.0 * V(0, p) * V(0, p) * V(0, p);
+        I(p) <+ ddx(x, V(0, p));
+    end
+endmodule
+"#,
+    );
+    let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).expect("fixture must lower");
+    let lanes = [AdSeed::NodePotential(0usize.into())];
+    let mut differentiated = differentiate(&cfg.function, &lanes).expect("must differentiate");
+    let row = differentiated.derivative_row(cfg.residuals[0]);
+    let mut bias = bias_point(&artifact);
+    bias.node_potentials[0] = 0.7;
+    let snapshot =
+        evaluate_cfg(&differentiated.function, &inputs(&bias)).expect("must evaluate merged ddx");
+
+    let value = snapshot.value(cfg.residuals[0]).expect("ddx is defined");
+    let jacobian = row[0]
+        .and_then(|entry| snapshot.value(entry))
+        .unwrap_or(0.0);
+    assert!((value - 3.0 * 0.7_f64.powi(2)).abs() <= 1.0e-12, "{value}");
+    assert!((jacobian - 6.0 * 0.7).abs() <= 1.0e-12, "{jacobian}");
+    let numeric = difference(
+        &differentiated.function,
+        &bias,
+        AdSeed::NodePotential(0usize.into()),
+        cfg.residuals[0],
+    );
+    assert!(
+        (jacobian - numeric).abs() <= 1.0e-7,
+        "{jacobian} vs {numeric}"
+    );
+}
+
+#[test]
+fn flow_ddx_matches_a_branch_unknown_finite_difference_with_voltage_coupling() {
+    let artifact = artifact(
+        r#"
+module flow_readback(p, n, ctrl, out, reverse, monitor);
+    inout p, n, ctrl, out, reverse, monitor;
+    electrical p, n, ctrl, out, reverse, monitor;
+    branch (p, n) sense;
+    analog begin
+        V(sense) <+ 0.25;
+        I(out, n) <+ ddx(I(sense) * I(sense) + V(ctrl, n) * I(sense), I(sense));
+        I(reverse, n) <+ ddx(I(sense) * I(sense) + V(ctrl, n) * I(sense), I(n, p));
+        I(monitor, n) <+ I(sense) * I(sense) + V(ctrl, n) * I(sense);
+    end
+endmodule
+"#,
+    );
+    assert_eq!(artifact.mir.branch_unknowns.len(), 1);
+    let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).expect("fixture must lower");
+    let lanes: Vec<AdSeed> = (0..artifact.mir.nodes.len())
+        .map(|index| AdSeed::NodePotential(index.into()))
+        .chain(
+            (0..artifact.mir.branch_unknowns.len())
+                .map(|index| AdSeed::BranchUnknownFlow(index.into())),
+        )
+        .collect();
+    let mut differentiated = differentiate(&cfg.function, &lanes).expect("must differentiate");
+    let forward_row = differentiated.derivative_row(cfg.residuals[1]);
+    let reversed_row = differentiated.derivative_row(cfg.residuals[2]);
+    let mut bias = bias_point(&artifact);
+    bias.node_potentials[1] = -0.2;
+    bias.node_potentials[2] = 0.9;
+    bias.branch_unknown_flows[0] = 0.37;
+
+    let nominal =
+        evaluate_cfg(&differentiated.function, &inputs(&bias)).expect("must evaluate readback");
+    let ddx_value = nominal
+        .value(cfg.residuals[1])
+        .expect("ddx contribution is defined");
+    let reversed_ddx_value = nominal
+        .value(cfg.residuals[2])
+        .expect("reversed ddx contribution is defined");
+
+    let step = 1.0e-6;
+    let mut plus = bias.clone();
+    plus.branch_unknown_flows[0] += step;
+    let plus = evaluate_cfg(&differentiated.function, &inputs(&plus))
+        .expect("positive perturbation evaluates")
+        .value(cfg.residuals[3])
+        .expect("monitor contribution is defined");
+    let mut minus = bias.clone();
+    minus.branch_unknown_flows[0] -= step;
+    let minus = evaluate_cfg(&differentiated.function, &inputs(&minus))
+        .expect("negative perturbation evaluates")
+        .value(cfg.residuals[3])
+        .expect("monitor contribution is defined");
+    let finite_difference = (plus - minus) / (2.0 * step);
+
+    assert!(
+        (ddx_value - finite_difference).abs() <= 1.0e-9 * finite_difference.abs().max(1.0),
+        "flow ddx={ddx_value} finite_difference={finite_difference}"
+    );
+    assert!(
+        (reversed_ddx_value + finite_difference).abs() <= 1.0e-9 * finite_difference.abs().max(1.0),
+        "reversed flow ddx={reversed_ddx_value} finite_difference={finite_difference}"
+    );
+
+    let branch_lane = lanes.len() - 1;
+    let ctrl_lane = 2;
+    let forward_branch = forward_row[branch_lane]
+        .and_then(|value| nominal.value(value))
+        .unwrap_or(0.0);
+    let forward_ctrl = forward_row[ctrl_lane]
+        .and_then(|value| nominal.value(value))
+        .unwrap_or(0.0);
+    let reversed_branch = reversed_row[branch_lane]
+        .and_then(|value| nominal.value(value))
+        .unwrap_or(0.0);
+    let reversed_ctrl = reversed_row[ctrl_lane]
+        .and_then(|value| nominal.value(value))
+        .unwrap_or(0.0);
+    assert!((forward_branch - 2.0).abs() <= 1.0e-12, "{forward_branch}");
+    assert!((forward_ctrl - 1.0).abs() <= 1.0e-12, "{forward_ctrl}");
+    assert!(
+        (reversed_branch + 2.0).abs() <= 1.0e-12,
+        "{reversed_branch}"
+    );
+    assert!((reversed_ctrl + 1.0).abs() <= 1.0e-12, "{reversed_ctrl}");
+}
+
+#[test]
+fn magnetic_phi_ddx_matches_flow_and_mmf_potential_derivatives() {
+    let artifact = artifact(
+        r#"
+`include "disciplines.vams"
+module magnetic_readback(p, n, out, monitor);
+    inout p, n, out, monitor;
+    magnetic p, n;
+    electrical out, monitor;
+    branch (p, n) sense;
+    analog begin
+        MMF(sense) <+ 0.25;
+        I(out) <+ ddx(Phi(sense) * Phi(sense) + MMF(sense) * Phi(sense), Phi(sense));
+        I(monitor) <+ Phi(sense) * Phi(sense) + MMF(sense) * Phi(sense);
+    end
+endmodule
+"#,
+    );
+    assert_eq!(artifact.mir.branch_unknowns.len(), 1);
+    let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).expect("fixture must lower");
+    let lanes: Vec<AdSeed> = (0..artifact.mir.nodes.len())
+        .map(|index| AdSeed::NodePotential(index.into()))
+        .chain(
+            (0..artifact.mir.branch_unknowns.len())
+                .map(|index| AdSeed::BranchUnknownFlow(index.into())),
+        )
+        .collect();
+    let mut differentiated = differentiate(&cfg.function, &lanes).expect("must differentiate");
+    let row = differentiated.derivative_row(cfg.residuals[1]);
+    let mut bias = bias_point(&artifact);
+    bias.node_potentials[0] = 0.8;
+    bias.node_potentials[1] = -0.1;
+    bias.branch_unknown_flows[0] = 0.37;
+    let snapshot =
+        evaluate_cfg(&differentiated.function, &inputs(&bias)).expect("must evaluate magnetic ddx");
+
+    let mmf = bias.node_potentials[0] - bias.node_potentials[1];
+    let phi = bias.branch_unknown_flows[0];
+    let value = snapshot.value(cfg.residuals[1]).expect("ddx is defined");
+    assert!((value - (2.0 * phi + mmf)).abs() <= 1.0e-12, "{value}");
+    let branch_lane = lanes.len() - 1;
+    let d_phi = row[branch_lane]
+        .and_then(|entry| snapshot.value(entry))
+        .unwrap_or(0.0);
+    let d_mmf_pos = row[0]
+        .and_then(|entry| snapshot.value(entry))
+        .unwrap_or(0.0);
+    let d_mmf_neg = row[1]
+        .and_then(|entry| snapshot.value(entry))
+        .unwrap_or(0.0);
+    assert!((d_phi - 2.0).abs() <= 1.0e-12, "d/dPhi={d_phi}");
+    assert!((d_mmf_pos - 1.0).abs() <= 1.0e-12, "d/dMMF(p)={d_mmf_pos}");
+    assert!((d_mmf_neg + 1.0).abs() <= 1.0e-12, "d/dMMF(n)={d_mmf_neg}");
+
+    for (lane, seed) in lanes.iter().copied().enumerate() {
+        let stamped = row[lane]
+            .and_then(|entry| snapshot.value(entry))
+            .unwrap_or(0.0);
+        let numeric = difference(&differentiated.function, &bias, seed, cfg.residuals[1]);
+        assert!(
+            (stamped - numeric).abs() <= 1.0e-7 * stamped.abs().max(numeric.abs()).max(1.0),
+            "magnetic ddx derivative for {seed:?}: stamped={stamped} numeric={numeric}"
+        );
+    }
+}
+
+#[test]
+fn flow_ddx_without_a_solver_branch_unknown_fails_closed() {
+    let artifact = artifact(
+        r#"
+module dependent_flow_axis(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ ddx(V(p, n) * V(p, n), I(p, n));
+endmodule
+"#,
+    );
+    let diagnostics = CfgModel::from_hir(&artifact.hir, &artifact.mir)
+        .expect_err("a contributed current is dependent, not a Newton axis");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("ddx flow probe requires a solver-owned branch-current unknown")
+        }),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
+fn nested_ddx_fails_closed_instead_of_truncating_higher_derivatives() {
+    let artifact = artifact(
+        r#"
+module nested_ddx(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ ddx(ddx(V(p, n) * V(p, n) * V(p, n), V(p, n)), V(p, n));
+endmodule
+"#,
+    );
+    let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).expect("fixture must lower");
+    let lanes: Vec<AdSeed> = (0..artifact.mir.nodes.len())
+        .map(|index| AdSeed::NodePotential(index.into()))
+        .collect();
+    let error = differentiate(&cfg.function, &lanes)
+        .expect_err("nested ddx needs a higher-order jet and must fail closed")
+        .to_string();
+    assert!(error.contains("nested ddx is not supported"), "{error}");
 }
 
 /// Packing keeps the sparsity rather than trading it away.

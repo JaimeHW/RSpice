@@ -26,11 +26,13 @@ use super::{
 use crate::native::abi::NativeRuntimeStatus;
 use crate::native::abi::{
     INTEGER_CAST_DESCRIPTOR, integer_binary_const_descriptor, integer_binary_descriptor,
-    integer_shift_const_descriptor, rspice_above_state_native, rspice_absdelay_state_native,
-    rspice_acos, rspice_acosh, rspice_asin, rspice_asinh, rspice_atan, rspice_atan2, rspice_atanh,
-    rspice_ceil, rspice_cos, rspice_cosh, rspice_cross_state_native, rspice_ddt_jacobian_native,
-    rspice_ddt_state_native, rspice_dynamic_variable_slot_native, rspice_exp, rspice_floor,
-    rspice_hypot, rspice_idt_jacobian_native, rspice_idt_state_native, rspice_idtmod_state_native,
+    integer_shift_const_descriptor, rspice_above_state_native,
+    rspice_absdelay_derivative_max_native, rspice_absdelay_derivative_native,
+    rspice_absdelay_state_max_native, rspice_absdelay_state_native, rspice_acos, rspice_acosh,
+    rspice_asin, rspice_asinh, rspice_atan, rspice_atan2, rspice_atanh, rspice_ceil, rspice_cos,
+    rspice_cosh, rspice_cross_state_native, rspice_ddt_jacobian_native, rspice_ddt_state_native,
+    rspice_dynamic_variable_slot_native, rspice_exp, rspice_floor, rspice_hypot,
+    rspice_idt_jacobian_native, rspice_idt_state_native, rspice_idtmod_state_native,
     rspice_integer_operation_native, rspice_laplace_derivative_native, rspice_laplace_step_native,
     rspice_last_crossing_state_native, rspice_limexp, rspice_limited_exp,
     rspice_limiter_previous_native, rspice_limiter_store_native, rspice_log, rspice_log10,
@@ -42,7 +44,8 @@ use crate::native::abi::{
     rspice_native_prior_current_error, rspice_pow, rspice_sin, rspice_sinh,
     rspice_slew_derivative_native, rspice_slew_state_native, rspice_table_derivative_native,
     rspice_table_lookup_native, rspice_tan, rspice_tanh, rspice_timer_state_native,
-    rspice_transition_state_native, rspice_zi_derivative_native, rspice_zi_step_native,
+    rspice_transition_derivative_native, rspice_transition_state_native,
+    rspice_zi_derivative_native, rspice_zi_step_native,
 };
 pub(crate) use crate::native::assignment::NativeAssignment;
 use crate::native::assignment::shareable_batch_ranges;
@@ -214,22 +217,6 @@ fn compile_assignment_function_artifact(
     let artifact = CompiledX64Function::new(body, windows_unwind);
     super::verify_x64_function_artifact(&artifact, "generated assignment function")?;
     Ok(artifact)
-}
-
-pub(super) fn compile_fused_evaluation_kernel_artifact(
-    kernel_image_offset: usize,
-    assignment: crate::native::model::CodeOffset,
-    stamp_values: &[NativeProgram],
-    published_current_pairs: &[Option<(usize, usize)>],
-) -> JitResult<CompiledX64Function> {
-    compile_fused_kernel_artifact(
-        kernel_image_offset,
-        assignment,
-        stamp_values,
-        None,
-        published_current_pairs,
-        "fused evaluation",
-    )
 }
 
 pub(super) fn compile_fused_stamp_kernel_artifact(
@@ -965,11 +952,23 @@ impl FunctionCompiler {
                 NativeOp::ZiStateDerivative(layout) => self.emit_zi_derivative_state(layout)?,
                 NativeOp::TimerState(timer_id) => self.emit_timer_state(timer_id)?,
                 NativeOp::TransitionState(filter_id) => self.emit_transition_state(filter_id)?,
+                NativeOp::TransitionStateDerivative(filter_id) => {
+                    self.emit_transition_derivative_state(filter_id)?
+                }
                 NativeOp::SlewState(filter_id) => self.emit_slew_state(filter_id)?,
                 NativeOp::SlewStateDerivative(filter_id) => {
                     self.emit_slew_derivative_state(filter_id)?
                 }
                 NativeOp::AbsDelayState(buffer_id) => self.emit_absdelay_state(buffer_id)?,
+                NativeOp::AbsDelayStateMax(buffer_id) => {
+                    self.emit_absdelay_helper(buffer_id, 3, rspice_absdelay_state_max_native)?
+                }
+                NativeOp::AbsDelayStateDerivative(buffer_id) => {
+                    self.emit_absdelay_helper(buffer_id, 4, rspice_absdelay_derivative_native)?
+                }
+                NativeOp::AbsDelayStateDerivativeMax(buffer_id) => {
+                    self.emit_absdelay_helper(buffer_id, 5, rspice_absdelay_derivative_max_native)?
+                }
                 NativeOp::CrossState(detector_id) => self.emit_cross_state(detector_id)?,
                 NativeOp::AboveState(detector_id) => self.emit_above_state(detector_id)?,
                 NativeOp::LastCrossingState(detector_id) => {
@@ -3013,6 +3012,29 @@ impl FunctionCompiler {
         Ok(())
     }
 
+    fn emit_transition_derivative_state(&mut self, filter_id: usize) -> JitResult<()> {
+        if self.depth < 5 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: format!(
+                    "transition derivative state requires stack depth 5, found {}",
+                    self.depth
+                )
+                .into(),
+            });
+        }
+
+        let input = self.register_stack[self.depth - 5];
+        self.emit_operand_context_filter_helper_call(
+            input,
+            5,
+            filter_id,
+            rspice_transition_derivative_native,
+        );
+        self.drop_stack_values(4)?;
+        Ok(())
+    }
+
     fn emit_slew_state(&mut self, filter_id: usize) -> JitResult<()> {
         if self.depth < 3 {
             return Err(JitError::Encoding {
@@ -3050,25 +3072,29 @@ impl FunctionCompiler {
     }
 
     fn emit_absdelay_state(&mut self, buffer_id: usize) -> JitResult<()> {
-        if self.depth < 2 {
+        self.emit_absdelay_helper(buffer_id, 2, rspice_absdelay_state_native)
+    }
+
+    fn emit_absdelay_helper(
+        &mut self,
+        buffer_id: usize,
+        operand_count: usize,
+        helper: unsafe extern "C" fn(*const f64, *const crate::native::EvalContext, usize) -> f64,
+    ) -> JitResult<()> {
+        if self.depth < operand_count {
             return Err(JitError::Encoding {
                 model: MODEL.into(),
                 detail: format!(
-                    "absdelay state requires stack depth 2, found {}",
+                    "absdelay state requires stack depth {operand_count}, found {}",
                     self.depth
                 )
                 .into(),
             });
         }
 
-        let input = self.register_stack[self.depth - 2];
-        self.emit_operand_context_filter_helper_call(
-            input,
-            2,
-            buffer_id,
-            rspice_absdelay_state_native,
-        );
-        self.drop_stack_values(1)?;
+        let input = self.register_stack[self.depth - operand_count];
+        self.emit_operand_context_filter_helper_call(input, operand_count, buffer_id, helper);
+        self.drop_stack_values(operand_count - 1)?;
         Ok(())
     }
 
@@ -5450,6 +5476,11 @@ mod tests {
             ),
             ("timer", NativeOp::TimerState(0), false),
             ("transition", NativeOp::TransitionState(0), false),
+            (
+                "transition-derivative",
+                NativeOp::TransitionStateDerivative(0),
+                false,
+            ),
             ("slew", NativeOp::SlewState(0), false),
             ("absdelay", NativeOp::AbsDelayState(0), false),
             ("cross", NativeOp::CrossState(0), false),
@@ -5523,6 +5554,10 @@ mod tests {
             ),
             ("timer", NativeOp::TimerState(0)),
             ("transition", NativeOp::TransitionState(0)),
+            (
+                "transition-derivative",
+                NativeOp::TransitionStateDerivative(0),
+            ),
             ("slew", NativeOp::SlewState(0)),
             ("absdelay", NativeOp::AbsDelayState(0)),
             ("cross", NativeOp::CrossState(0)),
@@ -9552,17 +9587,69 @@ mod tests {
 
         ctx.time = 1.0;
         let first = f(&ctx, std::ptr::null());
-        assert_eq!(first.to_bits(), 310.0_f64.to_bits());
+        assert_eq!(first.to_bits(), 311.0_f64.to_bits());
         filters[0].commit();
 
         ctx.time = 1.4;
         let mid = f(&ctx, std::ptr::null());
-        assert!((mid - 310.5).abs() < 1.0e-12, "mid transition: {mid}");
+        assert!((mid - 311.0).abs() < 1.0e-12, "mid transition: {mid}");
         filters[0].commit();
 
         ctx.time = 1.6;
         let done = f(&ctx, std::ptr::null());
         assert!((done - 311.0).abs() < 1.0e-12, "done transition: {done}");
+    }
+
+    #[test]
+    fn generated_value_leaf_routes_transition_derivative_with_five_operands() {
+        let program = NativeProgram::from_bytecode(
+            "x64-codegen-transition-derivative-test",
+            EntryKind::Jacobian,
+            &BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(3.0),
+                    Instruction::PushConst(0.0),
+                    Instruction::PushConst(0.0),
+                    Instruction::PushConst(0.0),
+                    Instruction::TransitionStateDerivative(0),
+                ],
+            },
+            NativeLoweringLimits::new(0, 0, 0, 0, 0),
+        )
+        .expect("lower transition derivative helper program");
+        let bytes =
+            compile_value_function(&program).expect("compile transition derivative helper leaf");
+        let memory =
+            ExecutableMemory::allocate(&bytes).expect("allocate transition derivative leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+
+        let mut filters = [TransitionFilter::default()];
+        filters[0]
+            .eval(1.0, 0.0, 0.0, 0.0, 0.0)
+            .expect("seed direct transition");
+        filters[0].commit();
+        let accepted = filters[0].checkpoint();
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.analysis_type = 2;
+        ctx.time = 1.0;
+        ctx.transition_filters = filters.as_mut_ptr();
+        ctx.transition_filters_len = filters.len();
+
+        for _ in 0..2 {
+            assert_eq!(
+                f(&ctx, std::ptr::null()).to_bits(),
+                3.0_f64.to_bits(),
+                "unchanged instantaneous transition has unity local Jacobian"
+            );
+            assert_eq!(
+                filters[0].checkpoint(),
+                accepted,
+                "generated native derivative must not change transition history"
+            );
+        }
     }
 
     #[test]
@@ -9661,21 +9748,21 @@ mod tests {
         std::hint::black_box(voltages[0]);
         let first = f(&ctx, std::ptr::null());
         assert_eq!(first.to_bits(), 310.0_f64.to_bits());
-        buffers[0].commit();
+        buffers[0].commit().unwrap();
 
         ctx.time = 0.5;
         voltages[0] = 1.0;
         std::hint::black_box(voltages[0]);
         let delayed_start = f(&ctx, std::ptr::null());
         assert_eq!(delayed_start.to_bits(), 310.0_f64.to_bits());
-        buffers[0].commit();
+        buffers[0].commit().unwrap();
 
         ctx.time = 1.0;
         voltages[0] = 3.0;
         std::hint::black_box(voltages[0]);
         let delayed = f(&ctx, std::ptr::null());
         assert!((delayed - 311.0).abs() < 1.0e-12, "delayed: {delayed}");
-        buffers[0].commit();
+        buffers[0].commit().unwrap();
 
         ctx.time = 1.25;
         voltages[0] = 5.0;

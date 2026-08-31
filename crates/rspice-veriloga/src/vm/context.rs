@@ -779,7 +779,7 @@ impl VmContext {
             self.state_older_candidate[index] = 0.0;
         }
         for buffer in &mut self.delay_buffers {
-            buffer.commit();
+            buffer.apply_validated_commit();
         }
         for filter in &mut self.transition_filters {
             filter.commit();
@@ -982,6 +982,11 @@ impl VmContext {
         for (index, state) in checkpoint.transition_filters.iter().enumerate() {
             TransitionFilter::validate_checkpoint(state)
                 .map_err(|error| invalid(format!("transition {index}: {error}")))?;
+            if state.initialized && state.time != checkpoint.time {
+                return Err(invalid(format!(
+                    "transition {index} accepted time does not equal checkpoint time"
+                )));
+            }
         }
         for (index, state) in checkpoint.slew_filters.iter().enumerate() {
             SlewFilter::validate_checkpoint(state)
@@ -1217,9 +1222,14 @@ impl VmContext {
             })
     }
 
-    /// Earliest exact timer, sampled-filter, or slew catch-up event owned by
-    /// the latest accepted runtime state.
+    /// Earliest exact timer, transition corner, sampled-filter, or slew
+    /// catch-up event owned by the latest accepted runtime state.
     pub(crate) fn transient_event_time(&self) -> Result<Option<f64>, VmError> {
+        let transition = self
+            .transition_filters
+            .iter()
+            .filter_map(|filter| filter.next_event_time(self.time))
+            .reduce(f64::min);
         let slew = self
             .slew_filters
             .iter()
@@ -1245,7 +1255,10 @@ impl VmContext {
             })?;
         let timer = (self.timer_event_bound.is_finite() && self.timer_event_bound > self.time)
             .then_some(self.timer_event_bound);
-        Ok([timer, zi, slew].into_iter().flatten().reduce(f64::min))
+        Ok([timer, transition, zi, slew]
+            .into_iter()
+            .flatten()
+            .reduce(f64::min))
     }
 
     /// Earliest interior zero-crossing target produced by the latest complete
@@ -1358,6 +1371,9 @@ impl VmContext {
                 }
             }
             for filter in &mut self.slew_filters {
+                filter.promote_operating_point_candidate();
+            }
+            for filter in &mut self.transition_filters {
                 filter.promote_operating_point_candidate();
             }
         } else if self.integration != coefficients {
@@ -1804,15 +1820,19 @@ mod tests {
         context.request_timer_event(2.0);
 
         context.allocate_delay_buffers(1);
-        context.delay_buffers[0].eval(0.0, 1.0, 0.25);
-        context.delay_buffers[0].commit();
-        context.delay_buffers[0].eval(1.0, 2.0, 0.25);
-        let delay_capacity = context.delay_buffers[0].capacity;
+        context.delay_buffers[0].eval(0.0, 1.0, 0.25, None).unwrap();
+        context.delay_buffers[0].commit().unwrap();
+        context.delay_buffers[0].eval(1.0, 2.0, 0.25, None).unwrap();
+        let delay_capacity = context.delay_buffers[0].allocation_capacity();
 
         context.allocate_transition_filters(1);
-        context.transition_filters[0].eval(1.0, 0.0, 0.0, 1.0, 1.0);
+        context.transition_filters[0]
+            .eval(1.0, 0.0, 0.0, 1.0, 1.0)
+            .unwrap();
         context.transition_filters[0].commit();
-        context.transition_filters[0].eval(2.0, 0.5, 0.0, 1.0, 1.0);
+        context.transition_filters[0]
+            .eval(2.0, 0.5, 0.0, 1.0, 1.0)
+            .unwrap();
 
         context.allocate_slew_filters(1);
         context.slew_filters[0].eval(1.0, 1.0, slew_rates(0.5, 0.5));
@@ -1874,8 +1894,11 @@ mod tests {
         assert_eq!(context.timer_event_step_bound(), None);
         assert_eq!(context.zi_filter_step_bound().unwrap(), None);
 
-        assert_eq!(context.delay_buffers[0].capacity, delay_capacity);
-        assert_eq!(context.delay_buffers[0].count, 0);
+        assert_eq!(
+            context.delay_buffers[0].allocation_capacity(),
+            delay_capacity
+        );
+        assert_eq!(context.delay_buffers[0].accepted_sample_count(), 0);
         assert_eq!(
             context.laplace_filters[0]
                 .frequency_response(123.0)
@@ -1894,7 +1917,8 @@ mod tests {
             .expect("reset must remove every in-flight operator candidate");
         assert!(reset.delay_buffers[0].samples.is_empty());
         assert_eq!(reset.transition_filters[0].output, 0.0);
-        assert_eq!(reset.transition_filters[0].target, 0.0);
+        assert!(!reset.transition_filters[0].initialized);
+        assert!(reset.transition_filters[0].pending.is_empty());
         assert_eq!(reset.slew_filters[0].output, 0.0);
         assert_eq!(reset.slew_filters[0].prev_time, 0.0);
         assert!(!reset.cross_detectors[0].initialized);
@@ -2079,9 +2103,14 @@ mod tests {
             .laplace_filters
             .push(StateSpaceFilter::integrator(1.0).unwrap());
 
+        context.delay_buffers[0].eval(0.0, 0.0, 0.25, None).unwrap();
+        context.delay_buffers[0].commit().unwrap();
+
         context.begin_stateful_evaluation();
-        context.delay_buffers[0].eval(1.0, 1.0, 0.25);
-        context.transition_filters[0].eval(1.0, 1.0, 0.0, 0.0, 0.0);
+        context.delay_buffers[0].eval(1.0, 1.0, 0.25, None).unwrap();
+        context.transition_filters[0]
+            .eval(1.0, 1.0, 0.0, 0.0, 0.0)
+            .unwrap();
         context.slew_filters[0].eval(1.0, 1.0, slew_rates(10.0, 10.0));
         context.cross_detectors[0].eval(-1.0, 1.0, 0).unwrap();
         context.laplace_filters[0].step(1.0, 0.25).unwrap();
@@ -2089,8 +2118,10 @@ mod tests {
         let accepted = context.accepted_checkpoint().unwrap();
 
         context.begin_stateful_evaluation();
-        context.delay_buffers[0].eval(1.0, 9.0, 0.25);
-        context.transition_filters[0].eval(9.0, 1.0, 0.0, 0.0, 0.0);
+        context.delay_buffers[0].eval(1.0, 9.0, 0.25, None).unwrap();
+        context.transition_filters[0]
+            .eval(9.0, 1.0, 0.0, 0.0, 0.0)
+            .unwrap();
         context.slew_filters[0].eval(9.0, 1.0, slew_rates(10.0, 10.0));
         context.cross_detectors[0].eval(1.0, 1.0, 0).unwrap();
         context.laplace_filters[0].step(9.0, 0.25).unwrap();
@@ -2119,9 +2150,14 @@ mod tests {
             .laplace_filters
             .push(StateSpaceFilter::integrator(1.0).unwrap());
 
+        context.delay_buffers[0].eval(0.0, 0.0, 0.25, None).unwrap();
+        context.delay_buffers[0].commit().unwrap();
+
         context.begin_stateful_evaluation();
-        context.delay_buffers[0].eval(1.0, 2.0, 0.25);
-        context.transition_filters[0].eval(3.0, f64::NAN, 0.0, 1.0, 1.0);
+        context.delay_buffers[0].eval(1.0, 2.0, 0.25, None).unwrap();
+        context.transition_filters[0]
+            .eval(3.0, 0.5, 0.0, 1.0, 1.0)
+            .unwrap();
         context.slew_filters[0].eval(4.0, 1.0, slew_rates(10.0, 10.0));
         context.cross_detectors[0].eval(1.0, 1.0, 0).unwrap();
         context.laplace_filters[0].step(5.0, 0.25).unwrap();
@@ -2129,7 +2165,7 @@ mod tests {
         let before = format!("{context:#?}");
         let error = context
             .advance_state()
-            .expect_err("a malformed transition candidate must fail acceptance");
+            .expect_err("a transition candidate for another time must fail acceptance");
         assert!(error.to_string().contains("transition 0 commit failed"));
         assert_eq!(format!("{context:#?}"), before);
 
@@ -2138,7 +2174,7 @@ mod tests {
         context.begin_stateful_evaluation();
         context.advance_state().unwrap();
         let accepted = context.accepted_checkpoint().unwrap();
-        assert!(accepted.delay_buffers[0].samples.is_empty());
+        assert_eq!(accepted.delay_buffers[0].samples, vec![(0.0, 0.0)]);
         assert_eq!(accepted.transition_filters[0].output, 0.0);
         assert_eq!(accepted.slew_filters[0].output, 0.0);
         assert!(!accepted.cross_detectors[0].initialized);
@@ -2171,9 +2207,13 @@ mod tests {
         context.state_older_candidate = vec![0.0];
 
         context.allocate_delay_buffers(1);
-        context.delay_buffers[0].eval(0.25, 4.0, 0.1);
+        context.delay_buffers[0].eval(0.0, 0.0, 0.1, None).unwrap();
+        context.delay_buffers[0].commit().unwrap();
+        context.delay_buffers[0].eval(0.25, 4.0, 0.1, None).unwrap();
         context.allocate_transition_filters(1);
-        context.transition_filters[0].eval(3.0, 0.25, 0.0, 1.0, 1.0);
+        context.transition_filters[0]
+            .eval(3.0, 0.25, 0.0, 1.0, 1.0)
+            .unwrap();
         context.allocate_slew_filters(1);
         context.slew_filters[0].eval(5.0, 0.25, slew_rates(1.0, 1.0));
         context.allocate_cross_detectors(1);
@@ -2230,13 +2270,13 @@ mod tests {
             ..VmContext::default()
         };
         context.allocate_delay_buffers(1);
-        context.delay_buffers[0].eval(0.0, 1.0, 0.25);
+        context.delay_buffers[0].eval(0.0, 1.0, 0.25, None).unwrap();
         let error = context
             .accepted_checkpoint()
             .expect_err("an in-flight delay candidate must block checkpoint capture");
         assert!(error.to_string().contains("in-flight Newton candidate"));
 
-        context.delay_buffers[0].commit();
+        context.delay_buffers[0].commit().unwrap();
         context.zi_filters = vec![ZiFilter::new(vec![1.0], vec![1.0], 1.0).unwrap()];
         context.zi_filters[0].eval(2.0, 0.0, true).unwrap();
         let error = context
@@ -2326,7 +2366,9 @@ mod tests {
             ..VmContext::default()
         };
         original.allocate_transition_filters(1);
-        original.transition_filters[0].eval(1.0, 0.0, 0.0, 1.0, 1.0);
+        original.transition_filters[0]
+            .eval(1.0, 0.0, 0.0, 1.0, 1.0)
+            .unwrap();
         original.advance_state().unwrap();
         original.zi_filters = vec![ZiFilter::new(vec![1.0], vec![1.0], 5.0e-19).unwrap()];
         original.zi_filters[0].eval(1.0, 0.0, true).unwrap();
@@ -2346,8 +2388,12 @@ mod tests {
 
         original.time = 0.25;
         resumed.time = 0.25;
-        let expected = original.transition_filters[0].eval(1.0, 0.25, 0.0, 1.0, 1.0);
-        let actual = resumed.transition_filters[0].eval(1.0, 0.25, 0.0, 1.0, 1.0);
+        let expected = original.transition_filters[0]
+            .eval(1.0, 0.25, 0.0, 1.0, 1.0)
+            .unwrap();
+        let actual = resumed.transition_filters[0]
+            .eval(1.0, 0.25, 0.0, 1.0, 1.0)
+            .unwrap();
         assert_eq!(expected.to_bits(), actual.to_bits());
     }
 

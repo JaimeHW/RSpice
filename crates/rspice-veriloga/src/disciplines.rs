@@ -8,6 +8,14 @@
 use crate::source::Span;
 use std::collections::HashMap;
 
+/// Whether one of the standard Verilog-AMS access functions names a flow
+/// quantity. Compiler backends share this table so less-common disciplines do
+/// not silently change meaning between portable and native lowering. Magnetic
+/// `Phi` is the flow access and `MMF` is the potential access.
+pub(crate) fn is_standard_flow_access(access: &str) -> bool {
+    matches!(access, "I" | "Pwr" | "F" | "Tau" | "Phi" | "Flow")
+}
+
 /// A nature defines a physical quantity (potential or flow)
 #[derive(Debug, Clone)]
 pub struct Nature {
@@ -155,7 +163,12 @@ impl DisciplineDb {
         self.add_nature(Nature::builtin("Torque", "N*m", 1.0e-6, "Tau"));
 
         // Magnetic
-        self.add_nature(Nature::builtin("Mmf", "A*turn", 1.0e-6, "MMF"));
+        self.add_nature(Nature::builtin(
+            "Magneto_Motive_Force",
+            "A*turn",
+            1.0e-12,
+            "MMF",
+        ));
 
         // Fluid
         self.add_nature(Nature::builtin("Pressure", "Pa", 1.0e-3, "P"));
@@ -224,7 +237,7 @@ impl DisciplineDb {
         self.add_discipline(Discipline::builtin(
             "magnetic",
             Domain::Continuous,
-            Some("Mmf"),
+            Some("Magneto_Motive_Force"),
             Some("Flux"),
         ));
 
@@ -264,5 +277,19 @@ impl DisciplineDb {
             }
             _ => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DisciplineDb, is_standard_flow_access};
+
+    #[test]
+    fn magnetic_access_functions_keep_their_standard_roles() {
+        let disciplines = DisciplineDb::with_standard();
+        assert!(!is_standard_flow_access("MMF"));
+        assert!(is_standard_flow_access("Phi"));
+        assert!(!disciplines.is_flow_access("MMF"));
+        assert!(disciplines.is_flow_access("Phi"));
     }
 }

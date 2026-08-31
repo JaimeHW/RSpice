@@ -484,6 +484,34 @@ impl FunctionRegistry {
             FunctionSignature::analog_operator("idtmod", 4),
         );
         functions.insert("ddx".into(), FunctionSignature::analog_operator("ddx", 2));
+        functions.insert(
+            "absdelay".into(),
+            FunctionSignature {
+                name: "absdelay".into(),
+                params: vec![
+                    FunctionParam {
+                        name: "expr".into(),
+                        param_type: ValueType::Real,
+                        is_optional: false,
+                        default: None,
+                    },
+                    FunctionParam {
+                        name: "td".into(),
+                        param_type: ValueType::Real,
+                        is_optional: false,
+                        default: None,
+                    },
+                    FunctionParam {
+                        name: "maxdelay".into(),
+                        param_type: ValueType::Real,
+                        is_optional: true,
+                        default: None,
+                    },
+                ],
+                return_type: ValueType::Real,
+                is_analog_operator: true,
+            },
+        );
         functions.insert("slew".into(), FunctionSignature::analog_operator("slew", 3));
         functions.insert(
             "laplace_zp".into(),
@@ -598,6 +626,22 @@ mod tests {
                 !(signature.min_args()..=signature.max_args()).contains(&arity),
                 "slew arity {arity} must be rejected"
             );
+        }
+    }
+
+    #[test]
+    fn absdelay_signature_accepts_exactly_two_or_three_arguments() {
+        let registry = FunctionRegistry::new();
+        let signature = registry.get("absdelay").expect("absdelay is registered");
+
+        assert!(signature.is_analog_operator);
+        assert_eq!(signature.min_args(), 2);
+        assert_eq!(signature.max_args(), 3);
+        for arity in 2..=3 {
+            assert!((signature.min_args()..=signature.max_args()).contains(&arity));
+        }
+        for arity in [0, 1, 4] {
+            assert!(!(signature.min_args()..=signature.max_args()).contains(&arity));
         }
     }
 }

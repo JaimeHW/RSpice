@@ -11,12 +11,14 @@ use super::verifier::{verify_exact_function, verify_exact_function_at};
 use crate::native::abi::NativeRuntimeStatus;
 use crate::native::abi::{
     INTEGER_CAST_DESCRIPTOR, integer_binary_const_descriptor, integer_binary_descriptor,
-    integer_shift_const_descriptor, rspice_above_state_native, rspice_absdelay_state_native,
-    rspice_acos, rspice_acosh, rspice_asin, rspice_asinh, rspice_atan, rspice_atan2, rspice_atanh,
-    rspice_cos, rspice_cosh, rspice_cross_state_native, rspice_ddt_jacobian_native,
-    rspice_ddt_state_native, rspice_dynamic_variable_slot_native, rspice_exp, rspice_hypot,
-    rspice_idt_jacobian_native, rspice_idt_state_native, rspice_idtmod_state_native,
-    rspice_integer_operation_native, rspice_laplace_derivative_native, rspice_laplace_step_native,
+    integer_shift_const_descriptor, rspice_above_state_native,
+    rspice_absdelay_derivative_max_native, rspice_absdelay_derivative_native,
+    rspice_absdelay_state_max_native, rspice_absdelay_state_native, rspice_acos, rspice_acosh,
+    rspice_asin, rspice_asinh, rspice_atan, rspice_atan2, rspice_atanh, rspice_cos, rspice_cosh,
+    rspice_cross_state_native, rspice_ddt_jacobian_native, rspice_ddt_state_native,
+    rspice_dynamic_variable_slot_native, rspice_exp, rspice_hypot, rspice_idt_jacobian_native,
+    rspice_idt_state_native, rspice_idtmod_state_native, rspice_integer_operation_native,
+    rspice_laplace_derivative_native, rspice_laplace_step_native,
     rspice_last_crossing_state_native, rspice_limexp, rspice_limited_exp,
     rspice_limiter_previous_native, rspice_limiter_store_native, rspice_log, rspice_log10,
     rspice_mod, rspice_native_current_probe_error, rspice_native_dynamic_variable_error,
@@ -27,7 +29,8 @@ use crate::native::abi::{
     rspice_native_prior_current_error, rspice_pow, rspice_sin, rspice_sinh,
     rspice_slew_derivative_native, rspice_slew_state_native, rspice_table_derivative_native,
     rspice_table_lookup_native, rspice_tan, rspice_tanh, rspice_timer_state_native,
-    rspice_transition_state_native, rspice_zi_derivative_native, rspice_zi_step_native,
+    rspice_transition_derivative_native, rspice_transition_state_native,
+    rspice_zi_derivative_native, rspice_zi_step_native,
 };
 use crate::native::assignment::{NativeAssignment, shareable_batch_ranges};
 use crate::native::expr::{
@@ -1293,6 +1296,12 @@ impl FunctionCompiler {
                 filter_id,
                 rspice_transition_state_native as *const () as usize,
             )?,
+            NativeOp::TransitionStateDerivative(filter_id) => self.emit_operand_context_helper(
+                prepared,
+                5,
+                filter_id,
+                rspice_transition_derivative_native as *const () as usize,
+            )?,
             NativeOp::SlewState(filter_id) => self.emit_operand_context_helper(
                 prepared,
                 3,
@@ -1310,6 +1319,24 @@ impl FunctionCompiler {
                 2,
                 buffer_id,
                 rspice_absdelay_state_native as *const () as usize,
+            )?,
+            NativeOp::AbsDelayStateMax(buffer_id) => self.emit_operand_context_helper(
+                prepared,
+                3,
+                buffer_id,
+                rspice_absdelay_state_max_native as *const () as usize,
+            )?,
+            NativeOp::AbsDelayStateDerivative(buffer_id) => self.emit_operand_context_helper(
+                prepared,
+                4,
+                buffer_id,
+                rspice_absdelay_derivative_native as *const () as usize,
+            )?,
+            NativeOp::AbsDelayStateDerivativeMax(buffer_id) => self.emit_operand_context_helper(
+                prepared,
+                5,
+                buffer_id,
+                rspice_absdelay_derivative_max_native as *const () as usize,
             )?,
             NativeOp::CrossState(detector_id) => self.emit_operand_context_helper(
                 prepared,
@@ -2908,6 +2935,51 @@ mod cross_target_contract_tests {
                 instruction_occurrences(&bytes, instruction),
                 1,
                 "AArch64 slew derivative must contain exactly one {label}"
+            );
+        }
+    }
+
+    #[test]
+    fn transition_derivative_encodes_one_five_operand_helper_call() {
+        let program = NativeProgram::from_ops_for_test(
+            vec![
+                NativeOp::Const(1.5),
+                NativeOp::Const(-2.0),
+                NativeOp::Const(0.25),
+                NativeOp::Const(0.5),
+                NativeOp::Const(0.75),
+                NativeOp::TransitionStateDerivative(0),
+            ],
+            5,
+            Vec::new(),
+            Vec::new(),
+        );
+        let bytes = compile_value_function(&program)
+            .expect("encode AArch64 transition derivative helper call");
+        verify_exact_function(&bytes, "transition derivative helper call")
+            .expect("verify AArch64 transition derivative helper call");
+
+        // Five f64 operands occupy 40 bytes and round to one 48-byte aligned
+        // call frame. Pin the single allocation/call/restoration sequence so
+        // the generated AAPCS64 ABI cannot silently drop an operand.
+        let mut signatures = A64Encoder::new();
+        signatures
+            .sub_x_imm(XReg::Sp, XReg::Sp, 48)
+            .expect("encode expected call-frame allocation");
+        signatures.blr(HOST_ABI.indirect_call_scratch);
+        signatures
+            .add_x_imm(XReg::Sp, XReg::Sp, 48)
+            .expect("encode expected call-frame restoration");
+        let signatures = signatures.into_bytes();
+        for (label, instruction) in [
+            ("48-byte allocation", &signatures[0..4]),
+            ("indirect helper call", &signatures[4..8]),
+            ("48-byte restoration", &signatures[8..12]),
+        ] {
+            assert_eq!(
+                instruction_occurrences(&bytes, instruction),
+                1,
+                "AArch64 transition derivative must contain exactly one {label}"
             );
         }
     }

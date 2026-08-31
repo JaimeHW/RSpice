@@ -636,22 +636,79 @@ impl<'a> Vm<'a> {
                 let current_time = self.context.time;
                 let is_transient = self.context.analysis_type == 2;
 
-                if self.context.delay_buffers.len() <= *buffer_id {
-                    self.context
-                        .delay_buffers
-                        .resize_with(*buffer_id + 1, Default::default);
-                }
-
                 let result = if !is_transient {
                     current_value
                 } else {
-                    self.context.delay_buffers[*buffer_id].eval(
-                        current_time,
-                        current_value,
-                        delay_time,
-                    )
+                    self.context
+                        .delay_buffers
+                        .get_mut(*buffer_id)
+                        .ok_or_else(|| {
+                            VmError::InvalidRuntimeConfiguration(format!(
+                                "absdelay buffer {buffer_id} is not preallocated"
+                            ))
+                        })?
+                        .eval(current_time, current_value, delay_time, None)
+                        .map_err(VmError::InvalidRuntimeConfiguration)?
                 };
 
+                self.stack.push(result);
+            }
+            Instruction::AbsDelayStateMax(buffer_id) => {
+                let max_delay = self.pop()?;
+                let delay_time = self.pop()?;
+                let current_value = self.pop()?;
+                let result = if self.context.analysis_type == 2 {
+                    self.context
+                        .delay_buffers
+                        .get_mut(*buffer_id)
+                        .ok_or_else(|| {
+                            VmError::InvalidRuntimeConfiguration(format!(
+                                "absdelay buffer {buffer_id} is not preallocated"
+                            ))
+                        })?
+                        .eval(
+                            self.context.time,
+                            current_value,
+                            delay_time,
+                            Some(max_delay),
+                        )
+                        .map_err(VmError::InvalidRuntimeConfiguration)?
+                } else {
+                    current_value
+                };
+                self.stack.push(result);
+            }
+            Instruction::AbsDelayStateDerivative(buffer_id)
+            | Instruction::AbsDelayStateDerivativeMax(buffer_id) => {
+                let max_delay = if matches!(instruction, Instruction::AbsDelayStateDerivativeMax(_))
+                {
+                    Some(self.pop()?)
+                } else {
+                    None
+                };
+                let delay_derivative = self.pop()?;
+                let delay_time = self.pop()?;
+                let input_derivative = self.pop()?;
+                let input = self.pop()?;
+                let result = if self.context.analysis_type == 2 {
+                    let evaluation = self
+                        .context
+                        .delay_buffers
+                        .get_mut(*buffer_id)
+                        .ok_or_else(|| {
+                            VmError::InvalidRuntimeConfiguration(format!(
+                                "absdelay buffer {buffer_id} is not preallocated"
+                            ))
+                        })?
+                        .eval_with_coefficients(self.context.time, input, delay_time, max_delay)
+                        .map_err(VmError::InvalidRuntimeConfiguration)?;
+                    evaluation.delay_coefficient.mul_add(
+                        delay_derivative,
+                        evaluation.input_coefficient * input_derivative,
+                    )
+                } else {
+                    input_derivative
+                };
                 self.stack.push(result);
             }
 
@@ -663,26 +720,54 @@ impl<'a> Vm<'a> {
                 let delay = self.pop()?;
                 let input = self.pop()?;
                 let time = self.context.time;
-                let is_transient = self.context.analysis_type == 2;
-
-                let result = if !is_transient {
-                    input
-                } else {
-                    if self.context.transition_filters.len() <= *filter_id {
-                        self.context
-                            .transition_filters
-                            .resize_with(*filter_id + 1, Default::default);
-                    }
-                    let filter = &mut self.context.transition_filters[*filter_id];
-                    filter.eval(
-                        input,
-                        time,
-                        delay.max(0.0),
-                        rise_time.max(0.0),
-                        fall_time.max(0.0),
+                if self.context.transition_filters.len() <= *filter_id {
+                    self.context
+                        .transition_filters
+                        .resize_with(*filter_id + 1, Default::default);
+                }
+                let filter = &mut self.context.transition_filters[*filter_id];
+                let result = match self.context.analysis_type {
+                    2 => filter.eval(input, time, delay, rise_time, fall_time),
+                    // DC and explicit initial-condition analysis pass the
+                    // input through while retaining the final Newton
+                    // candidate as the direct-transient seed.
+                    0 | 4 => filter.eval_operating_point(input, time, delay, rise_time, fall_time),
+                    // AC/noise use the LRM's approximate unity small-signal
+                    // transfer without perturbing accepted time-domain state.
+                    1 | 3 => super::filters::TransitionFilter::validate_operands(
+                        input, time, delay, rise_time, fall_time,
                     )
-                };
+                    .map(|()| input),
+                    analysis_type => Err(format!(
+                        "transition received invalid analysis type {analysis_type}"
+                    )),
+                }
+                .map_err(|error| VmError::InvalidNumericResult(format!("transition: {error}")))?;
 
+                self.stack.push(result);
+            }
+            Instruction::TransitionStateDerivative(filter_id) => {
+                let fall_time = self.pop()?;
+                let rise_time = self.pop()?;
+                let delay = self.pop()?;
+                let input_derivative = self.pop()?;
+                let input = self.pop()?;
+                let filter = self.context.transition_filters.get(*filter_id).ok_or(
+                    VmError::InvalidInstruction("missing transition derivative filter"),
+                )?;
+                let result = filter
+                    .eval_derivative(
+                        input,
+                        input_derivative,
+                        self.context.time,
+                        delay,
+                        rise_time,
+                        fall_time,
+                        self.context.analysis_type,
+                    )
+                    .map_err(|error| {
+                        VmError::InvalidNumericResult(format!("transition derivative: {error}"))
+                    })?;
                 self.stack.push(result);
             }
 
@@ -1434,9 +1519,10 @@ mod tests {
     }
 
     #[test]
-    fn zero_delay_transient_evaluation_preserves_history_for_a_later_dynamic_delay() {
+    fn omitted_maxdelay_freezes_the_first_accepted_positive_delay() {
         let mut context = VmContext::default();
         context.analysis_type = 2;
+        context.allocate_delay_buffers(1);
         let program = |input, delay| {
             vec![
                 Instruction::PushConst(input),
@@ -1448,24 +1534,91 @@ mod tests {
         for (time, input) in [(0.0, 1.0), (1.0, 2.0)] {
             context.time = time;
             context.begin_stateful_evaluation();
-            assert_eq!(
-                execute_with_context(&mut context, program(input, 0.0))
-                    .expect("zero-delay transient candidate"),
-                input
-            );
+            execute_with_context(&mut context, program(input, 0.25))
+                .expect("positive-delay transient candidate");
             context
                 .advance_state()
-                .expect("accept zero-delay transient candidate");
+                .expect("accept positive-delay transient candidate");
         }
 
         context.time = 2.0;
         context.begin_stateful_evaluation();
         assert_eq!(
-            execute_with_context(&mut context, program(3.0, 2.0))
-                .expect("dynamic positive-delay evaluation"),
-            1.0,
-            "the zero-delay passes must still populate accepted transport history"
+            execute_with_context(&mut context, program(3.0, 2.0)).expect("frozen-delay evaluation"),
+            2.75,
+            "without maxdelay, the first accepted td must remain frozen"
         );
+    }
+
+    #[test]
+    fn absdelay_requires_preallocated_transient_storage() {
+        let mut context = VmContext::default();
+        context.analysis_type = 2;
+        let error = execute_with_context(
+            &mut context,
+            vec![
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(0.25),
+                Instruction::AbsDelayState(0),
+            ],
+        )
+        .expect_err("malformed bytecode must not allocate absdelay state while evaluating");
+        assert!(matches!(error, VmError::InvalidRuntimeConfiguration(_)));
+        assert!(error.to_string().contains("not preallocated"));
+    }
+
+    #[test]
+    fn absdelay_maxdelay_derivative_uses_exact_interpolation_coefficients() {
+        let mut context = VmContext::default();
+        context.analysis_type = 2;
+        context.allocate_delay_buffers(1);
+        let primal = |input| {
+            vec![
+                Instruction::PushConst(input),
+                Instruction::PushConst(0.5),
+                Instruction::PushConst(2.0),
+                Instruction::AbsDelayStateMax(0),
+            ]
+        };
+        for (time, input) in [(0.0, 0.0), (1.0, 10.0)] {
+            context.time = time;
+            context.begin_stateful_evaluation();
+            execute_with_context(&mut context, primal(input)).expect("absdelay history sample");
+            context
+                .advance_state()
+                .expect("accept absdelay history sample");
+        }
+
+        context.time = 2.0;
+        context.begin_stateful_evaluation();
+        let derivative = execute_with_context(
+            &mut context,
+            vec![
+                Instruction::PushConst(20.0),
+                Instruction::PushConst(2.0),
+                Instruction::PushConst(0.5),
+                Instruction::PushConst(3.0),
+                Instruction::PushConst(2.0),
+                Instruction::AbsDelayStateDerivativeMax(0),
+            ],
+        )
+        .expect("exact absdelay derivative");
+        assert_eq!(derivative, -29.0);
+
+        context.begin_stateful_evaluation();
+        let clamped = execute_with_context(
+            &mut context,
+            vec![
+                Instruction::PushConst(20.0),
+                Instruction::PushConst(2.0),
+                Instruction::PushConst(4.0),
+                Instruction::PushConst(3.0),
+                Instruction::PushConst(2.0),
+                Instruction::AbsDelayStateDerivativeMax(0),
+            ],
+        )
+        .expect("clamped absdelay derivative");
+        assert_eq!(clamped, 0.0, "clamped td has zero derivative coefficient");
     }
 
     #[test]
@@ -1591,6 +1744,73 @@ mod tests {
             .advance_state()
             .expect("accept the preserved primal candidate");
         assert!((context.laplace_filters[0].checkpoint().state[0] - 5.0 / 12.0).abs() <= 1.0e-12);
+    }
+
+    #[test]
+    fn transition_derivative_vm_is_branch_exact_and_preserves_primal_candidate() {
+        let mut context = VmContext::default();
+        context.analysis_type = 2;
+        context.allocate_transition_filters(1);
+        context.transition_filters[0]
+            .eval_operating_point(1.0, 0.0, 0.0, 1.0, 1.0)
+            .unwrap();
+        context.transition_filters[0].promote_operating_point_candidate();
+        context.time = 1.0;
+        let accepted = context.transition_filters[0].checkpoint();
+
+        let direct_derivative = || {
+            vec![
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(3.0),
+                Instruction::PushConst(0.0),
+                Instruction::PushConst(0.0),
+                Instruction::PushConst(0.0),
+                Instruction::TransitionStateDerivative(0),
+            ]
+        };
+        for _ in 0..2 {
+            assert_eq!(
+                execute_with_context(&mut context, direct_derivative()),
+                Ok(3.0)
+            );
+            assert_eq!(context.transition_filters[0].checkpoint(), accepted);
+        }
+
+        context.begin_stateful_evaluation();
+        assert_eq!(
+            execute_with_context(
+                &mut context,
+                vec![
+                    Instruction::PushConst(2.0),
+                    Instruction::PushConst(0.0),
+                    Instruction::PushConst(2.0),
+                    Instruction::PushConst(2.0),
+                    Instruction::TransitionState(0),
+                ],
+            ),
+            Ok(1.0)
+        );
+        assert_eq!(
+            execute_with_context(
+                &mut context,
+                vec![
+                    Instruction::PushConst(2.0),
+                    Instruction::PushConst(3.0),
+                    Instruction::PushConst(0.0),
+                    Instruction::PushConst(2.0),
+                    Instruction::PushConst(2.0),
+                    Instruction::TransitionStateDerivative(0),
+                ],
+            ),
+            Ok(0.0)
+        );
+        context
+            .advance_state()
+            .expect("accept primal candidate after read-only derivative");
+        let committed = context.transition_filters[0].checkpoint();
+        assert_eq!(committed.input, 2.0);
+        assert_eq!(committed.output, 1.0);
+        assert!(committed.active.is_some());
     }
 
     #[test]

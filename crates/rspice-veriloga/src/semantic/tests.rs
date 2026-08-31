@@ -28,6 +28,43 @@ fn module_src(body: &str) -> String {
     format!("{PREAMBLE}{body}\nendmodule")
 }
 
+fn constant_value(expression: &Expression) -> f64 {
+    SemanticAnalyzer::eval_const_with(expression, &HashMap::new())
+        .expect("expression must fold to a numeric constant")
+}
+
+#[test]
+fn transition_materializes_default_times_and_omitted_fall_from_rise() {
+    for (call, expected_rise, expected_fall) in [
+        ("transition(1.0)", 1.0e-9, 1.0e-9),
+        ("transition(1.0, 0.0, 2.0)", 2.0, 2.0),
+        ("transition(1.0, 0.0, 0.0, 3.0)", 1.0e-9, 3.0),
+    ] {
+        let module = analyze_one(&module_src(&format!("analog I(p, n) <+ {call};")));
+        let Expression::Call(transition) = &module.contributions[0].expression else {
+            panic!("expected lowered transition call for {call}");
+        };
+        assert_eq!(transition.args.len(), 4, "{call}");
+        assert_eq!(constant_value(&transition.args[1]), 0.0, "{call}");
+        assert_eq!(constant_value(&transition.args[2]), expected_rise, "{call}");
+        assert_eq!(constant_value(&transition.args[3]), expected_fall, "{call}");
+    }
+}
+
+#[test]
+fn transition_time_tolerance_fails_closed_instead_of_being_discarded() {
+    let error = analyze(&module_src(
+        "analog I(p, n) <+ transition(1.0, 0.0, 1.0, 1.0, 1.0e-12);",
+    ))
+    .expect_err("unsupported transition time_tol must fail compilation");
+    let diagnostic = error.to_string();
+    assert!(diagnostic.contains("transition time_tol"), "{diagnostic}");
+    assert!(
+        diagnostic.contains("omit the fifth operand"),
+        "{diagnostic}"
+    );
+}
+
 /// Flatten the statement tree into the assignments it contains
 /// (loop bodies included), preserving order
 fn flat_assignments(m: &AnalyzedModule) -> Vec<&AnalyzedAssignment> {

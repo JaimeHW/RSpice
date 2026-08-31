@@ -20,6 +20,7 @@ use crate::ast::{
     AnalogOperator, ArrayLiteralElement, BinaryOp, BranchAccess, CrossDirection, Expression,
     LaplaceKind, LimiterArgument, NoiseSource, PortDirection, UnaryOp, ZiKind,
 };
+use crate::ir::TransitionSiteId;
 use crate::numeric_literal::parse_integer_literal;
 use crate::semantic::{AnalyzedModule, AnalyzedRegion, AnalyzedStatement, ParameterScope};
 use crate::types::{ParameterRange, ValueType};
@@ -208,11 +209,21 @@ pub enum HirAnalogOperator {
         max_delay: Option<ExprId>,
     },
     Transition {
+        site: TransitionSiteId,
         expr: ExprId,
         delay: Option<ExprId>,
         rise: Option<ExprId>,
         fall: Option<ExprId>,
         tolerance: Option<ExprId>,
+    },
+    /// Read-only local Jacobian action for the correlated transition site.
+    TransitionDerivative {
+        site: TransitionSiteId,
+        input: ExprId,
+        input_derivative: ExprId,
+        delay: Option<ExprId>,
+        rise: Option<ExprId>,
+        fall: Option<ExprId>,
     },
     Slew {
         expr: ExprId,
@@ -1044,6 +1055,7 @@ impl HirModel {
                 rise,
                 fall,
                 tolerance,
+                ..
             } => {
                 self.validate_expression_child(diagnostics, expression, "expr", *expr);
                 self.validate_optional_expression_child(diagnostics, expression, "delay", *delay);
@@ -1055,6 +1067,25 @@ impl HirModel {
                     "tolerance",
                     *tolerance,
                 );
+            }
+            HirAnalogOperator::TransitionDerivative {
+                input,
+                input_derivative,
+                delay,
+                rise,
+                fall,
+                ..
+            } => {
+                self.validate_expression_child(diagnostics, expression, "input", *input);
+                self.validate_expression_child(
+                    diagnostics,
+                    expression,
+                    "input_derivative",
+                    *input_derivative,
+                );
+                self.validate_optional_expression_child(diagnostics, expression, "delay", *delay);
+                self.validate_optional_expression_child(diagnostics, expression, "rise", *rise);
+                self.validate_optional_expression_child(diagnostics, expression, "fall", *fall);
             }
             HirAnalogOperator::Slew {
                 expr,
@@ -2173,6 +2204,7 @@ struct HirLowerer {
     expressions: Vec<HirExpression>,
     declared_branches: HashSet<SmolStr>,
     replication_work: usize,
+    next_transition_site: u32,
 }
 
 impl HirLowerer {
@@ -2181,6 +2213,7 @@ impl HirLowerer {
             expressions: Vec::new(),
             declared_branches,
             replication_work: 0,
+            next_transition_site: 0,
         }
     }
 
@@ -2480,14 +2513,23 @@ impl HirLowerer {
                 rise,
                 fall,
                 tolerance,
-                ..
-            } => HirAnalogOperator::Transition {
-                expr: self.lower_expr(expr).id,
-                delay: self.lower_optional_expr_id(delay),
-                rise: self.lower_optional_expr_id(rise),
-                fall: self.lower_optional_expr_id(fall),
-                tolerance: self.lower_optional_expr_id(tolerance),
-            },
+                span,
+            } => {
+                let mut site = TransitionSiteId::from_span(*span);
+                site.ordinal = self.next_transition_site;
+                self.next_transition_site = self
+                    .next_transition_site
+                    .checked_add(1)
+                    .expect("canonical transition site ordinal overflow");
+                HirAnalogOperator::Transition {
+                    site,
+                    expr: self.lower_expr(expr).id,
+                    delay: self.lower_optional_expr_id(delay),
+                    rise: self.lower_optional_expr_id(rise),
+                    fall: self.lower_optional_expr_id(fall),
+                    tolerance: self.lower_optional_expr_id(tolerance),
+                }
+            }
             AnalogOperator::Slew {
                 expr,
                 max_rise,

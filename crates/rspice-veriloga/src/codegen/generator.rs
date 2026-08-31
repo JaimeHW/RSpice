@@ -14,6 +14,127 @@ struct EmitContext {
     variable_indices: HashMap<SmolStr, usize>,
 }
 
+#[cfg(test)]
+mod absdelay_derivative_tests {
+    use super::*;
+    use crate::ir::{AbsDelaySiteId, DerivativeWrt, IrExpr, autodiff};
+
+    fn primal(site: AbsDelaySiteId, with_max: bool) -> IrExpr {
+        IrExpr::AbsDelay {
+            site,
+            expr: Box::new(IrExpr::Voltage(0, usize::MAX)),
+            delay_time: Box::new(IrExpr::Voltage(1, usize::MAX)),
+            max_delay: with_max.then(|| Box::new(IrExpr::Const(2.0))),
+        }
+    }
+
+    #[test]
+    fn absdelay_maxdelay_and_exact_derivative_share_one_slot() {
+        let generator = CodeGenerator::new();
+        let emit_context = EmitContext {
+            parameter_indices: HashMap::new(),
+            variable_indices: HashMap::new(),
+        };
+        let site = AbsDelaySiteId::from_span(crate::source::Span::dummy());
+        let primal = primal(site, true);
+        let derivative = autodiff::differentiate(&primal, &DerivativeWrt::Voltage(0));
+        let derivative_program = generator
+            .compile_expr(&derivative, &emit_context)
+            .expect("compile absdelay derivative first");
+        let primal_program = generator
+            .compile_expr(&primal, &emit_context)
+            .expect("compile absdelay primal second");
+
+        assert!(matches!(
+            derivative_program.instructions.last(),
+            Some(Instruction::AbsDelayStateDerivativeMax(0))
+        ));
+        assert!(matches!(
+            primal_program.instructions.last(),
+            Some(Instruction::AbsDelayStateMax(0))
+        ));
+        assert_eq!(generator.delay_buffer_count.get(), 1);
+    }
+
+    #[test]
+    fn absdelay_second_derivative_fails_closed() {
+        let site = AbsDelaySiteId::from_span(crate::source::Span::dummy());
+        let first = autodiff::differentiate(&primal(site, false), &DerivativeWrt::Voltage(0));
+        let second = autodiff::differentiate(&first, &DerivativeWrt::Voltage(0));
+        let error = CodeGenerator::new()
+            .compile_expr(
+                &second,
+                &EmitContext {
+                    parameter_indices: HashMap::new(),
+                    variable_indices: HashMap::new(),
+                },
+            )
+            .expect_err("unsupported absdelay Hessian must fail compilation");
+        assert!(error.to_string().contains("higher-order derivatives"));
+    }
+
+    #[test]
+    fn source_compiler_retains_absdelay_maxdelay_and_exact_jacobian_action() {
+        let source = r#"
+`include "disciplines.vams"
+module absdelay_max(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ absdelay(V(p, n), 1.0e-9, 2.0e-9);
+endmodule
+"#;
+        let model = crate::VerilogACompiler::new(crate::CompilerOptions::default())
+            .compile(source)
+            .expect("compile absdelay with maxdelay");
+        assert!(matches!(
+            model.stamp_programs[0].value_program.instructions.last(),
+            Some(Instruction::AbsDelayStateMax(0))
+        ));
+        assert!(
+            model.stamp_programs[0]
+                .jacobian_programs
+                .iter()
+                .any(|entry| matches!(
+                    entry.program.instructions.last(),
+                    Some(Instruction::AbsDelayStateDerivativeMax(0))
+                ))
+        );
+    }
+
+    #[test]
+    fn source_compiler_rejects_invalid_absdelay_arity_and_dynamic_maxdelay() {
+        let invalid_arity = r#"
+`include "disciplines.vams"
+module bad_absdelay_arity(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ absdelay(V(p, n));
+endmodule
+"#;
+        let error = crate::VerilogACompiler::new(crate::CompilerOptions::default())
+            .compile(invalid_arity)
+            .expect_err("absdelay requires td");
+        assert!(error.to_string().contains("2..3"));
+
+        let dynamic_maxdelay = r#"
+`include "disciplines.vams"
+module bad_absdelay_max(p, n);
+    inout p, n;
+    electrical p, n;
+    real dynamic_max;
+    analog begin
+        dynamic_max = V(p, n);
+        I(p, n) <+ absdelay(V(p, n), 1.0e-9, dynamic_max);
+    end
+endmodule
+"#;
+        let error = crate::VerilogACompiler::new(crate::CompilerOptions::default())
+            .compile(dynamic_maxdelay)
+            .expect_err("absdelay maxdelay must be simulation invariant");
+        assert!(error.to_string().contains("constant for the duration"));
+    }
+}
+
 impl EmitContext {
     fn from_ir(ir: &DeviceIR) -> Self {
         Self {
@@ -48,7 +169,9 @@ impl CodeGenerator {
             lookup_tables: std::cell::RefCell::new(Vec::new()),
             limit_state_count: std::cell::Cell::new(0),
             delay_buffer_count: std::cell::Cell::new(0),
+            absdelay_sites: std::cell::RefCell::new(HashMap::new()),
             transition_filter_count: std::cell::Cell::new(0),
+            transition_sites: std::cell::RefCell::new(HashMap::new()),
             slew_filter_count: std::cell::Cell::new(0),
             slew_sites: std::cell::RefCell::new(HashMap::new()),
             cross_detector_count: std::cell::Cell::new(0),
@@ -222,7 +345,9 @@ impl CodeGenerator {
         self.zi_sites.borrow_mut().clear();
         self.limit_state_count.set(0);
         self.delay_buffer_count.set(0);
+        self.absdelay_sites.borrow_mut().clear();
         self.transition_filter_count.set(0);
+        self.transition_sites.borrow_mut().clear();
         self.slew_filter_count.set(0);
         self.slew_sites.borrow_mut().clear();
         self.cross_detector_count.set(0);
@@ -700,6 +825,24 @@ impl CodeGenerator {
         slot
     }
 
+    fn transition_site_slot(&self, site: crate::ir::TransitionSiteId) -> usize {
+        if let Some(slot) = self.transition_sites.borrow().get(&site).copied() {
+            return slot;
+        }
+        let slot = Self::allocate_slot(&self.transition_filter_count);
+        self.transition_sites.borrow_mut().insert(site, slot);
+        slot
+    }
+
+    fn absdelay_site_slot(&self, site: crate::ir::AbsDelaySiteId) -> usize {
+        if let Some(slot) = self.absdelay_sites.borrow().get(&site).copied() {
+            return slot;
+        }
+        let slot = Self::allocate_slot(&self.delay_buffer_count);
+        self.absdelay_sites.borrow_mut().insert(site, slot);
+        slot
+    }
+
     fn compile_zi_polynomial(
         &self,
         definition: &crate::ir::ZiPolynomialDefinition,
@@ -1089,17 +1232,55 @@ impl CodeGenerator {
                     .instructions
                     .push(Instruction::TableLookup(table_id));
             }
-            IrExpr::AbsDelay { expr, delay_time } => {
-                // absdelay(expr, delay_time) - transport delay
-                // Emit expression value, then delay time, then AbsDelayState instruction
+            IrExpr::AbsDelay {
+                site,
+                expr,
+                delay_time,
+                max_delay,
+            } => {
                 self.emit_expr(expr, emit_ctx, program)?;
                 self.emit_expr(delay_time, emit_ctx, program)?;
-                let buffer_id = Self::allocate_slot(&self.delay_buffer_count);
-                program
-                    .instructions
-                    .push(Instruction::AbsDelayState(buffer_id));
+                if let Some(max_delay) = max_delay {
+                    self.emit_expr(max_delay, emit_ctx, program)?;
+                }
+                let buffer_id = self.absdelay_site_slot(*site);
+                program.instructions.push(if max_delay.is_some() {
+                    Instruction::AbsDelayStateMax(buffer_id)
+                } else {
+                    Instruction::AbsDelayState(buffer_id)
+                });
+            }
+            IrExpr::AbsDelayDerivative {
+                site,
+                input,
+                input_derivative,
+                delay_time,
+                delay_derivative,
+                max_delay,
+                derivative_order,
+            } => {
+                if *derivative_order != 1 {
+                    return Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
+                        "absdelay higher-order derivatives are not implemented".into(),
+                    ))
+                    .into());
+                }
+                self.emit_expr(input, emit_ctx, program)?;
+                self.emit_expr(input_derivative, emit_ctx, program)?;
+                self.emit_expr(delay_time, emit_ctx, program)?;
+                self.emit_expr(delay_derivative, emit_ctx, program)?;
+                if let Some(max_delay) = max_delay {
+                    self.emit_expr(max_delay, emit_ctx, program)?;
+                }
+                let buffer_id = self.absdelay_site_slot(*site);
+                program.instructions.push(if max_delay.is_some() {
+                    Instruction::AbsDelayStateDerivativeMax(buffer_id)
+                } else {
+                    Instruction::AbsDelayStateDerivative(buffer_id)
+                });
             }
             IrExpr::Transition {
+                site,
                 expr,
                 delay,
                 rise_time,
@@ -1113,22 +1294,58 @@ impl CodeGenerator {
                 } else {
                     program.instructions.push(Instruction::PushConst(0.0));
                 }
-                // Emit rise_time (default 0 = instantaneous)
+                // Semantic lowering normally materializes the module-scoped
+                // rise default; retain an instantaneous defensive default for
+                // directly constructed IR.
                 if let Some(r) = rise_time {
                     self.emit_expr(r, emit_ctx, program)?;
                 } else {
                     program.instructions.push(Instruction::PushConst(0.0));
                 }
-                // Emit fall_time (default to rise_time)
+                // An omitted fall time reuses the effective rise expression.
                 if let Some(f) = fall_time {
                     self.emit_expr(f, emit_ctx, program)?;
+                } else if let Some(r) = rise_time {
+                    self.emit_expr(r, emit_ctx, program)?;
                 } else {
                     program.instructions.push(Instruction::PushConst(0.0));
                 }
-                let filter_id = Self::allocate_slot(&self.transition_filter_count);
+                let filter_id = self.transition_site_slot(*site);
                 program
                     .instructions
                     .push(Instruction::TransitionState(filter_id));
+            }
+            IrExpr::TransitionDerivative {
+                site,
+                input,
+                input_derivative,
+                delay,
+                rise_time,
+                fall_time,
+            } => {
+                self.emit_expr(input, emit_ctx, program)?;
+                self.emit_expr(input_derivative, emit_ctx, program)?;
+                if let Some(delay) = delay {
+                    self.emit_expr(delay, emit_ctx, program)?;
+                } else {
+                    program.instructions.push(Instruction::PushConst(0.0));
+                }
+                if let Some(rise_time) = rise_time {
+                    self.emit_expr(rise_time, emit_ctx, program)?;
+                } else {
+                    program.instructions.push(Instruction::PushConst(0.0));
+                }
+                if let Some(fall_time) = fall_time {
+                    self.emit_expr(fall_time, emit_ctx, program)?;
+                } else if let Some(rise_time) = rise_time {
+                    self.emit_expr(rise_time, emit_ctx, program)?;
+                } else {
+                    program.instructions.push(Instruction::PushConst(0.0));
+                }
+                let filter_id = self.transition_site_slot(*site);
+                program
+                    .instructions
+                    .push(Instruction::TransitionStateDerivative(filter_id));
             }
             IrExpr::Slew {
                 site,
@@ -1668,6 +1885,77 @@ endmodule
                     Some(Instruction::LaplaceStateDerivative(0))
                 ))
         );
+    }
+}
+
+#[cfg(test)]
+mod transition_derivative_tests {
+    use super::*;
+    use crate::ir::{IrExpr, TransitionSiteId};
+
+    fn transition(site: TransitionSiteId, derivative: bool) -> IrExpr {
+        if derivative {
+            IrExpr::TransitionDerivative {
+                site,
+                input: Box::new(IrExpr::Voltage(0, usize::MAX)),
+                input_derivative: Box::new(IrExpr::Const(1.0)),
+                delay: Some(Box::new(IrExpr::Const(0.25))),
+                rise_time: Some(Box::new(IrExpr::Const(0.5))),
+                fall_time: None,
+            }
+        } else {
+            IrExpr::Transition {
+                site,
+                expr: Box::new(IrExpr::Voltage(0, usize::MAX)),
+                delay: Some(Box::new(IrExpr::Const(0.25))),
+                rise_time: Some(Box::new(IrExpr::Const(0.5))),
+                fall_time: None,
+            }
+        }
+    }
+
+    #[test]
+    fn transition_derivative_and_primal_share_slot_and_fall_default() {
+        let generator = CodeGenerator::new();
+        let emit_context = EmitContext {
+            parameter_indices: HashMap::new(),
+            variable_indices: HashMap::new(),
+        };
+        let site = TransitionSiteId::from_span(crate::source::Span::dummy());
+
+        let derivative = generator
+            .compile_expr(&transition(site, true), &emit_context)
+            .expect("compile transition derivative first");
+        let primal = generator
+            .compile_expr(&transition(site, false), &emit_context)
+            .expect("compile transition primal second");
+
+        assert!(matches!(
+            derivative.instructions.last(),
+            Some(Instruction::TransitionStateDerivative(0))
+        ));
+        assert!(matches!(
+            primal.instructions.last(),
+            Some(Instruction::TransitionState(0))
+        ));
+        assert_eq!(generator.transition_filter_count.get(), 1);
+        assert_eq!(generator.transition_sites.borrow().get(&site), Some(&0));
+        assert!(matches!(
+            &primal.instructions[primal.instructions.len() - 3..],
+            [
+                Instruction::PushConst(0.5),
+                Instruction::PushConst(0.5),
+                Instruction::TransitionState(0)
+            ]
+        ));
+        assert!(matches!(
+            &derivative.instructions[derivative.instructions.len() - 3..],
+            [
+                Instruction::PushConst(0.5),
+                Instruction::PushConst(0.5),
+                Instruction::TransitionStateDerivative(0)
+            ]
+        ));
     }
 }
 

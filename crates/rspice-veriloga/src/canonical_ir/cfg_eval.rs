@@ -503,6 +503,23 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                     .map(|lane| apply_binary(op, lane, scalar))
                     .collect()
             }
+            // The CFG interpreter is a static/DC oracle. At equilibrium a
+            // transition has the exact direct coefficient one, so its packed
+            // Jacobian action is the input derivative unchanged.
+            CfgValueKind::TransitionDerivative {
+                input,
+                input_derivative,
+                delay,
+                rise,
+                fall,
+                ..
+            } => {
+                self.read(input)?;
+                self.read(delay)?;
+                self.read(rise)?;
+                self.read(fall)?;
+                self.read_lanes(input_derivative)?
+            }
             // A merge that no predecessor supplied is a bug in the graph, not a
             // derivative of zero.
             _ => return Err(CfgEvalError::UndefinedValue(id)),
@@ -582,6 +599,33 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                 self.inputs.idt
             }
             CfgValueKind::IdtScale => self.inputs.idt_scale,
+            CfgValueKind::Transition {
+                input,
+                delay,
+                rise,
+                fall,
+                ..
+            } => {
+                let value = self.read(input)?;
+                self.read(delay)?;
+                self.read(rise)?;
+                self.read(fall)?;
+                value
+            }
+            CfgValueKind::TransitionDerivative {
+                input,
+                input_derivative,
+                delay,
+                rise,
+                fall,
+                ..
+            } => {
+                self.read(input)?;
+                self.read(delay)?;
+                self.read(rise)?;
+                self.read(fall)?;
+                self.read(input_derivative)?
+            }
             CfgValueKind::Cross {
                 operator,
                 input,

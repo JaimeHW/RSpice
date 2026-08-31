@@ -1228,9 +1228,13 @@ fn op_may_call(op: NativeOp) -> bool {
             | NativeOp::ZiStateDerivative(_)
             | NativeOp::TimerState(_)
             | NativeOp::TransitionState(_)
+            | NativeOp::TransitionStateDerivative(_)
             | NativeOp::SlewState(_)
             | NativeOp::SlewStateDerivative(_)
             | NativeOp::AbsDelayState(_)
+            | NativeOp::AbsDelayStateMax(_)
+            | NativeOp::AbsDelayStateDerivative(_)
+            | NativeOp::AbsDelayStateDerivativeMax(_)
             | NativeOp::CrossState(_)
             | NativeOp::AboveState(_)
             | NativeOp::LastCrossingState(_)
@@ -1347,9 +1351,13 @@ fn op_reads_state(op: NativeOp) -> bool {
             | NativeOp::ZiStateDerivative(_)
             | NativeOp::TimerState(_)
             | NativeOp::TransitionState(_)
+            | NativeOp::TransitionStateDerivative(_)
             | NativeOp::SlewState(_)
             | NativeOp::SlewStateDerivative(_)
             | NativeOp::AbsDelayState(_)
+            | NativeOp::AbsDelayStateMax(_)
+            | NativeOp::AbsDelayStateDerivative(_)
+            | NativeOp::AbsDelayStateDerivativeMax(_)
             | NativeOp::CrossState(_)
             | NativeOp::AboveState(_)
             | NativeOp::LastCrossingState(_)
@@ -1373,6 +1381,9 @@ fn op_writes_state(op: NativeOp) -> bool {
             | NativeOp::TransitionState(_)
             | NativeOp::SlewState(_)
             | NativeOp::AbsDelayState(_)
+            | NativeOp::AbsDelayStateMax(_)
+            | NativeOp::AbsDelayStateDerivative(_)
+            | NativeOp::AbsDelayStateDerivativeMax(_)
             | NativeOp::CrossState(_)
             | NativeOp::AboveState(_)
             | NativeOp::DdtState(_)
@@ -1400,9 +1411,13 @@ fn op_may_fail(op: NativeOp) -> bool {
             | NativeOp::ZiStateDerivative(_)
             | NativeOp::TimerState(_)
             | NativeOp::TransitionState(_)
+            | NativeOp::TransitionStateDerivative(_)
             | NativeOp::SlewState(_)
             | NativeOp::SlewStateDerivative(_)
             | NativeOp::AbsDelayState(_)
+            | NativeOp::AbsDelayStateMax(_)
+            | NativeOp::AbsDelayStateDerivative(_)
+            | NativeOp::AbsDelayStateDerivativeMax(_)
             | NativeOp::CrossState(_)
             | NativeOp::AboveState(_)
             | NativeOp::LastCrossingState(_)
@@ -1482,6 +1497,12 @@ mod tests {
         assert!(!laplace_derivative.contains(Effects::WRITE_STATE));
         assert!(laplace_derivative.may_call());
         assert!(laplace_derivative.may_fail());
+
+        let transition_derivative = Effects::for_op(NativeOp::TransitionStateDerivative(0));
+        assert!(transition_derivative.contains(Effects::READ_STATE));
+        assert!(!transition_derivative.contains(Effects::WRITE_STATE));
+        assert!(transition_derivative.may_call());
+        assert!(transition_derivative.may_fail());
     }
 
     #[test]

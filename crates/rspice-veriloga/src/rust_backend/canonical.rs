@@ -58,7 +58,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 
-use crate::canonical_ir::ad::{DifferentiationError, differentiate_with_control};
+use crate::canonical_ir::ad::{DifferentiationError, differentiate_with_control_for_roots};
 use crate::canonical_ir::cfg::{
     CfgBinaryOp, CfgFunction, CfgInstruction, CfgTerminator, CfgUnaryOp, CfgValue, CfgValueKind,
     CfgValueType,
@@ -434,6 +434,16 @@ fn kernel_region_metrics(
                 write!(out, "idt:{}", operator_indices[operator])
             }
             CfgValueKind::IdtScale => write!(out, "idt-scale"),
+            CfgValueKind::Transition { site, .. } => write!(
+                out,
+                "transition:{}:{}:{}:{}",
+                site.source, site.start, site.end, site.ordinal
+            ),
+            CfgValueKind::TransitionDerivative { site, .. } => write!(
+                out,
+                "transition-derivative:{}:{}:{}:{}",
+                site.source, site.start, site.end, site.ordinal
+            ),
             CfgValueKind::Cross { operator, .. } => {
                 write!(out, "cross:{}", operator_indices[operator])
             }
@@ -446,14 +456,17 @@ fn kernel_region_metrics(
             CfgValueKind::Limit {
                 operator, selector, ..
             } => write!(out, "limit:{}:{selector}", operator_indices[operator]),
-            CfgValueKind::Ddx {
-                pos_node, neg_node, ..
-            } => write!(
-                out,
-                "ddx:{:?}:{:?}",
-                pos_node.map(|node| node_indices[&node]),
-                neg_node.map(|node| node_indices[&node])
-            ),
+            CfgValueKind::Ddx { axis, .. } => match axis {
+                crate::canonical_ir::cfg::CfgDdxAxis::Potential { pos_node, neg_node } => write!(
+                    out,
+                    "ddx:potential:{:?}:{:?}",
+                    pos_node.map(|node| node_indices[&node]),
+                    neg_node.map(|node| node_indices[&node])
+                ),
+                crate::canonical_ir::cfg::CfgDdxAxis::BranchFlow { unknown, reversed } => {
+                    write!(out, "ddx:flow:{}:{reversed}", unknown.index())
+                }
+            },
             CfgValueKind::LimitPrevious { operator, .. } => {
                 write!(out, "limit-previous:{}", operator_indices[operator])
             }
@@ -882,6 +895,17 @@ impl ModelPlan {
             )
         });
         let charges = stored_charges(&mut cfg.function, &residuals);
+        let mut derivative_roots = residuals.clone();
+        derivative_roots.extend(charges.iter().flatten().copied());
+        // Only numeric stamp values need the preliminary scalar pass: the
+        // packed pass differentiates those resolved readbacks again to obtain
+        // their Hessian rows. A `ddx` used by an activation, branch predicate,
+        // or report-only expression still gets its exact first derivative from
+        // `AdBuilder::resolve_ddx`, but predicates are piecewise constant and
+        // therefore do not need (or expose) a second derivative. Keeping those
+        // readbacks compact is important for large compact-model op-point
+        // sections, whose predicates must be correct without inflating the
+        // executable stamp with solver-invisible Hessians.
         let one_step_dae_split_safe = idt_slots.is_empty()
             && !ddt_controls_flow
             && residuals.iter().zip(&charges).all(|(residual, charge)| {
@@ -900,20 +924,24 @@ impl ModelPlan {
 
         checkpoint_phase(artifact, measurements, PipelinePhase::Differentiation)?;
         let phase_started = web_time::Instant::now();
-        let mut differentiated =
-            match differentiate_with_control(&cfg.function, &seeds, measurements.control()) {
-                Ok(function) => function,
-                Err(DifferentiationError::Validation(error)) => {
-                    return Err(unsupported(artifact, format!("differentiation: {error}")));
-                }
-                Err(DifferentiationError::Cancelled(error)) => {
-                    return Err(RustBackendError::cancelled(
-                        artifact.metadata.source_package.as_str(),
-                        artifact.mir.module_name.as_str(),
-                        error,
-                    ));
-                }
-            };
+        let mut differentiated = match differentiate_with_control_for_roots(
+            &cfg.function,
+            &seeds,
+            &derivative_roots,
+            measurements.control(),
+        ) {
+            Ok(function) => function,
+            Err(DifferentiationError::Validation(error)) => {
+                return Err(unsupported(artifact, format!("differentiation: {error}")));
+            }
+            Err(DifferentiationError::Cancelled(error)) => {
+                return Err(RustBackendError::cancelled(
+                    artifact.metadata.source_package.as_str(),
+                    artifact.mir.module_name.as_str(),
+                    error,
+                ));
+            }
+        };
         record_phase(
             artifact,
             measurements,
@@ -4630,11 +4658,20 @@ fn reject_unsupported_kinds(
         ));
     }
     for value in &function.values {
-        if let CfgValueKind::BranchFlow(branch) = &value.kind {
-            return Err(unsupported(
-                artifact,
-                format!("an unresolved flow probe on {branch}"),
-            ));
+        match &value.kind {
+            CfgValueKind::BranchFlow(branch) => {
+                return Err(unsupported(
+                    artifact,
+                    format!("an unresolved flow probe on {branch}"),
+                ));
+            }
+            CfgValueKind::Transition { .. } | CfgValueKind::TransitionDerivative { .. } => {
+                return Err(unsupported(
+                    artifact,
+                    "stateful transition in the direct generated-Rust backend; use the VM, native JIT, or WebAssembly JIT runtime so accepted queue and interruption history are preserved",
+                ));
+            }
+            _ => {}
         }
     }
     if artifact
@@ -4871,5 +4908,63 @@ mod accepted_state_shape_tests {
         };
 
         assert_ne!(digest(&REAL_LANE), digest(&BOOLEAN_LANE));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::canonical_ir::{CfgEvalInputs, evaluate_cfg};
+    use crate::{CompilerOptions, VerilogACompiler};
+    use std::collections::{HashMap, HashSet};
+
+    #[test]
+    fn root_pruning_keeps_ddx_that_controls_a_stamp_path() {
+        let source = r#"
+module conditional_ddx(p);
+    inout p;
+    electrical p;
+    analog begin
+        if (ddx(V(p) * V(p), V(p)) > 1.0)
+            I(p) <+ 7.0;
+        else
+            I(p) <+ 3.0;
+    end
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("conditional ddx fixture compiles");
+        let mut measurements =
+            MetricsRecorder::new(0, crate::metrics::PerformanceBudget::default());
+        let plan = ModelPlan::build(&artifact, &mut measurements)
+            .expect("conditional ddx must survive generated-stamp planning");
+        let residual = plan.conduction.rows[0].residual;
+        let snapshot = evaluate_cfg(
+            &plan.function,
+            &CfgEvalInputs {
+                parameters: Vec::new(),
+                parameter_given: Vec::new(),
+                event_state: Vec::new(),
+                event_controls: HashMap::new(),
+                node_potentials: vec![0.75],
+                branch_flows: Vec::new(),
+                branch_unknown_flows: Vec::new(),
+                temperature: 300.15,
+                thermal_voltage: 300.15 * 8.617_333_262e-5,
+                multiplicity: 1.0,
+                time: 0.0,
+                analyses: HashSet::new(),
+                simparams: HashMap::new(),
+                ddt: 0.0,
+                ddt_scale: 0.0,
+                idt: 0.0,
+                idt_scale: 0.0,
+                staged: Vec::new(),
+            },
+        )
+        .expect("optimized conditional ddx CFG evaluates");
+        let value = snapshot.value(residual).expect("residual is defined");
+        assert_eq!(value, 7.0, "ddx=1.5 must select the true contribution");
     }
 }

@@ -33,11 +33,179 @@
 //! targeted audit before expanding that boundary.
 
 use crate::canonical_ir::CanonicalIrArtifact;
+#[cfg(any(
+    feature = "native",
+    all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32")
+))]
+use crate::codegen::AssignmentStep;
 use crate::codegen::{CompiledModel, Instruction, StampIndex};
 use crate::vm::{CURRENT_PAIR_GROUND, Vm, VmAcceptedCheckpoint, VmContext, VmError};
 #[cfg(feature = "native")]
 use crate::vm::{terminal_pair_current_endpoints, terminal_pair_current_len};
 use smol_str::SmolStr;
+
+/// Collision-resistant identity of every ordered runtime slot/table that a
+/// compiled native or browser image addresses by numeric index.
+///
+/// Canonical MIR authenticates the equations, but derivative-shadow variables
+/// and several bytecode-era runtime tables are materialized only in
+/// [`CompiledModel`].  Their exact order is therefore part of the executable
+/// ABI and must participate in cross-allocation cache reuse.
+#[cfg(any(
+    feature = "native",
+    all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32")
+))]
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct CompiledModelLayoutIdentity(blake3::Hash);
+
+#[cfg(any(
+    feature = "native",
+    all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32")
+))]
+fn compiled_model_layout_identity(model: &CompiledModel) -> CompiledModelLayoutIdentity {
+    fn usize_field(hasher: &mut blake3::Hasher, value: usize) {
+        hasher.update(&(value as u64).to_le_bytes());
+    }
+
+    fn string_field(hasher: &mut blake3::Hasher, value: &str) {
+        usize_field(hasher, value.len());
+        hasher.update(value.as_bytes());
+    }
+
+    fn stamp_index(hasher: &mut blake3::Hasher, index: &StampIndex) {
+        let (tag, slot) = match index {
+            StampIndex::Terminal(slot) => (0_u8, *slot),
+            StampIndex::Internal(slot) => (1, *slot),
+            StampIndex::Branch(slot) => (2, *slot),
+            StampIndex::Ground => (3, 0),
+        };
+        hasher.update(&[tag]);
+        usize_field(hasher, slot);
+    }
+
+    fn assignment_layout(hasher: &mut blake3::Hasher, steps: &[AssignmentStep]) {
+        usize_field(hasher, steps.len());
+        for step in steps {
+            match step {
+                AssignmentStep::Assign(assignment) => {
+                    hasher.update(&[0]);
+                    usize_field(hasher, assignment.var_index);
+                }
+                AssignmentStep::AssignIndexed {
+                    base, len, lower, ..
+                } => {
+                    hasher.update(&[1]);
+                    usize_field(hasher, *base);
+                    usize_field(hasher, *len);
+                    hasher.update(&lower.to_le_bytes());
+                }
+                AssignmentStep::Loop { body, .. } => {
+                    hasher.update(&[2]);
+                    assignment_layout(hasher, body);
+                }
+            }
+        }
+    }
+
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"rspice-compiled-model-layout-v1\0");
+
+    usize_field(&mut hasher, model.num_terminals);
+    usize_field(&mut hasher, model.terminal_names.len());
+    for name in &model.terminal_names {
+        string_field(&mut hasher, name);
+    }
+
+    usize_field(&mut hasher, model.parameters.len());
+    for parameter in &model.parameters {
+        string_field(&mut hasher, &parameter.name);
+    }
+
+    usize_field(&mut hasher, model.num_variables);
+    usize_field(&mut hasher, model.variable_names.len());
+    for name in &model.variable_names {
+        string_field(&mut hasher, name);
+    }
+    usize_field(&mut hasher, model.event_state_variables.len());
+    for slot in &model.event_state_variables {
+        usize_field(&mut hasher, *slot);
+    }
+    assignment_layout(&mut hasher, &model.assignment_steps);
+
+    usize_field(&mut hasher, model.internal_nodes);
+    usize_field(&mut hasher, model.branch_sources.len());
+    for source in &model.branch_sources {
+        stamp_index(&mut hasher, &source.pos);
+        stamp_index(&mut hasher, &source.neg);
+        hasher.update(&[u8::from(source.indirect)]);
+    }
+
+    usize_field(&mut hasher, model.stamp_programs.len());
+    for stamp in &model.stamp_programs {
+        usize_field(&mut hasher, stamp.stamp_locations.len());
+        for location in &stamp.stamp_locations {
+            stamp_index(&mut hasher, &location.row);
+            stamp_index(&mut hasher, &location.col);
+            hasher.update(&location.sign.to_bits().to_le_bytes());
+        }
+        usize_field(&mut hasher, stamp.jacobian_programs.len());
+        for jacobian in &stamp.jacobian_programs {
+            stamp_index(&mut hasher, &jacobian.row);
+            stamp_index(&mut hasher, &jacobian.col);
+            match jacobian.col_axis {
+                crate::codegen::ColumnAxis::Node(slot) => {
+                    hasher.update(&[0]);
+                    usize_field(&mut hasher, slot);
+                }
+                crate::codegen::ColumnAxis::Branch(slot) => {
+                    hasher.update(&[1]);
+                    usize_field(&mut hasher, slot);
+                }
+            }
+            hasher.update(&jacobian.sign.to_bits().to_le_bytes());
+        }
+        usize_field(&mut hasher, stamp.reactive_jacobians.len());
+        for jacobian in &stamp.reactive_jacobians {
+            stamp_index(&mut hasher, &jacobian.row);
+            stamp_index(&mut hasher, &jacobian.col);
+            match jacobian.col_axis {
+                crate::codegen::ColumnAxis::Node(slot) => {
+                    hasher.update(&[0]);
+                    usize_field(&mut hasher, slot);
+                }
+                crate::codegen::ColumnAxis::Branch(slot) => {
+                    hasher.update(&[1]);
+                    usize_field(&mut hasher, slot);
+                }
+            }
+            hasher.update(&jacobian.sign.to_bits().to_le_bytes());
+        }
+        usize_field(&mut hasher, stamp.branch_ordinal.unwrap_or(usize::MAX));
+        hasher.update(&[
+            u8::from(stamp.indirect),
+            u8::from(stamp.static_condition.is_some()),
+        ]);
+    }
+
+    usize_field(&mut hasher, model.lookup_tables.len());
+    usize_field(&mut hasher, model.laplace_filters.len());
+    usize_field(&mut hasher, model.zi_filters.len());
+    usize_field(&mut hasher, model.zi_filter_definitions.len());
+    usize_field(&mut hasher, model.noise_sources.len());
+    for source in &model.noise_sources {
+        stamp_index(&mut hasher, &source.pos);
+        stamp_index(&mut hasher, &source.neg);
+        hasher.update(&[u8::from(source.is_current)]);
+        usize_field(&mut hasher, source.branch_ordinal.unwrap_or(usize::MAX));
+        usize_field(&mut hasher, source.program_idx);
+        hasher.update(&[
+            u8::from(source.exponent_program.is_some()),
+            u8::from(source.table.is_some()),
+        ]);
+    }
+
+    CompiledModelLayoutIdentity(hasher.finalize())
+}
 
 #[cfg(feature = "native")]
 use crate::native::{NativeModel, NativeRequiredStorage, NativeStampKernelIo};
@@ -61,7 +229,10 @@ mod runtime_checkpoint_codec_tests {
     use super::{
         CheckpointWordEncoder, RUNTIME_CHECKPOINT_STATE_VERSION, VerilogADeviceCheckpoint,
     };
-    use crate::vm::{SlewCheckpoint, VmAcceptedCheckpoint};
+    use crate::vm::{
+        DelayCheckpoint, DelayConfiguration, PendingTransitionCheckpoint, SlewCheckpoint,
+        TransitionCheckpoint, TransitionSegmentCheckpoint, VmAcceptedCheckpoint,
+    };
 
     fn checkpoint_with_slew_entries() -> VerilogADeviceCheckpoint {
         VerilogADeviceCheckpoint {
@@ -71,14 +242,52 @@ mod runtime_checkpoint_codec_tests {
             shape_identity: "fedcba9876543210".repeat(4).into(),
             state_version: RUNTIME_CHECKPOINT_STATE_VERSION,
             accepted: VmAcceptedCheckpoint {
-                time: f64::MIN_POSITIVE,
+                time: 2.5,
                 variables: vec![-0.0, f64::INFINITY],
                 state_values_prev: vec![f64::from_bits(1)],
                 state_values_older: vec![-f64::MIN_POSITIVE],
                 state_derivatives_prev: vec![1.0 / 3.0],
                 state_initialized: vec![true],
-                delay_buffers: Vec::new(),
-                transition_filters: Vec::new(),
+                delay_buffers: vec![
+                    DelayCheckpoint {
+                        configuration: None,
+                        samples: Vec::new(),
+                    },
+                    DelayCheckpoint {
+                        configuration: Some(DelayConfiguration::Fixed { delay: 0.25 }),
+                        samples: vec![(0.0, 1.0), (1.0, 2.0)],
+                    },
+                    DelayCheckpoint {
+                        configuration: Some(DelayConfiguration::Bounded { max_delay: 2.0 }),
+                        samples: vec![(0.5, -1.0), (2.0, 4.0)],
+                    },
+                ],
+                transition_filters: vec![TransitionCheckpoint {
+                    input: 3.0,
+                    output: 1.5,
+                    time: 2.5,
+                    active: Some(TransitionSegmentCheckpoint {
+                        origin_time: 1.0,
+                        origin_value: 0.0,
+                        destination: 3.0,
+                        end_time: 4.0,
+                    }),
+                    pending: vec![
+                        PendingTransitionCheckpoint {
+                            start_time: 5.0,
+                            destination: -1.0,
+                            rise_time: 0.25,
+                            fall_time: 0.5,
+                        },
+                        PendingTransitionCheckpoint {
+                            start_time: 6.0,
+                            destination: 2.0,
+                            rise_time: 0.75,
+                            fall_time: 1.0,
+                        },
+                    ],
+                    initialized: true,
+                }],
                 slew_filters: vec![
                     SlewCheckpoint {
                         output: -0.0,
@@ -96,7 +305,7 @@ mod runtime_checkpoint_codec_tests {
                 cross_detectors: Vec::new(),
                 laplace_filters: Vec::new(),
                 zi_filters: Vec::new(),
-                timer_event_bound: Some(f64::MIN_POSITIVE * 2.0),
+                timer_event_bound: Some(4.0),
             },
             prev_discontinuity: true,
         }
@@ -142,6 +351,19 @@ mod runtime_checkpoint_codec_tests {
         assert!(!decoded.accepted.slew_filters[0].initialized);
         assert!(decoded.accepted.slew_filters[1].initialized);
         assert_eq!(decoded.accepted.slew_filters[1].next_corner_time, Some(4.0));
+        assert_eq!(decoded.accepted.transition_filters[0].pending.len(), 2);
+        assert_eq!(
+            decoded.accepted.delay_buffers[1].configuration,
+            Some(DelayConfiguration::Fixed { delay: 0.25 })
+        );
+        assert_eq!(
+            decoded.accepted.delay_buffers[2].configuration,
+            Some(DelayConfiguration::Bounded { max_delay: 2.0 })
+        );
+        assert_eq!(
+            decoded.accepted.transition_filters[0].active,
+            checkpoint.accepted.transition_filters[0].active
+        );
 
         let mut trailing = words;
         trailing.push(0);
@@ -155,6 +377,59 @@ mod runtime_checkpoint_codec_tests {
             )
             .expect_err("trailing words must fail closed")
             .contains("trailing words")
+        );
+    }
+
+    #[test]
+    fn current_runtime_word_payload_rejects_invalid_absdelay_configuration() {
+        let checkpoint = checkpoint_with_slew_entries();
+        let words = checkpoint.to_words();
+        let delay_section = words
+            .windows(4)
+            .position(|window| window == [3, 0, 0, 1])
+            .expect("delay section contains None followed by Fixed configuration");
+
+        let mut invalid_tag = words.clone();
+        invalid_tag[delay_section + 1] = 3;
+        assert!(
+            VerilogADeviceCheckpoint::from_words(
+                checkpoint.instance_name.clone(),
+                checkpoint.model_name.clone(),
+                checkpoint.source_digest.clone(),
+                checkpoint.shape_identity.clone(),
+                &invalid_tag,
+            )
+            .expect_err("unknown delay configuration tags must fail closed")
+            .contains("delay 0 configuration tag 3 is invalid")
+        );
+
+        let mut invalid_value = checkpoint.clone();
+        invalid_value.accepted.delay_buffers[1].configuration =
+            Some(DelayConfiguration::Fixed { delay: 0.0 });
+        assert!(
+            VerilogADeviceCheckpoint::from_words(
+                invalid_value.instance_name.clone(),
+                invalid_value.model_name.clone(),
+                invalid_value.source_digest.clone(),
+                invalid_value.shape_identity.clone(),
+                &invalid_value.to_words(),
+            )
+            .expect_err("non-positive delay configurations must fail closed")
+            .contains("configuration is not finite and positive")
+        );
+
+        let mut missing_configuration = checkpoint;
+        missing_configuration.accepted.delay_buffers[1].configuration = None;
+        assert!(
+            VerilogADeviceCheckpoint::from_words(
+                missing_configuration.instance_name.clone(),
+                missing_configuration.model_name.clone(),
+                missing_configuration.source_digest.clone(),
+                missing_configuration.shape_identity.clone(),
+                &missing_configuration.to_words(),
+            )
+            .expect_err("accepted samples without configuration must fail closed")
+            .contains("unconfigured delay checkpoint contains accepted samples")
         );
     }
 
@@ -292,6 +567,56 @@ mod runtime_checkpoint_codec_tests {
             .contains("unsupported runtime Verilog-A state version 3")
         );
     }
+
+    #[test]
+    fn legacy_v4_payload_is_validated_without_inventing_transition_queue_history() {
+        let checkpoint = checkpoint_with_slew_entries();
+        let words = checkpoint.to_legacy_v4_words_for_test();
+        VerilogADeviceCheckpoint::validate_legacy_v4_words(&words)
+            .expect("complete legacy v4 payload validates");
+        assert!(
+            VerilogADeviceCheckpoint::from_words(
+                checkpoint.instance_name,
+                checkpoint.model_name,
+                checkpoint.source_digest,
+                checkpoint.shape_identity,
+                &words,
+            )
+            .expect_err("v4 cannot resume without accepted transition queue history")
+            .contains("unsupported runtime Verilog-A state version 4")
+        );
+    }
+
+    #[test]
+    fn legacy_v5_payload_is_validated_without_inventing_absdelay_configuration() {
+        let checkpoint = checkpoint_with_slew_entries();
+        let words = checkpoint.to_legacy_v5_words_for_test();
+        VerilogADeviceCheckpoint::validate_legacy_v5_words(&words)
+            .expect("complete legacy v5 delay history validates");
+        assert!(
+            VerilogADeviceCheckpoint::from_words(
+                checkpoint.instance_name.clone(),
+                checkpoint.model_name.clone(),
+                checkpoint.source_digest.clone(),
+                checkpoint.shape_identity.clone(),
+                &words,
+            )
+            .expect_err("v5 cannot resume without its frozen absdelay definition")
+            .contains("unsupported runtime Verilog-A state version 5")
+        );
+
+        let legacy_delay_section = words
+            .windows(4)
+            .position(|window| window == [3, 0, 2, 0])
+            .expect("legacy delay section begins with empty and fixed histories");
+        let mut malformed = words;
+        malformed[legacy_delay_section + 3] = f64::NAN.to_bits();
+        assert!(
+            VerilogADeviceCheckpoint::validate_legacy_v5_words(&malformed)
+                .expect_err("legacy v5 delay samples must remain fully validated")
+                .contains("delay sample 0 is not finite")
+        );
+    }
 }
 
 #[cfg(feature = "native")]
@@ -395,6 +720,7 @@ enum NativeCompileCacheKey {
         mir_digest: SmolStr,
         source_digest: SmolStr,
         module: SmolStr,
+        layout: CompiledModelLayoutIdentity,
     },
 }
 
@@ -420,14 +746,19 @@ impl PartialEq for NativeCompileCacheKey {
                     mir_digest: left_mir,
                     source_digest: left_source,
                     module: left_module,
+                    layout: left_layout,
                 },
                 Self::CanonicalMir {
                     mir_digest: right_mir,
                     source_digest: right_source,
                     module: right_module,
+                    layout: right_layout,
                 },
             ) => {
-                left_mir == right_mir && left_source == right_source && left_module == right_module
+                left_mir == right_mir
+                    && left_source == right_source
+                    && left_module == right_module
+                    && left_layout == right_layout
             }
             #[cfg(feature = "native-bytecode-contract-tests")]
             _ => false,
@@ -491,6 +822,7 @@ struct WasmCompileCacheKey {
     mir_digest: SmolStr,
     source_digest: SmolStr,
     module: SmolStr,
+    layout: CompiledModelLayoutIdentity,
 }
 
 /// Executable-image budget for the process-wide native compilation cache.
@@ -699,7 +1031,7 @@ pub struct VerilogADevice {
     prev_discontinuity: bool,
 }
 
-pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 4;
+pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 6;
 
 /// Versioned accepted runtime state for one compiled Verilog-A instance.
 /// Compiled programs, topology, and solver caches are intentionally absent.
@@ -719,10 +1051,15 @@ impl VerilogADeviceCheckpoint {
     /// portable checkpoint format. Floating-point values are stored by IEEE
     /// bits, preserving signed zero and every accepted finite value exactly.
     pub fn to_words(&self) -> Vec<u64> {
-        self.to_words_with_format(self.state_version, true)
+        self.to_words_with_format(self.state_version, true, true)
     }
 
-    fn to_words_with_format(&self, state_version: u32, include_slew_corners: bool) -> Vec<u64> {
+    fn to_words_with_format(
+        &self,
+        state_version: u32,
+        include_slew_corners: bool,
+        include_transition_queue: bool,
+    ) -> Vec<u64> {
         let mut encoder = CheckpointWordEncoder::default();
         encoder.word(u64::from(state_version));
         encoder.boolean(self.prev_discontinuity);
@@ -734,6 +1071,19 @@ impl VerilogADeviceCheckpoint {
         encoder.booleans(&self.accepted.state_initialized);
         encoder.word(self.accepted.delay_buffers.len() as u64);
         for delay in &self.accepted.delay_buffers {
+            if state_version >= 6 {
+                match delay.configuration {
+                    None => encoder.word(0),
+                    Some(crate::vm::DelayConfiguration::Fixed { delay }) => {
+                        encoder.word(1);
+                        encoder.float(delay);
+                    }
+                    Some(crate::vm::DelayConfiguration::Bounded { max_delay }) => {
+                        encoder.word(2);
+                        encoder.float(max_delay);
+                    }
+                }
+            }
             encoder.word(delay.samples.len() as u64);
             for &(time, value) in &delay.samples {
                 encoder.float(time);
@@ -742,11 +1092,33 @@ impl VerilogADeviceCheckpoint {
         }
         encoder.word(self.accepted.transition_filters.len() as u64);
         for state in &self.accepted.transition_filters {
-            encoder.float(state.output);
-            encoder.float(state.target);
-            encoder.float(state.start_time);
-            encoder.float(state.end_time);
-            encoder.float(state.start_value);
+            if include_transition_queue {
+                encoder.boolean(state.initialized);
+                encoder.float(state.input);
+                encoder.float(state.output);
+                encoder.float(state.time);
+                encoder.boolean(state.active.is_some());
+                if let Some(active) = state.active {
+                    encoder.float(active.origin_time);
+                    encoder.float(active.origin_value);
+                    encoder.float(active.destination);
+                    encoder.float(active.end_time);
+                }
+                encoder.word(state.pending.len() as u64);
+                for pending in &state.pending {
+                    encoder.float(pending.start_time);
+                    encoder.float(pending.destination);
+                    encoder.float(pending.rise_time);
+                    encoder.float(pending.fall_time);
+                }
+            } else {
+                let active = state.active;
+                encoder.float(state.output);
+                encoder.float(active.map_or(state.input, |segment| segment.destination));
+                encoder.float(active.map_or(state.time, |segment| segment.origin_time));
+                encoder.float(active.map_or(state.time, |segment| segment.end_time));
+                encoder.float(active.map_or(state.output, |segment| segment.origin_value));
+            }
         }
         encoder.word(self.accepted.slew_filters.len() as u64);
         for state in &self.accepted.slew_filters {
@@ -823,7 +1195,11 @@ impl VerilogADeviceCheckpoint {
         expected_version: u32,
     ) -> Result<Self, String> {
         use crate::laplace::LaplaceCheckpoint;
-        use crate::vm::{CrossCheckpoint, DelayCheckpoint, SlewCheckpoint, TransitionCheckpoint};
+        use crate::vm::{
+            CrossCheckpoint, DelayBuffer, DelayCheckpoint, DelayConfiguration,
+            PendingTransitionCheckpoint, SlewCheckpoint, TransitionCheckpoint,
+            TransitionSegmentCheckpoint,
+        };
         use crate::zfilter::ZiCheckpoint;
 
         let mut decoder = CheckpointWordDecoder::new(words);
@@ -844,6 +1220,22 @@ impl VerilogADeviceCheckpoint {
         let delay_count = decoder.length("delay buffers", 1)?;
         let mut delay_buffers = Vec::with_capacity(delay_count);
         for index in 0..delay_count {
+            let configuration = if state_version >= 6 {
+                match decoder.word(&format!("delay {index} configuration"))? {
+                    0 => None,
+                    1 => Some(DelayConfiguration::Fixed {
+                        delay: decoder.float(&format!("delay {index} fixed delay"))?,
+                    }),
+                    2 => Some(DelayConfiguration::Bounded {
+                        max_delay: decoder.float(&format!("delay {index} maximum delay"))?,
+                    }),
+                    tag => {
+                        return Err(format!("delay {index} configuration tag {tag} is invalid"));
+                    }
+                }
+            } else {
+                None
+            };
             let count = decoder.length(&format!("delay {index} samples"), 2)?;
             let mut samples = Vec::with_capacity(count);
             for sample in 0..count {
@@ -852,19 +1244,101 @@ impl VerilogADeviceCheckpoint {
                     decoder.float(&format!("delay {index} sample {sample} value"))?,
                 ));
             }
-            delay_buffers.push(DelayCheckpoint { samples });
+            let checkpoint = DelayCheckpoint {
+                configuration,
+                samples,
+            };
+            let validation_checkpoint;
+            let checkpoint_to_validate = if state_version >= 6 || checkpoint.samples.is_empty() {
+                &checkpoint
+            } else {
+                // Runtime versions 1 through 5 did not serialize the frozen
+                // absdelay definition. Validate every byte of their retained
+                // history without manufacturing resumable current state.
+                validation_checkpoint = DelayCheckpoint {
+                    configuration: Some(DelayConfiguration::Fixed {
+                        delay: f64::MIN_POSITIVE,
+                    }),
+                    samples: checkpoint.samples.clone(),
+                };
+                &validation_checkpoint
+            };
+            DelayBuffer::validate_checkpoint(checkpoint_to_validate)
+                .map_err(|error| format!("delay {index} checkpoint is invalid: {error}"))?;
+            delay_buffers.push(checkpoint);
         }
 
-        let transition_count = decoder.length("transition filters", 5)?;
+        let transition_has_queue = state_version >= 5;
+        let transition_count = decoder.length(
+            "transition filters",
+            if transition_has_queue { 6 } else { 5 },
+        )?;
         let mut transition_filters = Vec::with_capacity(transition_count);
         for index in 0..transition_count {
-            transition_filters.push(TransitionCheckpoint {
-                output: decoder.float(&format!("transition {index} output"))?,
-                target: decoder.float(&format!("transition {index} target"))?,
-                start_time: decoder.float(&format!("transition {index} start time"))?,
-                end_time: decoder.float(&format!("transition {index} end time"))?,
-                start_value: decoder.float(&format!("transition {index} start value"))?,
-            });
+            if transition_has_queue {
+                let initialized = decoder.boolean(&format!("transition {index} initialized"))?;
+                let input = decoder.float(&format!("transition {index} input"))?;
+                let output = decoder.float(&format!("transition {index} output"))?;
+                let time = decoder.float(&format!("transition {index} accepted time"))?;
+                let active = if decoder.boolean(&format!("transition {index} active"))? {
+                    Some(TransitionSegmentCheckpoint {
+                        origin_time: decoder
+                            .float(&format!("transition {index} active origin time"))?,
+                        origin_value: decoder
+                            .float(&format!("transition {index} active origin value"))?,
+                        destination: decoder
+                            .float(&format!("transition {index} active destination"))?,
+                        end_time: decoder.float(&format!("transition {index} active end time"))?,
+                    })
+                } else {
+                    None
+                };
+                let pending_count = decoder.length(&format!("transition {index} pending"), 4)?;
+                let mut pending = Vec::with_capacity(pending_count);
+                for pending_index in 0..pending_count {
+                    pending.push(PendingTransitionCheckpoint {
+                        start_time: decoder.float(&format!(
+                            "transition {index} pending {pending_index} start time"
+                        ))?,
+                        destination: decoder.float(&format!(
+                            "transition {index} pending {pending_index} destination"
+                        ))?,
+                        rise_time: decoder.float(&format!(
+                            "transition {index} pending {pending_index} rise time"
+                        ))?,
+                        fall_time: decoder.float(&format!(
+                            "transition {index} pending {pending_index} fall time"
+                        ))?,
+                    });
+                }
+                transition_filters.push(TransitionCheckpoint {
+                    input,
+                    output,
+                    time,
+                    active,
+                    pending,
+                    initialized,
+                });
+            } else {
+                let output = decoder.float(&format!("transition {index} output"))?;
+                let target = decoder.float(&format!("transition {index} target"))?;
+                let start_time = decoder.float(&format!("transition {index} start time"))?;
+                let end_time = decoder.float(&format!("transition {index} end time"))?;
+                let start_value = decoder.float(&format!("transition {index} start value"))?;
+                transition_filters.push(TransitionCheckpoint {
+                    input: target,
+                    output,
+                    time: start_time,
+                    active: (end_time > start_time).then_some(TransitionSegmentCheckpoint {
+                        origin_time: start_time,
+                        origin_value: start_value,
+                        destination: target,
+                        end_time,
+                    }),
+                    pending: Vec::new(),
+                    initialized: true,
+                });
+            }
         }
 
         let slew_has_corners = state_version >= 4;
@@ -1079,14 +1553,57 @@ impl VerilogADeviceCheckpoint {
         .map(drop)
     }
 
+    /// Validate and consume a complete legacy version-4 runtime payload.
+    /// Version 4 retained only one transition target and therefore cannot
+    /// reconstruct the arbitrary pending queue or interruption origin needed
+    /// for an exact resume.
+    pub fn validate_legacy_v4_words(words: &[u64]) -> Result<(), String> {
+        Self::from_words_with_expected_version(
+            SmolStr::new_inline("legacy"),
+            SmolStr::new_inline("legacy"),
+            SmolStr::new_inline("legacy"),
+            SmolStr::new_inline("legacy"),
+            words,
+            4,
+        )
+        .map(drop)
+    }
+
+    /// Validate and consume a complete legacy version-5 runtime payload.
+    /// Version 5 persisted the accepted `absdelay` samples but not the frozen
+    /// fixed/bounded delay definition. Its retained history remains fully
+    /// parseable for corruption diagnostics, but it cannot be promoted into
+    /// restart-authoritative current state without inventing configuration.
+    pub fn validate_legacy_v5_words(words: &[u64]) -> Result<(), String> {
+        Self::from_words_with_expected_version(
+            SmolStr::new_inline("legacy"),
+            SmolStr::new_inline("legacy"),
+            SmolStr::new_inline("legacy"),
+            SmolStr::new_inline("legacy"),
+            words,
+            5,
+        )
+        .map(drop)
+    }
+
     #[cfg(test)]
     fn to_legacy_v2_words_for_test(&self) -> Vec<u64> {
-        self.to_words_with_format(2, false)
+        self.to_words_with_format(2, false, false)
     }
 
     #[cfg(test)]
     fn to_legacy_v3_words_for_test(&self) -> Vec<u64> {
-        self.to_words_with_format(3, false)
+        self.to_words_with_format(3, false, false)
+    }
+
+    #[cfg(test)]
+    fn to_legacy_v4_words_for_test(&self) -> Vec<u64> {
+        self.to_words_with_format(4, true, false)
+    }
+
+    #[cfg(test)]
+    fn to_legacy_v5_words_for_test(&self) -> Vec<u64> {
+        self.to_words_with_format(5, true, true)
     }
 
     pub fn retained_value_count(&self) -> usize {
@@ -1530,8 +2047,14 @@ impl VerilogADevice {
                     | Instruction::IdtModState(idx)
                     | Instruction::LimitState(idx)
                     | Instruction::CanonicalLimitState(idx) => update_max(&mut max_state, *idx),
-                    Instruction::AbsDelayState(idx) => update_max(&mut max_delay_buffer, *idx),
-                    Instruction::TransitionState(idx) => {
+                    Instruction::AbsDelayState(idx)
+                    | Instruction::AbsDelayStateMax(idx)
+                    | Instruction::AbsDelayStateDerivative(idx)
+                    | Instruction::AbsDelayStateDerivativeMax(idx) => {
+                        update_max(&mut max_delay_buffer, *idx)
+                    }
+                    Instruction::TransitionState(idx)
+                    | Instruction::TransitionStateDerivative(idx) => {
                         update_max(&mut max_transition_filter, *idx)
                     }
                     Instruction::SlewState(idx) | Instruction::SlewStateDerivative(idx) => {
@@ -1662,6 +2185,7 @@ impl VerilogADevice {
             mir_digest: artifact.mir_digest.clone(),
             source_digest: model.source_digest.clone(),
             module: model.name.clone(),
+            layout: compiled_model_layout_identity(model),
         };
         Self::try_native_compile_cached(model, cache_key, |model| {
             crate::native::compile_native_with_canonical_ir(model, artifact)
@@ -1747,6 +2271,7 @@ impl VerilogADevice {
             mir_digest: artifact.mir_digest.clone(),
             source_digest: model.source_digest.clone(),
             module: model.name.clone(),
+            layout: compiled_model_layout_identity(model),
         };
         WASM_CACHE.with(|cache| {
             let mut cache = cache.borrow_mut();
@@ -5827,6 +6352,15 @@ endmodule
         device
             .try_begin_analysis(2)
             .expect("a valid analysis begin resets the reusable instance");
+        device.set_time(0.0);
+        device.set_timestep(1.0);
+        device.update_voltages(&[9.0]);
+        device
+            .try_evaluate()
+            .expect("seed the reused device's fresh delay history");
+        device
+            .try_advance_state()
+            .expect("accept the reused device's fresh delay anchor");
         device.set_time(1.0);
         device.set_timestep(1.0);
         device.update_voltages(&[9.0]);
@@ -5854,6 +6388,15 @@ endmodule
         }
         .expect("build independent fresh-analysis reference");
         fresh.try_begin_analysis(2).unwrap();
+        fresh.set_time(0.0);
+        fresh.set_timestep(1.0);
+        fresh.update_voltages(&[9.0]);
+        fresh
+            .try_evaluate()
+            .expect("seed independent fresh delay history");
+        fresh
+            .try_advance_state()
+            .expect("accept independent fresh delay anchor");
         fresh.set_time(1.0);
         fresh.set_timestep(1.0);
         fresh.update_voltages(&[9.0]);
@@ -5989,6 +6532,65 @@ endmodule
     }
 
     #[test]
+    fn native_compile_cache_rejects_same_source_with_different_variable_layout() {
+        let source = r#"
+`include "disciplines.vams"
+module native_cache_layout_identity(p, n);
+  inout p, n;
+  electrical p, n;
+  real voltage;
+  analog begin
+    voltage = V(p, n);
+    I(p, n) <+ voltage * voltage;
+  end
+endmodule
+"#;
+        let model = VerilogACompiler::new(CompilerOptions::default())
+            .compile(source)
+            .expect("compile cache-layout model");
+        let mut reordered = model.clone();
+        let shadow_slots = reordered
+            .variable_names
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, name)| name.contains('@').then_some(slot))
+            .collect::<Vec<_>>();
+        assert!(
+            shadow_slots.len() >= 2,
+            "fixture must contain at least two derivative-shadow slots"
+        );
+        reordered
+            .variable_names
+            .swap(shadow_slots[0], shadow_slots[1]);
+
+        let first_layout = compiled_model_layout_identity(&model);
+        let reordered_layout = compiled_model_layout_identity(&reordered);
+        assert_ne!(
+            first_layout.0, reordered_layout.0,
+            "ordered variable slots must participate in executable cache identity"
+        );
+
+        let mut cache = NativeCompileCache::default();
+        let first_key = NativeCompileCacheKey::CanonicalMir {
+            mir_digest: "same-mir".into(),
+            source_digest: model.source_digest.clone(),
+            module: model.name.clone(),
+            layout: first_layout,
+        };
+        let reordered_key = NativeCompileCacheKey::CanonicalMir {
+            mir_digest: "same-mir".into(),
+            source_digest: model.source_digest.clone(),
+            module: model.name.clone(),
+            layout: reordered_layout,
+        };
+        cache.insert(first_key, Err("first layout".into()));
+        assert!(
+            cache.get(&reordered_key).is_none(),
+            "a same-source cache entry must not be reused across variable-slot layouts"
+        );
+    }
+
+    #[test]
     fn native_compile_cache_evicts_by_image_bytes_and_keeps_the_newest_entry() {
         let mut cache = NativeCompileCache::default();
         for index in 0..4_u32 {
@@ -5997,6 +6599,7 @@ endmodule
                     mir_digest: SmolStr::new(format!("mir{index}")),
                     source_digest: SmolStr::new("src"),
                     module: SmolStr::new("m"),
+                    layout: CompiledModelLayoutIdentity(blake3::hash(&index.to_le_bytes())),
                 },
                 Err(format!("failure {index}")),
             );
@@ -6559,7 +7162,10 @@ endmodule
             instructions: vec![Instruction::LimitState(8)],
         });
         model.stamp_programs[0].static_condition = Some(BytecodeProgram {
-            instructions: vec![Instruction::AbsDelayState(6)],
+            instructions: vec![
+                Instruction::AbsDelayState(6),
+                Instruction::AbsDelayStateMax(9),
+            ],
         });
         model.stamp_programs[0]
             .reactive_jacobians
@@ -6572,6 +7178,7 @@ endmodule
                     instructions: vec![
                         Instruction::DdtState(3),
                         Instruction::AbsDelayState(2),
+                        Instruction::AbsDelayStateDerivative(10),
                         Instruction::TransitionState(1),
                     ],
                 },
@@ -6583,7 +7190,11 @@ endmodule
             branch_ordinal: None,
             program_idx: 0,
             psd_program: BytecodeProgram {
-                instructions: vec![Instruction::IdtState(5), Instruction::SlewState(4)],
+                instructions: vec![
+                    Instruction::IdtState(5),
+                    Instruction::SlewState(4),
+                    Instruction::AbsDelayStateDerivativeMax(11),
+                ],
             },
             exponent_program: Some(BytecodeProgram {
                 instructions: vec![
@@ -6604,7 +7215,7 @@ endmodule
         assert_eq!(context.state_values.len(), 9);
         assert_eq!(context.state_values_prev.len(), 9);
         assert_eq!(context.state_initialized.len(), 9);
-        assert_eq!(context.delay_buffers.len(), 7);
+        assert_eq!(context.delay_buffers.len(), 12);
         assert_eq!(context.transition_filters.len(), 2);
         assert_eq!(context.slew_filters.len(), 5);
         assert_eq!(context.cross_detectors.len(), 9);

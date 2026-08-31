@@ -147,6 +147,9 @@ pub enum EmitError {
     /// than a missing feature. `ModelPlan::build` refuses a module carrying a
     /// process before it reaches here; this is the backstop.
     DigitalValueInAnalogEmitter(ValueId),
+    /// Stateful transition runtime is provided by the VM/native/WASM paths;
+    /// direct generated Rust must reject it before emission.
+    UnsupportedTransition(ValueId),
 }
 
 impl std::fmt::Display for EmitError {
@@ -164,6 +167,10 @@ impl std::fmt::Display for EmitError {
             Self::DigitalValueInAnalogEmitter(value) => write!(
                 f,
                 "{value} is a discrete-domain value and has no analog form to emit"
+            ),
+            Self::UnsupportedTransition(value) => write!(
+                f,
+                "{value} is a stateful transition unsupported by the direct generated-Rust runtime"
             ),
         }
     }
@@ -812,7 +819,7 @@ impl Emitter<'_> {
             }
             self.line(
                 1,
-                &format!("let {} = {expression};", self.value_name(value.id)),
+                &format!("let {}={expression};", self.value_name(value.id)),
             );
         }
         Ok(())
@@ -912,7 +919,7 @@ impl Emitter<'_> {
             }
             if else_empty {
                 let condition = self.truth_operand(condition);
-                self.line(depth, &format!("if {condition} {{"));
+                self.line(depth, &format!("if {condition}{{"));
                 self.pass_arguments(then_target, &then_args, depth + 1);
                 self.block(then_target, Some(join), depth + 1)?;
                 self.line(depth, "}");
@@ -920,7 +927,7 @@ impl Emitter<'_> {
             }
             if then_empty {
                 let condition = self.false_operand(condition);
-                self.line(depth, &format!("if {condition} {{"));
+                self.line(depth, &format!("if {condition}{{"));
                 self.pass_arguments(else_target, &else_args, depth + 1);
                 self.block(else_target, Some(join), depth + 1)?;
                 self.line(depth, "}");
@@ -929,10 +936,10 @@ impl Emitter<'_> {
         }
 
         let condition = self.truth_operand(condition);
-        self.line(depth, &format!("if {condition} {{"));
+        self.line(depth, &format!("if {condition}{{"));
         self.pass_arguments(then_target, &then_args, depth + 1);
         self.block(then_target, join, depth + 1)?;
-        self.line(depth, "} else {");
+        self.line(depth, "}else{");
         self.pass_arguments(else_target, &else_args, depth + 1);
         self.block(else_target, join, depth + 1)?;
         self.line(depth, "}");
@@ -989,10 +996,10 @@ impl Emitter<'_> {
         let condition = self.truth_operand(condition);
         self.line(
             depth,
-            &format!("let {} = if {condition} {{", self.value_name(param)),
+            &format!("let {}=if {condition}{{", self.value_name(param)),
         );
         self.emit_single_value_arm(then_block, then_result, param, depth + 1)?;
-        self.line(depth, "} else {");
+        self.line(depth, "}else{");
         self.emit_single_value_arm(else_block, else_result, param, depth + 1)?;
         self.line(depth, "};");
         Ok(true)
@@ -1045,7 +1052,7 @@ impl Emitter<'_> {
         for param in &self.function.block(header).params.clone() {
             self.declare_mutable(*param, depth);
         }
-        self.line(depth, "loop {");
+        self.line(depth, "loop{");
         self.instructions(header, depth + 1)?;
 
         let CfgTerminator::Branch {
@@ -1066,7 +1073,7 @@ impl Emitter<'_> {
             };
 
         let condition = self.false_operand(condition);
-        self.line(depth + 1, &format!("if {condition} {{"));
+        self.line(depth + 1, &format!("if {condition}{{"));
         self.pass_arguments(exit, &exit_args, depth + 2);
         self.line(depth + 2, "break;");
         self.line(depth + 1, "}");
@@ -1154,10 +1161,7 @@ impl Emitter<'_> {
             }
             self.line(
                 depth,
-                &format!(
-                    "let {} = {expression};",
-                    self.value_name(instruction.result)
-                ),
+                &format!("let {}={expression};", self.value_name(instruction.result)),
             );
             self.capture(instruction.result, depth);
         }
@@ -1177,7 +1181,7 @@ impl Emitter<'_> {
             return;
         }
         let name = format!("o{}", self.value_name(value));
-        self.line(depth, &format!("{name} = {};", self.value_name(value)));
+        self.line(depth, &format!("{name}={};", self.value_name(value)));
         self.captured.insert(value, name);
     }
 
@@ -1185,7 +1189,7 @@ impl Emitter<'_> {
         let mut out = String::new();
         for (value, name) in &self.captured {
             let initial = self.zero(*value);
-            let _ = writeln!(out, "    let mut {name} = {initial};");
+            let _ = writeln!(out, "let mut {name}={initial};");
         }
         out
     }
@@ -1224,13 +1228,13 @@ impl Emitter<'_> {
         if !clobbers {
             for (param, argument) in pairs {
                 let argument = self.coerce_operand(argument, self.function.value(param).value_type);
-                self.line(depth, &format!("{} = {argument};", self.value_name(param)));
+                self.line(depth, &format!("{}={argument};", self.value_name(param)));
             }
             return;
         }
         for (index, (param, argument)) in pairs.iter().copied().enumerate() {
             let argument = self.coerce_operand(argument, self.function.value(param).value_type);
-            self.line(depth, &format!("let edge{index} = {argument};"));
+            self.line(depth, &format!("let edge{index}={argument};"));
         }
         for (index, (param, _)) in pairs.into_iter().enumerate() {
             self.line(depth, &format!("{} = edge{index};", self.value_name(param)));
@@ -1281,7 +1285,7 @@ impl Emitter<'_> {
             let argument = self.coerce_operand(argument, self.function.value(parameter).value_type);
             self.line(
                 depth,
-                &format!("let mut {} = {argument};", self.value_name(parameter)),
+                &format!("let mut {}={argument};", self.value_name(parameter)),
             );
         }
     }
@@ -1316,7 +1320,7 @@ impl Emitter<'_> {
             let initial = self.zero(value);
             self.line(
                 depth,
-                &format!("let mut {} = {initial};", self.value_name(value)),
+                &format!("let mut {}={initial};", self.value_name(value)),
             );
         }
     }
@@ -1327,16 +1331,13 @@ impl Emitter<'_> {
         }
         match self.function.lanes_of(value) {
             Some(lanes) if lanes.len() > 1 => {
-                format!("{}([0.0; {}])", lane_type_name(lanes.len()), lanes.len())
+                format!("{}([0.0;{}])", lane_type_name(lanes.len()), lanes.len())
             }
             Some(_) | None => "0.0".to_string(),
         }
     }
 
-    fn line(&mut self, depth: usize, text: &str) {
-        for _ in 0..depth {
-            self.source.push('\t');
-        }
+    fn line(&mut self, _depth: usize, text: &str) {
         self.source.push_str(text);
         self.source.push('\n');
     }
@@ -1375,7 +1376,7 @@ impl Emitter<'_> {
         if self.function.value(value).value_type == CfgValueType::Boolean {
             operand
         } else {
-            format!("{operand} != 0.0")
+            format!("{operand}!=0.0")
         }
     }
 
@@ -1391,7 +1392,7 @@ impl Emitter<'_> {
         if self.function.value(value).value_type == CfgValueType::Boolean {
             format!("!{operand}")
         } else {
-            format!("{operand} == 0.0")
+            format!("{operand}==0.0")
         }
     }
 
@@ -1489,7 +1490,7 @@ impl Emitter<'_> {
                 Some(if width == 1 {
                     literal.len()
                 } else {
-                    format!("{}([{literal}; {width}])", lane_type_name(width)).len()
+                    format!("{}([{literal};{width}])", lane_type_name(width)).len()
                 })
             }
             _ => None,
@@ -1680,6 +1681,9 @@ impl Emitter<'_> {
                 self.numeric_operand(*proposed)
             ),
             CfgValueKind::Ddx { .. } => return Err(EmitError::UnresolvedDdx(value)),
+            CfgValueKind::Transition { .. } | CfgValueKind::TransitionDerivative { .. } => {
+                return Err(EmitError::UnsupportedTransition(value));
+            }
             CfgValueKind::Unary { op, input } => self.unary_expression(*op, *input),
             CfgValueKind::Binary { op, left, right } => self.binary_expression(*op, *left, *right),
             CfgValueKind::LaneSplat(constant) => {
@@ -1688,7 +1692,7 @@ impl Emitter<'_> {
                     real_literal(*constant)
                 } else {
                     format!(
-                        "{}([{}; {width}])",
+                        "{}([{};{width}])",
                         lane_type_name(width),
                         real_literal(*constant)
                     )
@@ -1717,7 +1721,7 @@ impl Emitter<'_> {
                     format!(
                         "{}([{}])",
                         lane_type_name(elements.len()),
-                        elements.join(", ")
+                        elements.join(",")
                     )
                 }
             }
@@ -1727,7 +1731,7 @@ impl Emitter<'_> {
                 } else {
                     "+"
                 };
-                format!("{} {symbol} {}", self.operand(*left), self.operand(*right))
+                format!("{}{symbol} {}", self.operand(*left), self.operand(*right))
             }
             CfgValueKind::LaneScalar { op, input, scalar } => {
                 let symbol = if matches!(op, CfgBinaryOp::Div) {
@@ -1736,7 +1740,7 @@ impl Emitter<'_> {
                     "*"
                 };
                 format!(
-                    "{} {symbol} {}",
+                    "{}{symbol} {}",
                     self.operand(*input),
                     self.numeric_operand(*scalar)
                 )
@@ -1748,7 +1752,7 @@ impl Emitter<'_> {
             CfgValueKind::Staged { slot } => {
                 let staged = format!("{}[{slot}]", bindings.staged);
                 if self.function.value(value).value_type == CfgValueType::Boolean {
-                    format!("{staged} != 0.0")
+                    format!("{staged}!=0.0")
                 } else {
                     staged
                 }
@@ -2083,11 +2087,11 @@ fn unary(op: CfgUnaryOp, input: &str) -> String {
 
 fn binary(op: CfgBinaryOp, left: &str, right: &str) -> String {
     match op {
-        CfgBinaryOp::Add => format!("{left} + {right}"),
-        CfgBinaryOp::Sub => format!("{left} - {right}"),
-        CfgBinaryOp::Mul => format!("{left} * {right}"),
-        CfgBinaryOp::Div => format!("{left} / {right}"),
-        CfgBinaryOp::Mod => format!("{left} % {right}"),
+        CfgBinaryOp::Add => format!("{left}+ {right}"),
+        CfgBinaryOp::Sub => format!("{left}- {right}"),
+        CfgBinaryOp::Mul => format!("{left}* {right}"),
+        CfgBinaryOp::Div => format!("{left}/ {right}"),
+        CfgBinaryOp::Mod => format!("{left}% {right}"),
         CfgBinaryOp::Pow => format!("{left}.powf({right})"),
         CfgBinaryOp::Hypot => format!("{left}.hypot({right})"),
         CfgBinaryOp::Atan2 => format!("{left}.atan2({right})"),
@@ -2096,23 +2100,23 @@ fn binary(op: CfgBinaryOp, left: &str, right: &str) -> String {
         // returns whichever the comparison selects. Two backends that differ on
         // NaN differ exactly where a model has already gone wrong and where the
         // difference is hardest to trace.
-        CfgBinaryOp::Min => format!("if {left} <= {right} {{ {left} }} else {{ {right} }}"),
-        CfgBinaryOp::Max => format!("if {left} >= {right} {{ {left} }} else {{ {right} }}"),
-        CfgBinaryOp::Eq => format!("{left} == {right}"),
-        CfgBinaryOp::Ne => format!("{left} != {right}"),
-        CfgBinaryOp::Lt => format!("{left} < {right}"),
-        CfgBinaryOp::Le => format!("{left} <= {right}"),
-        CfgBinaryOp::Gt => format!("{left} > {right}"),
-        CfgBinaryOp::Ge => format!("{left} >= {right}"),
-        CfgBinaryOp::And => format!("{left} && {right}"),
-        CfgBinaryOp::Or => format!("{left} || {right}"),
+        CfgBinaryOp::Min => format!("if {left}<= {right}{{{left}}}else{{{right}}}"),
+        CfgBinaryOp::Max => format!("if {left}>= {right}{{{left}}}else{{{right}}}"),
+        CfgBinaryOp::Eq => format!("{left}== {right}"),
+        CfgBinaryOp::Ne => format!("{left}!= {right}"),
+        CfgBinaryOp::Lt => format!("{left}< {right}"),
+        CfgBinaryOp::Le => format!("{left}<= {right}"),
+        CfgBinaryOp::Gt => format!("{left}> {right}"),
+        CfgBinaryOp::Ge => format!("{left}>= {right}"),
+        CfgBinaryOp::And => format!("{left}&& {right}"),
+        CfgBinaryOp::Or => format!("{left}|| {right}"),
     }
 }
 
 /// Whether substituting a constant is no larger than binding it once.
 ///
-/// A depth-one binding costs one indentation tab, `let `, ` = `, `;\n`,
-/// the expression, and its name. Every use also costs the name. Assuming the
+/// A compact binding costs `let `, `=`, `;\n`, the expression, and its name.
+/// Every use also costs the name. Assuming the
 /// shortest possible one-byte name makes this conservative: when it returns
 /// true, substitution cannot increase generated source after dense naming.
 fn constant_inlining_saves_source(expression_len: usize, uses: usize) -> bool {
@@ -2120,9 +2124,7 @@ fn constant_inlining_saves_source(expression_len: usize, uses: usize) -> bool {
         return false;
     }
     uses.saturating_mul(expression_len)
-        <= 10usize
-            .saturating_add(expression_len)
-            .saturating_add(uses.saturating_add(1))
+        <= 8usize.saturating_add(expression_len).saturating_add(uses)
 }
 
 #[cfg(test)]
@@ -2145,13 +2147,15 @@ mod tests {
 
     #[test]
     fn constant_inlining_uses_a_conservative_source_cost() {
-        // A six-byte `0.0f64` is smaller through four uses, even if the binding
+        // A six-byte `0.0f64` is smaller through two uses, even if the binding
         // would have had the shortest possible local name.
         assert!(constant_inlining_saves_source(6, 1));
-        assert!(constant_inlining_saves_source(6, 3));
+        assert!(constant_inlining_saves_source(6, 2));
+        assert!(!constant_inlining_saves_source(6, 3));
         assert!(!constant_inlining_saves_source(6, 4));
 
-        // A longer literal only wins through two uses.
+        // A longer literal is no larger through two uses.
+        assert!(constant_inlining_saves_source(10, 1));
         assert!(constant_inlining_saves_source(10, 2));
         assert!(!constant_inlining_saves_source(10, 3));
         assert!(!constant_inlining_saves_source(6, 0));

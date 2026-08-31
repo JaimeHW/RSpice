@@ -246,6 +246,15 @@ fn evaluate_stateful_helper(
             )?;
             (Instruction::TransitionState(index), 4)
         }
+        446 => {
+            require_slot(
+                session,
+                index,
+                session.context.transition_filters.len(),
+                "transition derivative filter",
+            )?;
+            (Instruction::TransitionStateDerivative(index), 5)
+        }
         424 => {
             require_slot(
                 session,
@@ -263,6 +272,33 @@ fn evaluate_stateful_helper(
                 "delay buffer",
             )?;
             (Instruction::AbsDelayState(index), 2)
+        }
+        447 => {
+            require_slot(
+                session,
+                index,
+                session.context.delay_buffers.len(),
+                "delay buffer",
+            )?;
+            (Instruction::AbsDelayStateMax(index), 3)
+        }
+        448 => {
+            require_slot(
+                session,
+                index,
+                session.context.delay_buffers.len(),
+                "delay derivative buffer",
+            )?;
+            (Instruction::AbsDelayStateDerivative(index), 4)
+        }
+        449 => {
+            require_slot(
+                session,
+                index,
+                session.context.delay_buffers.len(),
+                "delay derivative buffer",
+            )?;
+            (Instruction::AbsDelayStateDerivativeMax(index), 5)
         }
         426 => {
             require_slot(
@@ -702,7 +738,7 @@ pub fn eval_op_v1(
 /// Variable-arity host capability for bounded stateful operations.
 ///
 /// Operands reside in the authenticated trailing region of `frame_offset`;
-/// callers supply only the count, never a linear-memory pointer. ABI v6
+/// callers supply only the count, never a linear-memory pointer. ABI v6+
 /// allowlists Zi value and derivative operations on this capability.
 #[cfg(target_arch = "wasm32")]
 pub fn eval_op_slice_v1(
@@ -781,7 +817,7 @@ pub fn math2_v1(opcode: i32, left: f64, right: f64) -> f64 {
 
 #[cfg(target_arch = "wasm32")]
 fn is_stateful_opcode(opcode: i32) -> bool {
-    matches!(opcode, 400..=429 | 432 | 440..=444)
+    matches!(opcode, 400..=429 | 432 | 440..=446)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1507,6 +1543,80 @@ mod tests {
                 .take_error()
                 .is_some_and(|error| error.contains("slice helper is required"))
         );
+    }
+
+    #[test]
+    fn transition_derivative_scalar_helper_is_read_only_and_branch_exact() {
+        let mut context = VmContext::default();
+        context.analysis_type = 2;
+        context.allocate_transition_filters(1);
+        let mut session = WasmJitRuntimeSession::new(context);
+
+        let seeded = evaluate_helper_with_session(
+            423,
+            0,
+            0,
+            0,
+            [1.0, 0.0, 0.0, 0.0, 0.0],
+            &[],
+            Some(&mut session),
+        )
+        .expect("seed direct transient transition candidate");
+        assert_eq!(seeded.to_bits(), 1.0_f64.to_bits());
+        session
+            .context_mut()
+            .advance_state()
+            .expect("accept seeded transition state");
+        session.context_mut().time = 1.0;
+        let accepted = session.context().transition_filters[0].checkpoint();
+
+        for _ in 0..2 {
+            let direct = evaluate_helper_with_session(
+                446,
+                0,
+                0,
+                0,
+                [1.0, 3.0, 0.0, 0.0, 0.0],
+                &[],
+                Some(&mut session),
+            )
+            .expect("evaluate unchanged instantaneous transition derivative");
+            assert_eq!(direct.to_bits(), 3.0_f64.to_bits());
+            assert_eq!(
+                session.context().transition_filters[0].checkpoint(),
+                accepted,
+                "derivative evaluation must not change accepted transition history"
+            );
+        }
+
+        let ramp = evaluate_helper_with_session(
+            446,
+            0,
+            0,
+            0,
+            [2.0, 3.0, 0.0, 2.0, 2.0],
+            &[],
+            Some(&mut session),
+        )
+        .expect("evaluate finite transition-ramp derivative");
+        assert_eq!(ramp.to_bits(), 0.0_f64.to_bits());
+        assert_eq!(
+            session.context().transition_filters[0].checkpoint(),
+            accepted
+        );
+
+        session.context_mut().analysis_type = 3;
+        let small_signal = evaluate_helper_with_session(
+            446,
+            0,
+            0,
+            0,
+            [2.0, 3.0, 0.0, 2.0, 2.0],
+            &[],
+            Some(&mut session),
+        )
+        .expect("evaluate AC transition derivative");
+        assert_eq!(small_signal.to_bits(), 3.0_f64.to_bits());
     }
 
     #[test]

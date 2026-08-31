@@ -32,9 +32,11 @@
 use smol_str::SmolStr;
 use std::collections::{HashMap, HashSet};
 
+use crate::disciplines::is_standard_flow_access;
+
 use super::cfg::{
-    CfgBinaryOp, CfgFunction, CfgTerminator, CfgUnaryOp, CfgValueKind, CfgValueType, CfgVariable,
-    SsaBuilder,
+    CfgBinaryOp, CfgDdxAxis, CfgFunction, CfgTerminator, CfgUnaryOp, CfgValueKind, CfgValueType,
+    CfgVariable, SsaBuilder,
 };
 use super::hir::{
     HirAnalogOperator, HirContribution, HirContributionKind, HirExprKind, HirExpression,
@@ -1968,55 +1970,81 @@ impl<'a> CfgLowerer<'a> {
         }
     }
 
-    /// `ddx(expr, V(pos, neg))`, left symbolic for the derivative pass.
+    /// `ddx(expr, probe)`, left symbolic for the derivative pass.
     fn ddx(&mut self, expr: ExprId, probe: ExprId, span: SourceSpanRef) -> ValueId {
-        let Some((pos_node, neg_node)) = self.ddx_probe(probe, span) else {
+        let Some(axis) = self.ddx_probe(probe, span) else {
             return self.real_constant(0.0);
         };
         let value = self.expr(expr);
         self.builder.push(
             self.block,
             CfgValueType::Real,
-            CfgValueKind::Ddx {
-                value,
-                pos_node,
-                neg_node,
-            },
+            CfgValueKind::Ddx { value, axis },
         )
     }
 
-    /// The node pair a `ddx` probe names. Only a potential probe is meaningful:
-    /// a flow probe would be a derivative with respect to a value the solver
-    /// does not own as an unknown.
-    fn ddx_probe(
-        &mut self,
-        probe: ExprId,
-        span: SourceSpanRef,
-    ) -> Option<(Option<NodeId>, Option<NodeId>)> {
+    /// The solver-owned axis a `ddx` probe names. A flow is a valid axis only
+    /// when topology has introduced a branch-current unknown for it; currents
+    /// synthesized from flow contributions and terminal currents are dependent
+    /// values, not independent Newton coordinates.
+    fn ddx_probe(&mut self, probe: ExprId, span: SourceSpanRef) -> Option<CfgDdxAxis> {
         let kind = self
             .hir
             .expressions
             .get(usize::from(probe))
             .map(|expression| expression.kind.clone());
         match kind {
-            Some(HirExprKind::BranchAccess { access, pos, neg }) if !is_flow_access(&access) => {
+            Some(HirExprKind::BranchAccess { access, pos, neg }) => {
                 let pos_node = self.endpoint(&pos, span).ok()?;
                 let neg_node = match neg {
                     Some(neg) => self.endpoint(&neg, span).ok()?,
                     None => None,
                 };
-                Some((pos_node, neg_node))
+                if !is_flow_access(&access) {
+                    return Some(CfgDdxAxis::Potential { pos_node, neg_node });
+                }
+                match self.branch_unknown_by_nodes(pos_node, neg_node) {
+                    Some((unknown, reversed)) => Some(CfgDdxAxis::BranchFlow { unknown, reversed }),
+                    None => {
+                        self.unsupported(
+                            span,
+                            "ddx flow probe requires a solver-owned branch-current unknown from a potential or indirect contribution".to_string(),
+                        );
+                        None
+                    }
+                }
             }
-            Some(HirExprKind::NamedBranchAccess { access, name }) if !is_flow_access(&access) => {
-                let branch = self
-                    .mir
-                    .branches
-                    .iter()
-                    .find(|branch| branch.name == name)?;
-                Some((branch.pos_node, branch.neg_node))
+            Some(HirExprKind::NamedBranchAccess { access, name }) => {
+                let branch = self.mir.branches.iter().find(|branch| branch.name == name);
+                let Some(branch) = branch else {
+                    self.unsupported(span, format!("unknown ddx probe branch '{name}'"));
+                    return None;
+                };
+                if !is_flow_access(&access) {
+                    return Some(CfgDdxAxis::Potential {
+                        pos_node: branch.pos_node,
+                        neg_node: branch.neg_node,
+                    });
+                }
+                match self.branch_unknown_by_nodes(branch.pos_node, branch.neg_node) {
+                    Some((unknown, reversed)) => Some(CfgDdxAxis::BranchFlow { unknown, reversed }),
+                    None => {
+                        self.unsupported(
+                            span,
+                            format!(
+                                "ddx flow probe I(<{name}>) requires a solver-owned branch-current unknown from a potential or indirect contribution"
+                            ),
+                        );
+                        None
+                    }
+                }
             }
             _ => {
-                self.unsupported(span, "a ddx probe that is not a potential".to_string());
+                self.unsupported(
+                    span,
+                    "a ddx probe that is not a branch potential or solver-owned branch flow"
+                        .to_string(),
+                );
                 None
             }
         }
@@ -2091,6 +2119,76 @@ impl<'a> CfgLowerer<'a> {
                         operator: expression.id,
                         input,
                         ic,
+                    },
+                )
+            }
+            HirAnalogOperator::Transition {
+                site,
+                expr,
+                delay,
+                rise,
+                fall,
+                tolerance,
+            } => {
+                if tolerance.is_some() {
+                    self.unsupported(
+                        span,
+                        "transition time_tol requires exact tolerance-controlled corner placement"
+                            .to_string(),
+                    );
+                    return self.real_constant(0.0);
+                }
+                let input = self.expr(*expr);
+                let delay = delay
+                    .map(|value| self.expr(value))
+                    .unwrap_or_else(|| self.real_constant(0.0));
+                let rise = rise
+                    .map(|value| self.expr(value))
+                    .unwrap_or_else(|| self.real_constant(0.0));
+                let fall = fall
+                    .map(|value| self.expr(value))
+                    .unwrap_or_else(|| self.real_constant(0.0));
+                self.builder.push(
+                    self.block,
+                    CfgValueType::Real,
+                    CfgValueKind::Transition {
+                        site: *site,
+                        input,
+                        delay,
+                        rise,
+                        fall,
+                    },
+                )
+            }
+            HirAnalogOperator::TransitionDerivative {
+                site,
+                input,
+                input_derivative,
+                delay,
+                rise,
+                fall,
+            } => {
+                let input = self.expr(*input);
+                let input_derivative = self.expr(*input_derivative);
+                let delay = delay
+                    .map(|value| self.expr(value))
+                    .unwrap_or_else(|| self.real_constant(0.0));
+                let rise = rise
+                    .map(|value| self.expr(value))
+                    .unwrap_or_else(|| self.real_constant(0.0));
+                let fall = fall
+                    .map(|value| self.expr(value))
+                    .unwrap_or_else(|| self.real_constant(0.0));
+                self.builder.push(
+                    self.block,
+                    CfgValueType::Real,
+                    CfgValueKind::TransitionDerivative {
+                        site: *site,
+                        input,
+                        input_derivative,
+                        delay,
+                        rise,
+                        fall,
                     },
                 )
             }
@@ -2250,7 +2348,7 @@ fn is_noise_name(name: &str) -> bool {
 }
 
 fn is_flow_access(access: &str) -> bool {
-    matches!(access, "I" | "Pwr" | "F" | "Tau" | "Phi" | "Flow")
+    is_standard_flow_access(access)
 }
 
 fn is_predicate(op: CfgBinaryOp) -> bool {
@@ -2348,6 +2446,7 @@ fn analog_operator_label(op: &HirAnalogOperator) -> &'static str {
         HirAnalogOperator::Limexp { .. } => "limexp",
         HirAnalogOperator::Absdelay { .. } => "absdelay",
         HirAnalogOperator::Transition { .. } => "transition",
+        HirAnalogOperator::TransitionDerivative { .. } => "transition_derivative",
         HirAnalogOperator::Slew { .. } => "slew",
         HirAnalogOperator::LastCrossing { .. } => "last_crossing",
     }

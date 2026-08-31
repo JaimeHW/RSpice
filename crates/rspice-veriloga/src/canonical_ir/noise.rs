@@ -865,6 +865,7 @@ fn push_analog_children(op: &HirAnalogOperator, stack: &mut Vec<ExprId>) {
             rise,
             fall,
             tolerance,
+            ..
         } => {
             stack.push(*expr);
             stack.extend(
@@ -875,6 +876,17 @@ fn push_analog_children(op: &HirAnalogOperator, stack: &mut Vec<ExprId>) {
                     .chain(tolerance)
                     .copied(),
             );
+        }
+        HirAnalogOperator::TransitionDerivative {
+            input,
+            input_derivative,
+            delay,
+            rise,
+            fall,
+            ..
+        } => {
+            stack.extend([*input, *input_derivative]);
+            stack.extend(delay.iter().chain(rise).chain(fall).copied());
         }
         HirAnalogOperator::Slew {
             expr,
