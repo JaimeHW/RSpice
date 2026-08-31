@@ -5,7 +5,7 @@
 use super::component_type::ComponentType;
 use super::point::{LabelPosition, Point};
 use super::rotation::Rotation;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::path::PathBuf;
 
@@ -151,6 +151,49 @@ pub struct LibraryCellInstance {
 }
 
 /// Frozen catalog identity for a build-time generated Verilog-A placement.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum PersistedGeneratedIdentity {
+    #[default]
+    Missing,
+    Null,
+    Value(String),
+}
+
+impl PersistedGeneratedIdentity {
+    pub const fn is_missing(&self) -> bool {
+        matches!(self, Self::Missing)
+    }
+
+    pub const fn is_value(&self) -> bool {
+        matches!(self, Self::Value(_))
+    }
+}
+
+impl Serialize for PersistedGeneratedIdentity {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Value(value) => value.serialize(serializer),
+            Self::Missing | Self::Null => serializer.serialize_none(),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for PersistedGeneratedIdentity {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Option::<String>::deserialize(deserializer).map(|value| match value {
+            Some(value) => Self::Value(value),
+            None => Self::Null,
+        })
+    }
+}
+
+/// Frozen catalog identity for a build-time generated Verilog-A placement.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GeneratedVerilogAInstance {
     pub schema_revision: u32,
@@ -159,7 +202,17 @@ pub struct GeneratedVerilogAInstance {
     pub model_name: String,
     pub module_name: String,
     pub source_digest: String,
+    #[serde(
+        default,
+        skip_serializing_if = "PersistedGeneratedIdentity::is_missing"
+    )]
+    pub source_identity: PersistedGeneratedIdentity,
     pub checkpoint_identity: String,
+    #[serde(
+        default,
+        skip_serializing_if = "PersistedGeneratedIdentity::is_missing"
+    )]
+    pub accepted_state_shape_identity: PersistedGeneratedIdentity,
     pub descriptor_signature: String,
 }
 

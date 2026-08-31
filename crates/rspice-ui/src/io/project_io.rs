@@ -28,14 +28,15 @@ use crate::state::workspace::validate_cell_view_name_segment;
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
     AnalysisResultPvtPoint, AnalysisResultSourceDomain, AnalysisType, CanonicalCellViewOwnerKey,
-    CellViewRef, ConfigurationSet, DcOpResult, ExecutionTarget, InstancePath, InstancePathPattern,
-    LibraryManager, NoiseContributorRow, NoiseSummary, OperatingPointValue, PatternSegment,
-    PreparedModelSourceIdentity, PreparedRunReceipt, PreparedRunTaskReceipt,
+    CellViewRef, ConfigurationSet, DcOpResult, ExecutionTarget,
+    GENERATED_VERILOGA_BINDING_SCHEMA_REVISION, GeneratedVerilogABindingMigration, InstancePath,
+    InstancePathPattern, LibraryManager, NoiseContributorRow, NoiseSummary, OperatingPointValue,
+    PatternSegment, PreparedModelSourceIdentity, PreparedRunReceipt, PreparedRunTaskReceipt,
     PreparedSourceCheckReceipt, PreparedSpecification, PreparedSpecificationPolicy,
     ProjectWorkspace, RunRetention, SavedOutputMaterializationStatus, SavedOutputReceipt,
     SimulationRun, SimulationRunLifecycle, SimulationRunProvenance, SimulationState, SpecEntry,
     SpecificationDefinition, SpecificationPolicy, SpecificationVerdict, ViewType, WaveformData,
-    canonical_cell_view_owner_key,
+    canonical_cell_view_owner_key, migrate_generated_veriloga_binding,
 };
 
 /// Presence-aware persisted field used at schema-era boundaries.
@@ -1980,6 +1981,37 @@ pub(crate) fn load_project_text(
     project.workspace.migrate_owned_netlist_deck_ids();
     let mut load_repairs = Vec::new();
     load_repairs.extend(project.workspace.migrate_document_occurrences());
+    let mut migrated_generated_bindings = 0usize;
+    let mut unresolved_generated_bindings = 0usize;
+    for schematic in project.workspace.schematic_buffers.values_mut() {
+        for component in &mut schematic.components {
+            let Some(binding) = component.library_cell.as_mut() else {
+                continue;
+            };
+            if binding.generated_veriloga.is_none() {
+                continue;
+            }
+            match migrate_generated_veriloga_binding(binding) {
+                GeneratedVerilogABindingMigration::Current => {}
+                GeneratedVerilogABindingMigration::Migrated => {
+                    migrated_generated_bindings += 1;
+                }
+                GeneratedVerilogABindingMigration::Unresolved(_reason) => {
+                    unresolved_generated_bindings += 1;
+                }
+            }
+        }
+    }
+    if migrated_generated_bindings > 0 {
+        load_repairs.push(format!(
+            "Migrated {migrated_generated_bindings} exact generated Verilog-A binding(s) to identity schema {GENERATED_VERILOGA_BINDING_SCHEMA_REVISION}."
+        ));
+    }
+    if unresolved_generated_bindings > 0 {
+        load_repairs.push(format!(
+            "Preserved {unresolved_generated_bindings} generated Verilog-A binding(s) as unresolved because their persisted identity was not an exact catalog match."
+        ));
+    }
     if let Some(context) = &mut project.execution_context {
         context.migrate_to_current(project_id).map_err(|error| {
             ProjectIoError::InvalidData(format!("execution context migration failed: {error}"))

@@ -66,8 +66,8 @@ pub use clipboard::ClipboardData;
 pub use component::{
     BuiltinXspiceInstance, BuiltinXspicePortBinding, BuiltinXspicePortDirection,
     BuiltinXspicePortType, Component, ComponentDisplayMode, GeneratedVerilogAInstance,
-    InstanceMultiplicity, LibraryCellInstance, explicit_component_model,
-    validate_library_netlist_template,
+    InstanceMultiplicity, LibraryCellInstance, PersistedGeneratedIdentity,
+    explicit_component_model, validate_library_netlist_template,
 };
 pub use component_type::ComponentType;
 pub use design_note::{
@@ -92,8 +92,11 @@ pub use documentation_shape::{
     arc_parameters, geometry_from_points,
 };
 pub use generated_veriloga_catalog::{
-    generated_veriloga_devices, generated_veriloga_library_binding,
-    validate_generated_veriloga_binding,
+    GENERATED_VERILOGA_BINDING_SCHEMA_REVISION, generated_veriloga_devices,
+    generated_veriloga_library_binding, validate_generated_veriloga_binding,
+};
+pub(crate) use generated_veriloga_catalog::{
+    GeneratedVerilogABindingMigration, migrate_generated_veriloga_binding,
 };
 pub use ground_names::is_ground_reference;
 pub(crate) use hierarchy::SheetMoveConnectivityPlan;
