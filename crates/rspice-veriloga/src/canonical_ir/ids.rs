@@ -80,3 +80,8 @@ id_type!(ShapeId);
 // the schedule.
 id_type!(DigitalSignalId);
 id_type!(DigitalProcessId);
+// `DigitalLocalId` indexes a variable declared *inside* one process, in
+// declaration order within that process. It is not a module-wide identity:
+// two processes each declaring `integer i` own an id 0 apiece, because a
+// process-local variable is never visible outside the function it lives in.
+id_type!(DigitalLocalId);

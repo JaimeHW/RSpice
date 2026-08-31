@@ -46,8 +46,8 @@ use std::collections::{HashMap, HashSet};
 use super::digital::{DigitalSchedulingRegion, DigitalSensitivityTerm, DigitalWriteTarget};
 use super::digital_value;
 use super::{
-    BlockId, BranchId, BranchUnknownId, ContributionId, DigitalSignalId, ExprId, NodeId, ParamId,
-    ShapeId, ValueId, VariableId,
+    BlockId, BranchId, BranchUnknownId, ContributionId, DigitalLocalId, DigitalSignalId, ExprId,
+    NodeId, ParamId, ShapeId, ValueId, VariableId,
 };
 
 /// What SSA tracks a definition for.
@@ -61,6 +61,14 @@ use super::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CfgVariable {
     Local(VariableId),
+    /// A variable declared inside a digital process, which lives in SSA rather
+    /// than in the signal store.
+    ///
+    /// Separate from [`Self::Local`] because the two are drawn from different
+    /// numbering spaces — one indexes the module's analog variables, the other
+    /// the declarations of one process — and a merge that confused them would
+    /// read an analog `real` where a four-state counter belongs.
+    DigitalLocal(DigitalLocalId),
     Residual(ContributionId),
     /// Whether a potential contribution's leading instance-static guard prefix
     /// enables its topology. This is not ordinary statement reachability: once
@@ -1192,6 +1200,24 @@ pub struct SsaBuilder {
     /// rewrites value ids twice — collapsing trivial merges, then compacting —
     /// and an id read out beforehand names something else afterwards.
     outputs: Vec<ValueId>,
+    /// The type a variable's merges take, when it is not the default.
+    ///
+    /// Empty for the analog body, whose every variable is a `real` — an
+    /// `integer` included, because that ABI carries one in an `f64`. A digital
+    /// process declares each of its locals, and the merge the builder creates
+    /// for one then carries the declared type instead of guessing.
+    variable_types: HashMap<CfgVariable, CfgValueType>,
+    /// Blocks a [`CfgTerminator::Wait`] resumes into.
+    ///
+    /// Their parameters are exempt from trivial-merge collapse. A resumption
+    /// does not preserve the value table — the process suspended, and whatever
+    /// it computed before the suspension is gone — so a parameter that
+    /// "trivially" equals a value defined before the `Wait` is not trivial at
+    /// all: collapsing it makes the resumed half read something nothing
+    /// defines. This is the one place the analog and digital construction
+    /// rules genuinely differ, and it is inert for the analog body because
+    /// nothing there suspends.
+    resume_targets: HashSet<BlockId>,
     /// Where a collapsed merge sends its readers, as a union-find parent list.
     ///
     /// Recorded rather than applied. Rewriting every use at the moment a merge
@@ -1218,9 +1244,56 @@ impl SsaBuilder {
             incomplete: Vec::new(),
             sealed: HashSet::new(),
             predecessors: HashMap::new(),
+            variable_types: HashMap::new(),
+            resume_targets: HashSet::new(),
             outputs: Vec::new(),
             redirect: Vec::new(),
         }
+    }
+
+    /// Declare the type a variable's values carry.
+    ///
+    /// Every merge the builder creates for `variable` takes this type, and so
+    /// does the constant a merge with no reaching definition collapses to. A
+    /// variable that is never declared is a `real`, which is what the analog
+    /// body's every variable is and why that half needs no declarations.
+    pub fn declare_variable(&mut self, variable: CfgVariable, value_type: CfgValueType) {
+        self.variable_types.insert(variable, value_type);
+    }
+
+    fn variable_type(&self, variable: CfgVariable) -> CfgValueType {
+        self.variable_types
+            .get(&variable)
+            .copied()
+            .unwrap_or(CfgValueType::Real)
+    }
+
+    /// The value a variable of this type has where nothing defined it.
+    ///
+    /// Zero for a `real`, because that is the Verilog-AMS initial value of an
+    /// analog variable. `x` for a four-state value, because IEEE 1364-2005
+    /// section 4.2.2 gives an unwritten variable exactly that — the two
+    /// languages disagree about what "no value yet" means, and the type says
+    /// which of them is being asked.
+    fn undefined_value(&mut self, value_type: CfgValueType) -> ValueId {
+        let kind = match value_type {
+            CfgValueType::FourState { width } => {
+                CfgValueKind::FourStateConstant(digital_value::FourStateValue::splat(
+                    width,
+                    crate::four_state::FourStateBit::Unknown,
+                ))
+            }
+            CfgValueType::Integer => CfgValueKind::IntegerConstant(0),
+            CfgValueType::Boolean => CfgValueKind::BooleanConstant(false),
+            CfgValueType::Real | CfgValueType::Lanes(_) | CfgValueType::Effect => {
+                CfgValueKind::RealConstant(0.0)
+            }
+        };
+        let value_type = match kind {
+            CfgValueKind::RealConstant(_) => CfgValueType::Real,
+            _ => value_type,
+        };
+        self.push_leaf(value_type, kind)
     }
 
     /// Follow a value through any merges that collapsed since it was recorded.
@@ -1303,10 +1376,56 @@ impl SsaBuilder {
             CfgTerminator::Wait { resume, .. } => vec![*resume],
             CfgTerminator::Return | CfgTerminator::Unset => Vec::new(),
         };
+        if let CfgTerminator::Wait { resume, .. } = &terminator {
+            self.resume_targets.insert(*resume);
+        }
         for successor in successors {
             self.predecessors.entry(successor).or_default().push(block);
         }
         self.blocks[usize::from(block)].terminator = terminator;
+    }
+
+    /// Route one value across an edge that cannot carry the value table.
+    ///
+    /// The mechanism a [`CfgTerminator::Wait`] needs and an ordinary jump does
+    /// not: a suspension ends the run, so a value the resumed half reads has to
+    /// arrive as a block parameter rather than be looked up. Adds the argument
+    /// and the parameter together, which is what keeps the two lists aligned,
+    /// and returns the parameter the resumed block reads instead.
+    ///
+    /// Call it immediately after the terminator that creates the edge and
+    /// before anything reads a variable in `to`; a parameter added by the
+    /// ordinary merge machinery in between would take its argument at sealing
+    /// time and the positions would cross.
+    pub fn carry_value(&mut self, value: ValueId, from: BlockId, to: BlockId) -> ValueId {
+        debug_assert_eq!(
+            self.blocks[usize::from(from)]
+                .arguments_to(to)
+                .map(<[ValueId]>::len),
+            Some(self.blocks[usize::from(to)].params.len()),
+            "carry_value must run before any other parameter is added to the target"
+        );
+        let value_type = self.values[usize::from(value)].value_type;
+        let parameter = self.new_value(value_type, CfgValueKind::BlockParameter);
+        self.blocks[usize::from(to)].params.push(parameter);
+        self.blocks[usize::from(from)].push_argument(to, value);
+        parameter
+    }
+
+    /// Route a variable's current value across such an edge.
+    ///
+    /// The variable reads as the new parameter in `to`, so everything after the
+    /// suspension sees the value the process had when it suspended.
+    pub fn carry_variable(
+        &mut self,
+        variable: CfgVariable,
+        from: BlockId,
+        to: BlockId,
+    ) -> Option<ValueId> {
+        let value = self.read_variable(variable, from)?;
+        let parameter = self.carry_value(value, from, to);
+        self.write_variable(variable, to, parameter);
+        Some(parameter)
     }
 
     pub fn write_variable(&mut self, variable: CfgVariable, block: BlockId, value: ValueId) {
@@ -1333,7 +1452,8 @@ impl SsaBuilder {
             // Predecessors are still arriving. Reserve a parameter now and fill
             // its arguments in on sealing; this is the only reason construction
             // needs two passes over a loop.
-            let value = self.new_value(CfgValueType::Real, CfgValueKind::BlockParameter);
+            let value_type = self.variable_type(variable);
+            let value = self.new_value(value_type, CfgValueKind::BlockParameter);
             self.blocks[usize::from(block)].params.push(value);
             self.incomplete.push((block, variable, value));
             self.write_variable(variable, block, value);
@@ -1349,7 +1469,8 @@ impl SsaBuilder {
             // minimal without a separate cleanup pass.
             [single] => self.read_variable(variable, *single)?,
             _ => {
-                let value = self.new_value(CfgValueType::Real, CfgValueKind::BlockParameter);
+                let value_type = self.variable_type(variable);
+                let value = self.new_value(value_type, CfgValueKind::BlockParameter);
                 self.blocks[usize::from(block)].params.push(value);
                 // Written before recursing so a cycle terminates here rather
                 // than spinning through the loop body forever.
@@ -1408,6 +1529,12 @@ impl SsaBuilder {
         block: BlockId,
         parameter: ValueId,
     ) -> Option<ValueId> {
+        // A resume block's parameters are its entire live-in state: the value
+        // table does not survive the suspension that reaches it, so there is no
+        // "the argument is already available here" to collapse into.
+        if self.resume_targets.contains(&block) {
+            return Some(parameter);
+        }
         let mut unique: Option<ValueId> = None;
         let preds = self.predecessors.get(&block).cloned().unwrap_or_default();
         let position = match self.blocks[usize::from(block)]
@@ -1484,9 +1611,17 @@ impl SsaBuilder {
         }
         // Zero is the Verilog-AMS initial value of an analog variable, so an
         // undefined merge resolves to it for any reader that already holds the
-        // parameter. The `None` is what tells the lowering to say so.
-        let replacement = unique
-            .unwrap_or_else(|| self.push_leaf(CfgValueType::Real, CfgValueKind::RealConstant(0.0)));
+        // parameter. The `None` is what tells the lowering to say so. The
+        // parameter's own type chooses the constant, so a four-state merge
+        // resolves to `x` rather than to a real zero nothing in a process can
+        // read.
+        let replacement = match unique {
+            Some(value) => value,
+            None => {
+                let value_type = self.values[usize::from(parameter)].value_type;
+                self.undefined_value(value_type)
+            }
+        };
         self.replace_all_uses(parameter, replacement);
         unique.map(|_| replacement)
     }

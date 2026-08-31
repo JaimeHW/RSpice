@@ -70,9 +70,9 @@ pub use hir::{
     HirParameter, HirParameterDimension, HirPort, HirStatement, HirVariable, HirZiKind,
 };
 pub use ids::{
-    ArrayId, BlockId, BranchId, BranchUnknownId, ContributionId, DigitalProcessId, DigitalSignalId,
-    DisciplineId, EquationId, ExprId, ModuleId, NodeId, NoiseSourceId, ParamId, PortId, RegionId,
-    ScheduleId, ShapeId, SourceId, StateId, SymbolId, ValueId, VariableId,
+    ArrayId, BlockId, BranchId, BranchUnknownId, ContributionId, DigitalLocalId, DigitalProcessId,
+    DigitalSignalId, DisciplineId, EquationId, ExprId, ModuleId, NodeId, NoiseSourceId, ParamId,
+    PortId, RegionId, ScheduleId, ShapeId, SourceId, StateId, SymbolId, ValueId, VariableId,
 };
 pub use metadata::{CANONICAL_IR_SCHEMA_VERSION, CanonicalMetadata, StableDigest, source_identity};
 pub use mir::{

@@ -836,3 +836,150 @@ fn a_wait_reports_its_resume_edge_as_a_successor() {
         .collect();
     assert!(unreachable.is_empty(), "stranded blocks: {unreachable:?}");
 }
+
+// ===========================================================================
+// Typed SSA merges
+// ===========================================================================
+
+/// A merge carries the type of the variable it merges.
+///
+/// The builder used to create every block parameter as a `real`, which is the
+/// analog body's only variable type and was therefore invisible until a
+/// process needed one. A four-state merge that arrived as a `real` would reach
+/// the interpreter as an analog value in a process, which it refuses — so this
+/// is the property every process-local variable rests on.
+#[test]
+fn a_block_parameter_takes_its_variables_declared_type() {
+    use rspice_veriloga::canonical_ir::cfg::{CfgVariable, SsaBuilder};
+    use rspice_veriloga::canonical_ir::{DigitalLocalId, VariableId};
+
+    let mut builder = SsaBuilder::new();
+    let entry = builder.create_block();
+    builder.seal_block(entry);
+    let then_block = builder.create_block();
+    let else_block = builder.create_block();
+    let join = builder.create_block();
+
+    let counter = CfgVariable::DigitalLocal(DigitalLocalId::new(0));
+    builder.declare_variable(counter, CfgValueType::FourState { width: 4 });
+    // Declared nowhere, so it keeps the default every analog variable has.
+    let analog = CfgVariable::Local(VariableId::new(0));
+
+    let condition = builder.push_leaf(CfgValueType::Boolean, CfgValueKind::BooleanConstant(true));
+    builder.set_terminator(
+        entry,
+        CfgTerminator::Branch {
+            condition,
+            then_target: then_block,
+            then_args: Vec::new(),
+            else_target: else_block,
+            else_args: Vec::new(),
+        },
+    );
+    builder.seal_block(then_block);
+    builder.seal_block(else_block);
+
+    for (block, bits, real) in [(then_block, 0b0000u64, 1.0), (else_block, 0b1111, 2.0)] {
+        let value = builder.push_leaf(
+            CfgValueType::FourState { width: 4 },
+            CfgValueKind::FourStateConstant(FourStateValue::from_u64(4, bits)),
+        );
+        builder.write_variable(counter, block, value);
+        let value = builder.push_leaf(CfgValueType::Real, CfgValueKind::RealConstant(real));
+        builder.write_variable(analog, block, value);
+        builder.set_terminator(
+            block,
+            CfgTerminator::Jump {
+                target: join,
+                args: Vec::new(),
+            },
+        );
+    }
+    builder.seal_block(join);
+
+    let merged_counter = builder.read_variable(counter, join).expect("a merge");
+    let merged_analog = builder.read_variable(analog, join).expect("a merge");
+    assert_eq!(
+        builder.value_type_of(merged_counter),
+        Some(CfgValueType::FourState { width: 4 })
+    );
+    assert_eq!(
+        builder.value_type_of(merged_analog),
+        Some(CfgValueType::Real)
+    );
+
+    builder.set_terminator(join, CfgTerminator::Return);
+    let function = builder.finish(entry).expect("a valid graph");
+    let types: Vec<CfgValueType> = function
+        .block(join)
+        .params
+        .iter()
+        .map(|param| function.value(*param).value_type)
+        .collect();
+    assert_eq!(
+        types,
+        vec![CfgValueType::FourState { width: 4 }, CfgValueType::Real],
+        "the merges keep their types through construction"
+    );
+}
+
+/// A merge with no reaching definition resolves to the initial value of its own
+/// type: `x` at the declared width for a four-state variable, IEEE 1364-2005
+/// section 4.2.2, rather than the real zero Verilog-AMS gives an analog one.
+///
+/// Reached the way it is reached in practice — a loop header read before the
+/// back edge exists, so the body already holds the parameter by the time
+/// sealing discovers nothing defines it.
+#[test]
+fn an_undefined_four_state_merge_resolves_to_unknown() {
+    use rspice_veriloga::canonical_ir::DigitalLocalId;
+    use rspice_veriloga::canonical_ir::cfg::{CfgVariable, SsaBuilder};
+
+    let mut builder = SsaBuilder::new();
+    let entry = builder.create_block();
+    builder.seal_block(entry);
+    let header = builder.create_block();
+    let exit = builder.create_block();
+    builder.set_terminator(
+        entry,
+        CfgTerminator::Jump {
+            target: header,
+            args: Vec::new(),
+        },
+    );
+
+    let local = CfgVariable::DigitalLocal(DigitalLocalId::new(0));
+    builder.declare_variable(local, CfgValueType::FourState { width: 2 });
+    // The header is not sealed, so this reserves a parameter whose arguments
+    // arrive later — and nothing ever defines the variable on either edge.
+    let read = builder.read_variable(local, header).expect("a parameter");
+    let negated = builder.push(
+        header,
+        CfgValueType::FourState { width: 2 },
+        CfgValueKind::DigitalBitwiseNot { input: read },
+    );
+    builder.set_terminator(
+        header,
+        CfgTerminator::Jump {
+            target: exit,
+            args: Vec::new(),
+        },
+    );
+    builder.seal_block(header);
+    builder.seal_block(exit);
+    builder.set_terminator(exit, CfgTerminator::Return);
+
+    let (function, outputs) = builder
+        .finish_with_outputs(entry, &[negated])
+        .expect("a valid graph");
+    let CfgValueKind::DigitalBitwiseNot { input } = function.value(outputs[0]).kind else {
+        panic!("the negation survives");
+    };
+    let CfgValueKind::FourStateConstant(value) = &function.value(input).kind else {
+        panic!(
+            "an undefined four-state merge must resolve to a four-state constant, got {:?}",
+            function.value(input).kind
+        );
+    };
+    assert_eq!(value.spelling(), "xx");
+}
