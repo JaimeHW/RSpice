@@ -592,6 +592,69 @@ impl BackwardError {
     }
 }
 
+/// Canonicalize unknowns that are mathematically fixed to zero by an exact
+/// homogeneous singleton equation in the selected operator.
+///
+/// Sparse LU can leave a sub-ulp remnant in an auxiliary MNA coordinate whose
+/// equation is exactly `a*x = 0`. A componentwise certificate quite correctly
+/// assigns that remnant an error of one because its residual and denominator
+/// are both `|a*x|`. Setting `x` to positive zero is not a perturbation or a
+/// tolerance: it is the unique solution of the original equation. Rows with a
+/// nonzero right-hand side, zero coefficients, or more than one coefficient
+/// are deliberately ineligible, and callers must certify the complete system
+/// again after applying any projection.
+fn canonicalize_real_homogeneous_singletons(
+    csc: &SymbolicSparseColMat<usize>,
+    values: &[Value],
+    rhs: &[Value],
+    solution: &mut [Value],
+    operation: RealSolveOp,
+) -> bool {
+    let nrows = csc.nrows();
+    let ncols = csc.ncols();
+    if nrows != ncols
+        || values.len() != csc.row_idx().len()
+        || rhs.len() != nrows
+        || solution.len() != ncols
+    {
+        return false;
+    }
+
+    let mut unique_unknown = vec![None; nrows];
+    let mut multiple = vec![false; nrows];
+    for col in 0..ncols {
+        for index in csc.col_ptr()[col]..csc.col_ptr()[col + 1] {
+            if values[index] == 0.0 {
+                continue;
+            }
+            let original_row = csc.row_idx()[index];
+            let (equation, unknown) = match operation {
+                RealSolveOp::Normal => (original_row, col),
+                RealSolveOp::Transpose => (col, original_row),
+            };
+            if unique_unknown[equation].replace(unknown).is_some() {
+                multiple[equation] = true;
+            }
+        }
+    }
+
+    let positive_zero_bits = 0.0_f64.to_bits();
+    let mut changed = false;
+    for equation in 0..nrows {
+        if rhs[equation] != 0.0 || multiple[equation] {
+            continue;
+        }
+        let Some(unknown) = unique_unknown[equation] else {
+            continue;
+        };
+        if solution[unknown].to_bits() != positive_zero_bits {
+            solution[unknown] = 0.0;
+            changed = true;
+        }
+    }
+    changed
+}
+
 /// Compute componentwise backward error in the supplied coordinates.
 ///
 /// The denominator `|b| + |A| |x|` makes the check unit- and scale-invariant.
@@ -2266,21 +2329,47 @@ impl StaticMatrix {
             return Ok(true);
         }
         for rhs_index in 0..rhs_count {
+            let begin = rhs_index * n;
+            let end = begin + n;
             let error = componentwise_backward_error_with_layout(
                 csc,
                 residual_layout,
                 values,
-                &solution[rhs_index * n..(rhs_index + 1) * n],
-                &rhs[rhs_index * n..(rhs_index + 1) * n],
+                &solution[begin..end],
+                &rhs[begin..end],
                 residual_scratch,
                 residual_gross_scratch,
                 residual_compensation_scratch,
                 residual_row_nnz_scratch,
                 operation,
             );
-            if !error.is_ok_and(BackwardError::accepted) {
-                return Ok(false);
+            if error.is_ok_and(BackwardError::accepted) {
+                continue;
             }
+            if canonicalize_real_homogeneous_singletons(
+                csc,
+                values,
+                &rhs[begin..end],
+                &mut solution[begin..end],
+                operation,
+            ) {
+                let canonical_error = componentwise_backward_error_with_layout(
+                    csc,
+                    residual_layout,
+                    values,
+                    &solution[begin..end],
+                    &rhs[begin..end],
+                    residual_scratch,
+                    residual_gross_scratch,
+                    residual_compensation_scratch,
+                    residual_row_nnz_scratch,
+                    operation,
+                );
+                if canonical_error.is_ok_and(BackwardError::accepted) {
+                    continue;
+                }
+            }
+            return Ok(false);
         }
         Ok(true)
     }
@@ -2804,6 +2893,40 @@ impl StaticMatrix {
             backward_error = refined_error;
         }
 
+        // Exact zero is invariant under diagonal equilibration. Determine
+        // eligibility from the physical operator, then certify the complete
+        // diagonally equivalent scaled system before unscaling. This preserves
+        // the overflow protection that equilibration provides.
+        if canonicalize_real_homogeneous_singletons(csc, values, rhs, solution, operation) {
+            let canonical_error = componentwise_backward_error_with_layout_and_floors(
+                csc,
+                residual_layout,
+                &ws.scaled_values,
+                solution,
+                &ws.scaled_rhs,
+                scaled_denominator_floor,
+                residual_scratch,
+                residual_gross_scratch,
+                residual_compensation_scratch,
+                residual_row_nnz_scratch,
+                operation,
+            )?;
+            if canonical_error.accepted() {
+                let solution_scale = match operation {
+                    RealSolveOp::Normal => &ws.col_scale,
+                    RealSolveOp::Transpose => &ws.row_scale,
+                };
+                for (value, &scale) in solution.iter_mut().zip(solution_scale) {
+                    *value *= scale;
+                    if !value.is_finite() {
+                        return Err(SolverError::Overflow);
+                    }
+                }
+                return Ok(());
+            }
+            backward_error = canonical_error;
+        }
+
         Err(SolverError::InaccurateSolution(
             backward_error.componentwise,
         ))
@@ -2996,6 +3119,26 @@ impl StaticMatrix {
             }
             backward_error = refined_error;
         }
+        if canonicalize_real_homogeneous_singletons(csc, values, rhs, solution, operation) {
+            let canonical_error = match componentwise_backward_error_with_layout(
+                csc,
+                residual_layout,
+                values,
+                solution,
+                rhs,
+                residual_scratch,
+                residual_gross_scratch,
+                residual_compensation_scratch,
+                residual_row_nnz_scratch,
+                operation,
+            ) {
+                Ok(error) => error,
+                Err(_) => return Ok(false),
+            };
+            if canonical_error.accepted() {
+                return Ok(true);
+            }
+        }
         Ok(false)
     }
 
@@ -3014,12 +3157,12 @@ impl StaticMatrix {
             )));
         }
 
-        let solution = solve_gauss(self.to_dense_real(), rhs.to_vec())?;
+        let mut solution = solve_gauss(self.to_dense_real(), rhs.to_vec())?;
         let mut residual = Vec::new();
         let mut denominator = Vec::new();
         let mut compensation = Vec::new();
         let mut row_nnz = Vec::new();
-        let backward_error = componentwise_backward_error_with_layout(
+        let mut backward_error = componentwise_backward_error_with_layout(
             &self.csc,
             &self.residual_layout,
             &self.values,
@@ -3034,6 +3177,30 @@ impl StaticMatrix {
         if backward_error.accepted() {
             Ok(solution)
         } else {
+            if canonicalize_real_homogeneous_singletons(
+                &self.csc,
+                &self.values,
+                rhs,
+                &mut solution,
+                RealSolveOp::Normal,
+            ) {
+                let canonical_error = componentwise_backward_error_with_layout(
+                    &self.csc,
+                    &self.residual_layout,
+                    &self.values,
+                    &solution,
+                    rhs,
+                    &mut residual,
+                    &mut denominator,
+                    &mut compensation,
+                    &mut row_nnz,
+                    RealSolveOp::Normal,
+                )?;
+                if canonical_error.accepted() {
+                    return Ok(solution);
+                }
+                backward_error = canonical_error;
+            }
             Err(SolverError::InaccurateSolution(
                 backward_error.componentwise,
             ))
@@ -3120,7 +3287,7 @@ impl StaticMatrix {
             }
         }
 
-        let solution: Vec<Value> = scaled_solution
+        let mut solution: Vec<Value> = scaled_solution
             .iter()
             .zip(&col_scale)
             .map(|(&value, &scale)| {
@@ -3136,7 +3303,7 @@ impl StaticMatrix {
         let mut denominator = Vec::new();
         let mut compensation = Vec::new();
         let mut row_nnz = Vec::new();
-        let backward_error = componentwise_backward_error_with_layout(
+        let mut backward_error = componentwise_backward_error_with_layout(
             &self.csc,
             &self.residual_layout,
             &self.values,
@@ -3151,61 +3318,29 @@ impl StaticMatrix {
         if backward_error.accepted() {
             Ok(solution)
         } else {
-            // Extended elimination can recover the meaningful digits while a
-            // mathematically zero auxiliary unknown still rounds to a tiny
-            // nonzero binary64 value. Try zero projections one coordinate at
-            // a time, retaining a projection only when it improves the same
-            // strict backward-error metric and returning it only when the
-            // original certificate passes. Legitimate small signals therefore
-            // cannot be erased merely because of their magnitude.
-            let solution_scale = solution
-                .iter()
-                .fold(1.0_f64, |scale, value| scale.max(value.abs()));
-            let snap_threshold = solution_scale * 256.0 * Value::EPSILON;
-            let mut snap_candidates: Vec<usize> = solution
-                .iter()
-                .enumerate()
-                .filter_map(|(index, value)| {
-                    (*value != 0.0 && value.abs() <= snap_threshold).then_some(index)
-                })
-                .collect();
-            let mut projected_solution = solution.clone();
-            let mut projected_error = backward_error;
-            while !snap_candidates.is_empty() {
-                let mut best: Option<(usize, Vec<Value>, BackwardError)> = None;
-                for (candidate_position, &index) in snap_candidates.iter().enumerate() {
-                    let mut trial = projected_solution.clone();
-                    trial[index] = 0.0;
-                    let trial_error = componentwise_backward_error_with_layout(
-                        &self.csc,
-                        &self.residual_layout,
-                        &self.values,
-                        &trial,
-                        rhs,
-                        &mut residual,
-                        &mut denominator,
-                        &mut compensation,
-                        &mut row_nnz,
-                        RealSolveOp::Normal,
-                    )?;
-                    if trial_error.accepted() {
-                        return Ok(trial);
-                    }
-                    if best.as_ref().is_none_or(|(_, _, best_error)| {
-                        trial_error.acceptance_ratio < best_error.acceptance_ratio
-                    }) {
-                        best = Some((candidate_position, trial, trial_error));
-                    }
+            if canonicalize_real_homogeneous_singletons(
+                &self.csc,
+                &self.values,
+                rhs,
+                &mut solution,
+                RealSolveOp::Normal,
+            ) {
+                let canonical_error = componentwise_backward_error_with_layout(
+                    &self.csc,
+                    &self.residual_layout,
+                    &self.values,
+                    &solution,
+                    rhs,
+                    &mut residual,
+                    &mut denominator,
+                    &mut compensation,
+                    &mut row_nnz,
+                    RealSolveOp::Normal,
+                )?;
+                if canonical_error.accepted() {
+                    return Ok(solution);
                 }
-                let Some((candidate_position, best_solution, best_error)) = best else {
-                    break;
-                };
-                if best_error.acceptance_ratio >= projected_error.acceptance_ratio {
-                    break;
-                }
-                snap_candidates.remove(candidate_position);
-                projected_solution = best_solution;
-                projected_error = best_error;
+                backward_error = canonical_error;
             }
             Err(SolverError::InaccurateSolution(
                 backward_error.componentwise,
@@ -5714,6 +5849,136 @@ mod tests {
         )
         .unwrap();
         assert_eq!(zero_error.componentwise.to_bits(), 0.0_f64.to_bits());
+    }
+
+    #[test]
+    fn real_singleton_canonicalization_is_exact_and_fail_closed() {
+        let matrix =
+            StaticMatrix::from_triplets(2, 2, &[(0, 0, 2.0), (1, 0, 3.0), (1, 1, 4.0)]).unwrap();
+        let tiny = 2.0_f64.powi(-90);
+        let mut residual = Vec::new();
+        let mut denominator = Vec::new();
+        let mut compensation = Vec::new();
+        let mut row_nnz = Vec::new();
+
+        let normal_rhs = [0.0, 4.0];
+        let mut normal = [tiny, 1.0];
+        assert!(canonicalize_real_homogeneous_singletons(
+            &matrix.csc,
+            &matrix.values,
+            &normal_rhs,
+            &mut normal,
+            RealSolveOp::Normal,
+        ));
+        assert_eq!(normal[0].to_bits(), 0.0_f64.to_bits());
+        assert_eq!(normal[1], 1.0);
+        assert!(
+            componentwise_backward_error_with_layout(
+                &matrix.csc,
+                &matrix.residual_layout,
+                &matrix.values,
+                &normal,
+                &normal_rhs,
+                &mut residual,
+                &mut denominator,
+                &mut compensation,
+                &mut row_nnz,
+                RealSolveOp::Normal,
+            )
+            .unwrap()
+            .accepted()
+        );
+
+        let transpose_rhs = [2.0, 0.0];
+        let mut transposed = [1.0, tiny];
+        assert!(canonicalize_real_homogeneous_singletons(
+            &matrix.csc,
+            &matrix.values,
+            &transpose_rhs,
+            &mut transposed,
+            RealSolveOp::Transpose,
+        ));
+        assert_eq!(transposed, [1.0, 0.0]);
+        assert!(
+            componentwise_backward_error_with_layout(
+                &matrix.csc,
+                &matrix.residual_layout,
+                &matrix.values,
+                &transposed,
+                &transpose_rhs,
+                &mut residual,
+                &mut denominator,
+                &mut compensation,
+                &mut row_nnz,
+                RealSolveOp::Transpose,
+            )
+            .unwrap()
+            .accepted()
+        );
+
+        let mut nonhomogeneous_singleton = [tiny, 1.0];
+        assert!(!canonicalize_real_homogeneous_singletons(
+            &matrix.csc,
+            &matrix.values,
+            &[Value::from_bits(1), 4.0],
+            &mut nonhomogeneous_singleton,
+            RealSolveOp::Normal,
+        ));
+        assert_eq!(nonhomogeneous_singleton, [tiny, 1.0]);
+
+        let zero_coefficient = StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).unwrap();
+        let mut unconstrained = [tiny];
+        assert!(!canonicalize_real_homogeneous_singletons(
+            &zero_coefficient.csc,
+            &zero_coefficient.values,
+            &[0.0],
+            &mut unconstrained,
+            RealSolveOp::Normal,
+        ));
+        assert_eq!(unconstrained, [tiny]);
+
+        let multi_entry = StaticMatrix::from_triplets(
+            2,
+            2,
+            &[(0, 0, 1.0), (0, 1, Value::from_bits(1)), (1, 1, 1.0)],
+        )
+        .unwrap();
+        let mut coupled = [tiny, 1.0];
+        assert!(!canonicalize_real_homogeneous_singletons(
+            &multi_entry.csc,
+            &multi_entry.values,
+            &[0.0, 1.0],
+            &mut coupled,
+            RealSolveOp::Normal,
+        ));
+        assert_eq!(coupled, [tiny, 1.0]);
+
+        let mut incomplete = [tiny, 2.0];
+        assert!(canonicalize_real_homogeneous_singletons(
+            &matrix.csc,
+            &matrix.values,
+            &normal_rhs,
+            &mut incomplete,
+            RealSolveOp::Normal,
+        ));
+        assert_eq!(incomplete[0].to_bits(), 0.0_f64.to_bits());
+        assert!(
+            !componentwise_backward_error_with_layout(
+                &matrix.csc,
+                &matrix.residual_layout,
+                &matrix.values,
+                &incomplete,
+                &normal_rhs,
+                &mut residual,
+                &mut denominator,
+                &mut compensation,
+                &mut row_nnz,
+                RealSolveOp::Normal,
+            )
+            .unwrap()
+            .accepted(),
+            "projection must not substitute for recertifying every original equation"
+        );
     }
 
     #[test]

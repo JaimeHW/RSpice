@@ -391,6 +391,176 @@ mod exact_matrix_free_tests {
     }
 
     #[test]
+    fn grounded_voltage_singleton_projection_is_exact_and_topology_limited() {
+        let branches = vec![
+            ExactMnaBranch::VoltageSource {
+                branch_ordinal: 1,
+                node_pos: 1,
+                node_neg: 0,
+                source_index: 0,
+                source: None,
+            },
+            ExactMnaBranch::VoltageSource {
+                branch_ordinal: 2,
+                node_pos: 0,
+                node_neg: 2,
+                source_index: 1,
+                source: None,
+            },
+            ExactMnaBranch::VoltageSource {
+                branch_ordinal: 3,
+                node_pos: 1,
+                node_neg: 2,
+                source_index: 2,
+                source: None,
+            },
+            ExactMnaBranch::Inductor {
+                branch_ordinal: 4,
+                node_pos: 2,
+                node_neg: 0,
+                inductance: 1.0e-6,
+            },
+        ];
+        let operator = ExactHbOperator {
+            mna_branches: &branches,
+            ..fixture(&[], &[], &[], &[])
+        };
+        operator.validate().expect("projection fixture is valid");
+        let size = operator.entity_count() * operator.real_width;
+        let mut solution = (0..size)
+            .map(|index| Complex64::new(index as Value + 1.0, -(index as Value) - 0.5))
+            .collect::<Vec<_>>();
+        let original = solution.clone();
+        let mut rhs = vec![Complex64::new(7.0, 0.0); size];
+
+        let positive_grounded_branch = operator.num_nodes;
+        rhs[operator.re_idx(positive_grounded_branch, 0)] = Complex64::new(-0.0, -0.0);
+        rhs[operator.im_idx(positive_grounded_branch, 1)] = Complex64::new(0.0, 0.0);
+        let negative_grounded_branch = operator.num_nodes + 1;
+        rhs[operator.re_idx(negative_grounded_branch, 1)] = Complex64::new(0.0, 0.0);
+        for branch_entity in [operator.num_nodes + 2, operator.num_nodes + 3] {
+            for harmonic in 0..operator.num_components {
+                rhs[operator.re_idx(branch_entity, harmonic)] = Complex64::new(0.0, 0.0);
+                if harmonic > 0 {
+                    rhs[operator.im_idx(branch_entity, harmonic)] = Complex64::new(0.0, 0.0);
+                }
+            }
+        }
+
+        operator.project_homogeneous_grounded_voltage_singletons(&mut solution, &rhs);
+
+        for index in [
+            operator.re_idx(0, 0),
+            operator.im_idx(0, 1),
+            operator.re_idx(1, 1),
+        ] {
+            assert_eq!(solution[index].re.to_bits(), 0);
+            assert_eq!(solution[index].im.to_bits(), 0);
+        }
+        // A nonzero grounded-source row is not projected, even though the
+        // same coordinate also appears in a homogeneous floating constraint.
+        assert_eq!(
+            solution[operator.re_idx(0, 1)],
+            original[operator.re_idx(0, 1)]
+        );
+        // A grounded inductor row is not an ideal-voltage-source singleton.
+        assert_eq!(
+            solution[operator.re_idx(1, 0)],
+            original[operator.re_idx(1, 0)]
+        );
+        // Branch-current coordinates are never canonicalized.
+        assert_eq!(
+            solution[operator.re_idx(positive_grounded_branch, 0)],
+            original[operator.re_idx(positive_grounded_branch, 0)]
+        );
+    }
+
+    #[test]
+    fn candidate_report_certifies_and_renorms_after_singleton_projection() {
+        let g = vec![(0, 0, 2.0), (1, 1, 4.0)];
+        let branches = vec![ExactMnaBranch::VoltageSource {
+            branch_ordinal: 1,
+            node_pos: 1,
+            node_neg: 0,
+            source_index: 0,
+            source: None,
+        }];
+        let operator = ExactHbOperator {
+            gmin: 0.0,
+            mna_branches: &branches,
+            ..fixture(&g, &[], &[], &[])
+        };
+        let size = operator.entity_count() * operator.real_width;
+        let mut exact = vec![Complex64::new(0.0, 0.0); size];
+        for harmonic in 0..operator.num_components {
+            exact[operator.re_idx(1, harmonic)] = Complex64::new(2.0 + harmonic as Value, 0.0);
+            if harmonic > 0 {
+                exact[operator.im_idx(1, harmonic)] = Complex64::new(-2.0 - harmonic as Value, 0.0);
+            }
+            let branch_entity = operator.num_nodes;
+            exact[operator.re_idx(branch_entity, harmonic)] =
+                Complex64::new(1.0 + harmonic as Value, 0.0);
+            if harmonic > 0 {
+                exact[operator.im_idx(branch_entity, harmonic)] =
+                    Complex64::new(-1.0 - harmonic as Value, 0.0);
+            }
+        }
+        let rhs = operator.apply(&exact);
+        let mut candidate = exact;
+        candidate[operator.re_idx(0, 1)] = Complex64::new(1.0e-30, -1.0e-30);
+
+        let (report, relative_residual) =
+            exact_hb_candidate_report(&operator, &mut candidate, &rhs)
+                .expect("canonical candidate has a finite full certificate");
+
+        assert!(report.is_accepted());
+        assert_eq!(relative_residual.to_bits(), 0);
+        assert_eq!(candidate[operator.re_idx(0, 1)].re.to_bits(), 0);
+        assert_eq!(candidate[operator.re_idx(0, 1)].im.to_bits(), 0);
+    }
+
+    #[test]
+    fn exact_matrix_free_step_returns_positive_zero_for_grounded_homogeneous_source() {
+        let mut config = HbConfig::new(1.0e6).with_harmonics(1);
+        config.use_krylov = true;
+        let mut solver = HbSolver::new(config, 2);
+        solver.add_conductance(0, 0, 3.0);
+        solver.add_conductance(1, 1, 5.0);
+        let source_index = solver
+            .try_add_named_voltage_source_branch_harmonics(1, 0, 0.0, &[], "VZERO")
+            .expect("zero source registers");
+        solver
+            .try_add_periodic_voltage_source_branch(1, 0, source_index, 1, "VZERO")
+            .expect("exact branch registers");
+        let mut state = HbSolverState::new(2, 1);
+        state
+            .try_prepare_mna_branches(1, 1)
+            .expect("exact branch state is allocated");
+        state.residual[0][0] = Complex64::new(1.0, 0.0);
+        state.residual[0][1] = Complex64::new(2.0, -3.0);
+        state.residual[1][0] = Complex64::new(-4.0, 0.0);
+        state.residual[1][1] = Complex64::new(5.0, 6.0);
+
+        let step = solver
+            .solve_jacobian_system_exact(&state, 0.0, &NoAbort)
+            .expect("homogeneous grounded-source step is certified");
+
+        for coordinate in [
+            step.node_voltages[0][0].re,
+            step.node_voltages[0][0].im,
+            step.node_voltages[0][1].re,
+            step.node_voltages[0][1].im,
+        ] {
+            assert_eq!(coordinate.to_bits(), 0);
+        }
+        assert!(
+            step.branch_currents[0]
+                .iter()
+                .any(|value| value.norm() > 0.0)
+        );
+    }
+
+    #[test]
     fn large_or_structurally_invalid_krylov_steps_never_select_dense_recovery() {
         use rspice_matrix::SolverError;
 
@@ -801,6 +971,52 @@ impl ExactHbOperator<'_> {
         output
     }
 
+    /// Canonicalize exact homogeneous singleton voltage constraints before a
+    /// full streamed certificate is formed. A grounded ideal voltage-source
+    /// branch row contains exactly one node-voltage coordinate. When that
+    /// realified row has an exactly zero RHS, the coordinate is mathematically
+    /// zero; spelling it as positive zero avoids treating Krylov roundoff as a
+    /// componentwise error of one in that homogeneous row.
+    ///
+    /// This is deliberately an exact, topology-based operation: nonzero RHS
+    /// rows, floating two-node constraints, and non-voltage branches are left
+    /// untouched.
+    fn project_homogeneous_grounded_voltage_singletons(
+        &self,
+        solution: &mut [Complex64],
+        rhs: &[Complex64],
+    ) {
+        debug_assert_eq!(solution.len(), self.entity_count() * self.real_width);
+        debug_assert_eq!(rhs.len(), solution.len());
+        let zero = Complex64::new(0.0, 0.0);
+        for (branch_index, branch) in self.mna_branches.iter().enumerate() {
+            let ExactMnaBranch::VoltageSource {
+                node_pos, node_neg, ..
+            } = branch
+            else {
+                continue;
+            };
+            let node = match (*node_pos, *node_neg) {
+                (node, 0) if node > 0 => node - 1,
+                (0, node) if node > 0 => node - 1,
+                _ => continue,
+            };
+            let branch_entity = self.num_nodes + branch_index;
+            for harmonic in 0..self.num_components {
+                let branch_re = self.re_idx(branch_entity, harmonic);
+                if rhs[branch_re] == zero {
+                    solution[self.re_idx(node, harmonic)] = zero;
+                }
+                if harmonic > 0 {
+                    let branch_im = self.im_idx(branch_entity, harmonic);
+                    if rhs[branch_im] == zero {
+                        solution[self.im_idx(node, harmonic)] = zero;
+                    }
+                }
+            }
+        }
+    }
+
     /// Assemble only the independent per-harmonic diagonal blocks used by
     /// the block-Jacobi preconditioner.  This costs O(H*N^2), not
     /// O((H*N)^2), and includes the exact same-harmonic Hankel coupling.
@@ -937,11 +1153,13 @@ impl super::krylov::KrylovPreconditioner for RowScaledExactHbPreconditioner<'_> 
 
 fn exact_hb_candidate_report(
     operator: &ExactHbOperator<'_>,
-    solution: &[Complex64],
+    solution: &mut [Complex64],
     rhs: &[Complex64],
-) -> Result<rspice_matrix::ComplexTransposeBackwardErrorReport, rspice_matrix::SolverError> {
+) -> Result<(rspice_matrix::ComplexTransposeBackwardErrorReport, Value), rspice_matrix::SolverError>
+{
+    operator.project_homogeneous_grounded_voltage_singletons(solution, rhs);
     let size = rhs.len();
-    rspice_matrix::analyze_complex_transpose_solution_by_entry_visitor(
+    let report = rspice_matrix::analyze_complex_transpose_solution_by_entry_visitor(
         size,
         size,
         solution,
@@ -953,7 +1171,18 @@ fn exact_hb_candidate_report(
                 visitor(column, row, Complex64::new(value, 0.0));
             });
         },
-    )
+    )?;
+    let rhs_norm = stable_complex_l2_norm(rhs);
+    let residual_norm = stable_complex_l2_norm(report.residual());
+    let relative_residual = if rhs_norm == 0.0 {
+        residual_norm
+    } else {
+        residual_norm / rhs_norm
+    };
+    if !relative_residual.is_finite() {
+        return Err(rspice_matrix::SolverError::Overflow);
+    }
+    Ok((report, relative_residual))
 }
 
 fn stable_complex_l2_norm(values: &[Complex64]) -> Value {
@@ -2164,8 +2393,9 @@ impl HbSolver {
             {
                 Err(rspice_matrix::SolverError::Overflow)
             } else if outcome.converged {
-                match exact_hb_candidate_report(&operator, &outcome.solution, &rhs_complex) {
-                    Ok(candidate_report) => {
+                match exact_hb_candidate_report(&operator, &mut outcome.solution, &rhs_complex) {
+                    Ok((candidate_report, relative_residual)) => {
+                        outcome.relative_residual = relative_residual;
                         let result = if candidate_report.is_accepted() {
                             Ok(())
                         } else {
@@ -2299,26 +2529,18 @@ impl HbSolver {
                         break;
                     }
 
-                    let refined_report =
-                        match exact_hb_candidate_report(&operator, &outcome.solution, &rhs_complex)
-                        {
-                            Ok(report) => report,
-                            Err(error) => {
-                                qualification = Err(error);
-                                break;
-                            }
-                        };
-                    let rhs_norm = stable_complex_l2_norm(&rhs_complex);
-                    let residual_norm = stable_complex_l2_norm(refined_report.residual());
-                    outcome.relative_residual = if rhs_norm == 0.0 {
-                        residual_norm
-                    } else {
-                        residual_norm / rhs_norm
+                    let (refined_report, relative_residual) = match exact_hb_candidate_report(
+                        &operator,
+                        &mut outcome.solution,
+                        &rhs_complex,
+                    ) {
+                        Ok(report) => report,
+                        Err(error) => {
+                            qualification = Err(error);
+                            break;
+                        }
                     };
-                    if !outcome.relative_residual.is_finite() {
-                        qualification = Err(rspice_matrix::SolverError::Overflow);
-                        break;
-                    }
+                    outcome.relative_residual = relative_residual;
                     if refined_report.is_accepted() {
                         qualification = Ok(());
                         break;
