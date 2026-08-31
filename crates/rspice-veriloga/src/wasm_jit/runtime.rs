@@ -1238,6 +1238,46 @@ mod tests {
     }
 
     #[test]
+    fn timer_helper_is_inactive_outside_transient() {
+        for analysis_type in [0, 1, 3, 4] {
+            let mut context = VmContext::default();
+            context.analysis_type = analysis_type;
+            let mut session = WasmJitRuntimeSession::new(context);
+            assert_eq!(
+                evaluate_helper_with_session(
+                    422,
+                    0,
+                    0,
+                    0,
+                    [0.0, 0.0, 0.0, 1.0, 0.0],
+                    &[],
+                    Some(&mut session),
+                ),
+                Ok(0.0),
+                "analysis {analysis_type}"
+            );
+            assert_eq!(session.context().timer_event_step_bound(), None);
+            assert!(session.take_error().is_none());
+        }
+
+        let mut transient = VmContext::default();
+        transient.analysis_type = 2;
+        let mut session = WasmJitRuntimeSession::new(transient);
+        assert_eq!(
+            evaluate_helper_with_session(
+                422,
+                0,
+                0,
+                0,
+                [0.0, 0.0, 0.0, 1.0, 0.0],
+                &[],
+                Some(&mut session),
+            ),
+            Ok(1.0)
+        );
+    }
+
+    #[test]
     fn laplace_derivative_helper_matches_vm_and_preserves_filter_state() {
         let mut context = VmContext::default();
         context.analysis_type = 2;

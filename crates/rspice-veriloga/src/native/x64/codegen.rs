@@ -9577,6 +9577,7 @@ mod tests {
 
         let mut filters = [TransitionFilter::default()];
         let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.analysis_type = 2;
         ctx.temperature = 310.0;
         ctx.transition_filters = filters.as_mut_ptr();
         ctx.transition_filters_len = filters.len();
@@ -11250,6 +11251,7 @@ mod tests {
         let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
             unsafe { std::mem::transmute(entry) };
         let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.analysis_type = 2;
         ctx.temperature = 310.0;
         ctx.timestep = 0.01;
 

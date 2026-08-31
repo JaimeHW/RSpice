@@ -8,6 +8,7 @@ mod context;
 mod error;
 mod executor;
 mod filters;
+mod small_signal;
 
 pub(crate) use context::idtmod_wrapped_candidate;
 pub use context::{
@@ -24,3 +25,4 @@ pub(crate) use filters::{
     SlewCheckpoint, TransitionCheckpoint, TransitionSegmentCheckpoint, timer_event_evaluation,
 };
 pub use filters::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};
+pub(crate) use small_signal::SmallSignalVm;

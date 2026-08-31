@@ -636,17 +636,21 @@ impl<'a> Vm<'a> {
                 let current_time = self.context.time;
                 let is_transient = self.context.analysis_type == 2;
 
+                let buffer = self
+                    .context
+                    .delay_buffers
+                    .get_mut(*buffer_id)
+                    .ok_or_else(|| {
+                        VmError::InvalidRuntimeConfiguration(format!(
+                            "absdelay buffer {buffer_id} is not preallocated"
+                        ))
+                    })?;
                 let result = if !is_transient {
-                    current_value
+                    buffer
+                        .eval_operating_point(current_time, current_value, delay_time, None)
+                        .map_err(VmError::InvalidRuntimeConfiguration)?
                 } else {
-                    self.context
-                        .delay_buffers
-                        .get_mut(*buffer_id)
-                        .ok_or_else(|| {
-                            VmError::InvalidRuntimeConfiguration(format!(
-                                "absdelay buffer {buffer_id} is not preallocated"
-                            ))
-                        })?
+                    buffer
                         .eval(current_time, current_value, delay_time, None)
                         .map_err(VmError::InvalidRuntimeConfiguration)?
                 };
@@ -657,24 +661,30 @@ impl<'a> Vm<'a> {
                 let max_delay = self.pop()?;
                 let delay_time = self.pop()?;
                 let current_value = self.pop()?;
-                let result = if self.context.analysis_type == 2 {
-                    self.context
-                        .delay_buffers
-                        .get_mut(*buffer_id)
-                        .ok_or_else(|| {
-                            VmError::InvalidRuntimeConfiguration(format!(
-                                "absdelay buffer {buffer_id} is not preallocated"
-                            ))
-                        })?
-                        .eval(
-                            self.context.time,
+                let current_time = self.context.time;
+                let is_transient = self.context.analysis_type == 2;
+                let buffer = self
+                    .context
+                    .delay_buffers
+                    .get_mut(*buffer_id)
+                    .ok_or_else(|| {
+                        VmError::InvalidRuntimeConfiguration(format!(
+                            "absdelay buffer {buffer_id} is not preallocated"
+                        ))
+                    })?;
+                let result = if is_transient {
+                    buffer
+                        .eval(current_time, current_value, delay_time, Some(max_delay))
+                        .map_err(VmError::InvalidRuntimeConfiguration)?
+                } else {
+                    buffer
+                        .eval_operating_point(
+                            current_time,
                             current_value,
                             delay_time,
                             Some(max_delay),
                         )
                         .map_err(VmError::InvalidRuntimeConfiguration)?
-                } else {
-                    current_value
                 };
                 self.stack.push(result);
             }
@@ -690,23 +700,29 @@ impl<'a> Vm<'a> {
                 let delay_time = self.pop()?;
                 let input_derivative = self.pop()?;
                 let input = self.pop()?;
-                let result = if self.context.analysis_type == 2 {
-                    let evaluation = self
-                        .context
-                        .delay_buffers
-                        .get_mut(*buffer_id)
-                        .ok_or_else(|| {
-                            VmError::InvalidRuntimeConfiguration(format!(
-                                "absdelay buffer {buffer_id} is not preallocated"
-                            ))
-                        })?
-                        .eval_with_coefficients(self.context.time, input, delay_time, max_delay)
+                let current_time = self.context.time;
+                let is_transient = self.context.analysis_type == 2;
+                let buffer = self
+                    .context
+                    .delay_buffers
+                    .get_mut(*buffer_id)
+                    .ok_or_else(|| {
+                        VmError::InvalidRuntimeConfiguration(format!(
+                            "absdelay buffer {buffer_id} is not preallocated"
+                        ))
+                    })?;
+                let result = if is_transient {
+                    let evaluation = buffer
+                        .eval_with_coefficients(current_time, input, delay_time, max_delay)
                         .map_err(VmError::InvalidRuntimeConfiguration)?;
                     evaluation.delay_coefficient.mul_add(
                         delay_derivative,
                         evaluation.input_coefficient * input_derivative,
                     )
                 } else {
+                    buffer
+                        .small_signal_delay(current_time, input, delay_time, max_delay)
+                        .map_err(VmError::InvalidRuntimeConfiguration)?;
                     input_derivative
                 };
                 self.stack.push(result);
@@ -1014,6 +1030,19 @@ impl<'a> Vm<'a> {
                 let time_tol = self.pop()?;
                 let period = self.pop()?;
                 let start_time = self.pop()?;
+                if self.context.analysis_type != 2 {
+                    if !matches!(self.context.analysis_type, 0 | 1 | 3 | 4) {
+                        return Err(VmError::InvalidRuntimeConfiguration(format!(
+                            "timer received invalid analysis type {}",
+                            self.context.analysis_type
+                        )));
+                    }
+                    // `timer` is a transient event source. In particular, a
+                    // one-shot at t=0 must not execute its event body during
+                    // the equilibrium solve used by DC, AC, noise, or IC.
+                    self.stack.push(0.0);
+                    return Ok(());
+                }
                 let (result, next_event) = crate::vm::timer_event_evaluation(
                     start_time,
                     period,
@@ -1244,6 +1273,34 @@ mod tests {
                 .expect_err("non-integer event operands must fail closed");
             assert!(matches!(error, VmError::InvalidNumericResult(_)));
         }
+    }
+
+    #[test]
+    fn timer_events_are_transient_only() {
+        let timer = || {
+            vec![
+                Instruction::PushConst(0.0),
+                Instruction::PushConst(0.0),
+                Instruction::PushConst(0.0),
+                Instruction::PushConst(1.0),
+                Instruction::TimerState(0),
+            ]
+        };
+
+        for analysis_type in [0, 1, 3, 4] {
+            let mut context = VmContext::default();
+            context.analysis_type = analysis_type;
+            assert_eq!(
+                execute_with_context(&mut context, timer()),
+                Ok(0.0),
+                "analysis {analysis_type}"
+            );
+            assert_eq!(context.timer_event_step_bound(), None);
+        }
+
+        let mut transient = VmContext::default();
+        transient.analysis_type = 2;
+        assert_eq!(execute_with_context(&mut transient, timer()), Ok(1.0));
     }
 
     #[test]

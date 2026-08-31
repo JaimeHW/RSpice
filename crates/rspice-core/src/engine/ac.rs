@@ -1754,11 +1754,11 @@ impl Engine {
         }
         #[cfg(feature = "veriloga")]
         {
-            let omega = 2.0 * std::f64::consts::PI * frequency_hz;
             for device in circuit.veriloga_devices().iter() {
-                // Small-signal linearization uses Jacobian terms at the
-                // operating point. Verilog-A device stamping exposes the
-                // Jacobian through matrix callbacks.
+                // Stateful Verilog-A derivatives are complex transfer
+                // actions. The runtime evaluates the complete differentiated
+                // program as one phasor so nested ddt/idt, Laplace, Zi, and
+                // absdelay operators retain their cross-component terms.
                 let mut cloned = device.clone();
                 let device_name = cloned.name.to_string();
                 cloned
@@ -1769,25 +1769,16 @@ impl Engine {
                         ))
                     })?;
                 cloned
-                    .try_stamp(
+                    .try_stamp_small_signal_complex(
                         op_voltages,
-                        |row, col, value| matrix.add_real(row, col, value),
-                        |_index, _value| {},
+                        frequency_hz,
+                        |row, col, real, imag| {
+                            matrix.add(row, col, Complex64::new(real, imag));
+                        },
                     )
                     .map_err(|err| {
                         SimulationError::Circuit(format!(
                             "Verilog-A device '{device_name}' small-signal stamping failed: {err}"
-                        ))
-                    })?;
-                let device_name = cloned.name.to_string();
-                // Reactive (ddt charge/flux) part: jw * dQ/dx
-                cloned
-                    .try_stamp_reactive(op_voltages, |row, col, charge_deriv| {
-                        matrix.add_imag(row, col, omega * charge_deriv);
-                    })
-                    .map_err(|err| {
-                        SimulationError::Circuit(format!(
-                            "Verilog-A device '{device_name}' small-signal reactive stamping failed: {err}"
                         ))
                     })?;
             }

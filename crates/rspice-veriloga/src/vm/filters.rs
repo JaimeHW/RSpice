@@ -185,6 +185,53 @@ impl DelayBuffer {
             .output)
     }
 
+    /// Validate and stage the analysis-wide delay definition at an
+    /// equilibrium operating point while preserving the required unity DC
+    /// value.  The first accepted point freezes omitted `maxdelay` to its
+    /// authored `td`, or freezes the explicit maximum when present. Later
+    /// frequency points only validate/read that definition and never append
+    /// duplicate time-zero history.
+    pub(crate) fn eval_operating_point(
+        &mut self,
+        time: f64,
+        value: f64,
+        delay: f64,
+        max_delay: Option<f64>,
+    ) -> Result<f64, String> {
+        self.validate_runtime(time, value, delay, max_delay)?;
+        let (configuration, _, _) = self.resolve_configuration(delay, max_delay)?;
+        if self.configuration.is_none() {
+            if time != 0.0 {
+                return Err(format!(
+                    "absdelay's first equilibrium definition must be established at time zero, got {time}"
+                ));
+            }
+            self.candidate = Some(DelayCandidate {
+                time,
+                value,
+                configuration,
+            });
+        } else {
+            self.candidate = None;
+        }
+        Ok(value)
+    }
+
+    /// Read the effective transport delay for AC/noise without mutating
+    /// accepted history. The result honors the definition frozen by the
+    /// accepted operating point.
+    pub(crate) fn small_signal_delay(
+        &self,
+        time: f64,
+        value: f64,
+        delay: f64,
+        max_delay: Option<f64>,
+    ) -> Result<f64, String> {
+        self.validate_runtime(time, value, delay, max_delay)?;
+        self.resolve_configuration(delay, max_delay)
+            .map(|(_, effective, _)| effective)
+    }
+
     /// Evaluate a candidate and expose exact current-input and delay
     /// coefficients without changing accepted history.
     pub(crate) fn eval_with_coefficients(
@@ -194,7 +241,7 @@ impl DelayBuffer {
         delay: f64,
         max_delay: Option<f64>,
     ) -> Result<DelayEvaluation, String> {
-        Self::validate_runtime(time, value, delay, max_delay)?;
+        self.validate_runtime(time, value, delay, max_delay)?;
         if self
             .samples
             .back()
@@ -218,6 +265,7 @@ impl DelayBuffer {
     }
 
     fn validate_runtime(
+        &self,
         time: f64,
         value: f64,
         delay: f64,
@@ -231,15 +279,45 @@ impl DelayBuffer {
         if !value.is_finite() {
             return Err(format!("absdelay input must be finite, got {value}"));
         }
+        match (self.configuration, max_delay) {
+            (None, maximum) => {
+                Self::validate_delay(delay)?;
+                if maximum.is_some_and(|value| !value.is_finite() || value <= 0.0) {
+                    return Err(format!(
+                        "absdelay maxdelay must be finite and strictly positive, got {}",
+                        maximum.unwrap_or(f64::NAN)
+                    ));
+                }
+            }
+            (Some(DelayConfiguration::Fixed { .. }), None) => {
+                // `td` is part of the accepted fixed operator definition. Its
+                // current expression value is no longer a runtime operand.
+            }
+            (Some(DelayConfiguration::Bounded { .. }), Some(_)) => {
+                // `td` remains dynamic, while the accepted maximum replaces
+                // the current authored maxdelay value.
+                Self::validate_delay(delay)?;
+            }
+            (Some(DelayConfiguration::Fixed { .. }), Some(_)) => {
+                return Err(
+                    "absdelay call changed from omitted maxdelay to present maxdelay after initialization"
+                        .into(),
+                );
+            }
+            (Some(DelayConfiguration::Bounded { .. }), None) => {
+                return Err(
+                    "absdelay call changed from present maxdelay to omitted maxdelay after initialization"
+                        .into(),
+                );
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_delay(delay: f64) -> Result<(), String> {
         if !delay.is_finite() || delay <= 0.0 {
             return Err(format!(
                 "absdelay td must be finite and strictly positive, got {delay}"
-            ));
-        }
-        if max_delay.is_some_and(|maximum| !maximum.is_finite() || maximum <= 0.0) {
-            return Err(format!(
-                "absdelay maxdelay must be finite and strictly positive, got {}",
-                max_delay.unwrap_or(f64::NAN)
             ));
         }
         Ok(())
@@ -732,6 +810,47 @@ mod tests {
         assert_eq!(
             bounded.checkpoint().configuration,
             Some(super::DelayConfiguration::Bounded { max_delay: 3.0 })
+        );
+    }
+
+    #[test]
+    fn operating_point_freezes_omitted_delay_for_small_signal_phase() {
+        let mut buffer = DelayBuffer::new(2);
+        assert_eq!(buffer.eval_operating_point(0.0, 2.0, 0.25, None), Ok(2.0));
+        buffer.commit().expect("accept operating-point definition");
+
+        assert_eq!(
+            buffer.small_signal_delay(0.0, 2.0, 0.75, None),
+            Ok(0.25),
+            "AC/noise must use the accepted fixed delay, not a later operand value"
+        );
+        assert_eq!(
+            buffer.checkpoint().configuration,
+            Some(super::DelayConfiguration::Fixed { delay: 0.25 })
+        );
+
+        assert_eq!(
+            buffer.small_signal_delay(0.0, 2.0, f64::NAN, None),
+            Ok(0.25),
+            "a frozen fixed delay must not revalidate the discarded td operand"
+        );
+        assert_eq!(buffer.eval_operating_point(0.0, 2.0, -1.0, None), Ok(2.0));
+
+        let mut bounded = DelayBuffer::new(2);
+        bounded
+            .eval_operating_point(0.0, 2.0, 0.25, Some(1.0))
+            .unwrap();
+        bounded.commit().expect("accept bounded definition");
+        assert_eq!(
+            bounded.small_signal_delay(0.0, 2.0, 0.5, Some(f64::NAN)),
+            Ok(0.5),
+            "the accepted maximum must replace later maxdelay operand values"
+        );
+        assert!(
+            bounded
+                .small_signal_delay(0.0, 2.0, f64::NAN, Some(1.0))
+                .is_err(),
+            "bounded td remains a live runtime operand"
         );
     }
 
@@ -2065,6 +2184,18 @@ impl SlewFilter {
         self.committed
             .next_corner_time
             .filter(|corner| corner.is_finite() && *corner > time)
+    }
+
+    /// Accepted local gain used when a caller intentionally carries transient
+    /// state into AC/noise. A still-active rate-limited segment is determined
+    /// entirely by history and has zero gain from the current input; a settled
+    /// or fresh operating point follows the input with unity gain.
+    pub(crate) fn small_signal_input_gain(&self, time: f64) -> f64 {
+        if self.next_corner_time(time).is_some() {
+            0.0
+        } else {
+            1.0
+        }
     }
 
     pub(crate) fn validate_checkpoint_ready(&self) -> Result<(), String> {

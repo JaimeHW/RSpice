@@ -1173,9 +1173,8 @@ pub unsafe extern "C" fn rspice_zi_step_native(
     ) {
         Ok(value) => {
             if ctx.analysis_type == 2 && !ctx.timer_event_bound.is_null() {
-                match filters[filter_id].next_sample_step_bound(ctx.time) {
-                    Ok(bound) => {
-                        let event_time = ctx.time + bound;
+                match filters[filter_id].next_event_time(ctx.time) {
+                    Ok(event_time) => {
                         let current = unsafe { &mut *ctx.timer_event_bound };
                         *current = current.min(event_time);
                     }
@@ -1555,6 +1554,18 @@ pub unsafe extern "C" fn rspice_timer_state_native(
     }
 
     let operands = unsafe { std::slice::from_raw_parts(operands, 4) };
+    if ctx.analysis_type != 2 {
+        if !matches!(ctx.analysis_type, 0 | 1 | 3 | 4) {
+            set_native_context_error(
+                ctx,
+                format!(
+                    "native timer helper received invalid analysis type {}",
+                    ctx.analysis_type
+                ),
+            );
+        }
+        return 0.0;
+    }
     let (result, next_event) = crate::vm::timer_event_evaluation(
         operands[0],
         operands[1],
@@ -2032,10 +2043,6 @@ unsafe fn rspice_absdelay_native_impl(
             },
         )
     };
-    if ctx.analysis_type != 2 {
-        return if derivative { input_derivative } else { input };
-    }
-
     if ctx.delay_buffers.is_null() {
         set_native_context_error(
             ctx,
@@ -2058,6 +2065,32 @@ unsafe fn rspice_absdelay_native_impl(
 
     let buffers =
         unsafe { std::slice::from_raw_parts_mut(ctx.delay_buffers, ctx.delay_buffers_len) };
+    if ctx.analysis_type != 2 {
+        if !matches!(ctx.analysis_type, 0 | 1 | 3 | 4) {
+            set_native_context_error(
+                ctx,
+                format!(
+                    "native absdelay helper received invalid analysis type {}",
+                    ctx.analysis_type
+                ),
+            );
+            return 0.0;
+        }
+        let result = if derivative {
+            buffers[buffer_id]
+                .small_signal_delay(ctx.time, input, delay_time, max_delay)
+                .map(|_| input_derivative)
+        } else {
+            buffers[buffer_id].eval_operating_point(ctx.time, input, delay_time, max_delay)
+        };
+        return match result {
+            Ok(value) => value,
+            Err(error) => {
+                set_native_context_error(ctx, error);
+                0.0
+            }
+        };
+    }
     match buffers[buffer_id].eval_with_coefficients(ctx.time, input, delay_time, max_delay) {
         Ok(evaluation) => {
             if derivative {
@@ -2398,8 +2431,9 @@ mod tests {
     use super::{
         EvalContext, INTEGER_CAST_DESCRIPTOR, NativeRuntimeStatus, integer_binary_descriptor,
         rspice_above_state_native, rspice_absdelay_derivative_max_native,
-        rspice_absdelay_state_max_native, rspice_absdelay_state_native, rspice_cross_state_native,
-        rspice_ddt_state_native, rspice_dynamic_variable_slot_native, rspice_idt_state_native,
+        rspice_absdelay_derivative_native, rspice_absdelay_state_max_native,
+        rspice_absdelay_state_native, rspice_cross_state_native, rspice_ddt_state_native,
+        rspice_dynamic_variable_slot_native, rspice_idt_state_native,
         rspice_integer_operation_native, rspice_laplace_derivative_native,
         rspice_laplace_step_native, rspice_last_crossing_state_native,
         rspice_limiter_previous_native, rspice_limiter_store_native,
@@ -2967,6 +3001,64 @@ mod tests {
     }
 
     #[test]
+    fn timer_native_helper_is_inactive_outside_transient() {
+        let timer = [0.0, 0.0, 0.0, 1.0];
+        let mut timer_bound = f64::INFINITY;
+        let mut ctx = empty_eval_context();
+        ctx.timer_event_bound = &mut timer_bound;
+
+        for analysis_type in [0, 1, 3, 4] {
+            ctx.analysis_type = analysis_type;
+            timer_bound = f64::INFINITY;
+            assert_eq!(
+                unsafe { rspice_timer_state_native(timer.as_ptr(), &ctx, 0) }.to_bits(),
+                0.0_f64.to_bits(),
+                "analysis {analysis_type}"
+            );
+            assert!(timer_bound.is_infinite());
+            assert!(ctx.take_runtime_error().is_none());
+        }
+
+        ctx.analysis_type = 2;
+        assert_eq!(
+            unsafe { rspice_timer_state_native(timer.as_ptr(), &ctx, 0) }.to_bits(),
+            1.0_f64.to_bits()
+        );
+    }
+
+    #[test]
+    fn zi_native_helper_publishes_exact_absolute_event_time() {
+        let operands = [1.0, 1.0, 1.0, 0.9, 2.0, 0.0];
+        let layout = crate::codegen::ZiRuntimeLayout::unit_coefficients(0);
+        let descriptor = layout.native_descriptor().expect("unit Zi descriptor");
+        let mut filters =
+            [
+                crate::zfilter::ZiFilter::new_with_timing(vec![1.0], vec![1.0], 1.0, 0.9)
+                    .expect("valid Zi timing"),
+            ];
+        let mut timer_bound = f64::INFINITY;
+        let mut ctx = empty_eval_context();
+        ctx.analysis_type = 2;
+        ctx.time = 0.2;
+        ctx.zi_filters = filters.as_mut_ptr();
+        ctx.zi_filters_len = filters.len();
+        ctx.timer_event_bound = &mut timer_bound;
+
+        let recomposed = ctx.time + (0.9 - ctx.time);
+        assert_ne!(
+            recomposed.to_bits(),
+            0.9_f64.to_bits(),
+            "fixture must expose subtraction/addition drift"
+        );
+        assert_eq!(
+            unsafe { rspice_zi_step_native(operands.as_ptr(), &ctx, descriptor) }.to_bits(),
+            0.0_f64.to_bits()
+        );
+        assert_eq!(timer_bound.to_bits(), 0.9_f64.to_bits());
+        assert!(ctx.take_runtime_error().is_none());
+    }
+
+    #[test]
     fn transition_native_helper_records_runtime_error_for_invalid_pointers() {
         let ctx = empty_eval_context();
         ctx.clear_runtime_error();
@@ -3243,14 +3335,38 @@ mod tests {
 
     #[test]
     fn absdelay_native_helper_passes_input_through_outside_transient() {
-        let operands = [1.25, 0.5];
-        let ctx = empty_eval_context();
+        let mut operands = [1.25, 0.5];
+        let mut buffers = [DelayBuffer::default()];
+        let mut ctx = empty_eval_context();
+        ctx.delay_buffers = buffers.as_mut_ptr();
+        ctx.delay_buffers_len = buffers.len();
         ctx.clear_runtime_error();
 
-        let value = unsafe { rspice_absdelay_state_native(operands.as_ptr(), &ctx, 7) };
+        let value = unsafe { rspice_absdelay_state_native(operands.as_ptr(), &ctx, 0) };
 
         assert_eq!(value.to_bits(), 1.25_f64.to_bits());
         assert!(ctx.take_runtime_error().is_none());
+
+        buffers[0]
+            .commit()
+            .expect("accept native fixed-delay definition");
+        operands[1] = f64::NAN;
+        for analysis_type in [0, 1, 3, 4] {
+            ctx.analysis_type = analysis_type;
+            let value = unsafe { rspice_absdelay_state_native(operands.as_ptr(), &ctx, 0) };
+            assert_eq!(
+                value.to_bits(),
+                1.25_f64.to_bits(),
+                "analysis {analysis_type}"
+            );
+            assert!(ctx.take_runtime_error().is_none());
+
+            let derivative_operands = [1.25, 3.0, f64::NAN, f64::NAN];
+            let derivative =
+                unsafe { rspice_absdelay_derivative_native(derivative_operands.as_ptr(), &ctx, 0) };
+            assert_eq!(derivative.to_bits(), 3.0_f64.to_bits());
+            assert!(ctx.take_runtime_error().is_none());
+        }
     }
 
     #[test]

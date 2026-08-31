@@ -3913,6 +3913,116 @@ impl VerilogADevice {
         Ok(())
     }
 
+    /// Stamp the complete complex small-signal Jacobian for AC or noise.
+    ///
+    /// The ordinary real Jacobian plus `jω*dQ/dx` split cannot represent
+    /// nested dynamic operators: their real and imaginary parts must compose
+    /// before the final matrix entry is stamped.  This path first uses the
+    /// selected native/VM/WASM backend to establish operating-point variables,
+    /// current probes, and lazily frozen operator definitions.  A dedicated
+    /// read-only complex evaluator then replays derivative shadows and the
+    /// full Jacobian programs, including `ddt`, `idt`, Laplace, Zi, and
+    /// transport-delay actions.  No transient history is advanced.
+    pub fn try_stamp_small_signal_complex<M>(
+        &mut self,
+        circuit_voltages: &[f64],
+        frequency_hz: f64,
+        mut matrix_add: M,
+    ) -> Result<(), VmError>
+    where
+        M: FnMut(usize, usize, f64, f64),
+    {
+        if !matches!(self.context.analysis_type, 1 | 3) {
+            return Err(VmError::InvalidRuntimeConfiguration(format!(
+                "complex small-signal stamping requires AC or noise analysis, got analysis type {}",
+                self.context.analysis_type
+            )));
+        }
+        if !frequency_hz.is_finite() || frequency_hz < 0.0 {
+            return Err(VmError::InvalidRuntimeConfiguration(format!(
+                "small-signal frequency must be finite and nonnegative, got {frequency_hz}"
+            )));
+        }
+
+        self.try_update_all_voltages(circuit_voltages)?;
+        // Replay procedural assignments from the same pre-pass image used by
+        // the selected scalar backend. Seeding from its post-pass image would
+        // execute self-referential/event-state assignments twice at every
+        // frequency point.
+        let variable_seed = self.context.variables.clone();
+        self.try_evaluate_with_mode(crate::vm::VerilogAEvaluationMode::SmallSignal)?;
+
+        let model = &self.model;
+        let matrix_indices = &self.matrix_indices;
+        let mut vm = crate::vm::SmallSignalVm::with_variable_seed(
+            &self.context,
+            frequency_hz,
+            &variable_seed,
+        )?;
+        vm.execute_assignments(&model.assignment_steps)?;
+
+        let matrix_capacity = model.branch_sources.len().saturating_mul(4).saturating_add(
+            matrix_indices
+                .jacobian
+                .iter()
+                .flatten()
+                .filter(|entry| entry.row.is_some() && entry.col.is_some())
+                .count(),
+        );
+        let mut real_structural = Vec::with_capacity(model.branch_sources.len().saturating_mul(4));
+        Self::buffer_structural_branches(
+            model,
+            &self.branch_active,
+            &self.node_mapping,
+            &self.internal_node_indices,
+            &self.branch_current_indices,
+            &mut real_structural,
+            self.context.multiplicity,
+        );
+        let mut entries = Vec::with_capacity(matrix_capacity);
+        entries.extend(
+            real_structural
+                .into_iter()
+                .map(|(row, col, value)| (row, col, value, 0.0)),
+        );
+
+        for (program_idx, program) in model.stamp_programs.iter().enumerate() {
+            if !self
+                .program_active
+                .get(program_idx)
+                .copied()
+                .unwrap_or(true)
+            {
+                continue;
+            }
+            let scale = if program.branch_ordinal.is_none() {
+                self.context.multiplicity
+            } else {
+                1.0
+            };
+            for mapped_entry in &matrix_indices.jacobian[program_idx] {
+                let model_entry = &program.jacobian_programs[mapped_entry.jacobian_idx];
+                let derivative = vm.execute(&model_entry.program)? * (mapped_entry.sign * scale);
+                if !derivative.re.is_finite() || !derivative.im.is_finite() {
+                    return Err(VmError::InvalidNumericResult(format!(
+                        "complex small-signal Jacobian {}:{} is non-finite at {frequency_hz} Hz",
+                        program_idx, mapped_entry.jacobian_idx
+                    )));
+                }
+                if let (Some(row), Some(col)) = (mapped_entry.row, mapped_entry.col) {
+                    entries.push((row, col, derivative.re, derivative.im));
+                }
+            }
+        }
+
+        // Publish atomically only after every program and coefficient has
+        // validated, matching the nonlinear stamp contract.
+        for (row, col, real, imag) in entries {
+            matrix_add(row, col, real, imag);
+        }
+        Ok(())
+    }
+
     /// Update terminal voltages from circuit solution
     ///
     /// Called before evaluating device equations.
@@ -6405,6 +6515,231 @@ endmodule
                 .iter()
                 .any(|entry| (entry.value - finite_difference).abs() < 1.0e-9),
             "Jacobian {jacobian:?} does not contain finite-difference action {finite_difference}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod complex_small_signal_device_tests {
+    use super::VerilogADevice;
+    use crate::{CompilerOptions, VerilogACompiler};
+    use std::hint::black_box;
+    use std::time::{Duration, Instant};
+
+    fn device(source: &str) -> VerilogADevice {
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let runtime = compiler
+            .compile_runtime(source, None)
+            .expect("compile complex small-signal fixture");
+        #[cfg(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32")))]
+        let device = VerilogADevice::try_new_with_canonical_ir(
+            "AC_COMPLEX",
+            runtime.model,
+            &runtime.canonical_ir,
+            &[1, 0],
+        );
+        #[cfg(not(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32"))))]
+        let device = VerilogADevice::try_new("AC_COMPLEX", runtime.model, &[1, 0]);
+        device.expect("build complex small-signal fixture")
+    }
+
+    fn one_port_admittance(source: &str, voltage: f64, frequency_hz: f64) -> (f64, f64) {
+        let mut device = device(source);
+        device.try_begin_analysis(1).expect("begin AC analysis");
+        let mut entries = Vec::new();
+        device
+            .try_stamp_small_signal_complex(&[voltage], frequency_hz, |row, col, re, im| {
+                if row == 0 && col == 0 {
+                    entries.push((re, im));
+                }
+            })
+            .expect("stamp complex small-signal fixture");
+        assert!(!entries.is_empty(), "fixture produced no one-port Jacobian");
+        entries
+            .into_iter()
+            .fold((0.0, 0.0), |(ar, ai), (br, bi)| (ar + br, ai + bi))
+    }
+
+    #[test]
+    fn device_laplace_assignment_shadow_retains_complex_phase() {
+        let source = r#"
+`include "disciplines.vams"
+module assigned_laplace(p, n);
+    inout p, n;
+    electrical p, n;
+    real y;
+    analog begin
+        y = laplace_nd(V(p, n), '{1.0}, '{1.0, 1.0});
+        I(p, n) <+ y * y;
+    end
+endmodule
+"#;
+        let (real, imag) = one_port_admittance(source, 2.0, 1.0 / std::f64::consts::TAU);
+        assert!((real - 2.0).abs() <= 1.0e-12, "{real}+j{imag}");
+        assert!((imag + 2.0).abs() <= 1.0e-12, "{real}+j{imag}");
+    }
+
+    #[test]
+    fn device_ddt_and_idt_use_physical_frequency_actions_once() {
+        let ddt = r#"
+`include "disciplines.vams"
+module ddt_ac(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ ddt(2.0e-6 * V(p, n));
+endmodule
+"#;
+        let idt = r#"
+`include "disciplines.vams"
+module idt_ac(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ idt(V(p, n), 0.0);
+endmodule
+"#;
+        let frequency = 10.0;
+        let omega = std::f64::consts::TAU * frequency;
+        let (ddt_real, ddt_imag) = one_port_admittance(ddt, 0.0, frequency);
+        assert_eq!(ddt_real, 0.0);
+        assert!((ddt_imag - omega * 2.0e-6).abs() <= 1.0e-15);
+        let (idt_real, idt_imag) = one_port_admittance(idt, 0.0, frequency);
+        assert_eq!(idt_real, 0.0);
+        assert!((idt_imag + 1.0 / omega).abs() <= 1.0e-15);
+    }
+
+    #[test]
+    fn device_zi_and_absdelay_apply_quarter_cycle_phase() {
+        let zi = r#"
+`include "disciplines.vams"
+module zi_ac(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ zi_nd(V(p, n), '{0.0, 1.0}, '{1.0}, 1.0);
+endmodule
+"#;
+        let delay = r#"
+`include "disciplines.vams"
+module delay_ac(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ absdelay(V(p, n), 0.25);
+endmodule
+"#;
+        for (label, source, frequency_hz) in [("Zi", zi, 0.25), ("absdelay", delay, 1.0)] {
+            let (real, imag) = one_port_admittance(source, 0.0, frequency_hz);
+            assert!(real.abs() <= 1.0e-14, "{label}: {real}+j{imag}");
+            assert!((imag + 1.0).abs() <= 1.0e-14, "{label}: {real}+j{imag}");
+        }
+    }
+
+    /// Focused release benchmark for the complex frequency-domain path.
+    ///
+    /// The split real/reactive path is an exact reference for this deliberately
+    /// simple RC admittance, so the same process reports both the compatibility
+    /// baseline and the path required by nested filters. Run with:
+    /// `cargo test -p rspice-veriloga --release --all-features
+    /// complex_small_signal_stamp_microbenchmark -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "manual release microbenchmark"]
+    fn complex_small_signal_stamp_microbenchmark() {
+        assert!(
+            !cfg!(debug_assertions),
+            "rerun the microbenchmark with --release"
+        );
+        let source = r#"
+`include "disciplines.vams"
+module ac_stamp_bench(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ 1.0e-3 * V(p, n) + ddt(1.0e-6 * V(p, n));
+endmodule
+"#;
+        let frequency_hz = 1.0e3;
+        let omega = std::f64::consts::TAU * frequency_hz;
+        let iterations = std::env::var("RSPICE_SMALL_SIGNAL_BENCH_ITERATIONS")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(50_000)
+            .max(1);
+        let samples = 5;
+        let mut complex = device(source);
+        let mut split = device(source);
+        complex.try_begin_analysis(1).unwrap();
+        split.try_begin_analysis(1).unwrap();
+
+        let run_complex = |device: &mut VerilogADevice| {
+            let start = Instant::now();
+            let mut checksum = 0.0;
+            for _ in 0..iterations {
+                device
+                    .try_stamp_small_signal_complex(&[0.0], frequency_hz, |row, col, re, im| {
+                        checksum += black_box((row + col + 1) as f64) * (re + im);
+                    })
+                    .unwrap();
+            }
+            (start.elapsed(), black_box(checksum))
+        };
+        let run_split = |device: &mut VerilogADevice| {
+            let start = Instant::now();
+            let mut checksum = 0.0;
+            for _ in 0..iterations {
+                device
+                    .try_stamp(
+                        &[0.0],
+                        |row, col, value| {
+                            checksum += black_box((row + col + 1) as f64) * value;
+                        },
+                        |_, _| {},
+                    )
+                    .unwrap();
+                device
+                    .try_stamp_reactive(&[0.0], |row, col, value| {
+                        checksum += black_box((row + col + 1) as f64) * omega * value;
+                    })
+                    .unwrap();
+            }
+            (start.elapsed(), black_box(checksum))
+        };
+
+        let _ = run_complex(&mut complex);
+        let _ = run_split(&mut split);
+        let mut complex_times = Vec::with_capacity(samples);
+        let mut split_times = Vec::with_capacity(samples);
+        let mut complex_checksum = 0.0;
+        let mut split_checksum = 0.0;
+        for sample in 0..samples {
+            let (first, second) = if sample % 2 == 0 {
+                let complex = run_complex(&mut complex);
+                let split = run_split(&mut split);
+                (complex, split)
+            } else {
+                let split = run_split(&mut split);
+                let complex = run_complex(&mut complex);
+                (complex, split)
+            };
+            complex_times.push(first.0);
+            split_times.push(second.0);
+            complex_checksum += first.1;
+            split_checksum += second.1;
+        }
+        let median = |times: &mut Vec<Duration>| {
+            times.sort_unstable();
+            times[times.len() / 2].as_secs_f64() * 1.0e9 / iterations as f64
+        };
+        let complex_ns = median(&mut complex_times);
+        let split_ns = median(&mut split_times);
+        let expected_checksum = samples as f64 * iterations as f64 * (1.0e-3 + omega * 1.0e-6);
+        assert!(
+            (complex_checksum - expected_checksum).abs() <= expected_checksum * 1.0e-9,
+            "complex checksum {complex_checksum:e}, expected {expected_checksum:e}"
+        );
+        assert!(
+            (split_checksum - expected_checksum).abs() <= expected_checksum * 1.0e-9,
+            "split checksum {split_checksum:e}, expected {expected_checksum:e}"
+        );
+        eprintln!(
+            "complex-small-signal-microbench iterations={iterations} samples={samples} complex_median_ns_per_stamp={complex_ns:.3} split_reference_median_ns_per_stamp={split_ns:.3} ratio={:.3} checksum={complex_checksum:.17e}",
+            complex_ns / split_ns
         );
     }
 }
