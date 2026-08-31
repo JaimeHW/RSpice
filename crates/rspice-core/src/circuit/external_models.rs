@@ -546,14 +546,12 @@ impl CircuitData {
             dispatch.record_fanout_pending(pending, touched_digital_nodes);
             dispatch.record_fanout_pending(pending, touched_real_nodes);
             if pass == 0 {
-                // Opening a settle call, every instance runs unless the
-                // sensitivity map says it may be skipped while quiet — see
-                // `circuit::xspice_dispatch` for why that skip is sound.
-                for (index, slot) in pending.iter_mut().enumerate() {
-                    if !dispatch.is_dirty_dispatched(index) {
-                        *slot = true;
-                    }
-                }
+                // The opening pass dispatches every instance, exactly as it
+                // always has. Narrowing it is the quiet-input check below, and
+                // only that check: an instance with no input ports at all —
+                // `d_pullup`, `d_pulldown` — is reached by no net's fan-out
+                // and would otherwise never run even once.
+                pending.fill(true);
             }
 
             for index in 0..instances.len() {
