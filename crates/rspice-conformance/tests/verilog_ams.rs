@@ -29,9 +29,7 @@
 //! a list of literals. A table of literals would say what the answer is; a
 //! model says why, and a change to a vector row changes both sides at once.
 
-use rspice_conformance::suites::verilog::{
-    AmsCorpus, AmsPortValue, AmsStimulus, ams_corpus_dir,
-};
+use rspice_conformance::suites::verilog::{AmsCorpus, AmsPortValue, AmsStimulus, ams_corpus_dir};
 
 /// Cases the corpus must contain, by name and by what they cover.
 ///
@@ -257,11 +255,9 @@ fn rspice_matches_the_reference_model_on_every_case() {
                 .map(|(_, value)| value.clone())
                 .collect();
             assert_eq!(
-                &actual,
-                row,
+                &actual, row,
                 "`{}` disagrees with the reference model at vector {}",
-                case.name,
-                observation.step
+                case.name, observation.step
             );
         }
     }

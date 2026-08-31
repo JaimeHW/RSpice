@@ -341,7 +341,9 @@ impl DigitalSignalStore {
         for index in 0..count {
             let signal = DigitalSignalId::from(index);
             let start = contributions.len();
-            let real = plan.signal(signal).is_some_and(|signal| signal.kind.is_real());
+            let real = plan
+                .signal(signal)
+                .is_some_and(|signal| signal.kind.is_real());
             for driver in plan.drivers_of(signal) {
                 contributions.push(Contribution {
                     select: driver.target.select.clone(),
@@ -1098,7 +1100,11 @@ mod tests {
 
         let plan = real_plan(DigitalRealResolution::Average, 2);
         let mut store = DigitalSignalStore::new(&plan);
-        assert_eq!(drive_real(&mut store, 0, 4.0), 2.0, "divided by two, not one");
+        assert_eq!(
+            drive_real(&mut store, 0, 4.0),
+            2.0,
+            "divided by two, not one"
+        );
     }
 
     /// A rewrite of the value a real net already holds is not an event, the

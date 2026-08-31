@@ -224,9 +224,18 @@ impl AmsCorpus {
 /// Why the corpus could not be loaded.
 #[derive(Debug, Clone)]
 pub enum AmsCorpusError {
-    UnreadableRoot { path: PathBuf, detail: String },
-    UnreadableManifest { path: PathBuf, detail: String },
-    MalformedManifest { line: usize, detail: String },
+    UnreadableRoot {
+        path: PathBuf,
+        detail: String,
+    },
+    UnreadableManifest {
+        path: PathBuf,
+        detail: String,
+    },
+    MalformedManifest {
+        line: usize,
+        detail: String,
+    },
     UnlistedDesigns(Vec<String>),
     OrphanedManifestEntries(Vec<String>),
     MissingStimulus {
@@ -234,7 +243,10 @@ pub enum AmsCorpusError {
         path: PathBuf,
         detail: String,
     },
-    MalformedStimulus { case: String, detail: String },
+    MalformedStimulus {
+        case: String,
+        detail: String,
+    },
     Empty(PathBuf),
 }
 

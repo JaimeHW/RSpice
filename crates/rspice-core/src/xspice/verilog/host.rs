@@ -660,9 +660,7 @@ impl<'plan> DigitalHost<'plan> {
                         (
                             ProcessStatus::AwaitingEvent(terms),
                             TransitionValues::Real { previous, next },
-                        ) => {
-                            any_real_term_is_satisfied(terms, transition.signal, *previous, *next)
-                        }
+                        ) => any_real_term_is_satisfied(terms, transition.signal, *previous, *next),
                         _ => false,
                     };
                     if satisfied {

@@ -1032,7 +1032,11 @@ impl<'a, E: DigitalEnvironment + ?Sized> Interpreter<'a, E> {
                 // not taken is reported rather than hidden by the condition.
                 let then_value = self.real(then_value)?;
                 let else_value = self.real(else_value)?;
-                Ok(DigitalScalar::Real(if taken { then_value } else { else_value }))
+                Ok(DigitalScalar::Real(if taken {
+                    then_value
+                } else {
+                    else_value
+                }))
             }
             CfgValueKind::DigitalBitwise { op, left, right } => {
                 let (op, left, right) = (*op, *left, *right);

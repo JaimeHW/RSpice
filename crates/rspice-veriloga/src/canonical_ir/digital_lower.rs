@@ -828,8 +828,7 @@ impl ProcessLowerer<'_> {
             span,
         });
         let variable = CfgVariable::DigitalLocal(id);
-        self.builder
-            .declare_variable(variable, CfgValueType::Real);
+        self.builder.declare_variable(variable, CfgValueType::Real);
         let initial = initial.unwrap_or_else(|| self.real_constant(0.0));
         self.builder.write_variable(variable, block, initial);
         if let Some(scope) = self.scopes.last_mut() {
@@ -1934,11 +1933,9 @@ impl ProcessLowerer<'_> {
                         CfgValueType::Real,
                         CfgValueKind::DigitalRealSignalRead { signal },
                     ),
-                    Some(_) => self.not_a_real(
-                        &identifier.name,
-                        "a four-state signal",
-                        identifier.span,
-                    ),
+                    Some(_) => {
+                        self.not_a_real(&identifier.name, "a four-state signal", identifier.span)
+                    }
                     None => {
                         self.error(
                             format!("`{}` is not a discrete-domain signal", identifier.name),

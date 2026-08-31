@@ -259,15 +259,18 @@ pub fn run_digital_verilog(
 
         host.advance_to(apply_at)?;
         for (port, spelling) in inputs.iter().zip(vector) {
-            let ResolvedPort { signal, width, name } = port;
+            let ResolvedPort {
+                signal,
+                width,
+                name,
+            } = port;
             if *width == 0 {
-                let value: f64 =
-                    spelling
-                        .parse()
-                        .map_err(|_| DigitalRunError::RealSpelling {
-                            port: name.clone(),
-                            spelling: spelling.clone(),
-                        })?;
+                let value: f64 = spelling
+                    .parse()
+                    .map_err(|_| DigitalRunError::RealSpelling {
+                        port: name.clone(),
+                        spelling: spelling.clone(),
+                    })?;
                 host.force_real(*signal, value, apply_at)?;
                 continue;
             }
@@ -335,7 +338,10 @@ struct ResolvedPort {
 }
 
 /// Resolve one stimulus port and check that the two agree about its domain.
-fn resolve_port(host: &DigitalHost<'_>, port: &DigitalPort) -> Result<ResolvedPort, DigitalRunError> {
+fn resolve_port(
+    host: &DigitalHost<'_>,
+    port: &DigitalPort,
+) -> Result<ResolvedPort, DigitalRunError> {
     let signal = host.signal(&port.name)?;
     let real = host.is_real(signal);
     if real != (port.width == 0) {
