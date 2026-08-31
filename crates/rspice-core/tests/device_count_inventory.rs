@@ -88,6 +88,15 @@ const EXCLUDED_FROM_DEVICE_COUNT: &[(&str, &str)] = &[
         "scratch nodes touched while applying one real-valued event batch",
     ),
     (
+        "xspice_dispatch_pending",
+        "one flag per counted XSPICE instance, saying whether the settle pass \
+         still owes it an evaluation",
+    ),
+    (
+        "xspice_dispatch_next_pending",
+        "the same flags accumulated for the next settle pass",
+    ),
+    (
         "branch_name_by_ordinal",
         "canonical branch names, one per MNA branch unknown",
     ),
