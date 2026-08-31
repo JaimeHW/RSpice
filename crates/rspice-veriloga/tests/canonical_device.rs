@@ -2201,6 +2201,44 @@ fn transpiler_reports_hot_phases_and_exact_output_size() {
     );
 }
 
+/// A model that asks for its own time step must not be generated silently.
+///
+/// `$bound_step` reaches the runtime as a hidden variable the front end writes
+/// only into the flat statement stream; the structured body the CFG is built
+/// from carries no trace of it. A generated device would therefore compile,
+/// run, and take whatever step the engine felt like — the failure mode that is
+/// hardest to notice and worst to debug. Refusing hands the model to a backend
+/// that honours the request.
+#[test]
+fn a_model_that_bounds_its_own_time_step_is_refused_rather_than_generated() {
+    for (task, argument) in [("$bound_step", "1.0e-9"), ("$discontinuity", "1")] {
+        let source = format!(
+            r#"
+module stepped(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real g = 1.0e-3;
+    analog begin
+        {task}({argument});
+        I(p, n) <+ g * V(p, n);
+    end
+endmodule
+"#
+        );
+        let artifact = VerilogACompiler::default()
+            .compile_canonical_ir(&source)
+            .unwrap_or_else(|error| panic!("{task}: front end: {error}"));
+        let error = RustTranspiler::new(options())
+            .transpile(&artifact)
+            .expect_err("a simulator-control task must not be dropped in silence");
+        assert_eq!(error.kind, RustBackendErrorKind::Unsupported);
+        assert!(
+            error.message.contains(task),
+            "the refusal must name the task it cannot honour, got {error}"
+        );
+    }
+}
+
 struct ImmediatePipelineCancellation;
 
 impl PipelineControl for ImmediatePipelineCancellation {

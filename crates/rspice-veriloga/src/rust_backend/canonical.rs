@@ -49,10 +49,11 @@
 //!
 //! ## What it refuses
 //!
-//! `$limit`, indirect contributions, and an unresolved flow probe. Each is a
-//! piece the canonical level has not finished, and a device that quietly
-//! computed something else would be worse than one that is not generated: the
-//! caller falls back to a tier, which is what the tiers are still there for.
+//! Indirect contributions, an unresolved flow probe, and the simulator-control
+//! tasks `$bound_step` and `$discontinuity`. Each is a piece the canonical
+//! level has not finished, and a device that quietly computed something else
+//! would be worse than one that is not generated: the caller falls back to a
+//! tier, which is what the tiers are still there for.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
@@ -4265,8 +4266,33 @@ fn reject_unsupported_kinds(
     {
         return Err(unsupported(artifact, "an indirect contribution"));
     }
+    // Simulator-control tasks, which this backend would otherwise drop in
+    // silence rather than refuse.
+    //
+    // The front end lowers `$bound_step` and `$discontinuity` into hidden
+    // variables named after the task, writes them only into the flat statement
+    // stream, and the runtime reads them back under those exact names. The
+    // structured body carries neither, so the CFG built from it is a faithful
+    // graph of a model that has stopped asking for the time step it needs — a
+    // model that compiles, runs, and steps wrongly. Refusing sends it to a
+    // backend that honours the request instead.
+    if let Some(variable) = artifact
+        .hir
+        .variables
+        .iter()
+        .find(|variable| SIMULATOR_CONTROL_TASK_VARIABLES.contains(&variable.name.as_str()))
+    {
+        return Err(unsupported(
+            artifact,
+            format!("the {} simulator-control task", variable.name),
+        ));
+    }
     Ok(())
 }
+
+/// Hidden variables the front end creates for a simulator-control task, named
+/// exactly as `VerilogADevice` reads them back.
+const SIMULATOR_CONTROL_TASK_VARIABLES: [&str; 2] = ["$bound_step", "$discontinuity"];
 
 fn stage_fn_name(class: InvalidationClass) -> &'static str {
     match class {
