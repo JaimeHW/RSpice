@@ -22,7 +22,15 @@ use super::*;
 // version 22 refused at the artifact boundary now produces an artifact, so the
 // record's identity has to change even though a continuous-domain model's
 // artifact is byte-identical to the one version 22 wrote.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 23;
+// Version 24 widens that canonical form. Process-local variables, `for`,
+// `while`, `repeat`, and the wildcard `case` forms lower where version 23
+// refused them, a continuous assignment lowers to a driver process and a new
+// `drivers` list, and two IEEE 1364-2005 defects are corrected: a
+// concatenation target now resizes its right-hand side (section 5.2.1) and a
+// case item is matched by identity rather than by `==` (section 9.5). Source
+// that version 23 refused now compiles, and source it compiled can produce a
+// different artifact, so the record's identity has to change.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 24;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
