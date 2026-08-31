@@ -1632,6 +1632,13 @@ impl SemanticAnalyzer {
     fn expr_contains_identifier(expr: &Expression, expected: &SmolStr) -> bool {
         match expr {
             Expression::Identifier(identifier) => &identifier.name == expected,
+            Expression::Digital(digital) => {
+                digital.base_name() == Some(expected)
+                    || digital
+                        .children()
+                        .into_iter()
+                        .any(|child| Self::expr_contains_identifier(child, expected))
+            }
             Expression::Binary(binary) => {
                 Self::expr_contains_identifier(&binary.left, expected)
                     || Self::expr_contains_identifier(&binary.right, expected)
@@ -1686,6 +1693,10 @@ impl SemanticAnalyzer {
 
     fn expr_contains_call(expr: &Expression, expected: &str) -> bool {
         match expr {
+            Expression::Digital(digital) => digital
+                .children()
+                .into_iter()
+                .any(|child| Self::expr_contains_call(child, expected)),
             Expression::Call(call) => {
                 call.name.eq_ignore_ascii_case(expected)
                     || call
@@ -1739,6 +1750,10 @@ impl SemanticAnalyzer {
 
     fn expr_contains_number_close(expr: &Expression, expected: f64) -> bool {
         match expr {
+            Expression::Digital(digital) => digital
+                .children()
+                .into_iter()
+                .any(|child| Self::expr_contains_number_close(child, expected)),
             Expression::Number(number) => {
                 let tolerance = expected.abs().max(1.0) * 1.0e-12;
                 (number.value - expected).abs() <= tolerance
@@ -3133,6 +3148,11 @@ impl SemanticAnalyzer {
         span: Span,
     ) -> CompileResult<()> {
         match expression {
+            Expression::Digital(digital) => {
+                for child in digital.children() {
+                    self.validate_direct_zi_contribution(child, span)?;
+                }
+            }
             Expression::Call(call) => {
                 if is_zi_operator_name(&call.name) {
                     self.validate_direct_zi_site(call.name.as_str(), call.args.get(4), span)?;
@@ -4187,6 +4207,9 @@ impl SemanticAnalyzer {
             | Expression::StringLit(_)
             | Expression::NullArgument(_)
             | Expression::Identifier(_)
+            // A discrete-domain expression cannot contain an analog function
+            // call, so there is nothing to materialize out of one.
+            | Expression::Digital(_)
             | Expression::BranchAccess(_) => expr.clone(),
             Expression::SystemFunction(function) => Expression::SystemFunction(SystemFunction {
                 name: function.name.clone(),
@@ -4644,6 +4667,10 @@ impl SemanticAnalyzer {
 
     fn expression_contains_output_function_call(&self, expr: &Expression) -> bool {
         match expr {
+            Expression::Digital(digital) => digital
+                .children()
+                .into_iter()
+                .any(|child| self.expression_contains_output_function_call(child)),
             Expression::Call(call) => {
                 self.user_functions
                     .get(&call.name)
@@ -4898,6 +4925,22 @@ impl SemanticAnalyzer {
     /// variables) and inline calls to user-defined analog functions.
     fn lower_expression(&mut self, expr: &Expression) -> CompileResult<Expression> {
         Ok(match expr {
+            // The refusal that keeps four-state literals and part-selects out
+            // of the continuous domain. Every analog expression is lowered
+            // here, so a discrete form written in an analog block, an analog
+            // function, a parameter default, or a contribution stops with the
+            // same diagnostic naming the construct.
+            Expression::Digital(digital) => {
+                return Err(CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::UnsupportedFeature(format!(
+                        "a {} has no value in the continuous (analog) domain; it \
+                         is legal only inside an `always`/`initial` process or a \
+                         continuous `assign`",
+                        digital.construct()
+                    )),
+                    digital.span(),
+                )));
+            }
             Expression::Identifier(id) => {
                 if self.parameter_arrays.contains(&id.name) {
                     return Err(CompileError::Semantic(SemanticError::new(
@@ -5444,6 +5487,10 @@ impl SemanticAnalyzer {
             | Expression::NullArgument(_)
             | Expression::Identifier(_)
             | Expression::BranchAccess(_) => Ok(()),
+            Expression::Digital(digital) => reject(
+                format!("a {} is not a continuous-domain value", digital.construct()),
+                digital.span(),
+            ),
             Expression::Binary(binary) => {
                 Self::validate_zi_freeze_expression(&binary.left, operator, argument_index)?;
                 Self::validate_zi_freeze_expression(&binary.right, operator, argument_index)
@@ -6392,6 +6439,13 @@ impl SemanticAnalyzer {
 
     fn infer_type(&self, expr: &Expression) -> CompileResult<ValueType> {
         match expr {
+            Expression::Digital(digital) => Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::UnsupportedFeature(format!(
+                    "a {} has no continuous-domain type",
+                    digital.construct()
+                )),
+                digital.span(),
+            ))),
             Expression::Number(number) => Ok(if Self::integer_literal_value(number).is_some() {
                 ValueType::Integer
             } else {
@@ -7722,6 +7776,16 @@ impl SemanticAnalyzer {
 
         match expression {
             Expression::Number(_) => true,
+            Expression::Digital(digital) => {
+                self.record_error_at(
+                    SemanticErrorKind::InvalidExpression(format!(
+                        "{owner} uses a {}, which has no continuous-domain value",
+                        digital.construct()
+                    )),
+                    digital.span(),
+                );
+                false
+            }
             Expression::Identifier(identifier) if identifier.name == "inf" => true,
             Expression::Identifier(identifier) => {
                 let Some(&referenced_index) = parameter_indices.get(&identifier.name) else {
@@ -8039,6 +8103,16 @@ impl SemanticAnalyzer {
                     references.push((index, identifier.name.clone(), identifier.span));
                 }
             }
+            Expression::Digital(digital) => {
+                for child in digital.children() {
+                    Self::collect_parameter_identifier_references(
+                        child,
+                        parameter_indices,
+                        param_given_indices,
+                        references,
+                    );
+                }
+            }
             Expression::Binary(binary) => {
                 Self::collect_parameter_identifier_references(
                     &binary.left,
@@ -8181,6 +8255,13 @@ impl SemanticAnalyzer {
     ) -> bool {
         match expr {
             Expression::Identifier(id) => names.contains(&id.name),
+            Expression::Digital(digital) => {
+                digital.base_name().is_some_and(|name| names.contains(name))
+                    || digital
+                        .children()
+                        .into_iter()
+                        .any(|child| Self::references_identifiers(child, names))
+            }
             Expression::Number(_) | Expression::StringLit(_) | Expression::NullArgument(_) => false,
             Expression::Binary(b) => {
                 Self::references_identifiers(&b.left, names)
@@ -8244,6 +8325,13 @@ impl SemanticAnalyzer {
             Expression::Identifier(identifier) => canonical_storage
                 .get(&identifier.name)
                 .is_some_and(|has_model_storage| !has_model_storage),
+            Expression::Digital(digital) => digital.children().into_iter().any(|child| {
+                Self::references_parameter_without_model_storage(
+                    child,
+                    canonical_storage,
+                    external_storage,
+                )
+            }),
             Expression::SystemFunction(function)
                 if function.name.eq_ignore_ascii_case("$param_given")
                     || function.name.eq_ignore_ascii_case("param_given") =>

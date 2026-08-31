@@ -48,6 +48,13 @@ pub enum TokenKind {
     // === Literals ===
     /// Integer literal: 123, 0xFF, 0b101
     IntegerLiteral,
+    /// A based literal with at least one `x`, `z`, or `?` digit: `4'b10x1`.
+    ///
+    /// Kept apart from [`TokenKind::IntegerLiteral`] because it has no numeric
+    /// value. The continuous half of the language cannot represent one, so it
+    /// must not be able to reach an analog expression by falling through a
+    /// shared literal production.
+    FourStateLiteral,
     /// Real literal: 1.5, 1e-3, 2.5M
     RealLiteral,
     /// String literal: "hello"
@@ -96,6 +103,8 @@ pub enum TokenKind {
 
     // === Keywords - Nets ===
     Wire,
+    /// `reg`: the IEEE 1364-2005 procedural variable type.
+    Reg,
     Ground,
     Electrical, // Common discipline
     Voltage,    // Common discipline
@@ -108,6 +117,16 @@ pub enum TokenKind {
     End,
     Fork,
     Join,
+
+    // === Keywords - Digital Processes (IEEE 1364) ===
+    /// `always`: opens a procedural process that re-executes forever.
+    Always,
+    /// `signed` / `unsigned` range qualifiers on a net, variable, or port.
+    ///
+    /// Both remain reported by [`TokenKind::is_keyword`], so a Verilog-A
+    /// source that already declares `real signed;` keeps that name.
+    Signed,
+    Unsigned,
 
     // === Keywords - Control Flow ===
     If,
@@ -293,6 +312,9 @@ impl TokenKind {
 
             // Nets
             "wire" => TokenKind::Wire,
+            "reg" => TokenKind::Reg,
+            "signed" => TokenKind::Signed,
+            "unsigned" => TokenKind::Unsigned,
             "ground" => TokenKind::Ground,
             "electrical" => TokenKind::Electrical,
             "voltage" => TokenKind::Voltage,
@@ -301,6 +323,7 @@ impl TokenKind {
             // Analog block
             "analog" => TokenKind::Analog,
             "initial" => TokenKind::Initial,
+            "always" => TokenKind::Always,
             "begin" => TokenKind::Begin,
             "end" => TokenKind::End,
             "fork" => TokenKind::Fork,
@@ -367,14 +390,15 @@ impl TokenKind {
             //     kinds above and are refused by the parser at the positions
             //     where they are constructs, while remaining usable as
             //     identifiers exactly where they are today.
-            "always" => TokenKind::AmsDigital,
+            //   * `always`, `reg`, `signed`, `unsigned` — the wave-1 digital
+            //     grammar has productions for these now, so they carry their
+            //     own kinds above instead of a blanket refusal.
             "defparam" => TokenKind::AmsDigital,
             "edge" => TokenKind::AmsDigital,
             "event" => TokenKind::AmsDigital,
             "primitive" => TokenKind::AmsDigital,
             "endprimitive" => TokenKind::AmsDigital,
             "realtime" => TokenKind::AmsDigital,
-            "reg" => TokenKind::AmsDigital,
             "scalared" => TokenKind::AmsDigital,
             "supply0" => TokenKind::AmsDigital,
             "supply1" => TokenKind::AmsDigital,
@@ -423,6 +447,13 @@ impl TokenKind {
                 | TokenKind::Discrete
                 | TokenKind::Continuous
                 | TokenKind::Wire
+                // `signed` and `unsigned` are reserved by IEEE 1364, but this
+                // compiler accepted them as ordinary names before the digital
+                // grammar existed. They are read as range qualifiers only in
+                // the declaration positions that ask for one, so a source with
+                // `real signed;` keeps working.
+                | TokenKind::Signed
+                | TokenKind::Unsigned
                 | TokenKind::Ground
                 | TokenKind::Electrical
                 | TokenKind::Voltage
@@ -904,6 +935,19 @@ impl<'a> Lexer<'a> {
 
         let text = &self.source[start..self.pos];
         let span = Span::new(self.source_id, start as u32, self.pos as u32);
+        // A literal with an `x`, `z`, or `?` digit has no integer value at all,
+        // so it never reaches the integer decoder. It becomes its own token
+        // kind: the analog grammar has no production for one, which is how a
+        // four-state value stays out of continuous-domain expressions.
+        if crate::four_state::digits_are_four_state(text) {
+            return match crate::four_state::decode(text) {
+                Ok(_) => Ok(Token::with_text(TokenKind::FourStateLiteral, span, text)),
+                Err(detail) => Err(LexerError::new(
+                    LexerErrorKind::InvalidNumber(format!("{text}: {detail}")),
+                    span,
+                )),
+            };
+        }
         match parse_integer_literal(text) {
             Ok(Some(_)) => Ok(Token::with_text(TokenKind::IntegerLiteral, span, text)),
             Ok(None) => Err(LexerError::new(
@@ -1156,10 +1200,9 @@ mod tests {
     }
 
     #[test]
-    fn malformed_or_four_state_based_literals_fail_closed() {
+    fn malformed_based_literals_fail_closed() {
         for src in [
-            "0'h0", "65'h1", "8'", "8's", "8'q1", "8'h", "8'b102", "8'o8", "8'dA", "8'hx1",
-            "8'b10?1", "8'oz",
+            "0'h0", "65'h1", "8'", "8's", "8'q1", "8'h", "8'b102", "8'o8", "8'dA",
         ] {
             let error = Lexer::new(src, SourceId::new(0))
                 .collect_tokens()
@@ -1177,6 +1220,34 @@ mod tests {
             error.to_string().contains("requires more than 64 bits"),
             "{error}"
         );
+    }
+
+    /// A literal with an `x`, `z`, or `?` digit lexes as its own kind rather
+    /// than failing here.
+    ///
+    /// It used to be a lexer error, because the integer decoder is the only
+    /// decoder there was and four-state values have no integer value. The
+    /// refusal has moved, not gone: the token has no analog production, so a
+    /// four-state literal written in a continuous-domain expression is now
+    /// refused by semantic analysis, by name, at its own span.
+    #[test]
+    fn four_state_based_literals_lex_as_their_own_kind() {
+        for src in ["8'hx1", "8'b10?1", "8'oz", "4'sb10x1", "'bx", "1'dz"] {
+            let tokens = lex(src);
+            assert_eq!(tokens[0].kind, TokenKind::FourStateLiteral, "for {src}");
+            assert_eq!(tokens[0].text.as_deref(), Some(src), "for {src}");
+        }
+
+        // Malformed four-state literals still stop at the lexer.
+        for src in ["0'bx", "8'qx", "70000'bx", "4'd1x"] {
+            let error = Lexer::new(src, SourceId::new(0))
+                .collect_tokens()
+                .expect_err("malformed four-state literal must be rejected");
+            assert!(
+                matches!(error.kind, LexerErrorKind::InvalidNumber(_)),
+                "unexpected error for {src}: {error}"
+            );
+        }
     }
 
     #[test]

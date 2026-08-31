@@ -1089,6 +1089,19 @@ fn rewrite_expression(expression: &Expression, scope: &ScopeMap) -> CompileResul
         Expression::Number(_) | Expression::StringLit(_) | Expression::NullArgument(_) => {
             expression.clone()
         }
+        // Hierarchy elaboration rewrites the continuous-domain body of a
+        // module that has already been accepted by semantic analysis, which
+        // refuses discrete-domain expressions. Failing here rather than
+        // cloning keeps that guarantee explicit.
+        Expression::Digital(digital) => {
+            return Err(semantic_error(
+                SemanticErrorKind::UnsupportedFeature(format!(
+                    "a {} cannot be elaborated into a continuous-domain module body",
+                    digital.construct()
+                )),
+                digital.span(),
+            ));
+        }
         Expression::Identifier(identifier) => Expression::Identifier(Identifier {
             name: scope
                 .parameters

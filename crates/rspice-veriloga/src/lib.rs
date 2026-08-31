@@ -85,6 +85,7 @@ pub mod codegen;
 pub mod disciplines;
 pub mod error;
 pub mod expr_converter;
+pub mod four_state;
 mod integer_runtime;
 pub mod ir;
 pub mod lexer;

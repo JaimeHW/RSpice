@@ -7,6 +7,7 @@
 //! 2. **Fidelity** - Preserves source locations for error reporting
 //! 3. **Traversability** - Easy to walk and transform
 
+use crate::four_state::FourStateLiteral;
 use crate::source::Span;
 use smol_str::SmolStr;
 
@@ -76,6 +77,17 @@ pub struct Module {
     pub instances: Vec<ModuleInstance>,
     /// Function definitions
     pub functions: Vec<FunctionDef>,
+    /// Discrete-domain net declarations (`wire`), in declaration order
+    pub digital_nets: Vec<DigitalNetDecl>,
+    /// Discrete-domain variable declarations (`reg`), in declaration order
+    pub digital_variables: Vec<DigitalVariableDecl>,
+    /// Continuous assignments (`assign`), in declaration order
+    pub continuous_assigns: Vec<ContinuousAssign>,
+    /// Procedural processes (`always`, `initial`), in declaration order.
+    ///
+    /// Each carries the [`DigitalProcessId`] it was given here, so a later
+    /// pass can name a process without depending on its index in this vector.
+    pub digital_processes: Vec<DigitalProcess>,
     /// Module attributes
     pub attributes: Vec<Attribute>,
     /// Source span
@@ -83,6 +95,15 @@ pub struct Module {
 }
 
 impl Module {
+    /// Whether the module declares anything from the discrete half of
+    /// Verilog-AMS.
+    pub fn has_digital_content(&self) -> bool {
+        !self.digital_nets.is_empty()
+            || !self.digital_variables.is_empty()
+            || !self.continuous_assigns.is_empty()
+            || !self.digital_processes.is_empty()
+    }
+
     pub fn new(name: impl Into<SmolStr>, span: Span) -> Self {
         Self {
             name: name.into(),
@@ -99,6 +120,10 @@ impl Module {
             analog_final: None,
             instances: Vec::new(),
             functions: Vec::new(),
+            digital_nets: Vec::new(),
+            digital_variables: Vec::new(),
+            continuous_assigns: Vec::new(),
+            digital_processes: Vec::new(),
             attributes: Vec::new(),
             span,
         }
@@ -119,6 +144,14 @@ pub struct PortDeclaration {
     pub direction: PortDirection,
     /// Discipline (electrical, thermal, etc.)
     pub discipline: Option<SmolStr>,
+    /// Packed vector range written on the port: `input [7:0] bus;`.
+    ///
+    /// `None` is a scalar port, which is every port a continuous-domain
+    /// module declares.
+    pub range: Option<VectorRange>,
+    /// Whether the port was declared `signed`. Continuous-domain ports never
+    /// are.
+    pub signedness: Signedness,
     /// Port names
     pub names: Vec<SmolStr>,
     /// Source span
@@ -622,6 +655,14 @@ pub enum Expression {
     AnalogOperator(AnalogOperator),
     /// Noise source
     NoiseSource(NoiseSource),
+    /// An expression form that exists only in the discrete (IEEE 1364) half
+    /// of Verilog-AMS.
+    ///
+    /// One variant, rather than one per form, so every continuous-domain
+    /// consumer has exactly one arm to refuse. Semantic analysis stops these
+    /// before any executable lowering runs, so nothing downstream of the
+    /// analyzer ever observes one.
+    Digital(DigitalExpr),
 }
 
 impl Expression {
@@ -641,8 +682,71 @@ impl Expression {
             Expression::ArrayLiteral(a) => a.span,
             Expression::AnalogOperator(o) => o.span(),
             Expression::NoiseSource(n) => n.span(),
+            Expression::Digital(d) => d.span(),
         }
     }
+}
+
+/// Expression forms belonging to the discrete half of Verilog-AMS.
+#[derive(Debug, Clone)]
+pub enum DigitalExpr {
+    /// Four-state literal: `4'b10x1`, `8'hzF`, `'bx`.
+    FourState(FourStateLit),
+    /// Constant part-select of a vector: `bus[7:4]`.
+    ///
+    /// The indexed forms `bus[base +: width]` and `bus[base -: width]` are not
+    /// part of this wave and are refused by name.
+    PartSelect(PartSelectExpr),
+}
+
+impl DigitalExpr {
+    pub fn span(&self) -> Span {
+        match self {
+            Self::FourState(literal) => literal.span,
+            Self::PartSelect(select) => select.span,
+        }
+    }
+
+    /// Name of the construct, for diagnostics that must say what they refused.
+    pub const fn construct(&self) -> &'static str {
+        match self {
+            Self::FourState(_) => "four-state literal",
+            Self::PartSelect(_) => "part-select",
+        }
+    }
+
+    /// Sub-expressions, so a generic expression walk can descend without
+    /// knowing the discrete forms.
+    pub fn children(&self) -> Vec<&Expression> {
+        match self {
+            Self::FourState(_) => Vec::new(),
+            Self::PartSelect(select) => vec![&select.msb, &select.lsb],
+        }
+    }
+
+    /// The signal this expression reads, when it names one.
+    pub fn base_name(&self) -> Option<&SmolStr> {
+        match self {
+            Self::FourState(_) => None,
+            Self::PartSelect(select) => Some(&select.name),
+        }
+    }
+}
+
+/// A decoded four-state literal at a source position.
+#[derive(Debug, Clone)]
+pub struct FourStateLit {
+    pub value: FourStateLiteral,
+    pub span: Span,
+}
+
+/// Constant part-select: `name[msb:lsb]`.
+#[derive(Debug, Clone)]
+pub struct PartSelectExpr {
+    pub name: SmolStr,
+    pub msb: Box<Expression>,
+    pub lsb: Box<Expression>,
+    pub span: Span,
 }
 
 /// Number literal
@@ -1145,4 +1249,516 @@ pub struct Attribute {
     pub name: SmolStr,
     pub value: Option<Expression>,
     pub span: Span,
+}
+
+// ============================================================================
+// Discrete-domain (IEEE 1364-2005) syntax tree
+// ============================================================================
+//
+// Verilog-AMS is a superset of Verilog, so these nodes live in the same tree
+// as the analog ones and are produced by the same parser. Three properties are
+// deliberate, because the process IR that consumes them must not have to
+// re-parse or re-infer anything:
+//
+//  1. **Source-faithful.** `always @(posedge clk) q <= d;` is a process whose
+//     body is a timing-controlled statement — not a desugared analog event,
+//     not a hoisted sensitivity list with the control removed. The suspension
+//     points a process IR needs are exactly the `@`/`#` nodes the author
+//     wrote, in the positions the author wrote them.
+//  2. **Identified.** Every process carries a [`DigitalProcessId`], assigned
+//     in module declaration order at parse time and stable for the life of the
+//     module. A later pass names a process by its id rather than by its index
+//     in a vector it does not own.
+//  3. **Derivable, not duplicated.** Sensitivity is not stored twice.
+//     [`DigitalProcess::event_control`] reads it back off the body when the
+//     process opens with one, which is the only shape from which a static
+//     sensitivity list is meaningful.
+//
+// Nothing here shares a node with the analog event grammar
+// ([`EventExpr`]). An analog `@(cross(...))` lowers to a continuous-time
+// guard that is evaluated on every Newton iteration; a digital `@(posedge c)`
+// suspends a process until an edge occurs. Giving them one node would put two
+// unrelated execution models behind one `match`.
+
+/// Signedness qualifier on a net, variable, or port declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Signedness {
+    #[default]
+    Unsigned,
+    Signed,
+}
+
+impl Signedness {
+    pub const fn is_signed(self) -> bool {
+        matches!(self, Self::Signed)
+    }
+}
+
+/// Packed vector range `[msb:lsb]`.
+///
+/// Both bounds are retained as written. IEEE 1364-2005 section 4.2.1 permits
+/// either direction (`[7:0]` and `[0:7]` are both legal and are not the same
+/// declaration), so normalizing to an ascending pair here would discard the
+/// author's bit ordering.
+#[derive(Debug, Clone)]
+pub struct VectorRange {
+    pub msb: Expression,
+    pub lsb: Expression,
+    pub span: Span,
+}
+
+/// One name in a discrete-domain declaration.
+#[derive(Debug, Clone)]
+pub struct DigitalDeclItem {
+    pub name: SmolStr,
+    /// Unpacked (memory) dimensions: `reg [7:0] mem [0:255];`
+    pub dimensions: Vec<ArrayDimension>,
+    /// Declaration-site initializer, as in `wire w = a & b;`.
+    pub init: Option<Expression>,
+    pub span: Span,
+}
+
+/// Net type keyword. Only `wire` has a production in this wave; the remaining
+/// IEEE 1364 net types are still refused by name at the keyword.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DigitalNetKind {
+    Wire,
+}
+
+impl DigitalNetKind {
+    pub const fn keyword(self) -> &'static str {
+        match self {
+            Self::Wire => "wire",
+        }
+    }
+}
+
+/// `wire [msb:lsb] a, b;`
+#[derive(Debug, Clone)]
+pub struct DigitalNetDecl {
+    pub kind: DigitalNetKind,
+    pub signedness: Signedness,
+    pub range: Option<VectorRange>,
+    pub items: Vec<DigitalDeclItem>,
+    pub span: Span,
+}
+
+/// Variable type keyword for a discrete-domain variable declaration.
+///
+/// `integer` keeps its existing continuous-domain [`VariableDecl`] node: IEEE
+/// 1364-2005 section 3.9 gives `integer` no range and no signedness qualifier,
+/// so the digital grammar needs nothing new to declare one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DigitalVariableKind {
+    Reg,
+}
+
+impl DigitalVariableKind {
+    pub const fn keyword(self) -> &'static str {
+        match self {
+            Self::Reg => "reg",
+        }
+    }
+}
+
+/// `reg [msb:lsb] q;`
+#[derive(Debug, Clone)]
+pub struct DigitalVariableDecl {
+    pub kind: DigitalVariableKind,
+    pub signedness: Signedness,
+    pub range: Option<VectorRange>,
+    pub items: Vec<DigitalDeclItem>,
+    pub span: Span,
+}
+
+/// `assign [#delay] lvalue = expression;`
+#[derive(Debug, Clone)]
+pub struct ContinuousAssign {
+    pub target: DigitalLValue,
+    pub value: Expression,
+    /// Delay written between `assign` and the target.
+    pub delay: Option<Expression>,
+    pub span: Span,
+}
+
+/// Stable identity of a process within its module.
+///
+/// Assigned by the parser in declaration order, starting at zero. It survives
+/// every later pass, so a process IR, a diagnostic, and a runtime schedule can
+/// all name the same process without agreeing on a container.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DigitalProcessId(pub u32);
+
+impl std::fmt::Display for DigitalProcessId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Which procedural process this is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DigitalProcessKind {
+    /// `always`: restarts as soon as it finishes (IEEE 1364-2005 section 9.9.2).
+    Always,
+    /// `initial`: runs once (IEEE 1364-2005 section 9.9.1).
+    Initial,
+}
+
+impl DigitalProcessKind {
+    pub const fn keyword(self) -> &'static str {
+        match self {
+            Self::Always => "always",
+            Self::Initial => "initial",
+        }
+    }
+}
+
+/// One `always` or `initial` process.
+#[derive(Debug, Clone)]
+pub struct DigitalProcess {
+    pub id: DigitalProcessId,
+    pub kind: DigitalProcessKind,
+    /// Statement the process executes, exactly as written. A process opening
+    /// with a timing control has that control as its outermost node.
+    pub body: DigitalStatement,
+    pub span: Span,
+}
+
+impl DigitalProcess {
+    /// The event control this process opens with, if it opens with one.
+    ///
+    /// This is the static sensitivity list: a process whose body begins with
+    /// `@(...)` suspends there on every pass, which is what makes the list
+    /// meaningful. A process that reaches a timing control later, or has
+    /// several, has no single static list and reports `None`.
+    pub fn event_control(&self) -> Option<&EventControl> {
+        match &self.body {
+            DigitalStatement::Timing(timing) => match &timing.control {
+                TimingControl::Event(event) => Some(event),
+                TimingControl::Delay(_) => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Whether the process contains any timing control at all.
+    ///
+    /// An `always` process with none never suspends, so it cannot advance
+    /// simulation time (IEEE 1364-2005 section 9.9.2).
+    pub fn has_timing_control(&self) -> bool {
+        self.body.contains_timing_control()
+    }
+}
+
+/// A statement inside a procedural process.
+#[derive(Debug, Clone)]
+pub enum DigitalStatement {
+    /// `begin ... end`, optionally named, optionally with local declarations.
+    Block(DigitalBlock),
+    /// `lvalue = [timing] expression;`
+    BlockingAssign(DigitalAssign),
+    /// `lvalue <= [timing] expression;`
+    NonblockingAssign(DigitalAssign),
+    /// `if (cond) stmt [else stmt]`
+    Conditional(DigitalConditional),
+    /// `case`, `casez`, or `casex`.
+    Case(DigitalCase),
+    /// `for (init; cond; update) stmt`
+    For(DigitalFor),
+    /// `while (cond) stmt`
+    While(DigitalWhile),
+    /// `repeat (count) stmt`
+    Repeat(DigitalRepeat),
+    /// `forever stmt`
+    Forever(DigitalForever),
+    /// `@(...) stmt` or `#delay stmt`, the process's suspension points.
+    Timing(DigitalTiming),
+    /// A lone `;`.
+    Null(Span),
+}
+
+impl DigitalStatement {
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Block(block) => block.span,
+            Self::BlockingAssign(assign) | Self::NonblockingAssign(assign) => assign.span,
+            Self::Conditional(conditional) => conditional.span,
+            Self::Case(case) => case.span,
+            Self::For(statement) => statement.span,
+            Self::While(statement) => statement.span,
+            Self::Repeat(statement) => statement.span,
+            Self::Forever(statement) => statement.span,
+            Self::Timing(timing) => timing.span,
+            Self::Null(span) => *span,
+        }
+    }
+
+    /// Whether this statement, or anything under it, suspends.
+    pub fn contains_timing_control(&self) -> bool {
+        match self {
+            Self::Timing(_) => true,
+            Self::Block(block) => block.statements.iter().any(Self::contains_timing_control),
+            Self::Conditional(conditional) => {
+                conditional.then_branch.contains_timing_control()
+                    || conditional
+                        .else_branch
+                        .as_ref()
+                        .is_some_and(|branch| branch.contains_timing_control())
+            }
+            Self::Case(case) => {
+                case.items
+                    .iter()
+                    .any(|item| item.statement.contains_timing_control())
+                    || case
+                        .default
+                        .as_ref()
+                        .is_some_and(|statement| statement.contains_timing_control())
+            }
+            Self::For(statement) => statement.body.contains_timing_control(),
+            Self::While(statement) => statement.body.contains_timing_control(),
+            Self::Repeat(statement) => statement.body.contains_timing_control(),
+            Self::Forever(statement) => statement.body.contains_timing_control(),
+            Self::BlockingAssign(assign) | Self::NonblockingAssign(assign) => {
+                assign.timing.is_some()
+            }
+            Self::Null(_) => false,
+        }
+    }
+}
+
+/// `begin [: name] ... end`
+#[derive(Debug, Clone)]
+pub struct DigitalBlock {
+    pub name: Option<SmolStr>,
+    /// Block-local continuous-domain declarations (`integer`, `real`).
+    pub variables: Vec<VariableDecl>,
+    /// Block-local `reg` declarations.
+    pub digital_variables: Vec<DigitalVariableDecl>,
+    pub statements: Vec<DigitalStatement>,
+    pub span: Span,
+}
+
+/// A procedural assignment, blocking or nonblocking.
+#[derive(Debug, Clone)]
+pub struct DigitalAssign {
+    pub target: DigitalLValue,
+    /// Intra-assignment timing control: `q <= #5 d;` or `q = @(posedge c) d;`
+    /// (IEEE 1364-2005 section 9.2.2).
+    pub timing: Option<TimingControl>,
+    pub value: Expression,
+    pub span: Span,
+}
+
+/// Assignment target inside a process or a continuous assignment.
+#[derive(Debug, Clone)]
+pub enum DigitalLValue {
+    /// A whole signal: `q`
+    Identifier { name: SmolStr, span: Span },
+    /// A single bit or memory word: `q[3]`
+    BitSelect {
+        name: SmolStr,
+        index: Box<Expression>,
+        span: Span,
+    },
+    /// A constant part-select: `bus[7:4]`
+    PartSelect {
+        name: SmolStr,
+        msb: Box<Expression>,
+        lsb: Box<Expression>,
+        span: Span,
+    },
+    /// A concatenation of targets: `{carry, sum}`
+    Concat {
+        elements: Vec<DigitalLValue>,
+        span: Span,
+    },
+}
+
+impl DigitalLValue {
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Identifier { span, .. }
+            | Self::BitSelect { span, .. }
+            | Self::PartSelect { span, .. }
+            | Self::Concat { span, .. } => *span,
+        }
+    }
+
+    /// Every signal name this target writes, in source order.
+    pub fn written_names(&self) -> Vec<(&SmolStr, Span)> {
+        let mut names = Vec::new();
+        self.collect_written_names(&mut names);
+        names
+    }
+
+    fn collect_written_names<'a>(&'a self, names: &mut Vec<(&'a SmolStr, Span)>) {
+        match self {
+            Self::Identifier { name, span }
+            | Self::BitSelect { name, span, .. }
+            | Self::PartSelect { name, span, .. } => names.push((name, *span)),
+            Self::Concat { elements, .. } => {
+                for element in elements {
+                    element.collect_written_names(names);
+                }
+            }
+        }
+    }
+}
+
+/// `if (condition) then_branch [else else_branch]`
+#[derive(Debug, Clone)]
+pub struct DigitalConditional {
+    pub condition: Expression,
+    pub then_branch: Box<DigitalStatement>,
+    pub else_branch: Option<Box<DigitalStatement>>,
+    pub span: Span,
+}
+
+/// Which of the three case forms was written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaseKind {
+    /// `case`: `x` and `z` in a label match only themselves.
+    Exact,
+    /// `casez`: `z` and `?` in either operand are don't-care.
+    WildcardZ,
+    /// `casex`: `x`, `z`, and `?` in either operand are don't-care.
+    WildcardXZ,
+}
+
+impl CaseKind {
+    pub const fn keyword(self) -> &'static str {
+        match self {
+            Self::Exact => "case",
+            Self::WildcardZ => "casez",
+            Self::WildcardXZ => "casex",
+        }
+    }
+}
+
+/// `case (selector) item... [default: stmt] endcase`
+#[derive(Debug, Clone)]
+pub struct DigitalCase {
+    pub kind: CaseKind,
+    pub selector: Expression,
+    pub items: Vec<DigitalCaseItem>,
+    pub default: Option<Box<DigitalStatement>>,
+    pub span: Span,
+}
+
+/// One `label[, label]*: statement` arm of a case statement.
+#[derive(Debug, Clone)]
+pub struct DigitalCaseItem {
+    pub labels: Vec<Expression>,
+    pub statement: Box<DigitalStatement>,
+    pub span: Span,
+}
+
+/// `for (init; condition; update) body`
+#[derive(Debug, Clone)]
+pub struct DigitalFor {
+    pub init: Box<DigitalAssign>,
+    pub condition: Expression,
+    pub update: Box<DigitalAssign>,
+    pub body: Box<DigitalStatement>,
+    pub span: Span,
+}
+
+/// `while (condition) body`
+#[derive(Debug, Clone)]
+pub struct DigitalWhile {
+    pub condition: Expression,
+    pub body: Box<DigitalStatement>,
+    pub span: Span,
+}
+
+/// `repeat (count) body`
+#[derive(Debug, Clone)]
+pub struct DigitalRepeat {
+    pub count: Expression,
+    pub body: Box<DigitalStatement>,
+    pub span: Span,
+}
+
+/// `forever body`
+#[derive(Debug, Clone)]
+pub struct DigitalForever {
+    pub body: Box<DigitalStatement>,
+    pub span: Span,
+}
+
+/// A timing control and the statement it guards.
+#[derive(Debug, Clone)]
+pub struct DigitalTiming {
+    pub control: TimingControl,
+    /// `None` for a bare `@(posedge clk);`, which suspends and does nothing.
+    pub statement: Option<Box<DigitalStatement>>,
+    pub span: Span,
+}
+
+/// `@(...)` or `#delay`.
+#[derive(Debug, Clone)]
+pub enum TimingControl {
+    Event(EventControl),
+    Delay(DelayControl),
+}
+
+impl TimingControl {
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Event(event) => event.span,
+            Self::Delay(delay) => delay.span,
+        }
+    }
+}
+
+/// `#expression`
+#[derive(Debug, Clone)]
+pub struct DelayControl {
+    pub value: Expression,
+    pub span: Span,
+}
+
+/// A digital event control: the sensitivity list of a suspension point.
+#[derive(Debug, Clone)]
+pub struct EventControl {
+    pub sensitivity: Sensitivity,
+    pub span: Span,
+}
+
+/// How the event control names the signals it waits on.
+#[derive(Debug, Clone)]
+pub enum Sensitivity {
+    /// `@*` or `@(*)`: every signal read by the guarded statement
+    /// (IEEE 1364-2005 section 9.7.5). The list is *not* materialized here —
+    /// computing it requires reading the statement, which is a later pass's
+    /// job, and storing a stale copy would be worse than storing none.
+    Implicit,
+    /// An explicit list. Terms are separated by `or` or `,`, which
+    /// IEEE 1364-2005 section 9.7.4 makes synonyms.
+    Explicit(Vec<EventTerm>),
+}
+
+/// One term of an explicit sensitivity list.
+#[derive(Debug, Clone)]
+pub struct EventTerm {
+    /// `None` is a level-sensitive term: any value change triggers it.
+    pub edge: Option<EdgeKind>,
+    pub signal: Expression,
+    pub span: Span,
+}
+
+/// `posedge` or `negedge`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EdgeKind {
+    Posedge,
+    Negedge,
+}
+
+impl EdgeKind {
+    pub const fn keyword(self) -> &'static str {
+        match self {
+            Self::Posedge => "posedge",
+            Self::Negedge => "negedge",
+        }
+    }
 }

@@ -514,6 +514,17 @@ impl<'a> ExprConverter<'a> {
                 CodeGenErrorKind::UnsupportedFeature("String literals in expressions".into()),
             )
             .into()),
+            // Semantic analysis refuses a discrete-domain expression in a
+            // continuous-domain position, so this arm is unreachable through
+            // the compiler's own pipeline and exists so that no other route
+            // can turn one into a number.
+            Expression::Digital(digital) => Err(CodeGenError::new(
+                CodeGenErrorKind::UnsupportedFeature(format!(
+                    "a {} has no continuous-domain value",
+                    digital.construct()
+                )),
+            )
+            .into()),
             Expression::Identifier(ident) => self.convert_identifier(ident),
             Expression::SystemFunction(func) => self.convert_system_function(func),
             Expression::Binary(binary) => self.convert_binary(binary),

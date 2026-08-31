@@ -1919,6 +1919,13 @@ impl HirModel {
     }
 }
 
+/// Call name given to a discrete-domain expression that reached HIR lowering.
+///
+/// No function registry defines it, so CFG lowering refuses it by name. It
+/// exists only so that this structurally unreachable case fails closed instead
+/// of silently becoming a real constant.
+const UNLOWERABLE_DIGITAL_CALL: &str = "__rspice_unlowerable_digital";
+
 const fn default_true() -> bool {
     true
 }
@@ -2194,6 +2201,19 @@ impl HirLowerer {
 
     fn lower_expr_kind(&mut self, expr: &Expression) -> HirExprKind {
         match expr {
+            // A discrete-domain expression has no continuous-domain lowering.
+            // Semantic analysis refuses one before any module reaches HIR, so
+            // this arm is unreachable through the compiler's own pipeline; it
+            // lowers to a call no registry defines so that a module arriving
+            // by some other route fails closed in CFG lowering rather than
+            // acquiring a number it does not have.
+            Expression::Digital(digital) => HirExprKind::Call {
+                name: SmolStr::new(format!(
+                    "{UNLOWERABLE_DIGITAL_CALL}_{}",
+                    digital.construct().replace(['-', ' '], "_")
+                )),
+                args: Vec::new(),
+            },
             Expression::NullArgument(_) => HirExprKind::NullArgument,
             Expression::Number(number) => HirExprKind::Number {
                 value: number.value,
@@ -2681,6 +2701,7 @@ fn expression_kind(expr: &Expression) -> SmolStr {
         Expression::ArrayLiteral(_) => "array_literal",
         Expression::AnalogOperator(_) => "analog_operator",
         Expression::NoiseSource(_) => "noise_source",
+        Expression::Digital(_) => "digital",
     }
     .into()
 }

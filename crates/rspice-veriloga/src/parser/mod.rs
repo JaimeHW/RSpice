@@ -10,16 +10,34 @@ use crate::numeric_literal::parse_numeric_literal;
 use crate::source::Span;
 use smol_str::SmolStr;
 
+mod digital;
+
+/// Declared attributes carried forward to the bare names that follow a typed
+/// port in an ANSI port list.
+struct AnsiPortContext {
+    direction: PortDirection,
+    discipline: Option<SmolStr>,
+    signedness: Signedness,
+    range: Option<VectorRange>,
+}
+
 /// Parser for Verilog-A/AMS
 pub struct Parser<'a> {
     tokens: &'a [Token],
     pos: usize,
+    /// Processes declared so far in the module being parsed, used to hand out
+    /// [`DigitalProcessId`]s in declaration order.
+    next_process_id: u32,
 }
 
 impl<'a> Parser<'a> {
     /// Create a new parser
     pub fn new(tokens: &'a [Token]) -> Self {
-        Self { tokens, pos: 0 }
+        Self {
+            tokens,
+            pos: 0,
+            next_process_id: 0,
+        }
     }
 
     /// Parse a complete source file
@@ -58,7 +76,7 @@ impl<'a> Parser<'a> {
                 items.push(Item::Nature(self.parse_nature()?));
             } else if self.check(TokenKind::Eof) {
                 break;
-            } else if Self::is_digital_declaration_keyword(self.current().kind) {
+            } else if Self::is_digital_construct_keyword(self.current().kind) {
                 // `connectmodule`, `primitive`, `always`, ... at file scope.
                 return Err(self.unsupported_ams_construct());
             } else {
@@ -101,6 +119,8 @@ impl<'a> Parser<'a> {
         self.advance(); // consume 'module' or 'macromodule'
 
         let name = self.expect_identifier("module name")?;
+        // Process identity is per module, so the counter restarts here.
+        self.next_process_id = 0;
         let mut module = Module::new(name, start);
 
         // Optional port list
@@ -126,7 +146,7 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::LParen)?;
 
         // Direction/discipline carried forward for ANSI-style bare names
-        let mut ansi_context: Option<(PortDirection, Option<SmolStr>)> = None;
+        let mut ansi_context: Option<AnsiPortContext> = None;
 
         if !self.check(TokenKind::RParen) {
             loop {
@@ -149,7 +169,7 @@ impl<'a> Parser<'a> {
                 };
 
                 if let Some(direction) = direction {
-                    // ANSI style: direction [discipline] name
+                    // ANSI style: direction [discipline] [signed] [range] name
                     let discipline: Option<SmolStr> = if self.is_discipline_keyword()
                         || (self.check(TokenKind::Identifier)
                             && self.peek_is(TokenKind::Identifier))
@@ -158,6 +178,8 @@ impl<'a> Parser<'a> {
                     } else {
                         None
                     };
+                    let signedness = self.parse_signedness();
+                    let range = self.parse_optional_vector_range()?;
 
                     let name: SmolStr = self.expect_identifier("port name")?.into();
                     module.ports.push(Port {
@@ -167,22 +189,32 @@ impl<'a> Parser<'a> {
                     module.port_declarations.push(PortDeclaration {
                         direction,
                         discipline: discipline.clone(),
+                        range: range.clone(),
+                        signedness,
                         names: vec![name],
                         span: span.extend(self.previous_span()),
                     });
-                    ansi_context = Some((direction, discipline));
+                    ansi_context = Some(AnsiPortContext {
+                        direction,
+                        discipline,
+                        signedness,
+                        range,
+                    });
                 } else {
                     let name: SmolStr = self.expect_identifier("port name")?.into();
                     module.ports.push(Port {
                         name: name.clone(),
                         span,
                     });
-                    // In an ANSI list, bare names inherit the direction and
-                    // discipline of the preceding declared port.
-                    if let Some((direction, discipline)) = &ansi_context {
+                    // In an ANSI list, bare names inherit the direction,
+                    // discipline, and vector shape of the preceding declared
+                    // port.
+                    if let Some(context) = &ansi_context {
                         module.port_declarations.push(PortDeclaration {
-                            direction: *direction,
-                            discipline: discipline.clone(),
+                            direction: context.direction,
+                            discipline: context.discipline.clone(),
+                            range: context.range.clone(),
+                            signedness: context.signedness,
                             names: vec![name],
                             span: span.extend(self.previous_span()),
                         });
@@ -306,6 +338,31 @@ impl<'a> Parser<'a> {
                 let net = self.parse_net_decl()?;
                 module.nets.push(net);
             }
+            // The discrete half of Verilog-AMS. These keywords were refused by
+            // name until the digital grammar existed; each one that gained a
+            // production moved here.
+            TokenKind::Wire => {
+                let net = self.parse_digital_net_decl()?;
+                module.digital_nets.push(net);
+            }
+            TokenKind::Reg => {
+                let variable = self.parse_digital_variable_decl()?;
+                module.digital_variables.push(variable);
+            }
+            TokenKind::Assign => {
+                let assignment = self.parse_continuous_assign()?;
+                module.continuous_assigns.push(assignment);
+            }
+            TokenKind::Always => {
+                let process = self.parse_digital_process(DigitalProcessKind::Always)?;
+                module.digital_processes.push(process);
+            }
+            // `analog initial` and `analog final` are consumed by the `analog`
+            // arm below, so a bare `initial` here is the 1364 procedural block.
+            TokenKind::Initial => {
+                let process = self.parse_digital_process(DigitalProcessKind::Initial)?;
+                module.digital_processes.push(process);
+            }
             TokenKind::Identifier => {
                 self.parse_identifier_module_item(module)?;
             }
@@ -347,7 +404,7 @@ impl<'a> Parser<'a> {
             // The digital half of Verilog-AMS. `analog initial` and
             // `analog final` are handled by the `analog` arm above, so a bare
             // `initial` reaching here is the 1364 procedural block.
-            kind if Self::is_digital_declaration_keyword(kind) => {
+            kind if Self::is_digital_construct_keyword(kind) => {
                 return Err(self.unsupported_ams_construct());
             }
             _ => {
@@ -609,6 +666,10 @@ impl<'a> Parser<'a> {
             None
         };
 
+        // IEEE 1364-2005 section 12.3.3: `input [signed] [range] names;`
+        let signedness = self.parse_signedness();
+        let range = self.parse_optional_vector_range()?;
+
         // Port names
         let mut names = Vec::new();
         loop {
@@ -622,6 +683,8 @@ impl<'a> Parser<'a> {
         Ok(PortDeclaration {
             direction,
             discipline: discipline.map(|s| s.into()),
+            range,
+            signedness,
             names,
             span: start.extend(self.previous_span()),
         })
@@ -2086,6 +2149,18 @@ impl<'a> Parser<'a> {
                     span: start.extend(self.previous_span()),
                 }))
             }
+            TokenKind::FourStateLiteral => {
+                let text = self.current().text.clone().unwrap_or_default();
+                let span = start.extend(self.current_span());
+                let value = crate::four_state::decode(&text).map_err(|message| {
+                    ParseError::new(ParseErrorKind::InvalidNumber(message), span)
+                })?;
+                self.advance();
+                Ok(Expression::Digital(DigitalExpr::FourState(FourStateLit {
+                    value,
+                    span: start.extend(self.previous_span()),
+                })))
+            }
             TokenKind::StringLiteral => {
                 let text = self.current().text.clone().unwrap_or_default();
                 self.advance();
@@ -2153,9 +2228,22 @@ impl<'a> Parser<'a> {
                     }));
                 }
 
-                // Array element access: arr[index]
+                // Array element access `arr[index]`, or — in the discrete
+                // subset — a constant part-select `bus[msb:lsb]`.
                 if self.match_token(TokenKind::LBracket) {
                     let index = self.parse_expression()?;
+                    if self.match_token(TokenKind::Colon) {
+                        let lsb = self.parse_expression()?;
+                        self.expect(TokenKind::RBracket)?;
+                        return Ok(Expression::Digital(DigitalExpr::PartSelect(
+                            PartSelectExpr {
+                                name: name.into(),
+                                msb: Box::new(index),
+                                lsb: Box::new(lsb),
+                                span: start.extend(self.previous_span()),
+                            },
+                        )));
+                    }
                     self.expect(TokenKind::RBracket)?;
                     return Ok(Expression::ArrayAccess(ArrayAccessExpr {
                         array: name.into(),
@@ -2468,6 +2556,12 @@ impl<'a> Parser<'a> {
             // `real time;` names the 1364 type rather than declaring a
             // variable. Say which keyword instead of reporting the token kind.
             Err(self.unsupported_ams_construct())
+        } else if let Some(word) = Self::reserved_digital_word(self.current().kind) {
+            Err(ParseError::expected(
+                context.to_string(),
+                format!("reserved word `{word}`"),
+                self.current_span(),
+            ))
         } else {
             Err(ParseError::expected(
                 context.to_string(),
@@ -2527,17 +2621,23 @@ impl<'a> Parser<'a> {
         )
     }
 
-    /// Whether the token introduces a digital construct in a *declaration*
-    /// position (top level or module item).
+    /// Whether the token opens a discrete-domain construct.
+    ///
+    /// Used at the two positions where such a construct has no production:
+    /// file scope, and inside an `analog` block. A keyword listed here that
+    /// *does* have a module-item production (`wire`, `reg`, `assign`,
+    /// `always`, `initial`) is matched by that production first, so it is only
+    /// refused where a digital construct genuinely cannot appear.
     ///
     /// [`TokenKind::AmsDigital`] covers the keywords reserved solely to be
     /// refused. The rest already had token kinds but no production, so they
     /// reached the generic "unsupported module item" error; naming the
     /// construct is strictly better and changes no accepted source.
-    const fn is_digital_declaration_keyword(kind: TokenKind) -> bool {
+    const fn is_digital_construct_keyword(kind: TokenKind) -> bool {
         matches!(
             kind,
             TokenKind::AmsDigital
+                | TokenKind::Always
                 | TokenKind::Assign
                 | TokenKind::Casex
                 | TokenKind::Casez
@@ -2549,11 +2649,27 @@ impl<'a> Parser<'a> {
                 | TokenKind::Fork
                 | TokenKind::Initial
                 | TokenKind::Join
+                | TokenKind::Reg
                 | TokenKind::Release
                 | TokenKind::Specify
                 | TokenKind::Task
                 | TokenKind::Wire
         )
+    }
+
+    /// The source spelling of a reserved word that this compiler will not
+    /// accept as an identifier.
+    ///
+    /// `reg` and `always` were refused outright before the digital grammar
+    /// existed, so neither has ever been usable as a name and reserving them
+    /// retracts no identifier space. Saying "reserved word" beats reporting a
+    /// token-kind name at a position that wanted an identifier.
+    const fn reserved_digital_word(kind: TokenKind) -> Option<&'static str> {
+        match kind {
+            TokenKind::Reg => Some("reg"),
+            TokenKind::Always => Some("always"),
+            _ => None,
+        }
     }
 
     /// Whether the token under the cursor introduces a digital construct in
@@ -2573,7 +2689,7 @@ impl<'a> Parser<'a> {
         if kind == TokenKind::AmsDigital {
             return true;
         }
-        if !Self::is_digital_declaration_keyword(kind) {
+        if !Self::is_digital_construct_keyword(kind) {
             return false;
         }
         !matches!(
