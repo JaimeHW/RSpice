@@ -505,6 +505,7 @@ fn kernel_region_metrics(
             CfgValueKind::DigitalRealCompare { op, .. } => {
                 write!(out, "digital-real-compare:{op:?}")
             }
+            CfgValueKind::DigitalRealSelect { .. } => write!(out, "digital-real-select"),
             CfgValueKind::DigitalBitwise { op, .. } => write!(out, "digital-bitwise:{op:?}"),
             CfgValueKind::DigitalBitwiseNot { .. } => write!(out, "digital-bitwise-not"),
             CfgValueKind::DigitalLogical { op, .. } => write!(out, "digital-logical:{op:?}"),

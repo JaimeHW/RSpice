@@ -1769,6 +1769,7 @@ impl Emitter<'_> {
             | CfgValueKind::DigitalRealSignalRead { .. }
             | CfgValueKind::DigitalRealArithmetic { .. }
             | CfgValueKind::DigitalRealCompare { .. }
+            | CfgValueKind::DigitalRealSelect { .. }
             | CfgValueKind::DigitalBitwise { .. }
             | CfgValueKind::DigitalBitwiseNot { .. }
             | CfgValueKind::DigitalLogical { .. }

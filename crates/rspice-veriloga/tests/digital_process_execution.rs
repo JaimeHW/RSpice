@@ -2031,10 +2031,20 @@ fn the_real_net_refusals_name_themselves() {
          \x20   initial q = level[0];",
             "no bits to select",
         ),
+        // Verilog-AMS LRM 2.4 table 4-2 makes `%` legal on real operands and
+        // this wave does not implement it; the refusal says which of the two
+        // kinds of missing it is.
         (
             "    wreal a, b, out;\n\
-         \x20   assign out = (a > b) ? a : b;",
-            "section 5.1.13",
+         \x20   assign out = a % b;",
+            "table 4-2 but is not implemented yet",
+        ),
+        // `?:` *is* implemented, and its arms are still one domain each.
+        (
+            "    wreal a, out;\n\
+         \x20   reg sel;\n\
+         \x20   assign out = sel ? a : 2;",
+            "a four-state operand in a real expression has no conversion",
         ),
     ];
     for (section, expected) in cases {

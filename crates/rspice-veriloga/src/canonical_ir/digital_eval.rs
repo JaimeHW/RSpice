@@ -1015,6 +1015,25 @@ impl<'a, E: DigitalEnvironment + ?Sized> Interpreter<'a, E> {
                     op, left, right,
                 )))
             }
+            CfgValueKind::DigitalRealSelect {
+                condition,
+                then_value,
+                else_value,
+            } => {
+                let (condition, then_value, else_value) = (*condition, *then_value, *else_value);
+                // IEEE 1364-2005 section 9.4, not section 5.1.13. A real has no
+                // bits for section 5.1.13's ambiguous-condition merge to
+                // combine, so an `x` or `z` condition takes the `else` arm —
+                // the rule this interpreter already applies at a `Branch`,
+                // which is what keeps `c ? a : b` and the `if` it stands for
+                // from disagreeing.
+                let taken = truth(&self.four_state(condition)?) == FourStateBit::One;
+                // Both arms are still evaluated, so a refusal inside the arm
+                // not taken is reported rather than hidden by the condition.
+                let then_value = self.real(then_value)?;
+                let else_value = self.real(else_value)?;
+                Ok(DigitalScalar::Real(if taken { then_value } else { else_value }))
+            }
             CfgValueKind::DigitalBitwise { op, left, right } => {
                 let (op, left, right) = (*op, *left, *right);
                 let left = self.four_state(left)?;

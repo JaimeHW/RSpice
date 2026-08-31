@@ -627,3 +627,269 @@ fn a_settling_design_stays_far_below_the_delta_ceiling() {
     let y = host.signal("y").expect("`y` is declared");
     assert_eq!(host.read(y).expect("declared").spelling(), "1");
 }
+
+// ===========================================================================
+// Real nets: Verilog-AMS LRM 2.4 section 3.7
+// ===========================================================================
+
+/// A real-valued port. Width zero is how the front end spells "no bits", and
+/// the stimulus says the same so the two are checked against each other.
+fn real_port(name: &str) -> DigitalPort {
+    port(name, 0)
+}
+
+const RNM_GAIN: &str = "\
+module rnm_gain(vin, vout, over);
+  input wreal vin;
+  output wreal vout;
+  output over;
+  reg over;
+  assign vout = vin * 0.5 + 0.25;
+  always @(vout) if (vout > 1.0) over = 1'b1; else over = 1'b0;
+endmodule
+";
+
+/// A real in, an algebraic mapping, a real out — and a four-state flag driven
+/// from a comparison on the way. The whole route in one run: a `wreal` port, a
+/// continuous assignment in the real domain, and a process woken by section
+/// 3.7's value-change event.
+#[test]
+fn a_real_valued_block_maps_its_input_and_flags_it() {
+    let stimulus = DigitalStimulus {
+        module: None,
+        inputs: vec![real_port("vin")],
+        outputs: vec![real_port("vout"), port("over", 1)],
+        clock: None,
+        step: 10,
+        settle: 5,
+        vectors: vectors(&[&["0.0"], &["1.0"], &["2.0"], &["-3.0"], &["4.0"]]),
+    };
+    let report = run_digital_verilog(RNM_GAIN, &stimulus).expect("the design must run");
+    // vin/2 + 1/4, exactly representable at every one of these points, so the
+    // expectation is the arithmetic and not a rounding of it.
+    assert_eq!(
+        rows(&report),
+        vec![
+            "vout=0.25 over=0",
+            "vout=0.75 over=0",
+            "vout=1.25 over=1",
+            "vout=-1.25 over=0",
+            "vout=2.25 over=1",
+        ]
+    );
+}
+
+const RNM_UNDRIVEN: &str = "\
+module rnm_undriven(seen, level);
+  input seen;
+  output wreal level;
+  wire seen;
+endmodule
+";
+
+/// "If no driver is connected to a wreal net, its value shall be zero (0.0).
+/// Unlike other digital nets which have an initial value of `z`, wreal nets
+/// shall have an initial value of zero." — section 3.7, end to end.
+#[test]
+fn an_undriven_real_net_reads_zero_rather_than_high_impedance() {
+    let stimulus = DigitalStimulus {
+        module: None,
+        inputs: vec![port("seen", 1)],
+        outputs: vec![real_port("level")],
+        clock: None,
+        step: 10,
+        settle: 5,
+        vectors: vectors(&[&["0"], &["1"]]),
+    };
+    let report = run_digital_verilog(RNM_UNDRIVEN, &stimulus).expect("the design must run");
+    assert_eq!(rows(&report), vec!["level=0.0", "level=0.0"]);
+}
+
+const RNM_DAC: &str = "\
+module rnm_dac(code, out);
+  input [3:0] code;
+  output wreal out;
+  wire [3:0] code;
+  wreal step3, step2, step1, step0;
+  assign step3 = code[3] ? 8.0 : 0.0;
+  assign step2 = code[2] ? 4.0 : 0.0;
+  assign step1 = code[1] ? 2.0 : 0.0;
+  assign step0 = code[0] ? 1.0 : 0.0;
+  assign out = (step3 + step2) + (step1 + step0);
+endmodule
+";
+
+/// A four-state bus in, a real out: the ladder weights each bit and sums them.
+///
+/// The bits never become a real. Each rung is a four-state *condition* choosing
+/// between two real constants, which is the only bridge section 3.7 leaves open
+/// without `$bitstoreal` — and is how a real-number DAC is actually written.
+#[test]
+fn a_real_valued_dac_ladder_weights_each_bit() {
+    let stimulus = DigitalStimulus {
+        module: None,
+        inputs: vec![port("code", 4)],
+        outputs: vec![real_port("out")],
+        clock: None,
+        step: 10,
+        settle: 5,
+        vectors: vectors(&[&["0000"], &["0001"], &["0101"], &["1010"], &["1111"]]),
+    };
+    let report = run_digital_verilog(RNM_DAC, &stimulus).expect("the design must run");
+    assert_eq!(
+        rows(&report),
+        vec!["out=0.0", "out=1.0", "out=5.0", "out=10.0", "out=15.0"]
+    );
+}
+
+/// One source for the four resolved spellings, each pinned against the
+/// arithmetic its keyword names. Two drivers, on the three combinations of
+/// 2.0/3.0 and -3.0/-1.0 the selector reaches.
+#[test]
+fn each_wreal_resolution_combines_its_drivers_end_to_end() {
+    for (keyword, expected) in [
+        ("wrealsum", ["1.0", "2.0", "0.0"]),
+        ("wrealavg", ["0.5", "1.0", "0.0"]),
+        ("wrealmin", ["-1.0", "-1.0", "-3.0"]),
+        ("wrealmax", ["2.0", "3.0", "3.0"]),
+    ] {
+        let source = format!(
+            "module bus_case(sel, out);\n\
+             \x20 input [1:0] sel;\n\
+             \x20 output {keyword} out;\n\
+             \x20 wire [1:0] sel;\n\
+             \x20 assign out = sel[1] ? 3.0 : 2.0;\n\
+             \x20 assign out = sel[0] ? -1.0 : -3.0;\n\
+             endmodule\n"
+        );
+        let stimulus = DigitalStimulus {
+            module: None,
+            inputs: vec![port("sel", 2)],
+            outputs: vec![real_port("out")],
+            clock: None,
+            step: 10,
+            settle: 5,
+            // 01: 2.0 and -1.0. 11: 3.0 and -1.0. 10: 3.0 and -3.0.
+            vectors: vectors(&[&["01"], &["11"], &["10"]]),
+        };
+        let report = run_digital_verilog(&source, &stimulus)
+            .unwrap_or_else(|error| panic!("`{keyword}` must run: {error}"));
+        assert_eq!(
+            rows(&report),
+            expected
+                .iter()
+                .map(|value| format!("out={value}"))
+                .collect::<Vec<_>>(),
+            "{keyword}"
+        );
+    }
+}
+
+const RNM_WAKE: &str = "\
+module rnm_wake(vin, ticks);
+  input wreal vin;
+  output [3:0] ticks;
+  reg [3:0] ticks;
+  initial ticks = 4'b0000;
+  always @(vin) ticks = ticks + 4'b0001;
+endmodule
+";
+
+/// `@(wreal)` wakes on a value change and on nothing else. The count rises once
+/// per distinct value and stays put when the stimulus repeats one — including
+/// across a change of one unit in the last place, because section 3.7's event
+/// is a change of value and this host applies no tolerance to it.
+#[test]
+fn a_value_change_on_a_real_net_wakes_a_waiting_process() {
+    let stimulus = DigitalStimulus {
+        module: None,
+        inputs: vec![real_port("vin")],
+        outputs: vec![port("ticks", 4)],
+        clock: None,
+        step: 10,
+        settle: 5,
+        vectors: vectors(&[
+            &["1.0"],
+            &["1.0"],
+            &["2.0"],
+            &["2.0"],
+            &["2.0000000000000004"],
+            &["2.0000000000000004"],
+        ]),
+    };
+    let report = run_digital_verilog(RNM_WAKE, &stimulus).expect("the design must run");
+    // Three distinct values, so three wakeups: the repeats move nothing and
+    // wake nothing, and the last pair differs from `2.0` by one unit in the
+    // last place and does.
+    assert_eq!(
+        rows(&report),
+        vec![
+            "ticks=0001",
+            "ticks=0001",
+            "ticks=0010",
+            "ticks=0010",
+            "ticks=0011",
+            "ticks=0011",
+        ]
+    );
+}
+
+/// A stimulus and a design that disagree about a port's domain are refused
+/// rather than converted for. The design is the authority either way.
+#[test]
+fn a_stimulus_in_the_wrong_value_domain_is_refused() {
+    let bits_for_a_real = DigitalStimulus {
+        module: None,
+        inputs: vec![port("vin", 1)],
+        outputs: vec![real_port("vout"), port("over", 1)],
+        clock: None,
+        step: 10,
+        settle: 5,
+        vectors: vectors(&[&["1"]]),
+    };
+    match run_digital_verilog(RNM_GAIN, &bits_for_a_real) {
+        Err(DigitalRunError::StimulusValueDomain { name, port_is_real }) => {
+            assert_eq!(name, "vin");
+            assert!(port_is_real);
+        }
+        other => panic!("expected a domain refusal, got {other:?}"),
+    }
+
+    let a_real_for_bits = DigitalStimulus {
+        module: None,
+        inputs: vec![real_port("vin")],
+        outputs: vec![real_port("vout"), real_port("over")],
+        clock: None,
+        step: 10,
+        settle: 5,
+        vectors: vectors(&[&["1.0"]]),
+    };
+    match run_digital_verilog(RNM_GAIN, &a_real_for_bits) {
+        Err(DigitalRunError::StimulusValueDomain { name, port_is_real }) => {
+            assert_eq!(name, "over");
+            assert!(!port_is_real);
+        }
+        other => panic!("expected a domain refusal, got {other:?}"),
+    }
+}
+
+/// A column that is not a number, for a port that carries one.
+#[test]
+fn a_real_column_that_is_not_a_number_is_refused() {
+    let stimulus = DigitalStimulus {
+        module: None,
+        inputs: vec![real_port("vin")],
+        outputs: vec![real_port("vout"), port("over", 1)],
+        clock: None,
+        step: 10,
+        settle: 5,
+        vectors: vectors(&[&["1z0"]]),
+    };
+    match run_digital_verilog(RNM_GAIN, &stimulus) {
+        Err(DigitalRunError::RealSpelling { port, spelling }) => {
+            assert_eq!(port, "vin");
+            assert_eq!(spelling, "1z0");
+        }
+        other => panic!("expected a spelling refusal, got {other:?}"),
+    }
+}

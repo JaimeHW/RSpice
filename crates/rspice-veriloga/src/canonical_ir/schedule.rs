@@ -1839,6 +1839,7 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         | CfgValueKind::DigitalRealSignalRead { .. }
         | CfgValueKind::DigitalRealArithmetic { .. }
         | CfgValueKind::DigitalRealCompare { .. }
+        | CfgValueKind::DigitalRealSelect { .. }
         | CfgValueKind::DigitalBitwise { .. }
         | CfgValueKind::DigitalBitwiseNot { .. }
         | CfgValueKind::DigitalLogical { .. }
@@ -2252,6 +2253,11 @@ mod digital_leaf_class {
                 op: RealCompareOp::Lt,
                 left: value,
                 right: value,
+            },
+            CfgValueKind::DigitalRealSelect {
+                condition: value,
+                then_value: value,
+                else_value: value,
             },
             CfgValueKind::DigitalBitwise {
                 op: BitwiseOp::And,

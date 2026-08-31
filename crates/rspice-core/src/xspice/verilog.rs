@@ -84,7 +84,19 @@ const TIME_UNIT_EXPONENT: i8 = -9;
 pub struct DigitalPort {
     /// The port's name in the design.
     pub name: String,
-    /// Declared width in bits. A scalar is one.
+    /// Declared width in bits. A scalar is one, and **zero is a real-valued
+    /// (`wreal`) port**, which Verilog-AMS LRM 2.4 section 3.7 gives no bits at
+    /// all.
+    ///
+    /// Zero rather than an `Option` or a second field, because the compiler
+    /// already spells "has no bit width" that way — a process-local `real` and
+    /// a real net both carry width zero through the whole front end — and two
+    /// spellings of one fact are two chances for them to disagree.
+    ///
+    /// It is not what decides the port's domain. The *design* decides: the
+    /// net-type keyword its author wrote is read back from the compiled plan,
+    /// and a stimulus whose width says otherwise is refused with
+    /// [`DigitalRunError::StimulusValueDomain`] rather than believed.
     pub width: u32,
 }
 
@@ -128,7 +140,12 @@ pub struct DigitalStimulus {
 pub struct DigitalObservation {
     /// Zero-based vector index this observation belongs to.
     pub step: usize,
-    /// Output name and its four-state spelling, in stimulus order.
+    /// Output name and its rendered value, in stimulus order.
+    ///
+    /// A four-state port renders as its `%b` spelling over `0 1 x z`. A real
+    /// port renders as a decimal that reads back to the same `f64` exactly —
+    /// Rust's shortest round-tripping form — so a trace can be compared
+    /// textually without a tolerance deciding what counts as equal.
     pub values: Vec<(String, String)>,
 }
 
@@ -180,15 +197,20 @@ pub fn run_digital_verilog(
     // Resolve every name once. A stimulus naming a port the design does not
     // declare is a mistake in the caller, and finding it before anything runs
     // makes the diagnostic name the port rather than a time.
+    //
+    // The design is asked what each port carries, and the stimulus is checked
+    // against that answer rather than trusted for it: a `.stim` that has
+    // drifted away from its design would otherwise drive a real net with bits
+    // and produce a trace that looks like a run.
     let inputs = stimulus
         .inputs
         .iter()
-        .map(|port| Ok((host.signal(&port.name)?, port.width, port.name.clone())))
+        .map(|port| resolve_port(&host, port))
         .collect::<Result<Vec<_>, DigitalRunError>>()?;
     let outputs = stimulus
         .outputs
         .iter()
-        .map(|port| Ok((host.signal(&port.name)?, port.name.clone())))
+        .map(|port| resolve_port(&host, port))
         .collect::<Result<Vec<_>, DigitalRunError>>()?;
     let clock = stimulus
         .clock
@@ -236,7 +258,19 @@ pub fn run_digital_verilog(
         }
 
         host.advance_to(apply_at)?;
-        for ((signal, width, name), spelling) in inputs.iter().zip(vector) {
+        for (port, spelling) in inputs.iter().zip(vector) {
+            let ResolvedPort { signal, width, name } = port;
+            if *width == 0 {
+                let value: f64 =
+                    spelling
+                        .parse()
+                        .map_err(|_| DigitalRunError::RealSpelling {
+                            port: name.clone(),
+                            spelling: spelling.clone(),
+                        })?;
+                host.force_real(*signal, value, apply_at)?;
+                continue;
+            }
             let value =
                 parse_four_state(spelling).ok_or_else(|| DigitalRunError::VectorSpelling {
                     port: name.clone(),
@@ -273,18 +307,57 @@ pub fn run_digital_verilog(
             step: index,
             values: outputs
                 .iter()
-                .map(|(signal, name)| {
-                    let spelling = host
-                        .read(*signal)
-                        .map(FourStateValue::spelling)
-                        .unwrap_or_default();
-                    (name.clone(), spelling)
+                .map(|port| {
+                    let rendered = if port.width == 0 {
+                        host.read_real(port.signal)
+                            .map(render_real)
+                            .unwrap_or_default()
+                    } else {
+                        host.read(port.signal)
+                            .map(FourStateValue::spelling)
+                            .unwrap_or_default()
+                    };
+                    (port.name.clone(), rendered)
                 })
                 .collect(),
         });
     }
 
     Ok(DigitalRunReport { observations })
+}
+
+/// One stimulus port, resolved against the compiled design.
+struct ResolvedPort {
+    signal: rspice_veriloga::canonical_ir::ids::DigitalSignalId,
+    /// The design's answer, not the stimulus's: zero for a real net.
+    width: u32,
+    name: String,
+}
+
+/// Resolve one stimulus port and check that the two agree about its domain.
+fn resolve_port(host: &DigitalHost<'_>, port: &DigitalPort) -> Result<ResolvedPort, DigitalRunError> {
+    let signal = host.signal(&port.name)?;
+    let real = host.is_real(signal);
+    if real != (port.width == 0) {
+        return Err(DigitalRunError::StimulusValueDomain {
+            name: port.name.clone(),
+            port_is_real: real,
+        });
+    }
+    Ok(ResolvedPort {
+        signal,
+        width: port.width,
+        name: port.name.clone(),
+    })
+}
+
+/// Render a real for a trace column.
+///
+/// `{:?}` rather than `{}`, which are different for an `f64`: both round-trip,
+/// and only the debug form keeps the decimal point that says the column is a
+/// real. `1.0` printing as `1` would be indistinguishable from a one-bit port.
+fn render_real(value: f64) -> String {
+    format!("{value:?}")
 }
 
 fn invert(bit: FourStateBit) -> FourStateBit {

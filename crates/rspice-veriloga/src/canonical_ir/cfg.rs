@@ -434,6 +434,25 @@ pub enum CfgValueKind {
         left: ValueId,
         right: ValueId,
     },
+    /// `condition ? then_value : else_value` over two real arms.
+    ///
+    /// Verilog-AMS LRM 2.4 table 4-2 makes `?:` legal in a real expression, and
+    /// it is the operator a real-number model is built out of — a rung of a
+    /// ladder, a mux, a saturation.
+    ///
+    /// The condition is four-state, so it can be ambiguous, and the two
+    /// standards answer different questions about that. IEEE 1364-2005 section
+    /// 5.1.13 combines the arms bit by bit when the condition is `x` or `z`,
+    /// which has no real-valued form: a real has no bits to combine. So the
+    /// rule this node carries is section 9.4's — an ambiguous condition is not
+    /// true, and the `else` arm is the value — which is the rule the
+    /// interpreter already applies to a `Branch`, and therefore the one that
+    /// makes `assign y = c ? a : b;` and the `if`/`else` it stands for agree.
+    DigitalRealSelect {
+        condition: ValueId,
+        then_value: ValueId,
+        else_value: ValueId,
+    },
     /// Elementwise bitwise operator over four-state values.
     DigitalBitwise {
         op: digital_value::BitwiseOp,
@@ -638,6 +657,7 @@ impl CfgValueKind {
             | Self::DigitalRealSignalRead { .. }
             | Self::DigitalRealArithmetic { .. }
             | Self::DigitalRealCompare { .. }
+            | Self::DigitalRealSelect { .. }
             | Self::DigitalBitwise { .. }
             | Self::DigitalBitwiseNot { .. }
             | Self::DigitalLogical { .. }
@@ -736,6 +756,11 @@ impl CfgValueKind {
             Self::DigitalShift { value, count, .. } => vec![*value, *count],
             Self::DigitalConcat { parts } => parts.clone(),
             Self::DigitalSelect {
+                condition,
+                then_value,
+                else_value,
+            }
+            | Self::DigitalRealSelect {
                 condition,
                 then_value,
                 else_value,
@@ -873,6 +898,11 @@ impl CfgValueKind {
                 }
             }
             Self::DigitalSelect {
+                condition,
+                then_value,
+                else_value,
+            }
+            | Self::DigitalRealSelect {
                 condition,
                 then_value,
                 else_value,

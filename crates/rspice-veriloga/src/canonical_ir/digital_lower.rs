@@ -1871,6 +1871,14 @@ impl ProcessLowerer<'_> {
                 matches!(unary.op, UnaryOp::Neg | UnaryOp::Pos)
                     && self.is_real_expression(&unary.operand)
             }
+            // Table 4-2 makes `?:` legal in a real expression, and it is the
+            // operator a real-number model is built out of. It is real when
+            // either arm is; a mixed pair is caught in `real_expression`,
+            // where a diagnostic can name it.
+            Expression::Conditional(conditional) => {
+                self.is_real_expression(&conditional.then_expr)
+                    || self.is_real_expression(&conditional.else_expr)
+            }
             _ => false,
         }
     }
@@ -1946,14 +1954,33 @@ impl ProcessLowerer<'_> {
                     BinaryOp::Sub => RealArithmeticOp::Sub,
                     BinaryOp::Mul => RealArithmeticOp::Mul,
                     BinaryOp::Div => RealArithmeticOp::Div,
-                    // Section 5.1 excludes real operands from `%`, the bitwise
-                    // and shift operators, and `**`; a logical `&&` reaches
-                    // here only when its own result was misclassified.
+                    // The bitwise and shift operators are not in Verilog-AMS
+                    // LRM 2.4 table 4-2 at all, and are illegal on a real by
+                    // section 4.2.1's "all other operators are considered
+                    // illegal". `%`, `**`, `&&` and `||` *are* in the table and
+                    // are simply not implemented yet; the message says which
+                    // kind of missing each one is.
+                    BinaryOp::Mod | BinaryOp::Pow | BinaryOp::And | BinaryOp::Or => {
+                        let spelling = match binary.op {
+                            BinaryOp::Mod => "%",
+                            BinaryOp::Pow => "**",
+                            BinaryOp::And => "&&",
+                            _ => "||",
+                        };
+                        self.error(
+                            format!(
+                                "`{spelling}` on real operands is legal per Verilog-AMS LRM 2.4 \
+                                 table 4-2 but is not implemented yet"
+                            ),
+                            binary.span,
+                        );
+                        return self.real_constant(0.0);
+                    }
                     _ => {
                         self.error(
-                            "this operator has no real-valued form: IEEE 1364-2005 section 5.1 \
-                             admits real operands for `+ - * /` and the comparisons, and for \
-                             nothing that depends on a bit pattern",
+                            "this operator has no real-valued form: Verilog-AMS LRM 2.4 section \
+                             4.2.1 makes every operator outside table 4-2 illegal on a real, \
+                             which is every operator that reads a bit pattern",
                             binary.span,
                         );
                         return self.real_constant(0.0);
@@ -1986,19 +2013,22 @@ impl ProcessLowerer<'_> {
                     },
                 )
             }
-            // A `?:` whose arms are real. IEEE 1364-2005 section 5.1.13 merges
-            // the two arms bitwise when the condition is `x` or `z`, and there
-            // is no real-valued form of a bitwise merge; picking an arm instead
-            // would answer a question the standard answered differently. Write
-            // the `if`/`else` this stands for, which section 9.4 does define.
+            // Verilog-AMS LRM 2.4 table 4-2's conditional operator. The
+            // condition is four-state and self-determined, exactly as it is for
+            // a four-state `?:`; the arms are real.
             Expression::Conditional(conditional) => {
-                self.error(
-                    "a `?:` with real arms has no lowered form: IEEE 1364-2005 section 5.1.13 \
-                     merges the arms bitwise when the condition is ambiguous, and a real has no \
-                     bits to merge; write the `if`/`else` it stands for",
-                    conditional.span,
-                );
-                self.real_constant(0.0)
+                let condition = self.condition(block, &conditional.condition);
+                let then_value = self.real_operand(block, &conditional.then_expr);
+                let else_value = self.real_operand(block, &conditional.else_expr);
+                self.builder.push(
+                    block,
+                    CfgValueType::Real,
+                    CfgValueKind::DigitalRealSelect {
+                        condition,
+                        then_value,
+                        else_value,
+                    },
+                )
             }
             other => {
                 self.error(
