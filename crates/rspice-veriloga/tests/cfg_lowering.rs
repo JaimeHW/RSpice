@@ -465,6 +465,56 @@ endmodule
     ));
 }
 
+/// An operand skipped inside an event operator's argument list means the
+/// default, exactly as leaving it off the end does.
+///
+/// `cross(v, 1, 1e-9, , 1.0)` is how a model reaches the enable without naming
+/// an expression tolerance, and it is the only way to: the front end decides
+/// which operands may be skipped, and everything it lets through is a spelling
+/// the executable backends have always read. This level used to refuse the
+/// whole module over the null.
+#[test]
+fn a_skipped_event_operator_argument_takes_the_same_default_as_an_omitted_one() {
+    let skipped = lower(
+        r#"
+module skipped(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real on = 1.0;
+    analog begin
+        if (cross(V(p, n) - 0.5, 1, 1.0e-9, , on))
+            I(p, n) <+ 1.0;
+    end
+endmodule
+"#,
+    );
+    let (expr_tol, enable) = skipped
+        .function
+        .values
+        .iter()
+        .find_map(|value| match &value.kind {
+            CfgValueKind::Cross {
+                expr_tol, enable, ..
+            } => Some((*expr_tol, *enable)),
+            _ => None,
+        })
+        .expect("cross CFG value");
+    assert!(
+        matches!(
+            skipped.function.value(expr_tol).kind,
+            CfgValueKind::RealConstant(0.0)
+        ),
+        "a skipped expression tolerance is the default"
+    );
+    assert!(
+        matches!(
+            skipped.function.value(enable).kind,
+            CfgValueKind::Parameter(_)
+        ),
+        "the operand after the skipped one keeps its own value"
+    );
+}
+
 /// Every standard math function the executable backends lower must lower here
 /// too.
 ///

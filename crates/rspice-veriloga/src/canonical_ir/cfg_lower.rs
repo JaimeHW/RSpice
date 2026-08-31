@@ -1850,22 +1850,10 @@ impl<'a> CfgLowerer<'a> {
             }
             ("cross", 1..=5) => {
                 let input = self.expr(args[0]);
-                let direction = args
-                    .get(1)
-                    .map(|argument| self.expr(*argument))
-                    .unwrap_or_else(|| self.real_constant(0.0));
-                let time_tol = args
-                    .get(2)
-                    .map(|argument| self.expr(*argument))
-                    .unwrap_or_else(|| self.real_constant(0.0));
-                let expr_tol = args
-                    .get(3)
-                    .map(|argument| self.expr(*argument))
-                    .unwrap_or_else(|| self.real_constant(0.0));
-                let enable = args
-                    .get(4)
-                    .map(|argument| self.expr(*argument))
-                    .unwrap_or_else(|| self.real_constant(1.0));
+                let direction = self.optional_argument(args, 1, 0.0);
+                let time_tol = self.optional_argument(args, 2, 0.0);
+                let expr_tol = self.optional_argument(args, 3, 0.0);
+                let enable = self.optional_argument(args, 4, 1.0);
                 self.builder.push(
                     self.block,
                     CfgValueType::Real,
@@ -1881,18 +1869,9 @@ impl<'a> CfgLowerer<'a> {
             }
             ("above", 1..=4) => {
                 let input = self.expr(args[0]);
-                let time_tol = args
-                    .get(1)
-                    .map(|argument| self.expr(*argument))
-                    .unwrap_or_else(|| self.real_constant(0.0));
-                let expr_tol = args
-                    .get(2)
-                    .map(|argument| self.expr(*argument))
-                    .unwrap_or_else(|| self.real_constant(0.0));
-                let enable = args
-                    .get(3)
-                    .map(|argument| self.expr(*argument))
-                    .unwrap_or_else(|| self.real_constant(1.0));
+                let time_tol = self.optional_argument(args, 1, 0.0);
+                let expr_tol = self.optional_argument(args, 2, 0.0);
+                let enable = self.optional_argument(args, 3, 1.0);
                 self.builder.push(
                     self.block,
                     CfgValueType::Real,
@@ -1907,18 +1886,9 @@ impl<'a> CfgLowerer<'a> {
             }
             ("timer", 1..=4) => {
                 let start = self.expr(args[0]);
-                let period = args
-                    .get(1)
-                    .map(|argument| self.expr(*argument))
-                    .unwrap_or_else(|| self.real_constant(0.0));
-                let time_tol = args
-                    .get(2)
-                    .map(|argument| self.expr(*argument))
-                    .unwrap_or_else(|| self.real_constant(0.0));
-                let enable = args
-                    .get(3)
-                    .map(|argument| self.expr(*argument))
-                    .unwrap_or_else(|| self.real_constant(1.0));
+                let period = self.optional_argument(args, 1, 0.0);
+                let time_tol = self.optional_argument(args, 2, 0.0);
+                let enable = self.optional_argument(args, 3, 1.0);
                 self.builder.push(
                     self.block,
                     CfgValueType::Real,
@@ -2189,6 +2159,32 @@ impl<'a> CfgLowerer<'a> {
         let value = self.builder.push_leaf(value_type, kind);
         self.leaves.insert(key, value);
         value
+    }
+
+    /// One optional operand of an event operator, or `fallback` where the
+    /// source left it out.
+    ///
+    /// A trailing operand is simply absent, but an operand skipped in the
+    /// middle — `cross(v, , 1e-9)` — arrives as an explicit null, which is a
+    /// perfectly ordinary way to reach a later default and not a value the
+    /// walk can lower. Both spellings mean the same thing and both resolve
+    /// here, so the level agrees with the executable backends on what a
+    /// defaulted tolerance is.
+    fn optional_argument(&mut self, args: &[ExprId], index: usize, fallback: f64) -> ValueId {
+        match args.get(index) {
+            Some(argument)
+                if !matches!(
+                    self.hir
+                        .expressions
+                        .get(usize::from(*argument))
+                        .map(|expression| &expression.kind),
+                    Some(HirExprKind::NullArgument)
+                ) =>
+            {
+                self.expr(*argument)
+            }
+            _ => self.real_constant(fallback),
+        }
     }
 
     fn unary(&mut self, op: CfgUnaryOp, input: ValueId) -> ValueId {
