@@ -1148,8 +1148,15 @@ impl<'a> AdBuilder<'a> {
                 }
             }
             // `(a da + b db) / hypot(a, b)`: the gradient is the unit vector
-            // along the operands, and dividing once at the end keeps the same
-            // overflow headroom the operation itself was chosen for.
+            // along the operands, written with one division rather than two in
+            // the same shape as the quotient rule above.
+            //
+            // It does not inherit `hypot`'s headroom, and nothing here could:
+            // the products are formed before the divide, so operands large
+            // enough that `hypot` earns its keep overflow this. The alternative
+            // costs a division per lane to move the same limit a few orders,
+            // which is not a trade worth making on every entry of every
+            // Jacobian.
             CfgBinaryOp::Hypot => {
                 let numerator = match (d_left, d_right) {
                     (Some(d_left), Some(d_right)) => {
