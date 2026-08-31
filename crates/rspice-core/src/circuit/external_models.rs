@@ -63,6 +63,14 @@ struct GeneratedVerilogADcAcceptedState {
     checkpoint: crate::device::veriloga_builtins::GeneratedVerilogAInstanceCheckpoint,
 }
 
+/// Execute every XSPICE event due at or before `time` and fold the result into
+/// the resolved event-node values.
+///
+/// Ordering, supersession and settling belong to the scheduler kernel; what
+/// happens here is what an executed event *means* to the analog side: it
+/// updates one driver, and the node's value is whatever its drivers resolve
+/// to. `Ok(true)` means something an instance can see changed.
+#[allow(clippy::too_many_arguments)]
 fn apply_xspice_events_at_or_before(
     digital_values: &mut HashMap<NodeId, crate::xspice::DigitalValue>,
     digital_drivers: &mut XspiceDigitalDrivers,
@@ -70,18 +78,18 @@ fn apply_xspice_events_at_or_before(
     real_values: &mut HashMap<NodeId, Value>,
     real_drivers: &mut XspiceRealDrivers,
     real_event_times: &mut HashMap<NodeId, Value>,
-    event_queue: &mut crate::xspice::EventQueue,
+    event_queue: &mut crate::xspice::XspiceEventScheduler,
     touched_digital_nodes: &mut Vec<NodeId>,
     touched_real_nodes: &mut Vec<NodeId>,
     time: Value,
-) -> bool {
+) -> Result<bool, crate::xspice::event_scheduler::SchedulerError> {
     let mut changed = false;
     touched_digital_nodes.clear();
     touched_real_nodes.clear();
     if !event_queue.has_event_at_or_before(time) {
-        return false;
+        return Ok(false);
     }
-    event_queue.drain_events_at(time, |event| {
+    event_queue.run_due_events(time, |event| {
         let node_id = event.node_id;
         let event_time = event.time;
         let driver_key = (event.instance, event.port_name, event.driver_index);
@@ -105,7 +113,7 @@ fn apply_xspice_events_at_or_before(
                 touched_real_nodes.push(node_id);
             }
         }
-    });
+    })?;
     if touched_digital_nodes.len() > 1 {
         touched_digital_nodes.sort_unstable();
         touched_digital_nodes.dedup();
@@ -134,50 +142,7 @@ fn apply_xspice_events_at_or_before(
         let previous_value = real_values.insert(node_id, resolved);
         changed |= previous_value != Some(resolved);
     }
-    changed
-}
-
-fn xspice_port_declares_event_type(port: &crate::xspice::PortSpec) -> bool {
-    if port.allowed_types.is_empty() {
-        port.default_type.is_event_driven()
-    } else {
-        port.allowed_types
-            .iter()
-            .copied()
-            .any(|port_type| port_type.is_event_driven())
-    }
-}
-
-fn xspice_event_output_width(connection: &crate::xspice::PortConnection) -> usize {
-    match connection {
-        crate::xspice::PortConnection::Digital(_)
-        | crate::xspice::PortConnection::DigitalInverted(_)
-        | crate::xspice::PortConnection::Real(_) => 1,
-        crate::xspice::PortConnection::DigitalVector(nodes)
-        | crate::xspice::PortConnection::RealVector(nodes) => nodes.len(),
-        crate::xspice::PortConnection::DigitalVectorMapped(nodes) => nodes.len(),
-        _ => 0,
-    }
-}
-
-fn xspice_event_output_count(instances: &[crate::xspice::XspiceInstance]) -> usize {
-    instances
-        .iter()
-        .map(|instance| {
-            instance
-                .ports()
-                .iter()
-                .zip(instance.connections())
-                .filter(|(port, _)| {
-                    matches!(
-                        port.direction,
-                        crate::xspice::PortDirection::Out | crate::xspice::PortDirection::InOut
-                    ) && xspice_port_declares_event_type(port)
-                })
-                .map(|(_, connection)| xspice_event_output_width(connection))
-                .sum::<usize>()
-        })
-        .sum()
+    Ok(changed)
 }
 
 /// Mark every net one event connection reaches as discrete. Analog port
@@ -205,32 +170,47 @@ fn mark_xspice_event_connection_nets(
     }
 }
 
-fn xspice_event_node_summary(digital_nodes: &[NodeId], real_nodes: &[NodeId]) -> String {
-    fn append_nodes(out: &mut String, label: &str, nodes: &[NodeId]) {
-        if nodes.is_empty() {
-            return;
-        }
-        if !out.is_empty() {
-            out.push_str("; ");
-        }
-        out.push_str(label);
-        out.push_str(" nodes ");
-        for (index, node) in nodes.iter().enumerate() {
-            if index > 0 {
-                out.push(',');
-            }
-            out.push_str(&node.to_string());
-        }
-    }
+/// Render a scheduler settling failure as the analysis-level diagnostic.
+///
+/// The old bounded relaxation could only say which nodes were still changing
+/// when it gave up. The scheduler counts activations per driver, so what comes
+/// out names the instances and ports that would not quiet, busiest first,
+/// which is what identifies a zero-delay loop.
+fn xspice_event_settling_message(
+    time: Value,
+    error: &crate::xspice::event_scheduler::SchedulerError,
+) -> String {
+    use crate::xspice::event_scheduler::{OscillationCause, SchedulerError};
 
-    let mut summary = String::new();
-    append_nodes(&mut summary, "digital", digital_nodes);
-    append_nodes(&mut summary, "real", real_nodes);
-    if summary.is_empty() {
-        "no event nodes changed in the last pass".to_string()
+    let SchedulerError::Oscillation(diagnostic) = error else {
+        return format!("XSPICE event scheduling failed at time {time:e}: {error}");
+    };
+    let ceiling = match diagnostic.cause {
+        OscillationCause::DeltaCycleLimit => {
+            format!("{} delta cycles", diagnostic.delta_cycle_limit)
+        }
+        OscillationCause::EventLimit => format!("{} events", diagnostic.event_limit),
+    };
+    let drivers: Vec<String> = diagnostic
+        .entities
+        .iter()
+        .map(|(target, count)| {
+            format!(
+                "{}.{} fired {count} times",
+                target.instance, target.port_name
+            )
+        })
+        .collect();
+    let busiest = if drivers.is_empty() {
+        "no driver fired".to_string()
     } else {
-        summary
-    }
+        drivers.join(", ")
+    };
+    format!(
+        "XSPICE event network did not settle at time {time:e} within {ceiling} \
+         after {} delta cycles and {} events ({busiest})",
+        diagnostic.delta_cycles, diagnostic.events_executed
+    )
 }
 
 fn merge_changed_event_nodes(target: &mut Vec<NodeId>, source: &[NodeId]) {
@@ -533,13 +513,6 @@ impl CircuitData {
         xyce_one_step_order2: bool,
     ) -> crate::xspice::CmResult<()> {
         let current_source_values = self.current_sources.values_at_time(time);
-        let max_event_passes = if self.has_xspice_event_driven_devices() {
-            xspice_event_output_count(&self.xspice_instances)
-                .saturating_add(1)
-                .max(1)
-        } else {
-            1
-        };
         let num_nodes = self.num_nodes;
         let event_loads = &self.xspice_event_loads;
         let mut dispatch_digital_nodes = Vec::new();
@@ -547,7 +520,12 @@ impl CircuitData {
         let mut analog_transitions =
             HashMap::<(NodeId, NodeId), crate::xspice::AnalogTransition>::new();
 
-        for pass in 0..max_event_passes {
+        // Delta cycles, not a bounded relaxation. A settling network leaves at
+        // the `!changed` exit below, in the same iteration it always did; one
+        // that will not settle is the scheduler's to diagnose, and it names
+        // the drivers that would not quiet rather than a pass count.
+        let mut pass = 0usize;
+        loop {
             let digital_values = &mut self.xspice_digital_values;
             let digital_drivers = &mut self.xspice_digital_drivers;
             let digital_event_times = &mut self.xspice_digital_event_times;
@@ -559,7 +537,7 @@ impl CircuitData {
             let touched_real_nodes = &mut self.xspice_touched_real_nodes;
             let mut next_dispatch_digital_nodes = Vec::new();
             let mut next_dispatch_real_nodes = Vec::new();
-            let mut changed = apply_xspice_events_at_or_before(
+            let mut changed = match apply_xspice_events_at_or_before(
                 digital_values,
                 digital_drivers,
                 digital_event_times,
@@ -570,7 +548,16 @@ impl CircuitData {
                 touched_digital_nodes,
                 touched_real_nodes,
                 time,
-            );
+            ) {
+                Ok(changed) => changed,
+                Err(error) => {
+                    let message = xspice_event_settling_message(time, &error);
+                    if self.xspice_evaluation_error.is_none() {
+                        self.xspice_evaluation_error = Some(message.clone());
+                    }
+                    return Err(crate::xspice::CmError::EvaluationError(message));
+                }
+            };
             merge_changed_event_nodes(&mut dispatch_digital_nodes, touched_digital_nodes);
             merge_changed_event_nodes(&mut dispatch_real_nodes, touched_real_nodes);
 
@@ -617,7 +604,7 @@ impl CircuitData {
                 }
 
                 instance.schedule_events(event_queue, time);
-                let instance_changed = apply_xspice_events_at_or_before(
+                let instance_changed = match apply_xspice_events_at_or_before(
                     digital_values,
                     digital_drivers,
                     digital_event_times,
@@ -628,7 +615,16 @@ impl CircuitData {
                     touched_digital_nodes,
                     touched_real_nodes,
                     time,
-                );
+                ) {
+                    Ok(changed) => changed,
+                    Err(error) => {
+                        let message = xspice_event_settling_message(time, &error);
+                        if self.xspice_evaluation_error.is_none() {
+                            self.xspice_evaluation_error = Some(message.clone());
+                        }
+                        return Err(crate::xspice::CmError::EvaluationError(message));
+                    }
+                };
                 if instance_changed {
                     changed = true;
                     merge_changed_event_nodes(
@@ -643,22 +639,10 @@ impl CircuitData {
                 return Ok(());
             }
 
-            if pass + 1 == max_event_passes {
-                let summary_digital_nodes = if next_dispatch_digital_nodes.is_empty() {
-                    dispatch_digital_nodes.as_slice()
-                } else {
-                    next_dispatch_digital_nodes.as_slice()
-                };
-                let summary_real_nodes = if next_dispatch_real_nodes.is_empty() {
-                    dispatch_real_nodes.as_slice()
-                } else {
-                    next_dispatch_real_nodes.as_slice()
-                };
-                let unsettled =
-                    xspice_event_node_summary(summary_digital_nodes, summary_real_nodes);
-                let message = format!(
-                    "XSPICE event network did not settle at time {time:e} after {max_event_passes} passes ({unsettled})"
-                );
+            // Something moved, so another delta cycle is owed. The scheduler
+            // is what decides the network has stopped converging.
+            if let Err(error) = event_queue.note_delta_cycle(time) {
+                let message = xspice_event_settling_message(time, &error);
                 if self.xspice_evaluation_error.is_none() {
                     self.xspice_evaluation_error = Some(message.clone());
                 }
@@ -666,8 +650,8 @@ impl CircuitData {
             }
             dispatch_digital_nodes = next_dispatch_digital_nodes;
             dispatch_real_nodes = next_dispatch_real_nodes;
+            pass += 1;
         }
-        Ok(())
     }
 
     /// Return and clear the first XSPICE evaluation error recorded during
@@ -2767,8 +2751,8 @@ mod tests {
     use crate::solver::StaticMatrix;
     use crate::xspice::{
         AnalysisType, CmContext, CmError, CmResult, CodeModel, DigitalValue, EvaluationPhase,
-        Event, EventQueue, EventValue, ParamSpec, PortConnection, PortDirection, PortSpec,
-        PortType, XspiceInstance,
+        EventValue, ParamSpec, PortConnection, PortDirection, PortSpec, PortType,
+        XspiceEventScheduler, XspiceInstance,
     };
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::sync::{Arc, Mutex};
@@ -2843,41 +2827,46 @@ mod tests {
         let mut real_values = HashMap::new();
         let mut real_drivers = HashMap::new();
         let mut real_event_times = HashMap::new();
-        let mut event_queue = EventQueue::new();
+        let mut event_queue = XspiceEventScheduler::new();
         let mut touched_digital_nodes = Vec::with_capacity(4);
         let mut touched_real_nodes = Vec::with_capacity(4);
         let digital_capacity = touched_digital_nodes.capacity();
         let real_capacity = touched_real_nodes.capacity();
 
-        event_queue.schedule(Event::new(
+        event_queue.schedule(
             1.0e-9,
             1,
             "out_a",
             "d_a",
+            0,
             EventValue::Digital(DigitalValue::one()),
-        ));
-        event_queue.schedule(Event::new(
+        );
+        event_queue.schedule(
             1.0e-9,
             1,
             "out_b",
             "d_b",
+            0,
             EventValue::Digital(DigitalValue::one()),
-        ));
-        event_queue.schedule(Event::new(1.0e-9, 2, "out_a", "r_a", EventValue::Real(1.0)));
-        event_queue.schedule(Event::new(1.0e-9, 2, "out_b", "r_b", EventValue::Real(2.0)));
+        );
+        event_queue.schedule(1.0e-9, 2, "out_a", "r_a", 0, EventValue::Real(1.0));
+        event_queue.schedule(1.0e-9, 2, "out_b", "r_b", 0, EventValue::Real(2.0));
 
-        assert!(apply_xspice_events_at_or_before(
-            &mut digital_values,
-            &mut digital_drivers,
-            &mut digital_event_times,
-            &mut real_values,
-            &mut real_drivers,
-            &mut real_event_times,
-            &mut event_queue,
-            &mut touched_digital_nodes,
-            &mut touched_real_nodes,
-            1.0e-9,
-        ));
+        assert!(
+            apply_xspice_events_at_or_before(
+                &mut digital_values,
+                &mut digital_drivers,
+                &mut digital_event_times,
+                &mut real_values,
+                &mut real_drivers,
+                &mut real_event_times,
+                &mut event_queue,
+                &mut touched_digital_nodes,
+                &mut touched_real_nodes,
+                1.0e-9,
+            )
+            .expect("a queue nothing feeds back into settles")
+        );
 
         assert_eq!(touched_digital_nodes, vec![1]);
         assert_eq!(touched_real_nodes, vec![2]);
@@ -2894,18 +2883,21 @@ mod tests {
         assert_eq!(real_event_times.get(&2).copied(), Some(1.0e-9));
         assert!(event_queue.is_empty());
 
-        assert!(!apply_xspice_events_at_or_before(
-            &mut digital_values,
-            &mut digital_drivers,
-            &mut digital_event_times,
-            &mut real_values,
-            &mut real_drivers,
-            &mut real_event_times,
-            &mut event_queue,
-            &mut touched_digital_nodes,
-            &mut touched_real_nodes,
-            1.0e-9,
-        ));
+        assert!(
+            !apply_xspice_events_at_or_before(
+                &mut digital_values,
+                &mut digital_drivers,
+                &mut digital_event_times,
+                &mut real_values,
+                &mut real_drivers,
+                &mut real_event_times,
+                &mut event_queue,
+                &mut touched_digital_nodes,
+                &mut touched_real_nodes,
+                1.0e-9,
+            )
+            .expect("an empty queue settles")
+        );
 
         assert!(touched_digital_nodes.is_empty());
         assert!(touched_real_nodes.is_empty());
@@ -2921,55 +2913,58 @@ mod tests {
         let mut real_values = HashMap::new();
         let mut real_drivers = HashMap::new();
         let mut real_event_times = HashMap::new();
-        let mut event_queue = EventQueue::new();
+        let mut event_queue = XspiceEventScheduler::new();
         let mut touched_digital_nodes = Vec::new();
         let mut touched_real_nodes = Vec::new();
 
-        event_queue.schedule(Event::new_with_driver_index(
+        event_queue.schedule(
             1.0e-9,
             1,
             "out",
             "vector_driver",
             0,
             EventValue::Digital(DigitalValue::one()),
-        ));
-        event_queue.schedule(Event::new_with_driver_index(
+        );
+        event_queue.schedule(
             1.0e-9,
             1,
             "out",
             "vector_driver",
             1,
             EventValue::Digital(DigitalValue::one()),
-        ));
-        event_queue.schedule(Event::new_with_driver_index(
+        );
+        event_queue.schedule(
             1.0e-9,
             2,
             "real_out",
             "real_vector_driver",
             0,
             EventValue::Real(1.0),
-        ));
-        event_queue.schedule(Event::new_with_driver_index(
+        );
+        event_queue.schedule(
             1.0e-9,
             2,
             "real_out",
             "real_vector_driver",
             1,
             EventValue::Real(2.0),
-        ));
+        );
 
-        assert!(apply_xspice_events_at_or_before(
-            &mut digital_values,
-            &mut digital_drivers,
-            &mut digital_event_times,
-            &mut real_values,
-            &mut real_drivers,
-            &mut real_event_times,
-            &mut event_queue,
-            &mut touched_digital_nodes,
-            &mut touched_real_nodes,
-            1.0e-9,
-        ));
+        assert!(
+            apply_xspice_events_at_or_before(
+                &mut digital_values,
+                &mut digital_drivers,
+                &mut digital_event_times,
+                &mut real_values,
+                &mut real_drivers,
+                &mut real_event_times,
+                &mut event_queue,
+                &mut touched_digital_nodes,
+                &mut touched_real_nodes,
+                1.0e-9,
+            )
+            .expect("a queue nothing feeds back into settles")
+        );
 
         assert_eq!(
             digital_drivers.get(&1).map(|drivers| drivers.len()),
@@ -3527,7 +3522,6 @@ mod tests {
         circuit.get_or_create_node("out");
         circuit.add_xspice_instance(feedback_inverter_instance());
         assert!(circuit.has_xspice_event_driven_devices());
-        assert_eq!(xspice_event_output_count(&circuit.xspice_instances), 1);
 
         let result =
             circuit.try_evaluate_xspice_with_analysis(0.0, 1e-9, &[], AnalysisType::Transient);
@@ -3539,8 +3533,15 @@ mod tests {
             .take_xspice_evaluation_error()
             .expect("non-settling XSPICE event networks must be reported");
 
-        assert!(err.contains("XSPICE event network did not settle"));
-        assert!(err.contains("2 passes"));
+        assert!(err.contains("XSPICE event network did not settle"), "{err}");
+        assert!(
+            err.contains("delta cycles"),
+            "the ceiling that tripped must be named: {err}"
+        );
+        assert!(
+            err.contains("Afb.out fired"),
+            "the diagnostic must name the driver that would not quiet: {err}"
+        );
     }
 
     #[test]

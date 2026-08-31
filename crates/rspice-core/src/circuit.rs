@@ -10,7 +10,7 @@ use crate::device::behavioral::BehavioralSources;
 use crate::device::{Cccs, Ccvs, MatrixStamper, NonlinearConvergenceCriteria, Vccs, Vcvs};
 use crate::numerics::integration::CompanionCoefficients;
 use crate::solver::{CscIndex, StaticMatrix, TripletMatrix};
-use crate::xspice::{CodeModelRegistry, DigitalValue, EventQueue, XspiceInstance};
+use crate::xspice::{CodeModelRegistry, DigitalValue, XspiceEventScheduler, XspiceInstance};
 use crate::{NodeId, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -611,7 +611,7 @@ pub struct CircuitData {
     /// Last event time per XSPICE real-valued event node.
     pub(crate) xspice_real_event_times: HashMap<NodeId, Value>,
     /// Circuit-level XSPICE digital event queue.
-    pub(crate) xspice_event_queue: EventQueue,
+    pub(crate) xspice_event_queue: XspiceEventScheduler,
     /// Scratch nodes touched while applying a batch of XSPICE digital events.
     pub(crate) xspice_touched_digital_nodes: Vec<NodeId>,
     /// Scratch nodes touched while applying a batch of XSPICE real-valued events.

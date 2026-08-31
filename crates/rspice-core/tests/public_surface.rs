@@ -161,7 +161,14 @@ use rspice_core::analysis::harmonic_balance::{
 /// engine names), and `note_delta_cycle` (an outer settle loop marking one
 /// iteration so a network that will not quiet is diagnosed rather than
 /// looping). Each is driven by the same integration test.
-const MAX_PUBLIC_ITEMS: usize = 4294;
+///
+/// The current net change is -20, from 4,291 to 4,271. Those +3 are in it, and
+/// the rehost itself removes 23: `xspice::Event`, `xspice::EventQueue` and
+/// `EventQueueStats` with their constructors, scheduling, draining,
+/// cancellation and statistics methods, and `XspiceInstance::schedule_events`,
+/// which no longer names a public queue type. The kernel is what schedules
+/// now, and nothing outside this crate ever named the queue it replaced.
+const MAX_PUBLIC_ITEMS: usize = 4271;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

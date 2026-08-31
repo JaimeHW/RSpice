@@ -1,15 +1,25 @@
 //! Discrete-event scheduler kernel for the digital and mixed-signal substrate.
 //!
-//! The XSPICE event path drains its queue inside analog Newton assembly: event
-//! time never advances on its own, and the relaxation that stands in for delta
-//! cycles is bounded by a pass count whose overrun is fatal. This module is the
-//! substrate that replaces it. It schedules and orders events; it does not
-//! execute them, because what an event *means* belongs to the code model or the
-//! digital process that owns it. Callers supply behaviour through the closure
-//! [`EventScheduler::run_time_slot`] takes.
+//! This module owns event ordering and time-slot execution. It schedules and
+//! orders events; it does not execute them, because what an event *means*
+//! belongs to the code model or the digital process that owns it. Callers
+//! supply behaviour through the closure [`EventScheduler::run_time_slot`] or
+//! [`EventScheduler::run_due_events`] takes.
 //!
-//! Nothing in the analog engine calls this module yet. Rehosting XSPICE on it
-//! and synchronizing it against analog time are separate changes.
+//! # Two ways to run a slot
+//!
+//! [`EventScheduler::run_time_slot`] is for an event world that drives itself:
+//! it advances to the next tick that has an event and settles it. That is what
+//! a native digital engine wants.
+//!
+//! [`EventScheduler::run_due_events`] is for an event world an analog loop
+//! drives, which is where XSPICE sits: the analog engine names the timepoint
+//! being settled and everything dated at or before it is due, including events
+//! dated before it. Settling is the outer loop's, marked one iteration at a
+//! time with [`EventScheduler::note_delta_cycle`], and that is where a network
+//! that will not quiet becomes [`SchedulerError::Oscillation`] rather than a
+//! hang. Synchronizing the two directions of time — analog steps stopping on
+//! event ticks — is a separate change.
 //!
 //! # Time base
 //!
@@ -26,6 +36,11 @@
 //! It is, up to [`TimeResolution::MAX_EXACT_TICKS`] — see that constant for why
 //! the bound is `2^51 - 1` and not `2^53`.
 //!
+//! A caller whose event times are not on a declared grid supplies its own
+//! monotone tick encoding instead; the XSPICE path does, because its times
+//! come from code models and the analog step controller and feed transient
+//! breakpoints unrounded. See `super::event`.
+//!
 //! # Ordering
 //!
 //! Same-time ordering is a total order, not a convention: every event carries a
@@ -40,10 +55,10 @@
 //! share a tick. IEEE 1364-2005 permits a simulator to execute active events in
 //! any order; fixing that order is what makes a run reproducible.
 //!
-//! The sequence counter is per-scheduler. The XSPICE queue's tie-break is a
-//! process-global atomic, which orders two schedulers against each other and
-//! makes a run's ordering depend on what else in the process scheduled an event
-//! first. That is not reproducible, and this kernel does not inherit it.
+//! The sequence counter is per-scheduler. The queue this replaced tie-broke on
+//! a process-global atomic, which ordered two schedulers against each other and
+//! made a run's ordering depend on what else in the process had scheduled an
+//! event first. That is not reproducible, and this kernel does not inherit it.
 
 use super::EventValue;
 use std::collections::BTreeMap;
@@ -698,7 +713,7 @@ impl EventScheduler {
         mut execute: F,
     ) -> Result<TimeSlotReport, SchedulerError>
     where
-        F: FnMut(&ScheduledEvent, &mut SchedulerContext<'_>),
+        F: FnMut(ScheduledEvent, &mut SchedulerContext<'_>),
     {
         self.open_due_slot(bound_tick);
 
@@ -745,7 +760,7 @@ impl EventScheduler {
                 queues: &mut self.queues,
                 current_tick: bound_tick,
             };
-            execute(&event, &mut context);
+            execute(event, &mut context);
         }
 
         Ok(TimeSlotReport {
@@ -806,7 +821,7 @@ impl EventScheduler {
         mut execute: F,
     ) -> Result<Option<TimeSlotReport>, SchedulerError>
     where
-        F: FnMut(&ScheduledEvent, &mut SchedulerContext<'_>),
+        F: FnMut(ScheduledEvent, &mut SchedulerContext<'_>),
     {
         let Some(tick) = self.next_tick() else {
             return Ok(None);
@@ -861,7 +876,7 @@ impl EventScheduler {
                 queues: &mut self.queues,
                 current_tick: tick,
             };
-            execute(&event, &mut context);
+            execute(event, &mut context);
         }
 
         Ok(Some(TimeSlotReport {

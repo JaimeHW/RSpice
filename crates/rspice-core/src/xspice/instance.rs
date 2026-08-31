@@ -8,7 +8,7 @@ use super::context::{
 };
 use super::{
     AnalysisType, CallType, CmContext, CmError, CmResult, CodeModel, DigitalValue, EvaluationPhase,
-    EventQueue, ParamSpec, ParamType, PortSpec, PortType, XspiceCheckpointSupport,
+    ParamSpec, ParamType, PortSpec, PortType, XspiceCheckpointSupport, XspiceEventScheduler,
 };
 use crate::{Complex64, Value};
 use std::any::Any;
@@ -2242,7 +2242,11 @@ impl XspiceInstance {
     }
 
     /// Process digital events scheduled by this instance
-    pub fn schedule_events(&mut self, event_queue: &mut EventQueue, current_time: Value) {
+    pub(crate) fn schedule_events(
+        &mut self,
+        event_queue: &mut XspiceEventScheduler,
+        current_time: Value,
+    ) {
         for PendingDigitalEvent {
             port_name,
             start_index,
@@ -3907,9 +3911,12 @@ mod tests {
             .context
             .set_output_digital("out", DigitalValue::one(), 0.0);
 
-        let mut event_queue = EventQueue::new();
+        let mut event_queue = XspiceEventScheduler::new();
         instance.schedule_events(&mut event_queue, 0.0);
-        let events = event_queue.pop_events_at(0.0);
+        let mut events = Vec::new();
+        event_queue
+            .run_due_events(0.0, |event| events.push(event))
+            .expect("a queue nothing feeds back into settles");
 
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].node_id, 1);
@@ -3935,9 +3942,12 @@ mod tests {
             0.0,
         );
 
-        let mut event_queue = EventQueue::new();
+        let mut event_queue = XspiceEventScheduler::new();
         instance.schedule_events(&mut event_queue, 0.0);
-        let events = event_queue.pop_events_at(0.0);
+        let mut events = Vec::new();
+        event_queue
+            .run_due_events(0.0, |event| events.push(event))
+            .expect("a queue nothing feeds back into settles");
         let driver_values: Vec<_> = events
             .iter()
             .map(|event| (event.driver_index, event.value))

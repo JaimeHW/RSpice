@@ -1,13 +1,16 @@
-//! Event Queue for XSPICE Event-Driven Simulation
+//! Event scheduling for XSPICE event-driven simulation.
 //!
-//! Provides the event-driven scheduling infrastructure for digital and real
-//! code models.
-//! Events are scheduled with delays and processed at breakpoints during transient analysis.
+//! [`EventValue`] is what a digital or real code-model output carries.
+//! [`XspiceEventScheduler`] is the analog-seconds face of the discrete-event
+//! kernel next door: the XSPICE path speaks in seconds because the analog
+//! spine does, and the kernel speaks in integer ticks because an event order
+//! has to be exact.
 
 use super::digital::DigitalValue;
+use super::event_scheduler::{
+    EventScheduler, EventTarget, SchedulerError, SchedulerLimits, SchedulerRegion, TimeResolution,
+};
 use crate::Value;
-use std::cmp::Ordering;
-use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet};
 
 //=============================================================================
 // Event Types
@@ -22,179 +25,142 @@ pub enum EventValue {
     Real(Value),
 }
 
-/// A scheduled event-driven XSPICE update.
+/// One executed event, in the terms the analog side works in.
+///
+/// The kernel hands out a `ScheduledEvent` keyed by tick and target; this is
+/// the same thing with the tick converted back to seconds and the target
+/// flattened, so the drain can move the driver's names straight into its
+/// driver key without copying them.
 #[derive(Debug, Clone)]
-pub struct Event {
-    /// Time at which the event occurs
-    pub time: Value,
-    /// Target node identifier (internal representation)
-    pub node_id: usize,
-    /// Port name (for lookup)
-    pub port_name: String,
-    /// Vector element index for distinguishing separate drivers on one port.
-    pub driver_index: usize,
-    /// Instance name that scheduled the event
-    pub instance: String,
-    /// New event value
-    pub value: EventValue,
-    /// Event priority (for tie-breaking)
-    pub priority: u64,
+pub(crate) struct XspiceEvent {
+    /// Absolute time the event occurs, in analog seconds.
+    pub(crate) time: Value,
+    /// Target node identifier (internal representation).
+    pub(crate) node_id: usize,
+    /// Port name on the driving instance.
+    pub(crate) port_name: String,
+    /// Vector element index distinguishing separate drivers on one port.
+    pub(crate) driver_index: usize,
+    /// Instance that scheduled the event.
+    pub(crate) instance: String,
+    /// New event value.
+    pub(crate) value: EventValue,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct EventDriverKey {
-    node_id: usize,
-    port_name: String,
-    driver_index: usize,
-    instance: String,
+//=============================================================================
+// Seconds <-> ticks
+//=============================================================================
+
+/// Analog seconds as a scheduler tick.
+///
+/// The kernel's decimal [`TimeResolution`] is not what this path uses, and the
+/// reason is worth stating: XSPICE event times are seconds chosen by code
+/// models and by the analog step controller, not points on a declared grid.
+/// `next_event_time` hands them straight to the transient breakpoint manager,
+/// so quantizing them would move the times events fire at. A decimal grid also
+/// bounds event time — 1 fs ticks stop being exactly invertible past 2.25 s,
+/// which is far inside the range a transient run uses.
+///
+/// For a non-negative finite `f64` the IEEE-754 bit pattern read as a `u64` is
+/// strictly monotone in the value and exactly invertible, which is everything
+/// the kernel asks of a tick: it orders, and it converts back. `None` is the
+/// answer for a time that cannot be scheduled at all, which is the same set
+/// the queue has always dropped: negative, infinite, or NaN.
+fn event_tick(seconds: Value) -> Option<u64> {
+    if !seconds.is_finite() || seconds < 0.0 {
+        return None;
+    }
+    // Positive and negative zero are one instant with two bit patterns, and
+    // the negative one does not compare below the positive one as a `u64`.
+    Some(if seconds == 0.0 { 0 } else { seconds.to_bits() })
 }
 
-impl Event {
-    /// Create a new event
-    pub fn new(
-        time: Value,
-        node_id: usize,
-        port_name: impl Into<String>,
-        instance: impl Into<String>,
-        value: EventValue,
-    ) -> Self {
-        Self::new_with_driver_index(time, node_id, port_name, instance, 0, value)
+/// The inverse of [`event_tick`] over the ticks it produces.
+fn tick_seconds(tick: u64) -> Value {
+    Value::from_bits(tick)
+}
+
+/// Absolute output time for a delay measured from `current_time`.
+///
+/// A negative delay is legitimate: a code model interpolates an input crossing
+/// inside the accepted analog step and dates its output from that crossing,
+/// which is behind the timepoint being evaluated. The result is still refused
+/// if it lands before the start of the analysis.
+fn scheduled_output_time(current_time: Value, delay: Value) -> Option<Value> {
+    if !current_time.is_finite() || !delay.is_finite() {
+        return None;
+    }
+    let event_time = current_time + delay;
+    if !event_time.is_finite() || event_time < 0.0 {
+        return None;
+    }
+    Some(event_time)
+}
+
+//=============================================================================
+// Scheduler
+//=============================================================================
+
+/// The event queue of one circuit.
+///
+/// Ordering, supersession and the settling diagnostics all belong to the
+/// kernel; what lives here is the seconds/tick conversion and the shape the
+/// XSPICE call sites expect.
+#[derive(Debug, Clone)]
+pub(crate) struct XspiceEventScheduler {
+    inner: EventScheduler,
+}
+
+impl Default for XspiceEventScheduler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl XspiceEventScheduler {
+    /// Create a new empty scheduler.
+    pub(crate) fn new() -> Self {
+        Self {
+            // The resolution is inert on this path: ticks come from
+            // `event_tick`, not from a decimal grid, and nothing here calls
+            // the kernel's seconds conversions. It is passed because the
+            // kernel takes one resolution for a whole run.
+            inner: EventScheduler::new(TimeResolution::default(), SchedulerLimits::default()),
+        }
     }
 
-    /// Create a new event for a specific vector port element.
-    pub fn new_with_driver_index(
+    /// Schedule an event at an absolute time, superseding this driver's own
+    /// pending output at or after that time.
+    pub(crate) fn schedule(
+        &mut self,
         time: Value,
         node_id: usize,
         port_name: impl Into<String>,
         instance: impl Into<String>,
         driver_index: usize,
         value: EventValue,
-    ) -> Self {
-        static PRIORITY_COUNTER: std::sync::atomic::AtomicU64 =
-            std::sync::atomic::AtomicU64::new(0);
-        Self {
-            time,
-            node_id,
-            port_name: port_name.into(),
-            driver_index,
-            instance: instance.into(),
-            value,
-            priority: PRIORITY_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
-        }
-    }
-
-    fn driver_key(&self) -> EventDriverKey {
-        EventDriverKey {
-            node_id: self.node_id,
-            port_name: self.port_name.clone(),
-            driver_index: self.driver_index,
-            instance: self.instance.clone(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct EventTimeKey(Value);
-
-impl PartialEq for EventTimeKey {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.total_cmp(&other.0) == Ordering::Equal
-    }
-}
-
-impl Eq for EventTimeKey {}
-
-impl PartialOrd for EventTimeKey {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for EventTimeKey {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.0.total_cmp(&other.0)
-    }
-}
-
-// Events are ordered by time (earliest first), then by priority
-impl PartialEq for Event {
-    fn eq(&self, other: &Self) -> bool {
-        self.time == other.time && self.priority == other.priority
-    }
-}
-
-impl Eq for Event {}
-
-impl PartialOrd for Event {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for Event {
-    fn cmp(&self, other: &Self) -> Ordering {
-        // BinaryHeap is a max-heap, so we reverse the ordering for earliest-first
-        other
-            .time
-            .partial_cmp(&self.time)
-            .unwrap_or(Ordering::Equal)
-            .then_with(|| other.priority.cmp(&self.priority))
-    }
-}
-
-//=============================================================================
-// Event Queue
-//=============================================================================
-
-/// Priority queue for XSPICE event-node updates.
-///
-/// Events are scheduled with a future time and processed in chronological order.
-/// The queue automatically handles cancellation and replacement of events.
-#[derive(Debug, Clone, Default)]
-pub struct EventQueue {
-    /// Pending events (min-heap by time)
-    events: BinaryHeap<Event>,
-    /// Active pending event priorities for lazy cancellation.
-    active_event_priorities: HashSet<u64>,
-    /// Active pending event counts by time.
-    active_times: BTreeMap<EventTimeKey, usize>,
-    /// Active pending event priorities by output driver and time.
-    driver_event_priorities: HashMap<EventDriverKey, BTreeMap<EventTimeKey, Vec<u64>>>,
-    /// Number of events processed
-    events_processed: u64,
-    /// Last event time processed
-    last_event_time: Value,
-}
-
-impl EventQueue {
-    /// Create a new empty event queue
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Schedule an event
-    pub fn schedule(&mut self, event: Event) {
-        if !event.time.is_finite() || event.time < 0.0 {
+    ) {
+        let Some(tick) = event_tick(time) else {
             return;
-        }
-        let driver_key = event.driver_key();
-        let event_time = EventTimeKey(event.time);
-        if let Some(cancelled) = self.cancel_driver_events_at_or_after(&driver_key, event_time) {
-            for (time, priorities) in cancelled {
-                for priority in priorities {
-                    if self.active_event_priorities.remove(&priority) {
-                        self.decrement_active_time(time);
-                    }
-                }
-            }
-        }
-        self.insert_active_event(&driver_key, event_time, event.priority);
-        self.events.push(event);
-        self.compact_stale_events_if_needed();
+        };
+        self.inner.schedule_superseding_at(
+            tick,
+            // Every XSPICE output is a blocking assignment: the value is
+            // computed and written in the same pass. None of the deferred
+            // regions has a spelling in a code model.
+            SchedulerRegion::Active,
+            EventTarget {
+                node_id,
+                port_name: port_name.into(),
+                driver_index,
+                instance: instance.into(),
+            },
+            value,
+        );
     }
 
-    /// Schedule an event with delay from current time.
-    pub fn schedule_delayed(
+    /// Schedule a digital event with delay from current time.
+    pub(crate) fn schedule_delayed(
         &mut self,
         current_time: Value,
         delay: Value,
@@ -214,8 +180,10 @@ impl EventQueue {
         );
     }
 
-    /// Schedule a digital event with delay from current time for one driver element.
-    pub fn schedule_delayed_with_driver_index(
+    /// Schedule a digital event with delay from current time for one driver
+    /// element.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn schedule_delayed_with_driver_index(
         &mut self,
         current_time: Value,
         delay: Value,
@@ -228,7 +196,7 @@ impl EventQueue {
         let Some(event_time) = scheduled_output_time(current_time, delay) else {
             return;
         };
-        let event = Event::new_with_driver_index(
+        self.schedule(
             event_time,
             node_id,
             port_name,
@@ -236,11 +204,10 @@ impl EventQueue {
             driver_index,
             EventValue::Digital(value),
         );
-        self.schedule(event);
     }
 
     /// Schedule a real-valued event with delay from current time.
-    pub fn schedule_real_delayed(
+    pub(crate) fn schedule_real_delayed(
         &mut self,
         current_time: Value,
         delay: Value,
@@ -260,8 +227,10 @@ impl EventQueue {
         );
     }
 
-    /// Schedule a real-valued event with delay from current time for one driver element.
-    pub fn schedule_real_delayed_with_driver_index(
+    /// Schedule a real-valued event with delay from current time for one
+    /// driver element.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn schedule_real_delayed_with_driver_index(
         &mut self,
         current_time: Value,
         delay: Value,
@@ -274,7 +243,7 @@ impl EventQueue {
         let Some(event_time) = scheduled_output_time(current_time, delay) else {
             return;
         };
-        let event = Event::new_with_driver_index(
+        self.schedule(
             event_time,
             node_id,
             port_name,
@@ -282,269 +251,98 @@ impl EventQueue {
             driver_index,
             EventValue::Real(value),
         );
-        self.schedule(event);
     }
 
-    /// Check if there are any pending events
-    pub fn is_empty(&self) -> bool {
-        self.active_event_priorities.is_empty()
+    /// Time of the next pending event.
+    pub(crate) fn next_event_time(&self) -> Option<Value> {
+        self.inner.next_tick().map(tick_seconds)
     }
 
-    /// Get the number of pending events
-    pub fn len(&self) -> usize {
-        self.active_event_priorities.len()
+    /// Whether an event is pending at or before the given time.
+    pub(crate) fn has_event_at_or_before(&self, time: Value) -> bool {
+        self.inner
+            .next_tick()
+            .is_some_and(|tick| tick_seconds(tick) <= time)
     }
 
-    /// Get the time of the next pending event
-    pub fn next_event_time(&self) -> Option<Value> {
-        self.active_times.first_key_value().map(|(time, _)| time.0)
-    }
-
-    /// Check if there's an event at or before the given time
-    pub fn has_event_at_or_before(&self, time: Value) -> bool {
-        self.active_times
-            .first_key_value()
-            .is_some_and(|(event_time, _)| event_time.0 <= time)
-    }
-
-    /// Pop all events at or before the given time
-    pub fn pop_events_at(&mut self, time: Value) -> Vec<Event> {
-        let mut events = Vec::new();
-        self.drain_events_at(time, |event| events.push(event));
-        events
-    }
-
-    /// Drain all events at or before the given time into a caller-provided sink.
-    pub fn drain_events_at<F>(&mut self, time: Value, mut sink: F)
+    /// Execute every event due at or before `time`, in event order.
+    ///
+    /// Failure means the tick did not settle; see
+    /// [`XspiceEventScheduler::note_delta_cycle`].
+    pub(crate) fn run_due_events<F>(
+        &mut self,
+        time: Value,
+        mut sink: F,
+    ) -> Result<(), SchedulerError>
     where
-        F: FnMut(Event),
+        F: FnMut(XspiceEvent),
     {
-        while let Some(event) = self.events.peek() {
-            if event.time <= time {
-                if let Some(e) = self.events.pop() {
-                    if self.remove_active_event(&e) {
-                        self.events_processed += 1;
-                        self.last_event_time = e.time;
-                        sink(e);
-                    }
-                }
-            } else {
-                break;
-            }
-        }
+        let Some(bound) = event_tick(time) else {
+            return Ok(());
+        };
+        self.inner.run_due_events(bound, |event, _| {
+            sink(XspiceEvent {
+                time: tick_seconds(event.tick),
+                node_id: event.target.node_id,
+                port_name: event.target.port_name,
+                driver_index: event.target.driver_index,
+                instance: event.target.instance,
+                value: event.value,
+            })
+        })?;
+        Ok(())
     }
 
-    /// Pop events at exactly the given time
-    pub fn pop_events_exactly_at(&mut self, time: Value) -> Vec<Event> {
-        const EPSILON: Value = 1e-18;
-        let mut events = Vec::new();
-        let mut retained = BinaryHeap::with_capacity(self.events.len());
-        while let Some(event) = self.events.pop() {
-            if !self.active_event_priorities.contains(&event.priority) {
-                continue;
-            }
-            if (event.time - time).abs() < EPSILON {
-                if self.remove_active_event(&event) {
-                    self.events_processed += 1;
-                    self.last_event_time = event.time;
-                    events.push(event);
-                }
-            } else {
-                retained.push(event);
-            }
-        }
-        self.events = retained;
-        events
+    /// Mark one iteration of the settle loop at `time`.
+    ///
+    /// Delta settling is unbounded, so this is what turns a zero-delay loop
+    /// into an [`SchedulerError::Oscillation`] naming its busiest drivers
+    /// rather than a hang.
+    pub(crate) fn note_delta_cycle(&mut self, time: Value) -> Result<(), SchedulerError> {
+        let Some(bound) = event_tick(time) else {
+            return Ok(());
+        };
+        self.inner.note_delta_cycle(bound)
     }
 
-    /// Cancel all events for a specific node
-    pub fn cancel_node_events(&mut self, node_id: usize) {
-        let active_event_priorities = &self.active_event_priorities;
-        let mut removed_active_event = false;
-        self.events.retain(|event| {
-            let is_active = active_event_priorities.contains(&event.priority);
-            if is_active && event.node_id == node_id {
-                removed_active_event = true;
-                false
-            } else {
-                is_active
-            }
-        });
-        if removed_active_event {
-            self.rebuild_indexes();
-        }
+    /// Number of pending events.
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.inner.pending()
     }
 
-    /// Cancel all events for a specific instance
-    pub fn cancel_instance_events(&mut self, instance: &str) {
-        let active_event_priorities = &self.active_event_priorities;
-        let mut removed_active_event = false;
-        self.events.retain(|event| {
-            let is_active = active_event_priorities.contains(&event.priority);
-            if is_active && event.instance == instance {
-                removed_active_event = true;
-                false
-            } else {
-                is_active
-            }
-        });
-        if removed_active_event {
-            self.rebuild_indexes();
-        }
+    /// Whether any event is pending.
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.inner.pending() == 0
     }
-
-    /// Clear all pending events
-    pub fn clear(&mut self) {
-        self.events.clear();
-        self.active_event_priorities.clear();
-        self.active_times.clear();
-        self.driver_event_priorities.clear();
-    }
-
-    /// Get statistics
-    pub fn stats(&self) -> EventQueueStats {
-        EventQueueStats {
-            pending: self.active_event_priorities.len(),
-            processed: self.events_processed,
-            last_event_time: self.last_event_time,
-        }
-    }
-
-    fn cancel_driver_events_at_or_after(
-        &mut self,
-        driver_key: &EventDriverKey,
-        time: EventTimeKey,
-    ) -> Option<BTreeMap<EventTimeKey, Vec<u64>>> {
-        let driver_events = self.driver_event_priorities.get_mut(driver_key)?;
-        let has_later_event = driver_events
-            .last_key_value()
-            .is_some_and(|(latest_time, _)| *latest_time >= time);
-        has_later_event.then(|| driver_events.split_off(&time))
-    }
-
-    fn insert_active_event(
-        &mut self,
-        driver_key: &EventDriverKey,
-        time: EventTimeKey,
-        priority: u64,
-    ) {
-        self.active_event_priorities.insert(priority);
-        *self.active_times.entry(time).or_insert(0) += 1;
-        self.driver_event_priorities
-            .entry(driver_key.clone())
-            .or_default()
-            .entry(time)
-            .or_default()
-            .push(priority);
-    }
-
-    fn remove_active_event(&mut self, event: &Event) -> bool {
-        if !self.active_event_priorities.remove(&event.priority) {
-            return false;
-        }
-        let time = EventTimeKey(event.time);
-        self.decrement_active_time(time);
-        let driver_key = event.driver_key();
-        let mut remove_driver = false;
-        if let Some(driver_events) = self.driver_event_priorities.get_mut(&driver_key) {
-            let mut remove_time = false;
-            if let Some(priorities) = driver_events.get_mut(&time) {
-                priorities.retain(|priority| *priority != event.priority);
-                remove_time = priorities.is_empty();
-            }
-            if remove_time {
-                driver_events.remove(&time);
-            }
-            remove_driver = driver_events.is_empty();
-        }
-        if remove_driver {
-            self.driver_event_priorities.remove(&driver_key);
-        }
-        true
-    }
-
-    fn decrement_active_time(&mut self, time: EventTimeKey) {
-        let mut remove_time = false;
-        if let Some(count) = self.active_times.get_mut(&time) {
-            *count = count.saturating_sub(1);
-            remove_time = *count == 0;
-        }
-        if remove_time {
-            self.active_times.remove(&time);
-        }
-    }
-
-    fn compact_stale_events_if_needed(&mut self) {
-        let active_events = self.active_event_priorities.len();
-        if self.events.len() <= active_events.saturating_mul(2).saturating_add(1024) {
-            return;
-        }
-        let active_event_priorities = &self.active_event_priorities;
-        self.events
-            .retain(|event| active_event_priorities.contains(&event.priority));
-    }
-
-    fn rebuild_indexes(&mut self) {
-        let mut active_event_priorities = HashSet::with_capacity(self.events.len());
-        let mut active_times = BTreeMap::new();
-        let mut driver_event_priorities: HashMap<EventDriverKey, BTreeMap<EventTimeKey, Vec<u64>>> =
-            HashMap::with_capacity(self.events.len());
-        for event in self.events.iter() {
-            let driver_key = event.driver_key();
-            let time = EventTimeKey(event.time);
-            active_event_priorities.insert(event.priority);
-            *active_times.entry(time).or_insert(0) += 1;
-            driver_event_priorities
-                .entry(driver_key)
-                .or_default()
-                .entry(time)
-                .or_default()
-                .push(event.priority);
-        }
-        self.active_event_priorities = active_event_priorities;
-        self.active_times = active_times;
-        self.driver_event_priorities = driver_event_priorities;
-    }
-}
-
-fn scheduled_output_time(current_time: Value, delay: Value) -> Option<Value> {
-    if !current_time.is_finite() || !delay.is_finite() {
-        return None;
-    }
-    let event_time = current_time + delay;
-    if !event_time.is_finite() || event_time < 0.0 {
-        return None;
-    }
-    Some(event_time)
-}
-
-/// Event queue statistics
-#[derive(Debug, Clone)]
-pub struct EventQueueStats {
-    /// Number of pending events
-    pub pending: usize,
-    /// Total events processed
-    pub processed: u64,
-    /// Last event time
-    pub last_event_time: Value,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn event_queue_ignores_negative_absolute_output_times() {
-        let mut queue = EventQueue::new();
+    fn drain(scheduler: &mut XspiceEventScheduler, time: Value) -> Vec<XspiceEvent> {
+        let mut drained = Vec::new();
+        scheduler
+            .run_due_events(time, |event| drained.push(event))
+            .expect("a queue nothing feeds back into settles");
+        drained
+    }
 
-        queue.schedule(Event::new(
+    #[test]
+    fn scheduler_ignores_negative_absolute_output_times() {
+        let mut scheduler = XspiceEventScheduler::new();
+
+        scheduler.schedule(
             -1.0e-12,
             1,
             "out",
             "a_negative_absolute_event_time",
+            0,
             EventValue::Digital(DigitalValue::one()),
-        ));
-        queue.schedule_delayed(
+        );
+        scheduler.schedule_delayed(
             1.0e-12,
             -1.0e-9,
             1,
@@ -552,7 +350,7 @@ mod tests {
             "a_negative_digital_event_time",
             DigitalValue::one(),
         );
-        queue.schedule_real_delayed(
+        scheduler.schedule_real_delayed(
             1.0e-12,
             -1.0e-9,
             2,
@@ -562,16 +360,16 @@ mod tests {
         );
 
         assert!(
-            queue.is_empty(),
+            scheduler.is_empty(),
             "event outputs before the start of transient analysis must be ignored"
         );
     }
 
     #[test]
-    fn event_queue_preserves_valid_rebased_delayed_output_times() {
-        let mut queue = EventQueue::new();
+    fn scheduler_preserves_valid_rebased_delayed_output_times() {
+        let mut scheduler = XspiceEventScheduler::new();
 
-        queue.schedule_delayed(
+        scheduler.schedule_delayed(
             10.0e-9,
             -2.0e-9,
             1,
@@ -579,92 +377,135 @@ mod tests {
             "a_late_digital_output",
             DigitalValue::one(),
         );
-        queue.schedule_real_delayed(10.0e-9, -1.0e-9, 2, "real_out", "a_late_real_output", 1.25);
+        scheduler.schedule_real_delayed(
+            10.0e-9,
+            -1.0e-9,
+            2,
+            "real_out",
+            "a_late_real_output",
+            1.25,
+        );
 
         assert_eq!(
-            queue.next_event_time(),
+            scheduler.next_event_time(),
             Some(8.0e-9),
             "valid rebased output events should keep their absolute target time"
         );
-        let events = queue.pop_events_at(10.0e-9);
+        let events = drain(&mut scheduler, 10.0e-9);
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].time, 8.0e-9);
         assert_eq!(events[1].time, 9.0e-9);
     }
 
     #[test]
-    fn event_queue_replaces_later_events_from_same_output_driver() {
-        let mut queue = EventQueue::new();
+    fn event_times_survive_the_tick_round_trip_exactly() {
+        // The times a transient run actually produces are not on any decimal
+        // grid; quantizing them would move the breakpoints they generate.
+        let mut scheduler = XspiceEventScheduler::new();
+        let awkward = [
+            0.0,
+            1.0e-18,
+            1.0 / 3.0e9,
+            2.718_281_828_459_045e-9,
+            7.234_567_890_123_456e-4,
+            123.456_789,
+        ];
+        for (index, time) in awkward.iter().enumerate() {
+            scheduler.schedule(
+                *time,
+                index + 1,
+                "out",
+                "driver",
+                index,
+                EventValue::Real(*time),
+            );
+        }
 
-        queue.schedule(Event::new(
+        let times: Vec<Value> = drain(&mut scheduler, 1.0e9)
+            .into_iter()
+            .map(|event| event.time)
+            .collect();
+        assert_eq!(times, awkward.to_vec());
+    }
+
+    #[test]
+    fn a_later_output_replaces_this_drivers_pending_output() {
+        let mut scheduler = XspiceEventScheduler::new();
+
+        scheduler.schedule(
             0.5e-9,
             1,
             "out",
             "a_driver",
+            0,
             EventValue::Digital(DigitalValue::zero()),
-        ));
-        queue.schedule(Event::new(
+        );
+        scheduler.schedule(
             2.0e-9,
             1,
             "out",
             "a_driver",
+            0,
             EventValue::Digital(DigitalValue::one()),
-        ));
-        queue.schedule(Event::new(
+        );
+        scheduler.schedule(
             2.0e-9,
             1,
             "other",
             "a_driver",
+            0,
             EventValue::Digital(DigitalValue::unknown()),
-        ));
-        queue.schedule(Event::new(
+        );
+        scheduler.schedule(
             1.0e-9,
             1,
             "out",
             "a_driver",
+            0,
             EventValue::Digital(DigitalValue::unknown()),
-        ));
+        );
 
-        assert_eq!(queue.len(), 3);
-        let events = queue.pop_events_at(2.0e-9);
-        let values: Vec<_> = events.iter().map(|event| event.value).collect();
+        assert_eq!(scheduler.len(), 3);
+        let values: Vec<_> = drain(&mut scheduler, 2.0e-9)
+            .iter()
+            .map(|event| event.value)
+            .collect();
         assert!(values.contains(&EventValue::Digital(DigitalValue::zero())));
         assert!(values.contains(&EventValue::Digital(DigitalValue::unknown())));
         assert!(!values.contains(&EventValue::Digital(DigitalValue::one())));
     }
 
     #[test]
-    fn event_queue_keeps_distinct_vector_driver_elements_on_same_node() {
-        let mut queue = EventQueue::new();
+    fn distinct_vector_driver_elements_on_one_node_are_distinct_drivers() {
+        let mut scheduler = XspiceEventScheduler::new();
 
-        queue.schedule(Event::new_with_driver_index(
+        scheduler.schedule(
             3.0e-9,
             1,
             "out",
             "vector_driver",
             0,
             EventValue::Digital(DigitalValue::zero()),
-        ));
-        queue.schedule(Event::new_with_driver_index(
+        );
+        scheduler.schedule(
             2.0e-9,
             1,
             "out",
             "vector_driver",
             1,
             EventValue::Digital(DigitalValue::one()),
-        ));
-        queue.schedule(Event::new_with_driver_index(
+        );
+        scheduler.schedule(
             1.0e-9,
             1,
             "out",
             "vector_driver",
             0,
             EventValue::Digital(DigitalValue::unknown()),
-        ));
+        );
 
-        assert_eq!(queue.len(), 2);
-        let events = queue.pop_events_at(3.0e-9);
-        let driver_values: Vec<_> = events
+        assert_eq!(scheduler.len(), 2);
+        let driver_values: Vec<_> = drain(&mut scheduler, 3.0e-9)
             .iter()
             .map(|event| (event.driver_index, event.value))
             .collect();
@@ -674,269 +515,114 @@ mod tests {
     }
 
     #[test]
-    fn event_queue_exact_pop_skips_cancelled_earlier_heap_entries() {
-        let mut queue = EventQueue::new();
-
-        queue.schedule(Event::new(
-            1.0e-9,
-            1,
-            "out",
-            "a_driver",
-            EventValue::Digital(DigitalValue::zero()),
-        ));
-        queue.schedule(Event::new(
-            3.0e-9,
-            1,
-            "out",
-            "a_driver",
-            EventValue::Digital(DigitalValue::one()),
-        ));
-        queue.schedule(Event::new(
-            0.5e-9,
-            1,
-            "out",
-            "a_driver",
-            EventValue::Digital(DigitalValue::unknown()),
-        ));
-
-        assert_eq!(queue.pop_events_exactly_at(0.5e-9).len(), 1);
-
-        queue.schedule(Event::new(
-            2.0e-9,
-            2,
-            "out",
-            "another_driver",
-            EventValue::Digital(DigitalValue::one()),
-        ));
-
-        let events = queue.pop_events_exactly_at(2.0e-9);
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].node_id, 2);
-        assert!(queue.is_empty());
-    }
-
-    #[test]
-    fn event_queue_exact_pop_is_not_blocked_by_earlier_active_events() {
-        let mut queue = EventQueue::new();
-
-        queue.schedule(Event::new(
-            1.0e-9,
-            1,
-            "out",
-            "early_driver",
-            EventValue::Digital(DigitalValue::zero()),
-        ));
-        queue.schedule(Event::new(
-            2.0e-9,
-            2,
-            "out",
-            "target_driver",
-            EventValue::Digital(DigitalValue::one()),
-        ));
-        queue.schedule(Event::new(
-            3.0e-9,
-            3,
-            "out",
-            "late_driver",
-            EventValue::Digital(DigitalValue::unknown()),
-        ));
-
-        let events = queue.pop_events_exactly_at(2.0e-9);
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].node_id, 2);
-        assert_eq!(queue.len(), 2);
-        assert_eq!(queue.next_event_time(), Some(1.0e-9));
-
-        let remaining = queue.pop_events_at(3.0e-9);
-        let remaining_nodes: Vec<_> = remaining.iter().map(|event| event.node_id).collect();
-        assert_eq!(remaining_nodes, vec![1, 3]);
-    }
-
-    #[test]
-    fn event_queue_stats_record_actual_processed_event_time() {
-        let mut queue = EventQueue::new();
-
-        queue.schedule(Event::new(
-            1.0e-9,
-            1,
-            "out",
-            "driver",
-            EventValue::Digital(DigitalValue::one()),
-        ));
-
-        let events = queue.pop_events_at(2.0e-9);
-        assert_eq!(events.len(), 1);
-        let stats = queue.stats();
-        assert_eq!(stats.processed, 1);
-        assert_eq!(stats.last_event_time, 1.0e-9);
-    }
-
-    #[test]
     fn delayed_digital_event_can_target_earlier_time_in_current_step() {
-        let mut queue = EventQueue::new();
+        let mut scheduler = XspiceEventScheduler::new();
 
-        queue.schedule_delayed(4.0e-9, -1.5e-9, 1, "out", "driver", DigitalValue::one());
+        scheduler.schedule_delayed(4.0e-9, -1.5e-9, 1, "out", "driver", DigitalValue::one());
 
-        let events = queue.pop_events_at(4.0e-9);
+        let events = drain(&mut scheduler, 4.0e-9);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].time, 2.5e-9);
-        let stats = queue.stats();
-        assert_eq!(stats.last_event_time, 2.5e-9);
     }
 
     #[test]
     fn delayed_real_event_can_target_earlier_time_in_current_step() {
-        let mut queue = EventQueue::new();
+        let mut scheduler = XspiceEventScheduler::new();
 
-        queue.schedule_real_delayed(4.0e-9, -1.5e-9, 1, "out", "driver", 2.0);
+        scheduler.schedule_real_delayed(4.0e-9, -1.5e-9, 1, "out", "driver", 2.0);
 
-        let events = queue.pop_events_at(4.0e-9);
+        let events = drain(&mut scheduler, 4.0e-9);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].time, 2.5e-9);
         assert_eq!(events[0].value, EventValue::Real(2.0));
-        let stats = queue.stats();
-        assert_eq!(stats.last_event_time, 2.5e-9);
     }
 
     #[test]
-    fn event_queue_active_indexes_track_schedule_drain_cancel_and_clear() {
-        let mut queue = EventQueue::new();
-        let driver = EventDriverKey {
-            node_id: 1,
-            port_name: "out".to_string(),
-            driver_index: 0,
-            instance: "a_driver".to_string(),
-        };
-
-        queue.schedule(Event::new(
-            1.0e-9,
-            1,
-            "out",
-            "a_driver",
-            EventValue::Digital(DigitalValue::zero()),
-        ));
-        queue.schedule(Event::new(
-            3.0e-9,
-            1,
-            "out",
-            "a_driver",
-            EventValue::Digital(DigitalValue::one()),
-        ));
-        assert_eq!(queue.len(), 2);
-        assert_eq!(queue.next_event_time(), Some(1.0e-9));
-        assert!(
-            queue
-                .driver_event_priorities
-                .get(&driver)
-                .is_some_and(|events| events.contains_key(&EventTimeKey(3.0e-9)))
-        );
-
-        queue.schedule(Event::new(
-            2.0e-9,
-            1,
-            "out",
-            "a_driver",
-            EventValue::Digital(DigitalValue::unknown()),
-        ));
-        assert_eq!(queue.len(), 2);
-        assert!(
-            queue
-                .driver_event_priorities
-                .get(&driver)
-                .is_some_and(|events| !events.contains_key(&EventTimeKey(3.0e-9))
-                    && events.contains_key(&EventTimeKey(2.0e-9)))
-        );
-
-        let drained = queue.pop_events_at(1.0e-9);
-        assert_eq!(drained.len(), 1);
-        assert_eq!(queue.len(), 1);
-        assert!(
-            queue
-                .driver_event_priorities
-                .get(&driver)
-                .is_some_and(|events| events.contains_key(&EventTimeKey(2.0e-9)))
-        );
-
-        queue.cancel_node_events(1);
-        assert!(queue.active_event_priorities.is_empty());
-        assert!(queue.active_times.is_empty());
-        assert!(queue.driver_event_priorities.is_empty());
-
-        queue.schedule(Event::new(
+    fn an_output_dated_before_a_settled_timepoint_is_still_delivered() {
+        // The interpolated-crossing case: after the drain at 4 ns, a model
+        // schedules an output dated 3 ns. The old queue had no horizon and
+        // delivered it; the kernel's due slot has to as well.
+        let mut scheduler = XspiceEventScheduler::new();
+        scheduler.schedule(
             4.0e-9,
             1,
             "out",
-            "a_driver",
+            "driver",
+            0,
             EventValue::Digital(DigitalValue::one()),
-        ));
-        queue.clear();
-        assert!(queue.active_event_priorities.is_empty());
-        assert!(queue.active_times.is_empty());
-        assert!(queue.driver_event_priorities.is_empty());
-    }
+        );
+        assert_eq!(drain(&mut scheduler, 4.0e-9).len(), 1);
 
-    #[test]
-    fn event_queue_cancel_filters_heap_in_place() {
-        let mut queue = EventQueue::new();
-
-        queue.schedule(Event::new(
-            1.0e-9,
-            1,
-            "out",
-            "a_left",
-            EventValue::Digital(DigitalValue::one()),
-        ));
-        queue.schedule(Event::new(
-            2.0e-9,
+        scheduler.schedule(
+            3.0e-9,
             2,
             "out",
-            "a_left",
+            "late_driver",
+            0,
             EventValue::Digital(DigitalValue::zero()),
-        ));
-        queue.schedule(Event::new(
-            3.0e-9,
-            3,
-            "out",
-            "a_right",
-            EventValue::Digital(DigitalValue::unknown()),
-        ));
-
-        queue.cancel_node_events(2);
-        assert_eq!(queue.len(), 2);
-        queue.cancel_instance_events("a_right");
-        assert_eq!(queue.len(), 1);
-
-        let events = queue.pop_events_at(3.0e-9);
+        );
+        let events = drain(&mut scheduler, 4.0e-9);
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].node_id, 1);
-        assert_eq!(events[0].instance, "a_left");
+        assert_eq!(events[0].time, 3.0e-9);
     }
 
     #[test]
-    fn event_queue_drains_due_events_into_caller_sink() {
-        let mut queue = EventQueue::new();
+    fn only_due_events_drain_and_the_rest_stay_pending() {
+        let mut scheduler = XspiceEventScheduler::new();
 
-        queue.schedule(Event::new(
+        scheduler.schedule(
             0.5e-9,
             1,
             "out",
             "a_driver",
+            0,
             EventValue::Digital(DigitalValue::zero()),
-        ));
-        queue.schedule(Event::new(
-            2.0e-9,
-            2,
-            "out",
-            "a_driver",
-            EventValue::Real(1.25),
-        ));
+        );
+        scheduler.schedule(2.0e-9, 2, "out", "a_driver", 0, EventValue::Real(1.25));
 
-        let mut drained = Vec::new();
-        queue.drain_events_at(1.0e-9, |event| drained.push(event.value));
+        let drained: Vec<_> = drain(&mut scheduler, 1.0e-9)
+            .into_iter()
+            .map(|event| event.value)
+            .collect();
 
         assert_eq!(drained, vec![EventValue::Digital(DigitalValue::zero())]);
-        assert_eq!(queue.len(), 1);
-        assert_eq!(queue.stats().processed, 1);
-        assert_eq!(queue.next_event_time(), Some(2.0e-9));
+        assert_eq!(scheduler.len(), 1);
+        assert_eq!(scheduler.next_event_time(), Some(2.0e-9));
+    }
+
+    #[test]
+    fn a_settle_loop_that_never_quiets_is_diagnosed() {
+        let mut scheduler = XspiceEventScheduler::new();
+        let mut reported = None;
+        for cycle in 0..20_000u32 {
+            scheduler.schedule(
+                1.0e-9,
+                1,
+                "q",
+                "an_oscillator",
+                0,
+                EventValue::Digital(if cycle % 2 == 0 {
+                    DigitalValue::zero()
+                } else {
+                    DigitalValue::one()
+                }),
+            );
+            scheduler
+                .run_due_events(1.0e-9, |_| {})
+                .expect("the drain itself settles");
+            if let Err(error) = scheduler.note_delta_cycle(1.0e-9) {
+                reported = Some(error);
+                break;
+            }
+        }
+
+        let Some(SchedulerError::Oscillation(diagnostic)) = reported else {
+            panic!("a network that never quiets must be diagnosed, got {reported:?}");
+        };
+        assert_eq!(
+            diagnostic.tick,
+            event_tick(1.0e-9).expect("a schedulable time")
+        );
+        assert_eq!(diagnostic.entities[0].0.instance, "an_oscillator");
     }
 }

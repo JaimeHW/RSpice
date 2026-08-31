@@ -47,7 +47,7 @@ pub(crate) struct NonlinearDeviceStateSnapshot {
     xspice_real_values: HashMap<NodeId, Value>,
     xspice_real_drivers: XspiceRealDrivers,
     xspice_real_event_times: HashMap<NodeId, Value>,
-    xspice_event_queue: EventQueue,
+    xspice_event_queue: XspiceEventScheduler,
     #[cfg(feature = "veriloga")]
     veriloga_devices: crate::device::veriloga::VerilogADevices,
     #[cfg(feature = "veriloga-builtins-base")]

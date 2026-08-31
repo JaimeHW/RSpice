@@ -1,10 +1,12 @@
 //! Conformance tests for the discrete-event scheduler kernel.
 //!
-//! The kernel has no in-crate consumer yet — rehosting XSPICE on it is a later
-//! change — so these tests are its only caller. They are written against the
-//! two properties a later lane has to be able to rely on: the same schedule
-//! produces the same ordering on every run and in every process, and that
-//! ordering is the one IEEE 1364-2005 specifies.
+//! The XSPICE path runs on the kernel, but it exercises the kernel through one
+//! shape: everything in the active region, driven by an outer settle loop.
+//! These tests are what holds the rest — the stratified regions, the total
+//! order, driver supersession, and the two properties everything above the
+//! kernel rests on: the same schedule produces the same ordering on every run
+//! and in every process, and that ordering is the one IEEE 1364-2005
+//! specifies.
 
 use std::collections::BTreeMap;
 use std::env;
