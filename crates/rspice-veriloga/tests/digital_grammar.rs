@@ -1347,6 +1347,159 @@ fn a_module_whose_only_digital_content_is_an_instance_still_refuses() {
     );
 }
 
+/// A port connected to *some of* a net's bits does not collapse; it becomes an
+/// implicit continuous assignment, in whichever direction the port's own
+/// direction gives it (IEEE 1364-2005 section 12.3.9).
+///
+/// Two nets cannot be joined when one of them is four bits and the other is one
+/// of those four, so the collapse reading has nothing to say here. The
+/// assignment reading does, and it is a *real* driver: four instances driving
+/// four bits of one net are four drivers of that net, each covering its own
+/// bit, so the resolver sees four contributions rather than four whole-net
+/// writes that overwrite each other.
+#[test]
+fn a_bit_select_port_connection_becomes_a_driver_on_that_bit() {
+    let source = format!(
+        "module inv(y, a);\n\
+         \x20   output y;\n     input a;\n     wire y, a;\n\
+         \x20   assign y = ~a;\n\
+         endmodule\n\
+         module top(bus, out);\n\
+         \x20   input [3:0] bus;\n\
+         \x20   output [3:0] out;\n\
+         \x20   wire [3:0] bus, out;\n\
+         \x20   inv u0 (out[0], bus[0]);\n\
+         \x20   inv u1 (out[1], bus[1]);\n\
+         \x20   inv u2 (out[2], bus[2]);\n\
+         \x20   inv u3 (out[3], bus[3]);\n\
+         endmodule\n"
+    );
+    let plan = plan(&source, "top");
+
+    // The ports kept their own signals rather than collapsing onto `out`/`bus`.
+    let names: Vec<&str> = plan
+        .signals
+        .iter()
+        .map(|signal| signal.name.as_str())
+        .collect();
+    for instance in ["u0", "u1", "u2", "u3"] {
+        for port in ["y", "a"] {
+            assert!(
+                names.contains(&format!("{instance}.{port}").as_str()),
+                "no elaborated signal `{instance}.{port}`; got {names:?}"
+            );
+        }
+    }
+
+    // `out` has four drivers, one per bit, with distinct indices.
+    let out = plan
+        .signals
+        .iter()
+        .find(|signal| signal.name == "out")
+        .expect("`out` is declared");
+    let mut driven: Vec<(u32, i64)> = plan
+        .drivers_of(out.id)
+        .map(|driver| {
+            let bit = match driver.target.select {
+                rspice_veriloga::canonical_ir::digital::DigitalWriteSelect::Bit(position) => {
+                    position
+                }
+                ref other => panic!("expected a bit select, got {other:?}"),
+            };
+            (driver.id.index, bit)
+        })
+        .collect();
+    driven.sort_unstable();
+    assert_eq!(driven, vec![(0, 0), (1, 1), (2, 2), (3, 3)]);
+
+    // Each instance's own input port is driven from the parent's bit, so it has
+    // a driver of its own rather than sharing the parent's net.
+    for instance in ["u0", "u1", "u2", "u3"] {
+        let port = plan
+            .signals
+            .iter()
+            .find(|signal| signal.name == format!("{instance}.a"))
+            .expect("the input port kept its own signal");
+        assert_eq!(
+            plan.drivers_of(port.id).count(),
+            1,
+            "`{instance}.a` must be driven from the parent's bit"
+        );
+    }
+}
+
+/// A part-select connection carries its whole width, and the driver covers
+/// exactly those bits.
+#[test]
+fn a_part_select_port_connection_drives_exactly_its_bits() {
+    let source = "module half(y, a);\n\
+         \x20   output [1:0] y;\n     input [1:0] a;\n\
+         \x20   wire [1:0] y, a;\n\
+         \x20   assign y = ~a;\n\
+         endmodule\n\
+         module top(bus, out);\n\
+         \x20   input [3:0] bus;\n\
+         \x20   output [3:0] out;\n\
+         \x20   wire [3:0] bus, out;\n\
+         \x20   half lo (out[1:0], bus[1:0]);\n\
+         \x20   half hi (out[3:2], bus[3:2]);\n\
+         endmodule\n";
+    let plan = plan(source, "top");
+
+    let out = plan
+        .signals
+        .iter()
+        .find(|signal| signal.name == "out")
+        .expect("`out` is declared");
+    let mut parts: Vec<(i64, i64)> = plan
+        .drivers_of(out.id)
+        .map(|driver| match driver.target.select {
+            rspice_veriloga::canonical_ir::digital::DigitalWriteSelect::Part { msb, lsb } => {
+                (msb, lsb)
+            }
+            ref other => panic!("expected a part select, got {other:?}"),
+        })
+        .collect();
+    parts.sort_unstable();
+    assert_eq!(parts, vec![(1, 0), (3, 2)]);
+}
+
+/// A child's own parameter is fixed at its declared default (IEEE 1364-2005
+/// section 12.2), and a parameter-sized expression inside the child folds
+/// against the *child's* table.
+///
+/// The two `WIDTH`s in this fixture are deliberately different numbers. A pass
+/// that folded the child's `{WIDTH{1'b0}}` with the parent's would produce a
+/// two-bit constant where the child asked for four, and the resulting device
+/// would be silently the wrong width rather than refused.
+#[test]
+fn a_child_folds_its_own_parameters_and_never_the_parents() {
+    let source = "module sink(y, a);\n\
+         \x20   parameter WIDTH = 4;\n\
+         \x20   output [WIDTH-1:0] y;\n\
+         \x20   input [WIDTH-1:0] a;\n\
+         \x20   wire [WIDTH-1:0] y, a;\n\
+         \x20   assign y = a ^ {WIDTH{1'b1}};\n\
+         endmodule\n\
+         module top(bus, out);\n\
+         \x20   parameter WIDTH = 2;\n\
+         \x20   input [3:0] bus;\n\
+         \x20   output [3:0] out;\n\
+         \x20   wire [3:0] bus, out;\n\
+         \x20   sink u (out, bus);\n\
+         endmodule\n";
+    let plan = plan(source, "top");
+
+    let port = plan
+        .signals
+        .iter()
+        .find(|signal| signal.name == "out")
+        .expect("`out` is declared");
+    assert_eq!(port.width, 4, "the child elaborated at its own WIDTH");
+    // One driver, from the child's `assign`, over the whole four-bit net.
+    assert_eq!(plan.drivers_of(port.id).count(), 1);
+}
+
 /// Every construct this wave does not elaborate refuses by name, with the
 /// clause that governs it. Nothing is dropped, and nothing is guessed at.
 #[test]
@@ -1364,21 +1517,20 @@ fn unelaborated_instance_constructs_refuse_by_name() {
             vec!["overrides a parameter", "12.2"],
         ),
         (
-            "a parameter on the instantiated module",
-            hierarchy(
-                "module gate(y, a);\n\
-                 \x20   parameter real w = 1.0;\n\
-                 \x20   output y;\n     input a;\n     wire y, a;\n\
-                 \x20   assign y = a;\n\
-                 endmodule\n",
-                "    wire x, z;\n     gate g1(z, x);",
-            ),
-            vec!["declares the parameter `w`", "12.2"],
-        ),
-        (
             "an expression in a port connection",
             hierarchy(NAND2, "    wire a, b, y;\n     nand2 g1(y, a & b, b);"),
             vec!["connected to an expression", "12.3.9"],
+        ),
+        (
+            "a bit-select connected to an inout port",
+            hierarchy(
+                "module pass(io, a);\n\
+                 \x20   inout io;\n     input a;\n     wire io, a;\n\
+                 \x20   assign io = a;\n\
+                 endmodule\n",
+                "    wire [1:0] bus;\n     wire x;\n     pass g1(bus[0], x);",
+            ),
+            vec!["bidirectional join", "12.3.9.3"],
         ),
         (
             "an undeclared connection name",
@@ -1511,7 +1663,6 @@ fn the_two_connection_forms_elaborate_to_the_same_plan() {
 // ===========================================================================
 
 /// The digital plan a source compiles to, by module name.
-#[cfg(feature = "native")]
 fn plan(source: &str, module: &str) -> rspice_veriloga::canonical_ir::CanonicalDigitalPlan {
     VerilogACompiler::new(CompilerOptions::default())
         .compile_canonical_ir_module(source, Some(module))

@@ -59,9 +59,10 @@ pub struct AnalyzedDigital {
     /// widening of the invariant environment.
     ///
     /// Only the compiled module's own. An elaborated instance's body is
-    /// lowered against an empty table, so a child's `{WIDTH{1'b0}}` is refused
-    /// rather than folded with the *parent's* `WIDTH` — which would be a wrong
-    /// answer wearing a right one's clothes.
+    /// lowered against [`ElaboratedDigitalInstance::constants`] — the *child's*
+    /// table — so a child's `{WIDTH{1'b0}}` folds with the child's `WIDTH` and
+    /// never with the parent's, which would be a wrong answer wearing a right
+    /// one's clothes.
     pub constants: HashMap<SmolStr, i64>,
 }
 
@@ -295,6 +296,15 @@ pub struct ElaboratedDigitalInstance {
     /// this instance's variable. They are the one construct here that is not
     /// something the author wrote.
     pub port_drivers: Vec<AnalyzedContinuousAssign>,
+    /// The instantiated module's *own* integer parameters and localparams.
+    ///
+    /// Not the parent's, and not the parent's merged with the child's. A
+    /// child's `{WIDTH{1'b0}}` means the child's `WIDTH`, and folding it with a
+    /// parent's `WIDTH` would be a wrong answer wearing a right one's clothes —
+    /// so the two tables never meet. With a parameter override on a digital
+    /// instance refused (section 12.2), the child's declared defaults *are* its
+    /// elaborated values, and every instance of one module sees the same table.
+    pub constants: HashMap<SmolStr, i64>,
     /// The instance statement, for diagnostics.
     pub span: Span,
 }

@@ -55,9 +55,13 @@
 //! - `**`, a non-constant delay, and a non-constant select bound.
 //!
 //! Refused before this pass, and still refused: tasks and functions,
-//! `generate`, `fork`/`join`, `wait`, `disable`, and `force`/`release` — the
-//! parser stops each on its own keyword, so none of them reaches a lowering
-//! decision.
+//! `fork`/`join`, `wait`, `disable`, and `force`/`release` — the parser stops
+//! each on its own keyword, so none of them reaches a lowering decision.
+//!
+//! Nor does a generate region. IEEE 1364-2005 section 12.4 makes one an
+//! elaboration-time construct, and the parser unrolls it into ordinary module
+//! items at `endmodule`, so what arrives here is the flat result and there is
+//! no generate anything to lower.
 //!
 //! # Hierarchy
 //!
@@ -202,11 +206,17 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
         id
     };
 
-    // An instance frame's body is lowered against no constants at all. The
-    // table on `AnalyzedDigital` belongs to the module the artifact is being
-    // built for, and folding a child's `WIDTH` with the parent's would be a
-    // wrong answer rather than a refused one; a child that needs a constant
-    // reports that it cannot resolve it.
+    // An instance frame's body is lowered against *its own* module's constants,
+    // never against the module the artifact is being built for. The two tables
+    // never meet: folding a child's `WIDTH` with the parent's would be a wrong
+    // answer rather than a refused one, and a child whose `{WIDTH{1'b0}}`
+    // resolved to the parent's number would compile into a device silently the
+    // wrong width.
+    //
+    // A synthesized port driver is lowered against no constants at all, because
+    // it belongs to neither scope: this pass wrote it, in elaborated names, and
+    // the only expressions in one are a name and a select whose bounds are
+    // already literals.
     let no_constants: HashMap<SmolStr, i64> = HashMap::new();
 
     let mut processes = Vec::new();
@@ -233,7 +243,7 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
     }
     for (instance, scope) in digital.instances.iter().zip(&frame_scopes) {
         for process in &instance.processes {
-            match lower_process(process, allocate(), &signals, scope, &no_constants) {
+            match lower_process(process, allocate(), &signals, scope, &instance.constants) {
                 Ok(lowered) => processes.push(lowered),
                 Err(mut errors) => diagnostics.append(&mut errors),
             }
@@ -243,7 +253,7 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
                 assignment,
                 &signals,
                 scope,
-                &no_constants,
+                &instance.constants,
                 allocate(),
                 &mut drivers,
             ) {
@@ -1540,10 +1550,32 @@ impl ProcessLowerer<'_> {
                 self.reduction(block, reduction)
             }
             Expression::Number(number) => {
-                // IEEE 1364-2005 section 3.5.1 gives an unsized literal at
-                // least 32 bits, and this front end has no context width to
-                // narrow it with.
-                let width = 32;
+                // IEEE 1364-2005 section 3.5.1: a *sized* literal is exactly as
+                // wide as its author wrote it, and an unsized one is at least
+                // 32 bits — which is what this front end gives it, having no
+                // context width to narrow it with.
+                //
+                // The size is recovered from the literal's own source spelling,
+                // because that is the only place it survives: the lexer routes a
+                // based literal whose digits are all `0`/`1` to the integer
+                // decoder, which keeps the number and drops the width.
+                //
+                // Reading it back is not cosmetic. Every operator that combines
+                // widths depends on it, and a concatenation depends on nothing
+                // else: `{a, b, c, 1'b1}` is four bits, while the same
+                // concatenation holding a 32-bit `1` is thirty-five, whose low
+                // four bits are a different value entirely.
+                if let Ok(literal) = crate::four_state::decode(&number.raw) {
+                    let value = FourStateValue::from_literal(&literal);
+                    let width = value.width();
+                    return self.builder.push_leaf(
+                        CfgValueType::FourState { width },
+                        CfgValueKind::FourStateConstant(value),
+                    );
+                }
+                // A plain decimal with no base marker. Section 3.5.1 sizes one
+                // as an unsized literal.
+                let width = crate::four_state::UNSIZED_FOUR_STATE_WIDTH;
                 let bits = if number.value < 0.0 || number.value.fract() != 0.0 {
                     self.error(
                         "only a non-negative whole number is a discrete-domain \

@@ -41,6 +41,14 @@
 //!   two readings *do* differ are refused below rather than silently resolved
 //!   in favour of the cheaper one.
 //!
+//! * **A bit- or part-select connection becomes an implicit continuous
+//!   assignment**, in the direction the port's own direction gives it. Some of
+//!   a net's bits are not a net, so there is nothing to join: an input port is
+//!   *driven from* the selected bits and an output port *drives* them, and each
+//!   is a real driver with a real identity on a real net. Driving four bits of
+//!   an eight-bit net is what a driver's write *select* exists for, so the
+//!   other four keep whatever else drives them.
+//!
 //! * **A variable output port becomes an implicit continuous assignment.**
 //!   Section 12.3.9.2 permits an output port to be a variable, and a variable
 //!   cannot be collapsed with a net: one holds a value written procedurally,
@@ -62,10 +70,19 @@
 //!
 //! Every refusal names the construct and the clause. Nothing is dropped.
 //!
-//! * a parameter override (`#(...)`) on a digital instance, and a digital
-//!   module that declares parameters at all (section 12.2);
-//! * a port connection that is not a simple net reference — an expression, a
-//!   constant, a concatenation, a bit- or part-select (section 12.3.9);
+//! * a parameter override (`#(...)`) on a digital instance (section 12.2).
+//!   The child's *own* parameters are not refused: section 12.2 makes the
+//!   declared default the value in the absence of an override, and the frame
+//!   carries that table so a parameter-sized expression inside the child folds
+//!   against the child's numbers. An override is what stays refused, because
+//!   honouring one would give two instances of a module two different signal
+//!   widths and this pass produces one signal table per module body;
+//! * a port connection that is neither a declared net nor a bit- or
+//!   part-select of one — an arbitrary expression, a constant, a concatenation
+//!   (section 12.3.9);
+//! * a bit- or part-select connected to an `inout` port, because section
+//!   12.3.9.3 makes that connection a bidirectional join of two nets and no
+//!   assignment in either direction describes one;
 //! * a connection naming something that is not a declared discrete-domain
 //!   signal, because this compiler does not create implicit nets (section
 //!   4.5);
@@ -93,8 +110,8 @@ use super::{
     ElaboratedDigitalSignal, reject_digital_content,
 };
 use crate::ast::{
-    Connection, ContinuousAssign, DigitalLValue, Expression, Identifier, Module, ModuleInstance,
-    PortDirection,
+    ArrayAccessExpr, Connection, ContinuousAssign, DigitalExpr, DigitalLValue, Expression,
+    Identifier, Module, ModuleInstance, PartSelectExpr, PortDirection,
 };
 use crate::error::{CompileError, CompileResult, SemanticError, SemanticErrorKind};
 use crate::source::Span;
@@ -272,17 +289,12 @@ impl DigitalElaborator<'_> {
         if has_analog_content(child) {
             reject_digital_content(child)?;
         }
-        if !child.parameters.is_empty() {
-            return Err(semantic_error(
-                SemanticErrorKind::UnsupportedFeature(format!(
-                    "digital module `{}` declares the parameter `{}`; IEEE 1364-2005 section \
-                     12.2 makes a parameter overridable per instance, and this compiler has \
-                     no per-instance digital parameter yet",
-                    instance.module, child.parameters[0].name
-                )),
-                instance.span,
-            ));
-        }
+        // A child that declares parameters elaborates at its own declared
+        // defaults, which section 12.2 makes the value in the absence of an
+        // override. What stays refused is the override itself — see below —
+        // because honouring one would give two instances of a module two
+        // different signal *widths*, and this pass produces one signal table
+        // per module body.
         if let Some(override_) = instance.parameters.first() {
             return Err(semantic_error(
                 SemanticErrorKind::UnsupportedFeature(format!(
@@ -329,6 +341,7 @@ impl DigitalElaborator<'_> {
             processes: child.digital.processes.clone(),
             continuous_assigns: child.digital.continuous_assigns.clone(),
             port_drivers,
+            constants: child.digital.constants.clone(),
             span: instance.span,
         });
 
@@ -394,7 +407,10 @@ impl DigitalElaborator<'_> {
             }
 
             let own = qualify(path, &port.name);
-            let binding = match connections[index] {
+            let form = connections[index]
+                .map(|expression| connection_form(expression, path, &port.name))
+                .transpose()?;
+            let binding = match form {
                 // An unconnected port is a net of its own. IEEE 1364-2005
                 // section 12.3.9 leaves an unconnected input at high
                 // impedance, which is what a net nothing drives already is.
@@ -404,8 +420,89 @@ impl DigitalElaborator<'_> {
                     is_variable,
                     is_input_port: port.direction == PortDirection::Input,
                 },
-                Some(expression) => {
-                    let outer = resolve_connection(expression, parent_scope, path, &port.name)?;
+                // Some of a net's bits, not a net. The two cannot be joined —
+                // one net has one width — so section 12.3.9's *other* reading
+                // applies: the port keeps its own signal and the connection is
+                // an implicit continuous assignment, in whichever direction the
+                // port's own direction makes it.
+                Some(ConnectionForm::Select { name, select, span }) => {
+                    let outer = lookup_connection(name, parent_scope, path, &port.name, span)?;
+                    let width = select.width(span)?;
+                    if width != declared.width {
+                        return Err(semantic_error(
+                            SemanticErrorKind::TypeMismatch {
+                                expected: format!("{}-bit connection", declared.width),
+                                found: format!("a {width}-bit select of `{}`", outer.elaborated),
+                                context: format!(
+                                    "port `{}` of instance `{path}`; IEEE 1364-2005 section \
+                                     12.3.9 connects a port to a differently sized expression \
+                                     by truncating or extending it, and this compiler requires \
+                                     the two to agree",
+                                    port.name
+                                ),
+                            },
+                            span,
+                        ));
+                    }
+                    match port.direction {
+                        PortDirection::Input => {
+                            // The parent drives the port: `assign u1.a = bus[3];`
+                            port_drivers.push(assignment(
+                                DigitalLValue::Identifier {
+                                    name: own.clone(),
+                                    span,
+                                },
+                                select.expression(&outer.elaborated, span),
+                                span,
+                            ));
+                        }
+                        PortDirection::Output => {
+                            if outer.is_variable {
+                                return Err(variable_connection_error(&outer, port, path, span));
+                            }
+                            if outer.is_input_port {
+                                return Err(input_port_connection_error(&outer, port, path, span));
+                            }
+                            // The port drives some of the parent's bits:
+                            // `assign bus[3] = u1.y;`
+                            port_drivers.push(assignment(
+                                select.lvalue(&outer.elaborated, span),
+                                Expression::Identifier(Identifier {
+                                    name: own.clone(),
+                                    span,
+                                }),
+                                span,
+                            ));
+                        }
+                        // Section 12.3.9.3 makes an inout connection a
+                        // bidirectional join of two nets. A select is not a
+                        // net, and neither direction of assignment describes
+                        // the join, so there is nothing honest to build.
+                        PortDirection::Inout => {
+                            return Err(semantic_error(
+                                SemanticErrorKind::UnsupportedFeature(format!(
+                                    "the `inout` port `{}` of instance `{path}` is connected to \
+                                     a select of `{}`; IEEE 1364-2005 section 12.3.9.3 makes an \
+                                     inout connection a bidirectional join of two nets, which no \
+                                     assignment in either direction describes — connect a \
+                                     declared net by name",
+                                    port.name, outer.elaborated
+                                )),
+                                span,
+                            ));
+                        }
+                    }
+                    Binding {
+                        elaborated: own,
+                        width: declared.width,
+                        is_variable,
+                        is_input_port: port.direction == PortDirection::Input,
+                    }
+                }
+                Some(ConnectionForm::Net(identifier)) => {
+                    let span = identifier.span;
+                    let outer =
+                        lookup_connection(&identifier.name, parent_scope, path, &port.name, span)?;
                     if outer.width != declared.width {
                         return Err(semantic_error(
                             SemanticErrorKind::TypeMismatch {
@@ -422,47 +519,22 @@ impl DigitalElaborator<'_> {
                                     port.name
                                 ),
                             },
-                            expression.span(),
+                            span,
                         ));
                     }
                     if port.direction != PortDirection::Input {
                         if outer.is_variable {
-                            return Err(semantic_error(
-                                SemanticErrorKind::InvalidContribution(format!(
-                                    "`{}`, which is a variable connected to the `{}` port `{}` \
-                                     of instance `{path}`; IEEE 1364-2005 section 12.3.9.2 \
-                                     connects an output or inout port to a net",
-                                    outer.elaborated,
-                                    direction_keyword(port.direction),
-                                    port.name
-                                )),
-                                expression.span(),
-                            ));
+                            return Err(variable_connection_error(&outer, port, path, span));
                         }
                         if outer.is_input_port {
-                            return Err(semantic_error(
-                                SemanticErrorKind::InvalidContribution(format!(
-                                    "`{}`, which the connecting module receives through an \
-                                     input port and the `{}` port `{}` of instance `{path}` \
-                                     would drive; IEEE 1364-2005 section 12.3.9.1 drives an \
-                                     input port from outside",
-                                    outer.elaborated,
-                                    direction_keyword(port.direction),
-                                    port.name
-                                )),
-                                expression.span(),
-                            ));
+                            return Err(input_port_connection_error(&outer, port, path, span));
                         }
                     }
 
                     if is_variable {
                         // Section 12.3.9.2: the port keeps its own signal and
                         // the connection becomes a driver on the outer net.
-                        port_drivers.push(implicit_port_assignment(
-                            &outer.elaborated,
-                            &own,
-                            expression.span(),
-                        ));
+                        port_drivers.push(implicit_port_assignment(&outer.elaborated, &own, span));
                         Binding {
                             elaborated: own,
                             width: declared.width,
@@ -585,23 +657,140 @@ fn bind_connections<'a>(
     Ok(bound)
 }
 
-/// Resolve the connecting scope's side of one port connection.
-fn resolve_connection(
-    expression: &Expression,
+/// The shapes a port connection may take.
+///
+/// IEEE 1364-2005 section 12.3.9 permits an arbitrary expression, and reads a
+/// connection two ways depending on what it is. These are the two this compiler
+/// can build something honest out of, and they take the two different readings:
+/// a whole net collapses, a select becomes an implicit continuous assignment.
+/// Everything else — a concatenation, a constant, an arithmetic expression —
+/// is refused where it is written.
+enum ConnectionForm<'a> {
+    /// `.a(bus)` — the whole of a declared net.
+    Net(&'a Identifier),
+    /// `.a(bus[3])` or `.a(bus[7:4])` — some of a declared net's bits.
+    Select {
+        name: &'a SmolStr,
+        select: SelectBounds<'a>,
+        span: Span,
+    },
+}
+
+/// Which bits of a net a connection selects.
+enum SelectBounds<'a> {
+    Bit(&'a Expression),
+    Part {
+        msb: &'a Expression,
+        lsb: &'a Expression,
+    },
+}
+
+impl SelectBounds<'_> {
+    /// How many bits the select carries.
+    ///
+    /// A bit select is one, with no evaluation: the index does not have to be
+    /// known here, and a generate-unrolled `carry[i+1]` is folded where it is
+    /// lowered. A part select's *bounds* are what give its width, so those must
+    /// fold, and a pair that does not is refused rather than guessed at.
+    fn width(&self, span: Span) -> CompileResult<u32> {
+        match self {
+            Self::Bit(_) => Ok(1),
+            Self::Part { msb, lsb } => {
+                let (Some(msb), Some(lsb)) = (constant_bound(msb), constant_bound(lsb)) else {
+                    return Err(semantic_error(
+                        SemanticErrorKind::UnsupportedFeature(
+                            "a part-select port connection whose bounds this compiler cannot \
+                             fold to constants; IEEE 1364-2005 section 4.2.1 requires constant \
+                             bounds, and the width of the connection is what the port must \
+                             agree with"
+                                .to_string(),
+                        ),
+                        span,
+                    ));
+                };
+                Ok(msb.abs_diff(lsb) as u32 + 1)
+            }
+        }
+    }
+
+    /// The select, rebuilt against the elaborated name of the net it reads.
+    fn expression(&self, elaborated: &str, span: Span) -> Expression {
+        match self {
+            Self::Bit(index) => Expression::ArrayAccess(ArrayAccessExpr {
+                array: SmolStr::from(elaborated),
+                index: Box::new((*index).clone()),
+                span,
+            }),
+            Self::Part { msb, lsb } => {
+                Expression::Digital(DigitalExpr::PartSelect(PartSelectExpr {
+                    name: SmolStr::from(elaborated),
+                    msb: Box::new((*msb).clone()),
+                    lsb: Box::new((*lsb).clone()),
+                    span,
+                }))
+            }
+        }
+    }
+
+    /// The same select as an assignment target.
+    fn lvalue(&self, elaborated: &str, span: Span) -> DigitalLValue {
+        match self {
+            Self::Bit(index) => DigitalLValue::BitSelect {
+                name: SmolStr::from(elaborated),
+                index: Box::new((*index).clone()),
+                span,
+            },
+            Self::Part { msb, lsb } => DigitalLValue::PartSelect {
+                name: SmolStr::from(elaborated),
+                msb: Box::new((*msb).clone()),
+                lsb: Box::new((*lsb).clone()),
+                span,
+            },
+        }
+    }
+}
+
+/// Read one port connection's shape, refusing the forms with no elaborated
+/// meaning.
+fn connection_form<'a>(
+    expression: &'a Expression,
+    path: &str,
+    port: &str,
+) -> CompileResult<ConnectionForm<'a>> {
+    match expression {
+        Expression::Identifier(identifier) => Ok(ConnectionForm::Net(identifier)),
+        Expression::ArrayAccess(access) => Ok(ConnectionForm::Select {
+            name: &access.array,
+            select: SelectBounds::Bit(&access.index),
+            span: access.span,
+        }),
+        Expression::Digital(DigitalExpr::PartSelect(select)) => Ok(ConnectionForm::Select {
+            name: &select.name,
+            select: SelectBounds::Part {
+                msb: &select.msb,
+                lsb: &select.lsb,
+            },
+            span: select.span,
+        }),
+        other => Err(semantic_error(
+            SemanticErrorKind::UnsupportedFeature(format!(
+                "port `{port}` of instance `{path}` is connected to an expression; IEEE \
+                 1364-2005 section 12.3.9 permits one, and this compiler connects a port to a \
+                 declared net or to a bit- or part-select of one, so name one of those"
+            )),
+            other.span(),
+        )),
+    }
+}
+
+/// The connecting scope's binding for a name a connection reads.
+fn lookup_connection(
+    name: &SmolStr,
     scope: &Scope,
     path: &str,
     port: &str,
+    span: Span,
 ) -> CompileResult<Binding> {
-    let Expression::Identifier(Identifier { name, .. }) = expression else {
-        return Err(semantic_error(
-            SemanticErrorKind::UnsupportedFeature(format!(
-                "port `{port}` of instance `{path}` is connected to an expression; IEEE \
-                 1364-2005 section 12.3.9 permits one, and this compiler joins a port to the \
-                 net it names, so connect a declared net by name"
-            )),
-            expression.span(),
-        ));
-    };
     scope.signals.get(name).cloned().ok_or_else(|| {
         semantic_error(
             SemanticErrorKind::UnsupportedFeature(format!(
@@ -610,9 +799,104 @@ fn resolve_connection(
                  net of IEEE 1364-2005 section 4.5, so declare `{name}` with a `wire` \
                  declaration"
             )),
-            expression.span(),
+            span,
         )
     })
+}
+
+/// Fold a select bound to a constant.
+///
+/// Deliberately minimal, and deliberately here rather than shared with the
+/// analyzer's evaluator: what reaches this is a bound written on a port
+/// connection, after any generate genvar has been substituted, so what has to
+/// fold is a literal or a small arithmetic expression over literals. A bound
+/// that needs more is refused with the clause.
+fn constant_bound(expression: &Expression) -> Option<i64> {
+    match expression {
+        Expression::Number(number) if number.value.fract() == 0.0 && number.value.is_finite() => {
+            Some(number.value as i64)
+        }
+        Expression::Unary(unary) => {
+            let operand = constant_bound(&unary.operand)?;
+            match unary.op {
+                crate::ast::UnaryOp::Neg => operand.checked_neg(),
+                crate::ast::UnaryOp::Pos => Some(operand),
+                _ => None,
+            }
+        }
+        Expression::Binary(binary) => {
+            let left = constant_bound(&binary.left)?;
+            let right = constant_bound(&binary.right)?;
+            match binary.op {
+                crate::ast::BinaryOp::Add => left.checked_add(right),
+                crate::ast::BinaryOp::Sub => left.checked_sub(right),
+                crate::ast::BinaryOp::Mul => left.checked_mul(right),
+                crate::ast::BinaryOp::Div => left.checked_div(right),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// A synthesized continuous assignment, in elaborated names.
+///
+/// Nothing about the resulting driver says it was synthesized, which is the
+/// point: it lowers through exactly the path a source `assign` does, and the
+/// net it drives resolves it against every other driver of that net.
+fn assignment(target: DigitalLValue, value: Expression, span: Span) -> AnalyzedContinuousAssign {
+    let name = target
+        .written_names()
+        .first()
+        .map(|(name, _)| (*name).clone())
+        .unwrap_or_default();
+    AnalyzedContinuousAssign {
+        target: name,
+        assignment: ContinuousAssign {
+            target,
+            value,
+            delay: None,
+            span,
+        },
+        span,
+    }
+}
+
+fn variable_connection_error(
+    outer: &Binding,
+    port: &crate::semantic::AnalyzedPort,
+    path: &str,
+    span: Span,
+) -> CompileError {
+    semantic_error(
+        SemanticErrorKind::InvalidContribution(format!(
+            "`{}`, which is a variable connected to the `{}` port `{}` of instance `{path}`; \
+             IEEE 1364-2005 section 12.3.9.2 connects an output or inout port to a net",
+            outer.elaborated,
+            direction_keyword(port.direction),
+            port.name
+        )),
+        span,
+    )
+}
+
+fn input_port_connection_error(
+    outer: &Binding,
+    port: &crate::semantic::AnalyzedPort,
+    path: &str,
+    span: Span,
+) -> CompileError {
+    semantic_error(
+        SemanticErrorKind::InvalidContribution(format!(
+            "`{}`, which the connecting module receives through an input port and the `{}` port \
+             `{}` of instance `{path}` would drive; IEEE 1364-2005 section 12.3.9.1 drives an \
+             input port from outside",
+            outer.elaborated,
+            direction_keyword(port.direction),
+            port.name
+        )),
+        span,
+    )
 }
 
 /// The implicit continuous assignment of a variable output port.
