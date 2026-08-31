@@ -213,63 +213,6 @@ fn xspice_event_settling_message(
     )
 }
 
-fn merge_changed_event_nodes(target: &mut Vec<NodeId>, source: &[NodeId]) {
-    if source.is_empty() {
-        return;
-    }
-    target.extend_from_slice(source);
-    target.sort_unstable();
-    target.dedup();
-}
-
-fn xspice_connection_uses_digital_node(
-    connection: &crate::xspice::PortConnection,
-    changed_nodes: &[NodeId],
-) -> bool {
-    match connection {
-        crate::xspice::PortConnection::Digital(node)
-        | crate::xspice::PortConnection::DigitalInverted(node) => changed_nodes.contains(node),
-        crate::xspice::PortConnection::DigitalVector(nodes) => {
-            nodes.iter().any(|node| changed_nodes.contains(node))
-        }
-        crate::xspice::PortConnection::DigitalVectorMapped(nodes) => nodes
-            .iter()
-            .any(|connection| changed_nodes.contains(&connection.node)),
-        _ => false,
-    }
-}
-
-fn xspice_connection_uses_real_node(
-    connection: &crate::xspice::PortConnection,
-    changed_nodes: &[NodeId],
-) -> bool {
-    match connection {
-        crate::xspice::PortConnection::Real(node) => changed_nodes.contains(node),
-        crate::xspice::PortConnection::RealVector(nodes) => {
-            nodes.iter().any(|node| changed_nodes.contains(node))
-        }
-        _ => false,
-    }
-}
-
-fn xspice_instance_depends_on_event_nodes(
-    instance: &crate::xspice::XspiceInstance,
-    changed_digital_nodes: &[NodeId],
-    changed_real_nodes: &[NodeId],
-) -> bool {
-    instance
-        .ports()
-        .iter()
-        .zip(instance.connections())
-        .any(|(port, connection)| {
-            matches!(
-                port.direction,
-                crate::xspice::PortDirection::In | crate::xspice::PortDirection::InOut
-            ) && (xspice_connection_uses_digital_node(connection, changed_digital_nodes)
-                || xspice_connection_uses_real_node(connection, changed_real_nodes))
-        })
-}
-
 impl CircuitData {
     //=========================================================================
     // XSPICE Code Model Interface
@@ -294,6 +237,7 @@ impl CircuitData {
             mark_xspice_event_connection_nets(&mut self.net_kinds, connection);
         }
         self.xspice_instances.push(instance);
+        self.invalidate_xspice_event_dispatch();
     }
 
     /// Check if any XSPICE instance participates in event-driven scheduling.
@@ -318,6 +262,9 @@ impl CircuitData {
                 mark_xspice_event_connection_nets(&mut self.net_kinds, connection);
             }
         }
+        // Renumbered connections move the nets the sensitivity map is keyed
+        // by, so it is rebuilt from the same replay this cache is.
+        self.invalidate_xspice_event_dispatch();
     }
 
     /// Whether a net carries an event-driven value rather than a solved
@@ -532,11 +479,25 @@ impl CircuitData {
     ) -> crate::xspice::CmResult<()> {
         let current_source_values = self.current_sources.values_at_time(time);
         let num_nodes = self.num_nodes;
-        let event_loads = &self.xspice_event_loads;
-        let mut dispatch_digital_nodes = Vec::new();
-        let mut dispatch_real_nodes = Vec::new();
         let mut analog_transitions =
             HashMap::<(NodeId, NodeId), crate::xspice::AnalogTransition>::new();
+
+        // The sensitivity map is built here rather than inside the loop so the
+        // rest of the body can hold it by shared reference while the instances
+        // are borrowed mutably.
+        self.ensure_xspice_event_dispatch();
+        let instance_count = self.xspice_instances.len();
+        self.xspice_dispatch_pending.clear();
+        self.xspice_dispatch_pending.resize(instance_count, false);
+        self.xspice_dispatch_next_pending.clear();
+        self.xspice_dispatch_next_pending
+            .resize(instance_count, false);
+
+        let event_loads = &self.xspice_event_loads;
+        let dispatch = self
+            .xspice_event_dispatch
+            .as_ref()
+            .expect("ensure_xspice_event_dispatch built the map");
 
         // Delta cycles, not a bounded relaxation. A settling network leaves at
         // the `!changed` exit below, in the same iteration it always did; one
@@ -553,8 +514,10 @@ impl CircuitData {
             let event_queue = &mut self.xspice_event_queue;
             let touched_digital_nodes = &mut self.xspice_touched_digital_nodes;
             let touched_real_nodes = &mut self.xspice_touched_real_nodes;
-            let mut next_dispatch_digital_nodes = Vec::new();
-            let mut next_dispatch_real_nodes = Vec::new();
+            let instances = &mut self.xspice_instances;
+            let pending = &mut self.xspice_dispatch_pending;
+            let next_pending = &mut self.xspice_dispatch_next_pending;
+            next_pending.fill(false);
             let mut changed = match apply_xspice_events_at_or_before(
                 digital_values,
                 digital_drivers,
@@ -576,17 +539,42 @@ impl CircuitData {
                     return Err(crate::xspice::CmError::EvaluationError(message));
                 }
             };
-            merge_changed_event_nodes(&mut dispatch_digital_nodes, touched_digital_nodes);
-            merge_changed_event_nodes(&mut dispatch_real_nodes, touched_real_nodes);
+            // What the drain just touched is owed an evaluation in *this*
+            // pass, which is what the node-list dispatch this replaced did.
+            dispatch.mark_fanout_dirty(instances, touched_digital_nodes);
+            dispatch.mark_fanout_dirty(instances, touched_real_nodes);
+            dispatch.record_fanout_pending(pending, touched_digital_nodes);
+            dispatch.record_fanout_pending(pending, touched_real_nodes);
+            if pass == 0 {
+                // Opening a settle call, every instance runs unless the
+                // sensitivity map says it may be skipped while quiet — see
+                // `circuit::xspice_dispatch` for why that skip is sound.
+                for (index, slot) in pending.iter_mut().enumerate() {
+                    if !dispatch.is_dirty_dispatched(index) {
+                        *slot = true;
+                    }
+                }
+            }
 
-            for instance in &mut self.xspice_instances {
-                if pass > 0
-                    && !xspice_instance_depends_on_event_nodes(
-                        instance,
-                        &dispatch_digital_nodes,
-                        &dispatch_real_nodes,
-                    )
-                {
+            for index in 0..instances.len() {
+                if !pending[index] {
+                    continue;
+                }
+                let instance = &mut instances[index];
+                if dispatch.is_dirty_dispatched(index) && !instance.event_inputs_dirty() {
+                    #[cfg(debug_assertions)]
+                    instance.debug_assert_event_inputs_quiet(
+                        solution,
+                        num_nodes,
+                        digital_values,
+                        digital_event_times,
+                        event_loads,
+                        real_values,
+                        real_event_times,
+                        &current_source_values,
+                        &analog_transitions,
+                        analysis,
+                    );
                     continue;
                 }
 
@@ -643,13 +631,19 @@ impl CircuitData {
                         return Err(crate::xspice::CmError::EvaluationError(message));
                     }
                 };
+                // A driver reached these nets whether or not the resolved
+                // value moved, so the persistent flags are owed either way.
+                dispatch.mark_fanout_dirty(instances, touched_digital_nodes);
+                dispatch.mark_fanout_dirty(instances, touched_real_nodes);
                 if instance_changed {
                     changed = true;
-                    merge_changed_event_nodes(
-                        &mut next_dispatch_digital_nodes,
-                        touched_digital_nodes,
-                    );
-                    merge_changed_event_nodes(&mut next_dispatch_real_nodes, touched_real_nodes);
+                    // Owed to the *next* pass, not this one: an instance
+                    // already walked past keeps its place in registration
+                    // order rather than being revisited out of turn. Gating
+                    // this on `instance_changed` is what the node-list
+                    // dispatch it replaces did.
+                    dispatch.record_fanout_pending(next_pending, touched_digital_nodes);
+                    dispatch.record_fanout_pending(next_pending, touched_real_nodes);
                 }
             }
 
@@ -666,8 +660,10 @@ impl CircuitData {
                 }
                 return Err(crate::xspice::CmError::EvaluationError(message));
             }
-            dispatch_digital_nodes = next_dispatch_digital_nodes;
-            dispatch_real_nodes = next_dispatch_real_nodes;
+            std::mem::swap(
+                &mut self.xspice_dispatch_pending,
+                &mut self.xspice_dispatch_next_pending,
+            );
             pass += 1;
         }
     }

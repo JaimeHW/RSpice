@@ -801,6 +801,16 @@ pub struct XspiceInstance {
     last_event_input_signature: Option<Vec<EventInputSignatureEntry>>,
     /// Reusable scratch signature for transient event-input skip checks.
     event_input_signature_scratch: Vec<EventInputSignatureEntry>,
+    /// Whether an event has reached one of this instance's input nets since
+    /// [`Self::last_event_input_signature`] was last found to describe them.
+    ///
+    /// This is the cheap, net-granular precondition of the signature check
+    /// below it: clear means the signature comparison in [`Self::evaluate`]
+    /// is guaranteed to match, so the caller may skip the instance without
+    /// building the signature at all. It is deliberately conservative in one
+    /// direction only — set when in doubt — and it is maintained in lockstep
+    /// with `last_event_input_signature` so the two never disagree.
+    event_inputs_dirty: bool,
     /// Has been initialized
     initialized: bool,
 }
@@ -1183,6 +1193,9 @@ impl XspiceInstance {
             port_context_solution_num_nodes: None,
             last_event_input_signature: None,
             event_input_signature_scratch: Vec::new(),
+            // No signature has been recorded, so the first evaluation must
+            // happen. Nothing else establishes that base case.
+            event_inputs_dirty: true,
             initialized: false,
         })
     }
@@ -1264,6 +1277,11 @@ impl XspiceInstance {
         checkpoint: &XspiceInstanceCheckpoint,
     ) -> Result<(), String> {
         self.validate_checkpoint_state(checkpoint)?;
+        // A restored context is not the one the recorded signature was taken
+        // against, so the net-granular precondition may not be trusted across
+        // a resume. Only the fast path is given up: the signature check inside
+        // `evaluate` still decides, exactly as it did before this flag existed.
+        self.event_inputs_dirty = true;
         self.context
             .restore_checkpoint_state(&checkpoint.context)
             .map_err(|err| format!("{}({}): {err}", self.name, self.model_name()))
@@ -1705,6 +1723,10 @@ impl XspiceInstance {
             if self.last_event_input_signature.as_deref()
                 == Some(self.event_input_signature_scratch.as_slice())
             {
+                // Observed, not assumed: the recorded signature still
+                // describes the inputs, so a dispatcher may skip this
+                // instance until an event reaches one of its input nets.
+                self.event_inputs_dirty = false;
                 return Ok(());
             }
         }
@@ -1715,6 +1737,7 @@ impl XspiceInstance {
                 if track_event_input_signature && phase != EvaluationPhase::RollbackableProbe {
                     self.last_event_input_signature =
                         Some(self.event_input_signature_scratch.clone());
+                    self.event_inputs_dirty = false;
                 }
                 Ok(())
             }
@@ -1732,6 +1755,139 @@ impl XspiceInstance {
 
     fn should_track_event_input_signature(&self, analysis: AnalysisType) -> bool {
         analysis == AnalysisType::Transient && self.model.can_skip_unchanged_event_inputs()
+    }
+
+    /// Whether a dispatcher may skip this instance while its input nets are
+    /// quiet, instead of relying on the signature check inside
+    /// [`Self::evaluate`].
+    ///
+    /// Two conditions, both necessary:
+    ///
+    /// 1. The model declares [`CodeModel::can_skip_unchanged_event_inputs`].
+    ///    Without it [`Self::evaluate`] would run the model body even for
+    ///    identical inputs, so skipping would not be equivalent.
+    /// 2. Every port is wired to an event net or to nothing. This rules out
+    ///    an analog input, whose value can move with the MNA solution and is
+    ///    *not* part of the event-input signature; and it rules out an analog
+    ///    output, whose stamps and
+    ///    [`Self::analog_output_transitions`] the caller would otherwise stop
+    ///    collecting.
+    ///
+    /// Condition 2 is redundant for every model that opts into condition 1
+    /// today — none of them declare an analog port — and it is kept so that a
+    /// future opt-in cannot silently make the skip unsound.
+    pub(crate) fn supports_event_dirty_dispatch(&self) -> bool {
+        self.model.can_skip_unchanged_event_inputs()
+            && self.connections.iter().all(|connection| {
+                matches!(
+                    connection,
+                    PortConnection::Digital(_)
+                        | PortConnection::DigitalInverted(_)
+                        | PortConnection::DigitalVector(_)
+                        | PortConnection::DigitalVectorMapped(_)
+                        | PortConnection::Real(_)
+                        | PortConnection::RealVector(_)
+                        | PortConnection::Null
+                )
+            })
+    }
+
+    /// Visit every circuit net this instance reads event values from.
+    ///
+    /// The walk matches the one the settle loop's dispatch filter performs,
+    /// so a net-to-instance index built from this is exactly the inverse of
+    /// that filter.
+    pub(crate) fn for_each_event_input_net(&self, mut visit: impl FnMut(usize)) {
+        for (port, connection) in self.ports.iter().zip(self.connections.iter()) {
+            if port.direction != super::PortDirection::In
+                && port.direction != super::PortDirection::InOut
+            {
+                continue;
+            }
+            match connection {
+                PortConnection::Digital(node)
+                | PortConnection::DigitalInverted(node)
+                | PortConnection::Real(node) => visit(*node),
+                PortConnection::DigitalVector(nodes) | PortConnection::RealVector(nodes) => {
+                    nodes.iter().copied().for_each(&mut visit);
+                }
+                PortConnection::DigitalVectorMapped(nodes) => {
+                    nodes.iter().for_each(|connection| visit(connection.node));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Whether an event has reached an input net since the recorded
+    /// event-input signature was last confirmed.
+    #[inline]
+    pub(crate) fn event_inputs_dirty(&self) -> bool {
+        self.event_inputs_dirty
+    }
+
+    /// Record that an event reached one of this instance's input nets.
+    #[inline]
+    pub(crate) fn mark_event_inputs_dirty(&mut self) {
+        self.event_inputs_dirty = true;
+    }
+
+    /// Debug-build check that a skipped instance really was quiet.
+    ///
+    /// The dispatcher skips an instance on the strength of a claim — that no
+    /// event reached its input nets, so the recorded event-input signature
+    /// still describes them. This re-derives the signature the expensive way
+    /// and panics if the claim was false, which is what a net missing from the
+    /// sensitivity map would look like. Compiled out of release builds; in
+    /// debug builds every deck in the suite exercises it.
+    #[cfg(debug_assertions)]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn debug_assert_event_inputs_quiet(
+        &mut self,
+        solution: &[Value],
+        num_nodes: usize,
+        digital_values: &HashMap<usize, DigitalValue>,
+        digital_event_times: &HashMap<usize, Value>,
+        event_total_loads: &HashMap<usize, Value>,
+        real_values: &HashMap<usize, Value>,
+        real_event_times: &HashMap<usize, Value>,
+        current_source_values: &[Value],
+        analog_transitions: &HashMap<(usize, usize), AnalogTransition>,
+        analysis: AnalysisType,
+    ) {
+        if !self.should_track_event_input_signature(analysis) {
+            return;
+        }
+        // Before the first evaluation there is no recorded signature, and the
+        // dispatcher does not skip on one either.
+        if self.last_event_input_signature.is_none() {
+            return;
+        }
+        if self
+            .update_inputs_with_analog_transitions(
+                solution,
+                num_nodes,
+                digital_values,
+                digital_event_times,
+                event_total_loads,
+                real_values,
+                real_event_times,
+                current_source_values,
+                analog_transitions,
+            )
+            .is_err()
+        {
+            return;
+        }
+        self.refresh_event_input_signature();
+        assert_eq!(
+            self.last_event_input_signature.as_deref(),
+            Some(self.event_input_signature_scratch.as_slice()),
+            "XSPICE dispatch skipped {} ({}) as quiet, but its event inputs moved; \
+             the net-to-instance sensitivity map is missing one of its input nets",
+            self.name,
+            self.model.name(),
+        );
     }
 
     fn refresh_event_input_signature(&mut self) {

@@ -38,6 +38,7 @@ pub use introspection::{DeviceOpEntry, DeviceOpReport};
 mod linear_stamping;
 mod magnetic;
 mod net_kind;
+mod xspice_dispatch;
 pub(crate) use net_kind::{NetKind, NetKinds};
 mod nonlinear;
 pub use crate::op_label::{OP_LABELS, OpLabel};
@@ -616,6 +617,15 @@ pub struct CircuitData {
     pub(crate) xspice_touched_digital_nodes: Vec<NodeId>,
     /// Scratch nodes touched while applying a batch of XSPICE real-valued events.
     pub(crate) xspice_touched_real_nodes: Vec<NodeId>,
+    /// Net-to-instance sensitivity for the settle loop, built on first use.
+    /// Derived from port directions and connections, so it is not part of any
+    /// rollback snapshot.
+    pub(crate) xspice_event_dispatch: Option<xspice_dispatch::XspiceEventDispatch>,
+    /// Instances the current settle pass still owes an evaluation, indexed by
+    /// registration order. Scratch, reused across calls.
+    pub(crate) xspice_dispatch_pending: Vec<bool>,
+    /// The same, accumulated for the next pass.
+    pub(crate) xspice_dispatch_next_pending: Vec<bool>,
     /// XSPICE code model registry (shared across instances)
     pub(crate) xspice_registry: Arc<CodeModelRegistry>,
     /// First XSPICE evaluation failure seen during the current analysis.

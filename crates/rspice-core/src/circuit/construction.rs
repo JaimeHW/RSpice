@@ -92,6 +92,9 @@ impl CircuitData {
             xspice_event_queue: XspiceEventScheduler::new(),
             xspice_touched_digital_nodes: Vec::new(),
             xspice_touched_real_nodes: Vec::new(),
+            xspice_event_dispatch: None,
+            xspice_dispatch_pending: Vec::new(),
+            xspice_dispatch_next_pending: Vec::new(),
             xspice_registry: Arc::new(CodeModelRegistry::with_builtins()),
             xspice_evaluation_error: None,
             // Verilog-A devices
