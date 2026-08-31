@@ -354,6 +354,87 @@ fn a_part_select_target_resizes_to_the_selected_width() {
     assert_eq!(harness.get("q"), "00001100");
 }
 
+/// The assignment context of a concatenation target is the *whole* left-hand
+/// side, so a narrow right-hand side zero-extends across it and the top
+/// element gets a 0 rather than the `x` that slicing an unresized value yields.
+///
+/// One bit into `{carry, sum}` is the smallest case that tells the two
+/// readings apart, and the reading being frozen is section 5.2.1's: the width
+/// of the assignment is the sum of the target's parts.
+#[test]
+fn a_narrow_value_zero_fills_across_a_concatenation_target() {
+    let mut harness = Harness::new(
+        "    reg carry, sum, src;\n\
+     \x20   initial {carry, sum} = src;",
+    );
+    harness.set("src", "1");
+    harness.set("carry", "x");
+    harness.set("sum", "x");
+
+    expect_finished(harness.run());
+    assert_eq!(harness.get("carry"), "0", "the extension is zero, not `x`");
+    assert_eq!(harness.get("sum"), "1");
+}
+
+/// The same target with an unsized literal, which section 3.5.1 gives 32 bits.
+/// It reaches the right answer through truncation rather than extension, which
+/// is why it cannot stand in for the test above — a lowering that never
+/// extends still passes this one.
+#[test]
+fn an_unsized_literal_into_a_concatenation_target_truncates_to_it() {
+    let mut harness = Harness::new(
+        "    reg carry, sum;\n\
+     \x20   initial {carry, sum} = 1;",
+    );
+    harness.set("carry", "x");
+    harness.set("sum", "x");
+
+    expect_finished(harness.run());
+    assert_eq!(harness.get("carry"), "0");
+    assert_eq!(harness.get("sum"), "1");
+}
+
+/// And the other direction: a wide right-hand side is truncated from the left
+/// across the concatenation, keeping the least significant bits, which are then
+/// distributed over the elements from the most significant end down.
+#[test]
+fn a_wide_value_truncates_from_the_left_into_a_concatenation_target() {
+    let mut harness = Harness::new(
+        "    reg [1:0] hi, lo;\n\
+     \x20   reg [7:0] src;\n\
+     \x20   initial {hi, lo} = src;",
+    );
+    harness.set("src", "1011xz01");
+    harness.set("hi", "11");
+    harness.set("lo", "11");
+
+    expect_finished(harness.run());
+    // The low four bits are `xz01`; `hi` takes the upper pair of those.
+    assert_eq!(harness.get("hi"), "xz");
+    assert_eq!(harness.get("lo"), "01");
+}
+
+/// Extension across a concatenation is the same in the nonblocking form, which
+/// resizes when the statement runs rather than when the update lands.
+#[test]
+fn a_concatenation_target_extends_the_same_way_nonblocking() {
+    let mut harness = Harness::new(
+        "    reg [1:0] hi;\n\
+     \x20   reg lo, src;\n\
+     \x20   initial {hi, lo} <= src;",
+    );
+    harness.set("src", "1");
+    harness.set("hi", "11");
+    harness.set("lo", "0");
+
+    expect_finished(harness.run());
+    assert_eq!(harness.get("hi"), "11", "nothing has landed yet");
+
+    harness.flush_nonblocking();
+    assert_eq!(harness.get("hi"), "00");
+    assert_eq!(harness.get("lo"), "1");
+}
+
 // ===========================================================================
 // Unknown propagation (IEEE 1364-2005 section 4.1)
 // ===========================================================================

@@ -481,6 +481,14 @@ impl ProcessLowerer<'_> {
     /// A concatenation target becomes one write per element, over slices of
     /// the right-hand side taken from the most significant end down, which is
     /// what `{carry, sum} = ...` means.
+    ///
+    /// The right-hand side is resized to the concatenation's *total* width
+    /// first. IEEE 1364-2005 section 5.2.1 makes the assignment context the
+    /// whole left-hand side, so `{carry, sum} = src` with a one-bit `src`
+    /// zero-extends and gives `carry` a 0. Slicing an unresized value instead
+    /// reads bits that are not there, and section 4.2.1 makes those `x` — so
+    /// the defect this fixes did not fail loudly, it wrote `x` into the top of
+    /// every concatenation target narrower than the sum of its parts.
     fn write(&mut self, block: BlockId, target: &DigitalLValue, value: ValueId, nonblocking: bool) {
         match target {
             DigitalLValue::Concat { elements, .. } => {
@@ -488,7 +496,9 @@ impl ProcessLowerer<'_> {
                     .iter()
                     .map(|part| self.lvalue_width(part))
                     .collect();
-                let mut offset: u32 = widths.iter().sum();
+                let total: u32 = widths.iter().sum();
+                let value = self.resize(block, value, total);
+                let mut offset = total;
                 for (element, width) in elements.iter().zip(widths) {
                     offset -= width;
                     let slice = self.builder.push(
@@ -522,6 +532,47 @@ impl ProcessLowerer<'_> {
                 self.builder.push(block, CfgValueType::Effect, kind);
             }
         }
+    }
+
+    /// Resize a value to `width`, IEEE 1364-2005 section 5.2.1.
+    ///
+    /// Built from the two nodes the IR already has rather than from a resize
+    /// node of its own: zero-extension is a concatenation with a zero constant,
+    /// truncation is a part select of the low bits, and an exact fit is
+    /// nothing at all. A dedicated node would need its own semantics in every
+    /// consumer, and these two already have theirs.
+    ///
+    /// Assignment-context resizing, so it zero-fills — a leading `x` does not
+    /// propagate the way section 3.5.1 propagates one in a literal.
+    fn resize(&mut self, block: BlockId, value: ValueId, width: u32) -> ValueId {
+        let current = self.value_width(value);
+        if current == width {
+            return value;
+        }
+        if current > width {
+            return self.builder.push(
+                block,
+                CfgValueType::FourState { width },
+                CfgValueKind::DigitalPartSelect {
+                    input: value,
+                    msb: i64::from(width) - 1,
+                    lsb: 0,
+                },
+            );
+        }
+        let padding = self.builder.push_leaf(
+            CfgValueType::FourState {
+                width: width - current,
+            },
+            CfgValueKind::FourStateConstant(FourStateValue::zero(width - current)),
+        );
+        self.builder.push(
+            block,
+            CfgValueType::FourState { width },
+            CfgValueKind::DigitalConcat {
+                parts: vec![padding, value],
+            },
+        )
     }
 
     fn write_target(&mut self, target: &DigitalLValue) -> Option<DigitalWriteTarget> {
