@@ -1,0 +1,38 @@
+# RSPICE-VERILOG-STIMULUS 1
+#
+# Four input bits, all sixteen combinations in ascending binary order with `x`
+# the more significant pair. The two instances see different bits of the same
+# operands, so an instance wired to the wrong net produces the other bit
+# slice's answer rather than no answer.
+
+module hier_forms
+
+input x 2
+input y 2
+
+output s0 1
+output c0 1
+output s1 1
+output c1 1
+output anded 2
+output ored 2
+
+step 10
+settle 5
+
+vector 00 00
+vector 00 01
+vector 00 10
+vector 00 11
+vector 01 00
+vector 01 01
+vector 01 10
+vector 01 11
+vector 10 00
+vector 10 01
+vector 10 10
+vector 10 11
+vector 11 00
+vector 11 01
+vector 11 10
+vector 11 11

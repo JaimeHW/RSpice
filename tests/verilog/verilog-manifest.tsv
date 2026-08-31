@@ -42,3 +42,4 @@ lvalue_forms.v	iverilog,verilator	part-select, concatenation and bit-select targ
 gate_forms.v	iverilog,verilator	unnamed, multi-instance, n-input and multi-output gate spellings
 bus_forms.v	iverilog	two continuous drivers on one net; Verilator cannot arbitrate a z
 edge_forms.v	iverilog	negedge beside posedge, and a register before its first write
+hier_forms.v	iverilog,verilator	ordered and named port connections, and both event-list separators

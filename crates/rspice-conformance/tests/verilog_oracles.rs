@@ -36,7 +36,7 @@ use std::fs;
 /// size; this tells you *which* language mechanism stopped being covered, which
 /// is the question anyone reading the failure actually has. Removing a case is
 /// allowed — editing this list is how you say you meant to.
-const REQUIRED_CASES: [(&str, &str); 13] = [
+const REQUIRED_CASES: [(&str, &str); 14] = [
     ("c17", "structural gate netlist (ISCAS85)"),
     (
         "gate_primitives",
@@ -70,6 +70,10 @@ const REQUIRED_CASES: [(&str, &str); 13] = [
     (
         "edge_forms",
         "negedge sensitivity and a register before its first write",
+    ),
+    (
+        "hier_forms",
+        "ordered port connections and the event-list separators",
     ),
 ];
 
@@ -579,7 +583,13 @@ type Expected = &'static [&'static str];
 ///   and the falling edge at `10k` writes `fall` from whatever `rise` held
 ///   then, which is `d[k - 1]`. Before any falling edge has run with a written
 ///   `rise`, `fall` is the x that section 4.2 gives an unwritten `reg`.
-const EXPECTED: [(&str, Expected); 13] = [
+///
+/// * **hier_forms** — two half adders over the two bit positions of `x` and
+///   `y`, plus the bitwise AND and OR of the two words. Worked out from the
+///   cell's own three gates and from which net each instance connects to,
+///   positional order for the first and the declaration's names for the
+///   second.
+const EXPECTED: [(&str, Expected); 14] = [
     (
         "c17",
         &[
@@ -814,6 +824,27 @@ const EXPECTED: [(&str, Expected); 13] = [
             "rise=1001 fall=0101",
             "rise=1110 fall=1001",
             "rise=0110 fall=1110",
+        ],
+    ),
+    (
+        "hier_forms",
+        &[
+            "s0=0 c0=0 s1=0 c1=0 anded=00 ored=00",
+            "s0=1 c0=0 s1=0 c1=0 anded=00 ored=01",
+            "s0=0 c0=0 s1=1 c1=0 anded=00 ored=10",
+            "s0=1 c0=0 s1=1 c1=0 anded=00 ored=11",
+            "s0=1 c0=0 s1=0 c1=0 anded=00 ored=01",
+            "s0=0 c0=1 s1=0 c1=0 anded=01 ored=01",
+            "s0=1 c0=0 s1=1 c1=0 anded=00 ored=11",
+            "s0=0 c0=1 s1=1 c1=0 anded=01 ored=11",
+            "s0=0 c0=0 s1=1 c1=0 anded=00 ored=10",
+            "s0=1 c0=0 s1=1 c1=0 anded=00 ored=11",
+            "s0=0 c0=0 s1=0 c1=1 anded=10 ored=10",
+            "s0=1 c0=0 s1=0 c1=1 anded=10 ored=11",
+            "s0=1 c0=0 s1=1 c1=0 anded=00 ored=11",
+            "s0=0 c0=1 s1=1 c1=0 anded=01 ored=11",
+            "s0=1 c0=0 s1=0 c1=1 anded=10 ored=11",
+            "s0=0 c0=1 s1=0 c1=1 anded=11 ored=11",
         ],
     ),
 ];
