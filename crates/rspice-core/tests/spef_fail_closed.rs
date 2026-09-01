@@ -7,8 +7,9 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use rspice_core::abort_signal::CountingAbort;
 use rspice_core::engine::{Engine, SimulationConfig};
-use rspice_core::netlist::Netlist;
+use rspice_core::netlist::{Netlist, ParseWithAbortError, spef::SpefFile};
 
 static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
 
@@ -69,13 +70,194 @@ fn assert_path_backed_spef_error(label: &str, spef: &str, expected: &str) {
     );
 }
 
+fn reduced_pi_spef() -> &'static str {
+    "\
+*SPEF \"IEEE 1481-2009\"
+*C_UNIT 1 NF
+*R_UNIT 1 KOHM
+*R_NET in 3
+*DRIVER I1:N
+*CELL CURRENT_SOURCE
+*C2_R1_C1 1 2 2
+*LOADS
+*RC ILOAD:P 4
+*END
+"
+}
+
+fn detailed_pi_spef() -> &'static str {
+    "\
+*SPEF \"IEEE 1481-2009\"
+*C_UNIT 1 NF
+*R_UNIT 1 KOHM
+*D_NET in 3
+*CONN
+*P in O
+*I ILOAD:P I
+*CAP
+1 in 1
+2 ILOAD:P 2
+*RES
+1 in ILOAD:P 2
+*END
+"
+}
+
+fn ac_voltage(netlist: &Netlist, frequency: f64, node: &str) -> rspice_core::Complex64 {
+    let point = Engine::default()
+        .run_ac(netlist, &[frequency])
+        .expect("annotated RC network executes")
+        .pop()
+        .expect("one AC point");
+    point
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case(node))
+        .map(|index| point.voltages[index])
+        .unwrap_or_else(|| panic!("node `{node}` is present: {:?}", point.node_names))
+}
+
 #[test]
-fn path_backed_reduced_resistor_and_capacitor_nets_are_not_silently_skipped() {
-    for (label, section) in [("reduced-r", "*R_NET"), ("reduced-c", "*C_NET")] {
-        let spef = format!(
-            "*SPEF \"IEEE 1481-2009\"\n*C_UNIT 1 PF\n*R_UNIT 1 OHM\n{section} in 1\n*END\n"
+fn reduced_r_net_matches_detailed_spef_and_closed_form_ac_impedance() {
+    let reduced_fixture = SpefFixture::new("reduced-r-ac", reduced_pi_spef());
+    let detailed_fixture = SpefFixture::new("detailed-r-ac", detailed_pi_spef());
+    let deck = "\
+Reduced SPEF pi AC oracle
+I1 0 in DC 0 AC 1
+ILOAD in 0 DC 0
+.spef_include \"parasitics.spef\"
+.ac lin 1 1k 1k
+.end
+";
+    let reduced =
+        Netlist::parse_with_path(deck, &reduced_fixture.deck_path).expect("reduced SPEF imports");
+    let detailed = Netlist::parse_with_path(deck, &detailed_fixture.deck_path)
+        .expect("equivalent detailed SPEF imports");
+
+    let c2 = 1.0e-9;
+    let resistance = 2.0e3;
+    let c1 = 2.0e-9;
+    for frequency in [1.0e3, 50.0e3, 1.0e6] {
+        let reduced_voltage = ac_voltage(&reduced, frequency, "in");
+        let detailed_voltage = ac_voltage(&detailed, frequency, "in");
+        let jw = rspice_core::Complex64::new(0.0, 2.0 * std::f64::consts::PI * frequency);
+        let expected = rspice_core::Complex64::new(1.0, 0.0)
+            / (jw * c2
+                + rspice_core::Complex64::new(1.0, 0.0)
+                    / (rspice_core::Complex64::new(resistance, 0.0)
+                        + rspice_core::Complex64::new(1.0, 0.0) / (jw * c1)));
+        let tolerance = 2.0e-10 * expected.norm().max(1.0);
+        assert!(
+            (reduced_voltage - detailed_voltage).norm() <= tolerance,
+            "reduced/detailed mismatch at {frequency:.3e} Hz: reduced={reduced_voltage:?}, detailed={detailed_voltage:?}"
         );
-        assert_path_backed_spef_error(label, &spef, section);
+        assert!(
+            (reduced_voltage - expected).norm() <= tolerance,
+            "closed-form mismatch at {frequency:.3e} Hz: actual={reduced_voltage:?}, expected={expected:?}"
+        );
+    }
+}
+
+#[test]
+fn reduced_r_net_matches_detailed_spef_and_closed_form_transient_step() {
+    let reduced_spef = reduced_pi_spef()
+        .replace("I1:N", "V1:P")
+        .replace("CURRENT_SOURCE", "VOLTAGE_SOURCE");
+    let reduced_fixture = SpefFixture::new("reduced-r-tran", &reduced_spef);
+    let detailed_fixture = SpefFixture::new("detailed-r-tran", detailed_pi_spef());
+    let deck = "\
+Reduced SPEF pi transient oracle
+V1 in 0 PULSE(0 1 1u 1n 1n 1 2)
+ILOAD in 0 DC 0
+.spef_include \"parasitics.spef\"
+.tran 100n 20u
+.end
+";
+    let reduced =
+        Netlist::parse_with_path(deck, &reduced_fixture.deck_path).expect("reduced SPEF imports");
+    let detailed = Netlist::parse_with_path(deck, &detailed_fixture.deck_path)
+        .expect("equivalent detailed SPEF imports");
+    let reduced_load_node = reduced
+        .elements
+        .iter()
+        .find(|element| element.name.eq_ignore_ascii_case("ILOAD"))
+        .and_then(|element| element.nodes.first())
+        .cloned()
+        .expect("reduced load was retained");
+    let detailed_load_node = detailed
+        .elements
+        .iter()
+        .find(|element| element.name.eq_ignore_ascii_case("ILOAD"))
+        .and_then(|element| element.nodes.first())
+        .cloned()
+        .expect("detailed load was retained");
+    let reduced_result = Engine::default()
+        .run_tran(&reduced, 20.0e-6, 100.0e-9)
+        .expect("reduced RC transient converges");
+    let detailed_result = Engine::default()
+        .run_tran(&detailed, 20.0e-6, 100.0e-9)
+        .expect("detailed RC transient converges");
+    assert_eq!(reduced_result.time, detailed_result.time);
+    let reduced_node = reduced_result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case(&reduced_load_node))
+        .expect("reduced far node is present");
+    let detailed_node = detailed_result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case(&detailed_load_node))
+        .expect("detailed far node is present");
+    let edge_midpoint = 1.0005e-6;
+    let time_constant = 2.0e3 * 2.0e-9;
+    let mut maximum_oracle_error = 0.0_f64;
+    for ((&time, &reduced_voltage), &detailed_voltage) in reduced_result
+        .time
+        .iter()
+        .zip(&reduced_result.voltages[reduced_node])
+        .zip(&detailed_result.voltages[detailed_node])
+    {
+        assert!(
+            (reduced_voltage - detailed_voltage).abs() <= 2.0e-10,
+            "reduced/detailed transient mismatch at {time:.3e} s"
+        );
+        if time >= 1.2e-6 {
+            let expected = 1.0 - (-(time - edge_midpoint) / time_constant).exp();
+            maximum_oracle_error = maximum_oracle_error.max((reduced_voltage - expected).abs());
+        }
+    }
+    assert!(
+        maximum_oracle_error < 4.0e-3,
+        "reduced RC transient differs from the closed form by {maximum_oracle_error:.3e} V"
+    );
+}
+
+#[test]
+fn reduced_lumped_nets_match_closed_form_ac_impedance() {
+    let deck = "\
+Reduced SPEF lumped capacitance
+I1 0 in DC 0 AC 1
+.spef_include \"parasitics.spef\"
+.ac lin 1 20k 20k
+.end
+";
+    for (label, keyword) in [("reduced-c-ac", "*C_NET"), ("lumped-r-ac", "*R_NET")] {
+        let fixture = SpefFixture::new(
+            label,
+            &format!("*SPEF \"IEEE 1481-2009\"\n*C_UNIT 1 NF\n{keyword} in 2.5\n*END\n"),
+        );
+        let netlist = Netlist::parse_with_path(deck, &fixture.deck_path)
+            .unwrap_or_else(|error| panic!("lumped {keyword} imports: {error}"));
+        let frequency = 20.0e3;
+        let actual = ac_voltage(&netlist, frequency, "in");
+        let expected = rspice_core::Complex64::new(
+            0.0,
+            -1.0 / (2.0 * std::f64::consts::PI * frequency * 2.5e-9),
+        );
+        assert!(
+            (actual - expected).norm() <= 2.0e-10 * expected.norm().max(1.0),
+            "lumped {keyword} mismatch: actual={actual:?}, expected={expected:?}"
+        );
     }
 }
 
@@ -105,6 +287,249 @@ fn invalid_parasitic_values_are_rejected_instead_of_dropped() {
         );
         assert_path_backed_spef_error(label, &spef, expected);
     }
+}
+
+#[test]
+fn reduced_records_fail_closed_on_zero_extreme_malformed_and_nonconserving_values() {
+    let cases = [
+        (
+            "zero-c-net",
+            "*C_UNIT 1 PF\n*C_NET in 0\n*END\n",
+            "STRICTLY POSITIVE",
+        ),
+        (
+            "zero-c2",
+            "*C_UNIT 1 PF\n*R_UNIT 1 OHM\n*R_NET in 2\n*DRIVER V1:1\n*CELL VOLTAGE_SOURCE\n*C2_R1_C1 0 1 2\n*LOADS\n*RC RLOAD:1 2\n*END\n",
+            "C2",
+        ),
+        (
+            "zero-r1",
+            "*C_UNIT 1 PF\n*R_UNIT 1 OHM\n*R_NET in 2\n*DRIVER V1:1\n*CELL VOLTAGE_SOURCE\n*C2_R1_C1 1 0 1\n*LOADS\n*RC RLOAD:1 1\n*END\n",
+            "R1",
+        ),
+        (
+            "zero-rc",
+            "*C_UNIT 1 PF\n*R_UNIT 1 OHM\n*R_NET in 2\n*DRIVER V1:1\n*CELL VOLTAGE_SOURCE\n*C2_R1_C1 1 1 1\n*LOADS\n*RC RLOAD:1 0\n*END\n",
+            "ELMORE",
+        ),
+        (
+            "extreme-cap",
+            "*C_UNIT 1e308 F\n*C_NET in 10\n*END\n",
+            "NON-FINITE",
+        ),
+        (
+            "malformed-unit",
+            "*C_UNIT 1 PF EXTRA\n*C_NET in 1\n*END\n",
+            "EXACTLY",
+        ),
+        (
+            "invalid-routing-confidence",
+            "*C_UNIT 1 PF\n*C_NET in 1 *V 0\n*END\n",
+            "POSITIVE INTEGER",
+        ),
+        (
+            "c-net-body",
+            "*C_UNIT 1 PF\n*C_NET in 1\n*CAP\n*END\n",
+            "UNEXPECTED",
+        ),
+        (
+            "unknown-r-record",
+            "*C_UNIT 1 PF\n*R_UNIT 1 OHM\n*R_NET in 2\n*FOO value\n*END\n",
+            "UNEXPECTED",
+        ),
+        (
+            "nonconserving-pi",
+            "*C_UNIT 1 PF\n*R_UNIT 1 OHM\n*R_NET in 3\n*DRIVER V1:1\n*CELL VOLTAGE_SOURCE\n*C2_R1_C1 1 1 1\n*LOADS\n*RC RLOAD:1 1\n*END\n",
+            "CONSERVED",
+        ),
+        (
+            "unknown-driver-cell",
+            "*C_UNIT 1 PF\n*R_UNIT 1 OHM\n*R_NET in 2\n*DRIVER V1:1\n*CELL UNKNOWN_DRIVER\n*C2_R1_C1 1 1 1\n*LOADS\n*RC RLOAD:1 1\n*END\n",
+            "UNKNOWN_DRIVER",
+        ),
+        (
+            "missing-load-record",
+            "*C_UNIT 1 PF\n*R_UNIT 1 OHM\n*R_NET in 2\n*DRIVER V1:1\n*CELL VOLTAGE_SOURCE\n*C2_R1_C1 1 1 1\n*LOADS\n*END\n",
+            "AT LEAST ONE",
+        ),
+        (
+            "duplicate-load",
+            "*C_UNIT 1 PF\n*R_UNIT 1 OHM\n*R_NET in 2\n*DRIVER V1:1\n*CELL VOLTAGE_SOURCE\n*C2_R1_C1 1 1 1\n*LOADS\n*RC RLOAD:1 1\n*RC RLOAD:1 1\n*END\n",
+            "DUPLICATE LOAD",
+        ),
+        (
+            "pole-residue",
+            "*C_UNIT 1 PF\n*R_UNIT 1 OHM\n*R_NET in 2\n*DRIVER V1:1\n*CELL VOLTAGE_SOURCE\n*C2_R1_C1 1 1 1\n*LOADS\n*RC RLOAD:1 1\n*Q 1 -1\n*END\n",
+            "POLE/RESIDUE",
+        ),
+        (
+            "unrealizable-load-delay",
+            "*C_UNIT 1 PF\n*R_UNIT 1 KOHM\n*R_NET in 2\n*DRIVER V1:1\n*CELL VOLTAGE_SOURCE\n*C2_R1_C1 1 2 1\n*LOADS\n*RC RLOAD:1 9\n*END\n",
+            "CANNOT BE REPRESENTED",
+        ),
+    ];
+    for (label, body, expected) in cases {
+        let spef = format!("*SPEF \"IEEE 1481-2009\"\n{body}");
+        assert_path_backed_spef_error(label, &spef, expected);
+    }
+}
+
+#[test]
+fn reduced_records_reject_unknown_or_hierarchically_unresolved_nodes() {
+    for (label, driver, load, expected) in [
+        ("unknown-driver", "MISSING:1", "RLOAD:1", "MISSING"),
+        ("unknown-load", "V1:1", "MISSING:1", "MISSING"),
+        ("unresolved-hierarchy", "TOP/V1:1", "RLOAD:1", "TOP/V1"),
+    ] {
+        let spef = format!(
+            "*SPEF \"IEEE 1481-2009\"\n*C_UNIT 1 PF\n*R_UNIT 1 OHM\n*R_NET in 2\n*DRIVER {driver}\n*CELL VOLTAGE_SOURCE\n*C2_R1_C1 1 1 1\n*LOADS\n*RC {load} 1\n*END\n"
+        );
+        assert_path_backed_spef_error(label, &spef, expected);
+    }
+    assert_path_backed_spef_error(
+        "unknown-c-net",
+        "*SPEF \"IEEE 1481-2009\"\n*C_UNIT 1 PF\n*C_NET ghost 1\n*END\n",
+        "GHOST",
+    );
+}
+
+#[test]
+fn reduced_driver_cell_must_match_the_resolved_subcircuit_type() {
+    let spef = "\
+*SPEF \"IEEE 1481-2009\"
+*C_UNIT 1 PF
+*R_UNIT 1 OHM
+*R_NET in 2
+*DRIVER XDRV:Y
+*CELL WRONG_CELL
+*C2_R1_C1 1 1 1
+*LOADS
+*RC RLOAD:1 1
+*END
+";
+    let fixture = SpefFixture::new("cell-mismatch", spef);
+    let deck = "\
+Reduced cell validation
+.subckt REAL_CELL Y
+R1 Y 0 1meg
+.ends
+XDRV in REAL_CELL
+RLOAD in 0 1k
+.spef_include \"parasitics.spef\"
+.op
+.end
+";
+
+    let error = Netlist::parse_with_path(deck, &fixture.deck_path)
+        .expect_err("mismatched reduced driver cell must fail closed")
+        .to_string();
+
+    assert!(error.contains("WRONG_CELL"), "unexpected error: {error}");
+    assert!(error.contains("REAL_CELL"), "unexpected error: {error}");
+}
+
+#[test]
+fn reduced_native_driver_cell_must_match_the_exact_pseudo_cell_type() {
+    let spef = "\
+*SPEF \"IEEE 1481-2009\"
+*C_UNIT 1 PF
+*R_UNIT 1 OHM
+*R_NET in 2
+*DRIVER V1:P
+*CELL CURRENT_SOURCE
+*C2_R1_C1 1 1 1
+*LOADS
+*RC RLOAD:1 1
+*END
+";
+
+    assert_path_backed_spef_error("native-cell-mismatch", spef, "VOLTAGE_SOURCE");
+}
+
+#[test]
+fn reduced_lowering_is_deterministic_collision_safe_and_source_provenanced() {
+    let spef = reduced_pi_spef();
+    let fixture = SpefFixture::new("reduced-collisions", spef);
+    let deck = "\
+Reduced SPEF collision guards
+I1 0 in DC 0 AC 1
+ILOAD in 0 DC 0
+RKEEP __SPEF_REDUCED_IN 0 1meg
+CSPEF1 spare 0 1p
+CSPEF2 spare 0 1p
+RSPEF4 spare 0 1
+CSPEF6 spare 0 1p
+.spef_include \"parasitics.spef\"
+.ac lin 1 1k 1k
+.end
+";
+    let netlist =
+        Netlist::parse_with_path(deck, &fixture.deck_path).expect("collision-safe import succeeds");
+    let names: Vec<_> = netlist
+        .elements
+        .iter()
+        .map(|element| element.name.to_ascii_uppercase())
+        .collect();
+    let unique: std::collections::HashSet<_> = names.iter().collect();
+    assert_eq!(unique.len(), names.len(), "all element names remain unique");
+    for generated in ["CSPEF3", "RSPEF5", "CSPEF7"] {
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case(generated))
+            .unwrap_or_else(|| panic!("expected deterministic element `{generated}`"));
+        assert!(matches!(
+            element.provenance,
+            rspice_core::netlist::ElementProvenance::Authored
+        ));
+    }
+    let load_node = netlist
+        .elements
+        .iter()
+        .find(|element| element.name.eq_ignore_ascii_case("ILOAD"))
+        .and_then(|element| element.nodes.first())
+        .expect("load node exists");
+    assert_eq!(load_node, "__SPEF_REDUCED_IN_1");
+}
+
+#[test]
+fn reduced_parsing_and_lowering_are_cooperatively_cancellable_and_transactional() {
+    let mut spef_text = String::from(
+        "*SPEF \"IEEE 1481-2009\"\n*C_UNIT 1 PF\n*R_UNIT 1 OHM\n*R_NET in 2\n*DRIVER V1:1\n*CELL VOLTAGE_SOURCE\n*C2_R1_C1 1 1 1\n*LOADS\n",
+    );
+    let mut deck = String::from("reduced cancellation\nV1 in 0 DC 0\n");
+    for index in 0..1_024 {
+        spef_text.push_str(&format!("*RC R{index}:1 1\n"));
+        deck.push_str(&format!("R{index} in 0 1meg\n"));
+    }
+    spef_text.push_str("*END\n");
+    deck.push_str(".op\n.end\n");
+
+    let parse_abort = CountingAbort::new(80);
+    let parse_result = SpefFile::parse_with_abort(&spef_text, &parse_abort);
+    assert!(matches!(parse_result, Err(ParseWithAbortError::Aborted)));
+    assert!(parse_abort.count() > 80, "parsing must poll during work");
+
+    let spef = SpefFile::parse(&spef_text).expect("large reduced fixture parses");
+    let mut netlist = Netlist::parse(&deck).expect("large fixture deck parses");
+    let original_nodes: Vec<_> = netlist
+        .elements
+        .iter()
+        .map(|element| element.nodes.clone())
+        .collect();
+    let apply_abort = CountingAbort::new(24);
+    let apply_result = spef.apply_with_abort(&mut netlist, &apply_abort);
+    assert!(matches!(apply_result, Err(ParseWithAbortError::Aborted)));
+    assert!(apply_abort.count() > 24, "lowering must poll during work");
+    assert_eq!(
+        netlist
+            .elements
+            .iter()
+            .map(|element| element.nodes.clone())
+            .collect::<Vec<_>>(),
+        original_nodes,
+        "aborted lowering must not publish partial rewiring"
+    );
 }
 
 #[test]

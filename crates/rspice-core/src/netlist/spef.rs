@@ -18,8 +18,14 @@
 //! (Spectre's spelling) — `.include file.spef` routes there too. DSPF
 //! files need none of this: DSPF is SPICE syntax and parses directly.
 //!
-//! Unsupported reduced sections (`*R_NET`/`*C_NET`) are rejected:
-//! silently dropping extracted parasitics would simulate a different circuit.
+//! Physically realizable reduced `*R_NET` pi models are lowered to an
+//! equivalent C-R-C network. Every retained single-pole load delay must agree
+//! with the far-side `R1*C1` time constant; a general timing macromodel is not
+//! silently presented as an exact analog topology.
+//! Lumped-capacitance `*R_NET` records and the `*C_NET` lumped-capacitance
+//! extension are lowered to a capacitor to ground. Reduced records are kept
+//! deliberately strict: unsupported multi-driver or pole/residue timing views
+//! fail closed instead of being mistaken for parallel physical networks.
 
 use std::collections::{HashMap, HashSet};
 
@@ -86,16 +92,55 @@ struct DNet {
     inductors: Vec<Induc>,
 }
 
+/// One load timing descriptor in an IEEE reduced-net driver view.
+#[derive(Debug, Clone)]
+struct ReducedLoad {
+    pin: NodeRef,
+    /// Single-pole Elmore delay in the product of the declared R/C units.
+    elmore_seconds: Value,
+    line: usize,
+}
+
+/// One driver-specific reduced pi model (`C2-R1-C1`).
+#[derive(Debug, Clone)]
+struct DriverReduction {
+    driver: NodeRef,
+    cell: String,
+    c2_farads: Value,
+    r1_ohms: Value,
+    c1_farads: Value,
+    loads: Vec<ReducedLoad>,
+    line: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReducedNetKind {
+    /// IEEE 1481 `*R_NET` (pi model or lumped capacitance).
+    Resistance,
+    /// Lumped-capacitance `*C_NET` vendor extension.
+    Capacitance,
+}
+
+#[derive(Debug, Clone)]
+struct ReducedNet {
+    kind: ReducedNetKind,
+    name: String,
+    total_capacitance: Value,
+    line: usize,
+    drivers: Vec<DriverReduction>,
+}
+
 /// Parsed SPEF document.
 #[derive(Debug, Default)]
 pub struct SpefFile {
     nets: Vec<DNet>,
+    reduced_nets: Vec<ReducedNet>,
 }
 
 /// Summary of one back-annotation pass.
 #[derive(Debug, Default, Clone)]
 pub struct SpefReport {
-    /// `*D_NET` sections applied.
+    /// Detailed and reduced net sections applied.
     pub nets: usize,
     /// Instance terminals rewired onto SPEF subnodes.
     pub rewired_pins: usize,
@@ -167,7 +212,7 @@ impl SpefFile {
         if report.nets == 0 {
             return Err(spef_annotation_error(
                 0,
-                "document contains no *D_NET annotation",
+                "document contains no supported net annotation",
             ));
         }
         if report.resistors + report.capacitors + report.inductors == 0 {
@@ -210,10 +255,16 @@ impl SpefFile {
         let mut new_elements: Vec<Element> = Vec::new();
         let mut parasitic_seq = 0_usize;
         let mut occupied_element_names: HashSet<String> = element_index.keys().cloned().collect();
+        let mut occupied_nodes = original_nodes.clone();
         let declared_nets: HashSet<String> = self
             .nets
             .iter()
             .map(|net| net.name.to_ascii_uppercase())
+            .chain(
+                self.reduced_nets
+                    .iter()
+                    .map(|net| net.name.to_ascii_uppercase()),
+            )
             .collect();
         let declared_pins: HashSet<(String, String)> = self
             .nets
@@ -484,12 +535,250 @@ impl SpefFile {
             }
         }
 
+        for element in &new_elements {
+            occupied_nodes.extend(element.nodes.iter().map(|node| node.to_ascii_uppercase()));
+        }
+
+        for (net_index, net) in self.reduced_nets.iter().enumerate() {
+            poll_parse_abort(abort, self.nets.len().saturating_add(net_index))?;
+            report.nets += 1;
+            debug_assert!(
+                net.kind == ReducedNetKind::Resistance || net.drivers.is_empty(),
+                "*C_NET must remain a lumped-capacitance record"
+            );
+            let canonical_net = net.name.to_ascii_uppercase();
+            if !original_nodes.contains(&canonical_net) {
+                if strict {
+                    return Err(spef_annotation_error(
+                        net.line,
+                        format!("reduced net `{}` is absent from the deck", net.name),
+                    ));
+                }
+                continue;
+            }
+
+            let Some(driver) = net.drivers.first() else {
+                let name =
+                    next_parasitic_name("CSPEF", &mut parasitic_seq, &mut occupied_element_names)?;
+                new_elements.push(spef_capacitor(
+                    name,
+                    canonical_net,
+                    "0".to_owned(),
+                    net.total_capacitance,
+                ));
+                report.capacitors += 1;
+                continue;
+            };
+
+            // Parsing rejects multiple reductions: they are alternative
+            // driver viewpoints, not physical networks that can be placed in
+            // parallel. One driver view lowers to a concrete pi network.
+            let NodeRef::Pin(driver_instance, driver_pin) = &driver.driver else {
+                if strict {
+                    return Err(spef_annotation_error(
+                        driver.line,
+                        format!(
+                            "reduced-net driver on `{}` is not an instance pin",
+                            net.name
+                        ),
+                    ));
+                }
+                continue;
+            };
+            if let Err(reason) = validate_reduced_driver(
+                netlist,
+                &element_index,
+                &subckt_ports,
+                driver_instance,
+                driver_pin,
+                &driver.cell,
+                &canonical_net,
+            ) {
+                if strict {
+                    return Err(spef_annotation_error(
+                        driver.line,
+                        format!(
+                            "driver {driver_instance}:{driver_pin} on reduced net `{}`: {reason}",
+                            net.name
+                        ),
+                    ));
+                }
+                continue;
+            }
+
+            let far_node = next_reduced_node_name(&net.name, &mut occupied_nodes)?;
+            let mut seen_loads = HashSet::new();
+            let mut rewired_loads = 0usize;
+            for (load_index, load) in driver.loads.iter().enumerate() {
+                poll_parse_abort(abort, load_index)?;
+                debug_assert!(load.elmore_seconds.is_finite() && load.elmore_seconds > 0.0);
+                let NodeRef::Pin(instance, pin) = &load.pin else {
+                    if strict {
+                        return Err(spef_annotation_error(
+                            load.line,
+                            format!("load on reduced net `{}` is not an instance pin", net.name),
+                        ));
+                    }
+                    continue;
+                };
+                let load_key = (instance.to_ascii_uppercase(), pin.to_ascii_uppercase());
+                if !seen_loads.insert(load_key) {
+                    if strict {
+                        return Err(spef_annotation_error(
+                            load.line,
+                            format!(
+                                "duplicate load `{instance}:{pin}` on reduced net `{}`",
+                                net.name
+                            ),
+                        ));
+                    }
+                    continue;
+                }
+                if instance.eq_ignore_ascii_case(driver_instance)
+                    && pin.eq_ignore_ascii_case(driver_pin)
+                {
+                    if strict {
+                        return Err(spef_annotation_error(
+                            load.line,
+                            format!(
+                                "driver `{driver_instance}:{driver_pin}` is also listed as a load on reduced net `{}`",
+                                net.name
+                            ),
+                        ));
+                    }
+                    continue;
+                }
+                match rewire_pin(
+                    netlist,
+                    &element_index,
+                    &subckt_ports,
+                    instance,
+                    pin,
+                    &net.name,
+                    &far_node,
+                ) {
+                    Ok(()) => rewired_loads += 1,
+                    Err(reason) if strict => {
+                        return Err(spef_annotation_error(
+                            load.line,
+                            format!(
+                                "load {instance}:{pin} on reduced net `{}`: {reason}",
+                                net.name
+                            ),
+                        ));
+                    }
+                    Err(reason) => {
+                        report.skipped_pins += 1;
+                        log::warn!(
+                            "SPEF: reduced-net load {instance}:{pin} on {} skipped: {reason}",
+                            net.name
+                        );
+                    }
+                }
+            }
+            if rewired_loads == 0 {
+                if strict {
+                    return Err(spef_annotation_error(
+                        driver.line,
+                        format!("reduced net `{}` did not resolve any load pins", net.name),
+                    ));
+                }
+                continue;
+            }
+
+            let c2_name =
+                next_parasitic_name("CSPEF", &mut parasitic_seq, &mut occupied_element_names)?;
+            new_elements.push(spef_capacitor(
+                c2_name,
+                canonical_net.clone(),
+                "0".to_owned(),
+                driver.c2_farads,
+            ));
+            let resistor_name =
+                next_parasitic_name("RSPEF", &mut parasitic_seq, &mut occupied_element_names)?;
+            new_elements.push(spef_resistor(
+                resistor_name,
+                canonical_net,
+                far_node.clone(),
+                driver.r1_ohms,
+            ));
+            let c1_name =
+                next_parasitic_name("CSPEF", &mut parasitic_seq, &mut occupied_element_names)?;
+            new_elements.push(spef_capacitor(
+                c1_name,
+                far_node,
+                "0".to_owned(),
+                driver.c1_farads,
+            ));
+            report.rewired_pins += rewired_loads;
+            report.resistors += 1;
+            report.capacitors += 2;
+        }
+
         for (index, element) in new_elements.into_iter().enumerate() {
             poll_parse_abort(abort, index)?;
             netlist.elements.push(element);
         }
         ensure_parse_not_aborted(abort)?;
         Ok(report)
+    }
+}
+
+fn spef_capacitor(name: String, a: String, b: String, farads: Value) -> Element {
+    Element {
+        name,
+        kind: ElementKind::Capacitor {
+            value: farads,
+            value_expr: None,
+            initial_voltage: None,
+            model: None,
+            instance_params: Vec::new(),
+            deferred_params: Vec::new(),
+        },
+        nodes: vec![a, b],
+        // SPEF is authored circuit input. The deterministic CSPEF/RSPEF name
+        // and reduced far-node spelling retain its source identity without
+        // misclassifying it as a helper owned by a SPICE element.
+        provenance: crate::netlist::ElementProvenance::Authored,
+    }
+}
+
+fn spef_resistor(name: String, a: String, b: String, ohms: Value) -> Element {
+    Element {
+        name,
+        kind: ElementKind::Resistor {
+            value: ohms,
+            value_expr: None,
+            model: None,
+            instance_params: Vec::new(),
+            deferred_params: Vec::new(),
+        },
+        nodes: vec![a, b],
+        provenance: crate::netlist::ElementProvenance::Authored,
+    }
+}
+
+fn next_reduced_node_name(
+    net: &str,
+    occupied: &mut HashSet<String>,
+) -> Result<String, ParseWithAbortError> {
+    let base = sanitize(&format!("__SPEF_REDUCED_{net}"));
+    let mut suffix = 0usize;
+    loop {
+        let candidate = if suffix == 0 {
+            base.clone()
+        } else {
+            format!("{base}_{suffix}")
+        };
+        if occupied.insert(candidate.clone()) {
+            return Ok(candidate);
+        }
+        suffix = suffix.checked_add(1).ok_or_else(|| {
+            spef_annotation_error(
+                0,
+                format!("too many node-name collisions while lowering reduced net `{net}`"),
+            )
+        })?;
     }
 }
 
@@ -590,6 +879,56 @@ fn rewire_pin(
     Ok(())
 }
 
+fn validate_reduced_driver(
+    netlist: &mut Netlist,
+    element_index: &HashMap<String, usize>,
+    subckt_ports: &HashMap<String, Vec<String>>,
+    instance: &str,
+    pin: &str,
+    cell: &str,
+    net: &str,
+) -> Result<(), String> {
+    // Reusing the terminal resolution/ownership check with the same node
+    // validates the driver without moving it off the near side of the pi.
+    rewire_pin(
+        netlist,
+        element_index,
+        subckt_ports,
+        instance,
+        pin,
+        net,
+        net,
+    )?;
+
+    let upper = instance.to_ascii_uppercase();
+    let element_idx = element_index
+        .get(&upper)
+        .or_else(|| element_index.get(&format!("X{upper}")))
+        .copied()
+        .ok_or_else(|| format!("no element named `{instance}` in the deck"))?;
+    let element = &netlist.elements[element_idx];
+    let expected_cell = match &element.kind {
+        ElementKind::Subcircuit { subckt_name, .. } => subckt_name.as_str(),
+        // Native independent sources are useful reduced-network drivers in
+        // standalone analog decks. Give them one exact pseudo-cell spelling
+        // rather than accepting arbitrary *CELL metadata.
+        ElementKind::VoltageSource(_) | ElementKind::VoltageSourceDeferred(_) => "VOLTAGE_SOURCE",
+        ElementKind::CurrentSource(_) | ElementKind::CurrentSourceDeferred(_) => "CURRENT_SOURCE",
+        _ => {
+            return Err(format!(
+                "element `{}` cannot be qualified as a reduced-net driver cell",
+                element.name
+            ));
+        }
+    };
+    if !expected_cell.eq_ignore_ascii_case(cell) {
+        return Err(format!(
+            "*CELL `{cell}` does not match driver type `{expected_cell}`"
+        ));
+    }
+    Ok(())
+}
+
 /// Resolve a SPEF pin name to a terminal index on a deck element.
 fn terminal_index(
     element: &Element,
@@ -612,6 +951,12 @@ fn terminal_index(
         | ElementKind::Inductor { .. } => position_in(&["1", "2"], &pin_upper)
             .or_else(|| position_in(&["P", "N"], &pin_upper))
             .or_else(|| position_in(&["A", "B"], &pin_upper)),
+        ElementKind::VoltageSource(_)
+        | ElementKind::VoltageSourceDeferred(_)
+        | ElementKind::CurrentSource(_)
+        | ElementKind::CurrentSourceDeferred(_) => position_in(&["1", "2"], &pin_upper)
+            .or_else(|| position_in(&["P", "N"], &pin_upper))
+            .or_else(|| position_in(&["+", "-"], &pin_upper)),
         _ => None,
     }
     .filter(|idx| *idx < element.nodes.len())
@@ -659,6 +1004,24 @@ enum NetSection {
     Induc,
 }
 
+struct ReducedDriverBuilder {
+    driver: NodeRef,
+    line: usize,
+    cell: Option<String>,
+    pi: Option<(Value, Value, Value)>,
+    loads_started: bool,
+    loads: Vec<ReducedLoad>,
+}
+
+struct ReducedNetBuilder {
+    kind: ReducedNetKind,
+    name: String,
+    total_capacitance: Value,
+    line: usize,
+    drivers: Vec<DriverReduction>,
+    active_driver: Option<ReducedDriverBuilder>,
+}
+
 impl<'a> Parser<'a> {
     fn new(content: &'a str) -> Self {
         Self {
@@ -685,8 +1048,11 @@ impl<'a> Parser<'a> {
     ) -> Result<SpefFile, ParseWithAbortError> {
         ensure_parse_not_aborted(abort)?;
         let mut nets = Vec::new();
+        let mut reduced_nets = Vec::new();
         let mut in_name_map = false;
         let mut current: Option<DNet> = None;
+        let mut current_reduced: Option<ReducedNetBuilder> = None;
+        let mut declared_net_names = HashSet::new();
         let mut section = NetSection::None;
 
         while let Some(raw) = self.lines.next() {
@@ -713,6 +1079,204 @@ impl<'a> Parser<'a> {
                     return Err(self
                         .error(format!("duplicate name-map index *{index}"))
                         .into());
+                }
+                continue;
+            }
+
+            if let Some(reduced) = current_reduced.as_mut() {
+                match keyword.as_str() {
+                    "*END" => {
+                        let mut reduced = current_reduced.take().ok_or_else(|| {
+                            self.error("internal reduced-net parser state was lost")
+                        })?;
+                        if let Some(driver) = reduced.active_driver.take() {
+                            reduced.drivers.push(
+                                self.finish_reduced_driver(driver)
+                                    .map_err(ParseWithAbortError::from)?,
+                            );
+                        }
+                        if reduced.kind == ReducedNetKind::Capacitance
+                            && !reduced.drivers.is_empty()
+                        {
+                            return Err(self
+                                .error("*C_NET accepts only a lumped capacitance")
+                                .into());
+                        }
+                        if reduced.drivers.len() > 1 {
+                            return Err(self
+                                .error(format!(
+                                    "reduced net `{}` has multiple driver views; they cannot be materialized as parallel physical networks",
+                                    reduced.name
+                                ))
+                                .into());
+                        }
+                        reduced_nets.push(ReducedNet {
+                            kind: reduced.kind,
+                            name: reduced.name,
+                            total_capacitance: reduced.total_capacitance,
+                            line: reduced.line,
+                            drivers: reduced.drivers,
+                        });
+                        section = NetSection::None;
+                    }
+                    "*DRIVER" if reduced.kind == ReducedNetKind::Resistance => {
+                        if fields.len() != 2 {
+                            return Err(self
+                                .error("malformed *DRIVER record (expected exactly 2 fields)")
+                                .into());
+                        }
+                        if let Some(driver) = reduced.active_driver.take() {
+                            reduced.drivers.push(
+                                self.finish_reduced_driver(driver)
+                                    .map_err(ParseWithAbortError::from)?,
+                            );
+                        }
+                        let driver = self
+                            .parse_pin_ref(fields[1])
+                            .map_err(ParseWithAbortError::from)?;
+                        if !matches!(driver, NodeRef::Pin(_, _)) {
+                            return Err(self.error("*DRIVER must name an instance pin").into());
+                        }
+                        reduced.active_driver = Some(ReducedDriverBuilder {
+                            driver,
+                            line: self.line_num,
+                            cell: None,
+                            pi: None,
+                            loads_started: false,
+                            loads: Vec::new(),
+                        });
+                    }
+                    "*CELL" if reduced.kind == ReducedNetKind::Resistance => {
+                        if fields.len() != 2 {
+                            return Err(self
+                                .error("malformed *CELL record (expected exactly 2 fields)")
+                                .into());
+                        }
+                        let cell = self
+                            .resolve_name(fields[1])
+                            .map_err(ParseWithAbortError::from)?;
+                        if cell.eq_ignore_ascii_case("UNKNOWN_DRIVER") {
+                            return Err(self.error("UNKNOWN_DRIVER is invalid in *R_NET").into());
+                        }
+                        let driver = reduced
+                            .active_driver
+                            .as_mut()
+                            .ok_or_else(|| self.error("*CELL record appears before *DRIVER"))?;
+                        if driver.cell.replace(cell).is_some() {
+                            return Err(self.error("duplicate *CELL record").into());
+                        }
+                    }
+                    "*C2_R1_C1" if reduced.kind == ReducedNetKind::Resistance => {
+                        if fields.len() != 4 {
+                            return Err(self
+                                .error("malformed *C2_R1_C1 record (expected exactly 4 fields)")
+                                .into());
+                        }
+                        let driver = reduced
+                            .active_driver
+                            .as_mut()
+                            .ok_or_else(|| self.error("*C2_R1_C1 record appears before *DRIVER"))?;
+                        if driver.cell.is_none() {
+                            return Err(self.error("*C2_R1_C1 record appears before *CELL").into());
+                        }
+                        if driver.pi.is_some() {
+                            return Err(self.error("duplicate *C2_R1_C1 record").into());
+                        }
+                        let c2 = self
+                            .parse_scaled_value(fields[1], self.cap_scale, "C2", false)
+                            .map_err(ParseWithAbortError::from)?;
+                        let r1 = self
+                            .parse_scaled_value(fields[2], self.res_scale, "R1", false)
+                            .map_err(ParseWithAbortError::from)?;
+                        let c1 = self
+                            .parse_scaled_value(fields[3], self.cap_scale, "C1", false)
+                            .map_err(ParseWithAbortError::from)?;
+                        let sum = c1 + c2;
+                        let tolerance = reduced.total_capacitance.max(sum) * 1.0e-4;
+                        if !sum.is_finite() || (sum - reduced.total_capacitance).abs() > tolerance {
+                            return Err(self
+                                .error(format!(
+                                    "*C2_R1_C1 capacitance is not conserved: C1+C2={sum:.17e} F, total={:.17e} F",
+                                    reduced.total_capacitance
+                                ))
+                                .into());
+                        }
+                        driver.pi = Some((c2, r1, c1));
+                    }
+                    "*LOADS" if reduced.kind == ReducedNetKind::Resistance => {
+                        if fields.len() != 1 {
+                            return Err(self
+                                .error("malformed *LOADS record (expected no arguments)")
+                                .into());
+                        }
+                        let driver = reduced
+                            .active_driver
+                            .as_mut()
+                            .ok_or_else(|| self.error("*LOADS record appears before *DRIVER"))?;
+                        if driver.pi.is_none() {
+                            return Err(self
+                                .error("*LOADS record appears before *C2_R1_C1")
+                                .into());
+                        }
+                        if driver.loads_started {
+                            return Err(self.error("duplicate *LOADS record").into());
+                        }
+                        driver.loads_started = true;
+                    }
+                    "*RC" if reduced.kind == ReducedNetKind::Resistance => {
+                        if fields.len() != 3 {
+                            return Err(self
+                                .error("malformed *RC record (expected exactly 3 fields)")
+                                .into());
+                        }
+                        let driver = reduced
+                            .active_driver
+                            .as_mut()
+                            .ok_or_else(|| self.error("*RC record appears before *DRIVER"))?;
+                        if !driver.loads_started {
+                            return Err(self.error("*RC record appears before *LOADS").into());
+                        }
+                        let pin = self
+                            .parse_pin_ref(fields[1])
+                            .map_err(ParseWithAbortError::from)?;
+                        if !matches!(pin, NodeRef::Pin(_, _)) {
+                            return Err(self.error("*RC must name an instance pin").into());
+                        }
+                        let delay_scale = self.res_scale * self.cap_scale;
+                        if !delay_scale.is_finite() || delay_scale <= 0.0 {
+                            return Err(self
+                                .error("R/C unit product for *RC is invalid or non-finite")
+                                .into());
+                        }
+                        let elmore_seconds = self
+                            .parse_scaled_value(fields[2], delay_scale, "*RC Elmore delay", false)
+                            .map_err(ParseWithAbortError::from)?;
+                        driver.loads.push(ReducedLoad {
+                            pin,
+                            elmore_seconds,
+                            line: self.line_num,
+                        });
+                    }
+                    "*Q" | "*K" => {
+                        return Err(self
+                            .error(format!(
+                                "reduced-net pole/residue record {keyword} is not materializable as a passive R/C network"
+                            ))
+                            .into());
+                    }
+                    _ => {
+                        return Err(self
+                            .error(format!(
+                                "unexpected record `{}` inside {}",
+                                fields[0],
+                                if reduced.kind == ReducedNetKind::Resistance {
+                                    "*R_NET"
+                                } else {
+                                    "*C_NET"
+                                }
+                            ))
+                            .into());
+                    }
                 }
                 continue;
             }
@@ -762,6 +1326,13 @@ impl<'a> Parser<'a> {
                     if let Some(net) = current.take() {
                         nets.push(net);
                     }
+                    if fields.len() != 3 && fields.len() != 5 {
+                        return Err(self
+                            .error("malformed *D_NET header (expected 3 fields or optional *V confidence)")
+                            .into());
+                    }
+                    self.validate_optional_routing_confidence(&fields)
+                        .map_err(ParseWithAbortError::from)?;
                     let name_field = fields
                         .get(1)
                         .ok_or_else(|| self.error("*D_NET without a net name"))
@@ -777,10 +1348,16 @@ impl<'a> Parser<'a> {
                         true,
                     )
                     .map_err(ParseWithAbortError::from)?;
+                    let name = self
+                        .resolve_name(name_field)
+                        .map_err(ParseWithAbortError::from)?;
+                    if !declared_net_names.insert(name.to_ascii_uppercase()) {
+                        return Err(self
+                            .error(format!("duplicate net annotation `{name}`"))
+                            .into());
+                    }
                     current = Some(DNet {
-                        name: self
-                            .resolve_name(name_field)
-                            .map_err(ParseWithAbortError::from)?,
+                        name,
                         line: self.line_num,
                         conns: Vec::new(),
                         caps: Vec::new(),
@@ -790,11 +1367,49 @@ impl<'a> Parser<'a> {
                     section = NetSection::None;
                 }
                 "*R_NET" | "*C_NET" => {
-                    return Err(self
-                        .error(format!(
-                            "reduced {keyword} parasitics are not supported and cannot be skipped"
-                        ))
-                        .into());
+                    in_name_map = false;
+                    if let Some(net) = current.take() {
+                        nets.push(net);
+                    }
+                    if fields.len() != 3 && fields.len() != 5 {
+                        return Err(self
+                            .error(format!(
+                                "malformed {keyword} header (expected 3 fields or optional *V confidence)"
+                            ))
+                            .into());
+                    }
+                    self.validate_optional_routing_confidence(&fields)
+                        .map_err(ParseWithAbortError::from)?;
+                    let kind = if keyword == "*R_NET" {
+                        ReducedNetKind::Resistance
+                    } else {
+                        ReducedNetKind::Capacitance
+                    };
+                    let name = self
+                        .resolve_name(fields[1])
+                        .map_err(ParseWithAbortError::from)?;
+                    if !declared_net_names.insert(name.to_ascii_uppercase()) {
+                        return Err(self
+                            .error(format!("duplicate net annotation `{name}`"))
+                            .into());
+                    }
+                    let total_capacitance = self
+                        .parse_scaled_value(
+                            fields[2],
+                            self.cap_scale,
+                            &format!("{keyword} total capacitance"),
+                            false,
+                        )
+                        .map_err(ParseWithAbortError::from)?;
+                    current_reduced = Some(ReducedNetBuilder {
+                        kind,
+                        name,
+                        total_capacitance,
+                        line: self.line_num,
+                        drivers: Vec::new(),
+                        active_driver: None,
+                    });
+                    section = NetSection::None;
                 }
                 "*CONN" => section = NetSection::Conn,
                 "*CAP" => section = NetSection::Cap,
@@ -932,14 +1547,88 @@ impl<'a> Parser<'a> {
             }
         }
 
+        if let Some(reduced) = current_reduced {
+            return Err(self
+                .error(format!(
+                    "reduced net `{}` is missing its terminating *END",
+                    reduced.name
+                ))
+                .into());
+        }
         if let Some(net) = current.take() {
             nets.push(net);
         }
         ensure_parse_not_aborted(abort)?;
-        Ok(SpefFile { nets })
+        Ok(SpefFile { nets, reduced_nets })
+    }
+
+    fn validate_optional_routing_confidence(&self, fields: &[&str]) -> Result<(), ParseError> {
+        if fields.len() == 3 {
+            return Ok(());
+        }
+        if !fields[3].eq_ignore_ascii_case("*V") {
+            return Err(self.error("optional routing confidence must begin with *V"));
+        }
+        let confidence: u32 = fields[4]
+            .parse()
+            .map_err(|_| self.error("routing confidence must be a positive integer"))?;
+        if confidence == 0 {
+            return Err(self.error("routing confidence must be a positive integer"));
+        }
+        Ok(())
+    }
+
+    fn finish_reduced_driver(
+        &self,
+        driver: ReducedDriverBuilder,
+    ) -> Result<DriverReduction, ParseError> {
+        let cell = driver
+            .cell
+            .ok_or_else(|| self.error("*DRIVER is missing its required *CELL record"))?;
+        let (c2_farads, r1_ohms, c1_farads) = driver
+            .pi
+            .ok_or_else(|| self.error("*DRIVER is missing its required *C2_R1_C1 record"))?;
+        if !driver.loads_started {
+            return Err(self.error("*DRIVER is missing its required *LOADS record"));
+        }
+        if driver.loads.is_empty() {
+            return Err(self.error("*LOADS must contain at least one *RC load record"));
+        }
+        // IEEE *RC values are load-specific Elmore delays, not physical
+        // connectivity. A static passive pi has exactly one far-side transfer
+        // time constant, R1*C1. It is exact for multiple loads only when every
+        // single-pole descriptor names that same transfer. Anything else
+        // needs a timing/macromodel runtime and must fail closed here.
+        let physical_delay = r1_ohms * c1_farads;
+        if !physical_delay.is_finite() || physical_delay <= 0.0 {
+            return Err(self.error(format!(
+                "*C2_R1_C1 far-side time constant is invalid or non-finite ({physical_delay})"
+            )));
+        }
+        for load in &driver.loads {
+            let tolerance = physical_delay.max(load.elmore_seconds) * 1.0e-4;
+            if (load.elmore_seconds - physical_delay).abs() > tolerance {
+                return Err(self.error(format!(
+                    "*RC load Elmore delay {:.17e} s cannot be represented by the passive pi far-side R1*C1 delay {physical_delay:.17e} s",
+                    load.elmore_seconds
+                )));
+            }
+        }
+        Ok(DriverReduction {
+            driver: driver.driver,
+            cell,
+            c2_farads,
+            r1_ohms,
+            c1_farads,
+            loads: driver.loads,
+            line: driver.line,
+        })
     }
 
     fn parse_unit(&self, fields: &[&str], table: &[(&str, Value)]) -> Result<Value, ParseError> {
+        if fields.len() != 3 {
+            return Err(self.error("unit statement must contain exactly a multiplier and unit"));
+        }
         let multiplier: Value = fields
             .get(1)
             .and_then(|f| f.parse().ok())
@@ -1022,6 +1711,9 @@ impl<'a> Parser<'a> {
                 if sub.is_empty() {
                     return Err(self.error(format!("node reference `{field}` has an empty suffix")));
                 }
+                if parse_map_index(sub).is_some() {
+                    return Ok(NodeRef::Pin(base, self.resolve_name(sub)?));
+                }
                 // A purely numeric suffix is an internal subnode; anything
                 // else is an instance pin.
                 if sub.chars().all(|ch| ch.is_ascii_digit()) {
@@ -1031,6 +1723,27 @@ impl<'a> Parser<'a> {
                 }
             }
         }
+    }
+
+    /// Parse a grammar position that requires `instance<delimiter>pin`.
+    /// Numeric pin names are pins here, not detailed-net internal subnodes.
+    fn parse_pin_ref(&self, field: &str) -> Result<NodeRef, ParseError> {
+        let (instance, pin) = field.split_once(self.delimiter).ok_or_else(|| {
+            self.error(format!(
+                "instance pin `{field}` is missing delimiter `{}`",
+                self.delimiter
+            ))
+        })?;
+        let instance = self.resolve_name(instance)?;
+        if pin.is_empty() {
+            return Err(self.error(format!("instance pin `{field}` has an empty pin name")));
+        }
+        let pin = if parse_map_index(pin).is_some() {
+            self.resolve_name(pin)?
+        } else {
+            pin.to_owned()
+        };
+        Ok(NodeRef::Pin(instance, pin))
     }
 }
 
@@ -1115,6 +1828,147 @@ mod tests {
             original_elements,
             "an aborted back-annotation must not publish partial elements"
         );
+    }
+
+    #[test]
+    fn parses_reduced_pi_and_lumped_capacitance_records_with_name_mapping() {
+        let source = "\
+*SPEF \"IEEE 1481-2009\"
+*DELIMITER :
+*C_UNIT 1 NF
+*R_UNIT 1 KOHM
+*NAME_MAP
+*1 in
+*2 I1
+*3 2
+*4 ILOAD
+*5 1
+*R_NET *1 3
+*DRIVER *2:*3
+*CELL CURRENT_SOURCE
+*C2_R1_C1 1 2 2
+*LOADS
+*RC *4:*5 4
+*END
+*C_NET shunt 5
+*END
+";
+
+        let spef = SpefFile::parse(source).expect("reduced SPEF parses");
+
+        assert_eq!(spef.reduced_nets.len(), 2);
+        let pi = &spef.reduced_nets[0];
+        assert_eq!(pi.name, "in");
+        assert!((pi.total_capacitance - 3.0e-9).abs() <= f64::EPSILON * 3.0e-9);
+        assert_eq!(pi.drivers.len(), 1);
+        assert_eq!(
+            pi.drivers[0].driver,
+            NodeRef::Pin("I1".to_owned(), "2".to_owned())
+        );
+        assert_eq!(pi.drivers[0].r1_ohms, 2.0e3);
+        assert!((pi.drivers[0].loads[0].elmore_seconds - 4.0e-6).abs() <= f64::EPSILON * 4.0e-6);
+        assert_eq!(spef.reduced_nets[1].kind, ReducedNetKind::Capacitance);
+        assert!((spef.reduced_nets[1].total_capacitance - 5.0e-9).abs() <= f64::EPSILON * 5.0e-9);
+    }
+
+    #[test]
+    fn reduced_spef_parser_aborts_during_large_load_section() {
+        let mut source = String::from(
+            "*SPEF \"IEEE 1481-2009\"\n*C_UNIT 1 PF\n*R_UNIT 1 OHM\n*R_NET in 2\n*DRIVER V1:1\n*CELL VOLTAGE_SOURCE\n*C2_R1_C1 1 1 1\n*LOADS\n",
+        );
+        for index in 0..4_096 {
+            source.push_str(&format!("*RC R{index}:1 1\n"));
+        }
+        source.push_str("*END\n");
+        let abort = crate::abort_signal::CountingAbort::new(80);
+
+        let result = SpefFile::parse_with_abort(&source, &abort);
+
+        assert!(matches!(result, Err(ParseWithAbortError::Aborted)));
+        assert!(abort.count() > 80, "reduced parsing must poll during work");
+    }
+
+    #[test]
+    fn reduced_spef_application_aborts_transactionally_during_load_rewiring() {
+        let mut source = String::from(
+            "*SPEF \"IEEE 1481-2009\"\n*C_UNIT 1 PF\n*R_UNIT 1 OHM\n*R_NET in 2\n*DRIVER V1:1\n*CELL VOLTAGE_SOURCE\n*C2_R1_C1 1 1 1\n*LOADS\n",
+        );
+        let mut deck = String::from("reduced cancellation\nV1 in 0 DC 0\n");
+        for index in 0..1_024 {
+            source.push_str(&format!("*RC R{index}:1 1\n"));
+            deck.push_str(&format!("R{index} in 0 1meg\n"));
+        }
+        source.push_str("*END\n");
+        deck.push_str(".op\n.end\n");
+        let spef = SpefFile::parse(&source).expect("large reduced SPEF parses");
+        let mut netlist = Netlist::parse(&deck).expect("large fixture deck parses");
+        let original_nodes: Vec<_> = netlist
+            .elements
+            .iter()
+            .map(|element| element.nodes.clone())
+            .collect();
+        let abort = crate::abort_signal::CountingAbort::new(24);
+
+        let result = spef.apply_with_abort(&mut netlist, &abort);
+
+        assert!(matches!(result, Err(ParseWithAbortError::Aborted)));
+        assert!(abort.count() > 24, "reduced lowering must poll during work");
+        assert_eq!(
+            netlist
+                .elements
+                .iter()
+                .map(|element| element.nodes.clone())
+                .collect::<Vec<_>>(),
+            original_nodes,
+            "an aborted reduced annotation must not publish partial rewiring"
+        );
+    }
+
+    #[test]
+    fn multiple_reduced_driver_views_fail_closed() {
+        let source = "\
+*SPEF \"IEEE 1481-2009\"
+*C_UNIT 1 PF
+*R_UNIT 1 OHM
+*R_NET in 2
+*DRIVER V1:1
+*CELL VOLTAGE_SOURCE
+*C2_R1_C1 1 1 1
+*LOADS
+*RC R1:1 1
+*DRIVER V2:1
+*CELL VOLTAGE_SOURCE
+*C2_R1_C1 1 1 1
+*LOADS
+*RC R2:1 1
+*END
+";
+
+        let error = SpefFile::parse(source).expect_err("alternative driver views cannot add");
+
+        assert!(error.to_string().contains("multiple driver views"));
+    }
+
+    #[test]
+    fn reduced_load_delay_must_be_representable_by_the_passive_pi() {
+        let source = "\
+*SPEF \"IEEE 1481-2009\"
+*C_UNIT 1 PF
+*R_UNIT 1 KOHM
+*R_NET in 2
+*DRIVER V1:1
+*CELL VOLTAGE_SOURCE
+*C2_R1_C1 1 2 1
+*LOADS
+*RC R1:1 9
+*END
+";
+
+        let error = SpefFile::parse(source)
+            .expect_err("an unrelated Elmore delay cannot become a passive far node");
+
+        assert!(error.to_string().contains("cannot be represented"));
+        assert!(error.to_string().contains("R1*C1"));
     }
 
     const SPEF: &str = r#"
