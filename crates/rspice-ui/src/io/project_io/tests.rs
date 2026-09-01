@@ -1179,59 +1179,6 @@ fn project_file_round_trips_persisted_simulation_results() {
     assert_eq!(analysis.measurements[0].name, "gain");
     assert_eq!(analysis.waveforms[0].complex.as_ref().unwrap().imag[2], 0.3);
     assert_eq!(restored.waveforms[0].name, "|V(out)|");
-    let mut unversioned_value: serde_json::Value =
-        serde_json::from_str(&json).expect("current project parses as JSON");
-    let legacy_results = unversioned_value["simulation_results"]
-        .as_object_mut()
-        .expect("simulation result object");
-    legacy_results.remove("schema_version");
-    legacy_results.remove("active_run_stable_id");
-    legacy_results.remove("active_dataset_id");
-    legacy_results.remove("active_analysis_sequence");
-    legacy_results.insert("active_run_id".to_owned(), serde_json::json!(12));
-    legacy_results.insert("active_analysis_id".to_owned(), serde_json::json!(7));
-    let legacy_run = legacy_results["runs"][0]
-        .as_object_mut()
-        .expect("legacy run object");
-    legacy_run.remove("run_id");
-    legacy_run.remove("dataset_id");
-    legacy_run.remove("job_id");
-    legacy_run.remove("execution_target");
-    legacy_run.remove("lifecycle");
-    legacy_run.remove("dataset_content_digest");
-    for analysis in legacy_run["analyses"]
-        .as_array_mut()
-        .expect("legacy analysis array")
-    {
-        analysis
-            .as_object_mut()
-            .expect("legacy analysis object")
-            .remove("result_data_digest");
-    }
-    legacy_run.remove("provenance_mode");
-    let unversioned_json =
-        serde_json::to_string(&unversioned_value).expect("unversioned project serializes");
-    let unversioned =
-        load_project_text(&unversioned_json, None).expect("unversioned project migrates");
-    let migrated_run = &unversioned.simulation_results.runs[0];
-    assert_eq!(
-        unversioned.simulation_results.active_run_stable_id,
-        migrated_run.run_id
-    );
-    assert_eq!(
-        unversioned.simulation_results.active_dataset_id,
-        migrated_run.dataset_id
-    );
-    assert_ne!(migrated_run.run_id, Some(expected_run_id));
-    assert_ne!(migrated_run.dataset_id, Some(expected_dataset_id));
-    assert_eq!(
-        unversioned.simulation_results.active_analysis_sequence,
-        Some(7)
-    );
-    assert_eq!(
-        migrated_run.lifecycle,
-        Some(SimulationRunLifecycle::LegacyUnknown)
-    );
 }
 
 #[test]

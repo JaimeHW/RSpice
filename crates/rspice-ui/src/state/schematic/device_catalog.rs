@@ -334,6 +334,12 @@ pub const ENGINE_ONLY_XSPICE_DEVICES: &[CatalogXspiceDeviceDescriptor] = &[
         "xspice_potentiometer.svg"
     ),
     xspice_device!(
+        "rspice.xspice.pspice_d_stim",
+        "pspice_d_stim",
+        "PSpice Digital Stimulus",
+        "xspice_digital_source.svg"
+    ),
+    xspice_device!(
         "rspice.xspice.pswitch",
         "pswitch",
         "P-Switch",
@@ -995,6 +1001,29 @@ mod tests {
             assert_eq!(decoded, binding);
             validate_builtin_xspice_binding(&decoded).expect("round-trip remains executable");
         }
+    }
+
+    #[test]
+    fn pspice_digital_stimulus_has_a_placeable_exact_catalog_contract() {
+        let descriptor = engine_only_xspice_devices()
+            .iter()
+            .find(|descriptor| descriptor.model_type == "pspice_d_stim")
+            .expect("PSpice digital stimulus catalog disposition");
+        assert_eq!(descriptor.stable_id, "rspice.xspice.pspice_d_stim");
+        assert_eq!(descriptor.display_name, "PSpice Digital Stimulus");
+        assert_eq!(descriptor.symbol_asset, "xspice_digital_source.svg");
+
+        let binding = builtin_xspice_library_binding(descriptor)
+            .expect("PSpice digital stimulus placement binding");
+        let validated = validate_builtin_xspice_binding(&binding)
+            .expect("PSpice digital stimulus exact executable binding");
+        assert_eq!(validated.model_type, "pspice_d_stim");
+        assert_eq!(binding.terminal_order, ["out[0]"]);
+        let contract = binding.builtin_xspice.as_ref().expect("built-in contract");
+        assert_eq!(contract.ports.len(), 1);
+        assert_eq!(contract.ports[0].name, "out");
+        assert_eq!(contract.ports[0].vector_width, 1);
+        assert_eq!(binding.parameter_order, ["stim_program"]);
     }
 
     #[test]

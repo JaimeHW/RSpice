@@ -634,10 +634,24 @@ fn stepped_measurement_exports_identify_every_coordinate_run() {
     let lines = csv.lines().collect::<Vec<_>>();
     assert_eq!(
         lines[0],
-        "netlist,name,value,expected,tolerance,passed,error,run"
+        "netlist,name,value,expected,tolerance,passed,error,run,raw_value,failure_limit,failure_limit_exceeded"
     );
-    assert!(lines[1].ends_with("[step-000001]"));
-    assert!(lines[2].ends_with("[step-000002]"));
+    let run_column = lines[0]
+        .split(',')
+        .position(|column| column == "run")
+        .expect("measurement CSV has a run column");
+    assert!(
+        lines[1]
+            .split(',')
+            .nth(run_column)
+            .is_some_and(|run| run.ends_with("[step-000001]"))
+    );
+    assert!(
+        lines[2]
+            .split(',')
+            .nth(run_column)
+            .is_some_and(|run| run.ends_with("[step-000002]"))
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
