@@ -10279,12 +10279,17 @@ mod tests {
 
     fn analyzed_two_terminal_hir(module_name: &str, expression: Expression) -> HirModel {
         let span = Span::dummy();
+        // One struct cloned into both lowerings, which is how the analyzer
+        // itself records an unguarded contribution: the shared site is what
+        // pairs the two copies.
         let contribution = AnalyzedContribution {
             branch: "p,n".into(),
             declared_branch: None,
             is_current: true,
             indirect: false,
             expression,
+            site: crate::semantic::AnalogSiteId(0),
+            expression_guard: crate::semantic::AnalogSiteGuard::None,
             expr_type: ValueType::Real,
             span,
         };
@@ -10317,6 +10322,7 @@ mod tests {
             contributions: vec![contribution.clone()],
             statements: Vec::new(),
             body: vec![AnalyzedRegion::Contribution(contribution)],
+            analog_site_count: 1,
             internal_nodes: Vec::new(),
             ground_nodes: Vec::new(),
             arrays: HashMap::new(),

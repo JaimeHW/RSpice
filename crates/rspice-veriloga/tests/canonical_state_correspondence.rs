@@ -374,8 +374,7 @@ endmodule
 "#,
     );
     let diagnostics = CfgModel::from_hir(&ramped.hir, &ramped.mir)
-        .err()
-        .expect("the CFG level cannot lower transition");
+        .expect_err("the CFG level cannot lower transition");
     assert!(
         diagnostics
             .iter()
@@ -414,8 +413,7 @@ endmodule
     };
 
     let errors = CfgStateAllocation::build(&base.hir, &cfg.function)
-        .err()
-        .expect("a transition must be refused, not allocated");
+        .expect_err("a transition must be refused, not allocated");
     assert!(
         errors
             .iter()
