@@ -615,9 +615,14 @@ fn validate_declared_ports(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::simulation_runner::hb::{
+        HbRunConfig, HbToneRunConfig, run_hb_analysis_with_abort,
+    };
+    use crate::services::simulation_runner::{
+        build_resolved_periodic_engine, parse_runner_netlist_with_abort,
+    };
     use rspice_core::abort_signal::NoAbort;
     use rspice_core::analysis::PssConfig;
-    use rspice_core::engine::{Engine, SimulationConfig};
 
     fn config() -> PspRunConfig {
         PspRunConfig {
@@ -753,18 +758,21 @@ mod tests {
                     C1 p1 0 1e-18\n\
                     P2 p2 0 PORT=2 Z0=50\n\
                     .end\n";
-        let netlist = rspice_core::Netlist::parse(deck).expect("deck parses");
-        let operating_point = Engine::new(SimulationConfig::default())
-            .run_pss_operating_point_with_abort(
-                &netlist,
-                PssConfig::new(1.0e6)
-                    .with_tstab_periods(1)
-                    .with_points_per_period(32)
-                    .with_harmonics(4)
-                    .with_tolerance(1.0e-7),
-                &NoAbort,
-            )
-            .expect("zero-state PSS converges");
+        let netlist = parse_runner_netlist_with_abort(deck, None, &NoAbort)
+            .expect("service deck parsing succeeds");
+        let operating_point =
+            build_resolved_periodic_engine(&netlist, 1.0e-7, "test PSS producer configuration")
+                .expect("resolved producer engine")
+                .run_pss_operating_point_with_abort(
+                    &netlist,
+                    PssConfig::new(1.0e6)
+                        .with_tstab_periods(1)
+                        .with_points_per_period(32)
+                        .with_harmonics(4)
+                        .with_tolerance(1.0e-7),
+                    &NoAbort,
+                )
+                .expect("zero-state PSS converges");
         let mut request = config();
         request.start_freq = 1.0e4;
         request.stop_freq = 1.0e4;
@@ -818,14 +826,17 @@ mod tests {
                     C1 p1 0 1e-18\n\
                     P2 p2 0 PORT=2 Z0=50\n\
                     .end\n";
-        let netlist = rspice_core::Netlist::parse(deck).expect("deck parses");
-        let operating_point = Engine::new(SimulationConfig::default())
-            .run_hb(
-                &netlist,
-                rspice_core::analysis::HbConfig::new(1.0e6).with_harmonics(8),
-            )
-            .expect("HB converges")
-            .operating_point;
+        let operating_point = run_hb_analysis_with_abort(
+            deck,
+            &HbRunConfig {
+                tones: vec![HbToneRunConfig::new(1.0e6, 8)],
+                reltol: 2.5e-7,
+                ..HbRunConfig::default()
+            },
+            &NoAbort,
+        )
+        .expect("HB service converges")
+        .operating_point;
         let mut request = config();
         request.start_freq = 1.0e4;
         request.stop_freq = 1.0e4;
@@ -835,7 +846,7 @@ mod tests {
         let result = run_hbsp_analysis_from_hb_with_source_path_and_abort(
             deck,
             &request,
-            &operating_point,
+            operating_point.as_ref(),
             None,
             &NoAbort,
         )

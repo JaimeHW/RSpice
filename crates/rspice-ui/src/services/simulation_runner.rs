@@ -2,7 +2,7 @@
 //!
 //! Async wrapper around rspice-core for running simulations from the GUI.
 
-use rspice_core::engine::SimulationConfig;
+use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::{SimulationConfigOverrides, resolve_simulation_config};
 
 mod harmonic_basis;
@@ -140,6 +140,27 @@ fn build_engine_config(
             &SimulationConfigOverrides::default(),
         ),
     }
+}
+
+/// Construct the authoritative engine used to produce or consume an
+/// authenticated periodic operating point.
+///
+/// `build_engine_config` has already resolved deck options.  Periodic run
+/// settings then own the Newton tolerance, so the resulting configuration
+/// must be marked resolved; passing it through `Engine::new` would apply the
+/// deck a second time and could overwrite that run-owned value.  Producer and
+/// dependent-analysis services share this helper so retained-state identity
+/// is based on exactly the same configuration contract.
+fn build_resolved_periodic_engine(
+    netlist: &rspice_core::Netlist,
+    tolerance: rspice_core::Value,
+    context: &str,
+) -> ServiceRunResult<Engine> {
+    let mut config = build_engine_config(netlist, None);
+    config.tolerance = tolerance;
+    Engine::try_new_with_resolved_config(config).map_err(|error| {
+        ServiceRunError::from_core(context, rspice_core::SimulationError::Configuration(error))
+    })
 }
 
 // =============================================================================

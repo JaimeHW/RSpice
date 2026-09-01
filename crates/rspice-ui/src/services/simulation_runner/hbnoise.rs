@@ -9,13 +9,13 @@ use std::path::Path;
 
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
-use rspice_core::engine::{Engine, HbOperatingPoint};
+use rspice_core::engine::HbOperatingPoint;
 
 use super::error::{ensure_not_aborted, poll_periodically};
 use super::{
-    ServiceRunError, ServiceRunResult, build_engine_config, generate_freq_points_with_abort,
-    is_ground_like, netlist_has_independent_source_named_with_abort,
-    parse_runner_netlist_with_abort,
+    ServiceRunError, ServiceRunResult, build_resolved_periodic_engine,
+    generate_freq_points_with_abort, is_ground_like,
+    netlist_has_independent_source_named_with_abort, parse_runner_netlist_with_abort,
 };
 
 /// Frequency sweep type for HBNOISE.
@@ -147,7 +147,11 @@ pub fn run_hbnoise_analysis_from_hb_with_source_path_and_abort(
         ));
     }
 
-    let engine = Engine::new(build_engine_config(&netlist, None));
+    let engine = build_resolved_periodic_engine(
+        &netlist,
+        operating_point.config().tolerance,
+        "HBNOISE resolved producer configuration is invalid",
+    )?;
     let exact = engine
         .run_pnoise_from_hb_with_abort(
             &netlist,
@@ -266,16 +270,25 @@ pub(crate) fn integrate_psd(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::simulation_runner::hb::{
+        HbRunConfig, HbToneRunConfig, run_hb_analysis_with_abort,
+    };
     use rspice_core::abort_signal::NoAbort;
-    use rspice_core::analysis::harmonic_balance::HbConfig;
-    use rspice_core::netlist::Netlist;
 
     fn retained_hb(deck: &str) -> HbOperatingPoint {
-        let netlist = Netlist::parse(deck).expect("deck parses");
-        Engine::new(Default::default())
-            .run_hb(&netlist, HbConfig::new(1.0e6).with_harmonics(8))
-            .expect("HB runs")
-            .operating_point
+        run_hb_analysis_with_abort(
+            deck,
+            &HbRunConfig {
+                tones: vec![HbToneRunConfig::new(1.0e6, 8)],
+                reltol: 2.5e-7,
+                ..HbRunConfig::default()
+            },
+            &NoAbort,
+        )
+        .expect("HB service runs")
+        .operating_point
+        .as_ref()
+        .clone()
     }
 
     #[test]

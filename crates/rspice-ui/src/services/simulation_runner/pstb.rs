@@ -5,13 +5,12 @@
 //! sampled loops.
 
 use super::{
-    ServiceRunError, ServiceRunResult, build_engine_config,
+    ServiceRunError, ServiceRunResult, build_resolved_periodic_engine,
     error::{ensure_not_aborted, poll_periodically},
     parse_runner_netlist_with_abort,
 };
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
-use rspice_core::engine::Engine;
 use std::fmt;
 use std::path::Path;
 
@@ -682,9 +681,11 @@ fn run_pstb_analysis_impl(
 
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
 
-    let mut sim_config = build_engine_config(&netlist, None);
-    sim_config.tolerance = config.pss_tolerance;
-    let engine = Engine::new(sim_config);
+    let engine = build_resolved_periodic_engine(
+        &netlist,
+        config.pss_tolerance,
+        "PSTB resolved producer configuration is invalid",
+    )?;
     ensure_not_aborted(abort)?;
     let circuit = engine
         .build_circuit(&netlist)

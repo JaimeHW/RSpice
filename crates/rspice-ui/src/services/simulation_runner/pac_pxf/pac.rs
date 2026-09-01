@@ -13,8 +13,9 @@ use rspice_core::engine::Engine;
 
 use super::super::error::{ensure_not_aborted, poll_periodically};
 use super::super::{
-    ServiceRunError, ServiceRunResult, build_engine_config, infer_primary_output_node_with_abort,
-    infer_primary_source_name_with_abort, parse_runner_netlist_with_abort,
+    ServiceRunError, ServiceRunResult, build_engine_config, build_resolved_periodic_engine,
+    infer_primary_output_node_with_abort, infer_primary_source_name_with_abort,
+    parse_runner_netlist_with_abort,
 };
 use super::shared::{normalize_pac_node_name, resolve_pac_output_node_with_abort};
 // =============================================================================
@@ -178,9 +179,11 @@ pub(crate) fn run_pac_internal_from_hb_with_abort(
     ensure_not_aborted(abort)?;
     config.validate().map_err(ServiceRunError::Failure)?;
 
-    let mut sim_config = build_engine_config(netlist, None);
-    sim_config.tolerance = config.pss_tolerance;
-    let engine = Engine::new(sim_config);
+    let engine = build_resolved_periodic_engine(
+        netlist,
+        config.pss_tolerance,
+        "PAC resolved producer configuration is invalid",
+    )?;
     let pac_config = build_core_pac_config(config)?;
     let pac_result = engine
         .run_pac_from_hb_with_abort(netlist, pac_config, operating_point, abort)
@@ -198,9 +201,11 @@ fn run_pac_internal_impl(
     ensure_not_aborted(abort)?;
     config.validate().map_err(ServiceRunError::Failure)?;
 
-    let mut sim_config = build_engine_config(netlist, None);
-    sim_config.tolerance = config.pss_tolerance;
-    let engine = Engine::new(sim_config);
+    let engine = build_resolved_periodic_engine(
+        netlist,
+        config.pss_tolerance,
+        "PAC resolved producer configuration is invalid",
+    )?;
 
     let pac_config = build_core_pac_config(config)?;
 
