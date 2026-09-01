@@ -13,6 +13,7 @@
 //! `dpwr dgnd t clk q qbar`, with the first four ports as inputs and the last
 //! two as analog in/out conductance ports.
 
+use crate::xspice::threshold_crossing::threshold_crossing_time;
 use crate::xspice::{
     AnalogTransition, CmContext, CmError, CmResult, CodeModel, EvaluationPhase, ParamSpec,
     PortDirection, PortSpec, PortType,
@@ -302,30 +303,25 @@ fn transition_time_for_state(target: bool, start: Value, params: DigParams) -> O
         .filter(|time| time.is_finite())
 }
 
+/// Where in the accepted step this context describes the input crossed
+/// `threshold`.
+///
+/// The arithmetic is [`threshold_crossing_time`]'s; this only names which of
+/// the context's time fields are the step.
 fn transition_time_at_threshold(
     ctx: &CmContext,
     previous_voltage: Value,
     voltage: Value,
     threshold: Value,
 ) -> Value {
-    let timestep = ctx.timestep;
-    let denominator = voltage - previous_voltage;
-    if !timestep.is_finite()
-        || timestep <= 0.0
-        || !previous_voltage.is_finite()
-        || !voltage.is_finite()
-        || !threshold.is_finite()
-        || denominator.abs() <= Value::EPSILON
-    {
-        return ctx.time;
-    }
-    let delta = timestep * (voltage - threshold) / denominator;
-    let transition_time = ctx.time - delta;
-    if transition_time.is_finite() {
-        transition_time.clamp(ctx.time_prev.min(ctx.time), ctx.time_prev.max(ctx.time))
-    } else {
-        ctx.time
-    }
+    threshold_crossing_time(
+        ctx.time,
+        ctx.time_prev,
+        ctx.timestep,
+        previous_voltage,
+        voltage,
+        threshold,
+    )
 }
 
 fn q_ports() -> &'static [PortSpec] {
@@ -425,33 +421,17 @@ impl XyceDTff {
         next_state: bool,
         params: DigParams,
     ) -> Value {
-        let timestep = ctx.timestep;
-        let denominator = voltage - previous_voltage;
-        if !timestep.is_finite()
-            || timestep <= 0.0
-            || !previous_voltage.is_finite()
-            || !voltage.is_finite()
-            || denominator.abs() <= Value::EPSILON
-        {
-            return ctx.time;
-        }
-
         // The Xyce DIG device linearly interpolates the input crossing within
         // the accepted solver step.  A rising transition must clear both
         // high thresholds; a falling transition must cross below both low
-        // thresholds.
+        // thresholds.  Which threshold is the device's decision; where the
+        // input met it is [`threshold_crossing_time`]'s.
         let threshold = if next_state {
             params.s0_vhi.max(params.s1_vlo)
         } else {
             params.s1_vlo.min(params.s0_vhi)
         };
-        let delta = timestep * (voltage - threshold) / denominator;
-        let transition_time = ctx.time - delta;
-        if transition_time.is_finite() {
-            transition_time.clamp(ctx.time_prev.min(ctx.time), ctx.time_prev.max(ctx.time))
-        } else {
-            ctx.time
-        }
+        transition_time_at_threshold(ctx, previous_voltage, voltage, threshold)
     }
 
     fn sample_input(

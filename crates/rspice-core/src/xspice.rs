@@ -64,6 +64,11 @@ mod registry;
 // `circuit::external_models` (rank 10); a counter module above either would be
 // an upward edge from both.
 pub(crate) mod settle_cost;
+// The one statement of where inside an accepted analog step a voltage crossed
+// a logic threshold. Read by the Xyce DIG code models and by the mixed
+// Verilog-AMS interleave, which have no context type in common — hence a
+// module of plain arithmetic rather than a method on either's state.
+pub(crate) mod threshold_crossing;
 mod traits;
 // Native execution of digital IEEE 1364-2005 Verilog. Not a code model: it
 // sits here because it is built on `event_scheduler`, and rank 9 is the only
