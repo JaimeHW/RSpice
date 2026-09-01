@@ -232,17 +232,6 @@ fn nonlinear_hb_fails_closed_before_solving_unrepresented_periodic_families() {
     let cases = [
         (
             "\
-* a VCCS requires a periodic controlled-source matrix stamp
-iin 0 in dc 0
-g1 out 0 in 0 2
-rin in 0 1
-rout out 0 1
-.end
-",
-            "controlled-source equations",
-        ),
-        (
-            "\
 * coupled inductors require a mutual branch block
 iin 0 a dc 0
 l1 a 0 1u

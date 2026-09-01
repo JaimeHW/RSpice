@@ -389,17 +389,6 @@ r1 out 0 1k
         ),
         (
             "\
-* a VCCS has no branch unknown but still requires a periodic matrix stamp
-iin 0 in dc 0
-g1 out 0 in 0 2
-rin in 0 1
-rout out 0 1
-.end
-",
-            "controlled-source equations",
-        ),
-        (
-            "\
 * solution-dependent capacitance requires its charge linearization
 iin 0 out dc 0
 vctrl ctrl 0 dc 0.5

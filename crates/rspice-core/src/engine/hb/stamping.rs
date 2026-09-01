@@ -5,6 +5,8 @@ enum PeriodicMnaRegistration {
     VoltageSource(usize),
     Inductor(usize),
     Resistor(usize),
+    Vcvs(usize),
+    Ccvs(usize),
 }
 
 impl Engine {
@@ -260,8 +262,8 @@ impl Engine {
     /// Register every supported exact HB MNA branch in the circuit's
     /// canonical one-based branch order.
     ///
-    /// Linear HB, PAC, and PNoise support independent voltage-source,
-    /// uncoupled-inductor, and branch-form resistor equations. If authored
+    /// Linear HB, PAC, and PNoise support independent and controlled
+    /// voltage-source, uncoupled-inductor, and branch-form resistor equations. If authored
     /// voltage-source spectra were registered first, the exact descriptors
     /// retain them for the large-signal solve; otherwise they describe
     /// zero-valued small-signal constraints. The caller rejects other branch
@@ -278,6 +280,8 @@ impl Engine {
             .len()
             .checked_add(circuit.inductors.len())
             .and_then(|count| count.checked_add(circuit.resistor_branches.len()))
+            .and_then(|count| count.checked_add(circuit.vcvs.len()))
+            .and_then(|count| count.checked_add(circuit.ccvs.len()))
             .ok_or_else(|| {
                 SimulationError::Circuit(
                     "periodic MNA supported-branch count overflows this platform".to_string(),
@@ -285,7 +289,7 @@ impl Engine {
             })?;
         if represented_count != branch_count {
             return Err(SimulationError::Circuit(format!(
-                "periodic MNA supports {represented_count} voltage-source/inductor/resistor branches, but the circuit declares {branch_count} canonical branches"
+                "periodic MNA supports {represented_count} voltage-source/controlled-source/inductor/resistor branches, but the circuit declares {branch_count} canonical branches"
             )));
         }
 
@@ -444,6 +448,93 @@ impl Engine {
             }
         }
 
+        for vcvs_index in 0..circuit.vcvs.len() {
+            let name = circuit.vcvs.names.get(vcvs_index).ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "periodic MNA VCVS storage is missing name row {vcvs_index}"
+                ))
+            })?;
+            circuit
+                .vcvs
+                .node_pos
+                .get(vcvs_index)
+                .zip(circuit.vcvs.node_neg.get(vcvs_index))
+                .zip(circuit.vcvs.ctrl_pos.get(vcvs_index))
+                .zip(circuit.vcvs.ctrl_neg.get(vcvs_index))
+                .zip(circuit.vcvs.gains.get(vcvs_index))
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "periodic MNA VCVS '{name}' has incomplete terminal/control/value storage"
+                    ))
+                })?;
+            let branch_ordinal = *circuit.vcvs.branch_indices.get(vcvs_index).ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "periodic MNA VCVS '{name}' is missing its canonical branch ordinal"
+                ))
+            })?;
+            let slot_index = branch_ordinal.checked_sub(1).ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "periodic MNA VCVS '{name}' has invalid branch ordinal 0"
+                ))
+            })?;
+            let slot = registrations.get_mut(slot_index).ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "periodic MNA VCVS '{name}' has branch ordinal {branch_ordinal}, outside 1..={branch_count}"
+                ))
+            })?;
+            if slot
+                .replace(PeriodicMnaRegistration::Vcvs(vcvs_index))
+                .is_some()
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "periodic MNA branch ordinal {branch_ordinal} is assigned more than once"
+                )));
+            }
+        }
+
+        for ccvs_index in 0..circuit.ccvs.len() {
+            let name = circuit.ccvs.names.get(ccvs_index).ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "periodic MNA CCVS storage is missing name row {ccvs_index}"
+                ))
+            })?;
+            circuit
+                .ccvs
+                .node_pos
+                .get(ccvs_index)
+                .zip(circuit.ccvs.node_neg.get(ccvs_index))
+                .zip(circuit.ccvs.ctrl_branch.get(ccvs_index))
+                .zip(circuit.ccvs.transresistances.get(ccvs_index))
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "periodic MNA CCVS '{name}' has incomplete terminal/control/value storage"
+                    ))
+                })?;
+            let branch_ordinal = *circuit.ccvs.branch_indices.get(ccvs_index).ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "periodic MNA CCVS '{name}' is missing its canonical branch ordinal"
+                ))
+            })?;
+            let slot_index = branch_ordinal.checked_sub(1).ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "periodic MNA CCVS '{name}' has invalid branch ordinal 0"
+                ))
+            })?;
+            let slot = registrations.get_mut(slot_index).ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "periodic MNA CCVS '{name}' has branch ordinal {branch_ordinal}, outside 1..={branch_count}"
+                ))
+            })?;
+            if slot
+                .replace(PeriodicMnaRegistration::Ccvs(ccvs_index))
+                .is_some()
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "periodic MNA branch ordinal {branch_ordinal} is assigned more than once"
+                )));
+            }
+        }
+
         for (slot_index, registration) in registrations.into_iter().enumerate() {
             let branch_ordinal = slot_index.checked_add(1).ok_or_else(|| {
                 SimulationError::Circuit(
@@ -504,7 +595,177 @@ impl Engine {
                             ))
                         })?;
                 }
+                PeriodicMnaRegistration::Vcvs(vcvs_index) => {
+                    let name = &circuit.vcvs.names[vcvs_index];
+                    solver
+                        .try_add_periodic_controlled_voltage_source_branch(
+                            circuit.vcvs.node_pos[vcvs_index],
+                            circuit.vcvs.node_neg[vcvs_index],
+                            branch_ordinal,
+                            name,
+                        )
+                        .map_err(|error| {
+                            SimulationError::Circuit(format!(
+                                "periodic MNA VCVS registration failed: {error}"
+                            ))
+                        })?;
+                }
+                PeriodicMnaRegistration::Ccvs(ccvs_index) => {
+                    let name = &circuit.ccvs.names[ccvs_index];
+                    solver
+                        .try_add_periodic_controlled_voltage_source_branch(
+                            circuit.ccvs.node_pos[ccvs_index],
+                            circuit.ccvs.node_neg[ccvs_index],
+                            branch_ordinal,
+                            name,
+                        )
+                        .map_err(|error| {
+                            SimulationError::Circuit(format!(
+                                "periodic MNA CCVS registration failed: {error}"
+                            ))
+                        })?;
+                }
             }
+        }
+        self.hb_stamp_controlled_sources(circuit, solver, branch_count)?;
+        Ok(())
+    }
+
+    fn hb_stamp_controlled_sources(
+        &self,
+        circuit: &CircuitData,
+        solver: &mut HbSolver,
+        branch_count: usize,
+    ) -> Result<(), SimulationError> {
+        let num_nodes = circuit.num_nodes();
+        let checked_node = |name: &str, role: &str, node: usize| {
+            if node <= num_nodes {
+                Ok(node)
+            } else {
+                Err(SimulationError::Circuit(format!(
+                    "periodic MNA controlled source '{name}' has {role} node {node} outside 0..={num_nodes}"
+                )))
+            }
+        };
+        let checked_branch = |name: &str, role: &str, branch: usize| {
+            if (1..=branch_count).contains(&branch) {
+                Ok(branch)
+            } else {
+                Err(SimulationError::Circuit(format!(
+                    "periodic MNA controlled source '{name}' has missing or invalid {role} branch ordinal {branch}; expected 1..={branch_count}"
+                )))
+            }
+        };
+        let branch_index = |ordinal: usize| num_nodes + ordinal - 1;
+
+        if circuit.vccs.names.len() != circuit.vccs.node_pos.len()
+            || circuit.vccs.names.len() != circuit.vccs.node_neg.len()
+            || circuit.vccs.names.len() != circuit.vccs.ctrl_pos.len()
+            || circuit.vccs.names.len() != circuit.vccs.ctrl_neg.len()
+            || circuit.vccs.names.len() != circuit.vccs.transconductances.len()
+        {
+            return Err(SimulationError::Circuit(
+                "periodic MNA VCCS storage is misaligned".to_string(),
+            ));
+        }
+        for index in 0..circuit.vccs.len() {
+            let name = &circuit.vccs.names[index];
+            let np = checked_node(name, "positive output", circuit.vccs.node_pos[index])?;
+            let nn = checked_node(name, "negative output", circuit.vccs.node_neg[index])?;
+            let cp = checked_node(name, "positive control", circuit.vccs.ctrl_pos[index])?;
+            let cn = checked_node(name, "negative control", circuit.vccs.ctrl_neg[index])?;
+            let gm = circuit.vccs.transconductances[index];
+            if !gm.is_finite() {
+                return Err(SimulationError::Circuit(format!(
+                    "periodic MNA VCCS '{name}' has non-finite transconductance"
+                )));
+            }
+            for (row, column, coefficient) in
+                [(np, cp, gm), (np, cn, -gm), (nn, cp, -gm), (nn, cn, gm)]
+            {
+                if row > 0 && column > 0 {
+                    solver.add_conductance(row - 1, column - 1, coefficient);
+                }
+            }
+        }
+
+        for index in 0..circuit.vcvs.len() {
+            let name = &circuit.vcvs.names[index];
+            let cp = checked_node(name, "positive control", circuit.vcvs.ctrl_pos[index])?;
+            let cn = checked_node(name, "negative control", circuit.vcvs.ctrl_neg[index])?;
+            let branch = checked_branch(name, "output", circuit.vcvs.branch_indices[index])?;
+            let gain = circuit.vcvs.gains[index];
+            if !gain.is_finite() {
+                return Err(SimulationError::Circuit(format!(
+                    "periodic MNA VCVS '{name}' has non-finite gain"
+                )));
+            }
+            for (control, coefficient) in [(cp, -gain), (cn, gain)] {
+                if control > 0 {
+                    solver
+                        .try_add_exact_mna_static_entry(
+                            branch_index(branch),
+                            control - 1,
+                            coefficient,
+                            name,
+                        )
+                        .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                }
+            }
+        }
+
+        if circuit.cccs.names.len() != circuit.cccs.node_pos.len()
+            || circuit.cccs.names.len() != circuit.cccs.node_neg.len()
+            || circuit.cccs.names.len() != circuit.cccs.ctrl_branch.len()
+            || circuit.cccs.names.len() != circuit.cccs.gains.len()
+        {
+            return Err(SimulationError::Circuit(
+                "periodic MNA CCCS storage is misaligned".to_string(),
+            ));
+        }
+        for index in 0..circuit.cccs.len() {
+            let name = &circuit.cccs.names[index];
+            let np = checked_node(name, "positive output", circuit.cccs.node_pos[index])?;
+            let nn = checked_node(name, "negative output", circuit.cccs.node_neg[index])?;
+            let control = checked_branch(name, "control", circuit.cccs.ctrl_branch[index])?;
+            let gain = circuit.cccs.gains[index];
+            if !gain.is_finite() {
+                return Err(SimulationError::Circuit(format!(
+                    "periodic MNA CCCS '{name}' has non-finite gain"
+                )));
+            }
+            for (output, coefficient) in [(np, gain), (nn, -gain)] {
+                if output > 0 {
+                    solver
+                        .try_add_exact_mna_static_entry(
+                            output - 1,
+                            branch_index(control),
+                            coefficient,
+                            name,
+                        )
+                        .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                }
+            }
+        }
+
+        for index in 0..circuit.ccvs.len() {
+            let name = &circuit.ccvs.names[index];
+            let output = checked_branch(name, "output", circuit.ccvs.branch_indices[index])?;
+            let control = checked_branch(name, "control", circuit.ccvs.ctrl_branch[index])?;
+            let rm = circuit.ccvs.transresistances[index];
+            if !rm.is_finite() {
+                return Err(SimulationError::Circuit(format!(
+                    "periodic MNA CCVS '{name}' has non-finite transresistance"
+                )));
+            }
+            solver
+                .try_add_exact_mna_static_entry(
+                    branch_index(output),
+                    branch_index(control),
+                    -rm,
+                    name,
+                )
+                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
         }
         Ok(())
     }
@@ -766,5 +1027,50 @@ mod tests {
             .expect("inductor spectrum is retained");
         assert!(inductor.voltage_coefficients[0].norm() <= 1.0e-9);
         assert!(inductor.current_coefficients[0].norm() <= 1.0e-9);
+    }
+
+    #[test]
+    fn periodic_cccs_missing_control_branch_fails_closed() {
+        let mut circuit = CircuitData::new();
+        let out = circuit.get_or_create_node("out");
+        circuit.cccs.add("Fbad".to_string(), out, 0, 0, 2.0);
+        let engine = Engine::new(SimulationConfig::default());
+        let mut solver = HbSolver::try_new(HbConfig::new(1.0e6).with_harmonics(1), 1)
+            .expect("solver fixture is valid");
+
+        let error = engine
+            .hb_stamp_periodic_mna_branches(&circuit, &mut solver)
+            .expect_err("an unresolved CCCS control branch must not be stamped");
+        let message = error.to_string();
+        assert!(
+            message.contains("Fbad")
+                && message.contains("control")
+                && message.contains("ordinal 0"),
+            "unexpected missing-control diagnostic: {message}"
+        );
+    }
+
+    #[test]
+    fn periodic_ccvs_out_of_range_control_branch_fails_closed() {
+        let mut circuit = CircuitData::new();
+        let out = circuit.get_or_create_node("out");
+        let branch = circuit.allocate_branch_named("Hbad");
+        circuit
+            .ccvs
+            .add("Hbad".to_string(), out, 0, branch, branch + 1, 50.0);
+        let engine = Engine::new(SimulationConfig::default());
+        let mut solver = HbSolver::try_new(HbConfig::new(1.0e6).with_harmonics(1), 1)
+            .expect("solver fixture is valid");
+
+        let error = engine
+            .hb_stamp_periodic_mna_branches(&circuit, &mut solver)
+            .expect_err("an out-of-range CCVS control branch must not be stamped");
+        let message = error.to_string();
+        assert!(
+            message.contains("Hbad")
+                && message.contains("control")
+                && message.contains("expected 1..=1"),
+            "unexpected malformed-control diagnostic: {message}"
+        );
     }
 }

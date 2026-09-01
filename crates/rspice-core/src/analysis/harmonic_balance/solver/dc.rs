@@ -256,6 +256,9 @@ impl HbSolver {
             }
             rhs[row] = self.dc_branch_source(branch, 1.0)?;
         }
+        for &(row, column, value) in &self.exact_mna_static_entries {
+            g_dc[row][column] += value;
+        }
 
         let solution = self.solve_real_linear_system(&g_dc, &rhs)?;
 
@@ -477,6 +480,22 @@ impl HbSolver {
                 .max(Self::dc_node_voltage(&v_dc, node_pos).abs())
                 .max(Self::dc_node_voltage(&v_dc, node_neg).abs());
         }
+        for &(row, column, coefficient) in &self.exact_mna_static_entries {
+            let input = if column < n {
+                state.x[column][0].re
+            } else {
+                state.mna_branch_currents[column - n][0].re
+            };
+            let contribution = coefficient * input;
+            if row < n {
+                state.residual[row][0].re -= contribution;
+                state.residual_scale[row][0] += contribution.abs();
+            } else {
+                let branch = row - n;
+                state.mna_branch_residual[branch][0].re -= contribution;
+                state.mna_branch_residual_scale[branch][0] += contribution.abs();
+            }
+        }
 
         self.validate_dc_residual_state(state)?;
         let diagnostic_norm: Value = state
@@ -591,6 +610,9 @@ impl HbSolver {
             if let ExactMnaBranch::Resistor { resistance, .. } = branch {
                 jacobian[branch_coordinate][branch_coordinate] += *resistance;
             }
+        }
+        for &(row, column, value) in &self.exact_mna_static_entries {
+            jacobian[row][column] -= value;
         }
 
         Ok(jacobian)
@@ -787,6 +809,11 @@ impl HbSolver {
                     }
                     (*branch_ordinal, *node_pos, *node_neg)
                 }
+                ExactMnaBranch::ControlledVoltageSource {
+                    branch_ordinal,
+                    node_pos,
+                    node_neg,
+                } => (*branch_ordinal, *node_pos, *node_neg),
             };
             if branch_ordinal != expected_ordinal
                 || node_pos > self.num_nodes
@@ -804,6 +831,21 @@ impl HbSolver {
                 "HB DC exact-MNA registry covers {} of {} ideal-voltage source descriptors",
                 seen_voltage_sources.len(),
                 self.voltage_source_branches.len()
+            )));
+        }
+        let unknowns = self.num_nodes.checked_add(branches.len()).ok_or_else(|| {
+            HbError::InvalidCircuit("HB DC MNA dimension exceeds this platform".to_string())
+        })?;
+        if let Some((entry, &(row, column, value))) = self
+            .exact_mna_static_entries
+            .iter()
+            .enumerate()
+            .find(|(_, (row, column, value))| {
+                *row >= unknowns || *column >= unknowns || !value.is_finite()
+            })
+        {
+            return Err(HbError::InvalidCircuit(format!(
+                "HB DC controlled-source entry #{entry} ({row}, {column}, {value}) is malformed for {unknowns} unknowns"
             )));
         }
         Ok(branches.len())
@@ -918,6 +960,7 @@ impl HbSolver {
             }
             ExactMnaBranch::Inductor { .. } => 0.0,
             ExactMnaBranch::Resistor { .. } => 0.0,
+            ExactMnaBranch::ControlledVoltageSource { .. } => 0.0,
         };
         if !source.is_finite() {
             return Err(HbError::InvalidCircuit(
@@ -928,17 +971,8 @@ impl HbSolver {
     }
 
     fn dc_branch_terminals(branch: &ExactMnaBranch) -> (usize, usize) {
-        match branch {
-            ExactMnaBranch::VoltageSource {
-                node_pos, node_neg, ..
-            }
-            | ExactMnaBranch::Inductor {
-                node_pos, node_neg, ..
-            }
-            | ExactMnaBranch::Resistor {
-                node_pos, node_neg, ..
-            } => (*node_pos, *node_neg),
-        }
+        let (_, node_pos, node_neg) = branch.ordinal_and_terminals();
+        (node_pos, node_neg)
     }
 
     fn dc_node_voltage(voltages: &[Value], node: usize) -> Value {

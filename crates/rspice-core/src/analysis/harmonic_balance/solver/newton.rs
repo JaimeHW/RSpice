@@ -44,6 +44,7 @@ struct ExactHbOperator<'a> {
     g_spectra: &'a [PeriodicSpectrum],
     c_spectra: &'a [PeriodicSpectrum],
     mna_branches: &'a [ExactMnaBranch],
+    mna_static_entries: &'a [(usize, usize, Value)],
 }
 
 #[cfg(test)]
@@ -68,6 +69,7 @@ mod exact_matrix_free_tests {
             g_spectra,
             c_spectra,
             mna_branches: &[],
+            mna_static_entries: &[],
         }
     }
 
@@ -692,26 +694,7 @@ impl ExactHbOperator<'_> {
                     "exact HB canonical branch ordinal exceeds this platform".to_string(),
                 )
             })?;
-            let (ordinal, node_pos, node_neg) = match branch {
-                ExactMnaBranch::VoltageSource {
-                    branch_ordinal,
-                    node_pos,
-                    node_neg,
-                    ..
-                } => (*branch_ordinal, *node_pos, *node_neg),
-                ExactMnaBranch::Inductor {
-                    branch_ordinal,
-                    node_pos,
-                    node_neg,
-                    ..
-                } => (*branch_ordinal, *node_pos, *node_neg),
-                ExactMnaBranch::Resistor {
-                    branch_ordinal,
-                    node_pos,
-                    node_neg,
-                    ..
-                } => (*branch_ordinal, *node_pos, *node_neg),
-            };
+            let (ordinal, node_pos, node_neg) = branch.ordinal_and_terminals();
             if ordinal != expected_ordinal
                 || node_pos > self.num_nodes
                 || node_neg > self.num_nodes
@@ -723,6 +706,16 @@ impl ExactHbOperator<'_> {
                     "exact HB canonical MNA branch {index} is malformed"
                 )));
             }
+        }
+        let unknowns = self.entity_count();
+        if let Some(&(row, column, value)) =
+            self.mna_static_entries.iter().find(|(row, column, value)| {
+                *row >= unknowns || *column >= unknowns || !value.is_finite()
+            })
+        {
+            return Err(HbError::InvalidCircuit(format!(
+                "exact HB controlled-source operator entry ({row}, {column}, {value}) is malformed for {unknowns} unknowns"
+            )));
         }
         Ok(())
     }
@@ -840,17 +833,7 @@ impl ExactHbOperator<'_> {
 
             for (branch_index, branch) in self.mna_branches.iter().enumerate() {
                 let branch_entity = n + branch_index;
-                let (node_pos, node_neg) = match branch {
-                    ExactMnaBranch::VoltageSource {
-                        node_pos, node_neg, ..
-                    }
-                    | ExactMnaBranch::Inductor {
-                        node_pos, node_neg, ..
-                    }
-                    | ExactMnaBranch::Resistor {
-                        node_pos, node_neg, ..
-                    } => (*node_pos, *node_neg),
-                };
+                let (_, node_pos, node_neg) = branch.ordinal_and_terminals();
                 if node_pos > 0 {
                     let node = node_pos - 1;
                     self.visit_linear_term(
@@ -909,6 +892,16 @@ impl ExactHbOperator<'_> {
                         &mut visitor,
                     );
                 }
+            }
+            for &(row, column, value) in self.mna_static_entries {
+                self.visit_linear_term(
+                    row,
+                    k,
+                    column,
+                    k,
+                    Complex64::new(-value, 0.0),
+                    &mut visitor,
+                );
             }
         }
 
@@ -1611,17 +1604,7 @@ impl HbSolver {
                     currents.len()
                 )));
             }
-            let (node_pos, node_neg) = match branch {
-                ExactMnaBranch::VoltageSource {
-                    node_pos, node_neg, ..
-                }
-                | ExactMnaBranch::Inductor {
-                    node_pos, node_neg, ..
-                }
-                | ExactMnaBranch::Resistor {
-                    node_pos, node_neg, ..
-                } => (*node_pos, *node_neg),
-            };
+            let (_, node_pos, node_neg) = branch.ordinal_and_terminals();
             for (harmonic, &current) in currents.iter().enumerate() {
                 if harmonic == 0 && current.im != 0.0 {
                     return Err(HbError::InvalidCircuit(format!(
@@ -1671,6 +1654,7 @@ impl HbSolver {
                         let resistor_voltage = current * *resistance;
                         (resistor_voltage - voltage_drop, resistor_voltage.norm())
                     }
+                    ExactMnaBranch::ControlledVoltageSource { .. } => (-voltage_drop, 0.0),
                 };
                 if !residual.re.is_finite()
                     || !residual.im.is_finite()
@@ -1685,6 +1669,24 @@ impl HbSolver {
                 state.mna_branch_residual[branch_index][harmonic] = residual;
                 state.mna_branch_residual_scale[branch_index][harmonic] =
                     voltage_scale + constitutive_scale;
+            }
+        }
+        for &(row, column, coefficient) in &self.exact_mna_static_entries {
+            for harmonic in 0..harmonic_count {
+                let input = if column < self.num_nodes {
+                    state.x[column][harmonic]
+                } else {
+                    state.mna_branch_currents[column - self.num_nodes][harmonic]
+                };
+                let contribution = coefficient * input;
+                if row < self.num_nodes {
+                    state.residual[row][harmonic] -= contribution;
+                    state.residual_scale[row][harmonic] += contribution.norm();
+                } else {
+                    let branch = row - self.num_nodes;
+                    state.mna_branch_residual[branch][harmonic] -= contribution;
+                    state.mna_branch_residual_scale[branch][harmonic] += contribution.norm();
+                }
             }
         }
         state.compute_residual_norm();
@@ -2033,17 +2035,7 @@ impl HbSolver {
             for (branch_index, branch) in self.exact_mna_branches().iter().enumerate() {
                 let branch_entity = n + branch_index;
                 let branch_coordinate = branch_entity * h + k;
-                let (node_pos, node_neg) = match branch {
-                    ExactMnaBranch::VoltageSource {
-                        node_pos, node_neg, ..
-                    }
-                    | ExactMnaBranch::Inductor {
-                        node_pos, node_neg, ..
-                    }
-                    | ExactMnaBranch::Resistor {
-                        node_pos, node_neg, ..
-                    } => (*node_pos, *node_neg),
-                };
+                let (_, node_pos, node_neg) = branch.ordinal_and_terminals();
                 if node_pos > 0 {
                     let node_coordinate = (node_pos - 1) * h + k;
                     jac[node_coordinate][branch_coordinate] -= 1.0;
@@ -2061,6 +2053,9 @@ impl HbSolver {
                 if let ExactMnaBranch::Resistor { resistance, .. } = branch {
                     jac[branch_coordinate][branch_coordinate] += *resistance;
                 }
+            }
+            for &(row, column, value) in &self.exact_mna_static_entries {
+                jac[row * h + k][column * h + k] -= value;
             }
         }
 
@@ -2359,6 +2354,7 @@ impl HbSolver {
                 g_spectra: &g_spectra,
                 c_spectra: &c_spectra,
                 mna_branches: self.exact_mna_branches(),
+                mna_static_entries: &self.exact_mna_static_entries,
             };
             operator.validate()?;
             let preconditioner = ExactHbPreconditioner::build(&operator);
