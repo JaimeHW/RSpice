@@ -377,6 +377,10 @@ if fft.metrics is not None:
 # Long-run transient storage and continuation
 compressed = engine.run_tran_compressed(netlist, stop_time=1.0,
                                         abs_tol=1e-6, rel_tol=1e-3)
+# The retained grid carries its exact step sizes plus every analog family.
+compressed.branch_current_waveform("V1")
+compressed.device_parameter_waveform("M1", "gm")
+compressed.store_waveform("YMEMRISTOR!MR1:R")
 segment, checkpoint = engine.run_tran_checkpointed(netlist, stop_time=0.5)
 checkpoint.save("run.chk")
 continued, checkpoint = engine.resume_tran(netlist, checkpoint, stop_time=1.0)
@@ -538,8 +542,10 @@ Every result type pickles, including the periodic and RF families. A result
 carries the state behind everything its own accessors expose, so each readable
 quantity — and each quantity derived from one, such as `PssResult.thd_percent`
 or `HbResult.is_valid` — is unchanged across a round trip. Internal traces with
-no accessor on the class holding them are not carried: `CompressedTransientResult`
-device store traces and `PacResult` branch currents fall in that group.
+no accessor on the class holding them are not carried; `PacResult` MNA branch
+currents currently fall in that group. Compressed transient pickles preserve
+retained step sizes, branch currents, device operating-point and typed store
+traces, and their canonical names.
 Transient FFT state is explicitly versioned and is identical in full and
 compressed transient pickles. Legacy transient pickles from bindings that
 discarded FFT products are rejected because they cannot prove whether an empty

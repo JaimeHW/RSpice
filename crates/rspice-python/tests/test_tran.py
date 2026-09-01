@@ -136,6 +136,27 @@ M1 d g 0 0 NM W=10u L=1u
         with pytest.raises(KeyError, match="add it to .SAVE"):
             result.device_parameter_waveform("M1", "missing")
 
+        compressed = engine.run_tran_compressed(
+            netlist,
+            stop_time=10e-6,
+            max_step=100e-9,
+            abs_tol=1e-8,
+            rel_tol=1e-4,
+        )
+        assert {
+            "@m1[gm]",
+            "@m1[id]",
+        } <= {name.lower() for name in compressed.device_parameter_names}
+        compressed_gm = compressed.device_parameter_waveform("m1", "GM")
+        assert compressed_gm.shape == compressed.time.shape
+        reconstructed = np.array(
+            [compressed.device_parameter_at("M1", "gm", float(time)) for time in result.time]
+        )
+        tolerance = 1e-8 + 1e-4 * np.abs(gm)
+        assert np.all(np.abs(reconstructed - gm) <= tolerance * (1.0 + 1e-10))
+        with pytest.raises(KeyError, match="add it to .SAVE"):
+            compressed.device_parameter_waveform("M1", "missing")
+
 
 class TestTransientValidation:
     def test_zero_stop_time_raises(self, engine, rc_lowpass):
@@ -220,6 +241,8 @@ class TestCompressedTransient:
         assert compressed.input_points == full.num_points
         assert compressed.num_points < compressed.input_points
         assert compressed.compression_ratio > 1.0
+        assert compressed.step_sizes.shape == compressed.time.shape
+        assert np.all(compressed.step_sizes >= 0.0)
         assert compressed.voltage_waveform("out").shape == compressed.time.shape
         reconstructed = np.array(
             [compressed.voltage_at("out", float(time)) for time in full.time]
@@ -232,6 +255,24 @@ class TestCompressedTransient:
         ground_time, ground = compressed.resample("0", 11)
         assert ground_time.shape == ground.shape == (11,)
         assert np.all(ground == 0.0)
+        assert compressed.branch_names == full.branch_names
+        for branch_name in compressed.branch_names:
+            retained_current = compressed.branch_current_waveform(branch_name)
+            assert retained_current.shape == compressed.time.shape
+            reconstructed_current = np.array(
+                [
+                    compressed.branch_current_at(branch_name, float(time))
+                    for time in full.time
+                ]
+            )
+            full_current = full.branch_current_waveform(branch_name)
+            tolerance = 1e-6 + 1e-3 * np.abs(full_current)
+            assert np.all(
+                np.abs(reconstructed_current - full_current)
+                <= tolerance * (1.0 + 1e-10)
+            )
+        with pytest.raises(KeyError):
+            compressed.branch_current_waveform("L99")
 
     def test_compression_arguments_are_validated(self, engine, rc_lowpass):
         with pytest.raises(ValueError):
@@ -240,6 +281,30 @@ class TestCompressedTransient:
             engine.run_tran_compressed(rc_lowpass, 1e-3, rel_tol=float("nan"))
         with pytest.raises(ValueError):
             engine.run_tran_compressed(rc_lowpass, 1e-3, max_interval=-1.0)
+
+    def test_typed_device_store_waveform_is_retained_and_interpolated(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* TEAM memristor typed store trace
+V1 in 0 0.2
+.model mrm1 memristor level=2 ron=50 roff=1k
+YMEMRISTOR mr1 in 0 mrm1 ivrelation=1
+.tran 1n 4n
+.end
+"""
+        )
+        compressed = engine.run_tran_compressed(
+            netlist,
+            stop_time=4e-9,
+            max_step=1e-9,
+            abs_tol=1e-8,
+            rel_tol=1e-4,
+        )
+        assert compressed.store_names == ["YMEMRISTOR!MR1:R"]
+        resistance = compressed.store_waveform("ymemristor!mr1:r")
+        assert resistance.shape == compressed.time.shape
+        assert compressed.store_at("YMEMRISTOR!MR1:R", 2e-9) > 0.0
+        with pytest.raises(KeyError, match="unknown device-store trace"):
+            compressed.store_waveform("missing")
 
 
 class TestFourier:

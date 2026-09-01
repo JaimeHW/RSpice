@@ -757,28 +757,36 @@ impl TransientResult {
     }
 }
 
-impl From<TransientResultCompressed> for TransientResult {
-    fn from(compressed: TransientResultCompressed) -> Self {
-        let node_names = if compressed.node_names.len() == compressed.num_nodes {
-            compressed.node_names
-        } else {
-            (1..=compressed.num_nodes).map(|i| i.to_string()).collect()
-        };
-        let step_size_count = compressed.time.len();
-        Self {
-            time: compressed.time,
-            step_sizes: vec![0.0; step_size_count],
-            voltages: compressed.voltages,
-            branch_currents: Vec::new(),
-            num_nodes: compressed.num_nodes,
-            node_names,
-            branch_names: Vec::new(),
+impl TransientResultCompressed {
+    /// Expand the retained analog inventory into a regular transient result.
+    ///
+    /// This preserves the retained grid; it does not reconstruct discarded
+    /// samples. Event-driven digital and real traces are outside the compressed
+    /// analog-result contract and therefore remain empty.
+    pub fn try_into_transient(self) -> Result<TransientResult, String> {
+        self.validate()?;
+        Ok(TransientResult {
+            time: self.time,
+            step_sizes: self.step_sizes,
+            voltages: self.voltages,
+            branch_currents: self.branch_currents,
+            num_nodes: self.num_nodes,
+            node_names: self.node_names,
+            branch_names: self.branch_names,
             digital_traces: Vec::new(),
             real_traces: Vec::new(),
-            device_op_traces: Vec::new(),
-            store_traces: compressed.store_traces,
-            fft_results: compressed.fft_results,
-        }
+            device_op_traces: self.device_op_traces,
+            store_traces: self.store_traces,
+            fft_results: self.fft_results,
+        })
+    }
+}
+
+impl TryFrom<TransientResultCompressed> for TransientResult {
+    type Error = String;
+
+    fn try_from(compressed: TransientResultCompressed) -> Result<Self, Self::Error> {
+        compressed.try_into_transient()
     }
 }
 

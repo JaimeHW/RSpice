@@ -8806,19 +8806,6 @@ impl Engine {
             abort,
         )?;
 
-        if result.time.is_empty() {
-            return Ok(TransientResultCompressed {
-                time: Vec::new(),
-                voltages: vec![Vec::new(); result.num_nodes],
-                num_nodes: result.num_nodes,
-                node_names: result.node_names.clone(),
-                store_traces: result.store_traces.clone(),
-                fft_results: result.fft_results.clone(),
-                compression_ratio: 1.0,
-                input_points: 0,
-            });
-        }
-
         compress_transient_result(&result, &compression, abort)
     }
 }
@@ -8847,31 +8834,49 @@ fn compress_transient_result(
             config.min_interval
         )));
     }
-    if result.voltages.len() != result.num_nodes
+    if result.step_sizes.len() != point_count
+        || result.voltages.len() != result.num_nodes
+        || result.node_names.len() != result.num_nodes
+        || result.branch_currents.len() != result.branch_names.len()
         || result
             .voltages
             .iter()
             .any(|waveform| !waveform.is_empty() && waveform.len() != point_count)
+        || result
+            .branch_currents
+            .iter()
+            .any(|waveform| !waveform.is_empty() && waveform.len() != point_count)
+        || result
+            .device_op_traces
+            .iter()
+            .any(|trace| trace.values.len() != point_count)
         || result
             .store_traces
             .iter()
             .any(|trace| trace.values.len() != point_count)
     {
         return Err(SimulationError::Circuit(
-            "Cannot compress malformed transient voltage or store waveforms".to_string(),
+            "Cannot compress a malformed or misaligned transient analog result".to_string(),
         ));
     }
-    if point_count <= 2 || !config.enabled {
-        return Ok(TransientResultCompressed {
-            time: result.time.clone(),
-            voltages: result.voltages.clone(),
-            num_nodes: result.num_nodes,
-            node_names: result.node_names.clone(),
-            store_traces: result.store_traces.clone(),
-            fft_results: result.fft_results.clone(),
-            compression_ratio: 1.0,
-            input_points: point_count,
-        });
+    if result
+        .step_sizes
+        .iter()
+        .any(|step| !step.is_finite() || *step < 0.0)
+        || result
+            .voltages
+            .iter()
+            .chain(&result.branch_currents)
+            .filter(|waveform| !waveform.is_empty())
+            .chain(result.device_op_traces.iter().map(|trace| &trace.values))
+            .chain(result.store_traces.iter().map(|trace| &trace.values))
+            .flatten()
+            .any(|value| !value.is_finite())
+    {
+        return Err(SimulationError::Circuit(
+            "Cannot compress a transient containing non-finite analog values or invalid step sizes"
+                .to_string(),
+        ));
     }
     if result
         .time
@@ -8883,7 +8888,22 @@ fn compress_transient_result(
             "Cannot compress a transient with non-finite or non-increasing time points".to_string(),
         ));
     }
-
+    if point_count <= 2 || !config.enabled {
+        return Ok(TransientResultCompressed {
+            time: result.time.clone(),
+            step_sizes: result.step_sizes.clone(),
+            voltages: result.voltages.clone(),
+            branch_currents: result.branch_currents.clone(),
+            num_nodes: result.num_nodes,
+            node_names: result.node_names.clone(),
+            branch_names: result.branch_names.clone(),
+            device_op_traces: result.device_op_traces.clone(),
+            store_traces: result.store_traces.clone(),
+            fft_results: result.fft_results.clone(),
+            compression_ratio: 1.0,
+            input_points: point_count,
+        });
+    }
     let mut retained = vec![false; point_count];
     retained[0] = true;
     retained[point_count - 1] = true;
@@ -8904,11 +8924,8 @@ fn compress_transient_result(
             let target = result.time[start] + config.min_interval;
             Some(
                 ((start + 1)..end)
-                    .min_by(|&lhs, &rhs| {
-                        (result.time[lhs] - target)
-                            .abs()
-                            .total_cmp(&(result.time[rhs] - target).abs())
-                    })
+                    .take_while(|&index| result.time[index] <= target)
+                    .last()
                     .unwrap_or(start + 1),
             )
         } else {
@@ -8933,6 +8950,13 @@ fn compress_transient_result(
                     .voltages
                     .iter()
                     .filter(|waveform| !waveform.is_empty())
+                    .chain(
+                        result
+                            .branch_currents
+                            .iter()
+                            .filter(|waveform| !waveform.is_empty()),
+                    )
+                    .chain(result.device_op_traces.iter().map(|trace| &trace.values))
                     .chain(result.store_traces.iter().map(|trace| &trace.values))
                 {
                     let actual = waveform[point];
@@ -8973,6 +8997,10 @@ fn compress_transient_result(
     let stored_points = indices.len();
     Ok(TransientResultCompressed {
         time: indices.iter().map(|&index| result.time[index]).collect(),
+        step_sizes: indices
+            .iter()
+            .map(|&index| result.step_sizes[index])
+            .collect(),
         voltages: result
             .voltages
             .iter()
@@ -8984,8 +9012,29 @@ fn compress_transient_result(
                 }
             })
             .collect(),
+        branch_currents: result
+            .branch_currents
+            .iter()
+            .map(|waveform| {
+                if waveform.is_empty() {
+                    Vec::new()
+                } else {
+                    indices.iter().map(|&index| waveform[index]).collect()
+                }
+            })
+            .collect(),
         num_nodes: result.num_nodes,
         node_names: result.node_names.clone(),
+        branch_names: result.branch_names.clone(),
+        device_op_traces: result
+            .device_op_traces
+            .iter()
+            .map(|trace| crate::engine::TransientDeviceOpTrace {
+                device_name: trace.device_name.clone(),
+                parameter: trace.parameter.clone(),
+                values: indices.iter().map(|&index| trace.values[index]).collect(),
+            })
+            .collect(),
         store_traces: result
             .store_traces
             .iter()
@@ -11046,7 +11095,9 @@ D1 D 0 DMOD
             .run_tran_compressed(&netlist, 1.0e-3, 1.0e-6, CompressionConfig::default())
             .expect("compressed transient retains pre-decimation FFT results");
         assert_eq!(compressed.fft_results, result.fft_results);
-        let expanded = TransientResult::from(compressed);
+        let expanded = compressed
+            .try_into_transient()
+            .expect("well-formed compressed FFT result expands");
         assert_eq!(expanded.fft_results, result.fft_results);
     }
 
@@ -11144,22 +11195,50 @@ D1 D 0 DMOD
         let time = (0..=1000)
             .map(|index| index as Value / 1000.0)
             .collect::<Vec<_>>();
-        let waveform = time
+        let voltage = time
             .iter()
             .map(|time| 1.0 - (-8.0 * time).exp())
             .collect::<Vec<_>>();
+        let branch_current = time
+            .iter()
+            .map(|time| (11.0 * time).sin() * 2.5e-3)
+            .collect::<Vec<_>>();
+        let device_op = time
+            .iter()
+            .map(|time| 0.25 + 3.0 * time * time)
+            .collect::<Vec<_>>();
+        let store = time
+            .iter()
+            .map(|time| 100.0 + 15.0 * (5.0 * time).cos())
+            .collect::<Vec<_>>();
+        let step_sizes = (0..time.len())
+            .map(|index| {
+                if index == 0 {
+                    0.0
+                } else {
+                    time[index] - time[index - 1]
+                }
+            })
+            .collect::<Vec<_>>();
         let result = TransientResult {
             time: time.clone(),
-            step_sizes: vec![0.0; time.len()],
-            voltages: vec![waveform.clone()],
-            branch_currents: Vec::new(),
+            step_sizes: step_sizes.clone(),
+            voltages: vec![voltage.clone()],
+            branch_currents: vec![branch_current.clone()],
             num_nodes: 1,
             node_names: vec!["out".to_string()],
-            branch_names: Vec::new(),
+            branch_names: vec!["VINPUT".to_string()],
             digital_traces: Vec::new(),
             real_traces: Vec::new(),
-            device_op_traces: Vec::new(),
-            store_traces: Vec::new(),
+            device_op_traces: vec![crate::engine::TransientDeviceOpTrace {
+                device_name: "M1".to_string(),
+                parameter: "gm".to_string(),
+                values: device_op.clone(),
+            }],
+            store_traces: vec![crate::engine::TransientStoreTrace {
+                name: "YDEVICE!X1:STATE".to_string(),
+                values: store.clone(),
+            }],
             fft_results: Vec::new(),
         };
         let config = CompressionConfig {
@@ -11171,17 +11250,105 @@ D1 D 0 DMOD
         let compressed = compress_transient_result(&result, &config, &NoAbort)
             .expect("well-formed waveform compresses");
         assert!(compressed.time.len() < time.len() / 4);
-        for (index, &sample_time) in time.iter().enumerate() {
-            let reconstructed = compressed
-                .interpolate(0, sample_time)
-                .expect("interpolates");
-            let tolerance = config.abs_tol + config.rel_tol * waveform[index].abs();
-            assert!(
-                (reconstructed - waveform[index]).abs() <= tolerance * (1.0 + 1e-12),
-                "sample {index}: reconstructed {reconstructed}, actual {}, tolerance {tolerance}",
-                waveform[index]
+        compressed.validate().expect("compressed inventory aligns");
+        assert_eq!(compressed.node_names, result.node_names);
+        assert_eq!(compressed.branch_names, result.branch_names);
+        assert_eq!(compressed.voltages.len(), result.voltages.len());
+        assert_eq!(
+            compressed.branch_currents.len(),
+            result.branch_currents.len()
+        );
+        assert_eq!(
+            compressed.device_op_traces.len(),
+            result.device_op_traces.len()
+        );
+        assert_eq!(compressed.store_traces.len(), result.store_traces.len());
+        for (&retained_time, &retained_step) in compressed.time.iter().zip(&compressed.step_sizes) {
+            let original_index = time
+                .binary_search_by(|candidate| candidate.total_cmp(&retained_time))
+                .expect("retained time came from the source grid");
+            assert_eq!(
+                retained_step.to_bits(),
+                step_sizes[original_index].to_bits()
             );
         }
+
+        let assert_error_bound =
+            |label: &str, original: &[Value], interpolate: &dyn Fn(Value) -> Option<Value>| {
+                for (index, &sample_time) in time.iter().enumerate() {
+                    let reconstructed = interpolate(sample_time).expect("interpolates");
+                    let tolerance = config.abs_tol + config.rel_tol * original[index].abs();
+                    assert!(
+                        (reconstructed - original[index]).abs() <= tolerance * (1.0 + 1e-12),
+                        "{label} sample {index}: reconstructed {reconstructed}, actual {}, tolerance {tolerance}",
+                        original[index]
+                    );
+                }
+            };
+        assert_error_bound("voltage", &voltage, &|sample_time| {
+            compressed.interpolate(0, sample_time)
+        });
+        assert_error_bound("branch current", &branch_current, &|sample_time| {
+            compressed.interpolate_branch_current_named("vinput", sample_time)
+        });
+        assert_error_bound("device operating-point", &device_op, &|sample_time| {
+            compressed.interpolate_device_op_named("m1", "GM", sample_time)
+        });
+        assert_error_bound("device store", &store, &|sample_time| {
+            compressed.interpolate_store_named("ydevice!x1:state", sample_time)
+        });
+
+        let expanded = compressed
+            .clone()
+            .try_into_transient()
+            .expect("checked expansion succeeds");
+        assert_eq!(expanded.time, compressed.time);
+        assert_eq!(expanded.step_sizes, compressed.step_sizes);
+        assert_eq!(expanded.voltages, compressed.voltages);
+        assert_eq!(expanded.branch_currents, compressed.branch_currents);
+        assert_eq!(expanded.node_names, compressed.node_names);
+        assert_eq!(expanded.branch_names, compressed.branch_names);
+        assert_eq!(expanded.device_op_traces, compressed.device_op_traces);
+        assert_eq!(expanded.store_traces, compressed.store_traces);
+        assert_eq!(expanded.fft_results, compressed.fft_results);
+    }
+
+    #[test]
+    fn compressed_maximum_interval_splits_at_or_before_boundary() {
+        let time = vec![0.0, 0.6, 1.01, 1.6];
+        let result = TransientResult {
+            time: time.clone(),
+            step_sizes: vec![0.0, 0.6, 0.41, 0.59],
+            voltages: vec![time.iter().map(|time| 2.0 * time).collect()],
+            branch_currents: Vec::new(),
+            num_nodes: 1,
+            node_names: vec!["out".to_string()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+            fft_results: Vec::new(),
+        };
+        let compressed = compress_transient_result(
+            &result,
+            &CompressionConfig {
+                abs_tol: 1.0,
+                rel_tol: 1.0,
+                enabled: true,
+                min_interval: 1.0,
+            },
+            &NoAbort,
+        )
+        .expect("linear waveform compresses on the maximum-gap boundary");
+
+        assert_eq!(compressed.time, [0.0, 0.6, 1.6]);
+        assert!(
+            compressed
+                .time
+                .windows(2)
+                .all(|window| window[1] - window[0] <= 1.0)
+        );
     }
 
     #[test]

@@ -178,11 +178,15 @@ def test_transient_pickle_rejects_legacy_and_future_fft_state(
     else:
         original = engine.run_tran(fft_netlist, stop_time=1e-3, max_step=1e-6)
     unpickler, state = original.__reduce__()
+    fft_index = -2 if compressed else -1
 
+    legacy_state = list(state)
+    legacy_state[fft_index] = None
     with pytest.raises(ValueError, match="legacy transient pickle"):
-        unpickler(*state[:-1])
+        unpickler(*legacy_state)
 
-    future_state = (*state[:-1], (999, state[-1][1]))
+    future_state = list(state)
+    future_state[fft_index] = (999, state[fft_index][1])
     with pytest.raises(ValueError, match="unsupported transient FFT pickle state version"):
         unpickler(*future_state)
 

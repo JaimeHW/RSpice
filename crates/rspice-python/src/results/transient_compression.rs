@@ -1,19 +1,30 @@
 //! Long-run transient controls: compression and resumable checkpoints.
 //!
-//! `CompressedTransientResult` carries an error-bounded reduction of a waveform
-//! set, so a multi-hour run stays addressable without holding every timepoint.
+//! `CompressedTransientResult` carries an error-bounded reduction of the full
+//! analog waveform inventory, so a multi-hour run stays addressable without
+//! holding every timepoint.
 //! `TransientCheckpoint` carries the netlist-fingerprinted state a resumed run
 //! restarts from; the fingerprint is what stops a checkpoint being replayed
 //! against a deck it was not produced from.
 
 use super::*;
 
-/// Memory-decimated transient voltage waveforms with bounded interpolation error.
+/// Memory-decimated transient analog waveforms with bounded interpolation error.
 #[pyclass(name = "CompressedTransientResult", module = "rspice", from_py_object)]
 #[derive(Debug, Clone)]
 pub struct PyCompressedTransientResult {
     inner: rspice_core::engine::TransientResultCompressed,
 }
+
+const COMPRESSED_TRANSIENT_ANALOG_STATE_VERSION: usize = 1;
+type CompressedTransientAnalogState = (
+    usize,
+    Vec<f64>,
+    Vec<Vec<f64>>,
+    Vec<String>,
+    Vec<(String, String, Vec<f64>)>,
+    Vec<(String, Vec<f64>)>,
+);
 
 impl PyCompressedTransientResult {
     pub fn new(inner: rspice_core::engine::TransientResultCompressed) -> Self {
@@ -37,6 +48,29 @@ impl PyCompressedTransientResult {
                 .ok_or_else(|| unknown_node_name_error(name).into()),
         }
     }
+
+    fn branch_current_values(&self, name: &str) -> PyResult<&[f64]> {
+        let index = self
+            .inner
+            .branch_names
+            .iter()
+            .position(|candidate| candidate.eq_ignore_ascii_case(name))
+            .ok_or_else(|| PyErr::from(unknown_branch_name_error(name)))?;
+        let values = self.inner.branch_currents.get(index).ok_or_else(|| {
+            crate::errors::value_error("malformed compressed transient branch inventory")
+        })?;
+        if values.is_empty() && !self.inner.time.is_empty() {
+            return Err(crate::errors::key_error(format!(
+                "branch-current waveform '{name}' was not recorded; add it to .SAVE"
+            )));
+        }
+        if values.len() != self.inner.time.len() {
+            return Err(crate::errors::value_error(format!(
+                "malformed compressed transient branch-current waveform '{name}'"
+            )));
+        }
+        Ok(values)
+    }
 }
 
 #[pymethods]
@@ -44,6 +78,12 @@ impl PyCompressedTransientResult {
     #[getter]
     fn time<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
         self.inner.time.to_pyarray(py)
+    }
+
+    /// Exact accepted integration intervals at the retained points.
+    #[getter]
+    fn step_sizes<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        self.inner.step_sizes.to_pyarray(py)
     }
 
     #[getter]
@@ -69,6 +109,104 @@ impl PyCompressedTransientResult {
     #[getter]
     fn compression_ratio(&self) -> f64 {
         self.inner.compression_ratio
+    }
+
+    /// Canonical branch names aligned with retained branch-current waveforms.
+    #[getter]
+    fn branch_names(&self) -> Vec<String> {
+        self.inner.branch_names.clone()
+    }
+
+    fn branch_current_waveform<'py>(
+        &self,
+        py: Python<'py>,
+        name: &str,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        Ok(self.branch_current_values(name)?.to_pyarray(py))
+    }
+
+    fn branch_current_at(&self, name: &str, time: f64) -> PyResult<f64> {
+        if !time.is_finite() {
+            return Err(crate::errors::value_error("time must be finite"));
+        }
+        let values = self.branch_current_values(name)?;
+        self.inner
+            .interpolate_branch_current_named(name, time)
+            .filter(|_| !values.is_empty())
+            .ok_or_else(|| {
+                crate::errors::value_error(format!(
+                    "compressed branch-current waveform '{name}' cannot be interpolated"
+                ))
+            })
+    }
+
+    /// Device operating-point traces requested with `.SAVE @device[param]`.
+    #[getter]
+    fn device_parameter_names(&self) -> Vec<String> {
+        self.inner
+            .device_op_traces
+            .iter()
+            .map(|trace| format!("@{}[{}]", trace.device_name, trace.parameter))
+            .collect()
+    }
+
+    fn device_parameter_waveform<'py>(
+        &self,
+        py: Python<'py>,
+        device: &str,
+        parameter: &str,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        self.inner
+            .try_device_op_waveform_named(device, parameter)
+            .map(|waveform| waveform.to_pyarray(py))
+            .ok_or_else(|| {
+                crate::errors::key_error(format!(
+                    "device operating-point trace '@{device}[{parameter}]' was not recorded; add it to .SAVE"
+                ))
+            })
+    }
+
+    fn device_parameter_at(&self, device: &str, parameter: &str, time: f64) -> PyResult<f64> {
+        if !time.is_finite() {
+            return Err(crate::errors::value_error("time must be finite"));
+        }
+        self.inner
+            .interpolate_device_op_named(device, parameter, time)
+            .ok_or_else(|| {
+                crate::errors::key_error(format!(
+                    "device operating-point trace '@{device}[{parameter}]' was not recorded; add it to .SAVE"
+                ))
+            })
+    }
+
+    /// Canonical typed device-store trace names.
+    #[getter]
+    fn store_names(&self) -> Vec<String> {
+        self.inner
+            .store_traces
+            .iter()
+            .map(|trace| trace.name.clone())
+            .collect()
+    }
+
+    fn store_waveform<'py>(
+        &self,
+        py: Python<'py>,
+        name: &str,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        self.inner
+            .try_store_waveform_named(name)
+            .map(|waveform| waveform.to_pyarray(py))
+            .ok_or_else(|| crate::errors::key_error(format!("unknown device-store trace '{name}'")))
+    }
+
+    fn store_at(&self, name: &str, time: f64) -> PyResult<f64> {
+        if !time.is_finite() {
+            return Err(crate::errors::value_error("time must be finite"));
+        }
+        self.inner
+            .interpolate_store_named(name, time)
+            .ok_or_else(|| crate::errors::key_error(format!("unknown device-store trace '{name}'")))
     }
 
     /// Typed `.FFT` products computed before waveform decimation.
@@ -100,9 +238,17 @@ impl PyCompressedTransientResult {
         node: NodeIdentifier,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let values = match self.node_index(&node)? {
-            Some(index) => self.inner.voltages.get(index).cloned().ok_or_else(|| {
-                crate::errors::value_error("malformed compressed transient voltage matrix")
-            })?,
+            Some(index) => {
+                let values = self.inner.voltages.get(index).cloned().ok_or_else(|| {
+                    crate::errors::value_error("malformed compressed transient voltage matrix")
+                })?;
+                if values.is_empty() && !self.inner.time.is_empty() {
+                    return Err(crate::errors::key_error(
+                        "requested node voltage was not recorded; add it to .SAVE",
+                    ));
+                }
+                values
+            }
             None => vec![0.0; self.inner.time.len()],
         };
         if values.len() != self.inner.time.len() {
@@ -118,9 +264,20 @@ impl PyCompressedTransientResult {
             return Err(crate::errors::value_error("time must be finite"));
         }
         match self.node_index(&node)? {
-            Some(index) => self.inner.interpolate(index, time).ok_or_else(|| {
-                crate::errors::value_error("compressed transient waveform cannot be interpolated")
-            }),
+            Some(index) => {
+                if self.inner.voltages.get(index).is_some_and(Vec::is_empty)
+                    && !self.inner.time.is_empty()
+                {
+                    return Err(crate::errors::key_error(
+                        "requested node voltage was not recorded; add it to .SAVE",
+                    ));
+                }
+                self.inner.interpolate(index, time).ok_or_else(|| {
+                    crate::errors::value_error(
+                        "compressed transient waveform cannot be interpolated",
+                    )
+                })
+            }
             None => Ok(0.0),
         }
     }
@@ -138,14 +295,27 @@ impl PyCompressedTransientResult {
         match self.node_index(&node)? {
             Some(index) => self
                 .inner
-                .resample(index, num_points)
-                .map(|(time, values)| (time.to_pyarray(py), values.to_pyarray(py)))
+                .voltages
+                .get(index)
+                .filter(|values| !values.is_empty() || self.inner.time.is_empty())
                 .ok_or_else(|| {
-                    crate::errors::value_error("compressed waveform cannot be resampled")
-                }),
+                    crate::errors::key_error(
+                        "requested node voltage was not recorded; add it to .SAVE",
+                    )
+                })
+                .and_then(|_| {
+                    self.inner.resample(index, num_points).ok_or_else(|| {
+                        crate::errors::value_error("compressed waveform cannot be resampled")
+                    })
+                })
+                .map(|(time, values)| (time.to_pyarray(py), values.to_pyarray(py))),
             None => {
-                let start = self.inner.time.first().copied().unwrap_or(0.0);
-                let stop = self.inner.time.last().copied().unwrap_or(start);
+                let Some((&start, &stop)) = self.inner.time.first().zip(self.inner.time.last())
+                else {
+                    return Err(crate::errors::value_error(
+                        "empty compressed transient has no time domain to resample",
+                    ));
+                };
                 let step = (stop - start) / (num_points - 1) as f64;
                 let time = (0..num_points)
                     .map(|index| start + index as f64 * step)
@@ -167,10 +337,9 @@ impl PyCompressedTransientResult {
 
     /// Rebuild from pickled state. Not part of the public API.
     ///
-    /// Device store traces have no accessor on this class, so they are not
-    /// carried; every quantity a caller can read back is.
     #[staticmethod]
-    #[pyo3(signature = (time, voltages, num_nodes, node_names, compression_ratio, input_points, fft_state=None))]
+    #[pyo3(signature = (time, voltages, num_nodes, node_names, compression_ratio, input_points, fft_state=None, analog_state=None))]
+    #[allow(clippy::too_many_arguments)]
     fn _unpickle(
         time: Vec<f64>,
         voltages: Vec<Vec<f64>>,
@@ -179,17 +348,54 @@ impl PyCompressedTransientResult {
         compression_ratio: f64,
         input_points: usize,
         fft_state: Option<TransientFftPersistenceState>,
+        analog_state: Option<CompressedTransientAnalogState>,
     ) -> PyResult<Self> {
-        Ok(Self::new(rspice_core::engine::TransientResultCompressed {
+        let Some((
+            version,
+            step_sizes,
+            branch_currents,
+            branch_names,
+            device_op_traces,
+            store_traces,
+        )) = analog_state
+        else {
+            return Err(crate::errors::value_error(
+                "legacy compressed-transient pickle predates lossless analog inventory persistence; rerun the analysis",
+            ));
+        };
+        if version != COMPRESSED_TRANSIENT_ANALOG_STATE_VERSION {
+            return Err(crate::errors::value_error(format!(
+                "unsupported compressed-transient analog pickle state version {version}"
+            )));
+        }
+        let inner = rspice_core::engine::TransientResultCompressed {
             time,
+            step_sizes,
             voltages,
+            branch_currents,
             num_nodes,
             node_names,
-            store_traces: Vec::new(),
+            branch_names,
+            device_op_traces: device_op_traces
+                .into_iter()
+                .map(|(device_name, parameter, values)| {
+                    rspice_core::engine::TransientDeviceOpTrace {
+                        device_name,
+                        parameter,
+                        values,
+                    }
+                })
+                .collect(),
+            store_traces: store_traces
+                .into_iter()
+                .map(|(name, values)| rspice_core::engine::TransientStoreTrace { name, values })
+                .collect(),
             fft_results: rebuild_transient_fft_results(fft_state)?,
             compression_ratio,
             input_points,
-        }))
+        };
+        inner.validate().map_err(crate::errors::value_error)?;
+        Ok(Self::new(inner))
     }
 
     #[allow(clippy::type_complexity)]
@@ -206,6 +412,7 @@ impl PyCompressedTransientResult {
             f64,
             usize,
             TransientFftPersistenceState,
+            CompressedTransientAnalogState,
         ),
     )> {
         Ok((
@@ -218,6 +425,28 @@ impl PyCompressedTransientResult {
                 self.inner.compression_ratio,
                 self.inner.input_points,
                 transient_fft_persistence_state(&self.inner.fft_results)?,
+                (
+                    COMPRESSED_TRANSIENT_ANALOG_STATE_VERSION,
+                    self.inner.step_sizes.clone(),
+                    self.inner.branch_currents.clone(),
+                    self.inner.branch_names.clone(),
+                    self.inner
+                        .device_op_traces
+                        .iter()
+                        .map(|trace| {
+                            (
+                                trace.device_name.clone(),
+                                trace.parameter.clone(),
+                                trace.values.clone(),
+                            )
+                        })
+                        .collect(),
+                    self.inner
+                        .store_traces
+                        .iter()
+                        .map(|trace| (trace.name.clone(), trace.values.clone()))
+                        .collect(),
+                ),
             ),
         ))
     }

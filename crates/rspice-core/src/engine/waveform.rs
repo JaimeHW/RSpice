@@ -30,8 +30,8 @@ use crate::Value;
 /// Configuration for waveform compression
 #[derive(Debug, Clone)]
 pub struct CompressionConfig {
-    /// Absolute tolerance for storing points (volts/amps)
-    /// Points within this absolute error of interpolated value are skipped
+    /// Absolute tolerance in each channel's native units.
+    /// Points within this absolute error of the interpolated value are skipped.
     pub abs_tol: Value,
 
     /// Relative tolerance for storing points (fraction)
@@ -42,8 +42,9 @@ pub struct CompressionConfig {
     /// When disabled, all points are stored (useful for debugging)
     pub enabled: bool,
 
-    /// Minimum time between stored points (prevents over-compression)
-    /// Set to 0.0 to allow maximum compression
+    /// Maximum time between retained points (prevents over-compression).
+    /// The historical field name is retained for API compatibility. Set to
+    /// 0.0 to impose no time-axis gap limit.
     pub min_interval: Value,
 }
 
@@ -131,9 +132,10 @@ impl ChannelState {
         let (t_prev, v_prev) = self.previous;
         let (t_stored, _) = self.last_stored;
 
-        // Check minimum interval constraint
-        if config.min_interval > 0.0 && (t_prev - t_stored) < config.min_interval {
-            return false;
+        // A positive interval is a hard maximum retained gap whenever the
+        // source grid contains an intermediate point that can satisfy it.
+        if config.min_interval > 0.0 && t_current - t_stored > config.min_interval {
+            return true;
         }
 
         // Calculate what linear interpolation would predict at t_prev
@@ -345,14 +347,27 @@ pub struct TransientResultCompressed {
     /// Time points (non-uniform due to compression)
     pub time: Vec<Value>,
 
+    /// Exact integration interval associated with each retained time point.
+    pub step_sizes: Vec<Value>,
+
     /// Voltage waveforms, indexed `[node][point]`.
     pub voltages: Vec<Vec<Value>>,
+
+    /// Branch-current waveforms, indexed `[branch][point]`.
+    pub branch_currents: Vec<Vec<Value>>,
 
     /// Number of nodes
     pub num_nodes: usize,
 
     /// Node names aligned with `voltages`
     pub node_names: Vec<String>,
+
+    /// Branch names aligned with `branch_currents`.
+    pub branch_names: Vec<String>,
+
+    /// Device operating-point waveforms requested by the authored output
+    /// projection. Values are decimated on the same retained time grid.
+    pub device_op_traces: Vec<super::TransientDeviceOpTrace>,
 
     /// Typed non-solution device store waveforms.
     pub store_traces: Vec<super::TransientStoreTrace>,
@@ -437,17 +452,156 @@ impl CompressionStats {
 }
 
 impl TransientResultCompressed {
+    /// Validate the complete analog result inventory and retained-grid
+    /// alignment before exposing or expanding this result.
+    pub fn validate(&self) -> Result<(), String> {
+        let point_count = self.time.len();
+        if self.step_sizes.len() != point_count {
+            return Err(format!(
+                "compressed transient has {} step sizes for {point_count} time points",
+                self.step_sizes.len()
+            ));
+        }
+        if self.voltages.len() != self.num_nodes || self.node_names.len() != self.num_nodes {
+            return Err(format!(
+                "compressed transient declares {} nodes but has {} voltage channels and {} node names",
+                self.num_nodes,
+                self.voltages.len(),
+                self.node_names.len()
+            ));
+        }
+        if self.branch_currents.len() != self.branch_names.len() {
+            return Err(format!(
+                "compressed transient has {} branch-current channels but {} branch names",
+                self.branch_currents.len(),
+                self.branch_names.len()
+            ));
+        }
+        if self.input_points < point_count {
+            return Err(format!(
+                "compressed transient retains {point_count} points from an impossible {}-point input",
+                self.input_points
+            ));
+        }
+        if !self.compression_ratio.is_finite() || self.compression_ratio < 1.0 {
+            return Err(format!(
+                "compressed transient has invalid compression ratio {}",
+                self.compression_ratio
+            ));
+        }
+        let expected_ratio = if point_count == 0 {
+            1.0
+        } else {
+            self.input_points as Value / point_count as Value
+        };
+        let ratio_tolerance = 16.0 * Value::EPSILON * expected_ratio.max(1.0);
+        if (self.compression_ratio - expected_ratio).abs() > ratio_tolerance {
+            return Err(format!(
+                "compressed transient ratio {} is inconsistent with {} retained points from a {}-point input (expected {expected_ratio})",
+                self.compression_ratio, point_count, self.input_points
+            ));
+        }
+        if self
+            .time
+            .windows(2)
+            .any(|window| !window[0].is_finite() || window[1] <= window[0])
+            || self.time.last().is_some_and(|time| !time.is_finite())
+        {
+            return Err(
+                "compressed transient time points must be finite and strictly increasing"
+                    .to_string(),
+            );
+        }
+        if self
+            .step_sizes
+            .iter()
+            .any(|step| !step.is_finite() || *step < 0.0)
+        {
+            return Err(
+                "compressed transient step sizes must be finite and non-negative".to_string(),
+            );
+        }
+
+        for (kind, name, values, may_be_projected_out) in self
+            .voltages
+            .iter()
+            .enumerate()
+            .map(|(index, values)| ("voltage", self.node_names[index].as_str(), values, true))
+            .chain(
+                self.branch_currents
+                    .iter()
+                    .enumerate()
+                    .map(|(index, values)| {
+                        (
+                            "branch-current",
+                            self.branch_names[index].as_str(),
+                            values,
+                            true,
+                        )
+                    }),
+            )
+            .chain(self.device_op_traces.iter().map(|trace| {
+                (
+                    "device operating-point",
+                    trace.parameter.as_str(),
+                    &trace.values,
+                    false,
+                )
+            }))
+            .chain(
+                self.store_traces
+                    .iter()
+                    .map(|trace| ("device store", trace.name.as_str(), &trace.values, false)),
+            )
+        {
+            if values.len() != point_count && !(may_be_projected_out && values.is_empty()) {
+                return Err(format!(
+                    "compressed transient {kind} channel '{name}' has {} values for {point_count} time points",
+                    values.len()
+                ));
+            }
+            if values.iter().any(|value| !value.is_finite()) {
+                return Err(format!(
+                    "compressed transient {kind} channel '{name}' contains a non-finite value"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn aligned_values<'a>(&self, values: &'a [Value]) -> Option<&'a [Value]> {
+        (values.len() == self.time.len()).then_some(values)
+    }
+
     fn aligned_channel_values(&self, node: usize) -> Option<&[Value]> {
         if node >= self.num_nodes {
             return None;
         }
 
         let values = self.voltages.get(node)?;
-        if values.len() != self.time.len() {
+        self.aligned_values(values)
+    }
+
+    fn interpolate_values(&self, values: &[Value], time: Value) -> Option<Value> {
+        if self.time.is_empty() || !time.is_finite() {
             return None;
         }
-
-        Some(values.as_slice())
+        let values = self.aligned_values(values)?;
+        let times = &self.time;
+        if time <= times[0] {
+            return Some(values[0]);
+        }
+        if time >= *times.last()? {
+            return values.last().copied();
+        }
+        let index = match times.binary_search_by(|candidate| candidate.total_cmp(&time)) {
+            Ok(index) => return values.get(index).copied(),
+            Err(index) => index.checked_sub(1)?,
+        };
+        let t0 = times[index];
+        let t1 = times[index + 1];
+        let fraction = (time - t0) / (t1 - t0);
+        Some(values[index] + fraction * (values[index + 1] - values[index]))
     }
 
     /// Get value at arbitrary time via linear interpolation
@@ -455,45 +609,62 @@ impl TransientResultCompressed {
     /// This is how compressed waveforms are read - the stored points
     /// are the control points for piecewise linear interpolation.
     pub fn interpolate(&self, node: usize, time: Value) -> Option<Value> {
-        if node >= self.num_nodes || self.time.is_empty() || !time.is_finite() {
-            return None;
-        }
-
-        let times = &self.time;
         let values = self.aligned_channel_values(node)?;
+        self.interpolate_values(values, time)
+    }
 
-        // Handle edge cases
-        if time <= times[0] {
-            return Some(values[0]);
-        }
-        if time >= *times.last().unwrap() {
-            return Some(*values.last().unwrap());
-        }
+    /// Get the retained branch-current waveform for a canonical branch name.
+    pub fn try_branch_current_waveform_named(&self, name: &str) -> Option<&[Value]> {
+        let index = self
+            .branch_names
+            .iter()
+            .position(|candidate| candidate.eq_ignore_ascii_case(name))?;
+        self.aligned_values(self.branch_currents.get(index)?)
+    }
 
-        // Binary search for interval
-        let idx = match times.binary_search_by(|t| t.total_cmp(&time)) {
-            Ok(i) => return Some(values[i]),
-            Err(i) => i - 1,
-        };
-        if idx + 1 >= times.len() {
-            return Some(values[idx]);
-        }
+    /// Interpolate a retained branch-current waveform by canonical name.
+    pub fn interpolate_branch_current_named(&self, name: &str, time: Value) -> Option<Value> {
+        self.interpolate_values(self.try_branch_current_waveform_named(name)?, time)
+    }
 
-        // Linear interpolation
-        let t0 = times[idx];
-        let t1 = times[idx + 1];
-        let v0 = values[idx];
-        let v1 = values[idx + 1];
-        let dt = t1 - t0;
-        if !dt.is_finite() || dt.abs() <= Value::EPSILON {
-            return Some(v0);
-        }
+    /// Get a retained device operating-point waveform by device and parameter.
+    pub fn try_device_op_waveform_named(
+        &self,
+        device_name: &str,
+        parameter: &str,
+    ) -> Option<&[Value]> {
+        let trace = self.device_op_traces.iter().find(|trace| {
+            trace.device_name.eq_ignore_ascii_case(device_name)
+                && trace.parameter.eq_ignore_ascii_case(parameter)
+        })?;
+        self.aligned_values(&trace.values)
+    }
 
-        let frac = (time - t0) / dt;
-        if !frac.is_finite() {
-            return Some(v0);
-        }
-        Some(v0 + frac * (v1 - v0))
+    /// Interpolate a retained device operating-point waveform.
+    pub fn interpolate_device_op_named(
+        &self,
+        device_name: &str,
+        parameter: &str,
+        time: Value,
+    ) -> Option<Value> {
+        self.interpolate_values(
+            self.try_device_op_waveform_named(device_name, parameter)?,
+            time,
+        )
+    }
+
+    /// Get a retained typed device-store waveform by canonical name.
+    pub fn try_store_waveform_named(&self, name: &str) -> Option<&[Value]> {
+        let trace = self
+            .store_traces
+            .iter()
+            .find(|trace| trace.name.eq_ignore_ascii_case(name))?;
+        self.aligned_values(&trace.values)
+    }
+
+    /// Interpolate a retained typed device-store waveform by canonical name.
+    pub fn interpolate_store_named(&self, name: &str, time: Value) -> Option<Value> {
+        self.interpolate_values(self.try_store_waveform_named(name)?, time)
     }
 
     /// Sample waveform at uniform intervals
@@ -506,15 +677,15 @@ impl TransientResultCompressed {
         self.aligned_channel_values(node)?;
 
         let t_start = self.time[0];
-        let t_end = *self.time.last().unwrap();
+        let t_end = *self.time.last()?;
         let dt = (t_end - t_start) / (num_points - 1) as Value;
 
         let times: Vec<_> = (0..num_points).map(|i| t_start + i as Value * dt).collect();
 
-        let values: Vec<_> = times
+        let values = times
             .iter()
-            .map(|&t| self.interpolate(node, t).unwrap_or(0.0))
-            .collect();
+            .map(|&time| self.interpolate(node, time))
+            .collect::<Option<Vec<_>>>()?;
 
         Some((times, values))
     }
@@ -541,9 +712,13 @@ mod tests {
     fn malformed_compressed_result(voltages: Vec<Vec<Value>>) -> TransientResultCompressed {
         TransientResultCompressed {
             time: vec![0.0, 1.0, 2.0],
+            step_sizes: vec![0.0, 1.0, 1.0],
             voltages,
+            branch_currents: Vec::new(),
             num_nodes: 1,
             node_names: vec!["out".to_string()],
+            branch_names: Vec::new(),
+            device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
             compression_ratio: 1.0,
@@ -556,10 +731,37 @@ mod tests {
         let missing_channel = malformed_compressed_result(Vec::new());
         assert_eq!(missing_channel.interpolate(0, 0.5), None);
         assert_eq!(missing_channel.resample(0, 3), None);
+        assert!(missing_channel.validate().is_err());
 
         let short_channel = malformed_compressed_result(vec![vec![0.0]]);
         assert_eq!(short_channel.interpolate(0, 0.5), None);
         assert_eq!(short_channel.resample(0, 3), None);
+        assert!(short_channel.validate().is_err());
+    }
+
+    #[test]
+    fn compressed_result_validates_projected_out_solution_channels() {
+        let mut projected = malformed_compressed_result(vec![Vec::new()]);
+        projected.branch_names = vec!["V1".to_string()];
+        projected.branch_currents = vec![Vec::new()];
+
+        projected
+            .validate()
+            .expect("empty projected-out voltage and current channels are typed missingness");
+        assert_eq!(projected.interpolate(0, 0.5), None);
+        assert_eq!(projected.try_branch_current_waveform_named("v1"), None);
+    }
+
+    #[test]
+    fn compressed_result_rejects_inconsistent_ratio_metadata() {
+        let mut malformed = malformed_compressed_result(vec![vec![0.0, 1.0, 2.0]]);
+        malformed.input_points = 6;
+        malformed.compression_ratio = 1.5;
+
+        let error = malformed
+            .validate()
+            .expect_err("ratio metadata must agree with retained and input point counts");
+        assert!(error.contains("inconsistent"), "unexpected error: {error}");
     }
 
     #[test]
@@ -589,5 +791,35 @@ mod tests {
             .finalize(1.0, &[3.0])
             .expect_err("final sample width must be validated");
         assert!(err.contains("final waveform sample"));
+    }
+
+    #[test]
+    fn recorder_positive_interval_limits_retained_gap() {
+        let config = CompressionConfig {
+            abs_tol: 1.0,
+            rel_tol: 1.0,
+            enabled: true,
+            min_interval: 1.0,
+        };
+        let mut recorder =
+            WaveformRecorder::new(1, 0.0, &[0.0], config).expect("recorder initializes");
+        for index in 1..=8 {
+            let time = index as Value * 0.25;
+            recorder
+                .record(time, &[time])
+                .expect("aligned sample records");
+        }
+        recorder
+            .finalize(2.0, &[2.0])
+            .expect("aligned final sample records");
+
+        assert!(
+            recorder
+                .times()
+                .windows(2)
+                .all(|window| window[1] - window[0] <= 1.0),
+            "retained grid exceeded maximum interval: {:?}",
+            recorder.times()
+        );
     }
 }

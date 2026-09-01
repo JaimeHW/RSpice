@@ -875,12 +875,22 @@ class TestCompressedTransientResult:
             "input_points",
             "compression_ratio",
             "node_names",
+            "branch_names",
+            "device_parameter_names",
+            "store_names",
         ):
             assert getattr(restored, name) == getattr(original, name), name
         np.testing.assert_array_equal(restored.time, original.time)
+        np.testing.assert_array_equal(restored.step_sizes, original.step_sizes)
         np.testing.assert_array_equal(
             restored.voltage_waveform("out"), original.voltage_waveform("out")
         )
+        assert original.branch_names, "compressed pickle branch coverage is non-vacuous"
+        for branch in original.branch_names:
+            np.testing.assert_array_equal(
+                restored.branch_current_waveform(branch),
+                original.branch_current_waveform(branch),
+            )
         # Interpolation and resampling read the retained points, not a cache.
         assert restored.voltage_at("out", 1e-3) == original.voltage_at("out", 1e-3)
         for restored_axis, original_axis in zip(
@@ -888,6 +898,42 @@ class TestCompressedTransientResult:
         ):
             np.testing.assert_array_equal(restored_axis, original_axis)
         assert repr(restored) == repr(original)
+
+    def test_legacy_future_and_malformed_analog_state_fail_closed(
+        self, engine, analysis_netlist
+    ):
+        original = engine.run_tran_compressed(
+            analysis_netlist, stop_time=2e-3, max_step=2e-5
+        )
+        unpickler, state = original.__reduce__()
+
+        with pytest.raises(ValueError, match="predates lossless analog inventory"):
+            unpickler(*state[:-1])
+
+        version, step_sizes, branch_currents, branch_names, device_ops, stores = (
+            state[-1]
+        )
+        future = (
+            999,
+            step_sizes,
+            branch_currents,
+            branch_names,
+            device_ops,
+            stores,
+        )
+        with pytest.raises(ValueError, match="unsupported compressed-transient analog"):
+            unpickler(*state[:-1], future)
+
+        malformed = (
+            version,
+            step_sizes[:-1],
+            branch_currents,
+            branch_names,
+            device_ops,
+            stores,
+        )
+        with pytest.raises(ValueError, match="step sizes"):
+            unpickler(*state[:-1], malformed)
 
 
 class TestDistortionResult:

@@ -613,7 +613,15 @@ pub(super) fn run_transient(
                         (tstop / tstep) / compressed.time.len() as f64
                     );
                 }
-                Ok(compressed.into())
+                let expanded =
+                    compressed
+                        .try_into_transient()
+                        .map_err(|message| CliError::InternalError {
+                            message: format!(
+                                "core returned a malformed compressed transient result: {message}"
+                            ),
+                        })?;
+                Ok(expanded)
             }
             Err(e) => Err(e),
         }
