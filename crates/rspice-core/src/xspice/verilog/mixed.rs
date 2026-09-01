@@ -232,6 +232,16 @@ struct ActiveTrial {
     tick: u64,
     time_seconds: f64,
     timestep_seconds: f64,
+    /// Whether this trial was opened by [`MixedSignalHost::begin_probe_trial`]
+    /// and therefore may never be committed.
+    ///
+    /// A solver assembles a residual at times that are not candidate accepted
+    /// endpoints — an LTE probe, a static residual capture at a timepoint
+    /// already committed — and each of those needs the module's continuous
+    /// equations and its D/A levels stamped. A probe trial delivers exactly
+    /// that and nothing else: [`MixedSignalHost::accept_trial`] refuses it by
+    /// name, so no route to committing one exists to be taken by mistake.
+    probe: bool,
     bridge_iterations: u32,
     /// Whether the last [`MixedSignalHost::settle_analog_bridges`] of this
     /// trial found the boundary quiet. `false` before the first one, so a
@@ -261,13 +271,39 @@ pub struct MixedSignalCheckpoint {
 }
 
 /// One compiled mixed module integrated with an outer transient solver.
+///
+/// `Clone` exists because [`CircuitData`](crate::CircuitData) is cloneable and
+/// this now lives in it: an AC sweep hands each worker thread an independent
+/// copy of the whole circuit. Cloning is cheap for the same reason a trial's
+/// rollback capture is — every payload is behind a [`MixedCell`], so a clone is
+/// three reference-count bumps and the copy is deferred to the first write.
+#[derive(Clone)]
 pub struct MixedSignalHost {
+    /// The deck's own name for this instance, carried so a refusal can say
+    /// which X-card it is about rather than which module.
+    instance: String,
     source_digest: String,
     resolution: TimeResolution,
     state: MixedState,
     trial: Option<ActiveTrial>,
     max_circuit_node: usize,
     max_bridge_iterations: u32,
+}
+
+impl fmt::Debug for MixedSignalHost {
+    /// Hand-written because neither the compiled analog device nor the digital
+    /// host is `Debug`, and because the useful summary of a running mixed
+    /// module is its identity and its boundary shape rather than its state.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MixedSignalHost")
+            .field("instance", &self.instance)
+            .field("source_digest", &self.source_digest)
+            .field("adc_bridges", &self.state.bridges.adc.len())
+            .field("dac_bridges", &self.state.bridges.dac.len())
+            .field("accepted_time", &self.state.accepted_time)
+            .field("trial_active", &self.trial.is_some())
+            .finish()
+    }
 }
 
 impl MixedSignalHost {
@@ -289,25 +325,61 @@ impl MixedSignalHost {
                 detail: error.to_string(),
             }
         })?;
-        if runtime.canonical_ir.digital.is_empty() || runtime.canonical_ir.mir.equations.is_empty()
-        {
+        Self::from_compiled(
+            instance,
+            Arc::new(runtime.model),
+            &runtime.canonical_ir,
+            terminal_nodes,
+            scheduler_limits,
+        )
+    }
+
+    /// Start one module from artifacts that are already compiled and cached.
+    ///
+    /// This is the entry the deck route takes, and [`Self::compile`] is its
+    /// composition with a compiler invocation. Splitting them is what lets a
+    /// `.VERILOGA` include be compiled exactly once for a build: the engine's
+    /// on-disk cache produces a `CompiledModel` and a
+    /// [`CanonicalIrArtifact`](rspice_veriloga::canonical_ir::CanonicalIrArtifact)
+    /// for every `.va` it reads, and a mixed module needs those same two
+    /// artifacts rather than a second compile of the same text. Compiling twice
+    /// would also be compiling under two different `CompilerOptions`, so the
+    /// analog half a device stamped and the analog half a host stamped could
+    /// differ without anything saying so.
+    ///
+    /// The `model` and `canonical_ir` pair must be the pair one compilation
+    /// produced. That is checked, not assumed: `VerilogADevice` construction
+    /// refuses a mismatched digest, and the engine's cache validates the pair
+    /// before admitting it.
+    pub(crate) fn from_compiled(
+        instance: &str,
+        model: Arc<rspice_veriloga::CompiledModel>,
+        canonical_ir: &rspice_veriloga::canonical_ir::CanonicalIrArtifact,
+        terminal_nodes: &[usize],
+        scheduler_limits: SchedulerLimits,
+    ) -> Result<Self, MixedSignalError> {
+        if canonical_ir.digital.is_empty() || canonical_ir.mir.equations.is_empty() {
             return Err(MixedSignalError::Compile {
                 detail: format!(
                     "module `{}` is not mixed: it must contain both analog equations and digital processes or drivers",
-                    runtime.canonical_ir.mir.module_name
+                    canonical_ir.mir.module_name
                 ),
             });
         }
 
+        // The same backend selection the device builder makes. A mixed module
+        // is one more Verilog-A instance as far as the continuous half is
+        // concerned, so it must not reach a different runtime than the analog
+        // instance beside it would.
         #[cfg(any(feature = "veriloga-native", feature = "veriloga-wasm-jit"))]
         let analog = VerilogADevice::try_new_with_canonical_ir(
             instance,
-            runtime.model,
-            &runtime.canonical_ir,
+            model,
+            canonical_ir,
             terminal_nodes,
         );
         #[cfg(not(any(feature = "veriloga-native", feature = "veriloga-wasm-jit")))]
-        let analog = VerilogADevice::try_new(instance, runtime.model, terminal_nodes);
+        let analog = VerilogADevice::try_new(instance, model, terminal_nodes);
         let mut analog = analog.map_err(|error| MixedSignalError::Compile {
             detail: format!("analog device construction failed: {error}"),
         })?;
@@ -319,11 +391,11 @@ impl MixedSignalHost {
 
         let resolution = TimeResolution::new(TIME_UNIT_EXPONENT).map_err(DigitalRunError::from)?;
         let max_bridge_iterations = scheduler_limits.max_delta_cycles_per_tick.max(1);
-        let mut digital =
-            DigitalHost::new(&runtime.canonical_ir.digital, resolution, scheduler_limits);
+        let mut digital = DigitalHost::new(&canonical_ir.digital, resolution, scheduler_limits);
         digital.start()?;
-        let source_digest = runtime.canonical_ir.metadata.source_digest.to_string();
+        let source_digest = canonical_ir.metadata.source_digest.to_string();
         Ok(Self {
+            instance: instance.to_string(),
             source_digest,
             resolution,
             state: MixedState {
@@ -340,6 +412,61 @@ impl MixedSignalHost {
             max_circuit_node: terminal_nodes.iter().copied().max().unwrap_or(0),
             max_bridge_iterations,
         })
+    }
+
+    /// The deck's name for this instance.
+    pub(crate) fn instance_name(&self) -> &str {
+        &self.instance
+    }
+
+    /// Every circuit node this module's matrix contributions can reach, in
+    /// ascending order and without ground.
+    ///
+    /// The matrix topology builder needs this before the first stamp: a
+    /// conductance has nowhere to land unless its `(row, col)` already exists
+    /// in the sparsity pattern. Analog terminals couple through the module's
+    /// own equations and D/A bridges couple their two nodes, so the union is
+    /// what a conservative dense block must span — the same answer, and for the
+    /// same reason, that `engine::matrix` computes for a `VerilogADevice`.
+    pub(crate) fn coupled_nodes(&self) -> Vec<usize> {
+        let mut nodes: Vec<usize> = (0..self.state.analog.num_terminals())
+            .map(|terminal| self.state.analog.node_for_terminal(terminal))
+            .chain(
+                self.state
+                    .bridges
+                    .dac
+                    .iter()
+                    .flat_map(|bridge| [bridge.positive, bridge.negative]),
+            )
+            .filter(|node| *node > 0)
+            .collect();
+        nodes.sort_unstable();
+        nodes.dedup();
+        nodes
+    }
+
+    /// Every boundary net's committed four-state value, paired with the circuit
+    /// node the deck attached it to.
+    ///
+    /// Both bridge directions are reported: an A/D bridge's signal is what the
+    /// module *read* off that node and a D/A bridge's is what it *drove* onto
+    /// it, and a waveform viewer wants both. Speculative state is never
+    /// reported — this reads the accepted store, and every trial that has not
+    /// been accepted has already been rolled back.
+    pub(crate) fn boundary_digital_values<F>(&self, mut sink: F)
+    where
+        F: FnMut(usize, &FourStateValue),
+    {
+        for bridge in &self.state.bridges.adc {
+            if let Some(value) = self.state.digital.read(bridge.signal) {
+                sink(bridge.positive, value);
+            }
+        }
+        for bridge in &self.state.bridges.dac {
+            if let Some(value) = self.state.digital.read(bridge.signal) {
+                sink(bridge.positive, value);
+            }
+        }
     }
 
     /// Add a scalar analog-to-digital bridge with hysteresis.
@@ -446,6 +573,60 @@ impl MixedSignalHost {
         initial_step: bool,
         final_step: bool,
     ) -> Result<(), MixedSignalError> {
+        self.begin_trial_inner(
+            time_seconds,
+            timestep_seconds,
+            integration,
+            initial_step,
+            final_step,
+            false,
+        )
+    }
+
+    /// Start a trial that is guaranteed never to be committed.
+    ///
+    /// The solver's rollbackable probe. `stamp_xspice_transient_trial` is the
+    /// same shape one layer out: evaluate, stamp, restore, decide nothing. A
+    /// probe is what lets a Newton iteration see this module's continuous
+    /// equations and its D/A levels without the boundary having been decided,
+    /// and what lets a residual be assembled at a timepoint that is not a
+    /// candidate endpoint at all — an LTE probe, or the static residual capture
+    /// a Xyce OneStep step takes *after* committing the timepoint it is
+    /// capturing.
+    ///
+    /// The one difference from [`Self::begin_trial`] is the monotonicity check.
+    /// That check exists because acceptance advances the analog integrator, so
+    /// a second acceptance at one instant would advance it twice; a probe never
+    /// reaches that path — [`Self::accept_trial`] refuses one by name — so the
+    /// check has nothing to protect and would refuse legitimate assemblies.
+    /// Every other guard, the missed-breakpoint one included, still applies.
+    pub(crate) fn begin_probe_trial(
+        &mut self,
+        time_seconds: f64,
+        timestep_seconds: f64,
+        integration: IntegrationCoefficients,
+        initial_step: bool,
+        final_step: bool,
+    ) -> Result<(), MixedSignalError> {
+        self.begin_trial_inner(
+            time_seconds,
+            timestep_seconds,
+            integration,
+            initial_step,
+            final_step,
+            true,
+        )
+    }
+
+    fn begin_trial_inner(
+        &mut self,
+        time_seconds: f64,
+        timestep_seconds: f64,
+        integration: IntegrationCoefficients,
+        initial_step: bool,
+        final_step: bool,
+        probe: bool,
+    ) -> Result<(), MixedSignalError> {
         self.require_idle("begin a trial")?;
         if !timestep_seconds.is_finite() || timestep_seconds < 0.0 {
             return Err(MixedSignalError::TrialProtocol {
@@ -462,7 +643,7 @@ impl MixedSignalHost {
         // preceding a timepoint already accepted, because `accept_trial`
         // advances the analog integrator and a second acceptance at the same
         // instant would advance it twice.
-        if self.state.started && time_seconds <= self.state.accepted_time {
+        if !probe && self.state.started && time_seconds <= self.state.accepted_time {
             return Err(MixedSignalError::TrialProtocol {
                 detail: format!(
                     "trial time {time_seconds:e} s does not advance past the accepted mixed-module \
@@ -525,12 +706,18 @@ impl MixedSignalHost {
             tick,
             time_seconds,
             timestep_seconds,
+            probe,
             bridge_iterations: 0,
             bridges_quiet: false,
             transition_times,
             sampled_adc_voltages,
         });
         Ok(())
+    }
+
+    /// Whether a trial is open.
+    pub(crate) fn trial_active(&self) -> bool {
+        self.trial.is_some()
     }
 
     /// Apply co-timed external digital input drives during the active trial.
@@ -716,6 +903,13 @@ impl MixedSignalHost {
             .ok_or_else(|| MixedSignalError::TrialProtocol {
                 detail: "there is no active trial to accept".into(),
             })?;
+        if trial.probe {
+            return Err(MixedSignalError::TrialProtocol {
+                detail: "a probe trial cannot be accepted; probes exist so a residual can be \
+                         assembled at a timepoint the solver is not committing"
+                    .into(),
+            });
+        }
         if !trial.bridges_quiet {
             return Err(MixedSignalError::TrialProtocol {
                 detail: "settle_analog_bridges must report the boundary quiet before a trial is \
