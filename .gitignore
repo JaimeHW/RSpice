@@ -54,6 +54,7 @@ Thumbs.db
 
 # Test outputs
 *.raw
+*.profraw
 # tests/xyce is a vendored upstream corpus, not generated output. The global
 # *.raw rule above silently withheld 43 of its reference files from git — the
 # whole of OutputData/Certification_Tests/BUG_746_SON/ among them — so a fresh
