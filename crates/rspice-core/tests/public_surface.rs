@@ -203,7 +203,15 @@ use rspice_core::analysis::harmonic_balance::{
 /// `TransientFftBin`, `TransientFftHarmonic`, `TransientFftMetrics`, and
 /// `TransientFftResult` expose calibrated spectra and optional `FFTOUT`
 /// figures without requiring a frontend to parse an engine text report.
-const MAX_PUBLIC_ITEMS: usize = 4284;
+///
+/// 2026-08-31, +23 arrears (4,284 → 4,307): two landings raised the count
+/// without touching this ceiling — deterministic TEAM resistance noise
+/// (`db03d39eb`) and the transactional mixed Verilog transient host
+/// (`9549ed6cb`). Neither set has been triaged for narrowing; whether each
+/// item is genuinely frontend-facing or a `pub(crate)` candidate is the
+/// visibility-narrowing pass's question, not this ratchet's. Recorded here so
+/// the next raise cannot mistake the arrears for headroom.
+const MAX_PUBLIC_ITEMS: usize = 4307;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
