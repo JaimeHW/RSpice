@@ -150,6 +150,64 @@ pub struct InsertionRule {
     pub span: Span,
 }
 
+impl InsertionRule {
+    /// Section 7.7.3's parameter values, folded to numbers and named.
+    ///
+    /// The rule keeps them as written because folding is the instantiating
+    /// pass's job, and this is that pass's half of it — here rather than in
+    /// the engine because [`crate::ast::Expression`] is this crate's and a
+    /// second walker over it in another crate is a second answer waiting to
+    /// happen.
+    ///
+    /// A literal, optionally signed, is the whole of what folds. Anything else
+    /// — an identifier, a call, an arithmetic expression — is refused by name
+    /// rather than guessed at, because a connect statement's parameter is
+    /// written at the top of a design where nothing is in scope to evaluate it
+    /// against.
+    ///
+    /// Section 7.7.3's positional form has no name to bind to, and a connect
+    /// module's parameter order is not part of what selection reads, so a
+    /// positional override is refused too.
+    pub fn numeric_parameters(&self) -> Result<Vec<(SmolStr, f64)>, ConnectError> {
+        self.parameters
+            .iter()
+            .map(|parameter| {
+                let name = parameter.name.clone().ok_or_else(|| {
+                    ConnectError::PositionalConnectParameter {
+                        module: self.connect_module.clone(),
+                        span: parameter.span,
+                    }
+                })?;
+                let value = fold_literal(&parameter.value).ok_or_else(|| {
+                    ConnectError::NonLiteralConnectParameter {
+                        module: self.connect_module.clone(),
+                        parameter: name.clone(),
+                        span: parameter.span,
+                    }
+                })?;
+                Ok((name, value))
+            })
+            .collect()
+    }
+}
+
+/// A signed numeric literal, and nothing else.
+fn fold_literal(expression: &crate::ast::Expression) -> Option<f64> {
+    use crate::ast::{Expression, UnaryOp};
+    match expression {
+        Expression::Number(number) => Some(number.value),
+        Expression::Unary(unary) => {
+            let operand = fold_literal(&unary.operand)?;
+            match unary.op {
+                UnaryOp::Neg => Some(-operand),
+                UnaryOp::Pos => Some(operand),
+                UnaryOp::Not | UnaryOp::BitNot => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 /// One `connect … resolveto …;` statement.
 #[derive(Debug, Clone)]
 pub struct ResolutionRule {
@@ -1196,6 +1254,24 @@ pub enum ConnectError {
          vendor-specific and this compiler implements the basic mode of section 7.4.4.1"
     )]
     DetailResolutionMode,
+
+    #[error(
+        "the connect statement for '{module}' passes a parameter positionally; \
+         Verilog-AMS LRM 2.4 section 7.7.3 parameter values are bound to a connect \
+         module's parameters by name"
+    )]
+    PositionalConnectParameter { module: SmolStr, span: Span },
+
+    #[error(
+        "the connect statement for '{module}' gives parameter '{parameter}' a value that is \
+         not a numeric literal; a Verilog-AMS LRM 2.4 section 7.7.3 parameter is written \
+         where no design scope exists to evaluate an expression against"
+    )]
+    NonLiteralConnectParameter {
+        module: SmolStr,
+        parameter: SmolStr,
+        span: Span,
+    },
 
     #[error("net segment {index} is not part of the signal")]
     UnknownSegment { index: usize },

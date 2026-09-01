@@ -64,6 +64,9 @@ use veriloga_cache::{
     normalize_model_key, resolve_cached_or_compile_veriloga_with_limits_and_abort,
 };
 
+#[cfg(feature = "veriloga")]
+mod connect_modules;
+
 mod model_policy;
 use model_policy::*;
 mod advanced_mos;
@@ -1416,6 +1419,17 @@ struct PlannedXspiceAutoBridge {
     kind: XspiceAutoBridgeKind,
     vcc: crate::Value,
     family: Option<String>,
+    /// The Verilog-AMS connect module selected for this boundary, when the
+    /// design has a `connectrules` block that reaches it.
+    ///
+    /// This is the extension `plan_xspice_auto_bridges` documented and
+    /// deliberately did not carry until something produced it: one field
+    /// naming the selected module, read by materialization, rather than a
+    /// second pass that decides boundaries again. `None` is a design with no
+    /// connect rules, which is every design that had none before this field
+    /// existed — and materialization takes exactly the path it took then.
+    #[cfg(feature = "veriloga")]
+    connect_module: Option<connect_modules::PlannedConnectModule>,
 }
 
 #[derive(Debug, Clone)]
@@ -1824,12 +1838,20 @@ fn explicit_digital_bridge_kind_for_port(
 ///
 /// What a connect module changes is *which model* bridges a node, not whether
 /// the node is a boundary or where the boundary is. So the extension this
-/// planner takes when that route lands is one more field on
-/// [`PlannedXspiceAutoBridge`] naming the selected module, read by
-/// materialization — not a second pass that decides boundaries again. Nothing
-/// produces such a selection yet: it needs a Verilog-AMS hierarchy elaborated
-/// into [`CircuitData`] nodes, which has no elaborated form (see
-/// `crate::xspice::verilog`'s module documentation).
+/// planner takes is one more field on [`PlannedXspiceAutoBridge`] naming the
+/// selected module, read by materialization — not a second pass that decides
+/// boundaries again. That field is
+/// [`PlannedXspiceAutoBridge::connect_module`], and its producer is
+/// [`connect_modules::select_for_boundary`], which runs *after* this planner
+/// and over its answers: this decides where the boundaries are, clause 7
+/// decides what goes on them.
+///
+/// A Verilog-AMS hierarchy elaborated into [`CircuitData`] nodes is still
+/// missing, and it is still what a general connect-module route needs — the
+/// hierarchical placement of section 7.8.4's rule 2, and `split` mode's
+/// per-port instances, both live there. What a flat deck presents instead is
+/// the smallest signal clause 7 describes, one node and one instance port, and
+/// [`connect_modules`] builds exactly that rather than approximating it.
 fn plan_xspice_auto_bridges(
     circuit: &CircuitData,
     flat_elements: &[Element],
@@ -1908,6 +1930,8 @@ fn plan_xspice_auto_bridges(
                         .get(&node)
                         .map(|candidate: &XspiceAutoBridgeFamilyCandidate| candidate.family.clone())
                         .or_else(|| metadata.and_then(|metadata| metadata.family.clone())),
+                    #[cfg(feature = "veriloga")]
+                    connect_module: None,
                 })
         })
         .collect();
@@ -1941,6 +1965,11 @@ fn plan_xspice_auto_bridges(
             kind,
             vcc: 0.0,
             family: None,
+            // Real-valued event traffic is not a discipline boundary: a
+            // `wreal` carries a real number, not a discipline's potential and
+            // flow, so clause 7 has nothing to say about it.
+            #[cfg(feature = "veriloga")]
+            connect_module: None,
         })
     }));
 
@@ -3511,6 +3540,20 @@ fn add_planned_xspice_auto_bridges(
             continue;
         };
 
+        // A template and a connect module are two answers to "what bridges
+        // this node", and taking either silently would make the deck's other
+        // request disappear.
+        #[cfg(feature = "veriloga")]
+        if let Some(selected) = bridge.connect_module.as_ref() {
+            let node_label = xspice_auto_bridge_node_label(node_names.as_deref(), bridge.node);
+            return Err(SimulationError::Circuit(format!(
+                "node '{node_label}' selects connect module '{}' and also matches auto-bridge \
+                 template '{}'; a node takes one bridge, so remove the template override or \
+                 the connect rule",
+                selected.name, template.key
+            )));
+        }
+
         let max_nodes = template.max_nodes.unwrap_or(bridges.len()).max(1);
         let mut group = Vec::with_capacity(max_nodes.min(bridges.len() - index));
         consumed[index] = true;
@@ -3607,73 +3650,84 @@ fn add_planned_xspice_auto_bridge(
 
     let vcc = bridge.vcc;
     let half_vcc = vcc / 2.0;
-    let (model_name, instance_name, connections, numeric_params, output_branch) = match bridge.kind
-    {
-        XspiceAutoBridgeKind::Adc => (
-            "adc_bridge",
-            format!("__rspice_auto_adc_{}", bridge.node),
-            vec![
-                PortConnection::AnalogVector(vec![bridge.node]),
-                PortConnection::DigitalVector(vec![bridge.node]),
-            ],
-            vec![
-                ("in_low".to_string(), half_vcc),
-                ("in_high".to_string(), half_vcc),
-            ],
-            None,
-        ),
-        XspiceAutoBridgeKind::Dac => (
-            "dac_bridge",
-            format!("__rspice_auto_dac_{}", bridge.node),
-            vec![
-                PortConnection::DigitalVector(vec![bridge.node]),
-                PortConnection::AnalogVector(vec![bridge.node]),
-            ],
-            vec![("out_low".to_string(), 0.0), ("out_high".to_string(), vcc)],
-            Some(XspiceAutoBridgeOutputBranch::Vector {
-                port_idx: 1,
-                element_idx: 0,
-            }),
-        ),
-        XspiceAutoBridgeKind::Bidi => (
-            "bidi_bridge",
-            format!("__rspice_auto_bidi_{}", bridge.node),
-            vec![
-                PortConnection::AnalogVector(vec![bridge.node]),
-                PortConnection::DigitalVector(vec![bridge.node]),
-                PortConnection::Null,
-            ],
-            vec![
-                ("out_high".to_string(), vcc),
-                ("in_low".to_string(), half_vcc),
-                ("in_high".to_string(), half_vcc),
-            ],
-            None,
-        ),
-        XspiceAutoBridgeKind::RealToV => (
-            "real_to_v",
-            format!("__rspice_auto_real_to_v_{}", bridge.node),
-            vec![
-                PortConnection::Real(bridge.node),
-                PortConnection::Analog(bridge.node),
-            ],
-            Vec::new(),
-            Some(XspiceAutoBridgeOutputBranch::Scalar { port_idx: 1 }),
-        ),
-        XspiceAutoBridgeKind::VToReal => (
-            "v_to_real",
-            format!("__rspice_auto_v_to_real_{}", bridge.node),
-            vec![
-                PortConnection::Analog(bridge.node),
-                PortConnection::Real(bridge.node),
-            ],
-            Vec::new(),
-            // No output branch: the observer's output is an event, not a
-            // matrix contribution, so there is no current for a branch to
-            // carry.
-            None,
-        ),
-    };
+    let (model_name, instance_name, connections, mut numeric_params, output_branch) =
+        match bridge.kind {
+            XspiceAutoBridgeKind::Adc => (
+                "adc_bridge",
+                format!("__rspice_auto_adc_{}", bridge.node),
+                vec![
+                    PortConnection::AnalogVector(vec![bridge.node]),
+                    PortConnection::DigitalVector(vec![bridge.node]),
+                ],
+                vec![
+                    ("in_low".to_string(), half_vcc),
+                    ("in_high".to_string(), half_vcc),
+                ],
+                None,
+            ),
+            XspiceAutoBridgeKind::Dac => (
+                "dac_bridge",
+                format!("__rspice_auto_dac_{}", bridge.node),
+                vec![
+                    PortConnection::DigitalVector(vec![bridge.node]),
+                    PortConnection::AnalogVector(vec![bridge.node]),
+                ],
+                vec![("out_low".to_string(), 0.0), ("out_high".to_string(), vcc)],
+                Some(XspiceAutoBridgeOutputBranch::Vector {
+                    port_idx: 1,
+                    element_idx: 0,
+                }),
+            ),
+            XspiceAutoBridgeKind::Bidi => (
+                "bidi_bridge",
+                format!("__rspice_auto_bidi_{}", bridge.node),
+                vec![
+                    PortConnection::AnalogVector(vec![bridge.node]),
+                    PortConnection::DigitalVector(vec![bridge.node]),
+                    PortConnection::Null,
+                ],
+                vec![
+                    ("out_high".to_string(), vcc),
+                    ("in_low".to_string(), half_vcc),
+                    ("in_high".to_string(), half_vcc),
+                ],
+                None,
+            ),
+            XspiceAutoBridgeKind::RealToV => (
+                "real_to_v",
+                format!("__rspice_auto_real_to_v_{}", bridge.node),
+                vec![
+                    PortConnection::Real(bridge.node),
+                    PortConnection::Analog(bridge.node),
+                ],
+                Vec::new(),
+                Some(XspiceAutoBridgeOutputBranch::Scalar { port_idx: 1 }),
+            ),
+            XspiceAutoBridgeKind::VToReal => (
+                "v_to_real",
+                format!("__rspice_auto_v_to_real_{}", bridge.node),
+                vec![
+                    PortConnection::Analog(bridge.node),
+                    PortConnection::Real(bridge.node),
+                ],
+                Vec::new(),
+                // No output branch: the observer's output is an event, not a
+                // matrix contribution, so there is no current for a branch to
+                // carry.
+                None,
+            ),
+        };
+
+    // A selected connect module replaces the parameters this bridge would have
+    // stamped, not the model it stamps them on: delegation is the whole reason
+    // a connect module runs here at all. With no section 7.7.3 override the
+    // numbers are the same ones, derived the same way from the same supply,
+    // which is why a deck that names a connect module gets the bridge it would
+    // have got without one.
+    #[cfg(feature = "veriloga")]
+    if let Some(selected) = bridge.connect_module.as_ref() {
+        numeric_params = connect_modules::delegated_parameters(selected, bridge.kind, vcc)?;
+    }
 
     let code_model = circuit.xspice_registry.get(model_name).ok_or_else(|| {
         SimulationError::Circuit(format!(
@@ -6018,10 +6072,29 @@ impl Engine {
         // storage while applying each instance's independent XO value.
         let mut xyce_pem_models: HashMap<String, crate::device::XycePemMemristor> = HashMap::new();
 
+        // The design's clause 7 connect specification, read from the same
+        // `.veriloga` files as the models so that each is opened once.
+        #[cfg(feature = "veriloga")]
+        let mut design_connect_rules = connect_modules::DesignConnectRules::default();
+
         // Load and cache Verilog-A models referenced by .VERILOGA directives.
         #[cfg(feature = "veriloga")]
         {
             for include in &netlist.veriloga_includes {
+                if connect_modules::DesignConnectRules::may_declare(&include.file_path) {
+                    let specification = design_connect_rules.read(&include.file_path)?;
+                    if !specification.declares_module {
+                        // A file that declares only connect modules is a
+                        // connect library. It contributes rules and no device,
+                        // and asking the compiler for a model would fail on a
+                        // file that is perfectly well formed.
+                        log::info!(
+                            "Read connect rules from '{}', which declares no device module",
+                            include.file_path.display()
+                        );
+                        continue;
+                    }
+                }
                 let entry = resolve_cached_or_compile_veriloga_with_limits_and_abort(
                     &include.file_path,
                     self.config.resource_limits,
@@ -9470,12 +9543,22 @@ impl Engine {
         let default_auto_bridge_vcc = xspice_auto_bridge_vcc(netlist);
         let scoped_auto_bridge_metadata =
             xspice_auto_bridge_scoped_metadata(&circuit, &flattened.xspice_auto_bridge_node_hints);
-        let auto_bridges = plan_xspice_auto_bridges(
+        #[cfg_attr(not(feature = "veriloga"), allow(unused_mut))]
+        let mut auto_bridges = plan_xspice_auto_bridges(
             &circuit,
             &flat_elements,
             &scoped_auto_bridge_metadata,
             default_auto_bridge_vcc,
         );
+        // Clause 7 runs over the boundaries the one planner found, never
+        // instead of it. A design with no `connectrules` block leaves every
+        // planned bridge exactly as it was planned.
+        #[cfg(feature = "veriloga")]
+        connect_modules::attach_to_planned_bridges(
+            &circuit,
+            &design_connect_rules,
+            &mut auto_bridges,
+        )?;
         if !auto_bridges.is_empty() {
             if netlist.options.auto_bridge.unwrap_or(true) {
                 add_planned_xspice_auto_bridges(
