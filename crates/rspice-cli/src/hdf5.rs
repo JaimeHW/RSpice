@@ -3,10 +3,12 @@
 //! The CLI uses a stable, self-describing layout with path-safe dataset names
 //! so exported files remain robust even when signal names contain SPICE syntax.
 
+use crate::atomic_artifact::{AtomicArtifactError, write_atomic};
 use rustyhdf5::{AttrValue, File as Hdf5File, FileBuilder};
 use thiserror::Error;
 
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::Path;
 
 const SCHEMA_VERSION: &str = "1";
@@ -17,6 +19,22 @@ pub enum Hdf5Error {
     Backend(#[from] rustyhdf5::Error),
     #[error("invalid HDF5 schema: {0}")]
     InvalidSchema(String),
+    #[error("failed to prepare staged HDF5 artifact: {0}")]
+    ArtifactPreparation(#[source] std::io::Error),
+    #[error("failed while writing staged HDF5 artifact: {0}")]
+    ArtifactWrite(#[source] std::io::Error),
+    #[error("failed to flush staged HDF5 artifact: {0}")]
+    ArtifactFlush(#[source] std::io::Error),
+    #[error("failed to atomically commit staged HDF5 artifact: {0}")]
+    ArtifactCommit(#[source] std::io::Error),
+}
+
+#[derive(Debug, Error)]
+enum Hdf5StagingError {
+    #[error(transparent)]
+    Backend(#[from] rustyhdf5::Error),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Hdf5Error>;
@@ -400,8 +418,22 @@ pub fn write_hdf5(path: &Path, data: &Hdf5SimulationData) -> Result<()> {
         add_measurements(&mut builder, &data.measurements)?;
     }
 
-    builder.write(path)?;
-    Ok(())
+    write_hdf5_builder(path, builder)
+}
+
+fn write_hdf5_builder(path: &Path, builder: FileBuilder) -> Result<()> {
+    write_atomic(path, |file| {
+        let bytes = builder.finish()?;
+        file.write_all(&bytes)?;
+        Ok(())
+    })
+    .map_err(|error| match error {
+        AtomicArtifactError::Preparation(error) => Hdf5Error::ArtifactPreparation(error),
+        AtomicArtifactError::Write(Hdf5StagingError::Backend(error)) => Hdf5Error::Backend(error),
+        AtomicArtifactError::Write(Hdf5StagingError::Io(error)) => Hdf5Error::ArtifactWrite(error),
+        AtomicArtifactError::Flush(error) => Hdf5Error::ArtifactFlush(error),
+        AtomicArtifactError::Commit(error) => Hdf5Error::ArtifactCommit(error),
+    })
 }
 
 pub fn read_hdf5(path: &Path) -> Result<Hdf5SimulationData> {
@@ -829,5 +861,97 @@ fn read_required_f64_attr(attrs: &HashMap<String, AttrValue>, name: &str) -> Res
         None => Err(Hdf5Error::InvalidSchema(format!(
             "missing required float attribute '{name}'"
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_TEST_DIRECTORY: AtomicU64 = AtomicU64::new(0);
+
+    struct TestDirectory(std::path::PathBuf);
+
+    impl TestDirectory {
+        fn new(tag: &str) -> Self {
+            let id = NEXT_TEST_DIRECTORY.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "rspice-hdf5-atomic-{}-{id}-{tag}",
+                std::process::id()
+            ));
+            std::fs::create_dir(&path).expect("create unique HDF5 test directory");
+            Self(path)
+        }
+    }
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn assert_only_destination_remains(directory: &Path, destination: &Path, exists: bool) {
+        let entries: Vec<std::path::PathBuf> = std::fs::read_dir(directory)
+            .expect("read HDF5 test directory")
+            .map(|entry| entry.expect("read HDF5 directory entry").path())
+            .collect();
+        if exists {
+            assert_eq!(entries, vec![destination.to_path_buf()]);
+        } else {
+            assert!(
+                entries.is_empty(),
+                "unexpected staged artifacts: {entries:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn backend_serialization_failure_preserves_old_or_absent_destination() {
+        for preexisting in [false, true] {
+            let directory = TestDirectory::new("backend-failure");
+            let destination = directory.0.join("result.h5");
+            if preexisting {
+                std::fs::write(&destination, b"old complete HDF5 artifact")
+                    .expect("seed existing HDF5 destination");
+            }
+
+            let mut incomplete_builder = FileBuilder::new();
+            incomplete_builder.create_dataset("missing_data");
+            let error = write_hdf5_builder(&destination, incomplete_builder)
+                .expect_err("incomplete dataset must fail serialization");
+            assert!(matches!(error, Hdf5Error::Backend(_)));
+
+            if preexisting {
+                assert_eq!(
+                    std::fs::read(&destination).expect("read preserved HDF5 destination"),
+                    b"old complete HDF5 artifact"
+                );
+            } else {
+                assert!(!destination.exists());
+            }
+            assert_only_destination_remains(&directory.0, &destination, preexisting);
+        }
+    }
+
+    #[test]
+    fn successful_hdf5_write_atomically_replaces_existing_bytes() {
+        let directory = TestDirectory::new("success");
+        let destination = directory.0.join("result.h5");
+        std::fs::write(&destination, b"old complete HDF5 artifact")
+            .expect("seed existing HDF5 destination");
+
+        let mut data = Hdf5SimulationData::new();
+        data.title = "atomic result".to_string();
+        let mut transient = Hdf5WaveformSection::new("time", vec![0.0, 1.0]);
+        transient.add_signal("V(out)", vec![0.0, 2.0]);
+        data.transient = Some(transient);
+        write_hdf5(&destination, &data).expect("write complete HDF5 destination");
+
+        assert_eq!(
+            read_hdf5(&destination).expect("read committed HDF5 destination"),
+            data
+        );
+        assert_only_destination_remains(&directory.0, &destination, true);
     }
 }

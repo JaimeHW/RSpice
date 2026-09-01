@@ -25,6 +25,7 @@ use std::process::ExitCode;
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 mod abort;
+mod atomic_artifact;
 mod cli;
 mod commands;
 mod hdf5;

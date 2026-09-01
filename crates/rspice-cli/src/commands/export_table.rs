@@ -14,6 +14,7 @@
 //! The same structure is what `convert` and `compare` read files back into;
 //! see [`crate::commands::waveform_io`].
 
+use crate::atomic_artifact::{AtomicArtifactError, write_atomic};
 use crate::cli::{CliError, OutputFormat};
 use crate::commands::run_signals::{ComplexSignal, ScalarSignal};
 use std::io::{BufWriter, Write};
@@ -200,19 +201,32 @@ impl ExportTable {
     ///
     /// HDF5 has analysis-specific sections and must be handled by the caller.
     pub(crate) fn write(&self, path: &Path, format: OutputFormat) -> Result<(), CliError> {
-        let file = std::fs::File::create(path).map_err(|e| CliError::output_error(path, e))?;
-        let mut writer = BufWriter::new(file);
-
-        match format {
-            OutputFormat::Raw => self.write_raw(&mut writer, path, true),
-            OutputFormat::RawAscii => self.write_raw(&mut writer, path, false),
-            OutputFormat::Csv => self.write_delimited(&mut writer, path, ','),
-            OutputFormat::Tsv => self.write_delimited(&mut writer, path, '\t'),
-            OutputFormat::Json => self.write_json(&mut writer, path),
-            OutputFormat::Hdf5 => Err(CliError::InternalError {
+        if format == OutputFormat::Hdf5 {
+            return Err(CliError::InternalError {
                 message: "HDF5 export must be handled by the analysis-specific writer".to_string(),
-            }),
+            });
         }
+
+        write_atomic(path, |file| {
+            let mut writer = BufWriter::new(file);
+            match format {
+                OutputFormat::Raw => self.write_raw(&mut writer, path, true)?,
+                OutputFormat::RawAscii => self.write_raw(&mut writer, path, false)?,
+                OutputFormat::Csv => self.write_delimited(&mut writer, path, ',')?,
+                OutputFormat::Tsv => self.write_delimited(&mut writer, path, '\t')?,
+                OutputFormat::Json => self.write_json(&mut writer, path)?,
+                OutputFormat::Hdf5 => {
+                    return Err(CliError::InternalError {
+                        message: "HDF5 export must be handled by the analysis-specific writer"
+                            .to_string(),
+                    });
+                }
+            }
+            writer
+                .flush()
+                .map_err(|error| CliError::output_error(path, error))
+        })
+        .map_err(|error| map_atomic_error(path, error))
     }
 
     /// Value of `column` at row `row` as (real, imag).
@@ -383,6 +397,25 @@ impl ExportTable {
     }
 }
 
+fn map_atomic_error(path: &Path, error: AtomicArtifactError<CliError>) -> CliError {
+    match error {
+        AtomicArtifactError::Write(error) => error,
+        AtomicArtifactError::Preparation(error) => atomic_io_error(path, "preparation", error),
+        AtomicArtifactError::Flush(error) => atomic_io_error(path, "flush", error),
+        AtomicArtifactError::Commit(error) => atomic_io_error(path, "commit", error),
+    }
+}
+
+fn atomic_io_error(path: &Path, phase: &str, error: std::io::Error) -> CliError {
+    CliError::output_error(
+        path,
+        std::io::Error::new(
+            error.kind(),
+            format!("atomic output {phase} failed: {error}"),
+        ),
+    )
+}
+
 /// SPICE rawfile variable declarations are whitespace-delimited and have no
 /// quoting convention. Output cards retain their exact authored spelling for
 /// CSV/TSV/JSON/HDF5 display, while rawfiles use the equivalent compact probe
@@ -404,5 +437,41 @@ pub(crate) fn delimited_cell(value: &str, delimiter: char) -> String {
         format!("\"{}\"", value.replace('"', "\"\""))
     } else {
         value.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn analysis_specific_hdf5_rejection_does_not_touch_existing_destination() {
+        let directory = std::env::temp_dir().join(format!(
+            "rspice-export-table-hdf5-rejection-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).expect("create export table test directory");
+        let destination = directory.join("result.h5");
+        std::fs::write(&destination, b"old complete artifact")
+            .expect("seed export table destination");
+        let table = ExportTable {
+            analysis: "test".to_string(),
+            plot_name: "test".to_string(),
+            scale_name: "time".to_string(),
+            scale_type: "time".to_string(),
+            scale: vec![0.0],
+            columns: Vec::new(),
+        };
+
+        let error = table
+            .write(&destination, OutputFormat::Hdf5)
+            .expect_err("generic HDF5 table write must be rejected");
+        assert!(matches!(error, CliError::InternalError { .. }));
+        assert_eq!(
+            std::fs::read(&destination).expect("read preserved destination"),
+            b"old complete artifact"
+        );
+
+        let _ = std::fs::remove_dir_all(directory);
     }
 }
