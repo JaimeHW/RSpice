@@ -100,7 +100,20 @@ use super::*;
 // 31's reader does not know, and a version-31 plan decodes under version 32
 // only because that field defaults. Rebuilding rather than leaning on the
 // default is the fail-closed reading, so the record's identity changes.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 32;
+// Version 33 gives the discrete domain a real *variable*, which is where a
+// real-number model keeps state. `real` is now a discrete-domain signal class
+// beside `wreal` — written procedurally rather than driven, per IEEE 1364-2005
+// section 6.2 — reached either by `output real` or by a module-level `real` a
+// process writes in a module with no analog block. `$realtobits` and
+// `$bitstoreal` are two more value kinds, a `parameter real` folds into a real
+// expression, and a deferred nonblocking update carries either a four-state
+// value or a real. A version-32 artifact could contain none of that: every one
+// of those constructs was refused by name, so nothing cached is being
+// reinterpreted. What changes is the shape of the record again — a plan
+// serialized by version 33 can carry a real variable and a deferred real update
+// that version 32's reader has no case for — so the record's identity changes
+// rather than relying on a decode that would silently drop them.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 33;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
