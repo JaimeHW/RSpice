@@ -857,13 +857,6 @@ impl Engine {
         if !circuit.iswitches.is_empty() {
             kinds.push("current-controlled switches requiring control-branch current spectra");
         }
-        if !circuit.vcvs.is_empty()
-            || !circuit.vccs.is_empty()
-            || !circuit.cccs.is_empty()
-            || !circuit.ccvs.is_empty()
-        {
-            kinds.push("controlled-source equations");
-        }
         if !circuit.ekv26s.is_empty() || !circuit.ekv3s.is_empty() || !circuit.vdmoses.is_empty() {
             kinds.push("unstamped advanced semiconductor models");
         }
@@ -896,7 +889,9 @@ impl Engine {
             .voltage_sources
             .len()
             .checked_add(circuit.inductors.len())
-            .and_then(|count| count.checked_add(circuit.resistor_branches.len()));
+            .and_then(|count| count.checked_add(circuit.resistor_branches.len()))
+            .and_then(|count| count.checked_add(circuit.vcvs.len()))
+            .and_then(|count| count.checked_add(circuit.ccvs.len()));
         if represented_branches != Some(circuit.num_branches()) {
             kinds.push("unrepresented MNA branch families");
         }

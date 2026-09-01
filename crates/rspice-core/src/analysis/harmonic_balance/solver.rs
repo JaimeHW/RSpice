@@ -707,6 +707,43 @@ pub(crate) enum ExactMnaBranch {
         resistance: Value,
         small_signal_resistance: Value,
     },
+    /// Dependent ideal-voltage branch. Its zero-valued branch equation and
+    /// control coefficients are completed by `exact_mna_static_entries`.
+    ControlledVoltageSource {
+        branch_ordinal: usize,
+        node_pos: usize,
+        node_neg: usize,
+    },
+}
+
+impl ExactMnaBranch {
+    fn ordinal_and_terminals(&self) -> (usize, usize, usize) {
+        match self {
+            Self::VoltageSource {
+                branch_ordinal,
+                node_pos,
+                node_neg,
+                ..
+            }
+            | Self::Inductor {
+                branch_ordinal,
+                node_pos,
+                node_neg,
+                ..
+            }
+            | Self::Resistor {
+                branch_ordinal,
+                node_pos,
+                node_neg,
+                ..
+            }
+            | Self::ControlledVoltageSource {
+                branch_ordinal,
+                node_pos,
+                node_neg,
+            } => (*branch_ordinal, *node_pos, *node_neg),
+        }
+    }
 }
 
 impl VoltageSourceBranch {
@@ -803,6 +840,13 @@ pub struct HbSolver {
     /// Authored names aligned with `periodic_mna_branches` in the circuit's
     /// canonical one-based MNA branch order.
     periodic_mna_branch_names: Vec<String>,
+
+    /// Frequency-independent entries in the augmented node/branch MNA
+    /// operator. Indices use the combined layout: nodes first, then branches
+    /// in canonical one-based circuit order. Controlled sources use this for
+    /// branch-control and current-output couplings that are not ordinary
+    /// nodal conductances or branch incidence terms.
+    exact_mna_static_entries: Vec<(usize, usize, Value)>,
 
     /// Node names
     node_names: Vec<String>,

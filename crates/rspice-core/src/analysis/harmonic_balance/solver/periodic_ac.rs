@@ -512,6 +512,7 @@ struct PeriodicConversionOperator<'a> {
     c_matrix: &'a [(usize, usize, Value)],
     l_matrix: &'a [(usize, usize, Value)],
     mna_branches: &'a [ExactMnaBranch],
+    mna_static_entries: &'a [(usize, usize, Value)],
     g_spectra: &'a [PeriodicSpectrum],
     c_spectra: &'a [PeriodicSpectrum],
 }
@@ -644,26 +645,7 @@ impl PeriodicConversionOperator<'_> {
                     "{context} MNA branch ordinal exceeds this platform"
                 ))
             })?;
-            let (branch_ordinal, node_pos, node_neg) = match branch {
-                ExactMnaBranch::VoltageSource {
-                    branch_ordinal,
-                    node_pos,
-                    node_neg,
-                    ..
-                } => (*branch_ordinal, *node_pos, *node_neg),
-                ExactMnaBranch::Inductor {
-                    branch_ordinal,
-                    node_pos,
-                    node_neg,
-                    ..
-                } => (*branch_ordinal, *node_pos, *node_neg),
-                ExactMnaBranch::Resistor {
-                    branch_ordinal,
-                    node_pos,
-                    node_neg,
-                    ..
-                } => (*branch_ordinal, *node_pos, *node_neg),
-            };
+            let (branch_ordinal, node_pos, node_neg) = branch.ordinal_and_terminals();
             if branch_ordinal != expected_ordinal {
                 return Err(HbError::InvalidCircuit(format!(
                     "{context} MNA branch slot {branch_index} carries canonical ordinal {branch_ordinal}; expected {expected_ordinal}"
@@ -704,6 +686,13 @@ impl PeriodicConversionOperator<'_> {
             {
                 return Err(HbError::InvalidCircuit(format!(
                     "{context} resistor branch #{branch_index} has non-finite small-signal resistance"
+                )));
+            }
+        }
+        for (entry, &(row, column, value)) in self.mna_static_entries.iter().enumerate() {
+            if row >= unknowns || column >= unknowns || !value.is_finite() {
+                return Err(HbError::InvalidCircuit(format!(
+                    "{context} controlled-source entry #{entry} ({row}, {column}, {value}) is malformed for {unknowns} unknowns"
                 )));
             }
         }
@@ -798,17 +787,7 @@ impl PeriodicConversionOperator<'_> {
 
         for (branch_index, branch) in self.mna_branches.iter().enumerate() {
             let branch_unknown = n + branch_index;
-            let (node_pos, node_neg) = match branch {
-                ExactMnaBranch::VoltageSource {
-                    node_pos, node_neg, ..
-                }
-                | ExactMnaBranch::Inductor {
-                    node_pos, node_neg, ..
-                }
-                | ExactMnaBranch::Resistor {
-                    node_pos, node_neg, ..
-                } => (*node_pos, *node_neg),
-            };
+            let (_, node_pos, node_neg) = branch.ordinal_and_terminals();
             for k_idx in 0..s {
                 let branch_coordinate = branch_unknown * s + k_idx;
                 if node_pos > 0 {
@@ -847,6 +826,16 @@ impl PeriodicConversionOperator<'_> {
                         Complex64::new(-*small_signal_resistance, 0.0),
                     );
                 }
+            }
+        }
+
+        for &(row, column, value) in self.mna_static_entries {
+            for k_idx in 0..s {
+                visitor(
+                    row * s + k_idx,
+                    column * s + k_idx,
+                    Complex64::new(value, 0.0),
+                );
             }
         }
 
@@ -981,17 +970,7 @@ impl PeriodicConversionOperator<'_> {
         }
         for (branch_index, branch) in self.mna_branches.iter().enumerate() {
             let row = node_count + branch_index;
-            let (node_pos, node_neg) = match branch {
-                ExactMnaBranch::VoltageSource {
-                    node_pos, node_neg, ..
-                }
-                | ExactMnaBranch::Inductor {
-                    node_pos, node_neg, ..
-                }
-                | ExactMnaBranch::Resistor {
-                    node_pos, node_neg, ..
-                } => (*node_pos, *node_neg),
-            };
+            let (_, node_pos, node_neg) = branch.ordinal_and_terminals();
             if node_pos > 0 {
                 let node = node_pos - 1;
                 block[node * n + row] += Complex64::new(1.0, 0.0);
@@ -1012,6 +991,9 @@ impl PeriodicConversionOperator<'_> {
             {
                 block[row * n + row] -= *small_signal_resistance;
             }
+        }
+        for &(row, column, value) in self.mna_static_entries {
+            block[row * n + column] += value;
         }
         if transpose {
             for i in 0..n {
@@ -1706,6 +1688,7 @@ impl HbSolver {
             c_matrix: &self.c_matrix,
             l_matrix: &self.l_matrix,
             mna_branches: &self.periodic_mna_branches,
+            mna_static_entries: &self.exact_mna_static_entries,
             g_spectra: &spectra,
             c_spectra: &cap_spectra,
         };
@@ -1858,6 +1841,7 @@ impl HbSolver {
             c_matrix: &self.c_matrix,
             l_matrix: &self.l_matrix,
             mna_branches: &self.periodic_mna_branches,
+            mna_static_entries: &self.exact_mna_static_entries,
             g_spectra: &spectra,
             c_spectra: &cap_spectra,
         };
@@ -2276,6 +2260,7 @@ impl HbSolver {
             c_matrix: &self.c_matrix,
             l_matrix: &self.l_matrix,
             mna_branches: &self.periodic_mna_branches,
+            mna_static_entries: &self.exact_mna_static_entries,
             g_spectra: &spectra,
             c_spectra: &cap_spectra,
         };
@@ -2522,6 +2507,7 @@ mod matrix_free_tests {
             c_matrix: c,
             l_matrix: &[],
             mna_branches: &[],
+            mna_static_entries: &[],
             g_spectra: spectra,
             c_spectra: cap_spectra,
         }
@@ -3089,6 +3075,7 @@ mod matrix_free_tests {
             c_matrix: &c,
             l_matrix: &[],
             mna_branches: &branches,
+            mna_static_entries: &[],
             g_spectra: &spectra,
             c_spectra: &cap_spectra,
         };
@@ -3213,6 +3200,7 @@ mod matrix_free_tests {
             c_matrix: &[],
             l_matrix: &[],
             mna_branches: &[],
+            mna_static_entries: &[],
             g_spectra: &[],
             c_spectra: &[],
         };
@@ -3269,6 +3257,7 @@ mod matrix_free_tests {
             c_matrix: &[],
             l_matrix: &[],
             mna_branches: &[],
+            mna_static_entries: &[],
             g_spectra: &[],
             c_spectra: &[],
         };
@@ -3320,6 +3309,7 @@ mod matrix_free_tests {
             c_matrix: &[],
             l_matrix: &[],
             mna_branches: &[],
+            mna_static_entries: &[],
             g_spectra: &[],
             c_spectra: &[],
         };
@@ -3362,6 +3352,7 @@ mod matrix_free_tests {
             c_matrix: &[],
             l_matrix: &l,
             mna_branches: &[],
+            mna_static_entries: &[],
             g_spectra: &[],
             c_spectra: &[],
         };
@@ -3387,6 +3378,7 @@ mod matrix_free_tests {
             c_matrix: &static_c,
             l_matrix: &[],
             mna_branches: &[],
+            mna_static_entries: &[],
             g_spectra: &[],
             c_spectra: &[],
         };
@@ -3411,6 +3403,7 @@ mod matrix_free_tests {
             c_matrix: &[],
             l_matrix: &[],
             mna_branches: &[],
+            mna_static_entries: &[],
             g_spectra: &[],
             c_spectra: &periodic_c,
         };
@@ -3506,6 +3499,7 @@ mod matrix_free_tests {
             c_matrix: &[],
             l_matrix: &[],
             mna_branches: &[],
+            mna_static_entries: &[],
             g_spectra: &invalid_spectra,
             c_spectra: &[],
         };
@@ -3645,6 +3639,7 @@ mod matrix_free_tests {
             c_matrix: &[],
             l_matrix: &[],
             mna_branches: &[],
+            mna_static_entries: &[],
             g_spectra: &[],
             c_spectra: &[],
         };
@@ -3687,6 +3682,7 @@ mod matrix_free_tests {
             c_matrix: &[],
             l_matrix: &[],
             mna_branches: &[],
+            mna_static_entries: &[],
             g_spectra: &[],
             c_spectra: &[],
         };
@@ -3720,6 +3716,7 @@ mod matrix_free_tests {
             c_matrix: &[],
             l_matrix: &[],
             mna_branches: &[],
+            mna_static_entries: &[],
             g_spectra: &[],
             c_spectra: &[],
         };
@@ -3751,6 +3748,7 @@ mod matrix_free_tests {
             c_matrix: &[],
             l_matrix: &[],
             mna_branches: &[],
+            mna_static_entries: &[],
             g_spectra: &invalid_spectra,
             c_spectra: &[],
         };

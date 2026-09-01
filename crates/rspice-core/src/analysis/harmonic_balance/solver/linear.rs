@@ -41,6 +41,7 @@ impl HbSolver {
             voltage_source_branch_names: Vec::new(),
             periodic_mna_branches: Vec::new(),
             periodic_mna_branch_names: Vec::new(),
+            exact_mna_static_entries: Vec::new(),
             node_names: (0..num_nodes).map(|i| format!("n{}", i)).collect(),
             source_spectra: vec![vec![Complex64::new(0.0, 0.0); num_harmonics + 1]; num_nodes],
             nonlinear_devices: Vec::new(),
@@ -68,6 +69,7 @@ impl HbSolver {
             voltage_source_branch_names: Vec::new(),
             periodic_mna_branches: Vec::new(),
             periodic_mna_branch_names: Vec::new(),
+            exact_mna_static_entries: Vec::new(),
             node_names: Vec::new(),
             source_spectra: Vec::new(),
             nonlinear_devices: Vec::new(),
@@ -492,6 +494,60 @@ impl HbSolver {
         )
     }
 
+    /// Register an exact dependent ideal-voltage branch. The branch's control
+    /// relation is stamped separately into the augmented static operator.
+    pub(crate) fn try_add_periodic_controlled_voltage_source_branch(
+        &mut self,
+        node_pos: usize,
+        node_neg: usize,
+        branch_ordinal: usize,
+        name: &str,
+    ) -> Result<(), HbError> {
+        self.validate_periodic_mna_branch_identity(node_pos, node_neg, branch_ordinal, name)?;
+        self.try_push_periodic_mna_branch(
+            ExactMnaBranch::ControlledVoltageSource {
+                branch_ordinal,
+                node_pos,
+                node_neg,
+            },
+            name,
+        )
+    }
+
+    /// Add one frequency-independent controlled-source entry to the complete
+    /// node/branch MNA operator. `row` and `column` use zero-based augmented
+    /// indices (all nodes, then canonical branches).
+    pub(crate) fn try_add_exact_mna_static_entry(
+        &mut self,
+        row: usize,
+        column: usize,
+        value: Value,
+        context: &str,
+    ) -> Result<(), HbError> {
+        let unknowns = self
+            .num_nodes
+            .checked_add(self.periodic_mna_branches.len())
+            .ok_or_else(|| {
+                HbError::InvalidCircuit(
+                    "periodic controlled-source MNA dimension exceeds this platform".to_string(),
+                )
+            })?;
+        if row >= unknowns || column >= unknowns || !value.is_finite() {
+            return Err(HbError::InvalidCircuit(format!(
+                "periodic controlled-source {context} stamp ({row}, {column}, {value}) is malformed for {unknowns} unknowns"
+            )));
+        }
+        self.exact_mna_static_entries
+            .try_reserve(1)
+            .map_err(|error| {
+                HbError::InvalidCircuit(format!(
+                    "periodic controlled-source {context} stamp allocation failed: {error}"
+                ))
+            })?;
+        self.exact_mna_static_entries.push((row, column, value));
+        Ok(())
+    }
+
     /// Fallibly copy the canonical periodic MNA names for retained results.
     pub(crate) fn try_periodic_mna_branch_names(&self) -> Result<Vec<String>, HbError> {
         if self.periodic_mna_branches.len() != self.periodic_mna_branch_names.len() {
@@ -861,6 +917,11 @@ impl HbSolver {
                     }
                     (*branch_ordinal, *node_pos, *node_neg, *resistance == 0.0)
                 }
+                ExactMnaBranch::ControlledVoltageSource {
+                    branch_ordinal,
+                    node_pos,
+                    node_neg,
+                } => (*branch_ordinal, *node_pos, *node_neg, false),
             };
             if branch_ordinal != expected_ordinal {
                 return Err(HbError::InvalidCircuit(format!(
@@ -896,6 +957,21 @@ impl HbSolver {
                 "exact linear MNA does not register every authored ideal voltage source"
                     .to_string(),
             ));
+        }
+        let unknowns = self
+            .num_nodes
+            .checked_add(self.periodic_mna_branches.len())
+            .ok_or_else(|| {
+                HbError::InvalidCircuit(
+                    "exact linear MNA dimension exceeds this platform".to_string(),
+                )
+            })?;
+        for (entry, &(row, column, value)) in self.exact_mna_static_entries.iter().enumerate() {
+            if row >= unknowns || column >= unknowns || !value.is_finite() {
+                return Err(HbError::InvalidCircuit(format!(
+                    "exact linear MNA controlled-source entry #{entry} ({row}, {column}, {value}) is malformed for {unknowns} unknowns"
+                )));
+            }
         }
         Ok(())
     }
@@ -1120,17 +1196,7 @@ impl HbSolver {
         if exact_mna {
             for (branch_index, branch) in self.periodic_mna_branches.iter().enumerate() {
                 let currents = &branch_currents[branch_index];
-                let (node_pos, node_neg) = match branch {
-                    ExactMnaBranch::VoltageSource {
-                        node_pos, node_neg, ..
-                    }
-                    | ExactMnaBranch::Inductor {
-                        node_pos, node_neg, ..
-                    }
-                    | ExactMnaBranch::Resistor {
-                        node_pos, node_neg, ..
-                    } => (*node_pos, *node_neg),
-                };
+                let (_, node_pos, node_neg) = branch.ordinal_and_terminals();
                 for (k, &current) in currents.iter().enumerate() {
                     if node_pos > 0 {
                         state.residual[node_pos - 1][k] -= current;
@@ -1163,17 +1229,7 @@ impl HbSolver {
         // certificate as nonlinear Newton.
         if exact_mna {
             for (branch_index, branch) in self.periodic_mna_branches.iter().enumerate() {
-                let (node_pos, node_neg) = match branch {
-                    ExactMnaBranch::VoltageSource {
-                        node_pos, node_neg, ..
-                    }
-                    | ExactMnaBranch::Inductor {
-                        node_pos, node_neg, ..
-                    }
-                    | ExactMnaBranch::Resistor {
-                        node_pos, node_neg, ..
-                    } => (*node_pos, *node_neg),
-                };
+                let (_, node_pos, node_neg) = branch.ordinal_and_terminals();
                 for k in 0..h {
                     let mut voltage_drop = Complex64::new(0.0, 0.0);
                     let mut voltage_scale = 0.0;
@@ -1215,6 +1271,7 @@ impl HbSolver {
                                 constitutive_voltage.norm(),
                             )
                         }
+                        ExactMnaBranch::ControlledVoltageSource { .. } => (-voltage_drop, 0.0),
                     };
                     state.mna_branch_residual[branch_index][k] = residual;
                     state.mna_branch_residual_scale[branch_index][k] =
@@ -1240,6 +1297,26 @@ impl HbSolver {
                     state.mna_branch_residual[branch.branch_idx][k] = source_value - voltage_drop;
                     state.mna_branch_residual_scale[branch.branch_idx][k] =
                         voltage_scale + source_value.norm();
+                }
+            }
+        }
+        if exact_mna {
+            for &(row, column, coefficient) in &self.exact_mna_static_entries {
+                for k in 0..h {
+                    let input = if column < self.num_nodes {
+                        state.x[column][k]
+                    } else {
+                        branch_currents[column - self.num_nodes][k]
+                    };
+                    let contribution = coefficient * input;
+                    if row < self.num_nodes {
+                        state.residual[row][k] -= contribution;
+                        state.residual_scale[row][k] += contribution.norm();
+                    } else {
+                        let branch = row - self.num_nodes;
+                        state.mna_branch_residual[branch][k] -= contribution;
+                        state.mna_branch_residual_scale[branch][k] += contribution.norm();
+                    }
                 }
             }
         }
@@ -1326,17 +1403,7 @@ impl HbSolver {
             if exact_mna {
                 for (branch_index, branch) in self.periodic_mna_branches.iter().enumerate() {
                     let row = n + branch_index;
-                    let (node_pos, node_neg) = match branch {
-                        ExactMnaBranch::VoltageSource {
-                            node_pos, node_neg, ..
-                        }
-                        | ExactMnaBranch::Inductor {
-                            node_pos, node_neg, ..
-                        }
-                        | ExactMnaBranch::Resistor {
-                            node_pos, node_neg, ..
-                        } => (*node_pos, *node_neg),
-                    };
+                    let (_, node_pos, node_neg) = branch.ordinal_and_terminals();
                     if node_pos > 0 {
                         let node = node_pos - 1;
                         y_matrix[node][row] += Complex64::new(1.0, 0.0);
@@ -1363,7 +1430,11 @@ impl HbSolver {
                         ExactMnaBranch::Resistor { resistance, .. } => {
                             y_matrix[row][row] -= *resistance;
                         }
+                        ExactMnaBranch::ControlledVoltageSource { .. } => {}
                     }
+                }
+                for &(row, column, value) in &self.exact_mna_static_entries {
+                    y_matrix[row][column] += value;
                 }
             } else {
                 for branch in &self.voltage_source_branches {

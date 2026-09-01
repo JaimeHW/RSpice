@@ -220,6 +220,8 @@ impl Engine {
             .checked_add(circuit.voltage_sources.len())
             .and_then(|count| count.checked_add(circuit.inductors.len()))
             .and_then(|count| count.checked_add(circuit.resistor_branches.len()))
+            .and_then(|count| count.checked_add(circuit.vcvs.len()))
+            .and_then(|count| count.checked_add(circuit.ccvs.len()))
             .ok_or_else(|| {
                 SimulationError::Circuit(
                     "PAC periodic node and branch count overflows this platform".to_string(),
