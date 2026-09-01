@@ -183,9 +183,12 @@ fn an_analog_oscillator_is_counted_by_the_digital_half_it_drives() {
     // second set of numbers.
     let clock = waveform(&result, "clk");
     let cycles = upward_crossings(&clock, 1.65);
-    assert!(
-        cycles >= 8,
-        "the oscillator should have completed several cycles in 95 ns, saw {cycles}"
+    // A 100 MHz sine starting at its mean and rising crosses that mean upward
+    // once per 10 ns period, so ten times in the 95 ns run: at the first
+    // timepoint after zero and then every 10 ns to 90 ns.
+    assert_eq!(
+        cycles, 10,
+        "the oscillator completes ten cycles above the bridge threshold in 95 ns"
     );
 
     // Every up-crossing of the analog waveform is one posedge of the module's
