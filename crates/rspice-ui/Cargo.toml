@@ -63,8 +63,15 @@ rust_xlsxwriter = { version = "0.92", default-features = false }
 # arrow-rs 59 is the first release whose parquet drops the `thrift` crate
 # (GHSA-2f9f-gq7v-9h6m); every parquet <= 58 pins the unpatched `thrift ^0.17`.
 arrow-array = "59"
+arrow-ipc = "59"
 arrow-schema = "59"
+bytes = "1"
 parquet = { version = "59", default-features = false, features = ["arrow"] }
+fst-reader = "0.17"
+matfile = "0.5"
+npyz = { version = "0.9", features = ["complex"] }
+rustyhdf5 = { version = "1.93", default-features = false }
+zip = { version = "7.2", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 thiserror.workspace = true
 sha2 = "0.10"
 regex = "1.12"
@@ -122,6 +129,7 @@ ed25519-dalek = { version = "2", features = ["rand_core"] }
 rand = "0.8"
 lopdf = { version = "0.44", default-features = false }
 wat = "1"
+fst-writer = "0.3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # Native builds expose egui's semantic tree to platform assistive technology
