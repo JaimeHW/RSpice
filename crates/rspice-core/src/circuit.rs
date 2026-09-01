@@ -40,6 +40,8 @@ mod introspection;
 pub use introspection::{DeviceOpEntry, DeviceOpReport};
 mod linear_stamping;
 mod magnetic;
+#[cfg(feature = "veriloga")]
+mod mixed_signal;
 mod net_kind;
 mod xspice_dispatch;
 pub(crate) use net_kind::{NetKind, NetKinds};
@@ -628,6 +630,16 @@ pub struct CircuitData {
     // Verilog-A devices (feature-gated)
     #[cfg(feature = "veriloga")]
     pub(crate) veriloga_devices: crate::device::veriloga::VerilogADevices,
+    /// Running hosts for instantiated mixed Verilog-AMS modules.
+    ///
+    /// Beside the analog instances rather than beside `xspice_instances`,
+    /// because what a mixed module *is* is one Verilog-A instance whose
+    /// discrete half is also executed: it stamps continuous equations through
+    /// the same runtime, takes its terminals from the same X-card, and is
+    /// selected by the same `.VERILOGA` include. What it borrows from XSPICE is
+    /// the transactional idiom, not the storage.
+    #[cfg(feature = "veriloga")]
+    pub(crate) mixed_signal_hosts: Vec<crate::xspice::verilog::MixedSignalHost>,
     #[cfg(feature = "veriloga-builtins-base")]
     pub(crate) generated_veriloga_devices: crate::device::veriloga_builtins::BuiltinVerilogADevices,
     /// Solver-controlled `$simparam` environment. This is deliberately not
