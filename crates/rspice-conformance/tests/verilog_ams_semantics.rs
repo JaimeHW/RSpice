@@ -286,10 +286,14 @@ fn a_process_probes_the_continuous_net_at_the_edge_that_woke_it() {
     // 1 V test there and would not change until the next clock edge, a whole
     // 40 ns period later.
     let model = ams::ModelFile::new("probes_terminal", ams::READS_CONTINUOUS);
+    // The clock's high level is the deck's supply, written from the same
+    // constant the derivation's threshold is half of, so the two cannot drift
+    // apart. The crossing instant does not depend on the level — half way up a
+    // linear ramp is half way up whatever it climbs to.
     let deck = format!(
         "* which solution a probe reads\n\
          vin p 0 pwl(0 0 100n 2.0)\n\
-         vclk clk 0 pulse(0 3.3 20n 0.1n 0.1n 10n 40n)\n\
+         vclk clk 0 pulse(0 {DEFAULT_SUPPLY} 20n 0.1n 0.1n 10n 40n)\n\
          x1 p 0 clk qs reads_continuous\n\
          rq qs 0 10k\n\
          .va \"{}\" reads_continuous\n\
@@ -304,10 +308,6 @@ fn a_process_probes_the_continuous_net_at_the_edge_that_woke_it() {
         (change - 60.05e-9).abs() < 0.5e-9,
         "the probe must read the edge's own solution, putting the change at 60.05 ns; a \
          stale read would put it at 100 ns. Saw {change:e}"
-    );
-    assert!(
-        DEFAULT_SUPPLY > 0.0,
-        "the threshold this derivation uses is half the deck's default supply"
     );
 }
 

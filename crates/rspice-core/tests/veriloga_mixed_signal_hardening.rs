@@ -682,27 +682,30 @@ fn newton_work_never_reaches_the_module() {
         "the reference must exercise the boundary, saw {expected:?}"
     );
 
-    let starved = || {
-        let mut config = SimulationConfig::default();
-        config.transient_nonlinear_max_iterations = Some(1);
-        config.transient_max_iterations = 1;
-        config
+    let starved = || SimulationConfig {
+        transient_nonlinear_max_iterations: Some(1),
+        transient_max_iterations: 1,
+        ..SimulationConfig::default()
     };
     let impossible = || {
-        let mut config = SimulationConfig::default();
         // Positive, so the configuration validates, and far below any residual
         // a floating-point solve can produce.
-        config.convergence_config.voltage_reltol = 1.0e-300;
-        config.convergence_config.voltage_abstol = 1.0e-300;
-        config.convergence_config.residual_reltol = 1.0e-300;
-        config.convergence_config.current_abstol = 1.0e-300;
-        config
+        let convergence_config = rspice_core::engine::ConvergenceConfig {
+            voltage_reltol: 1.0e-300,
+            voltage_abstol: 1.0e-300,
+            residual_reltol: 1.0e-300,
+            current_abstol: 1.0e-300,
+            ..rspice_core::engine::ConvergenceConfig::default()
+        };
+        SimulationConfig {
+            convergence_config,
+            ..SimulationConfig::default()
+        }
     };
-    let both = || {
-        let mut config = impossible();
-        config.transient_nonlinear_max_iterations = Some(1);
-        config.transient_max_iterations = 1;
-        config
+    let both = || SimulationConfig {
+        transient_nonlinear_max_iterations: Some(1),
+        transient_max_iterations: 1,
+        ..impossible()
     };
 
     for (label, config) in [
