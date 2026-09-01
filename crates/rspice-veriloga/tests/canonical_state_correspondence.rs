@@ -16,8 +16,8 @@
 use rspice_veriloga::canonical_ir::cfg::{CfgStateSite, CfgValueKind};
 use rspice_veriloga::canonical_ir::cfg_lower::CfgModel;
 use rspice_veriloga::canonical_ir::{
-    CanonicalIrArtifact, CanonicalStateFamily, CanonicalStateLayout, CanonicalStateOperator,
-    CfgInvalidationClass, CfgStateAllocation, CfgStateAllocationError, ExprId, schedule_cfg,
+    CanonicalIrArtifact, CanonicalStateFamily, CanonicalStateOperator, CfgInvalidationClass,
+    CfgStateAllocation, CfgStateAllocationError, ExprId, schedule_cfg,
 };
 use rspice_veriloga::ir::TransitionSiteId;
 use rspice_veriloga::rust_backend::discover_veriloga_sources;
@@ -134,7 +134,6 @@ endmodule
     let cfg = lower(&artifact);
     let allocation = CfgStateAllocation::build(&artifact.hir, &cfg.function)
         .unwrap_or_else(|errors| panic!("{}", render_allocation_errors(&errors)));
-    let layout = CanonicalStateLayout::from_hir(&artifact.hir);
 
     let operators = cfg_state_operators(&cfg);
     assert_eq!(operators.len(), 1, "one ddt in the module");
@@ -150,12 +149,17 @@ endmodule
         executed, operator,
         "the two copies are different expressions"
     );
+
+    let site = allocation
+        .site(operator)
+        .expect("the guarded assignment's ddt must own a record");
     assert_eq!(
-        layout.site(executed).map(|site| site.kind),
-        Some(CanonicalStateOperator::Ddt),
-        "the map must land on a ddt, not on the guard or the fallback"
+        (site.operator, site.kind, site.slot),
+        (executed, CanonicalStateOperator::Ddt, 0),
+        "the record must be the executed ddt's own, not the guard's or the \
+         fallback's"
     );
-    assert_eq!(allocation.slot(operator), Some(0));
+    assert_eq!(allocation.slot(operator), Some(site.slot));
 }
 
 /// A loop condition is folded with `&&`, not with a select, and the walk off it

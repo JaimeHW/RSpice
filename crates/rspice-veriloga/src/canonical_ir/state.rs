@@ -960,11 +960,6 @@ impl CfgStateAllocation {
         self.layout.family_len(family)
     }
 
-    /// The layout this allocation reads.
-    pub fn layout(&self) -> &CanonicalStateLayout {
-        &self.layout
-    }
-
     /// Whether this module's per-site numbering is also the bytecode
     /// generator's per-emission numbering, so a checkpoint written by one
     /// runtime means the same thing to the other.

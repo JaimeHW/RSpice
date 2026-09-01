@@ -626,18 +626,6 @@ impl HirExecutedCorrespondence {
     pub fn spans(&self) -> &[HirCorrespondenceSpan] {
         &self.spans
     }
-
-    /// How many body expressions are covered.
-    pub fn len(&self) -> usize {
-        self.spans
-            .iter()
-            .map(|span| usize::try_from(span.len).unwrap_or(usize::MAX))
-            .sum()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.spans.is_empty()
-    }
 }
 
 /// Accumulates [`HirExecutedCorrespondence`] runs while the body is lowered.
