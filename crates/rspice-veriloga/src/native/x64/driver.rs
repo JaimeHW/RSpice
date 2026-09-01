@@ -25,8 +25,6 @@ const DRIVER_CONTEXT_SLOT: i32 = 32;
 const DRIVER_VARIABLES_SLOT: i32 = 40;
 #[cfg(windows)]
 const DRIVER_IO_SLOT: i32 = 48;
-#[cfg(not(windows))]
-const DRIVER_FRAME_BYTES: i32 = 0;
 
 /// Compiles a driver whose address will be `driver_image_offset` in the final
 /// executable image.
@@ -132,7 +130,8 @@ fn compile_kernel_artifact(
     encoder.mov_r64_r64(Gpr::R12, host_ctx_arg_reg());
     encoder.mov_r64_r64(Gpr::R13, host_vars_arg_reg());
     encoder.mov_r64_r64(Gpr::R14, host_io_arg_reg());
-    if DRIVER_FRAME_BYTES > 0 {
+    #[cfg(windows)]
+    {
         encoder.sub_rsp_imm32(DRIVER_FRAME_BYTES);
         record_windows_unwind_stack_allocation(
             &mut windows_unwind_operations,
@@ -210,7 +209,8 @@ fn compile_kernel_artifact(
     for abort_branch in abort_branches {
         patch_local_branch(&mut encoder, abort_branch)?;
     }
-    if DRIVER_FRAME_BYTES > 0 {
+    #[cfg(windows)]
+    {
         encoder.add_rsp_imm32(DRIVER_FRAME_BYTES);
     }
     encoder.pop_r64(Gpr::R14);
@@ -259,18 +259,16 @@ fn record_windows_unwind_push(
     let _ = (operations, encoder, register);
 }
 
+#[cfg(windows)]
 fn record_windows_unwind_stack_allocation(
     operations: &mut Vec<WindowsX64UnwindOperation>,
     encoder: &X64Encoder,
     size: u32,
 ) {
-    #[cfg(windows)]
     operations.push(WindowsX64UnwindOperation::AllocateStack {
         code_offset: current_windows_unwind_code_offset(encoder),
         size,
     });
-    #[cfg(not(windows))]
-    let _ = (operations, encoder, size);
 }
 
 fn windows_unwind_info(
