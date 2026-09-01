@@ -246,7 +246,11 @@ impl TimeResolution {
     /// as a breakpoint would then be delivered a tick late. Correcting against
     /// the multiplication makes `seconds_to_floor_ticks(ticks_to_seconds(t))`
     /// exactly `t` for every representable `t`.
-    pub fn seconds_to_floor_ticks(self, seconds: f64) -> Result<u64, SchedulerError> {
+    ///
+    /// Crate-visible rather than public: the mixed interleave is the only
+    /// caller, and the rest of this type is published because a caller outside
+    /// the crate actually reaches for it. This becomes `pub` when one does.
+    pub(crate) fn seconds_to_floor_ticks(self, seconds: f64) -> Result<u64, SchedulerError> {
         if !seconds.is_finite() || seconds < 0.0 {
             return Err(SchedulerError::SecondsNotRepresentable { seconds });
         }
@@ -1070,5 +1074,78 @@ impl SchedulerContext<'_> {
             return Err(SchedulerError::TickNotExactlyRepresentable { ticks: u64::MAX });
         };
         self.schedule_at(tick, region, target, value)
+    }
+}
+
+/// The kernel's conformance tests live in `tests/event_scheduler_kernel.rs`,
+/// against the published API. These are here because
+/// [`TimeResolution::seconds_to_floor_ticks`] is crate-visible and so has no
+/// published API to be tested against.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flooring_maps_an_off_grid_analog_time_to_the_tick_at_or_before_it() {
+        let resolution = TimeResolution::new(-9).expect("1 ns");
+
+        // The case the round-to-nearest conversion gets wrong for a mixed
+        // interleave: a time three quarters of the way through a tick belongs
+        // to the tick it is inside, not to the one it is closest to. Rounding
+        // here would run the digital world a quarter of a nanosecond past an
+        // instant the integrator has accepted.
+        assert_eq!(resolution.seconds_to_ticks(2.75e-9), Ok(3));
+        assert_eq!(resolution.seconds_to_floor_ticks(2.75e-9), Ok(2));
+        assert_eq!(resolution.seconds_to_floor_ticks(2.25e-9), Ok(2));
+        assert_eq!(resolution.seconds_to_floor_ticks(0.0), Ok(0));
+        assert_eq!(resolution.seconds_to_floor_ticks(0.999e-9), Ok(0));
+
+        // Monotone: a non-decreasing sequence of analog times gives a
+        // non-decreasing sequence of ticks, which is what lets `advance_to` be
+        // driven straight from accepted timepoints.
+        let mut previous = 0u64;
+        let mut seconds = 0.0f64;
+        while seconds < 5.0e-9 {
+            let tick = resolution
+                .seconds_to_floor_ticks(seconds)
+                .expect("in range");
+            assert!(
+                tick >= previous,
+                "flooring must be monotone: {seconds:e} s gave {tick} after {previous}"
+            );
+            previous = tick;
+            seconds += 3.7e-11;
+        }
+    }
+
+    #[test]
+    fn flooring_a_tick_boundary_returns_that_tick_and_not_the_one_before() {
+        // The error a bare division would make: an event time handed back as a
+        // breakpoint, floored, must be delivered at its own tick. One ulp low
+        // and the digital slot runs a whole tick late.
+        for exponent in [-9i8, -12, -15] {
+            let resolution = TimeResolution::new(exponent).expect("declared precision");
+            for tick in [0u64, 1, 2, 3, 7, 999, 1_000, 1_001, 123_456_789] {
+                let seconds = resolution.ticks_to_seconds(tick).expect("in range");
+                assert_eq!(
+                    resolution.seconds_to_floor_ticks(seconds),
+                    Ok(tick),
+                    "exponent {exponent} tick {tick} round trip"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn flooring_refuses_what_rounding_refuses() {
+        let resolution = TimeResolution::new(-9).expect("1 ns");
+        assert!(resolution.seconds_to_floor_ticks(-1.0e-9).is_err());
+        assert!(resolution.seconds_to_floor_ticks(f64::NAN).is_err());
+        assert!(resolution.seconds_to_floor_ticks(f64::INFINITY).is_err());
+        assert!(
+            resolution
+                .seconds_to_floor_ticks(TimeResolution::MAX_EXACT_TICKS as f64 * 1.0e-9 * 2.0)
+                .is_err()
+        );
     }
 }

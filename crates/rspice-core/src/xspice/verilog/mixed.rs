@@ -241,6 +241,12 @@ struct ActiveTrial {
     /// Interpolated crossing times published during this trial, parallel to
     /// `bridges.adc`, folded into the accepted state on acceptance.
     transition_times: Vec<Option<f64>>,
+    /// Differential voltage each A/D bridge was last sampled at, parallel to
+    /// `bridges.adc`. The last settle of the trial that is accepted saw the
+    /// accepted solution, so this becomes the far end of the interval the next
+    /// timepoint's crossings are interpolated in — without the caller having
+    /// to hand the accepted solution back a second time.
+    sampled_adc_voltages: Vec<f64>,
 }
 
 /// Opaque, exact restart image for a settled mixed module.
@@ -499,6 +505,7 @@ impl MixedSignalHost {
             return Err(error);
         }
         let transition_times = self.state.accepted_adc_transition_times.clone();
+        let sampled_adc_voltages = self.state.accepted_adc_voltages.clone();
         self.trial = Some(ActiveTrial {
             rollback,
             tick,
@@ -507,6 +514,7 @@ impl MixedSignalHost {
             bridge_iterations: 0,
             bridges_quiet: false,
             transition_times,
+            sampled_adc_voltages,
         });
         Ok(())
     }
@@ -592,10 +600,10 @@ impl MixedSignalHost {
     ///
     /// Each transition is dated by interpolating its threshold crossing inside
     /// the trial's step, by the same rule the Xyce DIG code models date theirs
-    /// — [`threshold_crossing_time`]. That instant is kept unquantized and
-    /// read back through [`Self::last_transition_time`]; the digital slot it is
-    /// published into is its floor, which under whole-tick lockstep is this
-    /// trial's own tick. It cannot be an earlier one that matters:
+    /// — [`threshold_crossing_time`]. That instant is kept unquantized in the
+    /// accepted state; the digital slot it is published into is its floor,
+    /// which under whole-tick lockstep is this trial's own tick. It cannot be
+    /// an earlier one that matters:
     /// [`Self::begin_trial`] has already refused a step that passed a scheduled
     /// event, so nothing is queued between the crossing and here to reorder
     /// against.
@@ -626,10 +634,12 @@ impl MixedSignalHost {
         let before = self.dac_values()?;
         let mut drives = Vec::new();
         let mut crossings = Vec::new();
+        let mut sampled = Vec::with_capacity(self.state.bridges.adc.len());
         let mut publish_tick = tick;
         for (index, bridge) in self.state.bridges.adc.iter().enumerate() {
             let voltage = node_voltage(circuit_voltages, bridge.positive)
                 - node_voltage(circuit_voltages, bridge.negative);
+            sampled.push(voltage);
             let (bit, threshold) = if voltage <= bridge.low {
                 (Some(FourStateBit::Zero), bridge.low)
             } else if voltage >= bridge.high {
@@ -672,6 +682,7 @@ impl MixedSignalHost {
         let changed = before != self.dac_values()?;
         if let Some(trial) = self.trial.as_mut() {
             trial.bridges_quiet = !changed;
+            trial.sampled_adc_voltages = sampled;
         }
         Ok(changed)
     }
@@ -709,23 +720,14 @@ impl MixedSignalHost {
         self.state.accepted_time = trial.time_seconds;
         self.state.started = true;
         self.state.accepted_adc_transition_times = trial.transition_times;
-        Ok(())
-    }
-
-    /// Record the analog voltages an accepted timepoint settled at.
-    ///
-    /// The far end of the interval the next timepoint's threshold crossings are
-    /// interpolated in. Separate from [`Self::accept_trial`] because the
-    /// accepted solution is the caller's, not the host's: the host sees
-    /// candidates during Newton and only the caller knows which one was kept.
-    pub fn accept_solution(&mut self, circuit_voltages: &[f64]) -> Result<(), MixedSignalError> {
-        self.require_idle("record an accepted solution")?;
-        self.validate_solution(circuit_voltages)?;
-        for (index, bridge) in self.state.bridges.adc.iter().enumerate() {
-            self.state.accepted_adc_voltages[index] =
-                node_voltage(circuit_voltages, bridge.positive)
-                    - node_voltage(circuit_voltages, bridge.negative);
-        }
+        // The settle that reported the boundary quiet is the one that saw the
+        // solution this acceptance keeps, so its samples are the accepted
+        // voltages, and they become the far end of the interval the next
+        // timepoint's crossings are interpolated in. Taking them from there
+        // rather than asking the caller to hand the accepted solution back is
+        // what keeps the two from ever disagreeing about which solution was
+        // kept.
+        self.state.accepted_adc_voltages = trial.sampled_adc_voltages;
         Ok(())
     }
 
@@ -746,7 +748,15 @@ impl MixedSignalHost {
     /// A/D bridge signal, in seconds and unquantized.
     ///
     /// `None` when that bridge has not transitioned since the module started.
-    pub fn last_transition_time(&self, signal: &str) -> Result<Option<f64>, MixedSignalError> {
+    ///
+    /// Restricted to the tests that pin the interpolation because there is no
+    /// production reader yet: the engine route that would carry this into a
+    /// digital trace does not exist, and a getter published ahead of its
+    /// caller is a public commitment made on a guess about what the caller
+    /// will want. The interpolation itself is not test-only — it decides the
+    /// tick a transition is published into on every run.
+    #[cfg(test)]
+    fn last_transition_time(&self, signal: &str) -> Result<Option<f64>, MixedSignalError> {
         let id = self.state.digital.signal(signal)?;
         self.state
             .bridges
@@ -975,7 +985,6 @@ endmodule
             .expect("bridges settle")
         {}
         host.accept_trial().expect("accept a quiet trial");
-        host.accept_solution(voltages).expect("record the solution");
     }
 
     #[test]
@@ -1159,7 +1168,6 @@ endmodule
         assert!(matches!(error, MixedSignalError::TrialProtocol { .. }));
         host.settle_analog_bridges(&[0.0; 4]).unwrap();
         host.accept_trial().expect("a quiet boundary commits");
-        host.accept_solution(&[0.0; 4]).unwrap();
 
         // A settle that moved a D/A input still owes Newton a pass.
         begin(&mut host, 1);
@@ -1198,7 +1206,6 @@ endmodule
             .expect("settles")
         {}
         host.accept_trial().unwrap();
-        host.accept_solution(&[0.0, 0.0, 1.0, 0.0]).unwrap();
 
         let crossing = host
             .last_transition_time("adc")
