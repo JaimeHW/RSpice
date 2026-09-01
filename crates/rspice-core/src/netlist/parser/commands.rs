@@ -6471,7 +6471,7 @@ mod tests {
             netlist.saves.signals,
             vec![
                 SaveSignal::Voltage("out".to_string()),
-                SaveSignal::Current("v1".to_string()),
+                SaveSignal::Current("V1".to_string()),
                 SaveSignal::Voltage("out".to_string()),
                 SaveSignal::Voltage("out".to_string()),
                 SaveSignal::Voltage("out".to_string()),
