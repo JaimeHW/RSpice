@@ -36,9 +36,11 @@ will not be treated as malicious activity by the project.
 
 ## Dependency risk decisions
 
-Automated release gates run RustSec, cargo-deny, dependency review, and SBOM
-generation. An advisory may be accepted only when no safe compatible upgrade
-exists and reachability is constrained. Every exception is recorded in
+Every pull request and every push to `main` resolves the dependency graph from
+the committed `Cargo.lock` and runs both RustSec and cargo-deny. Release gates
+repeat those checks and also generate a software bill of materials. An
+advisory may be accepted only when no safe compatible upgrade exists and
+reachability is constrained. Every exception is recorded in
 [`security/advisory-exceptions.toml`](security/advisory-exceptions.toml) with an
 owner, mitigation, exit criterion, and review date. CI fails when the registry
 and scanner allowlists diverge or a review expires.

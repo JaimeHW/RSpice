@@ -865,8 +865,13 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("cargo build --locked --release -p rspice-cli", workflow)
         self.assertIn('"$binary" health --json', workflow)
         self.assertIn("tools/release/package_native.py", workflow)
-        self.assertIn("cargo deny check advisories bans licenses sources", workflow)
-        self.assertIn("cargo audit", workflow)
+        self.assertIn("cargo metadata --locked --all-features", workflow)
+        self.assertIn(
+            "cargo deny check --metadata-path target/security-metadata.json "
+            "advisories bans licenses sources",
+            workflow,
+        )
+        self.assertIn("cargo audit --deny warnings --file Cargo.lock", workflow)
         self.assertIn("cargo cyclonedx --format json --spec-version 1.5", workflow)
         self.assertEqual(workflow.count("actions/attest@"), 2)
         self.assertIn("sha256sum --check --strict ./*.sha256", workflow)
@@ -885,8 +890,12 @@ class CiConfigurationTests(unittest.TestCase):
         dependabot = read_text(".github/dependabot.yml")
 
         self.assertIn("actions/dependency-review-action@", security)
-        self.assertIn("cargo deny check advisories bans licenses sources", security)
-        self.assertIn("cargo audit", security)
+        self.assertIn(
+            "cargo deny check --metadata-path target/security-metadata.json "
+            "advisories bans licenses sources",
+            security,
+        )
+        self.assertIn("cargo audit --deny warnings --file Cargo.lock", security)
         self.assertIn("cargo cyclonedx --format json --target all", security)
         self.assertIn(
             "python3 tools/security/check_advisory_exceptions.py", security
@@ -908,6 +917,32 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("package-ecosystem: \"cargo\"", dependabot)
         self.assertIn("package-ecosystem: \"github-actions\"", dependabot)
         self.assertIn("package-ecosystem: \"pip\"", dependabot)
+
+    def test_advisory_gate_uses_committed_lockfile_on_every_change(self) -> None:
+        security = read_text(".github/workflows/security.yml")
+        trigger, _ = security.split("permissions:", 1)
+
+        self.assertNotIn(
+            "paths:",
+            trigger,
+            "the advisory gate must not be skipped for documentation-only or "
+            "other apparently dependency-neutral changes",
+        )
+        self.assertIn("pull_request:", trigger)
+        self.assertIn("branches: [main]", trigger)
+        self.assertIn(
+            "cargo metadata --locked --all-features --format-version 1",
+            security,
+        )
+        self.assertIn(
+            "cargo deny check --metadata-path target/security-metadata.json "
+            "advisories",
+            security,
+        )
+        self.assertIn("cargo audit --deny warnings --file Cargo.lock", security)
+        self.assertIn(
+            "python3 tools/security/check_advisory_exceptions.py", security
+        )
 
     def test_security_exceptions_are_owned_scoped_and_unexpired(self) -> None:
         result = subprocess.run(

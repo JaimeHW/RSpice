@@ -2,28 +2,8 @@ name: Security
 
 on:
   pull_request:
-    paths:
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "deny.toml"
-      - ".cargo/audit.toml"
-      - "security/**"
-      - "tools/security/**"
-      - "SECURITY.md"
-      - "crates/**"
-      - ".github/workflows/security.yml"
   push:
     branches: [main]
-    paths:
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "deny.toml"
-      - ".cargo/audit.toml"
-      - "security/**"
-      - "tools/security/**"
-      - "SECURITY.md"
-      - "crates/**"
-      - ".github/workflows/security.yml"
   schedule:
     - cron: "0 8 * * 1"
   workflow_dispatch:
@@ -69,10 +49,14 @@ jobs:
           cargo install cargo-cyclonedx --version "$CARGO_CYCLONEDX_VERSION" --locked
       - name: Validate expiring advisory exceptions
         run: python3 tools/security/check_advisory_exceptions.py
+      - name: Resolve the committed dependency graph
+        run: |
+          mkdir -p target
+          cargo metadata --locked --all-features --format-version 1 > target/security-metadata.json
       - name: Cargo deny policy
-        run: cargo deny check advisories bans licenses sources
+        run: cargo deny check --metadata-path target/security-metadata.json advisories bans licenses sources
       - name: RustSec audit
-        run: cargo audit
+        run: cargo audit --deny warnings --file Cargo.lock
       - name: Generate CycloneDX SBOMs
         run: |
           cargo cyclonedx --format json --target all --override-filename bom

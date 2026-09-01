@@ -332,8 +332,10 @@ jobs:
       - name: Gate current dependency risk
         run: |
           python tools/security/check_advisory_exceptions.py
-          cargo deny check advisories bans licenses sources
-          cargo audit
+          mkdir -p target
+          cargo metadata --locked --all-features --format-version 1 > target/security-metadata.json
+          cargo deny check --metadata-path target/security-metadata.json advisories bans licenses sources
+          cargo audit --deny warnings --file Cargo.lock
       - name: Generate release SBOMs and checksums
         env:
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}
