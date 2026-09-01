@@ -417,3 +417,153 @@ fn sensitivity_exports_table() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn netlist_dc_sensitivity_supports_branch_current_and_device_filter() {
+    let dir = test_dir("sens-dc-current-filter");
+    let deck = write_deck(
+        &dir,
+        "branch-current.sp",
+        "* filtered branch-current sensitivity\n\
+         V1 in 0 10\n\
+         R1 in out 1k\n\
+         R2 out 0 1k\n\
+         .sens I(V1) R1 DC\n\
+         .end\n",
+    );
+    let out = dir.join("sens-current.csv");
+
+    let output = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "-o",
+        out.to_str().unwrap(),
+        "-f",
+        "csv",
+    ]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let csv = std::fs::read_to_string(&out).expect("branch-current sensitivity table");
+    let mut lines = csv.lines();
+    let header = lines.next().expect("header");
+    assert_eq!(
+        header, "point,dI(V1)/d(R1)",
+        "the selected current probe and filtered parameter must retain their identities: {csv}"
+    );
+    let row = lines.next().expect("data row");
+    assert!(lines.next().is_none(), "single-point DC report: {csv}");
+    let derivative: f64 = row.split(',').nth(1).unwrap().parse().unwrap();
+    // I(V1) = -10 / (R1 + R2), so dI(V1)/dR1 = +10/(R1+R2)^2.
+    assert!(
+        (derivative - 2.5e-6).abs() < 1e-10,
+        "expected 2.5e-6 A/ohm, got {derivative}: {csv}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn netlist_dc_sensitivity_parameter_filter_selects_only_matching_device() {
+    let dir = test_dir("sens-dc-voltage-filter");
+    let deck = write_deck(
+        &dir,
+        "filtered-voltage.sp",
+        "* filtered voltage sensitivity\n\
+         V1 in 0 10\n\
+         R1 in out 1k\n\
+         R2 out 0 1k\n\
+         .sens V(out) R2:R DC\n\
+         .end\n",
+    );
+    let out = dir.join("sens-voltage.csv");
+
+    let output = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "-o",
+        out.to_str().unwrap(),
+        "-f",
+        "csv",
+    ]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let csv = std::fs::read_to_string(&out).expect("filtered voltage sensitivity table");
+    let header = csv.lines().next().expect("header");
+    assert_eq!(header, "point,dV(OUT)/d(R2)", "unexpected filters: {csv}");
+    assert!(!header.contains("R1"), "R1 must be excluded: {csv}");
+    let derivative: f64 = csv
+        .lines()
+        .nth(1)
+        .and_then(|row| row.split(',').nth(1))
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(
+        (derivative - 2.5e-3).abs() < 1e-8,
+        "expected dV(out)/dR2 = 2.5e-3 V/ohm, got {derivative}: {csv}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn netlist_dc_sensitivity_rejects_non_branch_current_probe() {
+    let dir = test_dir("sens-dc-invalid-current");
+    let deck = write_deck(
+        &dir,
+        "invalid-current.sp",
+        "* resistor owns no DC MNA branch\n\
+         V1 in 0 10\n\
+         R1 in 0 1k\n\
+         .sens I(R1) R1 DC\n\
+         .end\n",
+    );
+
+    let output = run_rspice(&["--quiet", "run", deck.to_str().unwrap()]);
+    assert!(!output.status.success(), "I(R1) must fail closed");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("DC sensitivity branch-current output 'R1' was not found"),
+        "unexpected error: {stderr}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn netlist_dc_sensitivity_rejects_discrete_parameter_filter() {
+    let dir = test_dir("sens-dc-discrete-filter");
+    let deck = write_deck(
+        &dir,
+        "discrete-filter.sp",
+        "* LEVEL is discrete and has no meaningful derivative\n\
+         V1 out 0 0.6\n\
+         D1 out 0 DMOD\n\
+         .model DMOD D LEVEL=1 IS=1e-14\n\
+         .sens V(out) DMOD:LEVEL DC\n\
+         .end\n",
+    );
+
+    let output = run_rspice(&["--quiet", "run", deck.to_str().unwrap()]);
+    assert!(
+        !output.status.success(),
+        "discrete LEVEL sensitivity must fail closed"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("no DC parameter matched filter(s) DMOD:LEVEL"),
+        "unexpected error: {stderr}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
