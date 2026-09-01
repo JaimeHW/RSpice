@@ -2114,78 +2114,89 @@ fn project_results_v2_rejects_cross_bound_selection_and_active_overlay() {
 fn project_text_migrates_v1_result_sequences_once_to_stable_identities() {
     let mut libraries = LibraryManager::with_primitives();
     let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-    let mut run_one = SimulationRun::new(1);
-    run_one.add_analysis(AnalysisResult::new(
-        4,
-        AnalysisType::Transient,
-        "TRAN legacy one",
-    ));
-    let mut run_two = SimulationRun::new(2);
-    run_two.add_analysis(AnalysisResult::new(9, AnalysisType::Ac, "AC legacy two"));
-    let overlay_dataset_id = run_one.dataset_id;
-    let mut simulation = SimulationState::default();
-    simulation.runs = vec![run_one, run_two];
-    simulation.next_run_id = 2;
-    simulation.active_run_idx = Some(1);
-    simulation.active_analysis_idx = Some(0);
-    simulation.overlay_dataset_ids = vec![overlay_dataset_id];
-    let project = ProjectFile::new_with_simulation_results(
-        workspace,
-        libraries,
-        ProjectSimulationResults::from_state(&simulation),
-    );
-    let mut value = serde_json::to_value(project).expect("project converts to JSON");
-    let results = value["simulation_results"]
-        .as_object_mut()
-        .expect("simulation result object");
-    results.insert(
-        "schema_version".to_owned(),
-        serde_json::Value::from(LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION),
-    );
-    results.remove("active_run_stable_id");
-    results.remove("active_dataset_id");
-    results.remove("active_analysis_sequence");
-    results.remove("overlay_dataset_ids");
-    results.insert("active_run_id".to_owned(), serde_json::Value::from(2));
-    results.insert("active_analysis_id".to_owned(), serde_json::Value::from(9));
-    results.insert("overlay_run_ids".to_owned(), serde_json::json!([1]));
-    for run in results["runs"].as_array_mut().expect("legacy run array") {
-        let run = run.as_object_mut().expect("legacy run object");
-        run.remove("run_id");
-        run.remove("dataset_id");
-        run.remove("job_id");
-        run.remove("execution_target");
-        run.remove("lifecycle");
-        run.remove("dataset_content_digest");
-        for analysis in run["analyses"]
-            .as_array_mut()
-            .expect("legacy analysis array")
-        {
-            analysis
+    let project = ProjectFile::new(workspace, libraries);
+    let project_value = serde_json::to_value(project).expect("project converts to JSON");
+
+    // A schema-v1 golden record is authored from the fields that actually
+    // existed in that era.  Do not downgrade a current record by deleting a
+    // hand-maintained subset: that silently leaves newly introduced evidence
+    // (for example measurement-verification fields) in an anachronistic file.
+    let versioned_v1_results = serde_json::json!({
+        "schema_version": LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION,
+        "runs": [
+            {
+                "id": 1,
+                "label": "Run 1 (v1 golden)",
+                "timestamp": 11.0,
+                "analyses": [{
+                    "id": 4,
+                    "analysis_type": "Transient",
+                    "label": "TRAN legacy one",
+                    "timestamp": 11.25,
+                    "waveforms": [{
+                        "name": "V(out)",
+                        "x": [0.0, 1.0e-6],
+                        "y": [0.0, 1.0],
+                        "color": "#00aaff",
+                        "visible": true
+                    }],
+                    "measurements": [],
+                    "success": true
+                }],
+                "elapsed_time": 0.01,
+                "success": true
+            },
+            {
+                "id": 2,
+                "label": "Run 2 (v1 golden)",
+                "timestamp": 12.0,
+                "analyses": [{
+                    "id": 9,
+                    "analysis_type": "Ac",
+                    "label": "AC legacy two",
+                    "timestamp": 12.25,
+                    "waveforms": [],
+                    "measurements": [],
+                    "success": true
+                }],
+                "elapsed_time": 0.02,
+                "success": true
+            }
+        ],
+        "next_run_id": 2,
+        "active_run_id": 2,
+        "active_analysis_id": 9,
+        "overlay_run_ids": [1]
+    });
+
+    let mut migrated_matrix = Vec::new();
+    for versioned in [true, false] {
+        let mut value = project_value.clone();
+        let mut results = versioned_v1_results.clone();
+        if !versioned {
+            results
                 .as_object_mut()
-                .expect("legacy analysis object")
-                .remove("result_data_digest");
+                .expect("v1 golden result object")
+                .remove("schema_version");
         }
-        run.remove("provenance_mode");
+        value["simulation_results"] = results;
+        let json = serde_json::to_string_pretty(&value).expect("v1 golden fixture serializes");
+        migrated_matrix.push(load_project_text(&json, None).unwrap_or_else(|error| {
+            panic!(
+                "{} v1 golden project migrates: {error}",
+                if versioned {
+                    "versioned"
+                } else {
+                    "unversioned"
+                }
+            )
+        }));
     }
-
-    let mut unversioned_value = value.clone();
-    unversioned_value["simulation_results"]
-        .as_object_mut()
-        .expect("unversioned result object")
-        .remove("schema_version");
-    let unversioned_json = serde_json::to_string_pretty(&unversioned_value)
-        .expect("unversioned legacy fixture serializes");
-    let unversioned = load_project_text(&unversioned_json, None)
-        .expect("unversioned legacy project migrates as v1");
-    assert!(unversioned.simulation_results_warning.is_none());
     assert_eq!(
-        unversioned.simulation_results.schema_version,
-        PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
+        migrated_matrix[0].simulation_results, migrated_matrix[1].simulation_results,
+        "an omitted schema tag is exactly the schema-v1 wire contract"
     );
-
-    let legacy_json = serde_json::to_string_pretty(&value).expect("legacy fixture serializes");
-    let migrated = load_project_text(&legacy_json, None).expect("legacy project migrates");
+    let migrated = &migrated_matrix[0];
 
     assert!(migrated.simulation_results_warning.is_none());
     assert_eq!(
@@ -2228,7 +2239,7 @@ fn project_text_migrates_v1_result_sequences_once_to_stable_identities() {
     assert!(migrated.simulation_results.active_analysis_id.is_none());
     assert!(migrated.simulation_results.overlay_run_ids.is_empty());
 
-    let current_json = serialize_project_file(&migrated).expect("migration persists");
+    let current_json = serialize_project_file(migrated).expect("migration persists");
     let reloaded = load_project_text(&current_json, None).expect("migrated project reloads");
     assert_eq!(
         reloaded.simulation_results.active_run_stable_id,

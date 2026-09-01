@@ -598,6 +598,12 @@ mod tests {
             normalization: SpectrumNormalization::Peak,
             equivalent_noise_bandwidth_bins: 1.0,
         });
+        // The viewer accepts only the complete FFT transaction.  A curve
+        // without its matching metrics is deliberately fail-closed, so this
+        // rendering fixture must provide both halves even though these tests
+        // exercise only the curve-level empty-state diagnostics.
+        state.analysis.fft_state.analysis =
+            Some(crate::analysis::fft::data::SpectrumAnalysis::default());
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
