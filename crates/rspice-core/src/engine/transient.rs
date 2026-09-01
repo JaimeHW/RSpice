@@ -1157,9 +1157,13 @@ impl Engine {
                 let v_pos = Self::solution_node_voltage(solution, binding.node_pos);
                 let v_neg = Self::solution_node_voltage(solution, binding.node_neg);
                 let x = Self::solution_node_voltage(solution, binding.node_x);
+                let resistance_factor = binding
+                    .resistance_noise
+                    .as_ref()
+                    .map_or(1.0, |noise| noise.resistance_factor());
                 binding
                     .device
-                    .current_output(v_pos, v_neg, x)
+                    .current_output_with_resistance_factor(v_pos, v_neg, x, resistance_factor)
                     .map_err(|error| {
                         SimulationError::Circuit(format!(
                             "{} memristor '{}' output evaluation failed: {error}",
@@ -1211,9 +1215,13 @@ impl Engine {
         let v_pos = Self::solution_node_voltage(solution, binding.node_pos);
         let v_neg = Self::solution_node_voltage(solution, binding.node_neg);
         let x = Self::solution_node_voltage(solution, binding.node_x);
+        let resistance_factor = binding
+            .resistance_noise
+            .as_ref()
+            .map_or(1.0, |noise| noise.resistance_factor());
         binding
             .device
-            .resistance_output(v_pos, v_neg, x)
+            .resistance_output_with_factor(v_pos, v_neg, x, resistance_factor)
             .map_err(|error| {
                 SimulationError::Circuit(format!(
                     "{} memristor '{}' resistance output evaluation failed: {error}",
@@ -3538,6 +3546,9 @@ impl Engine {
             // Xyce seeds both accepted store-vector history levels from the
             // operating-point trial before the first real transient timepoint.
             circuit.initialize_generic_switch_transient_history();
+            circuit
+                .initialize_xyce_team_resistance_noise(resume_time)
+                .map_err(SimulationError::Circuit)?;
         }
         let mut store_traces = Vec::with_capacity(circuit.xyce_memristors.len());
         for binding in &mut circuit.xyce_memristors {
@@ -4061,6 +4072,28 @@ impl Engine {
             for (trace, binding) in result.store_traces.iter_mut().zip(&circuit.xyce_memristors) {
                 if let Some(first) = trace.values.first_mut() {
                     *first = binding.resistance_store;
+                }
+            }
+            for (derived_index, &branch) in derived_branch_currents.iter().enumerate() {
+                if !matches!(
+                    branch.kind,
+                    DerivedTransientBranchCurrentKind::XyceMemristor
+                ) {
+                    continue;
+                }
+                let current = Self::derived_transient_branch_current(
+                    &mut circuit,
+                    &solution,
+                    resume_time,
+                    None,
+                    branch,
+                )?;
+                if let Some(first) = result
+                    .branch_currents
+                    .get_mut(circuit.num_branches() + derived_index)
+                    .and_then(|waveform| waveform.first_mut())
+                {
+                    *first = current;
                 }
             }
             // The checkpointed companion history is authoritative for the
@@ -5045,6 +5078,12 @@ impl Engine {
             } else {
                 None
             };
+            if let Err(error) = circuit.prepare_xyce_team_resistance_noise_trial(step_time) {
+                if let Some(snapshot) = rejected_attempt_nonlinear_state.take() {
+                    circuit.restore_nonlinear_state(snapshot);
+                }
+                return Err(SimulationError::Circuit(error));
+            }
             macro_rules! restore_rejected_transient_nonlinear_state {
                 () => {{
                     // Xyce OneStep/Gear12 intentionally does not call
@@ -9638,6 +9677,140 @@ D1 D 0 DMOD
         Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
             .run_tran(&netlist, 4.0e-9, 1.0e-9)
             .expect("TEAM wildcard transient solves")
+    }
+
+    fn xyce_team_resistance_noise_deck(seed: i32, enabled: bool) -> Netlist {
+        Netlist::parse_validated(&format!(
+            "TEAM resistance RTN\n\
+             V1 in 0 1\n\
+             .model mrm1 memristor level=2 ron=100 roff=200 xon=0 xoff=1 \
+             ion=-1 ioff=1 kon=-1 koff=1 alphaon=1 alphaoff=1 wt=0 \
+             resnoise={} resseed={seed} reslambda=1 restd=0.7n reseptd=1p \
+             resdelta=2 resdeltagrad=0.2\n\
+             YMEMRISTOR mr1 in 0 mrm1\n\
+             .tran 0.25n 8n\n\
+             .end\n",
+            u8::from(enabled)
+        ))
+        .expect("TEAM resistance-noise fixture validates")
+    }
+
+    fn team_resistance_bits(result: &TransientResult) -> Vec<u64> {
+        result
+            .try_store_waveform_named("YMEMRISTOR!MR1:R")
+            .expect("TEAM resistance store trace")
+            .iter()
+            .map(|value| value.to_bits())
+            .collect()
+    }
+
+    #[test]
+    fn xyce_team_resistance_noise_seed_replays_and_changes_streams() {
+        let engine =
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+        let deck = xyce_team_resistance_noise_deck(41, true);
+        let first = engine
+            .run_tran(&deck, 8.0e-9, 0.25e-9)
+            .expect("first TEAM RTN transient solves");
+        let repeat = engine
+            .run_tran(&deck, 8.0e-9, 0.25e-9)
+            .expect("repeated TEAM RTN transient solves");
+        assert_eq!(first.time, repeat.time);
+        assert_eq!(team_resistance_bits(&first), team_resistance_bits(&repeat));
+
+        let different = engine
+            .run_tran(&xyce_team_resistance_noise_deck(42, true), 8.0e-9, 0.25e-9)
+            .expect("different-seed TEAM RTN transient solves");
+        assert_ne!(
+            team_resistance_bits(&first),
+            team_resistance_bits(&different),
+            "different RESSEED values must select different dwell trajectories"
+        );
+    }
+
+    #[test]
+    fn xyce_team_zero_noise_preserves_transient_bit_pattern() {
+        let engine =
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+        let with_disabled_parameters = xyce_team_resistance_noise_deck(99, false);
+        let baseline = Netlist::parse_validated(
+            "TEAM deterministic baseline\n\
+             V1 in 0 1\n\
+             .model mrm1 memristor level=2 ron=100 roff=200 xon=0 xoff=1 \
+             ion=-1 ioff=1 kon=-1 koff=1 alphaon=1 alphaoff=1 wt=0\n\
+             YMEMRISTOR mr1 in 0 mrm1\n\
+             .tran 0.25n 8n\n\
+             .end\n",
+        )
+        .expect("deterministic TEAM baseline validates");
+        let expected = engine
+            .run_tran(&baseline, 8.0e-9, 0.25e-9)
+            .expect("deterministic TEAM baseline solves");
+        let actual = engine
+            .run_tran(&with_disabled_parameters, 8.0e-9, 0.25e-9)
+            .expect("disabled TEAM RTN transient solves");
+        assert_eq!(expected.time, actual.time);
+        assert_eq!(
+            team_resistance_bits(&expected),
+            team_resistance_bits(&actual)
+        );
+    }
+
+    #[test]
+    fn xyce_team_noise_checkpoint_resume_matches_uninterrupted_suffix() {
+        let engine =
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+        let deck = xyce_team_resistance_noise_deck(71, true);
+        let (uninterrupted, scheduled) = engine
+            .run_tran_checkpoint_schedule_with_startup_mode(
+                &deck,
+                8.0e-9,
+                0.25e-9,
+                TransientStartupMode::OperatingPoint,
+                &[3.0e-9],
+            )
+            .expect("TEAM RTN checkpoint trajectory solves");
+        let checkpoint = TransientCheckpoint::from_text(&scheduled[0].checkpoint.to_text())
+            .expect("TEAM RTN checkpoint round-trips");
+        let (resumed, _) = engine
+            .run_tran_resume(&deck, &checkpoint, 8.0e-9, 0.25e-9)
+            .expect("TEAM RTN checkpoint resumes");
+        let seam = uninterrupted
+            .time
+            .iter()
+            .position(|time| time.to_bits() == checkpoint.time.to_bits())
+            .expect("checkpoint accepted time is present in uninterrupted result");
+        assert_eq!(&uninterrupted.time[seam..], resumed.time.as_slice());
+        assert_eq!(
+            &team_resistance_bits(&uninterrupted)[seam..],
+            team_resistance_bits(&resumed).as_slice()
+        );
+    }
+
+    #[test]
+    fn xyce_team_noise_honors_abort_and_checkpoint_parse_limits() {
+        let engine =
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+        let deck = xyce_team_resistance_noise_deck(5, true);
+        let error = engine
+            .run_tran_with_abort(&deck, 8.0e-9, 0.25e-9, &crate::abort_signal::ImmediateAbort)
+            .expect_err("an immediate abort must cancel TEAM RTN transient startup");
+        assert!(matches!(error, SimulationError::Aborted));
+
+        let (_, checkpoint) = engine
+            .run_tran_checkpointed(&deck, 1.0e-9, 0.25e-9)
+            .expect("bounded TEAM RTN checkpoint captures");
+        let hostile = checkpoint.to_text().replacen(
+            "xyce_team_resistance_noise_states 1",
+            &format!("xyce_team_resistance_noise_states {}", usize::MAX),
+            1,
+        );
+        let error = TransientCheckpoint::from_text(&hostile)
+            .expect_err("hostile TEAM RTN checkpoint count must fail before allocation");
+        assert!(
+            error.contains("declares") && error.contains("rows"),
+            "unexpected bounded-parser diagnostic: {error}"
+        );
     }
 
     fn assert_team_wildcard_avoids_private_state(result: &TransientResult) {

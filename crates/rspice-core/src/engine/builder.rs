@@ -623,24 +623,41 @@ pub(crate) fn build_xyce_team_memristor(
         temperature_kelvin,
     )?;
 
-    for (name, default) in [
-        ("RESNOISE", 0.0),
-        ("RESSEED", 0.0),
-        ("RESLAMBDA", 0.0),
-        ("RESTD", 0.0),
-        ("RESEPTD", 1.0e-10),
-        ("RESDELTA", 0.0),
-        ("RESDELTAGRAD", 0.0),
-    ] {
-        if let Some(value) = params.get(name)
-            && *value != default
-        {
+    let mut resistance_noise = crate::device::XyceTeamResistanceNoiseParams::default();
+    if let Some(value) = params.get("RESNOISE") {
+        if !value.is_finite() || (*value != 0.0 && *value != 1.0) {
             return Err(SimulationError::Circuit(format!(
-                "TEAM memristor '{}' model '{}' requests {name}={value}; stochastic resistance noise remains unsupported until its accepted-step RNG and checkpoint contract is available",
+                "TEAM memristor '{}' model '{}' requires RESNOISE=0 or 1, got {value}",
                 element_name, model_name
             )));
         }
+        resistance_noise.enabled = *value == 1.0;
     }
+    if let Some(value) = params.get("RESSEED") {
+        if !value.is_finite()
+            || *value < i32::MIN as Value
+            || *value > i32::MAX as Value
+            || value.fract() != 0.0
+        {
+            return Err(SimulationError::Circuit(format!(
+                "TEAM memristor '{}' model '{}' requires a 32-bit integer RESSEED, got {value}",
+                element_name, model_name
+            )));
+        }
+        resistance_noise.seed = *value as i32 as u32;
+    }
+    macro_rules! assign_noise {
+        ($field:ident, $name:literal) => {
+            if let Some(value) = params.get($name) {
+                resistance_noise.$field = *value;
+            }
+        };
+    }
+    assign_noise!(lambda, "RESLAMBDA");
+    assign_noise!(update_time, "RESTD");
+    assign_noise!(epsilon_update_time, "RESEPTD");
+    assign_noise!(delta, "RESDELTA");
+    assign_noise!(delta_gradient, "RESDELTAGRAD");
 
     let mut model = crate::device::XyceTeamModelParams::default();
     macro_rules! assign {
@@ -694,12 +711,14 @@ pub(crate) fn build_xyce_team_memristor(
         instance.iv_relation = value.round() as i32;
     }
 
-    crate::device::XyceTeamMemristor::new(model, instance).map_err(|error| {
-        SimulationError::Circuit(format!(
-            "TEAM memristor '{}' model '{}': {error}",
-            element_name, model_name
-        ))
-    })
+    crate::device::XyceTeamMemristor::new(model, instance)
+        .and_then(|device| device.with_resistance_noise(resistance_noise))
+        .map_err(|error| {
+            SimulationError::Circuit(format!(
+                "TEAM memristor '{}' model '{}': {error}",
+                element_name, model_name
+            ))
+        })
 }
 
 fn xyce_pem_table_path(
@@ -7696,6 +7715,15 @@ impl Engine {
                         1.0,
                     );
                     circuit.non_electrical_state_nodes.insert(node_x);
+                    let resistance_noise = match &device {
+                        crate::device::XyceMemristor::Team(team) => {
+                            Some(crate::device::XyceTeamResistanceNoiseRuntime::new(
+                                *team.resistance_noise(),
+                                &element.name,
+                            ))
+                        }
+                        crate::device::XyceMemristor::Pem(_) => None,
+                    };
                     circuit
                         .xyce_memristors
                         .push(crate::circuit::XyceMemristorBinding {
@@ -7704,6 +7732,7 @@ impl Engine {
                             node_neg,
                             node_x,
                             device,
+                            resistance_noise,
                             resistance_store: 0.0,
                         });
                 }

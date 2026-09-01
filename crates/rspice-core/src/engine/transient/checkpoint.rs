@@ -49,7 +49,9 @@ use crate::device::veriloga_builtins::{
     GeneratedVerilogAAcceptedStateShapeIdentity, GeneratedVerilogAInstanceCheckpoint,
     GeneratedVerilogAPersistentState,
 };
-use crate::device::{TransmissionLine, TransmissionLineCheckpoint};
+use crate::device::{
+    TransmissionLine, TransmissionLineCheckpoint, XyceTeamResistanceNoiseCheckpoint,
+};
 use crate::engine::SimulationConfig;
 use crate::expr::{Expr, Function, parse_expression_strict};
 use crate::netlist::expr::prepare_behavioral_expression;
@@ -112,8 +114,10 @@ use super::{
 /// fixed delay or a maximum-delay bound, including the exact accepted value.
 /// Version 31 persists the older accepted state and previous physical
 /// derivative for every runtime Verilog-A Laplace filter so trapezoidal and
-/// Gear-2 continuation is bit-exact across a restart.
-const FORMAT_VERSION: u32 = 31;
+/// Gear-2 continuation is bit-exact across a restart. Version 32 adds the
+/// accepted TEAM resistance-noise PRNG, dwell, level, factor, and provenance.
+const FORMAT_VERSION: u32 = 32;
+const XYCE_TEAM_RESISTANCE_NOISE_FORMAT_VERSION: u32 = 32;
 const RUNTIME_VERILOGA_FORMAT_VERSION: u32 = 17;
 #[cfg(feature = "veriloga")]
 const RUNTIME_VERILOGA_SLEW_INITIALIZATION_FORMAT_VERSION: u32 = 23;
@@ -366,6 +370,7 @@ pub struct TransientCheckpoint {
     ind_v_prev: Vec<Value>,
     inductor_flux_history_available: bool,
     xyce_memristor_resistance_stores: Vec<Value>,
+    xyce_team_resistance_noise_states: Vec<XyceTeamResistanceNoiseCheckpoint>,
     generic_switch_stores: Vec<[Value; 4]>,
     accepted_nonlinear_state_available: bool,
     accepted_nonlinear_states: AcceptedNativeNonlinearCheckpointStates,
@@ -1100,6 +1105,93 @@ fn parse_count_header(line: &str, name: &str) -> Result<usize, String> {
         return Err(format!("malformed '{name}' header: extra field '{extra}'"));
     }
     Ok(count)
+}
+
+fn read_xyce_team_resistance_noise_states(
+    lines: &mut CheckpointLines<'_>,
+    budget: &mut CheckpointParseBudget,
+) -> Result<Vec<XyceTeamResistanceNoiseCheckpoint>, String> {
+    let header = lines
+        .next()
+        .ok_or_else(|| "missing TEAM resistance-noise state header".to_string())?;
+    let count = parse_count_header(header, "xyce_team_resistance_noise_states")?;
+    let mut states = allocate_checkpoint_rows(
+        lines,
+        count,
+        "TEAM resistance-noise checkpoint states",
+        budget,
+    )?;
+    for index in 0..count {
+        let line = lines
+            .next()
+            .ok_or_else(|| format!("missing TEAM resistance-noise checkpoint state {index}"))?;
+        let mut fields = line.split_whitespace();
+        if fields.next() != Some("xyce_team_resistance_noise_state") {
+            return Err(format!(
+                "malformed TEAM resistance-noise checkpoint state {index}: '{line}'"
+            ));
+        }
+        let mut next = |name: &str| {
+            fields.next().ok_or_else(|| {
+                format!(
+                    "TEAM resistance-noise checkpoint state {index} is missing {name}: '{line}'"
+                )
+            })
+        };
+        let version = next("version")?
+            .parse::<u32>()
+            .map_err(|_| format!("malformed TEAM resistance-noise state version in '{line}'"))?;
+        let instance_name = copy_checkpoint_string(
+            next("instance name")?,
+            "TEAM resistance-noise instance name",
+            budget,
+        )?;
+        let provenance = u64::from_str_radix(next("provenance")?, 16)
+            .map_err(|_| format!("malformed TEAM resistance-noise provenance in '{line}'"))?;
+        let initialized = parse_checkpoint_bool(
+            next("initialization flag")?,
+            "TEAM resistance-noise initialization flag",
+        )?;
+        let rng_state = u64::from_str_radix(next("RNG state")?, 16)
+            .map_err(|_| format!("malformed TEAM resistance-noise RNG state in '{line}'"))?;
+        let last_update_time = next("last update time")?
+            .parse::<Value>()
+            .map_err(|_| format!("malformed TEAM resistance-noise last update time in '{line}'"))?;
+        let next_update_interval =
+            next("next update interval")?
+                .parse::<Value>()
+                .map_err(|_| {
+                    format!("malformed TEAM resistance-noise next update interval in '{line}'")
+                })?;
+        let high_state = parse_checkpoint_bool(
+            next("high/low state")?,
+            "TEAM resistance-noise high/low state",
+        )?;
+        let resistance_factor = next("resistance factor")?.parse::<Value>().map_err(|_| {
+            format!("malformed TEAM resistance-noise resistance factor in '{line}'")
+        })?;
+        let last_trial_time = next("last trial time")?
+            .parse::<Value>()
+            .map_err(|_| format!("malformed TEAM resistance-noise last trial time in '{line}'"))?;
+        if let Some(extra) = fields.next() {
+            return Err(format!(
+                "TEAM resistance-noise checkpoint state {index} has extra field '{extra}'"
+            ));
+        }
+        states.push(XyceTeamResistanceNoiseCheckpoint {
+            version,
+            instance_name,
+            provenance,
+            initialized,
+            rng_state,
+            last_update_time,
+            next_update_interval,
+            high_state,
+            resistance_factor,
+            last_trial_time,
+        });
+    }
+    Ok(states)
 }
 
 struct CheckpointLines<'a> {
@@ -4499,6 +4591,37 @@ impl TransientCheckpoint {
                 "checkpoint reactive history and device store values must be finite".to_string(),
             );
         }
+        for state in &self.xyce_team_resistance_noise_states {
+            if state.version != crate::device::XYCE_TEAM_RESISTANCE_NOISE_STATE_VERSION {
+                return Err(format!(
+                    "TEAM resistance-noise checkpoint for '{}' has unsupported state version {}",
+                    state.instance_name, state.version
+                ));
+            }
+            if state.instance_name.is_empty()
+                || state.instance_name.chars().any(char::is_whitespace)
+            {
+                return Err(
+                    "TEAM resistance-noise checkpoint instance names must be nonempty and whitespace-free"
+                        .to_string(),
+                );
+            }
+            if !state.initialized
+                || !state.last_update_time.is_finite()
+                || !state.next_update_interval.is_finite()
+                || state.next_update_interval <= 0.0
+                || !state.resistance_factor.is_finite()
+                || state.resistance_factor <= 0.0
+                || !state.last_trial_time.is_finite()
+                || state.last_update_time > self.time
+                || state.last_trial_time.to_bits() != self.time.to_bits()
+            {
+                return Err(format!(
+                    "TEAM resistance-noise checkpoint for '{}' contains invalid accepted state",
+                    state.instance_name
+                ));
+            }
+        }
         if !self.accepted_nonlinear_state_available
             && (!self.accepted_nonlinear_states.resume_blockers.is_empty()
                 || !self.accepted_nonlinear_states.diodes.is_empty()
@@ -4999,6 +5122,8 @@ impl TransientCheckpoint {
                 .iter()
                 .map(|binding| binding.resistance_store)
                 .collect(),
+            xyce_team_resistance_noise_states: circuit
+                .capture_xyce_team_resistance_noise_checkpoints(),
             generic_switch_stores: circuit.generic_switch_transient_store_snapshots(),
             accepted_nonlinear_state_available: true,
             accepted_nonlinear_states,
@@ -5130,6 +5255,10 @@ impl TransientCheckpoint {
         )?;
         circuit.validate_accepted_native_nonlinear_checkpoint_states(
             &self.accepted_nonlinear_states,
+        )?;
+        circuit.validate_xyce_team_resistance_noise_checkpoints(
+            &self.xyce_team_resistance_noise_states,
+            self.time,
         )?;
         self.validate_accepted_junction_history_for_circuit(circuit)?;
         if !self.tline_resume_blockers.is_empty() {
@@ -5269,6 +5398,10 @@ impl TransientCheckpoint {
         // cannot fail after this point without a violated internal invariant.
         circuit
             .restore_accepted_native_nonlinear_checkpoint_states(&self.accepted_nonlinear_states)?;
+        circuit.restore_xyce_team_resistance_noise_checkpoints(
+            &self.xyce_team_resistance_noise_states,
+            self.time,
+        )?;
         circuit.capacitors.v_prev.copy_from_slice(&self.cap_v_prev);
         circuit
             .capacitors
@@ -5748,6 +5881,11 @@ impl TransientCheckpoint {
             .saturating_add(self.ind_i_prev_prev_prev.len())
             .saturating_add(self.ind_v_prev.len())
             .saturating_add(self.xyce_memristor_resistance_stores.len())
+            .saturating_add(
+                self.xyce_team_resistance_noise_states
+                    .len()
+                    .saturating_mul(9),
+            )
             .saturating_add(self.generic_switch_stores.len().saturating_mul(4))
             .saturating_add(self.accepted_nonlinear_states.resume_blockers.len())
             .saturating_add(
@@ -6040,6 +6178,25 @@ impl TransientCheckpoint {
             "xyce_memristor_resistance_stores",
             &self.xyce_memristor_resistance_stores,
         );
+        out.push_str(&format!(
+            "xyce_team_resistance_noise_states {}\n",
+            self.xyce_team_resistance_noise_states.len()
+        ));
+        for state in &self.xyce_team_resistance_noise_states {
+            out.push_str(&format!(
+                "xyce_team_resistance_noise_state {} {} {:016x} {} {:016x} {} {} {} {} {}\n",
+                state.version,
+                state.instance_name,
+                state.provenance,
+                u8::from(state.initialized),
+                state.rng_state,
+                state.last_update_time,
+                state.next_update_interval,
+                u8::from(state.high_state),
+                state.resistance_factor,
+                state.last_trial_time,
+            ));
+        }
         out.push_str(&format!(
             "generic_switch_stores {}\n",
             self.generic_switch_stores.len()
@@ -6861,6 +7018,12 @@ impl TransientCheckpoint {
         } else {
             Vec::new()
         };
+        let xyce_team_resistance_noise_states =
+            if version >= XYCE_TEAM_RESISTANCE_NOISE_FORMAT_VERSION {
+                read_xyce_team_resistance_noise_states(&mut lines, budget)?
+            } else {
+                Vec::new()
+            };
         let generic_switch_stores = if version >= 11 {
             let columns = read_value_section(&mut lines, "generic_switch_stores", 4, budget)?;
             let count = columns.first().map_or(0, Vec::len);
@@ -7106,6 +7269,7 @@ impl TransientCheckpoint {
             ind_v_prev: ind_iter.next().unwrap(),
             inductor_flux_history_available,
             xyce_memristor_resistance_stores,
+            xyce_team_resistance_noise_states,
             generic_switch_stores,
             accepted_nonlinear_state_available,
             accepted_nonlinear_states,
@@ -7781,6 +7945,7 @@ mod tests {
             ind_v_prev: vec![0.02],
             inductor_flux_history_available: true,
             xyce_memristor_resistance_stores: Vec::new(),
+            xyce_team_resistance_noise_states: Vec::new(),
             generic_switch_stores: vec![[-0.25, 0.125, 0.375, f64::MIN_POSITIVE]],
             accepted_nonlinear_state_available: true,
             accepted_nonlinear_states: AcceptedNativeNonlinearCheckpointStates {
@@ -8019,6 +8184,22 @@ mod tests {
                     lines
                         .next()
                         .expect("complete memristor store checkpoint vector");
+                }
+                continue;
+            }
+            if version < XYCE_TEAM_RESISTANCE_NOISE_FORMAT_VERSION
+                && line.starts_with("xyce_team_resistance_noise_states ")
+            {
+                let count = line
+                    .split_whitespace()
+                    .nth(1)
+                    .expect("TEAM resistance-noise checkpoint row count")
+                    .parse::<usize>()
+                    .expect("numeric TEAM resistance-noise checkpoint row count");
+                for _ in 0..count {
+                    lines
+                        .next()
+                        .expect("complete TEAM resistance-noise checkpoint rows");
                 }
                 continue;
             }

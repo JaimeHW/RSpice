@@ -52,6 +52,343 @@ use std::fmt;
 /// Xyce model level implemented by this module.
 pub const XYCE_TEAM_MEMRISTOR_LEVEL: u8 = 2;
 
+/// Wire/runtime version for accepted TEAM resistance-RTN state.
+pub const XYCE_TEAM_RESISTANCE_NOISE_STATE_VERSION: u32 = 1;
+
+/// Xyce TEAM random-telegraph resistance-noise parameters.
+///
+/// Xyce 7.10 draws an exponentially distributed dwell interval with mean
+/// `RESLAMBDA * RESTD`, then alternates the common `RON`/`ROFF` multiplier
+/// between `1 +/- RESDELTA * RESDELTAGRAD / 2`. `RESEPTD` is documented as
+/// the minimum update interval; honoring that floor also prevents a malformed
+/// zero-dwell model from consuming an unbounded number of random values.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct XyceTeamResistanceNoiseParams {
+    pub enabled: bool,
+    pub seed: u32,
+    pub lambda: Value,
+    pub update_time: Value,
+    pub epsilon_update_time: Value,
+    pub delta: Value,
+    pub delta_gradient: Value,
+}
+
+impl Default for XyceTeamResistanceNoiseParams {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            seed: 0,
+            lambda: 0.0,
+            update_time: 0.0,
+            epsilon_update_time: 1.0e-10,
+            delta: 0.0,
+            delta_gradient: 0.0,
+        }
+    }
+}
+
+impl XyceTeamResistanceNoiseParams {
+    pub fn validate(&self) -> Result<(), XyceTeamMemristorError> {
+        for (name, value) in [
+            ("RESLAMBDA", self.lambda),
+            ("RESTD", self.update_time),
+            ("RESEPTD", self.epsilon_update_time),
+            ("RESDELTA", self.delta),
+            ("RESDELTAGRAD", self.delta_gradient),
+        ] {
+            if !value.is_finite() {
+                return Err(XyceTeamMemristorError::InvalidParameter {
+                    name,
+                    reason: "must be finite",
+                });
+            }
+        }
+        if !self.enabled {
+            return Ok(());
+        }
+        require(
+            self.lambda > 0.0,
+            "RESLAMBDA",
+            "must be greater than zero when RESNOISE is enabled",
+        )?;
+        require(
+            self.update_time > 0.0,
+            "RESTD",
+            "must be greater than zero when RESNOISE is enabled",
+        )?;
+        require(
+            self.epsilon_update_time > 0.0,
+            "RESEPTD",
+            "must be greater than zero when RESNOISE is enabled",
+        )?;
+        let excursion = 0.5 * self.delta * self.delta_gradient;
+        require(
+            excursion.is_finite() && excursion.abs() < 1.0,
+            "RESDELTA",
+            "RESDELTA*RESDELTAGRAD/2 must have magnitude less than one",
+        )?;
+        Ok(())
+    }
+
+    /// Collision-resistant-enough runtime provenance for checkpoint matching.
+    /// The semantic netlist identity remains the primary restart authority;
+    /// this independent tag prevents accepting a structurally misrouted row.
+    pub fn provenance(&self, instance_name: &str) -> u64 {
+        let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+        let mut feed = |bytes: &[u8]| {
+            for byte in bytes {
+                hash ^= u64::from(*byte);
+                hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        };
+        feed(instance_name.to_ascii_uppercase().as_bytes());
+        feed(&[u8::from(self.enabled)]);
+        feed(&self.seed.to_le_bytes());
+        for value in [
+            self.lambda,
+            self.update_time,
+            self.epsilon_update_time,
+            self.delta,
+            self.delta_gradient,
+        ] {
+            feed(&value.to_bits().to_le_bytes());
+        }
+        hash
+    }
+}
+
+/// Accepted-boundary TEAM RTN state stored in transient checkpoints.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct XyceTeamResistanceNoiseCheckpoint {
+    pub version: u32,
+    pub instance_name: String,
+    pub provenance: u64,
+    pub initialized: bool,
+    pub rng_state: u64,
+    pub last_update_time: Value,
+    pub next_update_interval: Value,
+    pub high_state: bool,
+    pub resistance_factor: Value,
+    pub last_trial_time: Value,
+}
+
+/// Trial/accepted runtime for one TEAM instance.
+///
+/// The transient driver snapshots this value before an attempted step. A
+/// proposed state is generated at most once for that candidate time and is
+/// retained only if the step is accepted; every rejection restores the RNG
+/// word, dwell interval, level, and factor through the ordinary nonlinear
+/// circuit rollback image.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct XyceTeamResistanceNoiseRuntime {
+    params: XyceTeamResistanceNoiseParams,
+    provenance: u64,
+    initialized: bool,
+    rng_state: u64,
+    last_update_time: Value,
+    next_update_interval: Value,
+    high_state: bool,
+    resistance_factor: Value,
+    last_trial_time: Value,
+}
+
+impl XyceTeamResistanceNoiseRuntime {
+    pub(crate) fn new(params: XyceTeamResistanceNoiseParams, instance_name: &str) -> Self {
+        let provenance = params.provenance(instance_name);
+        // Stable per-instance streams avoid construction-order coupling while
+        // preserving authored RESSEED reproducibility.
+        let rng_state = provenance ^ u64::from(params.seed) ^ 0x5253_5049_4345_5254_u64;
+        Self {
+            params,
+            provenance,
+            initialized: false,
+            rng_state,
+            last_update_time: 0.0,
+            next_update_interval: 0.0,
+            high_state: false,
+            resistance_factor: 1.0,
+            last_trial_time: 0.0,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn enabled(&self) -> bool {
+        self.params.enabled
+    }
+
+    #[inline]
+    pub(crate) fn resistance_factor(&self) -> Value {
+        self.resistance_factor
+    }
+
+    pub(crate) fn initialize_accepted_boundary(
+        &mut self,
+        time: Value,
+    ) -> Result<(), XyceTeamMemristorError> {
+        finite_input("resistance-noise accepted time", time)?;
+        if !self.params.enabled || self.initialized {
+            return Ok(());
+        }
+        self.last_update_time = time;
+        self.last_trial_time = time;
+        self.next_update_interval = self.draw_interval();
+        self.initialized = true;
+        Ok(())
+    }
+
+    pub(crate) fn prepare_trial(&mut self, time: Value) -> Result<(), XyceTeamMemristorError> {
+        finite_input("resistance-noise trial time", time)?;
+        if !self.params.enabled {
+            return Ok(());
+        }
+        if !self.initialized {
+            return Err(XyceTeamMemristorError::InvalidParameter {
+                name: "RESNOISE",
+                reason: "transient runtime was not initialized at an accepted boundary",
+            });
+        }
+        if self.last_trial_time.to_bits() == time.to_bits() {
+            return Ok(());
+        }
+        if time < self.last_update_time {
+            return Err(XyceTeamMemristorError::InvalidParameter {
+                name: "RESNOISE",
+                reason: "trial time precedes the accepted resistance-noise state",
+            });
+        }
+        self.last_trial_time = time;
+        if time - self.last_update_time > self.next_update_interval {
+            self.last_update_time = time;
+            self.next_update_interval = self.draw_interval();
+            self.high_state = !self.high_state;
+            let excursion = 0.5 * self.params.delta * self.params.delta_gradient;
+            self.resistance_factor = if self.high_state {
+                1.0 + excursion
+            } else {
+                1.0 - excursion
+            };
+        }
+        Ok(())
+    }
+
+    fn draw_interval(&mut self) -> Value {
+        self.rng_state = self.rng_state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut word = self.rng_state;
+        word = (word ^ (word >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        word = (word ^ (word >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        word ^= word >> 31;
+        let uniform = (((word >> 11) as Value) + 1.0) / 9_007_199_254_740_992.0;
+        (-uniform.ln() * self.params.lambda * self.params.update_time)
+            .max(self.params.epsilon_update_time)
+    }
+
+    pub(crate) fn checkpoint(&self, instance_name: &str) -> XyceTeamResistanceNoiseCheckpoint {
+        XyceTeamResistanceNoiseCheckpoint {
+            version: XYCE_TEAM_RESISTANCE_NOISE_STATE_VERSION,
+            instance_name: instance_name.to_string(),
+            provenance: self.provenance,
+            initialized: self.initialized,
+            rng_state: self.rng_state,
+            last_update_time: self.last_update_time,
+            next_update_interval: self.next_update_interval,
+            high_state: self.high_state,
+            resistance_factor: self.resistance_factor,
+            last_trial_time: self.last_trial_time,
+        }
+    }
+
+    pub(crate) fn validate_checkpoint(
+        &self,
+        instance_name: &str,
+        checkpoint: &XyceTeamResistanceNoiseCheckpoint,
+        accepted_time: Value,
+    ) -> Result<(), String> {
+        if checkpoint.version != XYCE_TEAM_RESISTANCE_NOISE_STATE_VERSION {
+            return Err(format!(
+                "TEAM resistance-noise checkpoint for '{}' has unsupported state version {}; runtime requires {}",
+                instance_name, checkpoint.version, XYCE_TEAM_RESISTANCE_NOISE_STATE_VERSION
+            ));
+        }
+        if checkpoint.instance_name != instance_name {
+            return Err(format!(
+                "TEAM resistance-noise checkpoint instance '{}' does not match target '{}'",
+                checkpoint.instance_name, instance_name
+            ));
+        }
+        if checkpoint.provenance != self.provenance {
+            return Err(format!(
+                "TEAM resistance-noise checkpoint provenance mismatch for '{instance_name}'"
+            ));
+        }
+        if !checkpoint.last_update_time.is_finite()
+            || !checkpoint.next_update_interval.is_finite()
+            || !checkpoint.resistance_factor.is_finite()
+            || !checkpoint.last_trial_time.is_finite()
+        {
+            return Err(format!(
+                "TEAM resistance-noise checkpoint for '{instance_name}' contains non-finite state"
+            ));
+        }
+        if checkpoint.initialized != self.params.enabled {
+            return Err(format!(
+                "TEAM resistance-noise checkpoint initialization state for '{instance_name}' does not match RESNOISE"
+            ));
+        }
+        if self.params.enabled {
+            if checkpoint.next_update_interval < self.params.epsilon_update_time {
+                return Err(format!(
+                    "TEAM resistance-noise checkpoint dwell interval for '{instance_name}' is below RESEPTD"
+                ));
+            }
+            if checkpoint.last_update_time > accepted_time
+                || checkpoint.last_trial_time.to_bits() != accepted_time.to_bits()
+            {
+                return Err(format!(
+                    "TEAM resistance-noise checkpoint time provenance for '{instance_name}' does not match accepted time {accepted_time}"
+                ));
+            }
+            let excursion = 0.5 * self.params.delta * self.params.delta_gradient;
+            let expected_factor = if checkpoint.high_state {
+                1.0 + excursion
+            } else {
+                1.0 - excursion
+            };
+            if checkpoint.resistance_factor.to_bits() != expected_factor.to_bits() {
+                return Err(format!(
+                    "TEAM resistance-noise checkpoint factor for '{instance_name}' is inconsistent with its RTN state"
+                ));
+            }
+        } else if checkpoint.rng_state != self.rng_state
+            || checkpoint.last_update_time.to_bits() != 0.0f64.to_bits()
+            || checkpoint.next_update_interval.to_bits() != 0.0f64.to_bits()
+            || checkpoint.high_state
+            || checkpoint.resistance_factor.to_bits() != 1.0f64.to_bits()
+        {
+            return Err(format!(
+                "disabled TEAM resistance-noise checkpoint for '{instance_name}' contains active state"
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn restore_checkpoint(
+        &mut self,
+        instance_name: &str,
+        checkpoint: &XyceTeamResistanceNoiseCheckpoint,
+        accepted_time: Value,
+    ) -> Result<(), String> {
+        self.validate_checkpoint(instance_name, checkpoint, accepted_time)?;
+        self.initialized = checkpoint.initialized;
+        self.rng_state = checkpoint.rng_state;
+        self.last_update_time = checkpoint.last_update_time;
+        self.next_update_interval = checkpoint.next_update_interval;
+        self.high_state = checkpoint.high_state;
+        self.resistance_factor = checkpoint.resistance_factor;
+        self.last_trial_time = checkpoint.last_trial_time;
+        Ok(())
+    }
+}
+
 /// Parameters on a Xyce `.MODEL ... MEMRISTOR LEVEL=2` card.
 ///
 /// Defaults match Xyce 7.10's `N_DEV_MemristorTEAM` metadata.  The stochastic
@@ -303,6 +640,7 @@ pub struct XyceTeamMemristorCache {
 pub struct XyceTeamMemristor {
     model: XyceTeamModelParams,
     instance: XyceTeamInstanceParams,
+    resistance_noise: XyceTeamResistanceNoiseParams,
 }
 
 impl XyceTeamMemristor {
@@ -312,7 +650,20 @@ impl XyceTeamMemristor {
     ) -> Result<Self, XyceTeamMemristorError> {
         model.validate()?;
         instance.validate()?;
-        Ok(Self { model, instance })
+        Ok(Self {
+            model,
+            instance,
+            resistance_noise: XyceTeamResistanceNoiseParams::default(),
+        })
+    }
+
+    pub fn with_resistance_noise(
+        mut self,
+        resistance_noise: XyceTeamResistanceNoiseParams,
+    ) -> Result<Self, XyceTeamMemristorError> {
+        resistance_noise.validate()?;
+        self.resistance_noise = resistance_noise;
+        Ok(self)
     }
 
     #[inline]
@@ -325,10 +676,30 @@ impl XyceTeamMemristor {
         &self.instance
     }
 
+    #[inline]
+    pub fn resistance_noise(&self) -> &XyceTeamResistanceNoiseParams {
+        &self.resistance_noise
+    }
+
     /// Evaluate effective resistance and its derivative with respect to the
     /// scaled solver state.
     pub fn resistance(&self, x_scaled: Value) -> Result<(Value, Value), XyceTeamMemristorError> {
+        self.resistance_with_factor(x_scaled, 1.0)
+    }
+
+    pub(crate) fn resistance_with_factor(
+        &self,
+        x_scaled: Value,
+        resistance_factor: Value,
+    ) -> Result<(Value, Value), XyceTeamMemristorError> {
         finite_input("x", x_scaled)?;
+        finite_input("resistance_factor", resistance_factor)?;
+        if resistance_factor <= 0.0 {
+            return Err(XyceTeamMemristorError::InvalidParameter {
+                name: "resistance_factor",
+                reason: "must be greater than zero",
+            });
+        }
         let x_on = self.model.scaled_x_on();
         let span = self.model.scaled_x_off() - x_on;
         let (resistance, derivative) = match self.instance.iv_relation {
@@ -343,6 +714,8 @@ impl XyceTeamMemristor {
             }
             _ => unreachable!("instance parameters are validated at construction"),
         };
+        let resistance = resistance * resistance_factor;
+        let derivative = derivative * resistance_factor;
         if !resistance.is_finite() || !derivative.is_finite() {
             return Err(XyceTeamMemristorError::NonFiniteEvaluation);
         }
@@ -450,12 +823,24 @@ impl XyceTeamMemristor {
         x_scaled: Value,
         mode: XyceTeamEvaluationMode,
     ) -> Result<XyceTeamMemristorCache, XyceTeamMemristorError> {
+        self.evaluate_with_mode_and_resistance_factor(v_pos, v_neg, x_scaled, mode, 1.0)
+    }
+
+    pub(crate) fn evaluate_with_mode_and_resistance_factor(
+        &self,
+        v_pos: Value,
+        v_neg: Value,
+        x_scaled: Value,
+        mode: XyceTeamEvaluationMode,
+        resistance_factor: Value,
+    ) -> Result<XyceTeamMemristorCache, XyceTeamMemristorError> {
         finite_input("v_pos", v_pos)?;
         finite_input("v_neg", v_neg)?;
         finite_input("x", x_scaled)?;
 
         let voltage = v_pos - v_neg;
-        let (resistance, dresistance_dx) = self.resistance(x_scaled)?;
+        let (resistance, dresistance_dx) =
+            self.resistance_with_factor(x_scaled, resistance_factor)?;
         let conductance = resistance.recip();
         let current = voltage * conductance;
         let dcurrent_dv_pos = conductance;
@@ -982,6 +1367,98 @@ mod tests {
             (-expected_inner).exp() * expected_inner,
             1e-14,
             1e-14,
+        );
+    }
+
+    fn noise_params(seed: u32) -> XyceTeamResistanceNoiseParams {
+        XyceTeamResistanceNoiseParams {
+            enabled: true,
+            seed,
+            lambda: 1.0,
+            update_time: 1.0e-6,
+            epsilon_update_time: 1.0e-12,
+            delta: 2.0,
+            delta_gradient: 0.2,
+        }
+    }
+
+    #[test]
+    fn resistance_noise_seed_is_reproducible_and_distinguishes_streams() {
+        let mut first = XyceTeamResistanceNoiseRuntime::new(noise_params(17), "YMEMRISTOR!MR1");
+        let mut repeat = XyceTeamResistanceNoiseRuntime::new(noise_params(17), "YMEMRISTOR!MR1");
+        let mut different = XyceTeamResistanceNoiseRuntime::new(noise_params(18), "YMEMRISTOR!MR1");
+        first.initialize_accepted_boundary(0.0).unwrap();
+        repeat.initialize_accepted_boundary(0.0).unwrap();
+        different.initialize_accepted_boundary(0.0).unwrap();
+
+        assert_eq!(first, repeat);
+        assert_ne!(
+            first
+                .checkpoint("YMEMRISTOR!MR1")
+                .next_update_interval
+                .to_bits(),
+            different
+                .checkpoint("YMEMRISTOR!MR1")
+                .next_update_interval
+                .to_bits()
+        );
+    }
+
+    #[test]
+    fn rejected_noise_trial_restores_rng_and_retry_bit_exactly() {
+        let mut origin = XyceTeamResistanceNoiseRuntime::new(noise_params(23), "YMEMRISTOR!MR1");
+        origin.initialize_accepted_boundary(0.0).unwrap();
+
+        let accepted = origin.clone();
+        let mut rejected = origin;
+        rejected.prepare_trial(1.0).unwrap();
+        assert_ne!(rejected, accepted, "fixture must advance the RTN trial");
+
+        // Circuit rejection assigns the cloned nonlinear snapshot back to the
+        // binding. Reproduce that exact operation before retrying.
+        rejected = accepted.clone();
+        rejected.prepare_trial(2.0).unwrap();
+        let once = rejected.checkpoint("YMEMRISTOR!MR1");
+        rejected.prepare_trial(2.0).unwrap();
+        assert_eq!(
+            rejected.checkpoint("YMEMRISTOR!MR1"),
+            once,
+            "Newton reevaluations at one trial time must not redraw"
+        );
+
+        let mut direct = accepted;
+        direct.prepare_trial(2.0).unwrap();
+        assert_eq!(rejected, direct, "reject/retry must be bit-exact");
+    }
+
+    #[test]
+    fn resistance_noise_validation_fails_closed_and_disabled_is_equation_neutral() {
+        let mut malformed = noise_params(1);
+        malformed.lambda = Value::NAN;
+        assert!(malformed.validate().is_err());
+        malformed = noise_params(1);
+        malformed.update_time = 0.0;
+        assert!(malformed.validate().is_err());
+        malformed = noise_params(1);
+        malformed.delta = 20.0;
+        assert!(malformed.validate().is_err());
+
+        let deterministic = test_model(1, 0);
+        let disabled = deterministic
+            .with_resistance_noise(XyceTeamResistanceNoiseParams {
+                enabled: false,
+                seed: 99,
+                lambda: 7.0,
+                update_time: 3.0,
+                epsilon_update_time: 2.0,
+                delta: 4.0,
+                delta_gradient: 0.1,
+            })
+            .unwrap();
+        assert_eq!(
+            deterministic.evaluate(0.25, 0.0, 1.1).unwrap(),
+            disabled.evaluate(0.25, 0.0, 1.1).unwrap(),
+            "RESNOISE=0 must preserve the deterministic equation bit-for-bit"
         );
     }
 }

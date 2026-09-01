@@ -373,6 +373,108 @@ mod tests {
 }
 
 impl CircuitData {
+    pub(crate) fn initialize_xyce_team_resistance_noise(
+        &mut self,
+        accepted_time: Value,
+    ) -> Result<(), String> {
+        for binding in &mut self.xyce_memristors {
+            if let Some(noise) = binding.resistance_noise.as_mut() {
+                noise
+                    .initialize_accepted_boundary(accepted_time)
+                    .map_err(|error| {
+                        format!(
+                            "TEAM memristor '{}' resistance-noise initialization failed: {error}",
+                            binding.name
+                        )
+                    })?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn prepare_xyce_team_resistance_noise_trial(
+        &mut self,
+        trial_time: Value,
+    ) -> Result<(), String> {
+        for binding in &mut self.xyce_memristors {
+            if let Some(noise) = binding.resistance_noise.as_mut() {
+                noise.prepare_trial(trial_time).map_err(|error| {
+                    format!(
+                        "TEAM memristor '{}' resistance-noise trial failed: {error}",
+                        binding.name
+                    )
+                })?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn capture_xyce_team_resistance_noise_checkpoints(
+        &self,
+    ) -> Vec<crate::device::XyceTeamResistanceNoiseCheckpoint> {
+        self.xyce_memristors
+            .iter()
+            .filter_map(|binding| {
+                binding
+                    .resistance_noise
+                    .as_ref()
+                    .filter(|noise| noise.enabled())
+                    .map(|noise| noise.checkpoint(&binding.name))
+            })
+            .collect()
+    }
+
+    pub(crate) fn validate_xyce_team_resistance_noise_checkpoints(
+        &self,
+        checkpoints: &[crate::device::XyceTeamResistanceNoiseCheckpoint],
+        accepted_time: Value,
+    ) -> Result<(), String> {
+        let targets = self
+            .xyce_memristors
+            .iter()
+            .filter_map(|binding| {
+                binding
+                    .resistance_noise
+                    .as_ref()
+                    .filter(|noise| noise.enabled())
+                    .map(|noise| (binding, noise))
+            })
+            .collect::<Vec<_>>();
+        if checkpoints.len() != targets.len() {
+            return Err(format!(
+                "TEAM resistance-noise checkpoint count {} does not match target count {}",
+                checkpoints.len(),
+                targets.len()
+            ));
+        }
+        for ((binding, noise), checkpoint) in targets.into_iter().zip(checkpoints) {
+            noise.validate_checkpoint(&binding.name, checkpoint, accepted_time)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn restore_xyce_team_resistance_noise_checkpoints(
+        &mut self,
+        checkpoints: &[crate::device::XyceTeamResistanceNoiseCheckpoint],
+        accepted_time: Value,
+    ) -> Result<(), String> {
+        self.validate_xyce_team_resistance_noise_checkpoints(checkpoints, accepted_time)?;
+        let mut checkpoints = checkpoints.iter();
+        for binding in &mut self.xyce_memristors {
+            if let Some(noise) = binding
+                .resistance_noise
+                .as_mut()
+                .filter(|noise| noise.enabled())
+            {
+                let checkpoint = checkpoints
+                    .next()
+                    .expect("checkpoint count was validated before TEAM state injection");
+                noise.restore_checkpoint(&binding.name, checkpoint, accepted_time)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Capture every supported accepted native nonlinear runtime without
     /// changing the infallible checkpoint-capture contract. Unsupported or
     /// invalid device state is represented by an explicit, named blocker.
@@ -1558,9 +1660,19 @@ impl CircuitData {
             let v_pos = value_at(solution, binding.node_pos)?;
             let v_neg = value_at(solution, binding.node_neg)?;
             let x = value_at(solution, binding.node_x)?;
+            let resistance_factor = binding
+                .resistance_noise
+                .as_ref()
+                .map_or(1.0, |noise| noise.resistance_factor());
             let cache = binding
                 .device
-                .evaluate(v_pos, v_neg, x, self.xyce_memristor_operating_point_mode)
+                .evaluate_with_resistance_factor(
+                    v_pos,
+                    v_neg,
+                    x,
+                    self.xyce_memristor_operating_point_mode,
+                    resistance_factor,
+                )
                 .map_err(|error| {
                     format!(
                         "{} memristor '{}': {error}",
