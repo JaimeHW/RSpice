@@ -421,6 +421,12 @@ pub fn visit_state_sites(
             transition,
             first_transition,
         } => {
+            // This walk order predates the layout and is NOT the generator's
+            // emission order (numerator, denominator, period, first_transition,
+            // expr, transition). A state-bearing operator nested inside a zi
+            // operand would be numbered differently by the two; no shipped or
+            // corpus module nests one there, and reordering would move slot
+            // numbers, so the divergence stands until the layout allocates.
             visit_state_sites(expressions, *expr, visit)?;
             visit_state_sites(expressions, *period, visit)?;
             for child in [*transition, *first_transition].into_iter().flatten() {
