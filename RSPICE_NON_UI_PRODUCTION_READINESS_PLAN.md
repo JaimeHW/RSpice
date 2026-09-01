@@ -63,7 +63,7 @@ is started.
 | AR-13 | P2 | Exact HB/PAC/PNoise/PSS/envelope/PZ coverage is incomplete for native analog devices, dynamic state, colored noise, AC-NQS, and lossy/distributed elements | Inspected |
 | AR-14 | P2 | Native compact/passive model coverage has explicit gaps: HICUM/MEXTRAM routing, LTRA `G != 0`, and turns/geometry-based inductor synthesis | Inspected; HICUM/Verilog-A ownership requires coordination |
 | AR-15 | P2 | SPEF reduced parasitics and inductance are rejected; Spectre statistics and native analog statement/model lowering are incomplete | Inspected |
-| AR-16 | P2 | Transient integration-order support is restricted to orders 1 and 2 | Inspected; compatibility requirement must be confirmed before expansion |
+| AR-16 | P2 | Transient integration-order support is restricted to orders 1 and 2 | Resolved as an intentional Xyce-compatible boundary; see `TRANSIENT_INTEGRATION_ORDER_DECISION.md` |
 | AR-17 | P1 | CLI and Python outputs are written directly to final paths and can leave truncated or partial files | Inspected |
 | AR-18 | P1 | Internal/public result access can panic and aggregation can zero-fill missing currents, converting schema errors into plausible data | Observed/inspected |
 | AR-19 | P1 | CLI `.STEP` supports only a subset of analyses, rejects repeated analysis kinds, cannot compose with `.ALTER`/textual `.DATA`, and lacks per-coordinate checkpoint/output namespaces | Inspected |
@@ -766,6 +766,13 @@ behavior and actual product requirements. If orders above two are not valid for
 the selected OneStep/Gear12 compatibility mode, keep the explicit rejection and
 close the finding as an intentional, tested boundary. If higher-order Gear/BDF
 is a product requirement, implement it as follows.
+
+**Decision (2026-09-01):** Current authoritative Xyce documentation explicitly
+defines variable-order trapezoidal and Gear methods over orders 1 and 2. RSpice
+therefore retains its fail-closed 1/2 boundary; higher-order work in 9.1 through
+9.3 is not required by the current compatibility contract. The evidence,
+existing enforcement, and conditions for reopening the decision are recorded
+in `TRANSIENT_INTEGRATION_ORDER_DECISION.md`.
 
 ### 9.1 Generalize integration history
 
