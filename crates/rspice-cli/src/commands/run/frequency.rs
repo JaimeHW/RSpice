@@ -9,7 +9,7 @@
 //! and reject `-f hdf5` rather than write a misleading file.
 
 use super::RunContext;
-use super::shared::{NodeResolver, generate_frequency_sweep, map_hdf5_output_error};
+use super::shared::{generate_frequency_sweep, map_hdf5_output_error};
 use crate::cli::{CliError, OutputFormat};
 use crate::commands::run_signals::{
     ComplexSignal, ac_signals, apply_save_set_complex_checked, voltage_display_name,
@@ -19,6 +19,65 @@ use crate::hdf5::{
     Hdf5SimulationData, Hdf5WaveformSection, write_hdf5,
 };
 use crate::report::format_spice_exponent;
+
+fn map_frequency_error(
+    ctx: &RunContext<'_>,
+    analysis: &str,
+    source: rspice_core::SimulationError,
+) -> CliError {
+    if matches!(source, rspice_core::SimulationError::Aborted) {
+        super::cancellation_cli_error(ctx.args.timeout)
+    } else {
+        CliError::CoreSimulationError {
+            source,
+            analysis: Some(analysis.to_string()),
+        }
+    }
+}
+
+/// Node lookup for analyses whose core entrypoint still accepts numerical
+/// ports. Unlike the older shared resolver, construction is cancellable, so a
+/// large hierarchy cannot make a frequency-analysis timeout wait for
+/// elaboration to finish.
+struct FrequencyNodeResolver {
+    node_name_to_index: std::collections::HashMap<String, usize>,
+    ground_policy: rspice_core::netlist::GroundPolicy,
+}
+
+impl FrequencyNodeResolver {
+    fn from_context(ctx: &RunContext<'_>) -> Result<Self, CliError> {
+        let circuit = ctx
+            .engine
+            .build_circuit_with_abort(ctx.netlist, &crate::abort::ProcessAbort)
+            .map_err(|source| map_frequency_error(ctx, "Node Resolution", source))?;
+        let node_name_to_index = circuit
+            .node_names_sorted()
+            .iter()
+            .enumerate()
+            .map(|(index, name)| (name.to_ascii_uppercase(), index + 1))
+            .collect();
+        Ok(Self {
+            node_name_to_index,
+            ground_policy: ctx.netlist.ground_policy(),
+        })
+    }
+
+    fn resolve_node(&self, node: &str) -> Option<usize> {
+        let node = node.trim();
+        if node.is_empty() {
+            return None;
+        }
+        if self.ground_policy.is_ground(node) {
+            return Some(0);
+        }
+        if let Ok(index) = node.parse::<usize>() {
+            return Some(index);
+        }
+        self.node_name_to_index
+            .get(&node.to_ascii_uppercase())
+            .copied()
+    }
+}
 
 /// Run `.TF`: DC small-signal transfer function, input impedance, and
 /// output impedance, reported in ngspice's format.
@@ -35,14 +94,15 @@ pub(super) fn run_tf_from_command(
 
     let result = ctx
         .engine
-        .run_transfer_function(
+        .run_transfer_function_with_abort(
             ctx.netlist,
             output_node,
             reference_node,
             output_is_current,
             input_source,
+            &crate::abort::ProcessAbort,
         )
-        .map_err(|e| CliError::simulation_error_in(e.to_string(), "Transfer Function"))?;
+        .map_err(|source| map_frequency_error(ctx, "Transfer Function", source))?;
 
     // ngspice's exact labels, per-form ordering, and C-style %e exponent
     // formatting, so scripts written against ngspice's .TF output parse
@@ -141,16 +201,7 @@ pub(super) fn run_disto(
             f2_over_f1,
             &crate::abort::ProcessAbort,
         )
-        .map_err(|source| {
-            if matches!(source, rspice_core::SimulationError::Aborted) {
-                super::cancellation_cli_error(ctx.args.timeout)
-            } else {
-                CliError::CoreSimulationError {
-                    source,
-                    analysis: Some("DISTO".to_string()),
-                }
-            }
-        })?;
+        .map_err(|source| map_frequency_error(ctx, "DISTO", source))?;
 
     let projection = distortion_projection(ctx, &result)?;
     if !ctx.quiet {
@@ -569,8 +620,8 @@ pub(super) fn run_ac_data(ctx: &RunContext<'_>, table_name: &str) -> Result<(), 
 
     let (_row_netlists, results) = ctx
         .engine
-        .run_ac_data(ctx.netlist, table_name)
-        .map_err(|error| CliError::simulation_error_in(error.to_string(), "AC"))?;
+        .run_ac_data_with_abort(ctx.netlist, table_name, &crate::abort::ProcessAbort)
+        .map_err(|source| map_frequency_error(ctx, "AC DATA", source))?;
     finish_ac_results(ctx, results)
 }
 
@@ -603,16 +654,7 @@ fn run_ac_frequencies(ctx: &RunContext<'_>, frequencies: Vec<f64>) -> Result<(),
     let results = ctx
         .engine
         .run_ac_with_abort(ctx.netlist, &frequencies, &crate::abort::ProcessAbort)
-        .map_err(|error| {
-            if matches!(error, rspice_core::SimulationError::Aborted) {
-                super::cancellation_cli_error(ctx.args.timeout)
-            } else {
-                CliError::CoreSimulationError {
-                    source: error,
-                    analysis: Some("AC".to_string()),
-                }
-            }
-        })?;
+        .map_err(|source| map_frequency_error(ctx, "AC", source))?;
     finish_ac_results(ctx, results)
 }
 
@@ -748,8 +790,8 @@ pub(super) fn run_stb(
 
     let stb = ctx
         .engine
-        .run_stb(ctx.netlist, config)
-        .map_err(|e| CliError::simulation_error_in(e.to_string(), "STB"))?;
+        .run_stb_with_abort(ctx.netlist, config, &crate::abort::ProcessAbort)
+        .map_err(|source| map_frequency_error(ctx, "STB", source))?;
 
     if !ctx.args.allow_nonfinite {
         for (freq, gain) in stb.frequencies.iter().zip(stb.loop_gains.iter()) {
@@ -880,27 +922,6 @@ pub(super) fn run_noise(
         );
     }
 
-    let resolver = NodeResolver::from_netlist(ctx.engine, ctx.netlist)?;
-    let output = resolver
-        .resolve_node(output_node)
-        .ok_or_else(|| CliError::SimulationError {
-            message: format!("Invalid .NOISE output node '{}'", output_node),
-            analysis: Some("Noise".to_string()),
-        })?;
-    let output_neg = match reference_node {
-        Some(reference) => {
-            Some(
-                resolver
-                    .resolve_node(reference)
-                    .ok_or_else(|| CliError::SimulationError {
-                        message: format!("Invalid .NOISE reference node '{}'", reference),
-                        analysis: Some("Noise".to_string()),
-                    })?,
-            )
-        }
-        None => None,
-    };
-
     let input_source_exists = ctx.netlist.elements.iter().any(|element| {
         element.name.eq_ignore_ascii_case(input_source)
             && matches!(
@@ -920,13 +941,14 @@ pub(super) fn run_noise(
     }
 
     let frequencies = generate_frequency_sweep(variation, points, start_freq, stop_freq);
-    let execution = ctx.engine.run_noise_with_input_source(
+    let execution = ctx.engine.run_noise_named_with_input_source_and_abort(
         ctx.netlist,
-        output,
-        output_neg,
+        output_node,
+        reference_node,
         input_source,
         &frequencies,
         ctx.engine.config().temperature,
+        &crate::abort::ProcessAbort,
     );
     finish_noise(
         ctx,
@@ -950,13 +972,14 @@ pub(super) fn run_noise_data(
     }
     let execution = ctx
         .engine
-        .run_noise_data_named_with_input_source(
+        .run_noise_data_named_with_input_source_and_abort(
             ctx.netlist,
             output_node,
             reference_node,
             input_source,
             table_name,
             ctx.engine.config().temperature,
+            &crate::abort::ProcessAbort,
         )
         .map(|(_, results)| results);
     let integrate = execution.as_ref().is_ok_and(|results| {
@@ -1104,7 +1127,7 @@ fn finish_noise(
             }
             Ok(())
         }
-        Err(e) => Err(CliError::simulation_error_in(e.to_string(), "Noise")),
+        Err(source) => Err(map_frequency_error(ctx, "Noise", source)),
     }
 }
 
@@ -1168,7 +1191,7 @@ pub(super) fn run_pz(
         );
     }
 
-    match ctx.engine.run_pz_ports(
+    match ctx.engine.run_pz_ports_with_abort(
         ctx.netlist,
         input_node,
         None,
@@ -1177,12 +1200,13 @@ pub(super) fn run_pz(
         input_is_current,
         true,
         true,
+        &crate::abort::ProcessAbort,
     ) {
         Ok(result) => {
             report_pz(ctx, &result.poles, &result.zeros)?;
             Ok(())
         }
-        Err(e) => Err(CliError::simulation_error_in(e.to_string(), "Pole-Zero")),
+        Err(source) => Err(map_frequency_error(ctx, "Pole-Zero", source)),
     }
 }
 
@@ -1277,7 +1301,7 @@ pub(super) fn run_pz_from_command(
     transfer_type: rspice_core::netlist::PoleZeroTransferType,
     analysis_type: rspice_core::netlist::PoleZeroAnalysisType,
 ) -> Result<(), CliError> {
-    let resolver = NodeResolver::from_netlist(ctx.engine, ctx.netlist)?;
+    let resolver = FrequencyNodeResolver::from_context(ctx)?;
 
     let resolve = |node: &str| {
         resolver
@@ -1310,7 +1334,7 @@ pub(super) fn run_pz_from_command(
         );
     }
 
-    match ctx.engine.run_pz_ports(
+    match ctx.engine.run_pz_ports_with_abort(
         ctx.netlist,
         in_pos,
         Some(in_neg),
@@ -1319,12 +1343,13 @@ pub(super) fn run_pz_from_command(
         input_is_current,
         compute_poles,
         compute_zeros,
+        &crate::abort::ProcessAbort,
     ) {
         Ok(result) => {
             report_pz(ctx, &result.poles, &result.zeros)?;
             Ok(())
         }
-        Err(e) => Err(CliError::simulation_error_in(e.to_string(), "Pole-Zero")),
+        Err(source) => Err(map_frequency_error(ctx, "Pole-Zero", source)),
     }
 }
 
@@ -1341,10 +1366,14 @@ pub(super) fn run_sensitivity(
         );
     }
 
-    match ctx
-        .engine
-        .run_sensitivity(ctx.netlist, output_node, param_name, param_value, None)
-    {
+    match ctx.engine.run_sensitivity_with_abort(
+        ctx.netlist,
+        output_node,
+        param_name,
+        param_value,
+        None,
+        &crate::abort::ProcessAbort,
+    ) {
         Ok(sensitivity) => {
             if !ctx.quiet {
                 println!("✓ Sensitivity analysis complete");
@@ -1365,7 +1394,7 @@ pub(super) fn run_sensitivity(
             export_dc_sensitivities(ctx, &[(param_name.to_string(), sensitivity)])?;
             Ok(())
         }
-        Err(e) => Err(CliError::simulation_error_in(e.to_string(), "Sensitivity")),
+        Err(source) => Err(map_frequency_error(ctx, "Sensitivity", source)),
     }
 }
 
@@ -1377,7 +1406,7 @@ pub(super) fn run_sensitivity_from_command(
     filters: &[String],
     ac_sweep: Option<rspice_core::netlist::SensitivityAcSweep>,
 ) -> Result<(), CliError> {
-    let resolver = NodeResolver::from_netlist(ctx.engine, ctx.netlist)?;
+    let resolver = FrequencyNodeResolver::from_context(ctx)?;
     let out_pos = if output_is_current {
         0
     } else {
@@ -1438,8 +1467,14 @@ pub(super) fn run_sensitivity_from_command(
 
         let result = ctx
             .engine
-            .run_sensitivity_ac_complete(ctx.netlist, output, &freqs, filters)
-            .map_err(|e| CliError::simulation_error_in(e.to_string(), "Sensitivity AC"))?;
+            .run_sensitivity_ac_complete_with_abort(
+                ctx.netlist,
+                output,
+                &freqs,
+                filters,
+                &crate::abort::ProcessAbort,
+            )
+            .map_err(|source| map_frequency_error(ctx, "Sensitivity AC", source))?;
 
         for trace in &result.sensitivities {
             let combined = &trace.magnitude;
@@ -1510,8 +1545,13 @@ pub(super) fn run_sensitivity_from_command(
 
     let result = ctx
         .engine
-        .run_sensitivity_dc_complete(ctx.netlist, output, filters)
-        .map_err(|e| CliError::simulation_error_in(e.to_string(), "Sensitivity"))?;
+        .run_sensitivity_dc_complete_with_abort(
+            ctx.netlist,
+            output,
+            filters,
+            &crate::abort::ProcessAbort,
+        )
+        .map_err(|source| map_frequency_error(ctx, "Sensitivity", source))?;
     let mut sensitivities = result.sensitivities;
 
     sensitivities.sort_by(|a, b| {
