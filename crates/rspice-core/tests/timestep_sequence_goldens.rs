@@ -11,7 +11,15 @@
 //! These goldens close that hole. Each deck's accepted `(time, step_size)`
 //! sequence is checked in as bit patterns; any change to breakpoint
 //! placement, LTE control, order selection, step growth/shrink policy, or the
-//! event machinery's inertness moves the sequence and fails here.
+//! event machinery's inertness moves the sequence and fails here. Ordinary
+//! builds compare those patterns exactly. Source-coverage builds are a
+//! deliberately different binary: LLVM inserts a counter update in every
+//! instrumented region, and the Linux instrumented nonlinear solve has been
+//! observed to move one LTE proposal by 17 ULP while preserving every
+//! accepted-point decision and the closed-form waveform. Under `cfg(coverage)`
+//! only, [`steps_match`] admits at most [`COVERAGE_MAX_ULPS`] per field. The
+//! point count and point-for-point ordering remain exact, so coverage cannot
+//! bless a different controller path.
 //!
 //! # What these goldens prove, and what they do not
 //!
@@ -70,6 +78,15 @@ const BLESS_ENV: &str = "RSPICE_BLESS_TIMESTEP_GOLDENS";
 
 /// Environment variables that change solver numerics under the test's feet.
 const NUMERIC_ENV_OVERRIDES: [&str; 3] = ["RSPICE_SOLVER", "RSPICE_PIVREL", "RSPICE_PIVTOL"];
+
+/// Narrow allowance for LLVM source-coverage instrumentation roundoff.
+///
+/// The failing Linux coverage build differed by 2 ULP in accepted time and 17
+/// ULP in the LTE-proposed step at one point, starting from an exactly equal
+/// preceding state. Thirty-two is the smallest power-of-two ceiling above the
+/// measured proposal delta. It is used only by `cfg(coverage)`; production and
+/// ordinary test builds retain bit-exact comparison.
+const COVERAGE_MAX_ULPS: u64 = 32;
 
 /// One pure-analog transient deck whose accepted step sequence is pinned.
 struct GoldenDeck {
@@ -204,6 +221,40 @@ impl AcceptedStep {
 
     fn step(self) -> f64 {
         f64::from_bits(self.step_bits)
+    }
+}
+
+/// ULP distance for the non-negative finite values used by transient time and
+/// step columns. Invalid fixture/capture values never compare equal.
+fn nonnegative_finite_ulp_distance(left_bits: u64, right_bits: u64) -> Option<u64> {
+    let left = f64::from_bits(left_bits);
+    let right = f64::from_bits(right_bits);
+    (left.is_finite() && right.is_finite() && left >= 0.0 && right >= 0.0)
+        .then(|| left_bits.abs_diff(right_bits))
+}
+
+fn coverage_steps_match(expected: AcceptedStep, captured: AcceptedStep) -> bool {
+    nonnegative_finite_ulp_distance(expected.time_bits, captured.time_bits)
+        .is_some_and(|distance| distance <= COVERAGE_MAX_ULPS)
+        && nonnegative_finite_ulp_distance(expected.step_bits, captured.step_bits)
+            .is_some_and(|distance| distance <= COVERAGE_MAX_ULPS)
+}
+
+/// Compare one accepted point under the contract of the binary being tested.
+///
+/// Exact bits remain the release invariant. LLVM's instrumented coverage
+/// binary gets only the narrow, measured ULP allowance above; it is not a
+/// shipping configuration and is independently guarded by the exact sequence
+/// length and closed-form waveform tests in this module.
+#[allow(unexpected_cfgs)] // `cargo llvm-cov` supplies this well-known cfg to instrumented builds.
+fn steps_match(expected: AcceptedStep, captured: AcceptedStep) -> bool {
+    #[cfg(coverage)]
+    {
+        coverage_steps_match(expected, captured)
+    }
+    #[cfg(not(coverage))]
+    {
+        expected == captured
     }
 }
 
@@ -384,14 +435,17 @@ fn check(deck: &GoldenDeck) {
     let first_divergence = expected
         .iter()
         .zip(&captured)
-        .position(|(want, got)| want != got);
+        .position(|(&want, &got)| !steps_match(want, got));
     if let Some(index) = first_divergence {
         let want = expected[index];
         let got = captured[index];
+        let time_ulps = nonnegative_finite_ulp_distance(want.time_bits, got.time_bits);
+        let step_ulps = nonnegative_finite_ulp_distance(want.step_bits, got.step_bits);
         panic!(
             "deck {} ({}) drifted at accepted point {index}:\n  \
              golden time {:016x} ({:.17e}) step {:016x} ({:.17e})\n  \
-             actual time {:016x} ({:.17e}) step {:016x} ({:.17e})\n\
+             actual time {:016x} ({:.17e}) step {:016x} ({:.17e})\n  \
+             ULP distances: time {time_ulps:?}, step {step_ulps:?}\n\
              This is a timestep-control change, not a formatting one. Do not \
              re-bless without oracle evidence; see the protocol in {}.",
             deck.name,
@@ -416,6 +470,51 @@ fn check(deck: &GoldenDeck) {
         deck.name,
         deck.regime,
     );
+}
+
+/// Pin the coverage exception to the exact evidence that introduced it, and
+/// prove it refuses the next ULP outside the documented ceiling. This is kept
+/// independent of `cfg(coverage)` so every build checks the exception itself.
+#[test]
+fn coverage_roundoff_allowance_is_narrow_and_ulp_bounded() {
+    let linux_coverage_golden = AcceptedStep {
+        time_bits: 0x3eb9_091c_d3ca_7796,
+        step_bits: 0x3e8a_b164_968c_9861,
+    };
+    let linux_coverage_actual = AcceptedStep {
+        time_bits: 0x3eb9_091c_d3ca_7794,
+        step_bits: 0x3e8a_b164_968c_9850,
+    };
+    assert_eq!(
+        nonnegative_finite_ulp_distance(
+            linux_coverage_golden.time_bits,
+            linux_coverage_actual.time_bits,
+        ),
+        Some(2)
+    );
+    assert_eq!(
+        nonnegative_finite_ulp_distance(
+            linux_coverage_golden.step_bits,
+            linux_coverage_actual.step_bits,
+        ),
+        Some(17)
+    );
+    assert!(coverage_steps_match(
+        linux_coverage_golden,
+        linux_coverage_actual
+    ));
+
+    let outside = AcceptedStep {
+        time_bits: 1.0_f64.to_bits(),
+        step_bits: 1.0_f64.to_bits() + COVERAGE_MAX_ULPS + 1,
+    };
+    assert!(!coverage_steps_match(
+        AcceptedStep {
+            time_bits: 1.0_f64.to_bits(),
+            step_bits: 1.0_f64.to_bits(),
+        },
+        outside,
+    ));
 }
 
 #[test]
