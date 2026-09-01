@@ -36,7 +36,7 @@ use rspice_conformance::suites::verilog::{AmsCorpus, AmsPortValue, AmsStimulus, 
 /// Pinned by name rather than counted, for the reason `verilog_oracles` pins
 /// its own: a count tells you the corpus changed size, and this tells you which
 /// mechanism stopped being covered.
-const REQUIRED_CASES: [(&str, &str); 2] = [
+const REQUIRED_CASES: [(&str, &str); 3] = [
     (
         "wreal_forms",
         "real nets end to end: ports, arithmetic, a bit-driven ladder, a \
@@ -45,6 +45,13 @@ const REQUIRED_CASES: [(&str, &str); 2] = [
     (
         "wreal_resolution",
         "the four resolved real-net spellings, and an undriven wreal",
+    ),
+    (
+        "real_state",
+        "a real value that survives a clock edge: a module-level `real` written \
+         with `<=`, a process-local `real` across a suspension, a `parameter \
+         real` folded into the recurrence, an `output real` variable port, and \
+         the `$realtobits`/`$bitstoreal` round trip",
     ),
 ];
 
@@ -203,10 +210,78 @@ fn model_wreal_resolution(stimulus: &AmsStimulus) -> Vec<Row> {
         .collect()
 }
 
+/// `real_state`, computed from the recurrence the design writes.
+///
+/// The one case here with memory, so the model is a loop over the vectors with
+/// its own state rather than a map over them — which is the point: a model
+/// without state could not disagree with a design that had lost its.
+///
+/// # Why this is `==` and not a tolerance
+///
+/// The design and the model evaluate the *same* recurrence in the same order
+/// with the same `f64` arithmetic: `state + (vin - state) * K`, one subtraction,
+/// one multiplication, one addition, left to right, exactly as both are
+/// written. IEEE 754 makes each of those operations correctly rounded and
+/// therefore deterministic, so the two traces agree bit for bit or the
+/// evaluation order differs — and an evaluation order that differs is a defect
+/// this test exists to catch, not rounding to be absorbed by an epsilon.
+///
+/// The engine renders a real in Rust's shortest round-tripping form, so
+/// comparing the rendered strings is comparing the values.
+///
+/// # The region rules the trace depends on
+///
+/// * `state <= ...` defers to the nonblocking region (IEEE 1364-2005 section
+///   11), so the right-hand side reads the *previous* sample's state. A model
+///   that updated in place would drift away by the second sample.
+/// * `pattern = $realtobits(state)` is blocking and runs in the active region,
+///   so it also reads the previous sample's state — which is why `vround`
+///   trails `vout` by exactly one sample.
+/// * `acc = acc + vin` is the process-local accumulation, which crosses the
+///   suspension and therefore sums every edge rather than the last one.
+fn model_real_state(stimulus: &AmsStimulus) -> Vec<Row> {
+    // The declared default of the design's `parameter real K`. Written here as
+    // the same literal, because section 12.2 fixes it at elaboration and the
+    // harness overrides nothing.
+    const K: f64 = 0.25;
+
+    let mut rows = Vec::with_capacity(stimulus.vectors.len());
+    // Section 3.9: a `real` variable starts at zero. So does a real net
+    // (Verilog-AMS LRM 2.4 section 3.7), and so does the real *variable* port
+    // `vsum` before the first edge writes it.
+    let mut state = 0.0f64;
+    let mut acc = 0.0f64;
+    let mut vsum = 0.0f64;
+    let mut vround = 0.0f64;
+    // A `wire` nothing has driven is `x`; the first vector's `0` is therefore
+    // an x-to-0 transition, which is a falling edge and not a rising one.
+    let mut previous_clk: Option<bool> = None;
+
+    for vector in &stimulus.vectors {
+        let clk = vector[0] == "1";
+        let vin: f64 = vector[1].parse().expect("a real column");
+
+        if clk && previous_clk == Some(false) {
+            // Active region: both blocking processes read the state this edge
+            // has not yet changed.
+            vround = state;
+            acc += vin;
+            vsum = acc;
+            // Nonblocking region: the deferred update lands.
+            state += (vin - state) * K;
+        }
+        previous_clk = Some(clk);
+
+        rows.push(vec![real(state), real(vsum), real(vround)]);
+    }
+    rows
+}
+
 fn model(case: &str, stimulus: &AmsStimulus) -> Vec<Row> {
     match case {
         "wreal_forms" => model_wreal_forms(stimulus),
         "wreal_resolution" => model_wreal_resolution(stimulus),
+        "real_state" => model_real_state(stimulus),
         other => panic!("`{other}` has no reference model; add one beside the case"),
     }
 }

@@ -24,31 +24,10 @@
 //! agreeing by accident would take two independent mistakes that happen to
 //! cancel — and when they disagree, one of the two representations is wrong.
 //!
-//! # The RNM's ceiling today, stated rather than worked around
+//! # The mechanisms covered
 //!
-//! **A real-valued variable cannot hold state across a clock edge.** The
-//! canonical-IR digital lowering has no discrete-domain real *variable*:
-//!
-//! * `real state;` at module level lowers as an analog variable, and a process
-//!   that writes it is refused — "`state` is not a discrete-domain signal;
-//!   assigning a module-level analog variable from a process has no lowered
-//!   form yet".
-//! * `wreal state;` is a net, and IEEE 1364-2005 section 6.2 lets a procedural
-//!   assignment write only a variable, so the semantic pass refuses that too.
-//! * `$realtobits` / `$bitstoreal` — the LRM's own bridge, and the one the
-//!   refusals above name — are "not supported yet inside a discrete-domain
-//!   expression", so state cannot be parked in a `reg [63:0]` either.
-//! * A `parameter real` is likewise not a discrete-domain signal, so every real
-//!   constant below is written inline.
-//!
-//! What that rules out is the block this suite would otherwise open with: an RC
-//! low-pass whose RNM is a discrete-time single-pole update, where the declared
-//! tolerance would be the discretisation error at the sample rate. It cannot be
-//! written today, and it is *not* written in a form that pretends otherwise.
-//!
-//! What is left is still four independent mechanisms, because state can live in
-//! four-state `reg`s and reach the real domain as a *condition* — which is
-//! exactly the bridge Verilog-AMS LRM 2.4 section 3.7 leaves open:
+//! Five, and each is a different route between the two value domains — so a
+//! defect in one of them cannot hide behind the others:
 //!
 //! | block | direction | mechanism |
 //! |---|---|---|
@@ -56,6 +35,23 @@
 //! | [`schmitt_hysteresis`] | real → real, with memory | threshold + one-bit state |
 //! | [`flash_quantizer`] | real → bits → real | reference ladder + comparators |
 //! | [`ramp_integrator`] | bit → real, accumulating | discrete integration |
+//! | [`rc_lowpass`] | real → real, with real state | a discrete-time pole |
+//!
+//! [`rc_lowpass`] is the block this suite was written to open with and could
+//! not: until the discrete domain had a `real` *variable*, `real state;` at
+//! module level was the continuous body's and a process that wrote it was
+//! refused, `wreal state;` was a net and IEEE 1364-2005 section 6.2 kept a
+//! procedural assignment off one, `$realtobits`/`$bitstoreal` were unsupported
+//! so state could not be parked in a `reg [63:0]` either, and a `parameter
+//! real` was not a discrete-domain name — which is why every real constant in
+//! the other four blocks is still written inline. All four refusals are gone;
+//! the inline constants stay, because rewriting a passing block to use a
+//! feature it does not need would change what it covers for no reason.
+//!
+//! The four older blocks keep state in four-state `reg`s and reach the real
+//! domain as a *condition*, which is the bridge Verilog-AMS LRM 2.4 section 3.7
+//! leaves open. [`rc_lowpass`] keeps it in a real, which is the one the LRM
+//! describes and the language was missing.
 //!
 //! # Time alignment
 //!
@@ -1196,6 +1192,187 @@ endmodule
     }
 }
 
+// ===========================================================================
+// Block 5 — the RC low-pass
+// ===========================================================================
+
+/// Series resistance of the low-pass, ohms.
+const RC_R: f64 = 3.0e3;
+/// Shunt capacitance, farads. With `RC_R` this is a 300 ns time constant.
+const RC_C: f64 = 100.0e-12;
+/// Input full scale, volts.
+const RC_FULL_SCALE: f64 = 5.0;
+
+/// A first-order RC low-pass against a discrete-time single-pole update.
+///
+/// # What it models
+///
+/// The block this suite was written to open with and could not, until the
+/// discrete domain had a `real` variable to keep state in. It is the canonical
+/// real-number model: a continuous-time pole, abstracted as one line of
+/// arithmetic evaluated once per sample.
+///
+/// # Why both representations are honest
+///
+/// The analog side is a resistor and a capacitor. Its output is whatever the
+/// transient engine's integration of `C dv/dt = (u - v)/R` makes it; the deck
+/// contains no pole, no coefficient, and no sample rate, and would give the
+/// same waveform if nothing in the design were sampled at all.
+///
+/// The RNM side is `state <= state + (vin - state) * K` at the sample clock,
+/// with `K` a `parameter real` fixed at elaboration. It contains no
+/// differential equation and no time step; it advances once per rising edge and
+/// knows nothing about what happens between two of them.
+///
+/// # Why `K` is a derivation and not a fit
+///
+/// For an input held constant across a sample interval, the exact solution of
+/// the RC at the end of that interval is
+///
+/// ```text
+///   v(t + Ts) = u + (v(t) - u) * exp(-Ts / tau),   tau = R * C
+/// ```
+///
+/// which rearranges to exactly the update the RNM writes with
+/// `K = 1 - exp(-Ts / tau)`. So the discrete model is not an approximation of
+/// the pole at all — it is the pole's own step response evaluated at the sample
+/// instants, and the two representations would agree to the last bit in exact
+/// arithmetic. **There is therefore no discretisation-error term in the bound**,
+/// and that is a derivation rather than an omission: every term below is a cost
+/// of computing the continuous side numerically, not of abstracting it.
+///
+/// # The alignment that makes that true
+///
+/// `K` is exact only if the input is genuinely constant across each interval
+/// *between sample instants*, which is not the same interval a vector occupies.
+/// So the deck uses [`pwl_stepping_at_samples`]: level `k` holds over
+/// `(t_{k-1}, t_k]`, where `t_k` is the sample instant, and the RNM's clock edge
+/// at `t_k` reads vector `k`. Both sides therefore associate level `k` with the
+/// same interval.
+///
+/// `levels[0]` is held at zero for the reason [`ramp_integrator`]'s `e[0]` is:
+/// there is only half a period before the first sample, so the first interval
+/// is not `Ts` long and `K` is not its coefficient. Starting both sides at rest
+/// makes that interval a no-op instead of a special case.
+///
+/// # The bound, derived
+///
+/// Every term is a cost of integrating the analog side numerically, and each
+/// accumulates through the pole: an error made in one interval survives into
+/// the next scaled by `exp(-Ts/tau)`, so the geometric sum multiplies the
+/// per-interval cost by `1/K`. That factor is carried on each term rather than
+/// applied once, because it is part of what each term *is*.
+///
+/// * **Second-order truncation.** The default method is `TrapGear`, which is
+///   trapezoidal or Gear-2 as the step demands; both are second order, and
+///   Gear-2's local error constant `2/9` is the larger, so it is the one used.
+///   Over the `Ts/h` steps of one interval that is `(2/9) * Ts * h^2 / tau^3`
+///   relative, on an amplitude of at most full scale. Monotone in `h`, so the
+///   `max_step` *ceiling* bounds it whatever step the controller actually
+///   chooses.
+/// * **Order reduction at a breakpoint.** Each `PWL` corner is a discontinuity,
+///   and a multistep integrator has no history across one — the step after it
+///   is first order. One backward-Euler step of an exponential decay is short
+///   by `A * (h/tau)^2 / 2`, and there is at most one such step per interval.
+///   Carried whether or not the controller in fact reduces order, because a
+///   bound that assumed it did not would be assuming something about the
+///   controller rather than about the physics.
+/// * **`PWL` corners.** The transition ramps over `PWL_EDGE_S` instead of
+///   stepping, which delays the step by half an edge: `V * edge / (2 tau)`.
+/// * **Interpolation.** The sample instants are `PWL` corners and therefore
+///   accepted breakpoints, so in practice there is nothing to interpolate — but
+///   the harness would interpolate if they were not, and the cost of that is
+///   `h^2 |v''| / 8` with `|v''| <= V / tau^2`.
+/// * **`gmin`.** A `1e-15 S` shunt across a `3 kΩ` source perturbs the divider
+///   by `gmin * R` relative.
+/// * **Solver.** `RELTOL * full-scale + VNTOL`, the engine's own promise about
+///   any node voltage, and the largest term here as it is in every other block.
+pub fn rc_lowpass() -> RnmBlock {
+    // Held at zero for the first sample, then a full-scale step, a return, a
+    // half-scale hold, and two single-sample reversals at the end. The last of
+    // those is what a stateless RNM cannot survive: it would follow the input,
+    // and the pole cannot.
+    let levels = vec![
+        0.0, 5.0, 5.0, 5.0, 5.0, 0.0, 0.0, 0.0, 2.5, 2.5, 2.5, 2.5, 5.0, 0.0, 5.0, 0.0,
+    ];
+
+    let tau = RC_R * RC_C;
+    // The exact step-invariant coefficient, and the whole reason this block can
+    // be compared without a discretisation term.
+    let coefficient = 1.0 - (-SAMPLE_PERIOD_S / tau).exp();
+
+    let deck = format!(
+        "rc low-pass, first order\n\
+         VIN vin 0 PWL({schedule})\n\
+         RSER vin out {RC_R:?}\n\
+         CSHUNT out 0 {RC_C:?}\n\
+         .end\n",
+        schedule = pwl_stepping_at_samples(&levels),
+    );
+
+    let design = format!(
+        "\
+module rnm_rc_lowpass(clk, vin, vout);
+  parameter real K = {coefficient:?};
+  input clk;
+  input wreal vin;
+  output wreal vout;
+  real state;
+  always @(posedge clk) state <= state + (vin - state) * K;
+  assign vout = state;
+endmodule
+"
+    );
+
+    // The per-interval cost of every numerical term is paid again each interval
+    // and decays by `exp(-Ts/tau)` afterwards, so the run's worst case is the
+    // geometric sum of them.
+    let accumulation = 1.0 / coefficient;
+    let step = SAMPLE_PERIOD_S / STEPS_PER_SAMPLE;
+    let ratio = step / tau;
+    let bound = Bound::new(vec![
+        (
+            "second-order truncation, accumulated: V * (2/9) * Ts * h^2 / tau^3 / K",
+            RC_FULL_SCALE * (2.0 / 9.0) * SAMPLE_PERIOD_S * step * step / tau.powi(3)
+                * accumulation,
+        ),
+        (
+            "order reduction at each breakpoint, accumulated: V * (h / tau)^2 / 2 / K",
+            RC_FULL_SCALE * ratio * ratio / 2.0 * accumulation,
+        ),
+        (
+            "PWL corners, accumulated: V * edge / (2 tau) / K",
+            RC_FULL_SCALE * PWL_EDGE_S / (2.0 * tau) * accumulation,
+        ),
+        (
+            "interpolation: h^2 * (V / tau^2) / 8",
+            step * step * (RC_FULL_SCALE / (tau * tau)) / 8.0,
+        ),
+        (
+            "gmin shunt: gmin_target * R * V",
+            1e-15 * RC_R * RC_FULL_SCALE,
+        ),
+        Bound::solver(RC_FULL_SCALE),
+    ]);
+
+    RnmBlock {
+        name: "rc_lowpass",
+        models: "a first-order RC low-pass, abstracted as a discrete-time single-pole update",
+        why_both_are_honest: "the deck is a resistor and a capacitor and its waveform is an \
+             integration; the RNM is one line of arithmetic per sample whose coefficient is the \
+             pole's own step response, and neither computes the other",
+        deck,
+        design,
+        stimulus: real_input_stimulus("rnm_rc_lowpass", "vin", &["vout"], &levels, true),
+        pairs: vec![SignalPair {
+            analog_node: "out",
+            rnm_port: "vout",
+            carries: "the filtered output",
+            bound,
+        }],
+    }
+}
+
 /// Every reference block, in a fixed order.
 pub fn blocks() -> Vec<RnmBlock> {
     vec![
@@ -1203,5 +1380,6 @@ pub fn blocks() -> Vec<RnmBlock> {
         schmitt_hysteresis(),
         flash_quantizer(),
         ramp_integrator(),
+        rc_lowpass(),
     ]
 }

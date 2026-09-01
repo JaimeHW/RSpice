@@ -35,3 +35,4 @@
 
 wreal_forms.v	real nets end to end: a real port, real arithmetic, a DAC ladder driven by four-state conditions, a comparison to bits, and the section 3.7 value-change event
 wreal_resolution.v	the four resolved real-net spellings on identical driver pairs, and an undriven wreal reading zero per section 3.7
+real_state.v	real state across a clock edge: a module-level `real` filter written with `<=`, a process-local `real` accumulating across a suspension, a `parameter real` folded into the recurrence, an `output real` variable port, and the section 3.7 `$realtobits`/`$bitstoreal` round trip

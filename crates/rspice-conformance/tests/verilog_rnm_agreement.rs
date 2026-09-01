@@ -24,7 +24,7 @@ use rspice_conformance::suites::verilog::rnm::{self, RnmBlock};
 /// Pinned by name rather than counted, for the reason the sibling suites pin
 /// theirs: a count says the list changed size, and this says which mechanism
 /// stopped being covered.
-const REQUIRED_BLOCKS: [(&str, &str); 4] = [
+const REQUIRED_BLOCKS: [(&str, &str); 5] = [
     (
         "r2r_dac",
         "bits to real: binary-weighted superposition, ladder against closed form",
@@ -40,6 +40,11 @@ const REQUIRED_BLOCKS: [(&str, &str); 4] = [
     (
         "ramp_integrator",
         "accumulation: charge on a capacitor against a counted step",
+    ),
+    (
+        "rc_lowpass",
+        "real state: a continuous-time pole against a discrete-time single-pole \
+         update whose state is a module-level `real`",
     ),
 ];
 
