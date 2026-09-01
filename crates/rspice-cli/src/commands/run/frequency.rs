@@ -700,9 +700,9 @@ fn finish_ac_results(
 
     if !ctx.quiet {
         println!("AC Analysis: {} frequency points", results.len());
-        if ctx.verbose && !results.is_empty() {
-            let first = &results[0];
-            let last = results.last().unwrap();
+        if ctx.verbose
+            && let (Some(first), Some(last)) = (results.first(), results.last())
+        {
             let first_label = first
                 .node_names
                 .first()

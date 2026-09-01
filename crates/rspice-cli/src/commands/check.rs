@@ -419,11 +419,24 @@ fn check_connectivity(netlist: &Netlist, result: &mut ValidationResult) {
 
     for (node, count) in &node_connections {
         if *count == 1 {
-            let elements = node_elements.get(node).unwrap();
-            result.add_element_warning(
-                elements.first().unwrap_or(&String::new()),
-                format!("Node '{}' has only one connection", node),
-            );
+            if let Some(element) = node_elements
+                .get(node)
+                .and_then(|elements| elements.first())
+            {
+                result.add_element_warning(
+                    element,
+                    format!("Node '{}' has only one connection", node),
+                );
+            } else {
+                // Keep validation total even if a future adjacency producer
+                // changes independently from the connection counter.
+                result.warnings.push(ValidationIssue {
+                    message: format!("Node '{node}' has only one connection"),
+                    element: None,
+                    line: None,
+                    code: Some("TOPOLOGY_SINGLE_CONNECTION".to_string()),
+                });
+            }
         }
     }
 }

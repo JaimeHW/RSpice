@@ -308,7 +308,8 @@ fn resample_onto_golden(
         ));
     }
 
-    let (low, high) = (result_scale[0], *result_scale.last().expect("non-empty"));
+    let low = result_scale[0];
+    let high = result_scale[result_scale.len() - 1];
     let slack = (high - low).abs().max(1.0) * 1e-9;
     for &point in golden_scale {
         if point < low - slack || point > high + slack {
@@ -318,22 +319,27 @@ fn resample_onto_golden(
         }
     }
 
-    let interp_at = |series: &[f64], x: f64| -> f64 {
-        // Index of the first scale point >= x (the scale is sorted).
-        let upper = result_scale.partition_point(|&s| s < x);
-        if upper == 0 {
-            return series[0];
-        }
-        if upper >= result_scale.len() {
-            return *series.last().expect("non-empty");
-        }
-        let (x0, x1) = (result_scale[upper - 1], result_scale[upper]);
-        let (y0, y1) = (series[upper - 1], series[upper]);
-        if x1 == x0 {
-            return y0;
-        }
-        y0 + (y1 - y0) * (x - x0) / (x1 - x0)
-    };
+    let interp_at =
+        |series: &[f64], x: f64| -> Result<f64, CliError> {
+            // Index of the first scale point >= x (the scale is sorted).
+            let upper = result_scale.partition_point(|&s| s < x);
+            if upper == 0 {
+                return series.first().copied().ok_or_else(|| {
+                    invalid("result series is empty; cannot interpolate".to_string())
+                });
+            }
+            if upper >= result_scale.len() {
+                return series.last().copied().ok_or_else(|| {
+                    invalid("result series is empty; cannot interpolate".to_string())
+                });
+            }
+            let (x0, x1) = (result_scale[upper - 1], result_scale[upper]);
+            let (y0, y1) = (series[upper - 1], series[upper]);
+            if x1 == x0 {
+                return Ok(y0);
+            }
+            Ok(y0 + (y1 - y0) * (x - x0) / (x1 - x0))
+        };
 
     let mut values = Vec::with_capacity(result.values.len());
     values.push(golden_scale.clone());
@@ -343,7 +349,12 @@ fn resample_onto_golden(
                 "result series lengths disagree with its scale; cannot interpolate".to_string(),
             ));
         }
-        values.push(golden_scale.iter().map(|&x| interp_at(series, x)).collect());
+        values.push(
+            golden_scale
+                .iter()
+                .map(|&x| interp_at(series, x))
+                .collect::<Result<Vec<_>, _>>()?,
+        );
     }
 
     Ok(WaveformData {

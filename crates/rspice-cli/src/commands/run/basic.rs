@@ -492,11 +492,12 @@ pub(super) fn run_transient(
         // The engine reports its completed fraction at the abort-poll
         // cadence, so this is a real percentage, not a spinner.
         let pb = indicatif::ProgressBar::new(crate::abort::ProgressAbort::SCALE);
-        pb.set_style(
-            indicatif::ProgressStyle::default_bar()
-                .template("{bar:30.green} {percent:>3}% [{elapsed_precise}] {msg}")
-                .unwrap(),
-        );
+        let style = indicatif::ProgressStyle::default_bar()
+            .template("{bar:30.green} {percent:>3}% [{elapsed_precise}] {msg}")
+            .map_err(|error| CliError::InternalError {
+                message: format!("invalid built-in transient progress template: {error}"),
+            })?;
+        pb.set_style(style);
         pb.set_message(format!(
             "Transient: {} to {} s (step {})",
             tstart, tstop, tstep
@@ -505,11 +506,12 @@ pub(super) fn run_transient(
         pb
     } else {
         let pb = indicatif::ProgressBar::new_spinner();
-        pb.set_style(
-            indicatif::ProgressStyle::default_spinner()
-                .template("{spinner:.green} {msg}")
-                .unwrap(),
-        );
+        let style = indicatif::ProgressStyle::default_spinner()
+            .template("{spinner:.green} {msg}")
+            .map_err(|error| CliError::InternalError {
+                message: format!("invalid built-in transient spinner template: {error}"),
+            })?;
+        pb.set_style(style);
         pb.set_message(format!(
             "Running transient: {} to {} (step {})...",
             tstart, tstop, tstep

@@ -207,11 +207,12 @@ pub(super) fn run_monte_carlo(
         // The engine runs all iterations in one call without progress
         // callbacks; show honest elapsed time instead of a frozen bar.
         let pb = indicatif::ProgressBar::new_spinner();
-        pb.set_style(
-            indicatif::ProgressStyle::default_spinner()
-                .template("{spinner:.green} [{elapsed_precise}] {msg}")
-                .unwrap(),
-        );
+        let style = indicatif::ProgressStyle::default_spinner()
+            .template("{spinner:.green} [{elapsed_precise}] {msg}")
+            .map_err(|error| CliError::InternalError {
+                message: format!("invalid built-in Monte Carlo progress template: {error}"),
+            })?;
+        pb.set_style(style);
         pb.set_message(format!("Monte Carlo: {} runs (seed {})", num_runs, seed));
         pb.enable_steady_tick(std::time::Duration::from_millis(100));
         pb

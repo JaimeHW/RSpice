@@ -610,7 +610,11 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
                         .reports
                         .iter()
                         .find(|report| !report.passed)
-                        .expect("failed aggregate has a failed report");
+                        .ok_or_else(|| CliError::InternalError {
+                            message: format!(
+                                "multi-run aggregate for '{label}' reported failure without a failed child report"
+                            ),
+                        })?;
                     println!("  ✗ {label}: {}", status_failure_summary(failure));
                 }
             }
@@ -2458,13 +2462,19 @@ fn load_netlist_from_source(
             // The netlist parser falls back to a bare vector name for
             // anything unrecognized; a spec with parentheses that didn't
             // parse as V(...)/I(...) is a typo, not a vector name.
-            let parsed = rspice_core::netlist::parse_save_probe(spec);
+            let parsed = rspice_core::netlist::parse_save_probe(spec).ok_or_else(|| {
+                CliError::InvalidArgument {
+                    message: format!("invalid --save probe '{spec}'"),
+                    suggestion: Some(
+                        "use forms like V(out), V(a,b), I(v1), @m1[id], or all".to_string(),
+                    ),
+                }
+            })?;
             let malformed = match &parsed {
-                None => true,
-                Some(rspice_core::netlist::SaveSignal::Raw(_)) => {
+                rspice_core::netlist::SaveSignal::Raw(_) => {
                     spec.contains('(') || spec.contains(')')
                 }
-                Some(_) => false,
+                _ => false,
             };
             if malformed {
                 return Err(CliError::InvalidArgument {
@@ -2474,7 +2484,7 @@ fn load_netlist_from_source(
                     ),
                 });
             }
-            saves.signals.push(parsed.expect("checked above"));
+            saves.signals.push(parsed);
             override_requests.push(rspice_core::netlist::OutputRequest::from_save_override(
                 rspice_core::netlist::NetlistSourceLocation::in_file(
                     "<command line --save>",
