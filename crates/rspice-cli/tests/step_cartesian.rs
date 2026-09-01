@@ -78,6 +78,69 @@ fn complex_csv_magnitude_at(csv: &str, name: &str, frequency: f64) -> f64 {
     real.hypot(imaginary)
 }
 
+fn assert_conditional_implicit_step_topology_fails_closed(tag: &str, values: &str) {
+    let dir = test_dir(tag);
+    let deck = dir.join("conditional_topology.sp");
+    let output_path = dir.join("conditional_topology.csv");
+    std::fs::write(
+        &deck,
+        format!(
+            "* Conditional topology must not inherit the first coordinate schema\n\
+             .param mode=0\n\
+             V1 in 0 1\n\
+             R1 in out 1k\n\
+             .if (mode==1)\n\
+             R2 out extra 1k\n\
+             R3 extra 0 1k\n\
+             .else\n\
+             R4 out 0 1k\n\
+             .endif\n\
+             .step param mode list {values}\n\
+             .end\n"
+        ),
+    )
+    .expect("write conditional-topology deck");
+
+    let run = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "-o",
+        output_path.to_str().unwrap(),
+        "-f",
+        "csv",
+    ]);
+    assert!(
+        !run.status.success(),
+        "conditional topology must fail until coordinate-local schemas are exported; stdout: {}; stderr: {}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_ne!(
+        run.status.code(),
+        Some(101),
+        "authored topology must never cause a Rust panic: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains("result schema changes") && stderr.contains("V(extra)"),
+        "schema diagnostic must identify the conditional signal: {stderr}"
+    );
+    assert!(
+        !output_path.exists(),
+        "a rejected aggregation must not publish an output"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn conditional_implicit_step_topology_fails_closed_in_both_coordinate_orders() {
+    assert_conditional_implicit_step_topology_fails_closed("topology_forward", "0 1");
+    assert_conditional_implicit_step_topology_fails_closed("topology_reverse", "1 0");
+}
+
 #[test]
 fn two_step_dimensions_wrap_the_complete_dc_sweep_in_xyce_order() {
     let dir = test_dir("dc");

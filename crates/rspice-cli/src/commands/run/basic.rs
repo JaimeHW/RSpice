@@ -9,8 +9,7 @@ use super::RunContext;
 use super::shared::{NodeResolver, map_hdf5_output_error};
 use crate::cli::{CliError, OutputFormat};
 use crate::commands::run_signals::{
-    dc_export_signals, dc_operating_point_current_signals, dc_operating_point_signals,
-    dc_operating_point_voltage_signals, transient_export_signals,
+    SignalKind, checked_dc_operating_point_signals, dc_export_signals, transient_export_signals,
 };
 use crate::hdf5::{Hdf5SimulationData, Hdf5WaveformSection, write_hdf5};
 use std::borrow::Cow;
@@ -41,6 +40,8 @@ pub(super) fn run_dc_op(ctx: &RunContext<'_>) -> Result<(), CliError> {
         .run_dc_op_with_report_and_abort(ctx.netlist, &crate::abort::ProcessAbort)
     {
         Ok((result, op_report)) => {
+            let operating_point_signals = checked_dc_operating_point_signals(&result)
+                .map_err(|error| map_output_projection_error(ctx, error, "DC OP"))?;
             super::shared::ensure_finite_series(
                 ctx.args.allow_nonfinite,
                 "DC OP",
@@ -70,8 +71,14 @@ pub(super) fn run_dc_op(ctx: &RunContext<'_>) -> Result<(), CliError> {
             )?;
 
             if !ctx.quiet {
-                let voltage_signals = dc_operating_point_voltage_signals(&result);
-                let current_signals = dc_operating_point_current_signals(&result);
+                let voltage_signals = operating_point_signals
+                    .iter()
+                    .filter(|signal| signal.kind == SignalKind::Voltage)
+                    .collect::<Vec<_>>();
+                let current_signals = operating_point_signals
+                    .iter()
+                    .filter(|signal| signal.kind == SignalKind::Current)
+                    .collect::<Vec<_>>();
                 println!("DC Operating Point:");
                 for signal in voltage_signals.iter().take(10) {
                     println!("  {} = {:.6} V", signal.display_name, signal.values[0]);
@@ -90,7 +97,12 @@ pub(super) fn run_dc_op(ctx: &RunContext<'_>) -> Result<(), CliError> {
             }
 
             if let Some(ref output_path) = ctx.output_path_for("op") {
-                write_dc_op_output(output_path, &result, ctx.format, &ctx.netlist.saves)?;
+                write_dc_op_output(
+                    output_path,
+                    &operating_point_signals,
+                    ctx.format,
+                    &ctx.netlist.saves,
+                )?;
                 if !ctx.quiet {
                     println!("Results exported to: {}", output_path.display());
                 }
@@ -181,14 +193,14 @@ fn print_device_op_report(report: &rspice_core::circuit::DeviceOpReport, verbose
 
 fn write_dc_op_output(
     path: &Path,
-    result: &rspice_core::solver::SimulationResult,
+    operating_point_signals: &[crate::commands::run_signals::ScalarSignal],
     format: OutputFormat,
     saves: &rspice_core::netlist::SaveSet,
 ) -> Result<(), CliError> {
     use std::io::Write;
 
     let signals =
-        crate::commands::run_signals::apply_save_set(dc_operating_point_signals(result), saves);
+        crate::commands::run_signals::apply_save_set(operating_point_signals.to_vec(), saves);
 
     if matches!(format, OutputFormat::Hdf5) {
         let mut data = Hdf5SimulationData::new();

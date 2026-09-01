@@ -262,7 +262,10 @@ fn finish_ac_results(
 
     if let Some(ref output_path) = ctx.output_path_for("ac") {
         let signals = crate::commands::run_signals::apply_save_set_complex(
-            ac_signals(&results),
+            ac_signals(&results).map_err(|source| CliError::CoreSimulationError {
+                source,
+                analysis: Some("AC output projection".to_string()),
+            })?,
             &ctx.netlist.saves,
         );
         let frequencies: Vec<f64> = results.iter().map(|result| result.frequency).collect();

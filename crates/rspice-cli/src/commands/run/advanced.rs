@@ -82,7 +82,12 @@ pub(super) fn export_step_sweep(
 
     let sweep_vals: Vec<f64> = sweep_results.iter().map(|(v, _)| *v).collect();
     let signals = crate::commands::run_signals::apply_save_set(
-        crate::commands::run_signals::dc_sweep_voltage_signals(sweep_results),
+        crate::commands::run_signals::dc_sweep_voltage_signals(sweep_results).map_err(
+            |source| CliError::CoreSimulationError {
+                source,
+                analysis: Some("Step output projection".to_string()),
+            },
+        )?,
         &ctx.netlist.saves,
     );
 
