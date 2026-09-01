@@ -66,12 +66,38 @@ impl<'a> Parser<'a> {
                 items.push(Item::DefaultTransition(
                     self.parse_default_transition_directive()?,
                 ));
+            } else if self.check_identifier_text("__rspice_default_discipline") {
+                if !attributes.is_empty() {
+                    return Err(self.error(ParseErrorKind::UnexpectedToken(
+                        "attributes before `default_discipline`".to_string(),
+                    )));
+                }
+                items.push(Item::DefaultDiscipline(
+                    self.parse_default_discipline_directive()?,
+                ));
             } else if self.check(TokenKind::Module) || self.check(TokenKind::Macromodule) {
                 let mut module = self.parse_module()?;
                 let mut combined_attributes = attributes;
                 combined_attributes.append(&mut module.attributes);
                 module.attributes = combined_attributes;
                 items.push(Item::Module(module));
+            } else if self.check(TokenKind::Connectmodule) {
+                // Verilog-AMS LRM 2.4 Syntax 7-4 makes `connectmodule` a third
+                // `module_keyword`, so the body and the `endmodule` terminator
+                // are a module's. Nothing here is specific to the connect
+                // module beyond which `Item` it lands in.
+                let mut module = self.parse_module()?;
+                let mut combined_attributes = attributes;
+                combined_attributes.append(&mut module.attributes);
+                module.attributes = combined_attributes;
+                items.push(Item::ConnectModule(module));
+            } else if self.check(TokenKind::Connectrules) {
+                if !attributes.is_empty() {
+                    return Err(self.error(ParseErrorKind::UnexpectedToken(
+                        "attributes before `connectrules`".to_string(),
+                    )));
+                }
+                items.push(Item::ConnectRules(self.parse_connect_rules()?));
             } else if self.check(TokenKind::Discipline) {
                 items.push(Item::Discipline(self.parse_discipline()?));
             } else if self.check(TokenKind::Nature) {
@@ -113,6 +139,211 @@ impl<'a> Parser<'a> {
             value,
             span: start.extend(self.previous_span()),
         })
+    }
+
+    fn parse_default_discipline_directive(
+        &mut self,
+    ) -> Result<DefaultDisciplineDirective, ParseError> {
+        let start = self.current_span();
+        self.advance();
+        self.expect(TokenKind::LParen)?;
+        let discipline = if self.check(TokenKind::RParen) {
+            None
+        } else {
+            Some(self.expect_discipline_name("default discipline")?)
+        };
+        self.expect(TokenKind::RParen)?;
+        self.expect(TokenKind::Semicolon)?;
+        Ok(DefaultDisciplineDirective {
+            discipline,
+            span: start.extend(self.previous_span()),
+        })
+    }
+
+    /// Parse a `connectrules` … `endconnectrules` block.
+    ///
+    /// Verilog-AMS LRM 2.4 Syntax 7-5 and grammar A.1.8.
+    fn parse_connect_rules(&mut self) -> Result<ConnectRulesDecl, ParseError> {
+        let start = self.current_span();
+        self.advance(); // `connectrules`
+        let name = self.expect_identifier("connectrules name")?;
+        self.expect(TokenKind::Semicolon)?;
+
+        let mut items = Vec::new();
+        while !self.check(TokenKind::Endconnectrules) && !self.at_end() {
+            if !self.check(TokenKind::Connect) {
+                return Err(self.error(ParseErrorKind::UnexpectedToken(format!(
+                    "{:?} in a connectrules block, which holds `connect` statements only",
+                    self.current().kind
+                ))));
+            }
+            items.push(if self.connect_statement_is_resolution() {
+                ConnectRulesItem::Resolution(self.parse_connect_resolution()?)
+            } else {
+                ConnectRulesItem::Insertion(self.parse_connect_insertion()?)
+            });
+        }
+        self.expect(TokenKind::Endconnectrules)?;
+
+        Ok(ConnectRulesDecl {
+            name: name.into(),
+            items,
+            span: start.extend(self.previous_span()),
+        })
+    }
+
+    /// Which of Syntax 7-5's two `connectrules_item` forms the statement under
+    /// the cursor is.
+    ///
+    /// Both open with `connect` followed by an identifier, so the forms cannot
+    /// be told apart from a single token of lookahead — `connect d2a merged …`
+    /// and `connect cmos3, cmos4 resolveto …` agree for two tokens. The
+    /// keyword that distinguishes them is `resolveto`, and it always precedes
+    /// the statement's `;`, so scanning to the first of the two settles it
+    /// without backtracking.
+    fn connect_statement_is_resolution(&self) -> bool {
+        let mut pos = self.pos;
+        while let Some(token) = self.tokens.get(pos) {
+            match token.kind {
+                TokenKind::Resolveto => return true,
+                TokenKind::Semicolon | TokenKind::Eof => return false,
+                _ => pos += 1,
+            }
+        }
+        false
+    }
+
+    /// Syntax 7-6's `connect_insertion`.
+    fn parse_connect_insertion(&mut self) -> Result<ConnectInsertion, ParseError> {
+        let start = self.current_span();
+        self.advance(); // `connect`
+        let connect_module = self.expect_identifier("connect module name")?;
+
+        let mode = match self.current().kind {
+            TokenKind::Merged => {
+                self.advance();
+                Some(ConnectMode::Merged)
+            }
+            TokenKind::Split => {
+                self.advance();
+                Some(ConnectMode::Split)
+            }
+            _ => None,
+        };
+
+        // Section 7.7.3's parameter passing attribute, which is spelled as an
+        // instance's `parameter_value_assignment` and parses as one.
+        let parameters = if self.match_token(TokenKind::Hash) {
+            self.parse_instance_parameter_overrides()?
+        } else {
+            Vec::new()
+        };
+
+        let port_overrides = if self.check(TokenKind::Semicolon) {
+            None
+        } else {
+            let first = self.parse_connect_port_override()?;
+            self.expect(TokenKind::Comma)?;
+            let second = self.parse_connect_port_override()?;
+            if first.direction.is_some() != second.direction.is_some() {
+                return Err(self.error(ParseErrorKind::UnsupportedConstruct {
+                    context: "connect port overrides".to_string(),
+                    found: "one directed and one undirected discipline; Verilog-AMS LRM 2.4 \
+                            Syntax 7-6 admits either two bare disciplines or two directed ones, \
+                            never a mixture"
+                        .to_string(),
+                }));
+            }
+            Some(ConnectPortOverrides { first, second })
+        };
+        self.expect(TokenKind::Semicolon)?;
+
+        Ok(ConnectInsertion {
+            connect_module: connect_module.into(),
+            mode,
+            parameters,
+            port_overrides,
+            span: start.extend(self.previous_span()),
+        })
+    }
+
+    fn parse_connect_port_override(&mut self) -> Result<ConnectPortOverride, ParseError> {
+        let start = self.current_span();
+        let direction = match self.current().kind {
+            TokenKind::Input => {
+                self.advance();
+                Some(PortDirection::Input)
+            }
+            TokenKind::Output => {
+                self.advance();
+                Some(PortDirection::Output)
+            }
+            TokenKind::Inout => {
+                self.advance();
+                Some(PortDirection::Inout)
+            }
+            _ => None,
+        };
+        let discipline = self.expect_discipline_name("connect port discipline")?;
+        Ok(ConnectPortOverride {
+            direction,
+            discipline,
+            span: start.extend(self.previous_span()),
+        })
+    }
+
+    /// Syntax 7-7's `connect_resolution`.
+    fn parse_connect_resolution(&mut self) -> Result<ConnectResolution, ParseError> {
+        let start = self.current_span();
+        self.advance(); // `connect`
+
+        let mut disciplines = vec![self.expect_discipline_name("resolved discipline")?];
+        while !self.check(TokenKind::Resolveto) {
+            // A.1.8 separates the list with commas. Figures 7-2 through 7-5
+            // write the same lists with spaces, so the separator is accepted as
+            // optional rather than reading the standard's own examples as
+            // errors.
+            self.match_token(TokenKind::Comma);
+            if self.check(TokenKind::Resolveto) {
+                break;
+            }
+            disciplines.push(self.expect_discipline_name("resolved discipline")?);
+        }
+        self.expect(TokenKind::Resolveto)?;
+
+        let target = if self.match_token(TokenKind::Exclude) {
+            ConnectResolveTarget::Exclude
+        } else {
+            ConnectResolveTarget::Discipline(self.expect_discipline_name("resolution target")?)
+        };
+        self.expect(TokenKind::Semicolon)?;
+
+        Ok(ConnectResolution {
+            disciplines,
+            target,
+            span: start.extend(self.previous_span()),
+        })
+    }
+
+    /// A discipline name in a connect statement.
+    ///
+    /// `electrical`, `voltage`, and `current` have token kinds of their own
+    /// because a net declaration begins with them, so a bare
+    /// `expect_identifier` would refuse the one discipline every connect rule
+    /// in practice names.
+    fn expect_discipline_name(&mut self, context: &str) -> Result<SmolStr, ParseError> {
+        match self.current().kind {
+            TokenKind::Electrical | TokenKind::Voltage | TokenKind::Current => {
+                let text = self
+                    .current()
+                    .text
+                    .clone()
+                    .unwrap_or_else(|| format!("{:?}", self.current().kind).to_lowercase());
+                self.advance();
+                Ok(text.into())
+            }
+            _ => Ok(self.expect_identifier(context)?.into()),
+        }
     }
 
     /// Parse a module definition

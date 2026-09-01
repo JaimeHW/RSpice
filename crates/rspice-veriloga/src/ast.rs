@@ -27,6 +27,9 @@ pub enum Item {
     /// preprocessor retains it as a typed top-level item so
     /// declaration-order scope is not lost before semantic analysis.
     DefaultTransition(DefaultTransitionDirective),
+    /// Global Verilog-AMS default-discipline compiler directive, retained the
+    /// same way and for the same reason.
+    DefaultDiscipline(DefaultDisciplineDirective),
     /// Module definition
     Module(Module),
     /// Discipline definition
@@ -35,14 +38,122 @@ pub enum Item {
     Nature(NatureDef),
     /// Connectmodule definition (Verilog-AMS)
     ConnectModule(Module),
+    /// Connect specification block (Verilog-AMS LRM 2.4 section 7.7).
+    ConnectRules(ConnectRulesDecl),
     /// Paramset definition
     ParamSet(ParamSetDef),
+}
+
+/// One `connectrules` … `endconnectrules` block.
+///
+/// Verilog-AMS LRM 2.4 Syntax 7-5 (`connectrules_declaration`, from A.1.8).
+/// The block is a *specification*: it names which of the declared connect
+/// modules the elaborator may auto-insert, and how otherwise-compatible
+/// disciplines resolve against one another. It declares no behaviour of its
+/// own.
+#[derive(Debug, Clone)]
+pub struct ConnectRulesDecl {
+    /// The `connectrules_identifier` the block is named by.
+    pub name: SmolStr,
+    /// Items in source order, which is the order section 7.7.2.1's
+    /// "first match wins" rule reads them in.
+    pub items: Vec<ConnectRulesItem>,
+    pub span: Span,
+}
+
+/// Syntax 7-5's `connectrules_item`.
+#[derive(Debug, Clone)]
+pub enum ConnectRulesItem {
+    /// Syntax 7-6's `connect_insertion`.
+    Insertion(ConnectInsertion),
+    /// Syntax 7-7's `connect_resolution`.
+    Resolution(ConnectResolution),
+}
+
+/// `connect <cm> [merged|split] [#(...)] [<port overrides>] ;`
+///
+/// Verilog-AMS LRM 2.4 Syntax 7-6.
+#[derive(Debug, Clone)]
+pub struct ConnectInsertion {
+    /// The `connectmodule_identifier` this statement designates.
+    pub connect_module: SmolStr,
+    /// `None` is section 7.8.3's default, which is [`ConnectMode::Merged`].
+    /// Retained as written so a reader of the AST can tell a default from a
+    /// spelled-out `merged`.
+    pub mode: Option<ConnectMode>,
+    /// Section 7.7.3's parameter passing attribute.
+    pub parameters: Vec<ParameterOverride>,
+    /// Section 7.7.1's `connect_port_overrides`, when written.
+    pub port_overrides: Option<ConnectPortOverrides>,
+    pub span: Span,
+}
+
+/// Syntax 7-6's `connect_mode`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectMode {
+    /// One connect module for all the ports a rule applies to (section 7.8.3.1).
+    Merged,
+    /// One connect module per port (section 7.8.3.2).
+    Split,
+}
+
+/// Syntax 7-6's `connect_port_overrides`.
+///
+/// The grammar admits the bare `discipline , discipline` form as well as the
+/// three directed forms; both are held here, with `direction: None` for the
+/// bare form so the connect module's own port directions stand.
+#[derive(Debug, Clone)]
+pub struct ConnectPortOverrides {
+    pub first: ConnectPortOverride,
+    pub second: ConnectPortOverride,
+}
+
+/// One side of a [`ConnectPortOverrides`].
+#[derive(Debug, Clone)]
+pub struct ConnectPortOverride {
+    /// `None` is the undirected form.
+    pub direction: Option<PortDirection>,
+    pub discipline: SmolStr,
+    pub span: Span,
+}
+
+/// `connect <d> {, <d>} resolveto <d>|exclude ;`
+///
+/// Verilog-AMS LRM 2.4 Syntax 7-7.
+#[derive(Debug, Clone)]
+pub struct ConnectResolution {
+    /// The `discipline_list` before `resolveto`.
+    pub disciplines: Vec<SmolStr>,
+    pub target: ConnectResolveTarget,
+    pub span: Span,
+}
+
+/// Syntax 7-7's `discipline_identifier_or_exclude`.
+#[derive(Debug, Clone)]
+pub enum ConnectResolveTarget {
+    /// The discipline the list resolves to. Section 7.7.2.1: it "need not be
+    /// one of the disciplines specified in the discipline list".
+    Discipline(SmolStr),
+    /// `exclude`: the listed disciplines are declared incompatible, and
+    /// finding them on one net is an error.
+    Exclude,
 }
 
 /// One global default-transition directive.
 #[derive(Debug, Clone)]
 pub struct DefaultTransitionDirective {
     pub value: Expression,
+    pub span: Span,
+}
+
+/// One `` `default_discipline `` directive (Verilog-AMS LRM 2.4 section 10.2).
+#[derive(Debug, Clone)]
+pub struct DefaultDisciplineDirective {
+    /// `None` is the reset form: "if this directive is used without a
+    /// discipline name, discipline resolution will not use a default
+    /// discipline for nets declared after this directive is encountered in
+    /// the text stream".
+    pub discipline: Option<SmolStr>,
     pub span: Span,
 }
 

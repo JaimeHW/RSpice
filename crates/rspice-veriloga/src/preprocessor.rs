@@ -971,6 +971,41 @@ impl Preprocessor {
                         }
                         output.push_source("\n", &current_path, line_num + 1);
                     }
+                    "default_discipline" => {
+                        // Verilog-AMS LRM 2.4 section 10.2. Retained as a
+                        // synthetic statement for the same reason
+                        // `default_transition` is: section 10.2 scopes the
+                        // directive to "the text stream following" it, and a
+                        // preprocessor that consumed it would lose the
+                        // position that scope is measured from.
+                        //
+                        // Syntax 10-1's `qualifier` — `` `default_discipline d
+                        // reg `` — is refused rather than dropped. It selects a
+                        // default per net *type*, and reading it as the
+                        // unqualified form would give every net a default the
+                        // author asked only `reg` to have.
+                        if include_line {
+                            let operand = self.expand_macros_at(
+                                rest.trim(),
+                                line_num + 1,
+                                provider.limits().max_expanded_bytes,
+                            )?;
+                            let operand = operand.trim();
+                            if operand.split_whitespace().count() > 1 {
+                                return Err(PreprocessorError::new(
+                                    "`default_discipline` with a net-type qualifier is not \
+                                     supported; Verilog-AMS LRM 2.4 Syntax 10-1 makes the \
+                                     qualifier select a default per net type and this compiler \
+                                     applies one default per text stream",
+                                    self.current_file.clone(),
+                                    line_num + 1,
+                                ));
+                            }
+                            let retained = format!("__rspice_default_discipline ({operand});");
+                            output.push_source(&retained, &current_path, line_num + 1);
+                        }
+                        output.push_source("\n", &current_path, line_num + 1);
+                    }
                     _ => unreachable!("is_known_directive() filtered the directive set"),
                 }
             } else if include_line {
@@ -1057,6 +1092,7 @@ impl Preprocessor {
                 | "elsif"
                 | "endif"
                 | "default_transition"
+                | "default_discipline"
         )
     }
 

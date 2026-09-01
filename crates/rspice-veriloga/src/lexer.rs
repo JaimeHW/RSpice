@@ -74,6 +74,21 @@ pub enum TokenKind {
     Endmodule,
     Connectmodule,
 
+    // === Keywords - Connect rules (Verilog-AMS section 7.7) ===
+    /// `connectrules`, opening a connect specification block.
+    Connectrules,
+    /// `endconnectrules`.
+    Endconnectrules,
+    /// `connect`, opening either form of connect specification statement.
+    Connect,
+    /// `resolveto`, which makes a `connect` statement the resolution form
+    /// rather than the auto-insertion form.
+    Resolveto,
+    /// `merged`, one of the two `connect_mode` spellings.
+    Merged,
+    /// `split`, the other.
+    Split,
+
     // === Keywords - Ports ===
     Input,
     Output,
@@ -312,6 +327,17 @@ impl TokenKind {
             "endmodule" => TokenKind::Endmodule,
             "connectmodule" => TokenKind::Connectmodule,
 
+            // Connect rules. All six are reserved words in Verilog-AMS LRM 2.4
+            // Annex B, and Annex C.16 lists them among the keywords Verilog-A
+            // does not use — which is why none of them was reserved before the
+            // grammar that needs them existed.
+            "connectrules" => TokenKind::Connectrules,
+            "endconnectrules" => TokenKind::Endconnectrules,
+            "connect" => TokenKind::Connect,
+            "resolveto" => TokenKind::Resolveto,
+            "merged" => TokenKind::Merged,
+            "split" => TokenKind::Split,
+
             // Ports
             "input" => TokenKind::Input,
             "output" => TokenKind::Output,
@@ -466,6 +492,12 @@ impl TokenKind {
                 | TokenKind::Macromodule
                 | TokenKind::Endmodule
                 | TokenKind::Connectmodule
+                | TokenKind::Connectrules
+                | TokenKind::Endconnectrules
+                | TokenKind::Connect
+                | TokenKind::Resolveto
+                | TokenKind::Merged
+                | TokenKind::Split
                 | TokenKind::Input
                 | TokenKind::Output
                 | TokenKind::Inout

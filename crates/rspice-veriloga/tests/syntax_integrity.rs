@@ -202,12 +202,12 @@ fn verilog_ams_digital_constructs_are_refused_by_name() {
         );
     }
 
-    // File-scope items.
+    // File-scope items. `connectmodule` used to be here and is not any more:
+    // Verilog-AMS LRM 2.4 Syntax 7-4 makes it a `module_keyword` and the
+    // parser now reads one, so its refusal moved to the connect specification
+    // machinery, where a module that does not bridge two domains is named for
+    // what is wrong with it rather than for its keyword.
     for (keyword, source) in [
-        (
-            "connectmodule",
-            "connectmodule l2e(l, e);\n    input l;\n    output e;\nendconnectmodule\n",
-        ),
         (
             "primitive",
             "primitive latch(q, clk, d);\n    output q;\nendprimitive\n",
