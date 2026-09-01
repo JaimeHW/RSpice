@@ -2528,32 +2528,30 @@ impl ModelPlan {
             }
             let _ = writeln!(out, "use super::stamp::{{{}}};", imports.join(", "));
         }
-        // Emitted only where the body reaches something in it: on a model whose
-        // magnitudes are plain arithmetic it would be an unused import. Two
-        // things reach it, and the second is what the corpus
-        // found — a resolved `ddx` is a lane read, so a magnitude using one
-        // needs the packed-value support `stamp.rs` imports, *and* the clamped
-        // exponentials are functions in here rather than method calls, so a
-        // magnitude with a diode in it needs the helpers with no packed value
-        // anywhere. Twenty of the corpus models are the second case.
-        let uses_unary = |target| {
-            function
-                .values
-                .iter()
-                .any(|value| matches!(value.kind, CfgValueKind::Unary { op, .. } if op == target))
-        };
+        let (body, values) = emit_body(function, &noise.outputs, &self.emit_bindings())
+            .map_err(|error| unsupported(artifact, format!("noise body: {error}")))?;
+        let grouped_noise = super::noise::grouped_noise_extension(artifact, options)?;
+        // Import from both emitted evaluators, not only from the compact
+        // source-wise noise slice's CFG value kinds. The coherent-process
+        // extension is emitted from its own differentiated replay plan; the
+        // three HiSIM-HV extensions exposed that boundary by calling the
+        // bounded-exponential derivative without importing it. Looking at the
+        // completed bodies is exact (so no unused imports) and remains closed
+        // over future emitter rewrites.
+        let uses_math_helper =
+            |helper: &str| body.contains(helper) || grouped_noise.contains(helper);
         let mut math_support = Vec::new();
         if !shared_stages.is_empty() {
             math_support.push("install_generated_stage_values".to_string());
         }
         math_support.extend(lane_runtime_types(function));
-        if uses_unary(CfgUnaryOp::LimExp) {
+        if uses_math_helper("rspice_limexp(") {
             math_support.push("rspice_limexp".to_string());
         }
-        if uses_unary(CfgUnaryOp::LimitedExp) {
+        if uses_math_helper("rspice_limited_exp(") {
             math_support.push("rspice_limited_exp".to_string());
         }
-        if uses_unary(CfgUnaryOp::LimitedExpDerivative) {
+        if uses_math_helper("rspice_limited_exp_derivative(") {
             math_support.push("rspice_limited_exp_derivative".to_string());
         }
         if !math_support.is_empty() {
@@ -2599,8 +2597,6 @@ impl ModelPlan {
                 );
             }
         }
-        let (body, values) = emit_body(function, &noise.outputs, &self.emit_bindings())
-            .map_err(|error| unsupported(artifact, format!("noise body: {error}")))?;
         self.emit_noise_prologue(artifact, function, &mut out);
         out.push_str(&indent(&body, 2));
 
@@ -2711,7 +2707,7 @@ impl ModelPlan {
             );
         }
         out.push_str("        Ok(())\n    }\n}\n");
-        out.push_str(&super::noise::grouped_noise_extension(artifact, options)?);
+        out.push_str(&grouped_noise);
 
         Ok(GeneratedRustFile {
             relative_path: "noise.rs".to_string(),
