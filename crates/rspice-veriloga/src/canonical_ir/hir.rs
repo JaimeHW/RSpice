@@ -151,6 +151,62 @@ pub enum HirZiKind {
     },
 }
 
+impl HirLaplaceKind {
+    /// The numerator-then-denominator operand lists, whichever of the four
+    /// spellings wrote them.
+    ///
+    /// Every consumer of a filter kind wants the same two lists and differs
+    /// only in what it does with them, so the four-way match lives here rather
+    /// than once per consumer. Which of the two is a root list is
+    /// [`Self::names_roots`]'s question.
+    pub fn polynomials(&self) -> (&[ExprId], &[ExprId]) {
+        match self {
+            Self::ZeroPole { zeros, poles } => (zeros, poles),
+            Self::ZeroDenominator { zeros, denominator } => (zeros, denominator),
+            Self::NumeratorPole { numerator, poles } => (numerator, poles),
+            Self::NumeratorDenominator {
+                numerator,
+                denominator,
+            } => (numerator, denominator),
+        }
+    }
+
+    /// Whether the numerator and the denominator are named by their roots.
+    pub fn names_roots(&self) -> (bool, bool) {
+        match self {
+            Self::ZeroPole { .. } => (true, true),
+            Self::ZeroDenominator { .. } => (true, false),
+            Self::NumeratorPole { .. } => (false, true),
+            Self::NumeratorDenominator { .. } => (false, false),
+        }
+    }
+}
+
+impl HirZiKind {
+    /// The sampled-filter counterpart of [`HirLaplaceKind::polynomials`].
+    pub fn polynomials(&self) -> (&[ExprId], &[ExprId]) {
+        match self {
+            Self::ZeroPole { zeros, poles } => (zeros, poles),
+            Self::ZeroDenominator { zeros, denominator } => (zeros, denominator),
+            Self::NumeratorPole { numerator, poles } => (numerator, poles),
+            Self::NumeratorDenominator {
+                numerator,
+                denominator,
+            } => (numerator, denominator),
+        }
+    }
+
+    /// The sampled-filter counterpart of [`HirLaplaceKind::names_roots`].
+    pub fn names_roots(&self) -> (bool, bool) {
+        match self {
+            Self::ZeroPole { .. } => (true, true),
+            Self::ZeroDenominator { .. } => (true, false),
+            Self::NumeratorPole { .. } => (false, true),
+            Self::NumeratorDenominator { .. } => (false, false),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HirCrossDirection {
     Rising,

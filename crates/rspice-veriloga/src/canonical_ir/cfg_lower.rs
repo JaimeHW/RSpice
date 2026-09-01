@@ -234,108 +234,54 @@ fn resolve_noise_processes(
         .collect()
 }
 
-/// Which halves of a filter's transfer function are named by roots.
+/// Which halves of a filter's transfer function are named by their roots.
 ///
-/// One descriptor for both operator families, because the four spellings mean
-/// the same four things in each: `laplace_zd` and `zi_zd` both name zeros by
-/// their roots and the denominator by its coefficients. Having one lets the two
-/// lowerings differ only where the contract does — in whether the values are
-/// folded — instead of each carrying its own four-way match.
+/// Two independent facts rather than a four-way enum, because that is what the
+/// spellings are: the `z`/`n` and the `p`/`d` in `laplace_zd` decide the two
+/// halves separately, and the same pair of letters means the same thing in the
+/// `zi_*` family. Saying it this way is what lets both lowerings ask their one
+/// real question - is this half a root list - once per half.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FilterForm {
-    ZeroPole,
-    ZeroDenominator,
-    NumeratorPole,
-    NumeratorDenominator,
+struct FilterForm {
+    numerator_is_roots: bool,
+    denominator_is_roots: bool,
 }
 
 impl FilterForm {
     /// The form an operator's name spells, if it names one.
     fn from_operator(name: &str) -> Option<Self> {
-        match name.rsplit_once('_') {
-            Some((_, "zp")) => Some(Self::ZeroPole),
-            Some((_, "zd")) => Some(Self::ZeroDenominator),
-            Some((_, "np")) => Some(Self::NumeratorPole),
-            Some((_, "nd")) => Some(Self::NumeratorDenominator),
-            _ => None,
+        let (numerator, denominator) = match name.rsplit_once('_')?.1 {
+            "zp" => (true, true),
+            "zd" => (true, false),
+            "np" => (false, true),
+            "nd" => (false, false),
+            _ => return None,
+        };
+        Some(Self::new(numerator, denominator))
+    }
+
+    fn new(numerator_is_roots: bool, denominator_is_roots: bool) -> Self {
+        Self {
+            numerator_is_roots,
+            denominator_is_roots,
         }
     }
 }
 
-fn laplace_form(kind: &HirLaplaceKind) -> FilterForm {
-    match kind {
-        HirLaplaceKind::ZeroPole { .. } => FilterForm::ZeroPole,
-        HirLaplaceKind::ZeroDenominator { .. } => FilterForm::ZeroDenominator,
-        HirLaplaceKind::NumeratorPole { .. } => FilterForm::NumeratorPole,
-        HirLaplaceKind::NumeratorDenominator { .. } => FilterForm::NumeratorDenominator,
-    }
-}
-
-fn zi_form(kind: &HirZiKind) -> FilterForm {
-    match kind {
-        HirZiKind::ZeroPole { .. } => FilterForm::ZeroPole,
-        HirZiKind::ZeroDenominator { .. } => FilterForm::ZeroDenominator,
-        HirZiKind::NumeratorPole { .. } => FilterForm::NumeratorPole,
-        HirZiKind::NumeratorDenominator { .. } => FilterForm::NumeratorDenominator,
-    }
-}
-
-/// The numerator-then-denominator operand lists of a Laplace transfer function.
-fn laplace_polynomials(kind: &HirLaplaceKind) -> (&[ExprId], &[ExprId]) {
-    match kind {
-        HirLaplaceKind::ZeroPole { zeros, poles } => (zeros, poles),
-        HirLaplaceKind::ZeroDenominator { zeros, denominator } => (zeros, denominator),
-        HirLaplaceKind::NumeratorPole { numerator, poles } => (numerator, poles),
-        HirLaplaceKind::NumeratorDenominator {
-            numerator,
-            denominator,
-        } => (numerator, denominator),
-    }
-}
-
-/// The sampled-filter counterpart of [`laplace_polynomials`].
-fn zi_polynomials(kind: &HirZiKind) -> (&[ExprId], &[ExprId]) {
-    match kind {
-        HirZiKind::ZeroPole { zeros, poles } => (zeros, poles),
-        HirZiKind::ZeroDenominator { zeros, denominator } => (zeros, denominator),
-        HirZiKind::NumeratorPole { numerator, poles } => (numerator, poles),
-        HirZiKind::NumeratorDenominator {
-            numerator,
-            denominator,
-        } => (numerator, denominator),
+impl From<(bool, bool)> for FilterForm {
+    fn from((numerator_is_roots, denominator_is_roots): (bool, bool)) -> Self {
+        Self::new(numerator_is_roots, denominator_is_roots)
     }
 }
 
 fn laplace_kind_children(kind: &HirLaplaceKind) -> Vec<ExprId> {
-    match kind {
-        HirLaplaceKind::ZeroPole { zeros, poles } => zeros.iter().chain(poles).copied().collect(),
-        HirLaplaceKind::ZeroDenominator { zeros, denominator } => {
-            zeros.iter().chain(denominator).copied().collect()
-        }
-        HirLaplaceKind::NumeratorPole { numerator, poles } => {
-            numerator.iter().chain(poles).copied().collect()
-        }
-        HirLaplaceKind::NumeratorDenominator {
-            numerator,
-            denominator,
-        } => numerator.iter().chain(denominator).copied().collect(),
-    }
+    let (numerator, denominator) = kind.polynomials();
+    numerator.iter().chain(denominator).copied().collect()
 }
 
 fn zi_kind_children(kind: &HirZiKind) -> Vec<ExprId> {
-    match kind {
-        HirZiKind::ZeroPole { zeros, poles } => zeros.iter().chain(poles).copied().collect(),
-        HirZiKind::ZeroDenominator { zeros, denominator } => {
-            zeros.iter().chain(denominator).copied().collect()
-        }
-        HirZiKind::NumeratorPole { numerator, poles } => {
-            numerator.iter().chain(poles).copied().collect()
-        }
-        HirZiKind::NumeratorDenominator {
-            numerator,
-            denominator,
-        } => numerator.iter().chain(denominator).copied().collect(),
-    }
+    let (numerator, denominator) = kind.polynomials();
+    numerator.iter().chain(denominator).copied().collect()
 }
 
 /// Whether replacing every noise source by its large-signal value zero makes
@@ -1836,9 +1782,15 @@ impl<'a> CfgLowerer<'a> {
             // routes exist because [`crate::ast`] is a public builder as well as
             // the parser's output.
             HirExprKind::Laplace { expr, kind } => {
-                let (numerator, denominator) = laplace_polynomials(kind);
-                let form = laplace_form(kind);
-                self.laplace(expression.id, *expr, form, numerator, denominator, span)
+                let (numerator, denominator) = kind.polynomials();
+                self.laplace(
+                    expression.id,
+                    *expr,
+                    kind.names_roots().into(),
+                    numerator,
+                    denominator,
+                    span,
+                )
             }
             HirExprKind::Zi {
                 expr,
@@ -1847,12 +1799,11 @@ impl<'a> CfgLowerer<'a> {
                 transition,
                 first_transition,
             } => {
-                let (numerator, denominator) = zi_polynomials(kind);
-                let form = zi_form(kind);
+                let (numerator, denominator) = kind.polynomials();
                 self.zi(
                     expression.id,
                     *expr,
-                    form,
+                    kind.names_roots().into(),
                     numerator,
                     denominator,
                     *period,
@@ -1920,23 +1871,26 @@ impl<'a> CfgLowerer<'a> {
                 }
             }
         };
-        Some(match form {
-            FilterForm::ZeroPole => CfgLaplaceTransfer::ZeroPole {
+        // Pole-zero form is the one that stays unexpanded, because the runtime
+        // realization is built from the roots and expanding first would throw
+        // that away. A form that names only *one* half by roots has no such
+        // realization to preserve, so it expands into the coefficient form.
+        if form.numerator_is_roots && form.denominator_is_roots {
+            return Some(CfgLaplaceTransfer::ZeroPole {
                 zeros: self.laplace_roots(numerator, span)?,
                 poles: self.laplace_roots(denominator, span)?,
-            },
-            FilterForm::ZeroDenominator => CfgLaplaceTransfer::Coefficients {
-                numerator: expand(self, numerator)?,
-                denominator: self.laplace_coefficients(denominator, span)?,
-            },
-            FilterForm::NumeratorPole => CfgLaplaceTransfer::Coefficients {
-                numerator: self.laplace_coefficients(numerator, span)?,
-                denominator: expand(self, denominator)?,
-            },
-            FilterForm::NumeratorDenominator => CfgLaplaceTransfer::Coefficients {
-                numerator: self.laplace_coefficients(numerator, span)?,
-                denominator: self.laplace_coefficients(denominator, span)?,
-            },
+            });
+        }
+        let coefficients = |lowerer: &mut Self, list: &[ExprId], is_roots: bool| {
+            if is_roots {
+                expand(lowerer, list)
+            } else {
+                lowerer.laplace_coefficients(list, span)
+            }
+        };
+        Some(CfgLaplaceTransfer::Coefficients {
+            numerator: coefficients(self, numerator, form.numerator_is_roots)?,
+            denominator: coefficients(self, denominator, form.denominator_is_roots)?,
         })
     }
 
@@ -2073,24 +2027,27 @@ impl<'a> CfgLowerer<'a> {
         denominator: &[ExprId],
         span: SourceSpanRef,
     ) -> Option<(CfgZiPolynomial, CfgZiPolynomial)> {
-        Some(match form {
-            FilterForm::ZeroPole => (
-                self.zi_roots(numerator, span)?,
-                self.zi_roots(denominator, span)?,
-            ),
-            FilterForm::ZeroDenominator => (
-                self.zi_roots(numerator, span)?,
-                CfgZiPolynomial::Coefficients(self.zi_coefficients(denominator)),
-            ),
-            FilterForm::NumeratorPole => (
-                CfgZiPolynomial::Coefficients(self.zi_coefficients(numerator)),
-                self.zi_roots(denominator, span)?,
-            ),
-            FilterForm::NumeratorDenominator => (
-                CfgZiPolynomial::Coefficients(self.zi_coefficients(numerator)),
-                CfgZiPolynomial::Coefficients(self.zi_coefficients(denominator)),
-            ),
-        })
+        // No expansion in either half: a `zi_*` root only has a value at
+        // runtime, so the runtime is what expands it.
+        Some((
+            self.zi_polynomial(numerator, form.numerator_is_roots, span)?,
+            self.zi_polynomial(denominator, form.denominator_is_roots, span)?,
+        ))
+    }
+
+    fn zi_polynomial(
+        &mut self,
+        polynomial: &[ExprId],
+        is_roots: bool,
+        span: SourceSpanRef,
+    ) -> Option<CfgZiPolynomial> {
+        if is_roots {
+            self.zi_roots(polynomial, span)
+        } else {
+            Some(CfgZiPolynomial::Coefficients(
+                self.zi_coefficients(polynomial),
+            ))
+        }
     }
 
     fn zi_coefficients(&mut self, coefficients: &[ExprId]) -> Vec<ValueId> {

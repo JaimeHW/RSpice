@@ -74,22 +74,8 @@
 
 use std::collections::HashMap;
 
-use serde::{Deserialize, Serialize};
-
-use super::hir::{
-    HirAnalogOperator, HirExprKind, HirExpression, HirLaplaceKind, HirModel, HirStatement,
-    HirZiKind,
-};
+use super::hir::{HirAnalogOperator, HirExprKind, HirExpression, HirModel, HirStatement};
 use super::ids::ExprId;
-
-/// Wire-format version of [`CanonicalStateLayout`].
-///
-/// The layout is derived, not serialized into [`super::artifact`], so this is
-/// not yet a compatibility boundary for any stored artifact. It exists so that
-/// the first consumer to persist a layout — the CFG-sourced backend, which will
-/// allocate accepted state from it — inherits a version to move rather than
-/// having to introduce one alongside the change that makes it matter.
-pub const CANONICAL_STATE_LAYOUT_VERSION: u32 = 1;
 
 /// Which runtime array a site's record lives in.
 ///
@@ -99,7 +85,7 @@ pub const CANONICAL_STATE_LAYOUT_VERSION: u32 = 1;
 /// spelling is what makes this a layout: `cross` and `last_crossing` are two
 /// operators reading one detector, and `ddt`, `idt`, `idtmod` and `$limit` all
 /// draw from the module's scalar state lanes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CanonicalStateFamily {
     /// The module's parallel scalar lanes: `state_values_prev`,
     /// `state_values_older`, `state_derivatives_prev` and `state_initialized`,
@@ -190,7 +176,7 @@ impl CanonicalStateFamily {
 /// [`Self::Idt`] because that is the record the front end gives it; `slew` with
 /// no rate limit appears nowhere, because the LRM makes it an exact passthrough
 /// that owns no state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CanonicalStateOperator {
     Ddt,
     Idt,
@@ -424,9 +410,9 @@ pub fn visit_state_sites(
         }
         HirExprKind::Laplace { expr, kind } => {
             visit_state_sites(expressions, *expr, visit)?;
-            let (left, right) = laplace_polynomials(kind);
-            visit_list(expressions, left, visit)?;
-            visit_list(expressions, right, visit)?;
+            let (numerator, denominator) = kind.polynomials();
+            visit_list(expressions, numerator, visit)?;
+            visit_list(expressions, denominator, visit)?;
         }
         HirExprKind::Zi {
             expr,
@@ -440,9 +426,9 @@ pub fn visit_state_sites(
             for child in [*transition, *first_transition].into_iter().flatten() {
                 visit_state_sites(expressions, child, visit)?;
             }
-            let (left, right) = zi_polynomials(kind);
-            visit_list(expressions, left, visit)?;
-            visit_list(expressions, right, visit)?;
+            let (numerator, denominator) = kind.polynomials();
+            visit_list(expressions, numerator, visit)?;
+            visit_list(expressions, denominator, visit)?;
         }
     }
 
@@ -462,33 +448,6 @@ fn visit_list(
         visit_state_sites(expressions, *root, visit)?;
     }
     Ok(())
-}
-
-/// The numerator-then-denominator operand lists of a Laplace transfer function,
-/// whichever of the four spellings wrote it.
-fn laplace_polynomials(kind: &HirLaplaceKind) -> (&[ExprId], &[ExprId]) {
-    match kind {
-        HirLaplaceKind::ZeroPole { zeros, poles } => (zeros, poles),
-        HirLaplaceKind::ZeroDenominator { zeros, denominator } => (zeros, denominator),
-        HirLaplaceKind::NumeratorPole { numerator, poles } => (numerator, poles),
-        HirLaplaceKind::NumeratorDenominator {
-            numerator,
-            denominator,
-        } => (numerator, denominator),
-    }
-}
-
-/// The sampled-filter counterpart of [`laplace_polynomials`].
-fn zi_polynomials(kind: &HirZiKind) -> (&[ExprId], &[ExprId]) {
-    match kind {
-        HirZiKind::ZeroPole { zeros, poles } => (zeros, poles),
-        HirZiKind::ZeroDenominator { zeros, denominator } => (zeros, denominator),
-        HirZiKind::NumeratorPole { numerator, poles } => (numerator, poles),
-        HirZiKind::NumeratorDenominator {
-            numerator,
-            denominator,
-        } => (numerator, denominator),
-    }
 }
 
 fn visit_analog_operator_children(
@@ -600,7 +559,7 @@ fn visit_analog_operator_children(
 }
 
 /// One state-bearing operator and the record it owns.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CanonicalStateSite {
     /// The canonical expression that owns the record. This is the key: the CFG
     /// carries it in the `operator` field of every stateful value kind, and the
@@ -621,14 +580,19 @@ impl CanonicalStateSite {
 /// Every state record one module owns, keyed by operator site.
 ///
 /// Built with [`Self::from_hir`], which is the only level carrying the roots the
-/// numbering walks: [`MirModel`] holds the contributions but not the module's
+/// numbering walks: `MirModel` holds the contributions but not the module's
 /// assignments, so a MIR-only layout would number a module's contributions as
 /// though its assignments owned nothing.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// Derived rather than stored. It carries no wire format and no schema version
+/// because nothing serializes it: it is recomputed from the HIR, whose own
+/// digest is what an artifact's identity already covers. The first consumer to
+/// persist a layout — the CFG-sourced backend, when it allocates accepted state
+/// from this numbering — introduces a version with the change that makes one
+/// mean something, rather than inheriting one that has never been checked.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalStateLayout {
-    version: u32,
     sites: Vec<CanonicalStateSite>,
-    #[serde(skip)]
     by_operator: HashMap<ExprId, usize>,
 }
 
@@ -671,10 +635,6 @@ impl CanonicalStateLayout {
         builder.finish()
     }
 
-    pub fn version(&self) -> u32 {
-        self.version
-    }
-
     /// Every site in the module, in executed-root order.
     pub fn sites(&self) -> &[CanonicalStateSite] {
         &self.sites
@@ -693,20 +653,6 @@ impl CanonicalStateLayout {
             .iter()
             .filter(|site| site.family() == family)
             .count()
-    }
-
-    /// Rebuild the operator index after deserialization.
-    ///
-    /// The map is derived from `sites` and is skipped by the wire format rather
-    /// than written twice; a decoded layout has to be re-indexed before it can
-    /// answer [`Self::site`].
-    pub fn reindex(&mut self) {
-        self.by_operator = self
-            .sites
-            .iter()
-            .enumerate()
-            .map(|(index, site)| (site.operator, index))
-            .collect();
     }
 }
 
@@ -759,7 +705,6 @@ impl LayoutBuilder {
 
     fn finish(self) -> CanonicalStateLayout {
         CanonicalStateLayout {
-            version: CANONICAL_STATE_LAYOUT_VERSION,
             sites: self.sites,
             by_operator: self.by_operator,
         }
@@ -917,23 +862,82 @@ mod tests {
         assert_eq!(layout.family_len(CanonicalStateFamily::Integration), 1);
     }
 
+    /// Each family names the accepted-state field it occupies, and the two
+    /// answers a slot allocator reads before reserving anything.
+    ///
+    /// Written out against `crate::vm::VmAcceptedCheckpoint`'s own field names
+    /// rather than described in prose: a family added without a storage decision
+    /// would compile, and this is what refuses it. The lookup tables are the one
+    /// entry with no checkpoint field, because compiled table data is read-only
+    /// and no accepted state at all.
     #[test]
-    fn reindexing_restores_the_operator_map() {
-        let expressions = arena();
-        let layout = CanonicalStateLayout::for_roots(
-            &expressions,
-            [ExprId::from(1usize), ExprId::from(2usize)],
-        );
-        let mut decoded = CanonicalStateLayout {
-            version: layout.version,
-            sites: layout.sites.clone(),
-            by_operator: HashMap::new(),
-        };
-        assert_eq!(decoded.site(ExprId::from(2usize)), None);
-        decoded.reindex();
-        assert_eq!(
-            decoded.site(ExprId::from(2usize)),
-            layout.site(ExprId::from(2usize))
-        );
+    fn every_family_names_the_runtime_record_it_occupies() {
+        let expected = [
+            (
+                CanonicalStateFamily::Integration,
+                Some("state_values_prev"),
+                true,
+                true,
+            ),
+            (
+                CanonicalStateFamily::DelayBuffer,
+                Some("delay_buffers"),
+                true,
+                false,
+            ),
+            (
+                CanonicalStateFamily::TransitionFilter,
+                Some("transition_filters"),
+                true,
+                false,
+            ),
+            (
+                CanonicalStateFamily::SlewFilter,
+                Some("slew_filters"),
+                true,
+                true,
+            ),
+            (
+                CanonicalStateFamily::CrossDetector,
+                Some("cross_detectors"),
+                true,
+                true,
+            ),
+            (
+                CanonicalStateFamily::LaplaceFilter,
+                Some("laplace_filters"),
+                true,
+                true,
+            ),
+            (
+                CanonicalStateFamily::ZiFilter,
+                Some("zi_filters"),
+                true,
+                true,
+            ),
+            (
+                CanonicalStateFamily::TimerEvent,
+                Some("timer_event_bound"),
+                false,
+                true,
+            ),
+            (CanonicalStateFamily::LookupTable, None, true, true),
+        ];
+        for (family, field, per_slot, fixed) in expected {
+            assert_eq!(family.checkpoint_field(), field, "{family:?}");
+            assert_eq!(family.has_per_slot_record(), per_slot, "{family:?}");
+            assert_eq!(family.has_fixed_record(), fixed, "{family:?}");
+        }
+        // Every operator's family is one of the nine above, so a new family
+        // cannot slip in without an entry here.
+        for operator in CanonicalStateOperator::ALL {
+            assert!(
+                expected
+                    .iter()
+                    .any(|(family, ..)| *family == operator.family()),
+                "{}'s family is not described",
+                operator.name()
+            );
+        }
     }
 }

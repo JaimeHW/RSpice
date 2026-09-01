@@ -93,6 +93,5 @@ pub use schedule::{
     schedule_with_parameter_scopes as schedule_cfg_with_parameter_scopes, structural_guards,
 };
 pub use state::{
-    CANONICAL_STATE_LAYOUT_VERSION, CanonicalStateFamily, CanonicalStateLayout,
-    CanonicalStateOperator, CanonicalStateSite,
+    CanonicalStateFamily, CanonicalStateLayout, CanonicalStateOperator, CanonicalStateSite,
 };
