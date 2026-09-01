@@ -807,7 +807,7 @@ impl Capacitors {
     /// an enforced operating-point constraint and the same branch becomes the
     /// capacitor's physical lead-current observable after startup. Native and
     /// ngspice-compatible circuits retain only the transient seed.
-    pub fn add_with_value_expression_and_ic(
+    pub(crate) fn add_with_value_expression_and_ic(
         &mut self,
         name: String,
         node_pos: NodeId,
@@ -923,7 +923,7 @@ impl Capacitors {
     /// small-signal operating state. The incremental charge law follows the
     /// transient DAE exactly: terminal derivatives are `+/-C(op)`, while a
     /// non-terminal dependency contributes `Vcap(op) * dC/dx`.
-    pub fn prepare_solution_dependent_small_signal(
+    pub(crate) fn prepare_solution_dependent_small_signal(
         &mut self,
         solution: &[Value],
         frequency: Value,
@@ -1422,7 +1422,7 @@ impl Capacitors {
 
     /// Whether any value expression carries accepted operator state that is
     /// not represented by the capacitor charge checkpoint contract.
-    pub fn has_stateful_value_expressions(&self) -> bool {
+    pub(crate) fn has_stateful_value_expressions(&self) -> bool {
         self.value_expressions
             .iter()
             .flatten()
