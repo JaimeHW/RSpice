@@ -120,16 +120,22 @@ pub(super) fn run_spec_request_with_environment(
             dependencies,
             abort_flag,
         ),
-        AnalysisSpec::Qpss { .. }
+        blocked @ (AnalysisSpec::Qpss { .. }
         | AnalysisSpec::Qpac { .. }
         | AnalysisSpec::Qpnoise { .. }
         | AnalysisSpec::Qpxf { .. }
         | AnalysisSpec::TransientNoise { .. }
         | AnalysisSpec::DcMismatch { .. }
-        | AnalysisSpec::Reliability { .. } => Err(SimulationError::InvalidConfig(format!(
-            "{} execution is unavailable in this engine build; the request was rejected before dispatch",
-            spec.run_type().display_name()
-        ))),
+        | AnalysisSpec::Reliability { .. }) => {
+            let kind = crate::simulation::execution::canonical_analysis_kind(&blocked);
+            let reason = kind
+                .execution_blocker()
+                .unwrap_or("the selected execution capability is unavailable in this engine build");
+            Err(SimulationError::InvalidConfig(format!(
+                "{} execution is unavailable; the request was rejected before dispatch: {reason}",
+                blocked.run_type().display_name()
+            )))
+        }
         AnalysisSpec::LegacyDcOp
         | AnalysisSpec::DcOp { .. }
         | AnalysisSpec::DcSweep { .. }
@@ -274,12 +280,235 @@ fn spec_variant_name(spec: &AnalysisSpec) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::fs;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
+    use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
+    use crate::simulation::execution::{ExecutionArtifactEnvelope, PreparedDependencyBinding};
+    use crate::simulation::multi_run::{
+        EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve, HbToneSpec,
+        SpPort,
+    };
+
+    fn digest(byte: u8) -> ContentDigest {
+        ContentDigest::from_bytes([byte; 32])
+    }
+
+    fn hb_producer_spec() -> AnalysisSpec {
+        AnalysisSpec::HarmonicBalance {
+            tones: vec![HbToneSpec::new(1.0e6, 8)],
+            reltol: 2.5e-7,
+            abstol: 1.0e-12,
+            max_iterations: 100,
+            damping: 1.0,
+            oversample: 2,
+            collocation_points: None,
+            max_mixing_order: 5,
+            use_krylov: false,
+            gmres_restart: 30,
+            source_stepping: false,
+            verbose: false,
+        }
+    }
+
+    fn transferred_hb_dependencies(netlist: &str) -> ResolvedExecutionDependencies {
+        let producer_spec = hb_producer_spec();
+        let result = run_spec_request(
+            &EngineBridge::new(),
+            producer_spec.clone(),
+            SpecExecutionOptions::default(),
+            netlist,
+            None,
+            &ResolvedExecutionDependencies::default(),
+            &rspice_core::abort_signal::NoAbort,
+        )
+        .expect("the HB producer reaches the periodic dispatcher");
+        let producer = AnalysisInstanceId::new();
+        let revision = ObjectRevision::INITIAL;
+        let snapshot = digest(0xb1);
+        let config_digest = digest(0xb2);
+        let artifact = ExecutionArtifactEnvelope::from_hb_result(
+            snapshot,
+            producer,
+            revision,
+            config_digest,
+            &producer_spec,
+            &result,
+        )
+        .expect("the HB result forms a typed dependency")
+        .expect("HB always retains its numerical state");
+        let resolved = ResolvedExecutionDependencies::resolve(
+            snapshot,
+            vec![PreparedDependencyBinding::hb_state(
+                producer,
+                revision,
+                config_digest,
+            )],
+            &HashMap::from([(producer, artifact)]),
+        )
+        .expect("the exact producer binding resolves");
+        let (metadata, buffers) = resolved
+            .encode_transfer()
+            .expect("HB state serializes for worker transport");
+        ResolvedExecutionDependencies::decode_transfer(&metadata, buffers)
+            .expect("HB state authenticates after worker transport")
+    }
+
+    fn pss_producer_spec() -> AnalysisSpec {
+        AnalysisSpec::Pss {
+            method: crate::simulation::multi_run::PssMethod::Shooting,
+            fundamental_freq: 1.0e6,
+            tone_sources: vec!["P1".to_owned(), "P2".to_owned()],
+            tstab_periods: 20,
+            points_per_period: 512,
+            tolerance: 1.0e-7,
+            oscillator_mode: false,
+            oscillator_node: None,
+            num_harmonics: 8,
+        }
+    }
+
+    fn transferred_pss_dependencies(netlist: &str) -> ResolvedExecutionDependencies {
+        let producer_spec = pss_producer_spec();
+        let produced = svc_runner::run_pss_analysis_with_source_path_and_abort(
+            netlist,
+            1.0e6,
+            8,
+            1.0e-7,
+            None,
+            &rspice_core::abort_signal::NoAbort,
+        )
+        .expect("the PSS producer converges through the resolved service path");
+        let result = SimulationResult::Transient {
+            time: produced.time,
+            waveforms: HashMap::new(),
+            measurements: Vec::new(),
+            periodic_state: Some(produced.operating_point),
+            convergence: Default::default(),
+            events: Default::default(),
+        };
+        let producer = AnalysisInstanceId::new();
+        let revision = ObjectRevision::INITIAL;
+        let snapshot = digest(0xc1);
+        let config_digest = digest(0xc2);
+        let artifact = ExecutionArtifactEnvelope::from_periodic_result(
+            snapshot,
+            producer,
+            revision,
+            config_digest,
+            &producer_spec,
+            &result,
+        )
+        .expect("the PSS result forms a typed dependency")
+        .expect("PSS retains its numerical periodic state");
+        let resolved = ResolvedExecutionDependencies::resolve(
+            snapshot,
+            vec![PreparedDependencyBinding::periodic_state(
+                producer,
+                revision,
+                config_digest,
+            )],
+            &HashMap::from([(producer, artifact)]),
+        )
+        .expect("the exact producer binding resolves");
+        let (metadata, buffers) = resolved
+            .encode_transfer()
+            .expect("PSS state serializes for worker transport");
+        ResolvedExecutionDependencies::decode_transfer(&metadata, buffers)
+            .expect("PSS state authenticates after worker transport")
+    }
+
+    fn periodic_ports() -> Vec<SpPort> {
+        vec![
+            SpPort {
+                node_pos: "p1".to_owned(),
+                node_neg: "0".to_owned(),
+                z0: Some(50.0),
+            },
+            SpPort {
+                node_pos: "p2".to_owned(),
+                node_neg: "0".to_owned(),
+                z0: Some(50.0),
+            },
+        ]
+    }
+
+    fn blocked_preview_specs() -> Vec<AnalysisSpec> {
+        vec![
+            AnalysisSpec::Qpss {
+                tones: vec![HbToneSpec::new(1.0e6, 3), HbToneSpec::new(1.1e6, 3)],
+                max_iterations: 40,
+                relative_tolerance: 1.0e-6,
+                autonomous: false,
+                oscillator_node: None,
+            },
+            AnalysisSpec::Qpac {
+                start_freq: 1.0e3,
+                stop_freq: 2.0e3,
+                points_per_unit: 2,
+                sweep: crate::simulation::multi_run::FrequencySweep::Linear,
+                input_source: "V1".to_owned(),
+                output_node: "out".to_owned(),
+                output_ref: "0".to_owned(),
+                input_lattice: [0, 0],
+                output_lattice: [0, 0],
+            },
+            AnalysisSpec::Qpnoise {
+                start_freq: 1.0e3,
+                stop_freq: 2.0e3,
+                points_per_unit: 2,
+                sweep: crate::simulation::multi_run::FrequencySweep::Linear,
+                output_node: "out".to_owned(),
+                output_ref: "0".to_owned(),
+                input_source: "V1".to_owned(),
+                lattice_min: [-1, -1],
+                lattice_max: [1, 1],
+                integrated_noise: true,
+                contributor_ranking: true,
+            },
+            AnalysisSpec::Qpxf {
+                start_freq: 1.0e3,
+                stop_freq: 2.0e3,
+                points_per_unit: 2,
+                sweep: crate::simulation::multi_run::FrequencySweep::Linear,
+                input_source: "V1".to_owned(),
+                output_node: "out".to_owned(),
+                output_ref: "0".to_owned(),
+                input_lattice: [0, 0],
+                output_lattice: [0, 0],
+                group_delay: true,
+            },
+            AnalysisSpec::TransientNoise {
+                stop_time: 1.0e-6,
+                step_time: 1.0e-9,
+                start_time: 0.0,
+                max_timestep: 1.0e-9,
+                seed: 1,
+                noise_fmax: 1.0e8,
+                scale: 1.0,
+                uic: false,
+            },
+            AnalysisSpec::DcMismatch {
+                output_expression: "V(out)".to_owned(),
+                sigma_multiplier: 3.0,
+                contributor_limit: 25,
+                include_process: false,
+                include_mismatch: true,
+                normalized_contributions: true,
+            },
+            AnalysisSpec::Reliability {
+                target_years: vec![1.0, 10.0],
+                enable_hci: true,
+                enable_nbti: true,
+                enable_em: false,
+                min_stress_voltage: 0.1,
+            },
+        ]
+    }
 
     struct AbortOnPoll {
         abort_on: usize,
@@ -519,6 +748,196 @@ R2 out 0 1k\n\
     }
 
     #[test]
+    fn runnable_preview_envelope_reaches_dispatch_and_returns_complex_slow_time_data() {
+        let spec = AnalysisSpec::Envelope {
+            fundamental_freq: 1.0e3,
+            additional_carrier_tones: Vec::new(),
+            stop_time: 2.0e-3,
+            num_harmonics: 1,
+            envelope_step: Some(2.5e-4),
+            modulation_sources: Vec::new(),
+            initial_periodic_solve: EnvelopeInitialPeriodicSolve::TransientSpectralEstimate,
+            adaptive_mode: EnvelopeAdaptiveMode::FixedEnvelopeStep,
+            extraction_path: EnvelopeExtractionPath::Projection,
+        };
+        assert_eq!(
+            crate::simulation::execution::canonical_analysis_kind(&spec).execution_blocker(),
+            None
+        );
+
+        let result = run_spec_request(
+            &EngineBridge::new(),
+            spec,
+            SpecExecutionOptions::default(),
+            "preview envelope dispatch\n\
+             V1 in 0 SIN(0 1 1k)\n\
+             R1 in out 1k\n\
+             C1 out 0 100n\n\
+             .end\n",
+            None,
+            &ResolvedExecutionDependencies::default(),
+            &rspice_core::abort_signal::NoAbort,
+        )
+        .expect("the runnable preview Envelope spec reaches its solver");
+
+        let SimulationResult::Transient {
+            time, waveforms, ..
+        } = result
+        else {
+            panic!("Envelope must retain a slow-time transient result family");
+        };
+        assert!(!time.is_empty());
+        let envelope = waveforms
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("ENV(V(out))"))
+            .map(|(_, waveform)| waveform)
+            .expect("the dispatched result retains the output envelope");
+        assert_eq!(envelope.x_values, time);
+        assert_eq!(envelope.y_imag.as_ref().map(Vec::len), Some(time.len()));
+    }
+
+    #[test]
+    fn runnable_preview_hb_dependents_dispatch_from_authenticated_worker_state() {
+        let netlist = "preview HB dependent dispatch\n\
+                       P1 p1 0 PORT=1 Z0=50\n\
+                       R1 p1 p2 50\n\
+                       C1 p1 0 1e-18\n\
+                       P2 p2 0 PORT=2 Z0=50\n\
+                       VIN bias 0 0\n\
+                       RNOISE bias p2 1k\n\
+                       .end\n";
+        let dependencies = transferred_hb_dependencies(netlist);
+
+        let hbsp = AnalysisSpec::Hbsp {
+            start_freq: 1.0e4,
+            stop_freq: 2.0e4,
+            points_per_unit: 2,
+            sweep: crate::simulation::multi_run::FrequencySweep::Linear,
+            ports: periodic_ports(),
+            max_sideband: 1,
+            mixed_mode: false,
+            noise_parameters: false,
+        };
+        assert_eq!(
+            crate::simulation::execution::canonical_analysis_kind(&hbsp).execution_blocker(),
+            None
+        );
+        let hbsp_result = run_spec_request(
+            &EngineBridge::new(),
+            hbsp,
+            SpecExecutionOptions::default(),
+            netlist,
+            None,
+            &dependencies,
+            &rspice_core::abort_signal::NoAbort,
+        )
+        .expect("HBSP consumes the authenticated transferred HB state");
+        let SimulationResult::Ac {
+            frequencies,
+            waveforms,
+            ..
+        } = hbsp_result
+        else {
+            panic!("HBSP must retain the periodic S-parameter result family");
+        };
+        assert_eq!(frequencies.len(), 2);
+        assert!(waveforms.contains_key("S11"));
+        assert!(waveforms.contains_key("S21[k=+0,m=+0]"));
+
+        let hbnoise = AnalysisSpec::Hbnoise {
+            start_freq: 1.0e4,
+            stop_freq: 1.0e5,
+            points_per_unit: 2,
+            sweep: crate::simulation::multi_run::FrequencySweep::Decade,
+            output_node: "p2".to_owned(),
+            output_ref: "0".to_owned(),
+            input_source: "VIN".to_owned(),
+            max_sideband: 1,
+            integrated_noise: true,
+            noise_figure: false,
+            contributor_ranking: true,
+        };
+        assert_eq!(
+            crate::simulation::execution::canonical_analysis_kind(&hbnoise).execution_blocker(),
+            None
+        );
+        let hbnoise_result = run_spec_request(
+            &EngineBridge::new(),
+            hbnoise,
+            SpecExecutionOptions::default(),
+            netlist,
+            None,
+            &dependencies,
+            &rspice_core::abort_signal::NoAbort,
+        )
+        .expect("HBNOISE consumes the authenticated transferred HB state");
+        let SimulationResult::Noise {
+            frequencies,
+            output_noise,
+            summary,
+            ..
+        } = hbnoise_result
+        else {
+            panic!("HBNOISE must retain the noise result family");
+        };
+        assert!(frequencies.len() >= 2);
+        assert_eq!(output_noise.len(), frequencies.len());
+        assert!(
+            output_noise
+                .iter()
+                .all(|value| value.is_finite() && *value >= 0.0)
+        );
+        assert!(summary.is_some(), "integrated HBNOISE retains its evidence");
+    }
+
+    #[test]
+    fn runnable_preview_psp_dispatches_from_authenticated_worker_state() {
+        let netlist = "preview PSP dispatch\n\
+                       P1 p1 0 SIN(0 0 1Meg) PORT=1 Z0=50\n\
+                       R1 p1 p2 50\n\
+                       C1 p1 0 1e-18\n\
+                       P2 p2 0 SIN(0 0 1Meg) PORT=2 Z0=50\n\
+                       .end\n";
+        let dependencies = transferred_pss_dependencies(netlist);
+        let psp = AnalysisSpec::Psp {
+            start_freq: 1.0e4,
+            stop_freq: 2.0e4,
+            points_per_unit: 2,
+            sweep: crate::simulation::multi_run::FrequencySweep::Linear,
+            ports: periodic_ports(),
+            max_sideband: 1,
+            mixed_mode: false,
+            noise_parameters: false,
+        };
+        assert_eq!(
+            crate::simulation::execution::canonical_analysis_kind(&psp).execution_blocker(),
+            None
+        );
+
+        let result = run_spec_request(
+            &EngineBridge::new(),
+            psp,
+            SpecExecutionOptions::default(),
+            netlist,
+            None,
+            &dependencies,
+            &rspice_core::abort_signal::NoAbort,
+        )
+        .expect("PSP consumes the authenticated transferred PSS state");
+        let SimulationResult::Ac {
+            frequencies,
+            waveforms,
+            ..
+        } = result
+        else {
+            panic!("PSP must retain the periodic S-parameter result family");
+        };
+        assert_eq!(frequencies.len(), 2);
+        assert!(waveforms.contains_key("S11"));
+        assert!(waveforms.contains_key("S21[k=+0,m=+0]"));
+    }
+
+    #[test]
     fn unavailable_manifest_spec_is_rejected_before_engine_dispatch() {
         let spec = AnalysisSpec::DcMismatch {
             output_expression: "V(out)".to_owned(),
@@ -545,6 +964,52 @@ R2 out 0 1k\n\
             }
             other => panic!("expected fail-closed capability rejection, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn every_blocked_preview_spec_fails_closed_with_its_canonical_reason() {
+        let mut seen = Vec::new();
+        for spec in blocked_preview_specs() {
+            let kind = crate::simulation::execution::canonical_analysis_kind(&spec);
+            let expected = kind
+                .execution_blocker()
+                .unwrap_or_else(|| panic!("{kind:?} must declare why it is blocked"));
+            assert!(
+                spec.validate().is_ok(),
+                "{kind:?} fixture must reach dispatch"
+            );
+
+            let result = run_spec_request(
+                &EngineBridge::new(),
+                spec,
+                SpecExecutionOptions::default(),
+                "blocked preview exact reason\nV1 out 0 1\n.end\n",
+                None,
+                &ResolvedExecutionDependencies::default(),
+                &rspice_core::abort_signal::NoAbort,
+            );
+            match result {
+                Err(SimulationError::InvalidConfig(message)) => {
+                    assert!(message.contains(expected), "{kind:?}: {message}");
+                    assert!(message.contains("rejected before dispatch"), "{message}");
+                }
+                other => panic!("{kind:?} must fail closed, got {other:?}"),
+            }
+            seen.push(kind);
+        }
+
+        assert_eq!(
+            seen,
+            vec![
+                crate::state::CanonicalAnalysisKind::Qpss,
+                crate::state::CanonicalAnalysisKind::Qpac,
+                crate::state::CanonicalAnalysisKind::Qpnoise,
+                crate::state::CanonicalAnalysisKind::Qpxf,
+                crate::state::CanonicalAnalysisKind::TransientNoise,
+                crate::state::CanonicalAnalysisKind::DcMismatch,
+                crate::state::CanonicalAnalysisKind::Reliability,
+            ]
+        );
     }
 
     #[test]

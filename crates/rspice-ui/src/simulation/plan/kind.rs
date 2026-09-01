@@ -598,30 +598,7 @@ impl AnalysisKind {
     /// persistent, but execution must reject these kinds until a real solver
     /// is integrated.
     pub const fn execution_blocker(self) -> Option<&'static str> {
-        match self {
-            Self::Qpss => {
-                Some("the QPSS spectral-lattice solver is not available in this engine build")
-            }
-            Self::Qpac => {
-                Some("QPAC conversion-matrix execution is not available in this engine build")
-            }
-            Self::Qpnoise => {
-                Some("quasi-periodic noise execution is not available in this engine build")
-            }
-            Self::Qpxf => Some(
-                "quasi-periodic translated-transfer execution is not available in this engine build",
-            ),
-            Self::TransientNoise => Some(
-                "stochastic transient device-noise execution is not available in this engine build",
-            ),
-            Self::DcMismatch => {
-                Some("DC mismatch contribution extraction is not available in this engine build")
-            }
-            Self::Reliability => Some(
-                "reliability execution requires PDK-qualified aging models; the former hard-coded demonstration equations have been removed",
-            ),
-            _ => None,
-        }
+        self.canonical_kind().execution_blocker()
     }
 
     /// Exact prerequisite kinds declared by the canonical mockup manifest.
@@ -699,6 +676,12 @@ mod tests {
             assert_eq!(
                 kind.availability(),
                 kind.canonical_kind().availability(),
+                "{}",
+                kind.label()
+            );
+            assert_eq!(
+                kind.execution_blocker(),
+                kind.canonical_kind().execution_blocker(),
                 "{}",
                 kind.label()
             );
