@@ -116,6 +116,14 @@ pub(crate) enum Terminator {
 }
 
 impl Terminator {
+    pub(crate) fn edge_count(&self) -> usize {
+        match self {
+            Self::Return(_) => 0,
+            Self::Jump(_) => 1,
+            Self::Branch { .. } => 2,
+        }
+    }
+
     fn edges(&self) -> impl Iterator<Item = &Edge> {
         match self {
             Self::Return(_) => [None, None],
@@ -970,11 +978,12 @@ impl Program {
             /// The arm operand of a conditional: the use happens only when
             /// that arm is taken.
             Arm(ArmOwner),
-            /// An ordinary operand of another instruction: the use inherits
-            /// whatever arm that instruction turns out to belong to.
+            /// An ordinary operand of another instruction — a conditional's
+            /// own condition included, since that is evaluated exactly when
+            /// the conditional is. The use inherits whatever arm the using
+            /// instruction turns out to belong to.
             Operand(usize),
-            /// The program result, or a conditional's own condition operand:
-            /// the use happens unconditionally.
+            /// The program result: the use happens unconditionally.
             Unconditional,
         }
 
@@ -988,8 +997,6 @@ impl Program {
                         conditional: index,
                         taken: position == 1,
                     })
-                } else if conditional {
-                    UseSite::Unconditional
                 } else {
                     UseSite::Operand(index)
                 };
@@ -1742,6 +1749,51 @@ pub(crate) enum MoveStep {
     },
 }
 
+/// One sequenced move a backend performs on a control-flow edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct EdgeMove {
+    from: ValueLocation,
+    to: ValueLocation,
+}
+
+impl EdgeMove {
+    pub(crate) fn from(self) -> ValueLocation {
+        self.from
+    }
+
+    pub(crate) fn to(self) -> ValueLocation {
+        self.to
+    }
+}
+
+/// Reduce a sequenced parallel move to plain moves, refusing a plan that needs
+/// the cycle-breaking scratch.
+///
+/// A block parameter takes its location at the earliest predecessor terminator
+/// that binds it, while every argument bound on that edge is still live and so
+/// still owns its own location. No argument can therefore already sit in a
+/// parameter's location, which is precisely the condition under which a
+/// permutation cycle forms. A loop back edge is the shape that breaks the
+/// argument-still-live premise, and loops are what W-C3 introduces; until then
+/// a plan that needs the scratch is an allocator invariant violation rather
+/// than a case for the encoders to realize.
+fn scratch_free_edge_moves(steps: &[MoveStep]) -> JitResult<Box<[EdgeMove]>> {
+    steps
+        .iter()
+        .map(|step| match *step {
+            MoveStep::Move { from, to } => Ok(EdgeMove { from, to }),
+            MoveStep::SaveToScratch { .. } | MoveStep::RestoreFromScratch { .. } => {
+                Err(JitError::RegisterAllocation {
+                    model: MODEL.into(),
+                    detail: "SSA edge move needs a cycle break, which no acyclic CFG can produce"
+                        .into(),
+                })
+            }
+        })
+        .collect::<JitResult<Vec<_>>>()
+        .map(Vec::into_boxed_slice)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RegisterAllocation {
     instructions: Vec<AllocatedInstruction>,
@@ -1750,8 +1802,7 @@ pub(crate) struct RegisterAllocation {
     spill_slot_count: usize,
     used_register_count: usize,
     required_register_count: usize,
-    edge_moves: Vec<Box<[Box<[MoveStep]>]>>,
-    scratch_spill_slot: Option<usize>,
+    edge_moves: Vec<Box<[Box<[EdgeMove]>]>>,
 }
 
 fn expire_owners(
@@ -2010,9 +2061,8 @@ impl RegisterAllocation {
         let mut spill_owners: Vec<Option<ValueId>> = Vec::new();
         let mut instructions = Vec::with_capacity(instruction_count);
         let mut used_register_count = 0;
-        let mut edge_moves: Vec<Box<[Box<[MoveStep]>]>> =
+        let mut edge_moves: Vec<Box<[Box<[EdgeMove]>]>> =
             Vec::with_capacity(program.blocks().len());
-        let mut needs_move_scratch = false;
 
         for block in program.blocks() {
             expire_owners(
@@ -2170,11 +2220,7 @@ impl RegisterAllocation {
                         })?;
                     pairs.push((from, to));
                 }
-                let steps = sequence_parallel_move(&pairs)?;
-                needs_move_scratch |= steps
-                    .iter()
-                    .any(|step| !matches!(step, MoveStep::Move { .. }));
-                block_edge_moves.push(steps.into_boxed_slice());
+                block_edge_moves.push(scratch_free_edge_moves(&sequence_parallel_move(&pairs)?)?);
             }
             edge_moves.push(block_edge_moves.into_boxed_slice());
         }
@@ -2190,7 +2236,6 @@ impl RegisterAllocation {
             detail: "SSA allocator did not assign the validated return value".into(),
         })?;
 
-        let scratch_spill_slot = needs_move_scratch.then_some(spill_owners.len());
         Ok(Self {
             instructions,
             result,
@@ -2204,17 +2249,16 @@ impl RegisterAllocation {
                     })
                 })
                 .collect::<JitResult<Vec<_>>>()?,
-            spill_slot_count: spill_owners.len() + usize::from(needs_move_scratch),
+            spill_slot_count: spill_owners.len(),
             used_register_count,
             required_register_count,
             edge_moves,
-            scratch_spill_slot,
         })
     }
 
     /// The parallel move a backend must perform on one outgoing edge before
     /// branching to its target.
-    pub(crate) fn edge_moves(&self, block: BlockId, edge: usize) -> JitResult<&[MoveStep]> {
+    pub(crate) fn edge_moves(&self, block: BlockId, edge: usize) -> JitResult<&[EdgeMove]> {
         self.edge_moves
             .get(block.index())
             .and_then(|edges| edges.get(edge))
@@ -2227,14 +2271,6 @@ impl RegisterAllocation {
                 )
                 .into(),
             })
-    }
-
-    /// The spill slot reserved for breaking parallel-move cycles.
-    pub(crate) fn move_scratch_slot(&self) -> JitResult<usize> {
-        self.scratch_spill_slot.ok_or_else(|| JitError::Verifier {
-            model: MODEL.into(),
-            detail: "SSA allocation reserved no parallel-move scratch slot".into(),
-        })
     }
 
     pub(crate) fn instructions(&self) -> &[AllocatedInstruction] {
@@ -3319,13 +3355,16 @@ mod tests {
             .expect("then edge move plan");
         assert_eq!(then_plan.len(), 1);
         assert_eq!(
-            then_plan[0],
-            MoveStep::Move {
-                from: allocation
-                    .location(ValueId(1))
-                    .expect("allocated arm value"),
-                to: parameter_location,
-            }
+            then_plan[0].from(),
+            allocation
+                .location(ValueId(1))
+                .expect("allocated arm value")
+        );
+        assert_eq!(then_plan[0].to(), parameter_location);
+        assert_ne!(
+            then_plan[0].from(),
+            then_plan[0].to(),
+            "the parameter takes a location no live argument occupies"
         );
         assert!(
             allocation
@@ -3347,8 +3386,17 @@ mod tests {
             allocation.instructions().len(),
             across_call.instructions().len()
         );
-        assert!(allocation.scratch_spill_slot.is_none());
         assert_eq!(allocation.edge_moves.len(), 1);
         assert!(allocation.edge_moves[0].is_empty());
+    }
+
+    #[test]
+    fn an_edge_move_plan_that_needs_the_scratch_is_an_allocator_invariant_violation() {
+        let cycle =
+            sequence_parallel_move(&[(register(0), register(1)), (register(1), register(0))])
+                .expect("sequenced swap");
+        let error = super::scratch_free_edge_moves(&cycle)
+            .expect_err("no acyclic CFG produces a permutation cycle on an edge");
+        assert!(error.to_string().contains("cycle break"));
     }
 }

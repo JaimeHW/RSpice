@@ -15,9 +15,11 @@
 use super::calling_convention::HOST_ABI;
 use super::encoder::{ConditionCode, Gpr, Rel32Patch, X64Encoder, Xmm};
 use super::ir::{
-    ALLOCATABLE_VALUE_REGISTERS, AllocatedInstruction, AssignmentProgram, Effects as X64Effects,
-    Program as X64SsaProgram, RegisterAllocation, RegisterBank, ValueLocation as X64ValueLocation,
-    ValueType as X64ValueType, dynamic_variable_inline_supported, plan_shared_outputs,
+    ALLOCATABLE_VALUE_REGISTERS, AllocatedInstruction, AssignmentProgram,
+    BasicBlock as X64BasicBlock, BlockId as X64BlockId, Effects as X64Effects,
+    Program as X64SsaProgram, RegisterAllocation, RegisterBank, Terminator as X64Terminator,
+    ValueLocation as X64ValueLocation, ValueType as X64ValueType,
+    dynamic_variable_inline_supported, plan_shared_outputs,
 };
 use super::{
     CompiledX64Function, WindowsX64UnwindInfo, WindowsX64UnwindOperation, X64DataKind,
@@ -154,7 +156,17 @@ pub(super) fn compile_value_function_artifact(
     program: &NativeProgram,
 ) -> JitResult<CompiledX64Function> {
     validate_expression_stack_depth(program.max_stack_depth())?;
-    let ssa = X64SsaProgram::lower(program)?;
+    compile_value_function_artifact_from_ssa(&X64SsaProgram::lower(program)?)
+}
+
+/// Compile one already-lowered value entry.
+///
+/// The postfix lift is the shipped route into this; taking the SSA directly is
+/// what lets the branch form of a conditional be compiled through exactly the
+/// same emitter, allocator, and verifier as the select form.
+pub(super) fn compile_value_function_artifact_from_ssa(
+    ssa: &X64SsaProgram,
+) -> JitResult<CompiledX64Function> {
     validate_expression_stack_depth(ssa.maximum_stack_depth())?;
     let allocation = RegisterAllocation::build(&ssa, X64_VALUE_BANK)?;
     let callee_saved_xmm_count = callee_saved_xmm_count_for_allocation(&allocation);
@@ -792,228 +804,249 @@ impl FunctionCompiler {
                 detail: "x64 SSA and register-allocation instruction counts differ".into(),
             });
         }
+        if assignment.is_some() && !ssa.is_single_block() {
+            return Err(JitError::Verifier {
+                model: MODEL.into(),
+                detail: "x64 direct-assignment batches publish in one straight-line block".into(),
+            });
+        }
 
         self.depth = 0;
         self.spilled_depth = 0;
-        let mut context_pointer_cache = None;
         let mut output_index = 0_usize;
-        for (instruction_index, (instruction, allocated)) in ssa
-            .instructions()
-            .iter()
-            .zip(allocation.instructions())
-            .enumerate()
-        {
-            if instruction.value_type() != X64ValueType::F64 {
-                return Err(JitError::Verifier {
-                    model: MODEL.into(),
-                    detail: format!(
-                        "x64 codegen cannot legalize SSA value type {:?}",
-                        instruction.value_type()
-                    )
-                    .into(),
-                });
-            }
-            let result_register = self.prepare_allocated_instruction(allocated)?;
+        let mut block_offsets: Vec<Option<usize>> = vec![None; ssa.blocks().len()];
+        let mut pending_jumps: Vec<(usize, Rel32Patch)> = Vec::new();
+        for block in ssa.blocks() {
+            block_offsets[block.id().index()] = Some(self.encoder.position());
+            // A block reached from more than one predecessor cannot inherit what
+            // any single one of them left cached in RAX.
+            let mut context_pointer_cache = None;
+            let range = block.instruction_start()..block.instruction_end();
+            for (instruction_index, (instruction, allocated)) in ssa.instructions()[range.clone()]
+                .iter()
+                .zip(&allocation.instructions()[range])
+                .enumerate()
+                .map(|(offset, pair)| (block.instruction_start() + offset, pair))
+            {
+                if instruction.value_type() != X64ValueType::F64 {
+                    return Err(JitError::Verifier {
+                        model: MODEL.into(),
+                        detail: format!(
+                            "x64 codegen cannot legalize SSA value type {:?}",
+                            instruction.value_type()
+                        )
+                        .into(),
+                    });
+                }
+                let result_register = self.prepare_allocated_instruction(allocated)?;
 
-            let op = instruction.op();
-            match op {
-                NativeOp::Const(value) => {
-                    let dst = self.push_register()?;
-                    self.emit_constant_load(dst, value);
-                }
-                NativeOp::LoadParam(index) => {
-                    let dst = self.push_register()?;
-                    self.emit_context_pointer_load_cached(
-                        PARAMS_OFFSET,
-                        &mut context_pointer_cache,
-                    );
-                    self.encoder
-                        .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
-                }
-                NativeOp::LoadParamGiven(index) => {
-                    self.emit_param_given_load(index, &mut context_pointer_cache)?;
-                }
-                NativeOp::LoadPortConnected(index) => {
-                    self.emit_port_connected_load(index, &mut context_pointer_cache)?;
-                }
-                NativeOp::LoadVoltage { pos, neg } => {
-                    self.emit_voltage_load(pos, neg, &mut context_pointer_cache)?;
-                }
-                NativeOp::LoadCurrent(pair_index) => {
-                    self.emit_current_load(pair_index, &mut context_pointer_cache)?;
-                }
-                NativeOp::LoadPriorCurrent(current_index) => {
-                    self.emit_prior_current_load(current_index, &mut context_pointer_cache)?;
-                }
-                NativeOp::LoadInternalVoltage(index) => {
-                    let dst = self.push_register()?;
-                    self.emit_context_pointer_load_cached(
-                        INTERNAL_VOLTAGES_OFFSET,
-                        &mut context_pointer_cache,
-                    );
-                    self.encoder
-                        .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
-                }
-                NativeOp::LoadVariable(index) => {
-                    let dst = self.push_register()?;
-                    self.encoder.movsd_xmm_m64_base_disp32(
-                        dst,
-                        self.vars_arg_reg(),
-                        byte_disp(index)?,
-                    );
-                }
-                NativeOp::LoadVariableDyn { base, len, lower } => {
-                    self.emit_dynamic_variable_load(base, len, lower)?;
-                }
-                NativeOp::LoadBranchUnknown(index) => {
-                    let dst = self.push_register()?;
-                    self.emit_context_pointer_load_cached(
-                        BRANCH_UNKNOWNS_OFFSET,
-                        &mut context_pointer_cache,
-                    );
-                    self.encoder
-                        .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
-                }
-                NativeOp::LoadTemperature => {
-                    self.emit_context_f64_load(TEMPERATURE_OFFSET)?;
-                }
-                NativeOp::LoadThermalVoltage => {
-                    self.emit_thermal_voltage_load()?;
-                }
-                NativeOp::LoadTime => {
-                    self.emit_context_f64_load(TIME_OFFSET)?;
-                }
-                NativeOp::Analysis(analysis_id) => {
-                    self.emit_analysis_check(analysis_id)?;
-                }
-                NativeOp::LoadMfactor => {
-                    self.emit_context_f64_load(MFACTOR_OFFSET)?;
-                }
-                NativeOp::Add => self.emit_binary_op(BinaryOp::Add)?,
-                NativeOp::Sub => self.emit_binary_op(BinaryOp::Sub)?,
-                NativeOp::Mul => self.emit_binary_op(BinaryOp::Mul)?,
-                NativeOp::Div => self.emit_binary_op(BinaryOp::Div)?,
-                NativeOp::AddConst(value) => {
-                    self.emit_literal_rhs_binary_op(value, BinaryOp::Add)?
-                }
-                NativeOp::SubConst(value) => {
-                    self.emit_literal_rhs_binary_op(value, BinaryOp::Sub)?
-                }
-                NativeOp::MulConst(value) => {
-                    self.emit_literal_rhs_binary_op(value, BinaryOp::Mul)?
-                }
-                NativeOp::DivConst(value) => {
-                    self.emit_literal_rhs_binary_op(value, BinaryOp::Div)?
-                }
-                NativeOp::SubFromConst(value) => {
-                    self.emit_literal_lhs_binary_op(value, BinaryOp::Sub)?
-                }
-                NativeOp::DivFromConst(value) => {
-                    self.emit_literal_lhs_binary_op(value, BinaryOp::Div)?
-                }
-                NativeOp::Neg => self.emit_neg()?,
-                NativeOp::Abs => self.emit_abs()?,
-                NativeOp::Square => self.emit_square()?,
-                NativeOp::Sqrt => self.emit_sqrt()?,
-                NativeOp::Compare(op) => self.emit_compare(op)?,
-                NativeOp::CompareConst(op, value) => self.emit_compare_const(op, value)?,
-                NativeOp::Logical(op) => self.emit_logical(op)?,
-                NativeOp::LogicalConst(op, value) => self.emit_logical_const(op, value)?,
-                NativeOp::IfElse => self.emit_ifelse()?,
-                NativeOp::Extremum(op) => self.emit_extremum(op)?,
-                NativeOp::ExtremumConst(op, value) => self.emit_extremum_const(op, value)?,
-                NativeOp::ExtremumConstLhs(op, value) => self.emit_extremum_const_lhs(op, value)?,
-                NativeOp::UnaryMath(op) => self.emit_unary_math(op)?,
-                NativeOp::BinaryMath(op) => self.emit_binary_math(op)?,
-                NativeOp::IntegerCast => self.emit_integer_cast()?,
-                NativeOp::IntegerBinary(op) => self.emit_integer_binary(op)?,
-                NativeOp::IntegerShiftConst(op, count) => {
-                    self.emit_integer_shift_const(op, count)?
-                }
-                NativeOp::IntegerBinaryConst(op, value) => {
-                    self.emit_integer_bitwise_const(op, value)?
-                }
-                NativeOp::TableLookup(table_id) => {
-                    self.emit_table_helper_call(table_id, rspice_table_lookup_native)?
-                }
-                NativeOp::TableDerivative(table_id) => {
-                    self.emit_table_helper_call(table_id, rspice_table_derivative_native)?
-                }
-                NativeOp::LimitState(index) => self.emit_limit_state(index)?,
-                NativeOp::LimiterPrevious(index) => {
-                    self.emit_limiter_state_helper(index, rspice_limiter_previous_native)?
-                }
-                NativeOp::LimiterStore(index) => self.emit_limiter_store(index)?,
-                NativeOp::LaplaceState(filter_id) => self.emit_laplace_state(filter_id)?,
-                NativeOp::LaplaceStateDerivative(filter_id) => {
-                    self.emit_laplace_derivative(filter_id)?
-                }
-                NativeOp::ZiState(layout) => self.emit_zi_state(layout)?,
-                NativeOp::ZiStateDerivative(layout) => self.emit_zi_derivative_state(layout)?,
-                NativeOp::TimerState(timer_id) => self.emit_timer_state(timer_id)?,
-                NativeOp::TransitionState(filter_id) => self.emit_transition_state(filter_id)?,
-                NativeOp::TransitionStateDerivative(filter_id) => {
-                    self.emit_transition_derivative_state(filter_id)?
-                }
-                NativeOp::SlewState(filter_id) => self.emit_slew_state(filter_id)?,
-                NativeOp::SlewStateDerivative(filter_id) => {
-                    self.emit_slew_derivative_state(filter_id)?
-                }
-                NativeOp::AbsDelayState(buffer_id) => self.emit_absdelay_state(buffer_id)?,
-                NativeOp::AbsDelayStateMax(buffer_id) => {
-                    self.emit_absdelay_helper(buffer_id, 3, rspice_absdelay_state_max_native)?
-                }
-                NativeOp::AbsDelayStateDerivative(buffer_id) => {
-                    self.emit_absdelay_helper(buffer_id, 4, rspice_absdelay_derivative_native)?
-                }
-                NativeOp::AbsDelayStateDerivativeMax(buffer_id) => {
-                    self.emit_absdelay_helper(buffer_id, 5, rspice_absdelay_derivative_max_native)?
-                }
-                NativeOp::CrossState(detector_id) => self.emit_cross_state(detector_id)?,
-                NativeOp::AboveState(detector_id) => self.emit_above_state(detector_id)?,
-                NativeOp::LastCrossingState(detector_id) => {
-                    self.emit_last_crossing_state(detector_id)?
-                }
-                NativeOp::WhiteNoise => self.emit_white_noise()?,
-                NativeOp::FlickerNoise => self.emit_flicker_noise()?,
-                NativeOp::DdtState(index) => self.emit_ddt_state(index)?,
-                NativeOp::DdtJacobian => self.emit_ddt_jacobian()?,
-                NativeOp::IdtState(index) => self.emit_idt_state(index)?,
-                NativeOp::IdtJacobian => self.emit_idt_jacobian()?,
-                NativeOp::IdtModState(index) => self.emit_idtmod_state(index)?,
-            }
-            if self.logical_depth() != 1 {
-                return Err(JitError::Verifier {
-                    model: MODEL.into(),
-                    detail: format!(
-                        "x64 emitter depth {} is not one result after allocated {op:?}",
-                        self.logical_depth(),
-                    )
-                    .into(),
-                });
-            }
-            if let X64ValueLocation::Spill(slot) = allocated.result() {
-                let displacement = self.expression_spill_disp(slot)?;
-                self.encoder
-                    .movsd_m64_base_disp32_xmm(Gpr::Rsp, displacement, result_register);
-            }
-            self.reset_expression_state();
-            if instruction.effects().clobbers_context_pointer_cache() {
-                context_pointer_cache = None;
-            }
-            if let Some(assignment) = assignment {
-                let instruction_end = instruction_index + 1;
-                while let Some(output) = assignment.outputs().get(output_index).copied() {
-                    if output.instruction_end() != instruction_end {
-                        break;
+                let op = instruction.op();
+                match op {
+                    NativeOp::Const(value) => {
+                        let dst = self.push_register()?;
+                        self.emit_constant_load(dst, value);
                     }
-                    self.emit_assignment_location_store(
-                        allocation.location(output.value())?,
-                        output.variable_index(),
-                    )?;
-                    output_index += 1;
+                    NativeOp::LoadParam(index) => {
+                        let dst = self.push_register()?;
+                        self.emit_context_pointer_load_cached(
+                            PARAMS_OFFSET,
+                            &mut context_pointer_cache,
+                        );
+                        self.encoder
+                            .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
+                    }
+                    NativeOp::LoadParamGiven(index) => {
+                        self.emit_param_given_load(index, &mut context_pointer_cache)?;
+                    }
+                    NativeOp::LoadPortConnected(index) => {
+                        self.emit_port_connected_load(index, &mut context_pointer_cache)?;
+                    }
+                    NativeOp::LoadVoltage { pos, neg } => {
+                        self.emit_voltage_load(pos, neg, &mut context_pointer_cache)?;
+                    }
+                    NativeOp::LoadCurrent(pair_index) => {
+                        self.emit_current_load(pair_index, &mut context_pointer_cache)?;
+                    }
+                    NativeOp::LoadPriorCurrent(current_index) => {
+                        self.emit_prior_current_load(current_index, &mut context_pointer_cache)?;
+                    }
+                    NativeOp::LoadInternalVoltage(index) => {
+                        let dst = self.push_register()?;
+                        self.emit_context_pointer_load_cached(
+                            INTERNAL_VOLTAGES_OFFSET,
+                            &mut context_pointer_cache,
+                        );
+                        self.encoder
+                            .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
+                    }
+                    NativeOp::LoadVariable(index) => {
+                        let dst = self.push_register()?;
+                        self.encoder.movsd_xmm_m64_base_disp32(
+                            dst,
+                            self.vars_arg_reg(),
+                            byte_disp(index)?,
+                        );
+                    }
+                    NativeOp::LoadVariableDyn { base, len, lower } => {
+                        self.emit_dynamic_variable_load(base, len, lower)?;
+                    }
+                    NativeOp::LoadBranchUnknown(index) => {
+                        let dst = self.push_register()?;
+                        self.emit_context_pointer_load_cached(
+                            BRANCH_UNKNOWNS_OFFSET,
+                            &mut context_pointer_cache,
+                        );
+                        self.encoder
+                            .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
+                    }
+                    NativeOp::LoadTemperature => {
+                        self.emit_context_f64_load(TEMPERATURE_OFFSET)?;
+                    }
+                    NativeOp::LoadThermalVoltage => {
+                        self.emit_thermal_voltage_load()?;
+                    }
+                    NativeOp::LoadTime => {
+                        self.emit_context_f64_load(TIME_OFFSET)?;
+                    }
+                    NativeOp::Analysis(analysis_id) => {
+                        self.emit_analysis_check(analysis_id)?;
+                    }
+                    NativeOp::LoadMfactor => {
+                        self.emit_context_f64_load(MFACTOR_OFFSET)?;
+                    }
+                    NativeOp::Add => self.emit_binary_op(BinaryOp::Add)?,
+                    NativeOp::Sub => self.emit_binary_op(BinaryOp::Sub)?,
+                    NativeOp::Mul => self.emit_binary_op(BinaryOp::Mul)?,
+                    NativeOp::Div => self.emit_binary_op(BinaryOp::Div)?,
+                    NativeOp::AddConst(value) => {
+                        self.emit_literal_rhs_binary_op(value, BinaryOp::Add)?
+                    }
+                    NativeOp::SubConst(value) => {
+                        self.emit_literal_rhs_binary_op(value, BinaryOp::Sub)?
+                    }
+                    NativeOp::MulConst(value) => {
+                        self.emit_literal_rhs_binary_op(value, BinaryOp::Mul)?
+                    }
+                    NativeOp::DivConst(value) => {
+                        self.emit_literal_rhs_binary_op(value, BinaryOp::Div)?
+                    }
+                    NativeOp::SubFromConst(value) => {
+                        self.emit_literal_lhs_binary_op(value, BinaryOp::Sub)?
+                    }
+                    NativeOp::DivFromConst(value) => {
+                        self.emit_literal_lhs_binary_op(value, BinaryOp::Div)?
+                    }
+                    NativeOp::Neg => self.emit_neg()?,
+                    NativeOp::Abs => self.emit_abs()?,
+                    NativeOp::Square => self.emit_square()?,
+                    NativeOp::Sqrt => self.emit_sqrt()?,
+                    NativeOp::Compare(op) => self.emit_compare(op)?,
+                    NativeOp::CompareConst(op, value) => self.emit_compare_const(op, value)?,
+                    NativeOp::Logical(op) => self.emit_logical(op)?,
+                    NativeOp::LogicalConst(op, value) => self.emit_logical_const(op, value)?,
+                    NativeOp::IfElse => self.emit_ifelse()?,
+                    NativeOp::Extremum(op) => self.emit_extremum(op)?,
+                    NativeOp::ExtremumConst(op, value) => self.emit_extremum_const(op, value)?,
+                    NativeOp::ExtremumConstLhs(op, value) => {
+                        self.emit_extremum_const_lhs(op, value)?
+                    }
+                    NativeOp::UnaryMath(op) => self.emit_unary_math(op)?,
+                    NativeOp::BinaryMath(op) => self.emit_binary_math(op)?,
+                    NativeOp::IntegerCast => self.emit_integer_cast()?,
+                    NativeOp::IntegerBinary(op) => self.emit_integer_binary(op)?,
+                    NativeOp::IntegerShiftConst(op, count) => {
+                        self.emit_integer_shift_const(op, count)?
+                    }
+                    NativeOp::IntegerBinaryConst(op, value) => {
+                        self.emit_integer_bitwise_const(op, value)?
+                    }
+                    NativeOp::TableLookup(table_id) => {
+                        self.emit_table_helper_call(table_id, rspice_table_lookup_native)?
+                    }
+                    NativeOp::TableDerivative(table_id) => {
+                        self.emit_table_helper_call(table_id, rspice_table_derivative_native)?
+                    }
+                    NativeOp::LimitState(index) => self.emit_limit_state(index)?,
+                    NativeOp::LimiterPrevious(index) => {
+                        self.emit_limiter_state_helper(index, rspice_limiter_previous_native)?
+                    }
+                    NativeOp::LimiterStore(index) => self.emit_limiter_store(index)?,
+                    NativeOp::LaplaceState(filter_id) => self.emit_laplace_state(filter_id)?,
+                    NativeOp::LaplaceStateDerivative(filter_id) => {
+                        self.emit_laplace_derivative(filter_id)?
+                    }
+                    NativeOp::ZiState(layout) => self.emit_zi_state(layout)?,
+                    NativeOp::ZiStateDerivative(layout) => self.emit_zi_derivative_state(layout)?,
+                    NativeOp::TimerState(timer_id) => self.emit_timer_state(timer_id)?,
+                    NativeOp::TransitionState(filter_id) => {
+                        self.emit_transition_state(filter_id)?
+                    }
+                    NativeOp::TransitionStateDerivative(filter_id) => {
+                        self.emit_transition_derivative_state(filter_id)?
+                    }
+                    NativeOp::SlewState(filter_id) => self.emit_slew_state(filter_id)?,
+                    NativeOp::SlewStateDerivative(filter_id) => {
+                        self.emit_slew_derivative_state(filter_id)?
+                    }
+                    NativeOp::AbsDelayState(buffer_id) => self.emit_absdelay_state(buffer_id)?,
+                    NativeOp::AbsDelayStateMax(buffer_id) => {
+                        self.emit_absdelay_helper(buffer_id, 3, rspice_absdelay_state_max_native)?
+                    }
+                    NativeOp::AbsDelayStateDerivative(buffer_id) => {
+                        self.emit_absdelay_helper(buffer_id, 4, rspice_absdelay_derivative_native)?
+                    }
+                    NativeOp::AbsDelayStateDerivativeMax(buffer_id) => self.emit_absdelay_helper(
+                        buffer_id,
+                        5,
+                        rspice_absdelay_derivative_max_native,
+                    )?,
+                    NativeOp::CrossState(detector_id) => self.emit_cross_state(detector_id)?,
+                    NativeOp::AboveState(detector_id) => self.emit_above_state(detector_id)?,
+                    NativeOp::LastCrossingState(detector_id) => {
+                        self.emit_last_crossing_state(detector_id)?
+                    }
+                    NativeOp::WhiteNoise => self.emit_white_noise()?,
+                    NativeOp::FlickerNoise => self.emit_flicker_noise()?,
+                    NativeOp::DdtState(index) => self.emit_ddt_state(index)?,
+                    NativeOp::DdtJacobian => self.emit_ddt_jacobian()?,
+                    NativeOp::IdtState(index) => self.emit_idt_state(index)?,
+                    NativeOp::IdtJacobian => self.emit_idt_jacobian()?,
+                    NativeOp::IdtModState(index) => self.emit_idtmod_state(index)?,
+                }
+                if self.logical_depth() != 1 {
+                    return Err(JitError::Verifier {
+                        model: MODEL.into(),
+                        detail: format!(
+                            "x64 emitter depth {} is not one result after allocated {op:?}",
+                            self.logical_depth(),
+                        )
+                        .into(),
+                    });
+                }
+                if let X64ValueLocation::Spill(slot) = allocated.result() {
+                    let displacement = self.expression_spill_disp(slot)?;
+                    self.encoder
+                        .movsd_m64_base_disp32_xmm(Gpr::Rsp, displacement, result_register);
+                }
+                self.reset_expression_state();
+                if instruction.effects().clobbers_context_pointer_cache() {
+                    context_pointer_cache = None;
+                }
+                if let Some(assignment) = assignment {
+                    let instruction_end = instruction_index + 1;
+                    while let Some(output) = assignment.outputs().get(output_index).copied() {
+                        if output.instruction_end() != instruction_end {
+                            break;
+                        }
+                        self.emit_assignment_location_store(
+                            allocation.location(output.value())?,
+                            output.variable_index(),
+                        )?;
+                        output_index += 1;
+                    }
                 }
             }
+            self.emit_terminator(allocation, block, &mut pending_jumps)?;
         }
         if let Some(assignment) = assignment
             && output_index != assignment.outputs().len()
@@ -1026,6 +1059,141 @@ impl FunctionCompiler {
                 )
                 .into(),
             });
+        }
+        for (target, patch) in pending_jumps {
+            let offset = block_offsets[target].ok_or_else(|| JitError::Verifier {
+                model: MODEL.into(),
+                detail: format!("x64 branch targets block {target}, which was never emitted")
+                    .into(),
+            })?;
+            self.patch_rel32_to_offset(patch, offset)?;
+        }
+        Ok(())
+    }
+
+    /// Emit one block's terminator.
+    ///
+    /// `Return` emits nothing: the caller either materializes the result into
+    /// XMM0 or publishes assignment outputs. The exit block is always the last
+    /// block in layout order, so nothing follows it here.
+    fn emit_terminator(
+        &mut self,
+        allocation: &RegisterAllocation,
+        block: &X64BasicBlock,
+        pending_jumps: &mut Vec<(usize, Rel32Patch)>,
+    ) -> JitResult<()> {
+        let fallthrough = block.id().index() + 1;
+        match block.terminator() {
+            X64Terminator::Return(_) => Ok(()),
+            X64Terminator::Jump(edge) => {
+                self.emit_edge_moves(allocation, block.id(), 0)?;
+                if edge.target().index() != fallthrough {
+                    pending_jumps
+                        .push((edge.target().index(), self.encoder.jmp_rel32_placeholder()));
+                }
+                Ok(())
+            }
+            X64Terminator::Branch {
+                condition,
+                then_edge,
+                else_edge,
+            } => {
+                // Verilog-A truthiness is "not exactly zero", NaN included.
+                // Clearing the sign bit and testing the remaining payload
+                // decides that in one integer compare: only +0.0 and -0.0 are
+                // left at zero, and every NaN keeps a nonzero exponent. This
+                // is the same predicate the select form spells as UCOMISD
+                // against zero plus CMOVNE and CMOVP, and RAX is volatile
+                // under both supported ABIs and holds nothing at a block
+                // boundary.
+                match allocation.location(*condition)? {
+                    X64ValueLocation::Register(register) => {
+                        self.encoder
+                            .movq_r64_xmm(Gpr::Rax, allocated_xmm(register)?);
+                    }
+                    X64ValueLocation::Spill(slot) => {
+                        let displacement = self.expression_spill_disp(slot)?;
+                        self.encoder
+                            .mov_r64_m64_base_disp32(Gpr::Rax, Gpr::Rsp, displacement);
+                    }
+                }
+                self.encoder.btr_r64_imm8(Gpr::Rax, 63);
+                self.encoder.test_r64_r64(Gpr::Rax, Gpr::Rax);
+                let taken = self.encoder.jcc_rel32_placeholder(ConditionCode::NotEqual);
+
+                self.emit_edge_moves(allocation, block.id(), 1)?;
+                // The taken arm's moves are laid out next, so the untaken edge
+                // always needs its own jump even when its target follows.
+                pending_jumps.push((
+                    else_edge.target().index(),
+                    self.encoder.jmp_rel32_placeholder(),
+                ));
+
+                self.patch_rel32_to_current(taken)?;
+                self.emit_edge_moves(allocation, block.id(), 0)?;
+                if then_edge.target().index() != fallthrough {
+                    pending_jumps.push((
+                        then_edge.target().index(),
+                        self.encoder.jmp_rel32_placeholder(),
+                    ));
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn emit_edge_moves(
+        &mut self,
+        allocation: &RegisterAllocation,
+        block: X64BlockId,
+        edge: usize,
+    ) -> JitResult<()> {
+        for step in allocation.edge_moves(block, edge)?.to_vec() {
+            self.emit_location_move(step.from(), step.to())?;
+        }
+        Ok(())
+    }
+
+    fn emit_location_move(
+        &mut self,
+        from: X64ValueLocation,
+        to: X64ValueLocation,
+    ) -> JitResult<()> {
+        match (from, to) {
+            (X64ValueLocation::Register(source), X64ValueLocation::Register(destination)) => {
+                let source = allocated_xmm(source)?;
+                let destination = allocated_xmm(destination)?;
+                if source != destination {
+                    self.encoder.movsd_xmm_xmm(destination, source);
+                }
+            }
+            (X64ValueLocation::Register(source), X64ValueLocation::Spill(slot)) => {
+                let source = allocated_xmm(source)?;
+                let displacement = self.expression_spill_disp(slot)?;
+                self.encoder
+                    .movsd_m64_base_disp32_xmm(Gpr::Rsp, displacement, source);
+            }
+            (X64ValueLocation::Spill(slot), X64ValueLocation::Register(destination)) => {
+                let destination = allocated_xmm(destination)?;
+                let displacement = self.expression_spill_disp(slot)?;
+                self.encoder
+                    .movsd_xmm_m64_base_disp32(destination, Gpr::Rsp, displacement);
+            }
+            (X64ValueLocation::Spill(source), X64ValueLocation::Spill(destination)) => {
+                if source == destination {
+                    return Ok(());
+                }
+                // RAX is volatile under both supported ABIs and holds nothing
+                // at a block boundary, and a 64-bit integer move reproduces
+                // the payload bit-for-bit without touching the SIMD bank,
+                // which on Win64 would oblige the prologue to preserve it.
+                let source = self.expression_spill_disp(source)?;
+                let destination = self.expression_spill_disp(destination)?;
+                self.encoder
+                    .mov_r64_m64_base_disp32(Gpr::Rax, Gpr::Rsp, source);
+                self.encoder
+                    .mov_m64_base_disp32_r64(Gpr::Rsp, destination, Gpr::Rax);
+            }
         }
         Ok(())
     }
@@ -13599,5 +13767,226 @@ mod tests {
 
     fn thermal_voltage(temperature: f64) -> f64 {
         temperature * THERMAL_VOLTAGE_PER_K
+    }
+
+    // ----------------------------------------------- branch-lowered conditionals
+
+    fn branching_ssa(program: &NativeProgram) -> super::X64SsaProgram {
+        super::X64SsaProgram::lower(program)
+            .expect("lower the postfix program")
+            .with_branching_conditionals()
+            .expect("re-express conditionals as branches")
+    }
+
+    fn compile_branching_value_function(program: &NativeProgram) -> Vec<u8> {
+        super::compile_value_function_artifact_from_ssa(&branching_ssa(program))
+            .expect("compile the branch-form value function")
+            .bytes
+    }
+
+    fn value_entry(
+        memory: &ExecutableMemory,
+    ) -> extern "C" fn(*const EvalContext, *const f64) -> f64 {
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        unsafe { std::mem::transmute(entry) }
+    }
+
+    /// Nested conditionals whose arms own real work, including a helper call
+    /// that only one arm should reach.
+    fn nested_conditional_program() -> NativeProgram {
+        NativeProgram::from_ops_for_test(
+            vec![
+                NativeOp::LoadParam(0),
+                NativeOp::LoadParam(1),
+                NativeOp::LoadParam(2),
+                NativeOp::LoadParam(3),
+                NativeOp::Mul,
+                NativeOp::LoadParam(4),
+                NativeOp::UnaryMath(UnaryMathOp::Exp),
+                NativeOp::IfElse,
+                NativeOp::LoadParam(5),
+                NativeOp::Sqrt,
+                NativeOp::IfElse,
+                NativeOp::LoadParam(6),
+                NativeOp::Add,
+            ],
+            4,
+            Vec::new(),
+            Vec::new(),
+        )
+    }
+
+    #[test]
+    fn branch_lowered_conditionals_agree_with_the_select_form_bit_for_bit() {
+        let program = nested_conditional_program();
+        let split = branching_ssa(&program);
+        assert!(
+            split.blocks().len() == 7,
+            "two conditionals lay out two nested diamonds, found {} blocks",
+            split.blocks().len()
+        );
+
+        let select = ExecutableMemory::allocate(
+            &compile_value_function(&program).expect("compile the select form"),
+        )
+        .expect("allocate select leaf");
+        let branch = ExecutableMemory::allocate(&compile_branching_value_function(&program))
+            .expect("allocate branch leaf");
+        let select = value_entry(&select);
+        let branch = value_entry(&branch);
+
+        // Every truthiness class the two lowerings have to agree on, on both
+        // conditions: exact zero, negative zero, NaN, infinities, ordinary.
+        let truthiness = [
+            0.0_f64,
+            -0.0,
+            f64::NAN,
+            -f64::NAN,
+            1.0,
+            -1.0,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::MIN_POSITIVE,
+        ];
+        for outer in truthiness {
+            for inner in truthiness {
+                let params = [outer, inner, 3.0_f64, 0.5, 2.0, 9.0, -4.5];
+                let ctx = eval_context(&params, &[], &[], &[]);
+                let expected = select(&ctx, std::ptr::null());
+                let actual = branch(&ctx, std::ptr::null());
+                assert_eq!(
+                    actual.to_bits(),
+                    expected.to_bits(),
+                    "branch and select disagree at outer={outer} inner={inner}"
+                );
+                assert!(ctx.take_runtime_error().is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn a_branch_lowered_arm_does_not_run_the_untaken_arms_failing_load() {
+        // `condition ? variables[index] : 0.0` with an out-of-range index.
+        // The select form evaluates both arms, so the bounds check fires and
+        // hard-fails the entry even when the constant arm is the one selected.
+        let program = NativeProgram::from_ops_for_test(
+            vec![
+                NativeOp::LoadParam(0),
+                NativeOp::LoadParam(1),
+                NativeOp::LoadVariableDyn {
+                    base: 0,
+                    len: 3,
+                    lower: 1,
+                },
+                NativeOp::Const(7.0),
+                NativeOp::IfElse,
+            ],
+            3,
+            Vec::new(),
+            Vec::new(),
+        );
+        let select = ExecutableMemory::allocate(
+            &compile_value_function(&program).expect("compile the select form"),
+        )
+        .expect("allocate select leaf");
+        let branch = ExecutableMemory::allocate(&compile_branching_value_function(&program))
+            .expect("allocate branch leaf");
+        let select = value_entry(&select);
+        let branch = value_entry(&branch);
+        let variables = [11.0_f64, 22.0, 33.0, 44.0];
+
+        let out_of_range = [0.0_f64, 9.0];
+        let ctx = eval_context(&out_of_range, &[], &[], &[]);
+        ctx.clear_runtime_error();
+        let selected = select(&ctx, variables.as_ptr());
+        let select_error = ctx
+            .take_runtime_error()
+            .expect("the select form evaluates the arm it does not choose");
+        assert!(select_error.contains("array index 9 outside declared bounds"));
+        assert_eq!(selected.to_bits(), 0.0_f64.to_bits());
+
+        ctx.clear_runtime_error();
+        let branched = branch(&ctx, variables.as_ptr());
+        assert!(
+            ctx.take_runtime_error().is_none(),
+            "the branch form never reaches the untaken arm's bounds check"
+        );
+        assert_eq!(branched.to_bits(), 7.0_f64.to_bits());
+
+        // The taken arm still fails, and both forms still agree when the
+        // index is in range.
+        let taken = [1.0_f64, 9.0];
+        let ctx = eval_context(&taken, &[], &[], &[]);
+        ctx.clear_runtime_error();
+        branch(&ctx, variables.as_ptr());
+        assert!(
+            ctx.take_runtime_error().is_some(),
+            "a failing load on the taken path must still hard-fail"
+        );
+        for condition in [0.0_f64, 1.0, f64::NAN] {
+            let params = [condition, 2.0_f64];
+            let ctx = eval_context(&params, &[], &[], &[]);
+            ctx.clear_runtime_error();
+            let expected = select(&ctx, variables.as_ptr());
+            let actual = branch(&ctx, variables.as_ptr());
+            assert_eq!(actual.to_bits(), expected.to_bits());
+            assert!(ctx.take_runtime_error().is_none());
+        }
+    }
+
+    #[test]
+    fn branch_lowering_moves_block_parameters_between_spill_slots() {
+        // Thirteen simultaneously live values leave the ten-register bank
+        // exhausted, so the conditional's condition, its argument, and the
+        // join block's parameter all land in spill slots: the edge move is
+        // memory to memory.
+        let mut ops = (0..13).map(NativeOp::LoadParam).collect::<Vec<_>>();
+        ops.push(NativeOp::IfElse);
+        ops.extend(vec![NativeOp::Add; 10]);
+        let program = NativeProgram::from_ops_for_test(ops, 13, Vec::new(), Vec::new());
+
+        let split = branching_ssa(&program);
+        let allocation = super::RegisterAllocation::build(&split, super::X64_VALUE_BANK)
+            .expect("register allocation");
+        let spill_to_spill = split
+            .blocks()
+            .iter()
+            .flat_map(|block| {
+                (0..block.terminator().edge_count())
+                    .filter_map(|edge| allocation.edge_moves(block.id(), edge).ok())
+                    .flatten()
+            })
+            .any(|step| {
+                matches!(step.from(), super::X64ValueLocation::Spill(_))
+                    && matches!(step.to(), super::X64ValueLocation::Spill(_))
+            });
+        assert!(
+            spill_to_spill,
+            "this program is the fixture for the memory-to-memory edge move"
+        );
+
+        let select = ExecutableMemory::allocate(
+            &compile_value_function(&program).expect("compile the select form"),
+        )
+        .expect("allocate select leaf");
+        let branch = ExecutableMemory::allocate(&compile_branching_value_function(&program))
+            .expect("allocate branch leaf");
+        let select = value_entry(&select);
+        let branch = value_entry(&branch);
+        for condition in [0.0_f64, -0.0, 1.0, f64::NAN] {
+            let mut params = [1.0_f64; 13];
+            for (index, param) in params.iter_mut().enumerate() {
+                *param = index as f64 * 0.25 - 1.0;
+            }
+            params[10] = condition;
+            let ctx = eval_context(&params, &[], &[], &[]);
+            let expected = select(&ctx, std::ptr::null());
+            let actual = branch(&ctx, std::ptr::null());
+            assert_eq!(
+                actual.to_bits(),
+                expected.to_bits(),
+                "spilled-parameter edge move disagrees at condition={condition}"
+            );
+        }
     }
 }
