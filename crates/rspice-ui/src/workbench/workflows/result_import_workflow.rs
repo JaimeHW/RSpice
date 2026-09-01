@@ -18,6 +18,9 @@ use std::io::Read as _;
 use std::path::Path;
 use std::sync::Arc;
 
+#[path = "result_import_adapters.rs"]
+mod adapters;
+
 type ComplexComponentColumns = (Option<Vec<f64>>, Option<Vec<f64>>);
 
 pub(crate) const RESULT_DATASET_FILTER: (&str, &[&str]) = (
@@ -163,13 +166,6 @@ impl ResultImportFormat {
             Self::Vcd => "vcd",
             Self::Fst => "fst",
         }
-    }
-
-    const fn implemented(self) -> bool {
-        matches!(
-            self,
-            Self::CsvRfc4180 | Self::Tsv | Self::TouchstoneV1 | Self::TouchstoneV2
-        )
     }
 
     fn from_canonical_id(id: &str) -> Option<Self> {
@@ -898,12 +894,6 @@ pub(crate) fn parse_result_dataset(
         ));
     }
     let format = identify_result_import_format(source_name, bytes)?;
-    if !format.implemented() {
-        return Err(format!(
-            "Format '{}' was identified, but this build does not include its lossless result adapter; the selected source was not modified.",
-            format.canonical_id()
-        ));
-    }
     match format {
         ResultImportFormat::CsvRfc4180 | ResultImportFormat::Tsv => {
             let text = std::str::from_utf8(bytes)
@@ -920,7 +910,20 @@ pub(crate) fn parse_result_dataset(
         ResultImportFormat::TouchstoneV1 | ResultImportFormat::TouchstoneV2 => {
             parse_touchstone_result_dataset(source_name, bytes, format)
         }
-        _ => unreachable!("unimplemented formats return before dispatch"),
+        ResultImportFormat::RSpiceResultBundle | ResultImportFormat::RSpiceDatasetBundle => {
+            adapters::parse_native_bundle(bytes, format)
+        }
+        ResultImportFormat::Hdf5 => adapters::parse_hdf5(bytes, format),
+        ResultImportFormat::ArrowIpc => adapters::parse_arrow_ipc(bytes, format),
+        ResultImportFormat::Parquet => adapters::parse_parquet(bytes, format),
+        ResultImportFormat::NumpyNpy => adapters::parse_npy(bytes, format),
+        ResultImportFormat::NumpyNpz => adapters::parse_npz(bytes, format),
+        ResultImportFormat::MatlabV5 => adapters::parse_matlab_v5(bytes, format),
+        ResultImportFormat::MatlabV73 => adapters::parse_matlab_v73(bytes, format),
+        ResultImportFormat::SpiceRaw => adapters::parse_spice_raw(bytes, format),
+        ResultImportFormat::PsfAscii => adapters::parse_psf_ascii(bytes, format),
+        ResultImportFormat::Vcd => adapters::parse_vcd(bytes, format),
+        ResultImportFormat::Fst => adapters::parse_fst(bytes, format),
     }
 }
 
@@ -1015,10 +1018,14 @@ fn strong_result_format_signature(bytes: &[u8]) -> Option<ResultImportFormat> {
         Some(ResultImportFormat::MatlabV5)
     } else if bytes.starts_with(b"\x93NUMPY") {
         Some(ResultImportFormat::NumpyNpy)
+    } else if bytes.starts_with(b"PK\x03\x04") {
+        None
     } else if bytes.starts_with(b"PAR1") && bytes.ends_with(b"PAR1") {
         Some(ResultImportFormat::Parquet)
-    } else if bytes.starts_with(b"ARROW1") {
+    } else if bytes.starts_with(b"ARROW1") || bytes.ends_with(b"ARROW1") {
         Some(ResultImportFormat::ArrowIpc)
+    } else if adapters::looks_like_fst(bytes) {
+        Some(ResultImportFormat::Fst)
     } else {
         let prefix = std::str::from_utf8(bytes.get(..bytes.len().min(8_192))?).ok()?;
         if prefix.contains("$timescale") && prefix.contains("$scope") {
@@ -1790,7 +1797,7 @@ mod tests {
     }
 
     #[test]
-    fn known_unimplemented_formats_fail_closed_and_signatures_defeat_spoofed_extensions() {
+    fn structured_formats_reject_malformed_sources_and_signatures_defeat_spoofed_extensions() {
         for (name, bytes, id) in [
             ("samples.npy", b"\x93NUMPY\x01\x00".as_slice(), "numpy-npy"),
             ("table.parquet", b"PAR1payloadPAR1".as_slice(), "parquet"),
@@ -1800,9 +1807,8 @@ mod tests {
                 "vcd",
             ),
         ] {
-            let error = parse_result_dataset(name, bytes).expect_err("adapter is unavailable");
+            let error = parse_result_dataset(name, bytes).expect_err("malformed source rejects");
             assert!(error.contains(id), "{error}");
-            assert!(error.contains("not modified"), "{error}");
         }
 
         let error = parse_result_dataset("spoofed.csv", b"PAR1payloadPAR1")
