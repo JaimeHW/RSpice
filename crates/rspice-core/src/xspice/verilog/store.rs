@@ -192,6 +192,7 @@ struct Contribution {
 }
 
 /// The signal store and driver resolution for one compiled digital plan.
+#[derive(Clone)]
 pub(crate) struct DigitalSignalStore {
     /// Current value of every signal, at its declared width.
     values: Vec<FourStateValue>,

@@ -21,14 +21,11 @@
 //! See [`TIME_UNIT_RULING`]. It is a constant rather than a comment because a
 //! caller comparing this against another simulator has to be able to read it.
 //!
-//! # What is out of scope, and refused rather than approximated
-//!
-//! Mixed-signal interleave. A module with an analog block *and* digital
-//! processes is refused by [`DigitalRunError::MixedSignalModule`]: running its
-//! digital half alone would produce a trace that looks right and is not, which
-//! is the one outcome a conformance oracle cannot be allowed to see.
+//! Mixed modules are executed through [`MixedSignalHost`], whose trial
+//! transaction aligns the digital event slot with each analog Newton solve.
 
 pub(crate) mod host;
+mod mixed;
 pub(crate) mod store;
 #[cfg(test)]
 mod tests;
@@ -41,6 +38,7 @@ use crate::xspice::event_scheduler::{SchedulerLimits, TimeResolution};
 
 use host::DigitalHost;
 pub use host::DigitalRunError;
+pub use mixed::{MixedSignalCheckpoint, MixedSignalError, MixedSignalHost};
 
 /// What one tick of the digital host's clock is, and why it is not read from
 /// the source.

@@ -250,12 +250,34 @@ impl CodeGenerator {
         module: &AnalyzedModule,
         source_digest: impl Into<SmolStr>,
     ) -> CompileResult<CompiledModel> {
-        let source_digest = source_digest.into();
+        self.generate_analyzed_module_inner(module, source_digest.into(), false)
+    }
+
+    /// Lower only the analog half after a mixed host has taken ownership of
+    /// the module's canonical digital plan.
+    pub(crate) fn generate_mixed_analog_half_with_source_digest(
+        &self,
+        module: &AnalyzedModule,
+        source_digest: impl Into<SmolStr>,
+    ) -> CompileResult<CompiledModel> {
+        self.generate_analyzed_module_inner(module, source_digest.into(), true)
+    }
+
+    fn generate_analyzed_module_inner(
+        &self,
+        module: &AnalyzedModule,
+        source_digest: SmolStr,
+        mixed_host_owns_digital: bool,
+    ) -> CompileResult<CompiledModel> {
         let timings = compile_timings_enabled();
 
         // Build IR
         let phase_start = web_time::Instant::now();
-        let ir = DeviceIR::from_analyzed(module)?;
+        let ir = if mixed_host_owns_digital {
+            DeviceIR::from_analyzed_mixed_analog_half(module)?
+        } else {
+            DeviceIR::from_analyzed(module)?
+        };
         if timings {
             eprintln!(
                 "timing codegen.ir module={} elapsed={:.3}s variables={} assignments={} equations={} branch_unknowns={}",
