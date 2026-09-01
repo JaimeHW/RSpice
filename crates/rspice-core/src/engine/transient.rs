@@ -2624,6 +2624,33 @@ impl Engine {
             !circuit.iswitches.is_empty(),
             "current-controlled switch accepted hysteresis state is not checkpointed",
         );
+        // A mixed Verilog-AMS module's accepted state is a running digital
+        // design — the event queue, every process's resumption point, every
+        // `reg`, the resolved drivers and the boundary values — and none of it
+        // reaches the checkpoint file. `MixedSignalHost::checkpoint` produces an
+        // exact restart image of all of it, but that image holds a compiled
+        // analog device and a live scheduler rather than the numbers this
+        // format writes, so it is not the thing a `.cir`-adjacent text or packed
+        // encoding can carry.
+        //
+        // Without this blocker a resume rebuilds the module from the netlist,
+        // which restarts its `initial` blocks at time zero, and then advances it
+        // from the checkpoint's analog time. That is not a slightly worse
+        // answer: it is the design's state machine started over while the
+        // circuit around it continues, and the trace it produces is plausible.
+        // Measured on a deck whose module toggles on an external clock, a resume
+        // produced a `q` trace inverted against the baseline's from the
+        // checkpoint onward, with nothing reporting a problem. A module that
+        // happens to have a pending self-scheduled activation is caught by
+        // `MixedSignalError::MissedDigitalBreakpoint` instead, which is an
+        // accident of that guard rather than a contract — it fires only because
+        // the restarted wheel still holds an event dated behind the resume time.
+        #[cfg(feature = "veriloga")]
+        block_if_present(
+            &mut blockers,
+            circuit.has_mixed_signal_hosts(),
+            "mixed Verilog-AMS accepted digital state is not checkpointed",
+        );
         blockers.extend(circuit.xspice_checkpoint_resume_blockers());
         blockers.sort_unstable();
         blockers.dedup();
