@@ -211,6 +211,63 @@ impl TimeResolution {
         }
         Ok(ticks as u64)
     }
+
+    /// Convert analog seconds to the tick *at or before* them.
+    ///
+    /// This is the conversion a mixed-signal interleave uses, and it is a
+    /// separate method rather than a mode of [`Self::seconds_to_ticks`]
+    /// because the two answer different questions and both callers are right.
+    /// Rounding to nearest is what an event *scheduled* in seconds wants: the
+    /// tick closest to the instant asked for. Flooring is what an analog
+    /// timepoint being *delivered* to the digital world wants, and the reason
+    /// is that a `.tran` step controlled by local truncation error does not
+    /// land on the grid at all:
+    ///
+    /// * flooring is monotone, so a non-decreasing sequence of accepted analog
+    ///   times gives a non-decreasing sequence of ticks;
+    /// * it never runs the digital world past an instant the integrator has
+    ///   accepted, which rounding up to the nearest tick would;
+    /// * two analog times inside one tick collapse rather than reorder, which
+    ///   is what a declared precision means.
+    ///
+    /// The exact time is not lost by this — it is carried alongside, in the
+    /// unquantized `f64` the analog side already has, which is what keeps a
+    /// breakpoint bit-exact. See the module documentation of
+    /// [`crate::xspice::verilog`] for the ruling this implements.
+    ///
+    /// # Exactness
+    ///
+    /// The answer is defined as the largest `t` with
+    /// `ticks_to_seconds(t) <= seconds`, and it is computed against that same
+    /// product rather than against the division alone. A single division is
+    /// off by up to one ulp, which for a time that sits exactly on a tick can
+    /// land just under the integer and floor to the tick *before* it — the one
+    /// error this conversion must not make, because an event time handed back
+    /// as a breakpoint would then be delivered a tick late. Correcting against
+    /// the multiplication makes `seconds_to_floor_ticks(ticks_to_seconds(t))`
+    /// exactly `t` for every representable `t`.
+    pub fn seconds_to_floor_ticks(self, seconds: f64) -> Result<u64, SchedulerError> {
+        if !seconds.is_finite() || seconds < 0.0 {
+            return Err(SchedulerError::SecondsNotRepresentable { seconds });
+        }
+        let scale = self.seconds_per_tick();
+        let estimate = (seconds / scale).floor();
+        if !estimate.is_finite() || estimate < 0.0 || estimate > Self::MAX_EXACT_TICKS as f64 {
+            return Err(SchedulerError::SecondsNotRepresentable { seconds });
+        }
+        // The division is accurate to within one ulp of the quotient, so each
+        // correction runs at most once; they are loops rather than single
+        // steps so the postcondition holds by construction instead of by an
+        // argument about rounding.
+        let mut ticks = estimate as u64;
+        while ticks > 0 && (ticks as f64) * scale > seconds {
+            ticks -= 1;
+        }
+        while ticks < Self::MAX_EXACT_TICKS && ((ticks + 1) as f64) * scale <= seconds {
+            ticks += 1;
+        }
+        Ok(ticks)
+    }
 }
 
 /// The driver an event updates.
@@ -460,6 +517,29 @@ impl EventQueues {
         self.slot.iter().all(BTreeMap::is_empty)
     }
 
+    /// Earliest tick any event still sitting in the slot is dated at.
+    ///
+    /// The slot is keyed by sequence, not by tick, because within one tick
+    /// sequence is the whole tie-break after the region — so the tick has to
+    /// be read off the events themselves. That scan is why the empty case
+    /// returns first: an empty slot is the steady state between
+    /// [`EventScheduler::run_due_events`] calls, which is where the hot
+    /// predicates ask, and it must stay as cheap as the region-emptiness
+    /// check it already was.
+    ///
+    /// A non-empty slot is only observable from inside a due-slot run or after
+    /// one returned an oscillation, and neither is a per-evaluation path.
+    fn slot_min_tick(&self) -> Option<u64> {
+        if self.slot_is_empty() {
+            return None;
+        }
+        self.slot
+            .iter()
+            .flat_map(BTreeMap::values)
+            .map(|event| event.tick)
+            .min()
+    }
+
     /// Take the lowest-sequence active event.
     fn pop_active(&mut self) -> Option<ScheduledEvent> {
         let event = self.slot[SchedulerRegion::Active.index()]
@@ -617,11 +697,27 @@ impl EventScheduler {
     }
 
     /// Earliest tick holding an event, if any.
+    ///
+    /// Both tiers are consulted and the earlier answer wins. The slot is
+    /// asked what its events are *dated*, which is not the same question as
+    /// which slot is open: [`Self::open_due_slot`] sets `current_tick` to the
+    /// caller's bound, and `open_next_due_tick` then fills the slot from the
+    /// earliest pending tick at or before that bound. So a slot observed
+    /// part-settled holds events dated before `current_tick`, and answering
+    /// with the bound would date them late — as a breakpoint, by however far
+    /// the bound overshot.
+    ///
+    /// A slot is only observable part-settled from inside a due-slot run or
+    /// after one returned an oscillation. Every XSPICE reader asks between
+    /// runs, where a settled slot is empty in every region, so this reads the
+    /// future tier for them exactly as it always did.
     pub fn next_tick(&self) -> Option<u64> {
-        if !self.queues.slot_is_empty() {
-            return Some(self.current_tick);
+        let slot = self.queues.slot_min_tick();
+        let future = self.queues.future.keys().next().map(|(tick, _, _)| *tick);
+        match (slot, future) {
+            (Some(slot), Some(future)) => Some(slot.min(future)),
+            (slot, future) => slot.or(future),
         }
-        self.queues.future.keys().next().map(|(tick, _, _)| *tick)
     }
 
     /// Number of events not yet executed.

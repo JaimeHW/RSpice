@@ -1145,3 +1145,149 @@ fn several_thousand_events_drain_in_total_order() {
     };
     assert_eq!(slots, distinct_ticks);
 }
+
+//=============================================================================
+// Flooring an analog time onto the tick grid
+//=============================================================================
+
+#[test]
+fn flooring_maps_an_off_grid_analog_time_to_the_tick_at_or_before_it() {
+    let resolution = TimeResolution::new(-9).expect("1 ns");
+
+    // The case the round-to-nearest conversion gets wrong for a mixed
+    // interleave: a time three quarters of the way through a tick belongs to
+    // the tick it is inside, not to the one it is closest to. Rounding here
+    // would run the digital world a quarter of a nanosecond past an instant
+    // the integrator has accepted.
+    assert_eq!(resolution.seconds_to_ticks(2.75e-9), Ok(3));
+    assert_eq!(resolution.seconds_to_floor_ticks(2.75e-9), Ok(2));
+    assert_eq!(resolution.seconds_to_floor_ticks(2.25e-9), Ok(2));
+    assert_eq!(resolution.seconds_to_floor_ticks(0.0), Ok(0));
+    assert_eq!(resolution.seconds_to_floor_ticks(0.999e-9), Ok(0));
+
+    // Monotone: a non-decreasing sequence of analog times gives a
+    // non-decreasing sequence of ticks, which is what lets `advance_to` be
+    // driven straight from accepted timepoints.
+    let mut previous = 0u64;
+    let mut seconds = 0.0f64;
+    while seconds < 5.0e-9 {
+        let tick = resolution.seconds_to_floor_ticks(seconds).expect("in range");
+        assert!(
+            tick >= previous,
+            "flooring must be monotone: {seconds:e} s gave {tick} after {previous}"
+        );
+        previous = tick;
+        seconds += 3.7e-11;
+    }
+}
+
+#[test]
+fn flooring_a_tick_boundary_returns_that_tick_and_not_the_one_before() {
+    // The error a bare division would make: an event time handed back as a
+    // breakpoint, floored, must be delivered at its own tick. One ulp low and
+    // the digital slot runs a whole tick late.
+    for exponent in [-9i8, -12, -15] {
+        let resolution = TimeResolution::new(exponent).expect("declared precision");
+        for tick in [0u64, 1, 2, 3, 7, 999, 1_000, 1_001, 123_456_789] {
+            let seconds = resolution.ticks_to_seconds(tick).expect("in range");
+            assert_eq!(
+                resolution.seconds_to_floor_ticks(seconds),
+                Ok(tick),
+                "exponent {exponent} tick {tick} round trip"
+            );
+        }
+    }
+}
+
+#[test]
+fn flooring_refuses_what_rounding_refuses() {
+    let resolution = TimeResolution::new(-9).expect("1 ns");
+    assert!(resolution.seconds_to_floor_ticks(-1.0e-9).is_err());
+    assert!(resolution.seconds_to_floor_ticks(f64::NAN).is_err());
+    assert!(resolution.seconds_to_floor_ticks(f64::INFINITY).is_err());
+    assert!(
+        resolution
+            .seconds_to_floor_ticks(TimeResolution::MAX_EXACT_TICKS as f64 * 1.0e-9 * 2.0)
+            .is_err()
+    );
+}
+
+//=============================================================================
+// What the next tick reports about a part-settled slot
+//=============================================================================
+
+#[test]
+fn the_next_tick_dates_a_part_settled_slot_by_its_events_not_by_the_bound() {
+    // Drive the slot the way a mixed interleave does: name a bound well past
+    // the earliest pending tick, and stop the settle inside it. The events the
+    // kernel opened into the slot are dated at tick 2; reporting the bound
+    // would date them at 40, which as a breakpoint is 38 ns late.
+    let limits = SchedulerLimits {
+        max_delta_cycles_per_tick: 0,
+        ..SchedulerLimits::default()
+    };
+    let mut scheduler = EventScheduler::new(TimeResolution::new(-9).expect("1 ns"), limits);
+    scheduler
+        .schedule_at(
+            2,
+            SchedulerRegion::Active,
+            target("a", "out", 1, 0),
+            digital(1),
+        )
+        .expect("schedule");
+    scheduler
+        .schedule_at(
+            2,
+            SchedulerRegion::NonBlockingAssign,
+            target("b", "out", 2, 0),
+            digital(1),
+        )
+        .expect("schedule");
+
+    let error = scheduler
+        .run_due_events(40, |_, _| {})
+        .expect_err("the delta-cycle ceiling stops the slot part-settled");
+    assert!(matches!(error, SchedulerError::Oscillation(_)));
+
+    assert_eq!(
+        scheduler.next_tick(),
+        Some(2),
+        "an event still in the slot is dated where it was scheduled, not at the bound"
+    );
+}
+
+#[test]
+fn the_next_tick_is_unchanged_for_a_settled_slot() {
+    // The XSPICE estate's reading: every predicate asks between runs, and a
+    // slot that settled is empty in every region, so the answer comes from the
+    // future tier exactly as it always did.
+    let mut scheduler = scheduler();
+    assert_eq!(scheduler.next_tick(), None);
+    scheduler
+        .schedule_at(
+            4,
+            SchedulerRegion::Active,
+            target("a", "out", 1, 0),
+            digital(1),
+        )
+        .expect("schedule");
+    scheduler
+        .schedule_at(
+            9,
+            SchedulerRegion::Active,
+            target("b", "out", 2, 0),
+            digital(0),
+        )
+        .expect("schedule");
+    assert_eq!(scheduler.next_tick(), Some(4));
+
+    scheduler.run_due_events(4, |_, _| {}).expect("settles");
+    assert_eq!(
+        scheduler.next_tick(),
+        Some(9),
+        "the settled slot is empty, so the future tier answers"
+    );
+
+    scheduler.run_due_events(20, |_, _| {}).expect("settles");
+    assert_eq!(scheduler.next_tick(), None);
+}
