@@ -4,6 +4,7 @@ use super::*;
 enum PeriodicMnaRegistration {
     VoltageSource(usize),
     Inductor(usize),
+    TransformerWinding(usize, usize),
     Resistor(usize),
     Vcvs(usize),
     Ccvs(usize),
@@ -263,7 +264,8 @@ impl Engine {
     /// canonical one-based branch order.
     ///
     /// Linear HB, PAC, and PNoise support independent and controlled
-    /// voltage-source, uncoupled-inductor, and branch-form resistor equations. If authored
+    /// voltage-source, coupled/uncoupled-inductor, transformer-winding, and
+    /// branch-form resistor equations. If authored
     /// voltage-source spectra were registered first, the exact descriptors
     /// retain them for the large-signal solve; otherwise they describe
     /// zero-valued small-signal constraints. The caller rejects other branch
@@ -275,24 +277,6 @@ impl Engine {
         solver: &mut HbSolver,
     ) -> Result<(), SimulationError> {
         let branch_count = circuit.num_branches();
-        let represented_count = circuit
-            .voltage_sources
-            .len()
-            .checked_add(circuit.inductors.len())
-            .and_then(|count| count.checked_add(circuit.resistor_branches.len()))
-            .and_then(|count| count.checked_add(circuit.vcvs.len()))
-            .and_then(|count| count.checked_add(circuit.ccvs.len()))
-            .ok_or_else(|| {
-                SimulationError::Circuit(
-                    "periodic MNA supported-branch count overflows this platform".to_string(),
-                )
-            })?;
-        if represented_count != branch_count {
-            return Err(SimulationError::Circuit(format!(
-                "periodic MNA supports {represented_count} voltage-source/controlled-source/inductor/resistor branches, but the circuit declares {branch_count} canonical branches"
-            )));
-        }
-
         let mut registrations = Vec::new();
         registrations
             .try_reserve_exact(branch_count)
@@ -535,6 +519,78 @@ impl Engine {
             }
         }
 
+        // A multi-winding binding may either own otherwise-unassigned
+        // canonical winding branches or overlay standalone inductor branches.
+        // In both cases each self term has exactly one owner; only mutual
+        // off-diagonals are added after the complete registry is established.
+        for (binding_index, binding) in circuit.multi_winding_transformers.iter().enumerate() {
+            let device = &binding.device;
+            let winding_count = device.num_windings;
+            if winding_count == 0
+                || device.nodes.len() != winding_count
+                || device.inductances.len() != winding_count
+                || device.branches.len() != winding_count
+                || device.coupling_matrix.len() != winding_count
+                || device
+                    .coupling_matrix
+                    .iter()
+                    .any(|row| row.len() != winding_count)
+                || binding.branch_ordinals.len() != winding_count
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "periodic MNA transformer '{}' has malformed winding/matrix cardinality",
+                    device.name
+                )));
+            }
+            for winding_index in 0..winding_count {
+                let branch_ordinal = binding.branch_ordinals[winding_index];
+                let slot_index = branch_ordinal.checked_sub(1).ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "periodic MNA transformer '{}' winding {} has invalid branch ordinal 0",
+                        device.name,
+                        winding_index + 1
+                    ))
+                })?;
+                let slot = registrations.get_mut(slot_index).ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "periodic MNA transformer '{}' winding {} has branch ordinal {branch_ordinal}, outside 1..={branch_count}",
+                        device.name,
+                        winding_index + 1
+                    ))
+                })?;
+                match slot {
+                    None => {
+                        *slot = Some(PeriodicMnaRegistration::TransformerWinding(
+                            binding_index,
+                            winding_index,
+                        ));
+                    }
+                    Some(PeriodicMnaRegistration::Inductor(inductor_index)) => {
+                        if circuit.inductors.node_pos[*inductor_index]
+                            != device.nodes[winding_index].0
+                            || circuit.inductors.node_neg[*inductor_index]
+                                != device.nodes[winding_index].1
+                            || circuit.inductors.inductances[*inductor_index]
+                                != device.inductances[winding_index]
+                        {
+                            return Err(SimulationError::Circuit(format!(
+                                "periodic MNA transformer '{}' winding {} disagrees with standalone inductor branch {branch_ordinal}",
+                                device.name,
+                                winding_index + 1
+                            )));
+                        }
+                    }
+                    Some(_) => {
+                        return Err(SimulationError::Circuit(format!(
+                            "periodic MNA transformer '{}' winding {} aliases a non-inductor or another transformer branch at ordinal {branch_ordinal}",
+                            device.name,
+                            winding_index + 1
+                        )));
+                    }
+                }
+            }
+        }
+
         for (slot_index, registration) in registrations.into_iter().enumerate() {
             let branch_ordinal = slot_index.checked_add(1).ok_or_else(|| {
                 SimulationError::Circuit(
@@ -575,6 +631,24 @@ impl Engine {
                         .map_err(|error| {
                             SimulationError::Circuit(format!(
                                 "periodic MNA inductor registration failed: {error}"
+                            ))
+                        })?;
+                }
+                PeriodicMnaRegistration::TransformerWinding(binding_index, winding_index) => {
+                    let binding = &circuit.multi_winding_transformers[binding_index];
+                    let device = &binding.device;
+                    let name = format!("{}#{}", device.name, winding_index + 1);
+                    solver
+                        .try_add_periodic_inductor_branch(
+                            device.nodes[winding_index].0,
+                            device.nodes[winding_index].1,
+                            device.inductances[winding_index],
+                            branch_ordinal,
+                            &name,
+                        )
+                        .map_err(|error| {
+                            SimulationError::Circuit(format!(
+                                "periodic MNA transformer-winding registration failed: {error}"
                             ))
                         })?;
                 }
@@ -628,6 +702,264 @@ impl Engine {
             }
         }
         self.hb_stamp_controlled_sources(circuit, solver, branch_count)?;
+        self.hb_stamp_mutual_inductances(circuit, solver, branch_count)?;
+        Ok(())
+    }
+
+    /// Validate authored magnetic topology and stamp each mutual inductance
+    /// once into the augmented exact-MNA branch block.
+    fn hb_stamp_mutual_inductances(
+        &self,
+        circuit: &CircuitData,
+        solver: &mut HbSolver,
+        branch_count: usize,
+    ) -> Result<(), SimulationError> {
+        let num_nodes = circuit.num_nodes();
+        let branch_index = |ordinal: usize| num_nodes + ordinal - 1;
+        let mut inductor_by_branch = vec![None; branch_count];
+        for (inductor_index, &ordinal) in circuit.inductors.branch_indices.iter().enumerate() {
+            let slot = ordinal
+                .checked_sub(1)
+                .and_then(|index| inductor_by_branch.get_mut(index))
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "periodic mutual-inductance inductor '{}' has invalid branch ordinal {ordinal}",
+                        circuit
+                            .inductors
+                            .names
+                            .get(inductor_index)
+                            .map(String::as_str)
+                            .unwrap_or("<missing>")
+                    ))
+                })?;
+            if slot.replace(inductor_index).is_some() {
+                return Err(SimulationError::Circuit(format!(
+                    "periodic mutual-inductance topology assigns inductor branch ordinal {ordinal} more than once"
+                )));
+            }
+        }
+
+        // The authored K records are retained after builder resolution. Prove
+        // that every requested pair has exactly one derived runtime overlay,
+        // without numerically stamping the retained record a second time.
+        for coupling in &circuit.couplings {
+            if coupling.name.trim().is_empty() || coupling.inductor_names.len() < 2 {
+                return Err(SimulationError::Circuit(format!(
+                    "periodic mutual coupling '{}' names fewer than two inductors",
+                    coupling.name
+                )));
+            }
+            let mut indices = Vec::with_capacity(coupling.inductor_names.len());
+            for inductor_name in &coupling.inductor_names {
+                let mut matches = circuit
+                    .inductors
+                    .names
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, name)| name.eq_ignore_ascii_case(inductor_name));
+                let index = matches.next().map(|(index, _)| index).ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "periodic mutual coupling '{}' references missing inductor '{}'",
+                        coupling.name, inductor_name
+                    ))
+                })?;
+                if matches.next().is_some() {
+                    return Err(SimulationError::Circuit(format!(
+                        "periodic mutual coupling '{}' references non-unique inductor name '{}'",
+                        coupling.name, inductor_name
+                    )));
+                }
+                if indices.contains(&index) {
+                    return Err(SimulationError::Circuit(format!(
+                        "periodic mutual coupling '{}' repeats inductor '{}'",
+                        coupling.name, inductor_name
+                    )));
+                }
+                indices.push(index);
+            }
+            for left in 0..indices.len() {
+                for right in (left + 1)..indices.len() {
+                    let i = indices[left];
+                    let j = indices[right];
+                    let ordinal_i = circuit.inductors.branch_indices[i];
+                    let ordinal_j = circuit.inductors.branch_indices[j];
+                    let overlays = circuit
+                        .coupled_inductor_pairs
+                        .iter()
+                        .filter(|binding| {
+                            binding.device.name.eq_ignore_ascii_case(&coupling.name)
+                                && ((binding.branch1_ordinal == ordinal_i
+                                    && binding.branch2_ordinal == ordinal_j)
+                                    || (binding.branch1_ordinal == ordinal_j
+                                        && binding.branch2_ordinal == ordinal_i))
+                        })
+                        .collect::<Vec<_>>();
+                    if overlays.len() != 1 {
+                        return Err(SimulationError::Circuit(format!(
+                            "periodic mutual coupling '{}' pair ('{}', '{}') resolves to {} runtime overlays; expected exactly one",
+                            coupling.name,
+                            circuit.inductors.names[i],
+                            circuit.inductors.names[j],
+                            overlays.len()
+                        )));
+                    }
+                    let expected = coupling.mutual_inductance(
+                        circuit.inductors.inductances[i],
+                        circuit.inductors.inductances[j],
+                    );
+                    let actual = overlays[0].device.m;
+                    let tolerance =
+                        32.0 * Value::EPSILON * expected.abs().max(actual.abs()).max(1.0);
+                    if !actual.is_finite() || (actual - expected).abs() > tolerance {
+                        return Err(SimulationError::Circuit(format!(
+                            "periodic mutual coupling '{}' pair ('{}', '{}') has runtime mutual inductance {actual}, expected {expected}",
+                            coupling.name, circuit.inductors.names[i], circuit.inductors.names[j]
+                        )));
+                    }
+                }
+            }
+        }
+
+        for binding in &circuit.coupled_inductor_pairs {
+            let device = &binding.device;
+            let ordinal1 = binding.branch1_ordinal;
+            let ordinal2 = binding.branch2_ordinal;
+            if ordinal1 == ordinal2 {
+                return Err(SimulationError::Circuit(format!(
+                    "periodic mutual pair '{}' aliases branch ordinal {ordinal1} on both windings",
+                    device.name
+                )));
+            }
+            let inductor1 = ordinal1
+                .checked_sub(1)
+                .and_then(|index| inductor_by_branch.get(index))
+                .and_then(|index| *index)
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "periodic mutual pair '{}' has missing first inductor control branch ordinal {ordinal1}",
+                        device.name
+                    ))
+                })?;
+            let inductor2 = ordinal2
+                .checked_sub(1)
+                .and_then(|index| inductor_by_branch.get(index))
+                .and_then(|index| *index)
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "periodic mutual pair '{}' has missing second inductor control branch ordinal {ordinal2}",
+                        device.name
+                    ))
+                })?;
+            if circuit.inductors.node_pos[inductor1] != device.node1_pos
+                || circuit.inductors.node_neg[inductor1] != device.node1_neg
+                || circuit.inductors.inductances[inductor1] != device.l1
+                || circuit.inductors.node_pos[inductor2] != device.node2_pos
+                || circuit.inductors.node_neg[inductor2] != device.node2_neg
+                || circuit.inductors.inductances[inductor2] != device.l2
+                || !device.m.is_finite()
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "periodic mutual pair '{}' disagrees with its canonical inductor branches",
+                    device.name
+                )));
+            }
+            for (row, column) in [(ordinal1, ordinal2), (ordinal2, ordinal1)] {
+                solver
+                    .try_add_exact_mna_inductance_entry(
+                        branch_index(row),
+                        branch_index(column),
+                        device.m,
+                        &device.name,
+                    )
+                    .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+            }
+        }
+
+        for binding in &circuit.multi_winding_transformers {
+            let device = &binding.device;
+            let winding_count = device.num_windings;
+            if device.name.trim().is_empty()
+                || winding_count == 0
+                || device.nodes.len() != winding_count
+                || device.inductances.len() != winding_count
+                || device.branches.len() != winding_count
+                || binding.branch_ordinals.len() != winding_count
+                || device.coupling_matrix.len() != winding_count
+                || device
+                    .coupling_matrix
+                    .iter()
+                    .any(|row| row.len() != winding_count)
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "periodic MNA transformer '{}' has malformed winding/matrix cardinality",
+                    device.name
+                )));
+            }
+            for winding in 0..winding_count {
+                let (pos, neg) = device.nodes[winding];
+                let ordinal = binding.branch_ordinals[winding];
+                let expected_matrix_branch = num_nodes.checked_add(ordinal).ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "periodic MNA transformer '{}' winding {} branch index exceeds this platform",
+                        device.name,
+                        winding + 1
+                    ))
+                })?;
+                if pos > num_nodes
+                    || neg > num_nodes
+                    || pos == neg
+                    || !device.inductances[winding].is_finite()
+                    || device.inductances[winding] == 0.0
+                    || device.branches[winding] != Some(expected_matrix_branch)
+                {
+                    return Err(SimulationError::Circuit(format!(
+                        "periodic MNA transformer '{}' winding {} has malformed terminals, inductance, or canonical branch binding",
+                        device.name,
+                        winding + 1
+                    )));
+                }
+                if binding.branch_ordinals[..winding].contains(&ordinal) {
+                    return Err(SimulationError::Circuit(format!(
+                        "periodic MNA transformer '{}' repeats branch ordinal {ordinal}",
+                        device.name
+                    )));
+                }
+                for column in 0..winding_count {
+                    if !device.coupling_matrix[winding][column].is_finite() {
+                        return Err(SimulationError::Circuit(format!(
+                            "periodic MNA transformer '{}' has non-finite coupling coefficient ({winding}, {column})",
+                            device.name
+                        )));
+                    }
+                    let mutual = device.mutual_inductance(winding, column);
+                    if !mutual.is_finite() {
+                        return Err(SimulationError::Circuit(format!(
+                            "periodic MNA transformer '{}' has non-finite inductance matrix entry ({winding}, {column})",
+                            device.name
+                        )));
+                    }
+                    if winding != column {
+                        let reverse = device.mutual_inductance(column, winding);
+                        let tolerance =
+                            32.0 * Value::EPSILON * mutual.abs().max(reverse.abs()).max(1.0);
+                        if (mutual - reverse).abs() > tolerance {
+                            return Err(SimulationError::Circuit(format!(
+                                "periodic MNA transformer '{}' has asymmetric mutual inductance entries ({winding}, {column})",
+                                device.name
+                            )));
+                        }
+                        solver
+                            .try_add_exact_mna_inductance_entry(
+                                branch_index(ordinal),
+                                branch_index(binding.branch_ordinals[column]),
+                                mutual,
+                                &device.name,
+                            )
+                            .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                    }
+                }
+            }
+        }
         Ok(())
     }
 
@@ -957,7 +1289,9 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::SimulationConfig;
-    use crate::analysis::harmonic_balance::DC_SHORT_CONDUCTANCE;
+    use crate::analysis::harmonic_balance::{DC_SHORT_CONDUCTANCE, HbSolverState};
+    use crate::circuit::MultiWindingTransformerBinding;
+    use crate::device::{CoupledInductorPair, MultiWindingTransformer};
 
     #[test]
     fn hb_engine_stamps_dangling_series_rl_as_a_dc_short() {
@@ -1071,6 +1405,181 @@ mod tests {
                 && message.contains("control")
                 && message.contains("expected 1..=1"),
             "unexpected malformed-control diagnostic: {message}"
+        );
+    }
+
+    #[test]
+    fn periodic_multi_winding_transformer_preserves_mutual_sign_at_all_harmonics() {
+        let mut circuit = CircuitData::new();
+        let primary = circuit.get_or_create_node("primary");
+        let secondary = circuit.get_or_create_node("secondary");
+        let branch1 = circuit.allocate_branch_named("T1#1");
+        let branch2 = circuit.allocate_branch_named("T1#2");
+        let l1: Value = 100.0e-6;
+        let l2: Value = 25.0e-6;
+        let k: Value = 0.8;
+        let mutual = k * (l1 * l2).sqrt();
+        let mut transformer = MultiWindingTransformer::new(
+            "T1".to_string(),
+            vec![(primary, 0), (secondary, 0)],
+            vec![l1, l2],
+            vec![vec![1.0, k], vec![k, 1.0]],
+        );
+        transformer.set_branches(vec![
+            circuit.get_branch_matrix_index(branch1),
+            circuit.get_branch_matrix_index(branch2),
+        ]);
+        circuit
+            .multi_winding_transformers
+            .push(MultiWindingTransformerBinding {
+                branch_ordinals: vec![branch1, branch2],
+                device: transformer,
+            });
+
+        let fundamental = 1.0e6;
+        let harmonics = 3;
+        let engine = Engine::new(SimulationConfig::default());
+        let mut solver = HbSolver::try_new(
+            HbConfig::new(fundamental).with_harmonics(harmonics),
+            circuit.num_nodes(),
+        )
+        .expect("solver fixture is valid");
+        engine
+            .hb_stamp_periodic_mna_branches(&circuit, &mut solver)
+            .expect("multi-winding branch topology stamps");
+        let load = 50.0;
+        solver.add_conductance(secondary - 1, secondary - 1, 1.0 / load);
+        for harmonic in 1..=harmonics {
+            solver.set_harmonic_source(primary - 1, harmonic, 1.0, 0.0);
+        }
+        let mut state = HbSolverState::new(circuit.num_nodes(), harmonics);
+        solver
+            .solve_linear(&mut state)
+            .expect("multi-winding exact HB solve completes");
+
+        let leakage = l2 - mutual * mutual / l1;
+        for harmonic in 1..=harmonics {
+            let omega = 2.0 * std::f64::consts::PI * fundamental * harmonic as Value;
+            let expected =
+                Complex64::new(mutual / l1, 0.0) / Complex64::new(1.0, omega * leakage / load);
+            let actual = state.x[secondary - 1][harmonic] / state.x[primary - 1][harmonic];
+            let scale = expected.norm().max(1.0);
+            assert!(
+                (actual - expected).norm() <= 3.0e-10 * scale,
+                "harmonic {harmonic}: actual={actual}, expected={expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn periodic_mutual_pair_missing_canonical_inductor_branch_fails_closed() {
+        let mut circuit = CircuitData::new();
+        let primary = circuit.get_or_create_node("primary");
+        let secondary = circuit.get_or_create_node("secondary");
+        let branch1 = circuit.allocate_branch_named("L1");
+        let branch2 = circuit.allocate_branch_named("L2");
+        circuit
+            .inductors
+            .add("L1".to_string(), primary, 0, branch1, 100.0e-6);
+        circuit
+            .inductors
+            .add("L2".to_string(), secondary, 0, branch2, 25.0e-6);
+        circuit.add_coupled_inductor_pair(
+            branch1,
+            branch2 + 1,
+            CoupledInductorPair::new(
+                "Kbad".to_string(),
+                primary,
+                0,
+                100.0e-6,
+                secondary,
+                0,
+                25.0e-6,
+                0.8,
+            ),
+        );
+        let engine = Engine::new(SimulationConfig::default());
+        let mut solver =
+            HbSolver::try_new(HbConfig::new(1.0e6).with_harmonics(1), circuit.num_nodes())
+                .expect("solver fixture is valid");
+        let error = engine
+            .hb_stamp_periodic_mna_branches(&circuit, &mut solver)
+            .expect_err("a mutual overlay with a missing branch must fail closed");
+        let message = error.to_string();
+        assert!(
+            message.contains("Kbad")
+                && message.contains("missing second inductor")
+                && message.contains("ordinal 3"),
+            "unexpected malformed mutual topology diagnostic: {message}"
+        );
+    }
+
+    #[test]
+    fn periodic_authored_coupling_missing_resolved_overlay_fails_closed() {
+        let mut circuit = CircuitData::new();
+        let primary = circuit.get_or_create_node("primary");
+        let secondary = circuit.get_or_create_node("secondary");
+        let branch1 = circuit.allocate_branch_named("L1");
+        let branch2 = circuit.allocate_branch_named("L2");
+        circuit
+            .inductors
+            .add("L1".to_string(), primary, 0, branch1, 100.0e-6);
+        circuit
+            .inductors
+            .add("L2".to_string(), secondary, 0, branch2, 25.0e-6);
+        circuit.couplings.push(crate::device::InductorCoupling::new(
+            "Kmissing".to_string(),
+            vec!["L1".to_string(), "L2".to_string()],
+            0.8,
+        ));
+        let engine = Engine::new(SimulationConfig::default());
+        let mut solver =
+            HbSolver::try_new(HbConfig::new(1.0e6).with_harmonics(1), circuit.num_nodes())
+                .expect("solver fixture is valid");
+        let error = engine
+            .hb_stamp_periodic_mna_branches(&circuit, &mut solver)
+            .expect_err("an unresolved authored K card must fail closed");
+        let message = error.to_string();
+        assert!(
+            message.contains("Kmissing")
+                && message.contains("resolves to 0 runtime overlays")
+                && message.contains("expected exactly one"),
+            "unexpected unresolved coupling diagnostic: {message}"
+        );
+    }
+
+    #[test]
+    fn periodic_transformer_missing_device_branch_binding_fails_closed() {
+        let mut circuit = CircuitData::new();
+        let primary = circuit.get_or_create_node("primary");
+        let secondary = circuit.get_or_create_node("secondary");
+        let branch1 = circuit.allocate_branch_named("Tbad#1");
+        let branch2 = circuit.allocate_branch_named("Tbad#2");
+        let transformer = MultiWindingTransformer::new(
+            "Tbad".to_string(),
+            vec![(primary, 0), (secondary, 0)],
+            vec![100.0e-6, 25.0e-6],
+            vec![vec![1.0, 0.8], vec![0.8, 1.0]],
+        );
+        circuit
+            .multi_winding_transformers
+            .push(MultiWindingTransformerBinding {
+                branch_ordinals: vec![branch1, branch2],
+                device: transformer,
+            });
+        let engine = Engine::new(SimulationConfig::default());
+        let mut solver =
+            HbSolver::try_new(HbConfig::new(1.0e6).with_harmonics(1), circuit.num_nodes())
+                .expect("solver fixture is valid");
+        let error = engine
+            .hb_stamp_periodic_mna_branches(&circuit, &mut solver)
+            .expect_err("a transformer with missing device branch indices must fail closed");
+        let message = error.to_string();
+        assert!(
+            message.contains("Tbad")
+                && message.contains("winding 1")
+                && message.contains("canonical branch binding"),
+            "unexpected transformer branch diagnostic: {message}"
         );
     }
 }

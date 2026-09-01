@@ -863,12 +863,6 @@ impl Engine {
         if !circuit.tlines.is_empty() || !circuit.coupled_tlines.is_empty() {
             kinds.push("distributed transmission-line equations");
         }
-        if !circuit.couplings.is_empty()
-            || !circuit.coupled_inductor_pairs.is_empty()
-            || !circuit.multi_winding_transformers.is_empty()
-        {
-            kinds.push("coupled-inductor or transformer mutual branch equations");
-        }
         if !circuit.jiles_atherton_inductors.is_empty() || !circuit.xyce_core_groups.is_empty() {
             kinds.push("nonlinear magnetic-core branch equations");
         }
@@ -885,14 +879,30 @@ impl Engine {
         if circuit.has_generated_veriloga_devices() {
             kinds.push("generated Verilog-A compact-model equations");
         }
-        let represented_branches = circuit
+        let mut represented_branches = vec![false; circuit.num_branches()];
+        for &ordinal in circuit
             .voltage_sources
-            .len()
-            .checked_add(circuit.inductors.len())
-            .and_then(|count| count.checked_add(circuit.resistor_branches.len()))
-            .and_then(|count| count.checked_add(circuit.vcvs.len()))
-            .and_then(|count| count.checked_add(circuit.ccvs.len()));
-        if represented_branches != Some(circuit.num_branches()) {
+            .branch_indices
+            .iter()
+            .chain(&circuit.inductors.branch_indices)
+            .chain(&circuit.resistor_branches.branch_indices)
+            .chain(&circuit.vcvs.branch_indices)
+            .chain(&circuit.ccvs.branch_indices)
+            .chain(
+                circuit
+                    .multi_winding_transformers
+                    .iter()
+                    .flat_map(|binding| binding.branch_ordinals.iter()),
+            )
+        {
+            if let Some(slot) = ordinal
+                .checked_sub(1)
+                .and_then(|index| represented_branches.get_mut(index))
+            {
+                *slot = true;
+            }
+        }
+        if represented_branches.iter().any(|represented| !represented) {
             kinds.push("unrepresented MNA branch families");
         }
         if kinds.is_empty() {
