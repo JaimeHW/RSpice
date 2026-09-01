@@ -200,6 +200,20 @@ pub enum DigitalRunError {
     },
     /// The run needed more ticks than the decimal grid can represent exactly.
     TickOverflow,
+    /// A stimulus names a different module than the design was compiled for.
+    ///
+    /// Only reachable through [`super::CompiledDigitalDesign::run`], because
+    /// [`super::run_digital_verilog`] compiles the module its own stimulus
+    /// names. A compiled design outlives the stimulus that produced it, so the
+    /// two can drift apart; running one against the other would produce a trace
+    /// of the wrong design, and every port name the stimulus uses might well
+    /// resolve in it.
+    StimulusModule {
+        /// The module the design was compiled from.
+        compiled: String,
+        /// The module the stimulus asked for.
+        requested: String,
+    },
 }
 
 impl fmt::Display for DigitalRunError {
@@ -286,6 +300,15 @@ impl fmt::Display for DigitalRunError {
             Self::TickOverflow => write!(
                 f,
                 "the run reached a time past the exactly representable tick range"
+            ),
+            Self::StimulusModule {
+                compiled,
+                requested,
+            } => write!(
+                f,
+                "the design was compiled from module `{compiled}` and the stimulus asks for \
+                 `{requested}`; compile the module the stimulus names rather than running it \
+                 against another"
             ),
         }
     }
@@ -383,20 +406,38 @@ impl DigitalHost {
         resolution: TimeResolution,
         limits: SchedulerLimits,
     ) -> Self {
+        Self::from_plan(Arc::new(plan.clone()), resolution, limits)
+    }
+
+    /// Build a host over a plan that is already shared.
+    ///
+    /// The seam a compile-once caller needs. [`Self::new`] deep-copies the plan
+    /// so that a caller holding a borrow does not have to give it up; a caller
+    /// that compiled once and runs many times has nothing to copy, because the
+    /// plan is immutable for the whole of a host's life — every field this
+    /// builds is per-run state, and the `Arc` is only ever read through.
+    ///
+    /// So two hosts over one plan share the compiled design and share no
+    /// running state, which is exactly the property
+    /// [`super::CompiledDigitalDesign::run`] rests on.
+    pub(crate) fn from_plan(
+        plan: Arc<CanonicalDigitalPlan>,
+        resolution: TimeResolution,
+        limits: SchedulerLimits,
+    ) -> Self {
         let targets = plan
             .processes
             .iter()
             .enumerate()
             .map(|(index, process)| EventTarget {
                 node_id: index,
-                port_name: driven_signal_name(plan, index),
+                port_name: driven_signal_name(&plan, index),
                 driver_index: 0,
                 instance: format!("{}#{}", process.kind.keyword(), usize::from(process.id)),
             })
             .collect();
         Self {
-            plan: Arc::new(plan.clone()),
-            store: DigitalSignalStore::new(plan),
+            store: DigitalSignalStore::new(&plan),
             scheduler: EventScheduler::new(resolution, limits),
             slots: vec![
                 ProcessSlot {
@@ -408,6 +449,7 @@ impl DigitalHost {
             waiters: vec![Vec::new(); plan.signals.len()],
             inactive: Vec::new(),
             targets,
+            plan,
         }
     }
 

@@ -5,6 +5,15 @@
 //! [`CanonicalDigitalPlan`], resolving its nets, running its processes on the
 //! event kernel — is here or in the two submodules below it.
 //!
+//! # Two entry points, one for each shape of caller
+//!
+//! [`run_digital_verilog`] is the one-call route and compiles on every call.
+//! [`CompiledDigitalDesign`] is the same route with the compile hoisted out, for
+//! a caller with many stimuli and one design; the one-call route is literally
+//! the composition of its two halves. See its documentation for what is shared
+//! between two runs of one compiled design (the plan, which is immutable) and
+//! what is not (all of the running state).
+//!
 //! # Why it lives under `xspice`
 //!
 //! Not because it is an XSPICE code model; it is not. Because of the layering
@@ -78,6 +87,9 @@ pub(crate) mod store;
 #[cfg(test)]
 mod tests;
 
+use std::sync::Arc;
+
+use rspice_veriloga::canonical_ir::digital::CanonicalDigitalPlan;
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
 use rspice_veriloga::four_state::FourStateBit;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
@@ -202,177 +214,289 @@ pub struct DigitalRunReport {
     pub observations: Vec<DigitalObservation>,
 }
 
+/// One digital design, compiled once and runnable any number of times.
+///
+/// # Why the split exists
+///
+/// [`run_digital_verilog`] runs the Verilog front end on every call. For a
+/// caller with one stimulus that is the honest cost of the run, and it is what
+/// the convenience call still charges. For a caller with many — a sweep, a
+/// regression harness, a measurement that wants to know what *evaluating* a
+/// real-number model costs — it is a compile repeated for nothing, and at
+/// realistic run lengths it is most of the wall time. `.../tests/
+/// verilog_rnm_performance.rs` measures both columns side by side, which is the
+/// evidence this split was worth making.
+///
+/// # What is shared between runs, and what is not
+///
+/// Shared: the compiled plan, which is immutable — it is the front end's output
+/// and nothing downstream writes to it. Not shared: **every** piece of running
+/// state. [`Self::run`] builds a fresh [`DigitalHost`] — signal store, event
+/// queue, process resumption slots, sensitivity index — for each call and drops
+/// it when the call returns, so there is no state for one run to leave behind
+/// for the next and no way for two designs' runs to interleave into each other.
+/// That is a structural property rather than a discipline: the only thing a run
+/// can reach across a call boundary is behind an `Arc` it holds by shared
+/// reference.
+///
+/// # The relationship to [`MixedSignalHost`]
+///
+/// [`MixedSignalHost::compile`] is already compile-once by construction — it
+/// keeps its `DigitalHost` for the whole of an outer transient, because the
+/// analog solver drives it one trial at a time and the digital state has to
+/// survive between trials. This type gives the vector-driven route the same
+/// shape for the opposite reason: its state must *not* survive between runs.
+/// The two meet at [`DigitalHost::from_plan`], which is the one place a
+/// compiled plan becomes a running host; neither builds its own.
+pub struct CompiledDigitalDesign {
+    /// The front end's output, shared by every host built from it.
+    plan: Arc<CanonicalDigitalPlan>,
+    /// The module that was compiled, so a stimulus naming another one is
+    /// refused rather than silently run against this.
+    module: String,
+    /// Fixed here rather than per run, so two runs of one design cannot be on
+    /// different time bases. See [`TIME_UNIT_RULING`].
+    resolution: TimeResolution,
+}
+
+impl CompiledDigitalDesign {
+    /// Compile one module of a digital Verilog source.
+    ///
+    /// Every refusal [`run_digital_verilog`] makes before anything runs is made
+    /// here, in the same order: the `` `timescale `` scan, the front end, and
+    /// the two checks that the module is digital and only digital.
+    pub fn compile(source: &str, module: Option<&str>) -> Result<Self, DigitalRunError> {
+        if let Some(line) = first_timescale_directive(source) {
+            return Err(DigitalRunError::TimescaleDirective { line });
+        }
+
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let artifact = compiler
+            .compile_canonical_ir_module(source, module)
+            .map_err(|error| DigitalRunError::Compile {
+                detail: error.to_string(),
+            })?;
+
+        if artifact.digital.is_empty() {
+            return Err(DigitalRunError::NoDigitalContent {
+                module: artifact.mir.module_name.to_string(),
+            });
+        }
+        if !artifact.mir.equations.is_empty() {
+            return Err(DigitalRunError::MixedSignalModule {
+                module: artifact.mir.module_name.to_string(),
+                equations: artifact.mir.equations.len(),
+            });
+        }
+
+        Ok(Self {
+            module: artifact.mir.module_name.to_string(),
+            plan: Arc::new(artifact.digital),
+            resolution: TimeResolution::new(TIME_UNIT_EXPONENT)?,
+        })
+    }
+
+    /// Run one stimulus against this design.
+    ///
+    /// Nothing of a previous run reaches this one: the host is built here and
+    /// dropped at the end, so the design starts at time zero with every process
+    /// unstarted and every signal at its declared initial value, exactly as a
+    /// fresh [`run_digital_verilog`] would.
+    pub fn run(&self, stimulus: &DigitalStimulus) -> Result<DigitalRunReport, DigitalRunError> {
+        if let Some(requested) = stimulus.module.as_deref()
+            && requested != self.module
+        {
+            return Err(DigitalRunError::StimulusModule {
+                compiled: self.module.clone(),
+                requested: requested.to_string(),
+            });
+        }
+        self.execute(stimulus)
+    }
+}
+
+/// What the design is and how big it is, not what it contains.
+///
+/// Written out rather than derived because the derived form is the whole
+/// canonical plan — every process's control-flow graph — which is what a
+/// compiler dump is for and not what a failing assertion should print.
+impl std::fmt::Debug for CompiledDigitalDesign {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CompiledDigitalDesign")
+            .field("module", &self.module)
+            .field("signals", &self.plan.signals.len())
+            .field("processes", &self.plan.processes.len())
+            .finish()
+    }
+}
+
 /// Compile digital Verilog and run it against a stimulus.
 ///
 /// The whole route, in one call: preprocess and compile the source to a
 /// canonical digital plan, build a signal store and a process host over it,
 /// start every process at time zero, then walk the stimulus applying inputs and
 /// sampling outputs on the timing rule [`DigitalStimulus`] states.
+///
+/// It is the composition of [`CompiledDigitalDesign::compile`] and
+/// [`CompiledDigitalDesign::run`] and nothing else, so a caller with one
+/// stimulus keeps the one-call route and a caller with many can hoist the
+/// compile out of its loop.
 pub fn run_digital_verilog(
     source: &str,
     stimulus: &DigitalStimulus,
 ) -> Result<DigitalRunReport, DigitalRunError> {
-    if let Some(line) = first_timescale_directive(source) {
-        return Err(DigitalRunError::TimescaleDirective { line });
-    }
+    CompiledDigitalDesign::compile(source, stimulus.module.as_deref())?.execute(stimulus)
+}
 
-    let compiler = VerilogACompiler::new(CompilerOptions::default());
-    let artifact = compiler
-        .compile_canonical_ir_module(source, stimulus.module.as_deref())
-        .map_err(|error| DigitalRunError::Compile {
-            detail: error.to_string(),
-        })?;
+impl CompiledDigitalDesign {
+    /// The run itself, with the module agreement already decided.
+    ///
+    /// Split from [`Self::run`] so that [`run_digital_verilog`], which compiled
+    /// the module the stimulus named and therefore cannot disagree with it,
+    /// does not pay a string comparison to prove it.
+    fn execute(&self, stimulus: &DigitalStimulus) -> Result<DigitalRunReport, DigitalRunError> {
+        let mut host = DigitalHost::from_plan(
+            Arc::clone(&self.plan),
+            self.resolution,
+            SchedulerLimits::default(),
+        );
+        host.start()?;
 
-    if artifact.digital.is_empty() {
-        return Err(DigitalRunError::NoDigitalContent {
-            module: artifact.mir.module_name.to_string(),
-        });
-    }
-    if !artifact.mir.equations.is_empty() {
-        return Err(DigitalRunError::MixedSignalModule {
-            module: artifact.mir.module_name.to_string(),
-            equations: artifact.mir.equations.len(),
-        });
-    }
+        // Resolve every name once. A stimulus naming a port the design does not
+        // declare is a mistake in the caller, and finding it before anything runs
+        // makes the diagnostic name the port rather than a time.
+        //
+        // The design is asked what each port carries, and the stimulus is checked
+        // against that answer rather than trusted for it: a `.stim` that has
+        // drifted away from its design would otherwise drive a real net with bits
+        // and produce a trace that looks like a run.
+        let inputs = stimulus
+            .inputs
+            .iter()
+            .map(|port| resolve_port(&host, port))
+            .collect::<Result<Vec<_>, DigitalRunError>>()?;
+        let outputs = stimulus
+            .outputs
+            .iter()
+            .map(|port| resolve_port(&host, port))
+            .collect::<Result<Vec<_>, DigitalRunError>>()?;
+        let clock = stimulus
+            .clock
+            .as_ref()
+            .map(|clock| Ok::<_, DigitalRunError>((host.signal(&clock.port)?, clock.half_period)))
+            .transpose()?;
 
-    let plan = &artifact.digital;
-    let resolution = TimeResolution::new(TIME_UNIT_EXPONENT)?;
-    let mut host = DigitalHost::new(plan, resolution, SchedulerLimits::default());
-    host.start()?;
+        let mut observations = Vec::with_capacity(stimulus.vectors.len());
+        let mut clock_level = FourStateBit::Zero;
+        let mut next_clock_edge = clock.map(|(_, half)| half);
 
-    // Resolve every name once. A stimulus naming a port the design does not
-    // declare is a mistake in the caller, and finding it before anything runs
-    // makes the diagnostic name the port rather than a time.
-    //
-    // The design is asked what each port carries, and the stimulus is checked
-    // against that answer rather than trusted for it: a `.stim` that has
-    // drifted away from its design would otherwise drive a real net with bits
-    // and produce a trace that looks like a run.
-    let inputs = stimulus
-        .inputs
-        .iter()
-        .map(|port| resolve_port(&host, port))
-        .collect::<Result<Vec<_>, DigitalRunError>>()?;
-    let outputs = stimulus
-        .outputs
-        .iter()
-        .map(|port| resolve_port(&host, port))
-        .collect::<Result<Vec<_>, DigitalRunError>>()?;
-    let clock = stimulus
-        .clock
-        .as_ref()
-        .map(|clock| Ok::<_, DigitalRunError>((host.signal(&clock.port)?, clock.half_period)))
-        .transpose()?;
-
-    let mut observations = Vec::with_capacity(stimulus.vectors.len());
-    let mut clock_level = FourStateBit::Zero;
-    let mut next_clock_edge = clock.map(|(_, half)| half);
-
-    // `initial clk = 1'b0;` — the level the free-running clock holds before its
-    // first edge, which is what the generated testbench declares.
-    if let Some((signal, _)) = clock {
-        host.force(signal, FourStateValue::splat(1, FourStateBit::Zero), 0)?;
-    }
-
-    for (index, vector) in stimulus.vectors.iter().enumerate() {
-        let apply_at = (index as u64)
-            .checked_mul(stimulus.step)
-            .ok_or(DigitalRunError::TickOverflow)?;
-        let sample_at = apply_at
-            .checked_add(stimulus.settle)
-            .ok_or(DigitalRunError::TickOverflow)?;
-
-        // The clock is advanced first at a tick both it and a vector fall on.
-        // Two `initial`/`always` blocks writing different signals at one time
-        // are a race IEEE 1364-2005 leaves to the simulator; fixing the order
-        // here makes the run reproducible, and the corpus's clocked designs are
-        // edge-triggered on the rising edge, which never coincides with a
-        // vector boundary under `step = 2 * half_period`.
-        if let Some((signal, half)) = clock {
-            while let Some(edge) = next_clock_edge {
-                if edge > apply_at {
-                    break;
-                }
-                host.advance_to(edge)?;
-                clock_level = invert(clock_level);
-                host.force(signal, FourStateValue::splat(1, clock_level), edge)?;
-                next_clock_edge = Some(
-                    edge.checked_add(half)
-                        .ok_or(DigitalRunError::TickOverflow)?,
-                );
-            }
+        // `initial clk = 1'b0;` — the level the free-running clock holds before its
+        // first edge, which is what the generated testbench declares.
+        if let Some((signal, _)) = clock {
+            host.force(signal, FourStateValue::splat(1, FourStateBit::Zero), 0)?;
         }
 
-        host.advance_to(apply_at)?;
-        for (port, spelling) in inputs.iter().zip(vector) {
-            let ResolvedPort {
-                signal,
-                width,
-                name,
-            } = port;
-            if *width == 0 {
-                let value: f64 = spelling
-                    .parse()
-                    .map_err(|_| DigitalRunError::RealSpelling {
+        for (index, vector) in stimulus.vectors.iter().enumerate() {
+            let apply_at = (index as u64)
+                .checked_mul(stimulus.step)
+                .ok_or(DigitalRunError::TickOverflow)?;
+            let sample_at = apply_at
+                .checked_add(stimulus.settle)
+                .ok_or(DigitalRunError::TickOverflow)?;
+
+            // The clock is advanced first at a tick both it and a vector fall on.
+            // Two `initial`/`always` blocks writing different signals at one time
+            // are a race IEEE 1364-2005 leaves to the simulator; fixing the order
+            // here makes the run reproducible, and the corpus's clocked designs are
+            // edge-triggered on the rising edge, which never coincides with a
+            // vector boundary under `step = 2 * half_period`.
+            if let Some((signal, half)) = clock {
+                while let Some(edge) = next_clock_edge {
+                    if edge > apply_at {
+                        break;
+                    }
+                    host.advance_to(edge)?;
+                    clock_level = invert(clock_level);
+                    host.force(signal, FourStateValue::splat(1, clock_level), edge)?;
+                    next_clock_edge = Some(
+                        edge.checked_add(half)
+                            .ok_or(DigitalRunError::TickOverflow)?,
+                    );
+                }
+            }
+
+            host.advance_to(apply_at)?;
+            for (port, spelling) in inputs.iter().zip(vector) {
+                let ResolvedPort {
+                    signal,
+                    width,
+                    name,
+                } = port;
+                if *width == 0 {
+                    let value: f64 =
+                        spelling
+                            .parse()
+                            .map_err(|_| DigitalRunError::RealSpelling {
+                                port: name.clone(),
+                                spelling: spelling.clone(),
+                            })?;
+                    host.force_real(*signal, value, apply_at)?;
+                    continue;
+                }
+                let value =
+                    parse_four_state(spelling).ok_or_else(|| DigitalRunError::VectorSpelling {
                         port: name.clone(),
                         spelling: spelling.clone(),
                     })?;
-                host.force_real(*signal, value, apply_at)?;
-                continue;
-            }
-            let value =
-                parse_four_state(spelling).ok_or_else(|| DigitalRunError::VectorSpelling {
-                    port: name.clone(),
-                    spelling: spelling.clone(),
-                })?;
-            if value.width() != *width {
-                return Err(DigitalRunError::VectorWidth {
-                    port: name.clone(),
-                    declared: *width,
-                    offered: value.width(),
-                });
-            }
-            host.force(*signal, value, apply_at)?;
-        }
-
-        // Sample after the settle, with every clock edge in between delivered.
-        if let Some((signal, half)) = clock {
-            while let Some(edge) = next_clock_edge {
-                if edge > sample_at {
-                    break;
+                if value.width() != *width {
+                    return Err(DigitalRunError::VectorWidth {
+                        port: name.clone(),
+                        declared: *width,
+                        offered: value.width(),
+                    });
                 }
-                host.advance_to(edge)?;
-                clock_level = invert(clock_level);
-                host.force(signal, FourStateValue::splat(1, clock_level), edge)?;
-                next_clock_edge = Some(
-                    edge.checked_add(half)
-                        .ok_or(DigitalRunError::TickOverflow)?,
-                );
+                host.force(*signal, value, apply_at)?;
             }
+
+            // Sample after the settle, with every clock edge in between delivered.
+            if let Some((signal, half)) = clock {
+                while let Some(edge) = next_clock_edge {
+                    if edge > sample_at {
+                        break;
+                    }
+                    host.advance_to(edge)?;
+                    clock_level = invert(clock_level);
+                    host.force(signal, FourStateValue::splat(1, clock_level), edge)?;
+                    next_clock_edge = Some(
+                        edge.checked_add(half)
+                            .ok_or(DigitalRunError::TickOverflow)?,
+                    );
+                }
+            }
+            host.advance_to(sample_at)?;
+
+            observations.push(DigitalObservation {
+                step: index,
+                values: outputs
+                    .iter()
+                    .map(|port| {
+                        let rendered = if port.width == 0 {
+                            host.read_real(port.signal)
+                                .map(render_real)
+                                .unwrap_or_default()
+                        } else {
+                            host.read(port.signal)
+                                .map(FourStateValue::spelling)
+                                .unwrap_or_default()
+                        };
+                        (port.name.clone(), rendered)
+                    })
+                    .collect(),
+            });
         }
-        host.advance_to(sample_at)?;
 
-        observations.push(DigitalObservation {
-            step: index,
-            values: outputs
-                .iter()
-                .map(|port| {
-                    let rendered = if port.width == 0 {
-                        host.read_real(port.signal)
-                            .map(render_real)
-                            .unwrap_or_default()
-                    } else {
-                        host.read(port.signal)
-                            .map(FourStateValue::spelling)
-                            .unwrap_or_default()
-                    };
-                    (port.name.clone(), rendered)
-                })
-                .collect(),
-        });
+        Ok(DigitalRunReport { observations })
     }
-
-    Ok(DigitalRunReport { observations })
 }
 
 /// One stimulus port, resolved against the compiled design.

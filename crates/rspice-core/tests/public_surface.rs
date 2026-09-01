@@ -246,7 +246,19 @@ use rspice_core::analysis::harmonic_balance::{
 /// `pub use` lets a frontend name an item through a path the declaration's own
 /// name never appears in. The two grouped re-exports in `src/library.rs` drop
 /// those names but keep their statements, so the whole -10 is declarations.
-const MAX_PUBLIC_ITEMS: usize = 4297;
+///
+/// 2026-09-01, +3 deliberate (4,297 → 4,300): the compile-once digital run
+/// API. `CompiledDigitalDesign`, `CompiledDigitalDesign::compile` and
+/// `CompiledDigitalDesign::run` split `run_digital_verilog` into its two
+/// halves, and every one of the three is on the path a caller with many
+/// stimuli and one design must take — the conformance suite's RNM performance
+/// measurement is that caller, and without them the only way to run a design
+/// twice is to compile it twice. `run_digital_verilog` is retained unchanged
+/// as their composition, so nothing already public moved or grew. The
+/// module-name accessor that would have made a fourth was *not* added: no
+/// frontend reads it, `Debug` prints the name, and the refusal that cites it
+/// carries it.
+const MAX_PUBLIC_ITEMS: usize = 4300;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
