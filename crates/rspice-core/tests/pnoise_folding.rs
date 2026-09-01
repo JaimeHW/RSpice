@@ -39,7 +39,7 @@ fn direct_pnoise_resolves_deck_temperature() {
 }
 
 #[test]
-fn direct_pnoise_applies_hb_local_options_and_rejects_invalid_modes() {
+fn direct_pnoise_applies_hb_local_options_and_accepts_typed_initializers() {
     let base = "HB-local pnoise gate\nr1 out 0 1k\n.end\n";
     let mut zero_budget = Netlist::parse(base).expect("base deck parses");
     zero_budget.options.nonlin_hb_maxstep = Some(0);
@@ -48,12 +48,11 @@ fn direct_pnoise_applies_hb_local_options_and_rejects_invalid_modes() {
         .expect_err("a zero NONLIN-HB MAXSTEP must fail at the pnoise boundary");
     assert!(error.to_string().contains("MAXSTEP must be at least 1"));
 
-    let unsupported_tahb = Netlist::parse(&base.replace(".end", ".options hbint tahb=2\n.end"))
+    let dc_tahb = Netlist::parse(&base.replace(".end", ".options hbint tahb=2\n.end"))
         .expect("typed TAHB deck parses");
-    let error = Engine::new(SimulationConfig::default())
-        .run_pnoise(&unsupported_tahb, 1.0e6, &[1.0e4], "out", None, None, 0)
-        .expect_err("an unsupported TAHB mode must fail at the pnoise boundary");
-    assert!(error.to_string().contains("TAHB=2"));
+    Engine::new(SimulationConfig::default())
+        .run_pnoise(&dc_tahb, 1.0e6, &[1.0e4], "out", None, None, 0)
+        .expect("a supported HB initializer remains analysis-local for direct pnoise");
 }
 
 #[test]
