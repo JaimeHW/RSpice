@@ -12,7 +12,11 @@ pub const BSIM4_VA_ENV: &str = "RSPICE_BSIM4_VA";
 #[derive(Debug, Clone)]
 pub struct DeviceFixture {
     pub model: CompiledModel,
-    #[cfg(feature = "native")]
+    /// Held in every configuration, not only the native one. A grouped-noise
+    /// model refuses to construct without it — "no legacy fallback is
+    /// permitted" — and every compiler writes `noise_process_schema = 1`, so
+    /// the interpreter build needs the artifact for exactly the same reason
+    /// the engine's own builder passes one.
     pub canonical_ir: rspice_veriloga::canonical_ir::CanonicalIrArtifact,
 }
 
@@ -20,19 +24,12 @@ impl DeviceFixture {
     pub fn compile(source: &str) -> Self {
         let compiler = VerilogACompiler::new(CompilerOptions::default());
         let model = compiler.compile(source).expect("compilation failed");
-        #[cfg(feature = "native")]
-        {
-            let canonical_ir = compiler
-                .compile_canonical_ir(source)
-                .expect("canonical IR compilation failed");
-            Self {
-                model,
-                canonical_ir,
-            }
-        }
-        #[cfg(not(feature = "native"))]
-        {
-            Self { model }
+        let canonical_ir = compiler
+            .compile_canonical_ir(source)
+            .expect("canonical IR compilation failed");
+        Self {
+            model,
+            canonical_ir,
         }
     }
 
@@ -46,19 +43,12 @@ impl DeviceFixture {
         name: &str,
         nodes: &[usize],
     ) -> Result<VerilogADevice, rspice_veriloga::vm::VmError> {
-        #[cfg(feature = "native")]
-        {
-            VerilogADevice::try_new_with_canonical_ir(
-                name,
-                self.model.clone(),
-                &self.canonical_ir,
-                nodes,
-            )
-        }
-        #[cfg(not(feature = "native"))]
-        {
-            VerilogADevice::try_new(name, self.model.clone(), nodes)
-        }
+        VerilogADevice::try_new_with_canonical_ir(
+            name,
+            self.model.clone(),
+            &self.canonical_ir,
+            nodes,
+        )
     }
 }
 
