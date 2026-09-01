@@ -256,8 +256,7 @@ fn analysis_error(source: &str) -> String {
         "{:?}",
         analyzer
             .analyze(&file)
-            .err()
-            .expect("the body is refused; if it is not, the library can carry one")
+            .expect_err("the body is refused; if it is not, the library can carry one")
     )
 }
 

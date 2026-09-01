@@ -309,10 +309,10 @@ pub(super) fn check_delegable(
 // Where the rules come from, and the pass that runs over the planner's answers
 // ---------------------------------------------------------------------------
 
-/// Read the design's clause 7 connect specification out of the `.veriloga`
-/// sources the deck names.
+/// The design's clause 7 connect specification, accumulated one `.veriloga`
+/// file at a time as the include loop reads them.
 ///
-/// Two rules, both stated rather than discovered:
+/// Two rules govern what gets in, both stated rather than discovered:
 ///
 /// * **A file is read only if its text contains `connectrules`.** Compiling a
 ///   Verilog-A model is cached and reading its connect rules is not, so the
@@ -328,8 +328,6 @@ pub(super) fn check_delegable(
 ///   `rspice_veriloga::connect::build_connect_rule_table` does; extending that
 ///   across files would be this crate inventing a rule the language does not
 ///   have, so a second file is refused and both are named.
-/// The design's connect specification, accumulated one `.veriloga` file at a
-/// time as the include loop reads them.
 #[derive(Debug, Default)]
 pub(super) struct DesignConnectRules {
     declared_in: Option<std::path::PathBuf>,
