@@ -112,6 +112,11 @@
 pub mod ams;
 pub mod corpus;
 pub mod oracle;
+/// The dual-representation reference blocks. Behind `verilog-digital` because
+/// the RNM half of every block is a call into the digital host, and a module
+/// that could not run one would be half a suite.
+#[cfg(feature = "verilog-digital")]
+pub mod rnm;
 pub mod run;
 pub mod scale;
 pub mod testbench;
