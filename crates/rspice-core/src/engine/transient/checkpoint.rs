@@ -8739,7 +8739,7 @@ fn atomic_write_checkpoint_with_abort(
             Err(error) => return Err(AbortableCheckpointIoError::Io(error.to_string())),
         }
     }
-    let (temporary_path, mut file) = opened.ok_or_else(|| {
+    let (temporary_path, file) = opened.ok_or_else(|| {
         AbortableCheckpointIoError::Io(
             "could not allocate a unique checkpoint temporary file".to_string(),
         )
@@ -8749,18 +8749,23 @@ fn atomic_write_checkpoint_with_abort(
         armed: true,
     };
 
-    for chunk in bytes.chunks(CHECKPOINT_IO_CHUNK_BYTES) {
-        if abort.is_aborted() {
-            return Err(AbortableCheckpointIoError::Aborted);
+    // Keep the handle in a lexical scope so it is closed before the atomic
+    // replacement on Windows without an explicit `drop` that is meaningless
+    // for the wasm filesystem stub.
+    {
+        let mut file = file;
+        for chunk in bytes.chunks(CHECKPOINT_IO_CHUNK_BYTES) {
+            if abort.is_aborted() {
+                return Err(AbortableCheckpointIoError::Aborted);
+            }
+            file.write_all(chunk)
+                .map_err(|error| AbortableCheckpointIoError::Io(error.to_string()))?;
         }
-        file.write_all(chunk)
+        file.flush()
+            .map_err(|error| AbortableCheckpointIoError::Io(error.to_string()))?;
+        file.sync_all()
             .map_err(|error| AbortableCheckpointIoError::Io(error.to_string()))?;
     }
-    file.flush()
-        .map_err(|error| AbortableCheckpointIoError::Io(error.to_string()))?;
-    file.sync_all()
-        .map_err(|error| AbortableCheckpointIoError::Io(error.to_string()))?;
-    drop(file);
 
     if abort.is_aborted() {
         return Err(AbortableCheckpointIoError::Aborted);
