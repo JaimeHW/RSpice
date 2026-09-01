@@ -180,14 +180,24 @@ jobs:
         # twelve vectors — it is milliseconds.
         #
         # `verilog_rnm_agreement` is the same corpus's second answer to having
-        # no oracle: four reference blocks, each authored twice — once as a
+        # no oracle: five reference blocks, each authored twice — once as a
         # SPICE deck simulated by the transient engine, once as a `wreal` design
         # run on the digital host — held to a bound derived from the block's own
-        # physics. It runs here because it is a correctness gate and it is
-        # cheap: four small decks, a few hundred accepted transient points each,
-        # under a second in this debug build. Its sibling target
-        # `verilog_rnm_performance` is deliberately *not* named here — it is a
-        # wall-clock measurement, which belongs in nightly and in release.
+        # physics. Those five are small decks, a few hundred accepted transient
+        # points each, and under a second in this debug build.
+        #
+        # It also carries one production-scale block, a 7-bit flash converter:
+        # 257 nodes, 127 nonlinear devices, five thousand accepted points, about
+        # nine seconds of this debug build. That is a tenth of what
+        # `verilog_scale` costs in the same step and it is here for the reason
+        # the small ones are — it is a correctness gate, and it is specifically
+        # the precondition of the wall-clock measurement below, since a ratio
+        # between two representations that disagree is not a speedup. If it
+        # grows past a minute it is the case to move to nightly, not the suite.
+        #
+        # Its sibling target `verilog_rnm_performance` is deliberately *not*
+        # named here — it is a wall-clock measurement, which belongs in nightly
+        # and in release.
         run: >-
           cargo test --locked -p rspice-conformance --lib
           --test ngspice_oracle_audit --test y_device_policy

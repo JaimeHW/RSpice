@@ -90,7 +90,8 @@ use rspice_core::constants::{RELTOL, VNTOL};
 use rspice_core::engine::{Engine, SimulationConfig, TransientResult};
 use rspice_core::netlist::Netlist;
 use rspice_core::xspice::verilog::{
-    DigitalClock, DigitalPort, DigitalRunReport, DigitalStimulus, run_digital_verilog,
+    CompiledDigitalDesign, DigitalClock, DigitalPort, DigitalRunReport, DigitalStimulus,
+    run_digital_verilog,
 };
 
 // ===========================================================================
@@ -253,10 +254,35 @@ pub fn run_analog(block: &RnmBlock) -> Result<TransientResult, String> {
         .map_err(|error| format!("`{}` analog transient failed: {error}", block.name))
 }
 
-/// Run the RNM representation.
+/// Run the RNM representation, compiling it on the way.
+///
+/// The whole-call cost, which is what a caller with one stimulus pays. A caller
+/// that will run the same design more than once should hoist the compile with
+/// [`compile_rnm`] and [`run_compiled_rnm`]; the performance leg reports both,
+/// because the difference between them is what the front end costs.
 pub fn run_rnm(block: &RnmBlock) -> Result<DigitalRunReport, String> {
     run_digital_verilog(&block.design, &block.stimulus)
         .map_err(|error| format!("`{}` RNM design does not run: {error}", block.name))
+}
+
+/// Compile the RNM representation, without running it.
+pub fn compile_rnm(block: &RnmBlock) -> Result<CompiledDigitalDesign, String> {
+    CompiledDigitalDesign::compile(&block.design, block.stimulus.module.as_deref())
+        .map_err(|error| format!("`{}` RNM design does not compile: {error}", block.name))
+}
+
+/// Run a design [`compile_rnm`] already compiled.
+///
+/// Every call starts the design at time zero with no state from any previous
+/// one — that is the contract [`CompiledDigitalDesign::run`] states and pins —
+/// so a caller may run this as many times as it likes and compare the reports.
+pub fn run_compiled_rnm(
+    compiled: &CompiledDigitalDesign,
+    block: &RnmBlock,
+) -> Result<DigitalRunReport, String> {
+    compiled
+        .run(&block.stimulus)
+        .map_err(|error| format!("`{}` compiled RNM design does not run: {error}", block.name))
 }
 
 /// Linear interpolation of a variable-step waveform at an arbitrary time.
@@ -1370,6 +1396,280 @@ endmodule
             carries: "the filtered output",
             bound,
         }],
+    }
+}
+
+// ===========================================================================
+// The production-scale block — a 7-bit flash converter
+// ===========================================================================
+
+/// Resolution of the production-scale converter, in bits.
+const ADC_BITS: u32 = 7;
+/// Codes it resolves, and rungs in its reference string.
+const ADC_LEVELS: usize = 1 << ADC_BITS;
+/// Comparators, and taps on the string. One fewer than the codes.
+const ADC_COMPARATORS: usize = ADC_LEVELS - 1;
+/// Resistance of one rung of the reference string, ohms.
+const ADC_STRING_R: f64 = 1.0e3;
+/// One code, in volts. `VREF / 128 = 39.0625 mV`.
+const ADC_LSB: f64 = VREF / ADC_LEVELS as f64;
+/// Closest a guard-band vector comes to a tap, volts.
+///
+/// The same `12.5 mV` the three-comparator [`flash_quantizer`] uses, which is
+/// what makes the two blocks' finite-gain terms comparable. It has to stay
+/// under half an LSB — `19.53 mV` here — or a vector meant to straddle one tap
+/// would cross its neighbour.
+const ADC_GUARD_V: f64 = FLASH_GUARD_V;
+
+/// A 7-bit flash converter against a successive-approximation real expression.
+///
+/// # Why this block exists, when [`flash_quantizer`] covers the mechanism
+///
+/// Not to cover a mechanism. To measure one at a size a user would actually
+/// meet. The performance leg found that the RNM speedup is set by how much
+/// analog the model replaces, and that the reference blocks — five nodes, four
+/// resistors — have almost none to give: their ratios are tens, and the
+/// per-evaluation columns show the abstraction is buying *fewer* evaluations
+/// rather than cheaper ones. That is a statement about the blocks, and the only
+/// way to find out what it is a statement about is to run one that is not tiny.
+///
+/// So this is deliberately the *same* mechanism as [`flash_quantizer`] with one
+/// named parameter changed — three comparators become
+/// [`ADC_COMPARATORS`] — because then the difference between the two
+/// measurements is attributable to size and to nothing else. Every term of the
+/// bound below is that block's term with `N` substituted, and the one place the
+/// derivation had to be redone rather than rescaled is called out where it
+/// happens.
+///
+/// # The scale
+///
+/// The deck is a 128-rung reference string, 127 behavioural comparators and a
+/// 128-resistor summing network: 257 nodes, 129 voltage-source branch rows, and
+/// 127 `tanh` evaluations in every Newton iteration of every accepted step. That
+/// is a production-sized solve — a 6-to-8-bit flash is what sits in front of a
+/// pipeline stage in a real converter, and 127 comparators is how many one has,
+/// not a number chosen to make a matrix bigger.
+///
+/// # Why both representations are honest
+///
+/// The analog side is the converter. Its thresholds are node voltages on a
+/// string it never names, its comparators are limiters with finite gain, and its
+/// output code is a resistive average of 127 rails. Nothing in it divides
+/// anything by an LSB.
+///
+/// The RNM side does not enumerate the comparators either, and that is the
+/// point of it: a real-number model of a converter states the *conversion*, so
+/// this one runs a successive approximation — seven decisions, each against a
+/// threshold it computes — and reaches the same code by an algorithm the deck
+/// does not contain. A flash converter and a SAR are different machines that
+/// agree on what a code means, which is a stronger check than one arithmetic
+/// spelling of a threshold against another.
+///
+/// Successive approximation is also the only closed form available: the digital
+/// domain has no `floor`, so `min(127, floor(vin / LSB))` cannot be written, and
+/// seven conditionals are what a real-number model writes instead. They are
+/// exact, not an approximation of it — binary search on a monotone predicate
+/// finds the largest `t <= 127` with `vin > t * LSB`, which is precisely the
+/// number of taps the input is above.
+///
+/// # What the stimulus resolves
+///
+/// A linearity sweep: one vector at the midpoint of every one of the 128 codes,
+/// so every comparator flips exactly once across the run and every code is
+/// produced. A comparator wired to the wrong tap, or a rung of the wrong value,
+/// moves a transition by at least one code — `39.06 mV` on the reconstruction,
+/// which is eight times the bound below.
+///
+/// Then a guard-band pair on each compared tap, at `ADC_GUARD_V` either side.
+/// The sweep alone would never come closer than half an LSB to a threshold, and
+/// the thresholds are what the two representations have to agree about.
+///
+/// # The bound, derived
+///
+/// * **Finite gain.** [`flash_quantizer`]'s term is the one place the
+///   derivation had to be redone rather than rescaled, because with 127
+///   comparators "every comparator is at the guard band" is no longer a bound
+///   worth stating — it is 127 times too loose and it hides which comparators
+///   are actually paying. A limiter at an overdrive `d` misses its rail by
+///   `VDD * exp(-2 * gain * d)`, the reconstruction divides the sum of the
+///   rails by [`ADC_LEVELS`], and the taps are `ADC_LSB` apart — so the two
+///   comparators nearest the input are at least `ADC_GUARD_V` away and the rest
+///   recede in steps of an LSB:
+///
+///   ```text
+///     (VDD / 128) * 2 * exp(-2 g guard) * sum_m exp(-2 g m LSB)
+///       = (VDD / 128) * 2 * exp(-2 g guard) / (1 - exp(-2 g LSB))
+///   ```
+///
+///   At `g = 1e3` and `LSB = 39.06 mV` the geometric factor is `1 + 1e-34`; it
+///   is carried as written rather than dropped, because the factor is what says
+///   the tail was considered.
+/// * **Reference-string `gmin`.** A `1e-15 S` shunt at each tap perturbs it by
+///   at most `gmin * R_thevenin * VREF`, and the string's worst Thevenin
+///   resistance is a quarter of its `128 * R` total. That is a *threshold*
+///   error, not an output error: it moves a transition by `1.6e-10 V`, and the
+///   guard band is eight orders larger, so no vector can be on the wrong side
+///   of a shifted tap. Carried at its face value anyway, as [`r2r_dac`] carries
+///   its settling term, so that a reader can see it was considered.
+/// * **Settling and interpolation.** None, and for [`flash_quantizer`]'s
+///   reason: there is no reactance anywhere in this deck. The string, the
+///   limiters and the summer are resistive, so every node is at its final value
+///   the instant the input reaches its level, and there is no curvature for the
+///   harness's linear interpolation to miss.
+/// * **Solver.** `RELTOL * full-scale + VNTOL`, per node — `VDD` for a
+///   comparator rail and `127 * VDD / 128` for the reconstruction. As in every
+///   other block it dominates the others by orders of magnitude, and a bound
+///   under it would claim an accuracy the engine does not offer.
+pub fn flash_adc_7bit() -> RnmBlock {
+    // The linearity sweep: the midpoint of every code, so every comparator
+    // flips once and no vector is nearer than half an LSB to a tap.
+    let mut levels: Vec<f64> = (0..ADC_LEVELS)
+        .map(|code| (code as f64 + 0.5) * ADC_LSB)
+        .collect();
+    // Then the guard-band pairs, on the taps whose rails are compared and on
+    // the two the successive approximation decides first.
+    for tap in [1_usize, 32, 64, 96, ADC_COMPARATORS] {
+        let threshold = tap as f64 * ADC_LSB;
+        levels.push(threshold - ADC_GUARD_V);
+        levels.push(threshold + ADC_GUARD_V);
+    }
+
+    let mut deck = String::from("7-bit flash converter with a resistor-string reference\n");
+    deck.push_str(&format!("VREFS ref 0 {VREF:?}\n"));
+    deck.push_str(&format!(
+        "RSTR{ADC_COMPARATORS} ref t{ADC_COMPARATORS} {ADC_STRING_R:?}\n"
+    ));
+    for rung in (1..ADC_COMPARATORS).rev() {
+        deck.push_str(&format!(
+            "RSTR{rung} t{} t{rung} {ADC_STRING_R:?}\n",
+            rung + 1
+        ));
+    }
+    deck.push_str(&format!("RSTR0 t1 0 {ADC_STRING_R:?}\n"));
+    deck.push_str(&format!(
+        "VIN vin 0 PWL({})\n",
+        pwl_stepping_at_apply(&levels)
+    ));
+    for index in 1..=ADC_COMPARATORS {
+        deck.push_str(&format!(
+            "BC{index} c{index} 0 V={{{half:?} + {half:?}*tanh({COMPARATOR_GAIN:?}*(V(vin)-V(t{index})))}}\n",
+            half = VDD / 2.0,
+        ));
+        deck.push_str(&format!("RSUM{index} c{index} recon {ADC_STRING_R:?}\n"));
+    }
+    deck.push_str(&format!("RSUMT recon 0 {ADC_STRING_R:?}\n"));
+    deck.push_str(".end\n");
+
+    // The successive approximation, most significant decision first. Each line
+    // tests whether the input is above the threshold the code built so far plus
+    // this bit's weight, and keeps the bit if it is.
+    let mut design = String::from(
+        "\
+module rnm_flash_adc7(vin, recon, q1, q64, q127);
+  input wreal vin;
+  output wreal recon;
+  output wreal q1;
+  output wreal q64;
+  output wreal q127;
+",
+    );
+    for bit in (0..ADC_BITS).rev() {
+        design.push_str(&format!("  wreal s{bit};\n"));
+    }
+    for bit in (0..ADC_BITS).rev() {
+        let weight = f64::from(1u32 << bit);
+        let accumulated = if bit + 1 == ADC_BITS {
+            "0.0".to_string()
+        } else {
+            format!("s{}", bit + 1)
+        };
+        design.push_str(&format!(
+            "  assign s{bit} = (vin > ({accumulated} + {weight:?}) * {ADC_LSB:?}) \
+             ? ({accumulated} + {weight:?}) : {accumulated};\n"
+        ));
+    }
+    design.push_str(&format!(
+        "  assign recon = s0 * {step:?};\n",
+        step = VDD / ADC_LEVELS as f64,
+    ));
+    for tap in [1_usize, 64, ADC_COMPARATORS] {
+        design.push_str(&format!(
+            "  assign q{tap} = (vin > {threshold:?}) ? {VDD:?} : 0.0;\n",
+            threshold = tap as f64 * ADC_LSB,
+        ));
+    }
+    design.push_str("endmodule\n");
+
+    // The two comparators nearest the input are at least a guard band away and
+    // the rest recede an LSB at a time, so the whole sum is the nearest pair
+    // times a geometric tail.
+    let nearest = (-2.0 * COMPARATOR_GAIN * ADC_GUARD_V).exp();
+    let tail = 1.0 / (1.0 - (-2.0 * COMPARATOR_GAIN * ADC_LSB).exp());
+    // A quarter of the string's total resistance bounds any tap's Thevenin
+    // resistance, which is where the `gmin` shunt acts.
+    let string_thevenin = ADC_LEVELS as f64 * ADC_STRING_R / 4.0;
+    let tap_error = 1e-15 * string_thevenin * VREF;
+
+    let rail_bound = || {
+        Bound::new(vec![
+            (
+                "finite gain at the guard band: VDD * exp(-2 * gain * guard)",
+                VDD * nearest,
+            ),
+            (
+                "reference-string gmin: gmin_target * (128 R / 4) * VREF, as a threshold shift",
+                tap_error,
+            ),
+            Bound::solver(VDD),
+        ])
+    };
+    let recon_full_scale = ADC_COMPARATORS as f64 * VDD / ADC_LEVELS as f64;
+    let recon_bound = Bound::new(vec![
+        (
+            "finite gain, the nearest pair and the geometric tail: \
+             (VDD / 128) * 2 * exp(-2 g guard) / (1 - exp(-2 g LSB))",
+            VDD / ADC_LEVELS as f64 * 2.0 * nearest * tail,
+        ),
+        (
+            "reference-string gmin: gmin_target * (128 R / 4) * VREF, as a threshold shift",
+            tap_error,
+        ),
+        Bound::solver(recon_full_scale),
+    ]);
+
+    let mut pairs = vec![SignalPair {
+        analog_node: "recon",
+        rnm_port: "recon",
+        carries: "the reconstructed code: a resistive average of 127 rails against seven \
+                  successive-approximation decisions",
+        bound: recon_bound,
+    }];
+    for (analog_node, rnm_port) in [("c1", "q1"), ("c64", "q64"), ("c127", "q127")] {
+        pairs.push(SignalPair {
+            analog_node,
+            rnm_port,
+            carries: "one comparator rail against its reference-string tap",
+            bound: rail_bound(),
+        });
+    }
+
+    RnmBlock {
+        name: "flash_adc_7bit",
+        models: "a 7-bit flash converter — a 128-rung reference string, 127 comparators and a \
+                 resistive thermometer summer — against a successive-approximation real model",
+        why_both_are_honest: "the deck is the converter and its thresholds are node voltages on a \
+             string it never names; the RNM is a successive approximation, which reaches the same \
+             code by an algorithm the deck does not contain",
+        deck,
+        design,
+        stimulus: real_input_stimulus(
+            "rnm_flash_adc7",
+            "vin",
+            &["recon", "q1", "q64", "q127"],
+            &levels,
+            false,
+        ),
+        pairs,
     }
 }
 

@@ -248,3 +248,138 @@ fn the_hysteresis_block_reaches_the_same_input_with_both_output_states() {
          nothing here depends on history: low at {low:?}, high at {high:?}"
     );
 }
+
+// ===========================================================================
+// The production-scale block
+// ===========================================================================
+
+/// The 7-bit converter must agree with its real-number model too.
+///
+/// # Why it is one test and not five rows in the loop above
+///
+/// Cost, stated rather than hidden. Its analog representation is 257 nodes and
+/// 127 nonlinear devices and takes a few seconds of this debug build, where each
+/// of the five reference blocks takes milliseconds. Putting it in `blocks()`
+/// would run it once per test in this file, five times over, for no additional
+/// coverage — every one of those tests asks a question this one asks here, on
+/// the same single comparison.
+///
+/// # What it is for
+///
+/// It is not the coverage gate for the flash mechanism; `flash_quantizer` is,
+/// and this block is that block at 127 comparators rather than three. It is the
+/// correctness precondition of the wall-clock measurement in
+/// `verilog_rnm_performance`: a ratio between two representations that do not
+/// compute the same thing is not a speedup, so the agreement is established here
+/// and the measurement is free to assume it.
+///
+/// The checks are the ones the loop above makes, made once: every sample within
+/// the declared bound, every term of that bound named and finite, an order of
+/// margin between the bound and the observation, and every compared signal
+/// moving far enough over the run for the agreement to mean something.
+#[test]
+fn the_production_scale_converter_agrees_with_its_real_number_model() {
+    let block = rnm::flash_adc_7bit();
+    let agreement = rnm::compare(&block)
+        .unwrap_or_else(|error| panic!("`{}` could not be compared: {error}", block.name));
+
+    println!(
+        "\n{:<20} {:<10} {:>14} {:>14} {:>10}",
+        "block", "signal", "bound(V)", "max err(V)", "margin"
+    );
+    for pair in &agreement.pairs {
+        let bound = pair.pair.bound.total();
+        println!(
+            "{:<20} {:<10} {:>14.6e} {:>14.6e} {:>9.0}x",
+            block.name,
+            pair.pair.analog_node,
+            bound,
+            pair.max_error(),
+            bound / pair.max_error().max(f64::MIN_POSITIVE),
+        );
+
+        assert!(
+            !pair.pair.bound.terms.is_empty(),
+            "`{}`/`{}` declares a bound with no terms",
+            block.name,
+            pair.pair.analog_node
+        );
+        for (name, value) in &pair.pair.bound.terms {
+            assert!(
+                value.is_finite() && *value >= 0.0,
+                "`{}`/`{}` term `{name}` is {value}",
+                block.name,
+                pair.pair.analog_node
+            );
+        }
+
+        let observed = pair.max_error();
+        assert!(
+            observed * 2.0 <= bound,
+            "`{}`/`{}` observed {observed:.6e} V against a bound of {bound:.6e} V, which is less \
+             than a factor of two of margin — the bound is being met by luck\n{}",
+            block.name,
+            pair.pair.analog_node,
+            pair.pair.bound.derivation()
+        );
+
+        let analog: Vec<f64> = pair.points.iter().map(|point| point.analog).collect();
+        let span = analog.iter().copied().fold(f64::NEG_INFINITY, f64::max)
+            - analog.iter().copied().fold(f64::INFINITY, f64::min);
+        assert!(
+            span > 10.0 * bound,
+            "`{}`/`{}` moves only {span:.6e} V over its run",
+            block.name,
+            pair.pair.analog_node
+        );
+    }
+
+    assert!(
+        agreement.agrees(),
+        "the 7-bit converter and its real-number model disagree beyond the declared bound. The \
+         two share no code below this harness — one solves a 257-node network, the other runs a \
+         successive approximation on an event kernel — so one of them is wrong:\n{}",
+        agreement.failure_report()
+    );
+}
+
+/// The production block has to actually be production-sized, or the measurement
+/// it exists for is measuring the same thing the reference blocks measure.
+///
+/// Pinned by the shape of the deck rather than by a wall-clock number, which
+/// would flap: how many nodes the analog representation solves, how many
+/// nonlinear devices are in it, and how many codes the sweep visits.
+#[test]
+fn the_production_scale_converter_is_production_sized() {
+    let block = rnm::flash_adc_7bit();
+    let analog = rnm::run_analog(&block).expect("the converter must run");
+
+    // A 128-rung string, 127 comparator rails, the input and the
+    // reconstruction. Ground is not a node the result names.
+    assert!(
+        analog.node_names.len() >= 250,
+        "`{}` solves only {} nodes; the reference blocks solve fewer than ten, and a block that \
+         is not much larger than those measures what they already measure",
+        block.name,
+        analog.node_names.len()
+    );
+
+    let comparators = block
+        .deck
+        .lines()
+        .filter(|line| line.starts_with("BC"))
+        .count();
+    assert_eq!(
+        comparators, 127,
+        "`{}` should carry one behavioural comparator per code boundary",
+        block.name
+    );
+
+    // One vector per code, plus the guard-band pairs.
+    assert!(
+        block.samples() >= 128,
+        "`{}` sweeps only {} vectors; the linearity sweep has to visit every one of the 128 codes",
+        block.name,
+        block.samples()
+    );
+}
