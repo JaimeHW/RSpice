@@ -15,6 +15,7 @@ mod shared;
 
 pub(crate) use crate::commands::export_table as export;
 
+use crate::atomic_artifact::write_cli_bytes_atomic;
 use crate::report::{
     CsvMeasReporter, JUnitReporter, JsonMeasReporter, MeasurementReport, SimulationReport,
     TapReporter,
@@ -1153,7 +1154,7 @@ fn write_run_summary(
 
     let text =
         serde_json::to_string_pretty(&json).map_err(|e| CliError::output_json_error(path, e))?;
-    std::fs::write(path, text + "\n").map_err(|e| CliError::output_error(path, e))?;
+    write_cli_bytes_atomic(path, (text + "\n").as_bytes())?;
     Ok(())
 }
 

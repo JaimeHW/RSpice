@@ -16,6 +16,7 @@ use rspice_core::analysis::s_param;
 use super::RunContext;
 use super::basic::run_dc_op;
 use super::shared::generate_frequency_sweep;
+use crate::atomic_artifact::{write_cli_atomic, write_cli_bytes_atomic};
 use crate::cli::CliError;
 
 fn ensure_not_cancelled(ctx: &RunContext<'_>) -> Result<(), CliError> {
@@ -315,12 +316,12 @@ fn export_monte_carlo(
                 })
             }).collect::<Vec<_>>(),
         });
-        let mut file = std::fs::File::create(output_path)
-            .map_err(|e| CliError::output_error(output_path, e))?;
-        serde_json::to_writer_pretty(&mut file, &json)
-            .map_err(|e| CliError::output_json_error(output_path, e))?;
-        file.write_all(b"\n")
-            .map_err(|e| CliError::output_error(output_path, e))?;
+        write_cli_atomic(output_path, |file| {
+            serde_json::to_writer_pretty(&mut *file, &json)
+                .map_err(|e| CliError::output_json_error(output_path, e))?;
+            file.write_all(b"\n")
+                .map_err(|e| CliError::output_error(output_path, e))
+        })?;
     } else {
         let signals: Vec<crate::commands::run_signals::ScalarSignal> = variables
             .iter()
@@ -1627,7 +1628,7 @@ fn write_touchstone_nport(
         message,
         suggestion: Some("use CSV, JSON, or HDF5 output for per-port z0 values".to_string()),
     })?;
-    std::fs::write(path, document).map_err(|error| CliError::output_error(path, error))
+    write_cli_bytes_atomic(path, document.as_bytes())
 }
 
 /// Two-port S-parameter extraction over the deck's `.AC` sweep.
@@ -1855,24 +1856,25 @@ fn write_touchstone_2port(
     s: [&[rspice_core::Complex64]; 4],
 ) -> Result<(), CliError> {
     use std::io::Write;
-    let mut file = std::fs::File::create(path).map_err(|e| CliError::output_error(path, e))?;
-    writeln!(file, "! 2-port S-parameters").map_err(|e| CliError::output_error(path, e))?;
-    writeln!(file, "# HZ S RI R {z0}").map_err(|e| CliError::output_error(path, e))?;
-    let [s11, s21, s12, s22] = s;
-    for (index, freq) in frequencies.iter().enumerate() {
-        let entry = |values: &[rspice_core::Complex64]| {
-            values
-                .get(index)
-                .copied()
-                .unwrap_or_else(|| rspice_core::Complex64::new(0.0, 0.0))
-        };
-        let (a, b, c, d) = (entry(s11), entry(s21), entry(s12), entry(s22));
-        writeln!(
-            file,
-            "{freq:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e}",
-            a.re, a.im, b.re, b.im, c.re, c.im, d.re, d.im
-        )
-        .map_err(|e| CliError::output_error(path, e))?;
-    }
-    Ok(())
+    write_cli_atomic(path, |file| {
+        writeln!(file, "! 2-port S-parameters").map_err(|e| CliError::output_error(path, e))?;
+        writeln!(file, "# HZ S RI R {z0}").map_err(|e| CliError::output_error(path, e))?;
+        let [s11, s21, s12, s22] = s;
+        for (index, freq) in frequencies.iter().enumerate() {
+            let entry = |values: &[rspice_core::Complex64]| {
+                values
+                    .get(index)
+                    .copied()
+                    .unwrap_or_else(|| rspice_core::Complex64::new(0.0, 0.0))
+            };
+            let (a, b, c, d) = (entry(s11), entry(s21), entry(s12), entry(s22));
+            writeln!(
+                file,
+                "{freq:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e}",
+                a.re, a.im, b.re, b.im, c.re, c.im, d.re, d.im
+            )
+            .map_err(|e| CliError::output_error(path, e))?;
+        }
+        Ok(())
+    })
 }

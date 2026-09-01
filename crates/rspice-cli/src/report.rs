@@ -5,6 +5,7 @@
 //! - TAP (Test Anything Protocol) for streaming output
 //! - JSON/CSV for measurement results
 
+use crate::atomic_artifact::write_cli_atomic;
 use crate::cli::CliError;
 use std::fmt;
 use std::io::{BufWriter, Write};
@@ -77,9 +78,7 @@ pub struct JUnitReporter;
 impl JUnitReporter {
     /// Write JUnit XML report to file
     pub fn write(reports: &[SimulationReport], path: &Path) -> Result<(), CliError> {
-        let file = std::fs::File::create(path).map_err(|e| CliError::output_error(path, e))?;
-        let mut writer = BufWriter::new(file);
-        write_junit_report(&mut writer, path, reports)
+        write_buffered_atomic(path, |writer| write_junit_report(writer, path, reports))
     }
 }
 
@@ -192,9 +191,7 @@ pub struct TapReporter;
 impl TapReporter {
     /// Write TAP report to file
     pub fn write(reports: &[SimulationReport], path: &Path) -> Result<(), CliError> {
-        let file = std::fs::File::create(path).map_err(|e| CliError::output_error(path, e))?;
-        let mut writer = BufWriter::new(file);
-        write_tap_report(&mut writer, path, reports)
+        write_buffered_atomic(path, |writer| write_tap_report(writer, path, reports))
     }
 }
 
@@ -326,9 +323,7 @@ pub struct JsonMeasReporter;
 impl JsonMeasReporter {
     /// Write measurement results to JSON file
     pub fn write(reports: &[SimulationReport], path: &Path) -> Result<(), CliError> {
-        let file = std::fs::File::create(path).map_err(|e| CliError::output_error(path, e))?;
-        let mut writer = BufWriter::new(file);
-        write_measurement_json(&mut writer, path, reports)
+        write_buffered_atomic(path, |writer| write_measurement_json(writer, path, reports))
     }
 }
 
@@ -378,50 +373,68 @@ pub struct CsvMeasReporter;
 impl CsvMeasReporter {
     /// Write measurement results to CSV file
     pub fn write(reports: &[SimulationReport], path: &Path) -> Result<(), CliError> {
-        let file = std::fs::File::create(path).map_err(|e| CliError::output_error(path, e))?;
-        let mut writer = BufWriter::new(file);
-
-        write_line(
-            &mut writer,
-            path,
-            format_args!(
-                "netlist,name,value,expected,tolerance,passed,error,run,raw_value,failure_limit,failure_limit_exceeded"
-            ),
-        )?;
-
-        for report in reports {
-            for meas in &report.measurements {
-                write_line(
-                    &mut writer,
-                    path,
-                    format_args!(
-                        "{},{},{},{},{},{},{},{},{},{},{}",
-                        csv_escape(&report.netlist),
-                        csv_escape(&meas.name),
-                        meas.value.map(|v| format!("{:.9e}", v)).unwrap_or_default(),
-                        meas.expected
-                            .map(|v| format!("{:.9e}", v))
-                            .unwrap_or_default(),
-                        meas.tolerance
-                            .map(|v| format!("{:.9e}", v))
-                            .unwrap_or_default(),
-                        meas.passed,
-                        csv_escape(meas.error.as_deref().unwrap_or("")),
-                        csv_escape(&report.name),
-                        meas.raw_value
-                            .map(|v| format!("{:.9e}", v))
-                            .unwrap_or_default(),
-                        meas.failure_limit
-                            .map(|v| format!("{:.9e}", v))
-                            .unwrap_or_default(),
-                        meas.failure_limit_exceeded,
-                    ),
-                )?;
-            }
-        }
-
-        Ok(())
+        write_buffered_atomic(path, |writer| write_measurement_csv(writer, path, reports))
     }
+}
+
+fn write_measurement_csv<W: Write>(
+    writer: &mut W,
+    path: &Path,
+    reports: &[SimulationReport],
+) -> Result<(), CliError> {
+    write_line(
+        writer,
+        path,
+        format_args!(
+            "netlist,name,value,expected,tolerance,passed,error,run,raw_value,failure_limit,failure_limit_exceeded"
+        ),
+    )?;
+
+    for report in reports {
+        for meas in &report.measurements {
+            write_line(
+                writer,
+                path,
+                format_args!(
+                    "{},{},{},{},{},{},{},{},{},{},{}",
+                    csv_escape(&report.netlist),
+                    csv_escape(&meas.name),
+                    meas.value.map(|v| format!("{:.9e}", v)).unwrap_or_default(),
+                    meas.expected
+                        .map(|v| format!("{:.9e}", v))
+                        .unwrap_or_default(),
+                    meas.tolerance
+                        .map(|v| format!("{:.9e}", v))
+                        .unwrap_or_default(),
+                    meas.passed,
+                    csv_escape(meas.error.as_deref().unwrap_or("")),
+                    csv_escape(&report.name),
+                    meas.raw_value
+                        .map(|v| format!("{:.9e}", v))
+                        .unwrap_or_default(),
+                    meas.failure_limit
+                        .map(|v| format!("{:.9e}", v))
+                        .unwrap_or_default(),
+                    meas.failure_limit_exceeded,
+                ),
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+fn write_buffered_atomic(
+    path: &Path,
+    write: impl FnOnce(&mut BufWriter<&mut std::fs::File>) -> Result<(), CliError>,
+) -> Result<(), CliError> {
+    write_cli_atomic(path, |file| {
+        let mut writer = BufWriter::new(file);
+        write(&mut writer)?;
+        writer
+            .flush()
+            .map_err(|error| CliError::output_error(path, error))
+    })
 }
 
 /// Quote a CSV field if it contains separators, quotes, or newlines

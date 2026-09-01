@@ -2,6 +2,7 @@
 //!
 //! Compiles Verilog-A model files and displays model information.
 
+use crate::atomic_artifact::write_cli_bytes_atomic;
 use crate::cli::{CliError, CompileVaArgs, Config};
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 
@@ -130,8 +131,7 @@ pub fn execute(
         });
         let text = serde_json::to_string_pretty(&json)
             .map_err(|e| CliError::output_json_error(output_path, e))?;
-        std::fs::write(output_path, text + "\n")
-            .map_err(|e| CliError::output_error(output_path, e))?;
+        write_cli_bytes_atomic(output_path, (text + "\n").as_bytes())?;
         println!("Interface summary written to: {}", output_path.display());
     }
 

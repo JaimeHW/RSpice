@@ -13,6 +13,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use thiserror::Error;
 
+use crate::cli::CliError;
+
 const TEMP_MARKER: &str = ".rspice-tmp-";
 const MAX_TEMP_ATTEMPTS: u64 = 128;
 static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
@@ -44,6 +46,57 @@ where
         write,
         #[cfg(test)]
         None,
+    )
+}
+
+/// CLI-specialized wrapper that retains the destination path and commit phase
+/// in user-facing errors.
+pub(crate) fn write_cli_atomic<F>(destination: &Path, write: F) -> Result<(), CliError>
+where
+    F: FnOnce(&mut File) -> Result<(), CliError>,
+{
+    write_atomic(destination, write).map_err(|error| match error {
+        AtomicArtifactError::Write(error) => error,
+        AtomicArtifactError::Preparation(error) => {
+            atomic_cli_io_error(destination, "preparation", error)
+        }
+        AtomicArtifactError::Flush(error) => atomic_cli_io_error(destination, "flush", error),
+        AtomicArtifactError::Commit(error) => atomic_cli_io_error(destination, "commit", error),
+    })
+}
+
+/// Atomically publish an already serialized CLI artifact.
+pub(crate) fn write_cli_bytes_atomic(destination: &Path, bytes: &[u8]) -> Result<(), CliError> {
+    write_cli_atomic(destination, |file| {
+        file.write_all(bytes)
+            .map_err(|error| CliError::output_error(destination, error))
+    })
+}
+
+/// Atomically promote a file's complete bytes and permissions to a destination.
+pub(crate) fn copy_cli_atomic(source: &Path, destination: &Path) -> Result<(), CliError> {
+    let mut source_file =
+        File::open(source).map_err(|error| CliError::output_error(destination, error))?;
+    let permissions = source_file
+        .metadata()
+        .map_err(|error| CliError::output_error(destination, error))?
+        .permissions();
+
+    write_cli_atomic(destination, move |file| {
+        io::copy(&mut source_file, &mut *file)
+            .map_err(|error| CliError::output_error(destination, error))?;
+        file.set_permissions(permissions)
+            .map_err(|error| CliError::output_error(destination, error))
+    })
+}
+
+fn atomic_cli_io_error(destination: &Path, phase: &str, error: io::Error) -> CliError {
+    CliError::output_error(
+        destination,
+        io::Error::new(
+            error.kind(),
+            format!("atomic output {phase} failed: {error}"),
+        ),
     )
 }
 
@@ -400,6 +453,29 @@ mod tests {
     }
 
     #[test]
+    fn cli_byte_and_copy_helpers_replace_only_with_complete_bytes() {
+        let directory = TestDirectory::new("cli-convenience");
+        let source = directory.path().join("source.raw");
+        let destination = directory.path().join("destination.raw");
+        std::fs::write(&source, b"source complete artifact").expect("write copy source");
+        std::fs::write(&destination, b"old complete artifact").expect("seed destination");
+
+        write_cli_bytes_atomic(&destination, b"serialized complete artifact")
+            .expect("publish serialized artifact");
+        assert_eq!(
+            std::fs::read(&destination).expect("read serialized destination"),
+            b"serialized complete artifact"
+        );
+
+        copy_cli_atomic(&source, &destination).expect("copy complete artifact");
+        assert_eq!(
+            std::fs::read(&destination).expect("read copied destination"),
+            b"source complete artifact"
+        );
+        assert_no_staging_files(directory.path());
+    }
+
+    #[test]
     fn bare_filename_stages_and_syncs_in_the_current_directory() {
         assert_eq!(destination_parent(Path::new("result.csv")), Path::new("."));
     }
@@ -426,10 +502,10 @@ mod tests {
             panic!("create file symlink: {error}");
         }
 
-        let error = write_atomic(&destination, |file| file.write_all(b"replacement"))
+        let error = write_cli_bytes_atomic(&destination, b"replacement")
             .expect_err("symlink output must be rejected");
 
-        assert!(matches!(error, AtomicArtifactError::Preparation(_)));
+        assert!(matches!(error, CliError::OutputError { .. }));
         assert_eq!(
             std::fs::read(&target).expect("read symlink target"),
             b"symlink target"
