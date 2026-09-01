@@ -863,7 +863,7 @@ class CiConfigurationTests(unittest.TestCase):
         constraints = read_text("crates/rspice-python/ci-constraints.txt")
 
         self.assertIn('requires-python = ">=3.10"', pyproject)
-        self.assertIn('requires = ["maturin==1.14.1"]', pyproject)
+        self.assertIn('requires = ["maturin==1.15.0"]', pyproject)
         self.assertIn(
             'python: ["3.10", "3.11", "3.12", "3.13", "3.14", "3.14t"]',
             workflow,
@@ -904,7 +904,7 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertEqual(workflow.count("actions/attest@"), 3)
         self.assertIn("subject-path: crates/rspice-python/dist/*.whl", workflow)
         self.assertIn("subject-path: crates/rspice-python/dist/*.tar.gz", workflow)
-        self.assertIn("maturin==1.14.1", constraints)
+        self.assertIn("maturin==1.15.0", constraints)
         self.assertIn("numpy==2.2.6", constraints)
         self.assertIn("numpy==2.5.0", constraints)
 
