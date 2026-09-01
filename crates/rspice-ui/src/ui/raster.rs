@@ -124,6 +124,7 @@ impl Canvas {
         for pixel in &self.pixels[..height * self.width] {
             digest.update(pixel.to_array());
         }
+        let digest = digest.finalize();
         format!("{digest:x}")
     }
 
