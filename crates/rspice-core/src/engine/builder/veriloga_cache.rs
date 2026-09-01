@@ -113,7 +113,22 @@ use super::*;
 // serialized by version 33 can carry a real variable and a deferred real update
 // that version 32's reader has no case for — so the record's identity changes
 // rather than relying on a decode that would silently drop them.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 33;
+// Version 34 reserves the six Verilog-AMS connect keywords — `connect`,
+// `connectrules`, `endconnectrules`, `resolveto`, `merged` and `split` — and
+// reads the two constructs they belong to: `connectmodule`, which LRM 2.4
+// Syntax 7-4 makes a third `module_keyword` and which the parser refused
+// outright before, and the `connectrules` block of Syntax 7-5. It also reads
+// `` `default_discipline `` (section 10.2), which every module now carries.
+//
+// Unlike versions 32 and 33, this is not a new shape inside the plan: no
+// executable form of a connect module exists yet, so nothing new reaches a
+// cached artifact. What changes is what the *front end accepts* — a source
+// that was a hard parse error under version 33 compiles under 34, and six
+// identifiers that were legal names are not any more. A cached artifact
+// therefore no longer stands for the same compile, and the fail-closed
+// reading is to rebuild rather than to reason about which sources are
+// unaffected.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 34;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
