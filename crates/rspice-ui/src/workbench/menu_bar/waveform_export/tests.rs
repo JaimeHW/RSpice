@@ -26,6 +26,7 @@ struct MockExportWorkflowIo {
     datasets: RefCell<Vec<crate::io::WaveformDataset>>,
     paths: RefCell<Vec<PathBuf>>,
     text_files: RefCell<Vec<(PathBuf, String)>>,
+    byte_files: RefCell<Vec<(PathBuf, Vec<u8>, String)>>,
     dialog_titles: RefCell<Vec<String>>,
     saved_paths_are_reopenable: bool,
 }
@@ -36,6 +37,7 @@ impl Default for MockExportWorkflowIo {
             datasets: RefCell::default(),
             paths: RefCell::default(),
             text_files: RefCell::default(),
+            byte_files: RefCell::default(),
             dialog_titles: RefCell::default(),
             saved_paths_are_reopenable: true,
         }
@@ -64,6 +66,20 @@ impl ExportWorkflowIo for MockExportWorkflowIo {
     ) -> Result<(), String> {
         self.datasets.borrow_mut().push(dataset.clone());
         self.paths.borrow_mut().push(path.to_path_buf());
+        Ok(())
+    }
+
+    fn write_bytes_file_observed(
+        &self,
+        destination: &crate::workbench::workflows::export_workflow::ObservedExportDestination,
+        contents: &[u8],
+        mime_type: &str,
+    ) -> Result<(), String> {
+        self.byte_files.borrow_mut().push((
+            destination.path().to_path_buf(),
+            contents.to_vec(),
+            mime_type.to_owned(),
+        ));
         Ok(())
     }
 
@@ -123,7 +139,9 @@ fn export_registry_matches_the_fifteen_contract_ids_and_governs_availability() {
         let availability = result_export_format_availability(format);
         if matches!(
             format,
-            ResultExportFormat::CsvRfc4180
+            ResultExportFormat::RSpiceResultBundle
+                | ResultExportFormat::RSpiceDatasetBundle
+                | ResultExportFormat::CsvRfc4180
                 | ResultExportFormat::Tsv
                 | ResultExportFormat::TouchstoneV2
         ) {
@@ -1231,6 +1249,79 @@ fn engineering_export_preference_dispatches_exact_tsv() {
     assert_eq!(files[0].0, PathBuf::from("waveforms.tsv"));
     assert!(files[0].1.starts_with("time\tV(out)\n"));
     assert!(files[0].1.contains("1.234567890123456"));
+}
+
+#[test]
+fn engineering_export_ui_publishes_reopenable_native_real_and_complex_bundles() {
+    let transient =
+        AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
+            waveform("V(out)", vec![0.0, 1.0e-6, 2.0e-6], vec![0.0, 1.25, -0.5]),
+        ]);
+    let mut result_state = state_with_typed_result(transient);
+    result_state
+        .ui
+        .preferences
+        .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 3)
+        .expect("result bundle preference");
+    let result_io = MockExportWorkflowIo::default();
+    action_export_csv_with_io(&mut result_state, &result_io);
+    assert_eq!(
+        result_io.dialog_titles.borrow().as_slice(),
+        &["Export RSpice Result Bundle"]
+    );
+    let result_files = result_io.byte_files.borrow();
+    assert_eq!(result_files.len(), 1);
+    assert_eq!(result_files[0].0, PathBuf::from("waveforms.rspiceresult"));
+    assert_eq!(result_files[0].2, "application/vnd.rspice.result+zip");
+    let reopened = crate::workbench::workflows::result_import_workflow::parse_result_dataset(
+        "waveforms.rspiceresult",
+        &result_files[0].1,
+    )
+    .expect("reopen result bundle");
+    assert_eq!(reopened.analysis_type, AnalysisType::Transient);
+    assert_eq!(reopened.waveforms[0].name, "V(out)");
+    assert_eq!(reopened.waveforms[0].y.as_ref(), &[0.0, 1.25, -0.5]);
+    drop(result_files);
+
+    let ac = AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![complex_waveform(
+        "|V(out)|",
+        "V(out)",
+        vec![1.0e3, 2.0e3, 4.0e3],
+        vec![1.0, 2.0, 0.5],
+        vec![0.75, -1.5, 0.25],
+        vec![0.25, 0.5, -0.125],
+    )]);
+    let mut dataset_state = state_with_typed_result(ac);
+    dataset_state
+        .ui
+        .preferences
+        .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 4)
+        .expect("dataset bundle preference");
+    let dataset_io = MockExportWorkflowIo::default();
+    action_export_csv_with_io(&mut dataset_state, &dataset_io);
+    assert_eq!(
+        dataset_io.dialog_titles.borrow().as_slice(),
+        &["Export RSpice Dataset Bundle"]
+    );
+    let dataset_files = dataset_io.byte_files.borrow();
+    assert_eq!(dataset_files.len(), 1);
+    assert_eq!(dataset_files[0].0, PathBuf::from("waveforms.rspicedata"));
+    assert_eq!(dataset_files[0].2, "application/vnd.rspice.dataset+zip");
+    let reopened = crate::workbench::workflows::result_import_workflow::parse_result_dataset(
+        "waveforms.rspicedata",
+        &dataset_files[0].1,
+    )
+    .expect("reopen dataset bundle");
+    assert_eq!(reopened.analysis_type, AnalysisType::Ac);
+    assert_eq!(reopened.waveforms.len(), 1);
+    assert_eq!(reopened.waveforms[0].name, "V(out)");
+    let complex = reopened.waveforms[0]
+        .complex
+        .as_ref()
+        .expect("complex components reopen");
+    assert_eq!(complex.source_name, "V(out)");
+    assert_eq!(complex.real.as_ref(), &[0.75, -1.5, 0.25]);
+    assert_eq!(complex.imag.as_ref(), &[0.25, 0.5, -0.125]);
 }
 
 #[test]

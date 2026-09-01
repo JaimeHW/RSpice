@@ -790,8 +790,14 @@ fn results(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageAction
         state,
         ChoicePreference::EngineeringExport,
         "Default engineering export",
-        "Exports retain full stored precision; Touchstone is offered only for compatible S-parameter datasets.",
-        &["CSV", "Touchstone where compatible", "TSV"],
+        "Exports retain full stored precision; native bundles are self-verifying and reopen directly in RSpice.",
+        &[
+            "CSV",
+            "Touchstone where compatible",
+            "TSV",
+            "RSpice Result Bundle",
+            "RSpice Dataset Bundle",
+        ],
     );
 }
 
