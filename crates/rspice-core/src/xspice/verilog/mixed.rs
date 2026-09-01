@@ -7,8 +7,36 @@
 //! bridge simultaneously and reports whether a same-time digital/D/A change
 //! requires another Newton solve. Nothing is committed until
 //! [`MixedSignalHost::accept_trial`].
+//!
+//! # The two time bases
+//!
+//! The analog side names a timepoint in seconds, chosen by a step controller
+//! answering to local truncation error, and it lands wherever it lands. The
+//! digital side counts ticks of a declared precision. The host floors the
+//! former onto the latter — see
+//! [`TimeResolution::seconds_to_floor_ticks`](crate::xspice::event_scheduler::TimeResolution::seconds_to_floor_ticks)
+//! for why flooring rather than rounding — and keeps the unquantized analog
+//! time for everything that is answered in seconds: the trial's own bookkeeping,
+//! the interpolated instant an A/D bridge crossed its threshold, and the
+//! breakpoint [`MixedSignalHost::next_event_time`] hands back.
+//!
+//! Several analog timepoints therefore share one tick, which is what a declared
+//! precision means, and the host's monotonicity is enforced on the *analog*
+//! time rather than on the tick: a repeat of an accepted timepoint would
+//! advance the integrator twice.
+//!
+//! # Which node index is which
+//!
+//! Every node this module names — a module terminal, an A/D sense pair, a D/A
+//! output pair — is a **circuit-node id**, with `0` meaning ground, exactly as
+//! [`VerilogADevice`] takes its terminal mapping. The matrix row for a node is
+//! `id - 1`, and ground has no row. Bridges used to be given raw matrix rows
+//! instead, which made `0` mean ground on one side of the module and the
+//! circuit's first node on the other; a bridge referred to ground then stamped
+//! its Thevenin conductance onto whichever node happened to occupy row zero.
 
 use std::fmt;
+use std::sync::Arc;
 
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
 use rspice_veriloga::canonical_ir::ids::DigitalSignalId;
@@ -20,6 +48,8 @@ use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use super::host::DigitalHost;
 use super::{DigitalRunError, TIME_UNIT_EXPONENT, parse_four_state};
 use crate::xspice::event_scheduler::{SchedulerLimits, TimeResolution};
+use crate::xspice::settle_cost;
+use crate::xspice::threshold_crossing::threshold_crossing_time;
 
 /// A failure at the mixed transient boundary.
 #[derive(Debug, Clone, PartialEq)]
@@ -39,8 +69,6 @@ pub enum MixedSignalError {
     },
     /// A bridge declaration cannot be executed without guessing.
     InvalidBridge { detail: String },
-    /// A D/A input was X or Z, for which no analog level is defined.
-    IndeterminateDigitalBridge { signal: String, value: String },
     /// Cross-domain feedback did not quiet within the scheduler's delta cap.
     BridgeIterationLimit { tick: u64, limit: u32 },
 }
@@ -62,10 +90,6 @@ impl fmt::Display for MixedSignalError {
                 "analog trial at {trial_seconds:e} s stepped past digital breakpoint {scheduled_seconds:e} s"
             ),
             Self::InvalidBridge { detail } => write!(f, "invalid mixed-signal bridge: {detail}"),
-            Self::IndeterminateDigitalBridge { signal, value } => write!(
-                f,
-                "D/A bridge `{signal}` holds `{value}`; X and Z have no implicit analog level"
-            ),
             Self::BridgeIterationLimit { tick, limit } => write!(
                 f,
                 "mixed-signal bridges at tick {tick} did not settle within {limit} iterations"
@@ -82,6 +106,59 @@ impl From<DigitalRunError> for MixedSignalError {
     }
 }
 
+/// One payload of a mixed module's running state, shared with the trial
+/// rollback image until something writes through it.
+///
+/// This is `SharedXspiceInstance`'s idiom, generic because the mixed host has
+/// three payloads with the same shape rather than one. A trial used to capture
+/// its rollback by deep-copying the whole module — the compiled analog device
+/// with its context and history, the digital host with its store, scheduler,
+/// process slots and sensitivity index, and both bridge tables — at every
+/// attempted timepoint, whether or not the trial went on to touch any of it.
+/// Behind an [`Arc`] that capture is a reference-count bump, and the copy is
+/// deferred to the first write through a handle the image still shares.
+///
+/// The rollback image this produces is the image the deep copy produced.
+/// [`Arc::make_mut`] copies whenever the pointer is shared, so an image that
+/// aliases a payload observes every subsequent write on a fresh allocation and
+/// never on its own; and writing is the only way to reach that path, because
+/// [`Self::make_mut`] is the only mutable view. `DerefMut` is deliberately not
+/// implemented, so every mutation site is spelled out.
+#[derive(Clone)]
+struct MixedCell<T>(Arc<T>);
+
+impl<T: Clone> MixedCell<T> {
+    fn new(value: T) -> Self {
+        Self(Arc::new(value))
+    }
+
+    /// Take a mutable view, copying the payload first if a rollback image
+    /// still shares it.
+    ///
+    /// Each copy this actually takes is counted, so `mixed_trial_copy_ratchet`
+    /// can fail a change that puts the deep copies back.
+    #[inline]
+    fn make_mut(&mut self) -> &mut T {
+        let (value, copied) = settle_cost::make_mut_reporting_copy(&mut self.0);
+        if copied {
+            settle_cost::note_mixed_trial_deep_copy();
+        }
+        value
+    }
+}
+
+impl<T> std::ops::Deref for MixedCell<T> {
+    type Target = T;
+
+    #[inline]
+    fn deref(&self) -> &T {
+        &self.0
+    }
+}
+
+/// One scalar analog-to-digital bridge.
+///
+/// `positive` and `negative` are circuit-node ids; `0` is ground.
 #[derive(Clone)]
 struct AdcBridge {
     signal: DigitalSignalId,
@@ -91,6 +168,9 @@ struct AdcBridge {
     high: f64,
 }
 
+/// One scalar digital-to-analog Thevenin bridge.
+///
+/// `positive` and `negative` are circuit-node ids; `0` is ground.
 #[derive(Clone)]
 struct DacBridge {
     signal: DigitalSignalId,
@@ -102,21 +182,65 @@ struct DacBridge {
     resistance: f64,
 }
 
-#[derive(Clone)]
-struct MixedState {
-    analog: VerilogADevice,
-    digital: DigitalHost,
-    accepted_tick: u64,
-    started: bool,
+impl DacBridge {
+    /// The analog level for a digital value that is neither 0 nor 1.
+    ///
+    /// IEEE 1364-2005 section 4.2.2 makes a `reg` without an initial
+    /// assignment `x`, so a D/A bridge sees `x` at time zero in any design that
+    /// does not initialise its output — which is most of them. Refusing there
+    /// would make the common case unrunnable, so the boundary answers the way
+    /// the `dac_bridge` code model answers it: the midpoint of the two levels,
+    /// which is `out_undef`'s value exactly when both levels are given and it
+    /// is not. See `xspice::models::bridges`'s `dac_bridge_out_undef`, and the
+    /// same delegation in `engine::builder::connect_modules`.
+    fn undefined_level(&self) -> f64 {
+        self.low + (self.high - self.low) / 2.0
+    }
+}
+
+/// The bridge declarations, fixed once the module is wired.
+///
+/// Separate from the moving state because a bridge is added before the first
+/// trial and never during one, so a rollback image can share this table for
+/// the whole run without ever copying it.
+#[derive(Clone, Default)]
+struct Bridges {
     adc: Vec<AdcBridge>,
     dac: Vec<DacBridge>,
+}
+
+#[derive(Clone)]
+struct MixedState {
+    analog: MixedCell<VerilogADevice>,
+    digital: MixedCell<DigitalHost>,
+    bridges: MixedCell<Bridges>,
+    /// Differential voltage each A/D bridge saw at the last accepted timepoint,
+    /// which is the far end of the interval a threshold crossing is
+    /// interpolated in. Parallel to `bridges.adc`.
+    accepted_adc_voltages: Vec<f64>,
+    /// Interpolated analog time of each A/D bridge's most recent accepted
+    /// transition, unquantized. Parallel to `bridges.adc`.
+    accepted_adc_transition_times: Vec<Option<f64>>,
+    accepted_tick: u64,
+    accepted_time: f64,
+    started: bool,
 }
 
 #[derive(Clone)]
 struct ActiveTrial {
     rollback: MixedState,
     tick: u64,
+    time_seconds: f64,
+    timestep_seconds: f64,
     bridge_iterations: u32,
+    /// Whether the last [`MixedSignalHost::settle_analog_bridges`] of this
+    /// trial found the boundary quiet. `false` before the first one, so a
+    /// trial accepted without sampling its bridges is refused rather than
+    /// committed on an unexamined boundary.
+    bridges_quiet: bool,
+    /// Interpolated crossing times published during this trial, parallel to
+    /// `bridges.adc`, folded into the accepted state on acceptance.
+    transition_times: Vec<Option<f64>>,
 }
 
 /// Opaque, exact restart image for a settled mixed module.
@@ -142,7 +266,7 @@ pub struct MixedSignalHost {
 
 impl MixedSignalHost {
     /// Compile and start one module. `terminal_nodes` maps analog ports to the
-    /// outer solver's node indices.
+    /// outer solver's circuit-node ids, where `0` is ground.
     pub fn compile(
         source: &str,
         module: Option<&str>,
@@ -197,12 +321,14 @@ impl MixedSignalHost {
             source_digest,
             resolution,
             state: MixedState {
-                analog,
-                digital,
+                analog: MixedCell::new(analog),
+                digital: MixedCell::new(digital),
+                bridges: MixedCell::new(Bridges::default()),
+                accepted_adc_voltages: Vec::new(),
+                accepted_adc_transition_times: Vec::new(),
                 accepted_tick: 0,
+                accepted_time: 0.0,
                 started: false,
-                adc: Vec::new(),
-                dac: Vec::new(),
             },
             trial: None,
             max_circuit_node: terminal_nodes.iter().copied().max().unwrap_or(0),
@@ -211,6 +337,8 @@ impl MixedSignalHost {
     }
 
     /// Add a scalar analog-to-digital bridge with hysteresis.
+    ///
+    /// `positive` and `negative` are circuit-node ids; `0` is ground.
     pub fn add_adc_bridge(
         &mut self,
         signal: &str,
@@ -230,17 +358,21 @@ impl MixedSignalHost {
         }
         let id = self.scalar_signal(signal)?;
         self.max_circuit_node = self.max_circuit_node.max(positive).max(negative);
-        self.state.adc.push(AdcBridge {
+        self.state.bridges.make_mut().adc.push(AdcBridge {
             signal: id,
             positive,
             negative,
             low: low_threshold,
             high: high_threshold,
         });
+        self.state.accepted_adc_voltages.push(0.0);
+        self.state.accepted_adc_transition_times.push(None);
         Ok(())
     }
 
     /// Add a scalar digital-to-analog Thevenin bridge.
+    ///
+    /// `positive` and `negative` are circuit-node ids; `0` is ground.
     pub fn add_dac_bridge(
         &mut self,
         signal: &str,
@@ -264,7 +396,7 @@ impl MixedSignalHost {
         }
         let id = self.scalar_signal(signal)?;
         self.max_circuit_node = self.max_circuit_node.max(positive).max(negative);
-        self.state.dac.push(DacBridge {
+        self.state.bridges.make_mut().dac.push(DacBridge {
             signal: id,
             signal_name: signal.into(),
             positive,
@@ -277,6 +409,10 @@ impl MixedSignalHost {
     }
 
     /// Earliest exact event time the analog stepper must use as a breakpoint.
+    ///
+    /// A tick's seconds, not a floored analog time: this is the value D5
+    /// clause 2 asks the step controller to stop bit-exactly at, and the tick
+    /// is where the event actually is.
     pub fn next_event_time(&self) -> Result<Option<f64>, MixedSignalError> {
         self.state
             .digital
@@ -292,6 +428,10 @@ impl MixedSignalHost {
 
     /// Start a rollbackable analog trial and deliver the exact digital slot at
     /// this timestamp before the first Newton stamp.
+    ///
+    /// `time_seconds` is the analog timepoint, wherever the step controller
+    /// put it. It is floored onto the tick grid to name the digital slot, and
+    /// kept unquantized for everything answered in seconds.
     pub fn begin_trial(
         &mut self,
         time_seconds: f64,
@@ -308,24 +448,21 @@ impl MixedSignalHost {
         }
         let tick = self
             .resolution
-            .seconds_to_ticks(time_seconds)
+            .seconds_to_floor_ticks(time_seconds)
             .map_err(DigitalRunError::from)?;
-        let grid_time = self
-            .resolution
-            .ticks_to_seconds(tick)
-            .map_err(DigitalRunError::from)?;
-        let grid_tolerance =
-            f64::EPSILON * time_seconds.abs().max(grid_time.abs()).max(1.0e-30) * 4.0;
-        if (grid_time - time_seconds).abs() > grid_tolerance {
+        // Monotonicity is enforced on the analog time, not on the tick. Many
+        // trials share one tick once the step controller is in charge, and all
+        // of them are legitimate; what is not legitimate is repeating or
+        // preceding a timepoint already accepted, because `accept_trial`
+        // advances the analog integrator and a second acceptance at the same
+        // instant would advance it twice.
+        if self.state.started && time_seconds <= self.state.accepted_time {
             return Err(MixedSignalError::TrialProtocol {
                 detail: format!(
-                    "trial time {time_seconds:e} s is not on the host's exact 1 ns event grid; use next_event_time breakpoints"
+                    "trial time {time_seconds:e} s does not advance past the accepted mixed-module \
+                     time {:e} s; a repeated timepoint would advance the integrator twice",
+                    self.state.accepted_time
                 ),
-            });
-        }
-        if tick < self.state.accepted_tick {
-            return Err(MixedSignalError::TrialProtocol {
-                detail: "trial time precedes the accepted mixed-module time".into(),
             });
         }
         if let Some(next) = self.state.digital.next_tick()
@@ -342,25 +479,17 @@ impl MixedSignalHost {
 
         let rollback = self.state.clone();
         let prepare = (|| {
-            self.state.digital.advance_to(tick)?;
-            self.state
-                .analog
-                .try_set_analysis_type(2)
-                .map_err(analog_error)?;
-            self.state
-                .analog
+            self.state.digital.make_mut().advance_to(tick)?;
+            let analog = self.state.analog.make_mut();
+            analog.try_set_analysis_type(2).map_err(analog_error)?;
+            analog
                 .try_set_analysis_step(initial_step, final_step)
                 .map_err(analog_error)?;
-            self.state
-                .analog
-                .try_set_time(time_seconds)
-                .map_err(analog_error)?;
-            self.state
-                .analog
+            analog.try_set_time(time_seconds).map_err(analog_error)?;
+            analog
                 .try_set_timestep(timestep_seconds)
                 .map_err(analog_error)?;
-            self.state
-                .analog
+            analog
                 .try_set_integration_coefficients(integration)
                 .map_err(analog_error)?;
             Ok::<(), MixedSignalError>(())
@@ -369,10 +498,15 @@ impl MixedSignalHost {
             self.state = rollback;
             return Err(error);
         }
+        let transition_times = self.state.accepted_adc_transition_times.clone();
         self.trial = Some(ActiveTrial {
             rollback,
             tick,
+            time_seconds,
+            timestep_seconds,
             bridge_iterations: 0,
+            bridges_quiet: false,
+            transition_times,
         });
         Ok(())
     }
@@ -389,7 +523,12 @@ impl MixedSignalHost {
                 })?;
             parsed.push((signal, value));
         }
-        self.state.digital.force_many(&parsed, tick)?;
+        self.state.digital.make_mut().force_many(&parsed, tick)?;
+        // A drive published into the slot can move a D/A input, so the
+        // boundary is no longer known quiet.
+        if let Some(trial) = self.trial.as_mut() {
+            trial.bridges_quiet = false;
+        }
         Ok(())
     }
 
@@ -409,9 +548,10 @@ impl MixedSignalHost {
         self.validate_solution(circuit_voltages)?;
         self.state
             .analog
+            .make_mut()
             .try_stamp(circuit_voltages, &mut matrix_add, &mut rhs_add)
             .map_err(analog_error)?;
-        for bridge in &self.state.dac {
+        for bridge in &self.state.bridges.dac {
             let value = self.state.digital.read(bridge.signal).ok_or_else(|| {
                 MixedSignalError::InvalidBridge {
                     detail: format!("D/A signal `{}` disappeared", bridge.signal_name),
@@ -420,20 +560,27 @@ impl MixedSignalHost {
             let level = match value.bit(0) {
                 FourStateBit::Zero => bridge.low,
                 FourStateBit::One => bridge.high,
-                FourStateBit::Unknown | FourStateBit::HighImpedance => {
-                    return Err(MixedSignalError::IndeterminateDigitalBridge {
-                        signal: bridge.signal_name.clone(),
-                        value: value.spelling(),
-                    });
-                }
+                FourStateBit::Unknown | FourStateBit::HighImpedance => bridge.undefined_level(),
             };
             let conductance = 1.0 / bridge.resistance;
-            matrix_add(bridge.positive, bridge.positive, conductance);
-            matrix_add(bridge.positive, bridge.negative, -conductance);
-            matrix_add(bridge.negative, bridge.positive, -conductance);
-            matrix_add(bridge.negative, bridge.negative, conductance);
-            rhs_add(bridge.positive, conductance * level);
-            rhs_add(bridge.negative, -conductance * level);
+            // Ground has no matrix row, so a bridge referred to it stamps only
+            // its live side. Stamping row `0` for it would land on whichever
+            // node occupies the first row — including, for a module whose own
+            // first terminal is there, its own equation.
+            let positive = matrix_row(bridge.positive);
+            let negative = matrix_row(bridge.negative);
+            if let Some(row) = positive {
+                matrix_add(row, row, conductance);
+                rhs_add(row, conductance * level);
+            }
+            if let Some(row) = negative {
+                matrix_add(row, row, conductance);
+                rhs_add(row, -conductance * level);
+            }
+            if let (Some(positive), Some(negative)) = (positive, negative) {
+                matrix_add(positive, negative, -conductance);
+                matrix_add(negative, positive, -conductance);
+            }
         }
         Ok(())
     }
@@ -442,17 +589,34 @@ impl MixedSignalHost {
     /// changes simultaneously, and settle every same-time delta cycle.
     /// Returns true when digital activity changed any D/A input and Newton must
     /// be repeated at the same timestamp.
+    ///
+    /// Each transition is dated by interpolating its threshold crossing inside
+    /// the trial's step, by the same rule the Xyce DIG code models date theirs
+    /// — [`threshold_crossing_time`]. That instant is kept unquantized and
+    /// read back through [`Self::last_transition_time`]; the digital slot it is
+    /// published into is its floor, which under whole-tick lockstep is this
+    /// trial's own tick. It cannot be an earlier one that matters:
+    /// [`Self::begin_trial`] has already refused a step that passed a scheduled
+    /// event, so nothing is queued between the crossing and here to reorder
+    /// against.
     pub fn settle_analog_bridges(
         &mut self,
         circuit_voltages: &[f64],
     ) -> Result<bool, MixedSignalError> {
         let tick = self.active_tick()?;
-        let trial = self
-            .trial
-            .as_mut()
-            .expect("active_tick validated the trial");
-        trial.bridge_iterations = trial.bridge_iterations.saturating_add(1);
-        if trial.bridge_iterations > self.max_bridge_iterations {
+        let (time_seconds, timestep_seconds, iterations) = {
+            let trial = self
+                .trial
+                .as_mut()
+                .expect("active_tick validated the trial");
+            trial.bridge_iterations = trial.bridge_iterations.saturating_add(1);
+            (
+                trial.time_seconds,
+                trial.timestep_seconds,
+                trial.bridge_iterations,
+            )
+        };
+        if iterations > self.max_bridge_iterations {
             return Err(MixedSignalError::BridgeIterationLimit {
                 tick,
                 limit: self.max_bridge_iterations,
@@ -461,29 +625,65 @@ impl MixedSignalHost {
         self.validate_solution(circuit_voltages)?;
         let before = self.dac_values()?;
         let mut drives = Vec::new();
-        for bridge in &self.state.adc {
-            let voltage = circuit_voltages[bridge.positive] - circuit_voltages[bridge.negative];
-            let bit = if voltage <= bridge.low {
-                Some(FourStateBit::Zero)
+        let mut crossings = Vec::new();
+        let mut publish_tick = tick;
+        for (index, bridge) in self.state.bridges.adc.iter().enumerate() {
+            let voltage = node_voltage(circuit_voltages, bridge.positive)
+                - node_voltage(circuit_voltages, bridge.negative);
+            let (bit, threshold) = if voltage <= bridge.low {
+                (Some(FourStateBit::Zero), bridge.low)
             } else if voltage >= bridge.high {
-                Some(FourStateBit::One)
+                (Some(FourStateBit::One), bridge.high)
             } else {
-                None
+                (None, 0.0)
             };
-            if let Some(bit) = bit {
-                let next = FourStateValue::splat(1, bit);
-                if self.state.digital.read(bridge.signal) != Some(&next) {
-                    drives.push((bridge.signal, next));
+            let Some(bit) = bit else { continue };
+            let next = FourStateValue::splat(1, bit);
+            if self.state.digital.read(bridge.signal) == Some(&next) {
+                continue;
+            }
+            let crossing = threshold_crossing_time(
+                time_seconds,
+                time_seconds - timestep_seconds,
+                timestep_seconds,
+                self.state.accepted_adc_voltages[index],
+                voltage,
+                threshold,
+            );
+            let crossing_tick = self
+                .resolution
+                .seconds_to_floor_ticks(crossing)
+                .map_err(DigitalRunError::from)?;
+            publish_tick = publish_tick.max(crossing_tick);
+            drives.push((bridge.signal, next));
+            crossings.push((index, crossing));
+        }
+        if !drives.is_empty() {
+            self.state
+                .digital
+                .make_mut()
+                .force_many(&drives, publish_tick)?;
+            if let Some(trial) = self.trial.as_mut() {
+                for (index, crossing) in crossings {
+                    trial.transition_times[index] = Some(crossing);
                 }
             }
         }
-        if !drives.is_empty() {
-            self.state.digital.force_many(&drives, tick)?;
+        let changed = before != self.dac_values()?;
+        if let Some(trial) = self.trial.as_mut() {
+            trial.bridges_quiet = !changed;
         }
-        Ok(before != self.dac_values()?)
+        Ok(changed)
     }
 
     /// Commit both domains atomically after bridges and Newton are quiet.
+    ///
+    /// The quiet is a precondition, and it is enforced: a trial whose last
+    /// [`Self::settle_analog_bridges`] reported that a D/A input moved still
+    /// owes the solver a Newton pass at this timestamp, and one that never
+    /// sampled its bridges has an unexamined boundary. Committing either would
+    /// advance the analog integrator over a boundary state the analog solution
+    /// was never solved against.
     pub fn accept_trial(&mut self) -> Result<(), MixedSignalError> {
         let trial = self
             .trial
@@ -491,15 +691,41 @@ impl MixedSignalHost {
             .ok_or_else(|| MixedSignalError::TrialProtocol {
                 detail: "there is no active trial to accept".into(),
             })?;
+        if !trial.bridges_quiet {
+            return Err(MixedSignalError::TrialProtocol {
+                detail: "settle_analog_bridges must report the boundary quiet before a trial is \
+                         accepted; sample the bridges, and repeat Newton while they keep moving"
+                    .into(),
+            });
+        }
         if let Err(error) = self.state.analog.validate_advance_state() {
             let rollback = self.trial.take().expect("checked above").rollback;
             self.state = rollback;
             return Err(analog_error(error));
         }
-        self.state.analog.apply_validated_advance_state();
+        let trial = self.trial.take().expect("checked above");
+        self.state.analog.make_mut().apply_validated_advance_state();
         self.state.accepted_tick = trial.tick;
+        self.state.accepted_time = trial.time_seconds;
         self.state.started = true;
-        self.trial = None;
+        self.state.accepted_adc_transition_times = trial.transition_times;
+        Ok(())
+    }
+
+    /// Record the analog voltages an accepted timepoint settled at.
+    ///
+    /// The far end of the interval the next timepoint's threshold crossings are
+    /// interpolated in. Separate from [`Self::accept_trial`] because the
+    /// accepted solution is the caller's, not the host's: the host sees
+    /// candidates during Newton and only the caller knows which one was kept.
+    pub fn accept_solution(&mut self, circuit_voltages: &[f64]) -> Result<(), MixedSignalError> {
+        self.require_idle("record an accepted solution")?;
+        self.validate_solution(circuit_voltages)?;
+        for (index, bridge) in self.state.bridges.adc.iter().enumerate() {
+            self.state.accepted_adc_voltages[index] =
+                node_voltage(circuit_voltages, bridge.positive)
+                    - node_voltage(circuit_voltages, bridge.negative);
+        }
         Ok(())
     }
 
@@ -514,6 +740,23 @@ impl MixedSignalHost {
             })?;
         self.state = trial.rollback;
         Ok(())
+    }
+
+    /// Interpolated analog time of the most recent accepted transition on an
+    /// A/D bridge signal, in seconds and unquantized.
+    ///
+    /// `None` when that bridge has not transitioned since the module started.
+    pub fn last_transition_time(&self, signal: &str) -> Result<Option<f64>, MixedSignalError> {
+        let id = self.state.digital.signal(signal)?;
+        self.state
+            .bridges
+            .adc
+            .iter()
+            .position(|bridge| bridge.signal == id)
+            .map(|index| self.state.accepted_adc_transition_times[index])
+            .ok_or_else(|| MixedSignalError::InvalidBridge {
+                detail: format!("`{signal}` is not an A/D bridge on this module"),
+            })
     }
 
     /// Capture a restart image. Speculative state is never checkpointable.
@@ -549,12 +792,14 @@ impl MixedSignalHost {
             .map(|terminal| self.state.analog.node_for_terminal(terminal))
             .chain(
                 self.state
+                    .bridges
                     .adc
                     .iter()
                     .flat_map(|bridge| [bridge.positive, bridge.negative]),
             )
             .chain(
                 self.state
+                    .bridges
                     .dac
                     .iter()
                     .flat_map(|bridge| [bridge.positive, bridge.negative]),
@@ -611,11 +856,15 @@ impl MixedSignalHost {
         Ok(id)
     }
 
+    /// Check a candidate solution covers every node this module reads.
+    ///
+    /// The highest circuit-node id occupies matrix row `id - 1`, so a solution
+    /// of `n` entries covers ids up to and including `n`.
     fn validate_solution(&self, values: &[f64]) -> Result<(), MixedSignalError> {
-        if self.max_circuit_node >= values.len() {
+        if self.max_circuit_node > values.len() {
             return Err(MixedSignalError::TrialProtocol {
                 detail: format!(
-                    "circuit solution has {} entries but mixed module references node {}",
+                    "circuit solution has {} entries but mixed module references circuit node {}",
                     values.len(),
                     self.max_circuit_node
                 ),
@@ -631,6 +880,7 @@ impl MixedSignalHost {
 
     fn dac_values(&self) -> Result<Vec<FourStateValue>, MixedSignalError> {
         self.state
+            .bridges
             .dac
             .iter()
             .map(|bridge| {
@@ -643,6 +893,24 @@ impl MixedSignalHost {
                     })
             })
             .collect()
+    }
+}
+
+/// The matrix row a circuit-node id occupies, or `None` for ground.
+#[inline]
+fn matrix_row(node: usize) -> Option<usize> {
+    node.checked_sub(1)
+}
+
+/// The voltage a circuit-node id holds in a solution vector.
+///
+/// Ground is zero by definition and has no entry, exactly as
+/// `VerilogADevice::solution_value` reads it.
+#[inline]
+fn node_voltage(values: &[f64], node: usize) -> f64 {
+    match matrix_row(node) {
+        Some(row) => values.get(row).copied().unwrap_or(0.0),
+        None => 0.0,
     }
 }
 
@@ -674,13 +942,16 @@ module mixed_runtime(p, n, adc, clk, q, dac);
 endmodule
 "#;
 
+    /// Circuit nodes: `1` is the module's `p` terminal, `3` the A/D sense node,
+    /// `4` the D/A output node. Both bridges are referred to ground, which is
+    /// node `0` and has no matrix row.
     fn host() -> MixedSignalHost {
         let mut host =
             MixedSignalHost::compile(MIXED, None, "xmixed", &[1, 0], SchedulerLimits::default())
                 .expect("mixed source compiles and starts");
-        host.add_adc_bridge("adc", 2, 0, 0.4, 0.6)
+        host.add_adc_bridge("adc", 3, 0, 0.4, 0.6)
             .expect("A/D bridge");
-        host.add_dac_bridge("dac", 3, 0, 0.0, 5.0, 100.0)
+        host.add_dac_bridge("dac", 4, 0, 0.0, 5.0, 100.0)
             .expect("D/A bridge");
         host
     }
@@ -693,7 +964,18 @@ endmodule
             tick == 0,
             false,
         )
-        .expect("begin exact-grid trial");
+        .expect("begin trial");
+    }
+
+    /// Settle to quiet the way a driver does — repeating Newton for as long as
+    /// the boundary keeps moving — and then commit.
+    fn settle_and_accept(host: &mut MixedSignalHost, voltages: &[f64]) {
+        while host
+            .settle_analog_bridges(voltages)
+            .expect("bridges settle")
+        {}
+        host.accept_trial().expect("accept a quiet trial");
+        host.accept_solution(voltages).expect("record the solution");
     }
 
     #[test]
@@ -736,11 +1018,251 @@ endmodule
     }
 
     #[test]
+    fn a_ground_referred_dac_bridge_leaves_the_modules_own_terminal_row_alone() {
+        // The module's `p` terminal is circuit node 1, which is matrix row 0.
+        // The D/A bridge is referred to ground. Ground has no row, so the
+        // bridge's Thevenin conductance and its source term belong only to row
+        // 3 — the bridge's own node 4. A bridge given raw matrix rows instead
+        // reads its ground reference as row 0 and adds 1/100 S plus a 50 mA
+        // source to the module's own equation, which is a short from the
+        // module's terminal to the digital output level.
+        let mut host = host();
+        begin(&mut host, 0);
+        host.settle_analog_bridges(&[0.0, 1.0, 1.0, 0.0]).unwrap();
+        assert_eq!(
+            host.read_digital("dac").unwrap(),
+            "1",
+            "the A/D crossing must have driven the D/A input high"
+        );
+
+        let mut matrix = Vec::new();
+        let mut rhs = Vec::new();
+        host.stamp(
+            &[0.0, 1.0, 1.0, 0.0],
+            |row, col, value| matrix.push((row, col, value)),
+            |row, value| rhs.push((row, value)),
+        )
+        .unwrap();
+
+        let bridge_conductance = 1.0 / 100.0;
+        assert!(
+            !matrix
+                .iter()
+                .any(|&(row, col, value)| (row == 0 || col == 0)
+                    && (value.abs() - bridge_conductance).abs() < 1e-15),
+            "the bridge's conductance must not reach the module's terminal row: {matrix:?}"
+        );
+        let row_zero_rhs: f64 = rhs
+            .iter()
+            .filter(|&&(row, _)| row == 0)
+            .map(|&(_, value)| value)
+            .sum();
+        assert!(
+            row_zero_rhs.abs() < 1e-15,
+            "a ground-referred bridge must contribute nothing to row 0, got {row_zero_rhs}"
+        );
+
+        // And the live side is stamped exactly once, undiminished.
+        let row_three_rhs: f64 = rhs
+            .iter()
+            .filter(|&&(row, _)| row == 3)
+            .map(|&(_, value)| value)
+            .sum();
+        assert!((row_three_rhs - 0.05).abs() < 1e-15);
+        let row_three_diagonal: f64 = matrix
+            .iter()
+            .filter(|&&(row, col, _)| row == 3 && col == 3)
+            .map(|&(_, _, value)| value)
+            .sum();
+        assert!((row_three_diagonal - bridge_conductance).abs() < 1e-15);
+    }
+
+    #[test]
+    fn an_off_grid_trial_time_lands_in_the_tick_it_is_inside() {
+        // What an LTE-controlled transient actually offers: timepoints that
+        // are nowhere near an integer nanosecond. The host used to refuse
+        // every one of them.
+        let mut host = host();
+        host.begin_trial(0.0, 0.0, IntegrationCoefficients::inactive(), true, false)
+            .expect("t = 0");
+        settle_and_accept(&mut host, &[0.0; 4]);
+
+        for time in [3.7e-10, 8.1e-10, 1.4e-9, 1.93e-9, 2.0e-9] {
+            host.begin_trial(
+                time,
+                1.0e-10,
+                IntegrationCoefficients::inactive(),
+                false,
+                false,
+            )
+            .unwrap_or_else(|error| panic!("{time:e} s must be accepted: {error}"));
+            settle_and_accept(&mut host, &[0.0; 4]);
+        }
+    }
+
+    #[test]
+    fn a_repeated_or_receding_timepoint_is_refused() {
+        let mut host = host();
+        begin(&mut host, 0);
+        settle_and_accept(&mut host, &[0.0; 4]);
+        host.begin_trial(
+            1.0e-9,
+            1.0e-9,
+            IntegrationCoefficients::inactive(),
+            false,
+            false,
+        )
+        .unwrap();
+        settle_and_accept(&mut host, &[0.0; 4]);
+
+        // The same instant again would apply the integrator's advance twice.
+        let error = host
+            .begin_trial(
+                1.0e-9,
+                1.0e-9,
+                IntegrationCoefficients::inactive(),
+                false,
+                false,
+            )
+            .expect_err("a repeat of the accepted timepoint is refused");
+        assert!(matches!(error, MixedSignalError::TrialProtocol { .. }));
+
+        let error = host
+            .begin_trial(
+                5.0e-10,
+                1.0e-10,
+                IntegrationCoefficients::inactive(),
+                false,
+                false,
+            )
+            .expect_err("a timepoint before the accepted one is refused");
+        assert!(matches!(error, MixedSignalError::TrialProtocol { .. }));
+
+        // A later timepoint inside the same tick is not a repeat.
+        host.begin_trial(
+            1.5e-9,
+            5.0e-10,
+            IntegrationCoefficients::inactive(),
+            false,
+            false,
+        )
+        .expect("a distinct later timepoint in the same tick is a real step");
+    }
+
+    #[test]
+    fn an_unsettled_boundary_is_not_accepted() {
+        let mut host = host();
+        begin(&mut host, 0);
+        let error = host
+            .accept_trial()
+            .expect_err("a trial whose bridges were never sampled is refused");
+        assert!(matches!(error, MixedSignalError::TrialProtocol { .. }));
+        host.settle_analog_bridges(&[0.0; 4]).unwrap();
+        host.accept_trial().expect("a quiet boundary commits");
+        host.accept_solution(&[0.0; 4]).unwrap();
+
+        // A settle that moved a D/A input still owes Newton a pass.
+        begin(&mut host, 1);
+        assert!(host.settle_analog_bridges(&[0.0, 0.0, 1.0, 0.0]).unwrap());
+        let error = host
+            .accept_trial()
+            .expect_err("a moving boundary is refused");
+        assert!(matches!(error, MixedSignalError::TrialProtocol { .. }));
+        assert!(!host.settle_analog_bridges(&[0.0, 0.0, 1.0, 0.0]).unwrap());
+        host.accept_trial().expect("the second pass is quiet");
+    }
+
+    #[test]
+    fn an_ad_transition_is_dated_by_its_interpolated_crossing() {
+        let mut host = host();
+        begin(&mut host, 0);
+        settle_and_accept(&mut host, &[0.0; 4]);
+        // The first sample resolves the bridge net from `z` to `0`, which is a
+        // transition. There is no step to interpolate inside at time zero, so
+        // it is dated there.
+        assert_eq!(host.last_transition_time("adc").unwrap(), Some(0.0));
+
+        // The sense node ramps 0 V to 1 V across the nanosecond ending at
+        // 1 ns, and the A/D bridge's high threshold is 0.6 V. The crossing is
+        // six tenths of the way through the step, not at its end.
+        host.begin_trial(
+            1.0e-9,
+            1.0e-9,
+            IntegrationCoefficients::inactive(),
+            false,
+            false,
+        )
+        .unwrap();
+        while host
+            .settle_analog_bridges(&[0.0, 0.0, 1.0, 0.0])
+            .expect("settles")
+        {}
+        host.accept_trial().unwrap();
+        host.accept_solution(&[0.0, 0.0, 1.0, 0.0]).unwrap();
+
+        let crossing = host
+            .last_transition_time("adc")
+            .unwrap()
+            .expect("the bridge transitioned");
+        assert!(
+            (crossing - 0.6e-9).abs() < 1.0e-21,
+            "expected the interpolated crossing at 0.6 ns, got {crossing:e}"
+        );
+        assert!(
+            crossing < 1.0e-9,
+            "an uninterpolated sampler would have dated this at the step's end"
+        );
+    }
+
+    #[test]
+    fn an_undefined_digital_level_stamps_the_midpoint_rather_than_refusing() {
+        // `q` is a `reg` whose initial value the source does assign; `dac`
+        // follows it through a continuous assignment, which has not run at the
+        // instant a bridge is first read in a design that does not initialise.
+        let source = r#"
+module undriven(p, n, dac);
+  inout p, n; electrical p, n;
+  output dac; reg dac;
+  always @(p) dac <= 1'b0;
+  analog I(p, n) <+ V(p, n);
+endmodule
+"#;
+        let mut host = MixedSignalHost::compile(
+            source,
+            None,
+            "xundriven",
+            &[1, 0],
+            SchedulerLimits::default(),
+        )
+        .expect("compiles");
+        host.add_dac_bridge("dac", 2, 0, 1.0, 5.0, 100.0).unwrap();
+        assert_eq!(host.read_digital("dac").unwrap(), "x");
+
+        begin(&mut host, 0);
+        let mut rhs = Vec::new();
+        host.stamp(
+            &[0.0, 0.0],
+            |_, _, _| {},
+            |row, value| rhs.push((row, value)),
+        )
+        .expect("an x on a D/A bridge stamps rather than refusing");
+        let row_one: f64 = rhs
+            .iter()
+            .filter(|&&(row, _)| row == 1)
+            .map(|&(_, value)| value)
+            .sum();
+        // out_undef is the midpoint of 1 V and 5 V, over 100 ohms.
+        assert!(
+            (row_one - 0.03).abs() < 1e-15,
+            "expected the 3 V midpoint through 100 ohms, got {row_one}"
+        );
+    }
+
+    #[test]
     fn rejected_trial_rolls_back_process_resume_event_driver_and_bridge_state() {
         let mut host = host();
         begin(&mut host, 0);
-        host.settle_analog_bridges(&[0.0; 4]).unwrap();
-        host.accept_trial().unwrap();
+        settle_and_accept(&mut host, &[0.0; 4]);
 
         begin(&mut host, 1);
         host.force_digital(&[("clk", "1")]).unwrap();
@@ -756,19 +1278,17 @@ endmodule
     fn checkpoint_resume_preserves_deltas_delays_and_resolved_drivers() {
         let mut direct = host();
         begin(&mut direct, 0);
-        direct.settle_analog_bridges(&[0.0; 4]).unwrap();
-        direct.accept_trial().unwrap();
+        settle_and_accept(&mut direct, &[0.0; 4]);
         begin(&mut direct, 1);
         direct.force_digital(&[("clk", "1")]).unwrap();
-        direct.accept_trial().unwrap();
+        settle_and_accept(&mut direct, &[0.0; 4]);
         let checkpoint = direct.checkpoint().unwrap();
 
         let mut resumed = host();
         resumed.restore(&checkpoint).unwrap();
         for candidate in [&mut direct, &mut resumed] {
             begin(candidate, 3);
-            candidate.settle_analog_bridges(&[0.0; 4]).unwrap();
-            candidate.accept_trial().unwrap();
+            settle_and_accept(candidate, &[0.0; 4]);
         }
         assert_eq!(
             direct.read_digital("q").unwrap(),
@@ -845,7 +1365,7 @@ endmodule
             ..SchedulerLimits::default()
         };
         let mut host = MixedSignalHost::compile(source, None, "xosc", &[1, 0], limits).unwrap();
-        host.add_adc_bridge("seed", 2, 0, 0.4, 0.6).unwrap();
+        host.add_adc_bridge("seed", 3, 0, 0.4, 0.6).unwrap();
         begin(&mut host, 0);
         let error = host
             .settle_analog_bridges(&[0.0, 0.0, 1.0])
@@ -855,5 +1375,65 @@ endmodule
             MixedSignalError::Digital(DigitalRunError::Scheduler(_))
         ));
         host.reject_trial().unwrap();
+    }
+
+    /// A trial that touches nothing must copy nothing.
+    ///
+    /// The cost ratchet for the copy-on-write rework, in
+    /// `engine::xspice_settle_ratchet`'s style but scripted here rather than
+    /// run off a deck, because the mixed host has no deck route yet. The
+    /// structure it protects is the same one `SharedXspiceInstance` protects:
+    /// a rollback capture is a reference-count bump, and the deep copy of the
+    /// compiled analog device or of the digital host is deferred to the first
+    /// write through a handle the image still shares.
+    #[test]
+    fn mixed_trial_copy_ratchet() {
+        // A ceiling, not a target. Measured at exactly two copies per
+        // timepoint: `begin_trial` unshares the analog cell to set the time,
+        // and unshares the digital cell to advance it, and each of those is
+        // the *first* write after the capture, so it is the one that pays.
+        // Everything after them in the same trial — the advance applied on
+        // acceptance, every A/D publication, every Newton stamp — writes
+        // through a cell the image no longer shares and costs nothing, and the
+        // bridge tables are never written during a trial at all. Reverting to
+        // a whole-state deep copy puts a copy of everything at every
+        // `begin_trial` and another inside every publish, so the count moves
+        // by a multiple rather than by a margin.
+        const TIMEPOINTS: u64 = 40;
+        const MAX_COPIES: u64 = 2 * TIMEPOINTS + 4;
+
+        let mut host = host();
+        settle_cost::reset();
+        host.begin_trial(0.0, 0.0, IntegrationCoefficients::inactive(), true, false)
+            .unwrap();
+        settle_and_accept(&mut host, &[0.0; 4]);
+        for step in 1..TIMEPOINTS {
+            // Deliberately off-grid and sub-tick, which is the shape a step
+            // controller produces and the shape that used to be refused.
+            let time = step as f64 * 1.3e-10;
+            host.begin_trial(
+                time,
+                1.3e-10,
+                IntegrationCoefficients::inactive(),
+                false,
+                false,
+            )
+            .unwrap();
+            settle_and_accept(&mut host, &[0.0; 4]);
+        }
+        let copies = settle_cost::counts().mixed_trial_deep_copies;
+
+        assert!(
+            copies <= MAX_COPIES,
+            "{copies} copy-on-write copies over {TIMEPOINTS} timepoints, over the ceiling of \
+             {MAX_COPIES}. This is a cost regression, not a correctness failure: a rollback \
+             capture must be a reference-count bump, and each cell must be copied only by the \
+             first write that a capture still shares."
+        );
+        assert!(
+            copies > 0,
+            "a run that copies nothing at all means the counter and the work are no longer in \
+             the same place, not that the work became free"
+        );
     }
 }

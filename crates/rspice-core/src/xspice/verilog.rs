@@ -41,11 +41,12 @@
 //!
 //! Not here yet, and the boundary's rulings are recorded here because they
 //! have a right answer worth writing down before somebody guesses one. The
-//! mixed host above does not settle them: it *refuses* any trial time off its
-//! integer-nanosecond grid, which dissolves the time-translation question
-//! rather than answering it, and an LTE-controlled transient does not land on
-//! integer nanoseconds — so the general boundary still needs exactly what
-//! follows.
+//! mixed host above now implements the time half of them —
+//! [`TimeResolution::seconds_to_floor_ticks`](super::event_scheduler::TimeResolution::seconds_to_floor_ticks)
+//! is the floor, and the crossing an A/D bridge is dated by is interpolated
+//! inside the accepted step rather than snapped to the tick. What a `wreal`
+//! still needs from this section is the *driver-resolution* hazard below,
+//! which is not about time at all.
 //!
 //! **The two event worlds do not share a tick encoding**:
 //!

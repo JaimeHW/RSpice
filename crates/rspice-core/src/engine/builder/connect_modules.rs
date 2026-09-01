@@ -44,11 +44,13 @@
 //! bridge code models that already implement them. A connect module named by a
 //! `connectrules` block and *not* in that library has a body only a
 //! Verilog-AMS mixed host could run, and the one this crate has
-//! (`crate::xspice::verilog::MixedSignalHost`) is not wired to the engine and
-//! refuses any trial time off its integer-nanosecond grid — which an
-//! LTE-controlled transient does not land on. So it is refused by name, with
-//! that reason, rather than silently bridged as if the deck had asked for
-//! nothing.
+//! (`crate::xspice::verilog::MixedSignalHost`) is not wired to the engine.
+//! It no longer refuses an off-grid trial time — it floors an analog timepoint
+//! onto its tick grid and keeps the unquantized time — so what is missing is
+//! the elaboration that would give a resolved connect module a `CircuitData`
+//! instance to be planned onto, not the host's own time base. Until that
+//! exists it is refused by name, with that reason, rather than silently
+//! bridged as if the deck had asked for nothing.
 
 use rspice_veriloga::ast::PortDirection;
 use rspice_veriloga::connect::{
