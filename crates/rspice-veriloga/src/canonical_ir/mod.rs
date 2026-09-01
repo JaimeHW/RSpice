@@ -12,9 +12,11 @@
 //!
 //! [`noise`] lifts noise sources out into a separate plan along the way, since
 //! they are contribution expressions in the time domain but independent
-//! injected sources in `.noise`. [`artifact`] seals the result, while [`ids`],
-//! [`metadata`], and [`diagnostic`] supply the typed indices, provenance
-//! digests, and phase-tagged diagnostics used across all levels.
+//! injected sources in `.noise`. [`state`] names the runtime record every
+//! dynamic operator owns, so a backend addresses state by canonical site rather
+//! than by position in some lowered program. [`artifact`] seals the result,
+//! while [`ids`], [`metadata`], and [`diagnostic`] supply the typed indices,
+//! provenance digests, and phase-tagged diagnostics used across all levels.
 
 pub mod ad;
 pub mod artifact;
@@ -35,13 +37,14 @@ pub mod mir;
 pub mod noise;
 mod parameter_array;
 pub mod schedule;
+pub mod state;
 
 pub use ad::{AdFunction, AdSeed, differentiate};
 pub use artifact::CanonicalIrArtifact;
 pub use cfg::{
-    CfgBinaryOp, CfgBlock, CfgFunction, CfgInstruction, CfgIntegerBitwiseOp, CfgTerminator,
-    CfgUnaryOp, CfgValidationError, CfgValue, CfgValueKind, CfgValueType, CfgVariable, DigitalWait,
-    SsaBuilder,
+    CfgBinaryOp, CfgBlock, CfgFunction, CfgInstruction, CfgIntegerBitwiseOp, CfgLaplaceTransfer,
+    CfgTerminator, CfgUnaryOp, CfgValidationError, CfgValue, CfgValueKind, CfgValueType,
+    CfgVariable, CfgZiPolynomial, DigitalWait, SsaBuilder,
 };
 pub use cfg_complex::{COMPLEX_STEP, ComplexStep};
 pub use cfg_eval::{
@@ -88,4 +91,7 @@ pub use schedule::{
     InvalidationClass as CfgInvalidationClass, ParameterDependency, Schedule as CfgSchedule,
     StaticDependencies, StructuralGuard, schedule as schedule_cfg,
     schedule_with_parameter_scopes as schedule_cfg_with_parameter_scopes, structural_guards,
+};
+pub use state::{
+    CanonicalStateFamily, CanonicalStateLayout, CanonicalStateOperator, CanonicalStateSite,
 };

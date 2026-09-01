@@ -534,6 +534,56 @@ module piecewise(p, n);
 endmodule
 "#,
         ),
+        // The linear filters, which are the one dynamic family whose local
+        // coefficient at equilibrium is *not* one: a filter passes its input
+        // through its zero-frequency gain, so the oracles measure that gain and
+        // a rule that treated a filter as a passthrough fails here.
+        //
+        // Every spelling appears, because the four reduce to two realizable
+        // forms and the reduction is arithmetic that can be got wrong: the
+        // `laplace_zd` numerator below expands `(s + 1)(s + 2)` and the
+        // `laplace_np` denominator expands a conjugate pair, and both DC gains
+        // come out of the same expansion the runtime realization uses.
+        (
+            "continuous filters at equilibrium",
+            r#"
+module filters(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real g = 1.0e-3;
+    real zp, zd, np, nd;
+    analog begin
+        zp = laplace_zp(V(p, n), '{-1.0, 0.0}, '{-2.0, 0.0});
+        zd = laplace_zd(V(p, n) * V(p, n), '{-1.0, 0.0, -2.0, 0.0}, '{1.0, 0.5});
+        np = laplace_np(V(p, n), '{2.0, 0.25}, '{-1.0, 1.0, -1.0, -1.0});
+        nd = laplace_nd(1.0 + V(p, n), '{3.0}, '{1.5, 1.0e-9});
+        I(p, n) <+ g * (zp + zd + np + nd);
+    end
+endmodule
+"#,
+        ),
+        // The sampled filters, whose gain is H(1) and comes from operands
+        // rather than constants. The `zi_zp` fixture's roots are a conjugate
+        // pair, so the product form the interpreter evaluates has to cancel its
+        // imaginary part exactly — a gain read off the real parts alone would
+        // be a different number.
+        (
+            "sampled filters at equilibrium",
+            r#"
+module sampled(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real g = 1.0e-3;
+    parameter real b1 = 0.25;
+    real nd, zp;
+    analog begin
+        nd = zi_nd(V(p, n), '{0.5, b1}, '{1.0, -0.5}, 1.0e-6, 0.0);
+        zp = zi_zp(V(p, n) * V(p, n), '{0.25, 0.5, 0.25, -0.5}, '{0.5, 0.0}, 1.0e-6, 0.0);
+        I(p, n) <+ g * (nd + zp);
+    end
+endmodule
+"#,
+        ),
     ]
 }
 

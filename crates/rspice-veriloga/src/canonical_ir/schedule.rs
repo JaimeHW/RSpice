@@ -1805,6 +1805,14 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         | CfgValueKind::Slew { .. }
         | CfgValueKind::SlewDerivative { .. }
         | CfgValueKind::LastCrossing { .. }
+        // The filters for the same reason again, and with the sharpest case of
+        // it: `laplace_nd(1.0, '{1}, '{1, tau})` has nothing but constants in
+        // it, so the catch-all would compute the step response once per model
+        // card and freeze it.
+        | CfgValueKind::Laplace { .. }
+        | CfgValueKind::LaplaceDerivative { .. }
+        | CfgValueKind::Zi { .. }
+        | CfgValueKind::ZiDerivative { .. }
         | CfgValueKind::Cross { .. }
         | CfgValueKind::Above { .. }
         | CfgValueKind::Timer { .. }

@@ -1743,6 +1743,18 @@ impl Emitter<'_> {
                     operator: "last_crossing",
                 });
             }
+            CfgValueKind::Laplace { .. } | CfgValueKind::LaplaceDerivative { .. } => {
+                return Err(EmitError::UnsupportedStatefulOperator {
+                    value,
+                    operator: "laplace filter",
+                });
+            }
+            CfgValueKind::Zi { .. } | CfgValueKind::ZiDerivative { .. } => {
+                return Err(EmitError::UnsupportedStatefulOperator {
+                    value,
+                    operator: "zi filter",
+                });
+            }
             CfgValueKind::IntegerBitwise { .. } | CfgValueKind::IntegerBitwiseNot { .. } => {
                 return Err(EmitError::UnsupportedIntegerOperator(value));
             }

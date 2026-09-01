@@ -458,6 +458,18 @@ fn kernel_region_metrics(
             CfgValueKind::LastCrossing { operator, .. } => {
                 write!(out, "last-crossing:{}", operator_indices[operator])
             }
+            CfgValueKind::Laplace { operator, .. } => {
+                write!(out, "laplace:{}", operator_indices[operator])
+            }
+            CfgValueKind::LaplaceDerivative { operator, .. } => {
+                write!(out, "laplace-derivative:{}", operator_indices[operator])
+            }
+            CfgValueKind::Zi { operator, .. } => {
+                write!(out, "zi:{}", operator_indices[operator])
+            }
+            CfgValueKind::ZiDerivative { operator, .. } => {
+                write!(out, "zi-derivative:{}", operator_indices[operator])
+            }
             CfgValueKind::Transition { site, .. } => write!(
                 out,
                 "transition:{}:{}:{}:{}",
@@ -4739,6 +4751,29 @@ fn reject_unsupported_kinds(
                     "last_crossing in the direct generated-Rust backend; use the VM, native JIT, or WebAssembly JIT runtime so the crossing detector's accepted history is preserved",
                 ));
             }
+            // Named by the spelling the source wrote rather than by the family:
+            // a filter's four spellings reduce to two forms here, and a refusal
+            // that reported the form would send an author looking for a
+            // `laplace_nd` they did not write.
+            CfgValueKind::Laplace { operator, .. }
+            | CfgValueKind::LaplaceDerivative { operator, .. } => {
+                return Err(unsupported(
+                    artifact,
+                    format!(
+                        "a {} filter in the direct generated-Rust backend; use the VM, native JIT, or WebAssembly JIT runtime so the state-space realization and its accepted state are preserved",
+                        operator_spelling(artifact, *operator, "laplace")
+                    ),
+                ));
+            }
+            CfgValueKind::Zi { operator, .. } | CfgValueKind::ZiDerivative { operator, .. } => {
+                return Err(unsupported(
+                    artifact,
+                    format!(
+                        "a {} sampled filter in the direct generated-Rust backend; use the VM, native JIT, or WebAssembly JIT runtime so the sample schedule and its accepted history are preserved",
+                        operator_spelling(artifact, *operator, "zi")
+                    ),
+                ));
+            }
             // Representable and deliberately not emitted here. Verilog-AMS
             // defines these over signed 32-bit values with a specified rounding
             // and an out-of-range refusal; Rust's `as` casts implement none of
@@ -4889,6 +4924,29 @@ fn indent(body: &str, levels: usize) -> String {
         out.push('\n');
     }
     out
+}
+
+/// How the source spelled the operator owning a canonical expression.
+///
+/// A refusal is read by whoever wrote the model, so it names their operator.
+/// The fallback covers the public-AST route, where the operator is a resolved
+/// kind rather than a call and there is no spelling to recover.
+fn operator_spelling(
+    artifact: &CanonicalIrArtifact,
+    operator: crate::canonical_ir::ExprId,
+    fallback: &'static str,
+) -> String {
+    match artifact
+        .hir
+        .expressions
+        .get(usize::from(operator))
+        .map(|expression| &expression.kind)
+    {
+        Some(HirExprKind::Call { name, .. } | HirExprKind::SystemFunction { name, .. }) => {
+            name.to_ascii_lowercase()
+        }
+        _ => fallback.to_string(),
+    }
 }
 
 fn unsupported(artifact: &CanonicalIrArtifact, feature: impl Into<String>) -> RustBackendError {
