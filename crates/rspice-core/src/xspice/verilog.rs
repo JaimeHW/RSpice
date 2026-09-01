@@ -113,10 +113,7 @@ use crate::xspice::event_scheduler::{SchedulerLimits, TimeResolution};
 
 use host::DigitalHost;
 pub use host::DigitalRunError;
-pub use mixed::{
-    BoundaryNetActivity, BoundaryOscillation, BoundaryOscillationCause, MixedSignalCheckpoint,
-    MixedSignalError, MixedSignalHost,
-};
+pub use mixed::{MixedSignalCheckpoint, MixedSignalError, MixedSignalHost};
 
 /// What one tick of the digital host's clock is, and why it is not read from
 /// the source.

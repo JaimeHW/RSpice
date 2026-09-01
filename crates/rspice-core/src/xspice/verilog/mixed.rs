@@ -136,53 +136,47 @@ impl BoundaryNetHistory {
     }
 }
 
-/// One boundary net named in a [`MixedSignalError::BoundaryOscillation`].
+/// One boundary net's part in a settle that would not quiet.
+///
+/// Crate-private, and rendered into the error rather than carried into it. The
+/// structured form would be three public types — this, an enum for which
+/// ceiling tripped, and a struct holding the list — and the only consumer any
+/// of them would have is [`MixedSignalError`]'s own `Display`, which is not
+/// worth three entries of this crate's public-surface budget. If a caller ever
+/// needs to *branch* on a participant rather than read about one, that is the
+/// point to publish them.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BoundaryNetActivity {
+struct BoundaryNetActivity {
     /// The module's own name for the net.
-    pub signal: String,
+    signal: String,
     /// Circuit node the deck attached it to; `0` is ground.
-    pub node: usize,
-    /// Whether the module reads this net across an A/D bridge (`true`) or
-    /// drives it across a D/A bridge.
-    pub read_by_module: bool,
-    /// How many times the net moved: consecutive accepted timepoints for
-    /// [`BoundaryOscillationCause::AcceptedFlipRun`], settle passes within one
-    /// trial for [`BoundaryOscillationCause::SettlePassLimit`].
-    pub moves: u32,
+    node: usize,
+    /// Whether the module reads this net across an A/D bridge, or drives it
+    /// across a D/A one.
+    read_by_module: bool,
+    /// How many times the net moved: consecutive accepted timepoints for an
+    /// accepted-flip run, settle passes within one trial for a pass limit.
+    moves: u32,
     /// The values it took, oldest first.
-    pub recent: Vec<String>,
+    recent: Vec<String>,
 }
 
-/// What made a boundary look like feedback rather than signal.
-///
-/// Mirrors [`OscillationCause`](crate::xspice::event_scheduler::OscillationCause),
-/// which answers the same shape of question one layer down and whose
-/// diagnostic this one is modelled on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BoundaryOscillationCause {
-    /// One trial's boundary settle never reported itself quiet.
-    SettlePassLimit,
-    /// Consecutive accepted timepoints each moved the boundary.
-    AcceptedFlipRun,
-}
-
-/// Why a mixed module's boundary would not settle, and which nets were in it.
-///
-/// A cross-domain zero-delay loop is unbounded in the same way a same-tick
-/// digital one is, and it is diagnosed the same way: the ceiling exists to turn
-/// an unbounded process into evidence, and the evidence is the participants.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BoundaryOscillation {
-    /// Which ceiling tripped.
-    pub cause: BoundaryOscillationCause,
-    /// Digital tick of the timepoint that tripped it.
-    pub tick: u64,
-    /// The ceiling's value.
-    pub limit: u32,
-    /// Boundary nets that moved, busiest first, then in wiring order so the
-    /// report is reproducible.
-    pub nets: Vec<BoundaryNetActivity>,
+impl fmt::Display for BoundaryNetActivity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let side = if self.read_by_module {
+            "read by the module"
+        } else {
+            "driven by the module"
+        };
+        write!(
+            f,
+            "net `{}` on circuit node {} ({side}) moved {} times and took {}",
+            self.signal,
+            self.node,
+            self.moves,
+            self.recent.join(" ")
+        )
+    }
 }
 
 /// A failure at the mixed transient boundary.
@@ -207,7 +201,24 @@ pub enum MixedSignalError {
     BridgeIterationLimit { tick: u64, limit: u32 },
     /// Cross-domain feedback the analog stepper cannot resolve, with the nets
     /// that were in it.
-    BoundaryOscillation(BoundaryOscillation),
+    ///
+    /// A cross-domain zero-delay loop is unbounded in the same way a same-tick
+    /// digital one is, and it is diagnosed the same way: the ceiling exists to
+    /// turn an unbounded process into evidence, and the evidence is the
+    /// participants.
+    BoundaryOscillation {
+        /// Digital tick of the timepoint that tripped the ceiling.
+        tick: u64,
+        /// The ceiling's value.
+        limit: u32,
+        /// Whether the ceiling counted settle passes inside one trial, rather
+        /// than consecutive accepted timepoints.
+        within_one_timepoint: bool,
+        /// The boundary nets that moved, busiest first and then in wiring order
+        /// so the report is reproducible, each already rendered with its
+        /// circuit node, its direction and the values it took.
+        nets: Vec<String>,
+    },
 }
 
 impl fmt::Display for MixedSignalError {
@@ -231,30 +242,23 @@ impl fmt::Display for MixedSignalError {
                 f,
                 "mixed-signal bridges at tick {tick} did not settle within {limit} iterations"
             ),
-            Self::BoundaryOscillation(oscillation) => {
-                let what = match oscillation.cause {
-                    BoundaryOscillationCause::SettlePassLimit => "settle passes at one timepoint",
-                    BoundaryOscillationCause::AcceptedFlipRun => "consecutive accepted timepoints",
+            Self::BoundaryOscillation {
+                tick,
+                limit,
+                within_one_timepoint,
+                nets,
+            } => {
+                let what = if *within_one_timepoint {
+                    "settle passes at one timepoint"
+                } else {
+                    "consecutive accepted timepoints"
                 };
                 write!(
                     f,
-                    "the analog/digital boundary moved on {} {what} up to tick {}",
-                    oscillation.limit, oscillation.tick
+                    "the analog/digital boundary moved on {limit} {what} up to tick {tick}"
                 )?;
-                for net in &oscillation.nets {
-                    let side = if net.read_by_module {
-                        "read by the module"
-                    } else {
-                        "driven by the module"
-                    };
-                    write!(
-                        f,
-                        "; net `{}` on circuit node {} ({side}) moved {} times and took {}",
-                        net.signal,
-                        net.node,
-                        net.moves,
-                        net.recent.join(" ")
-                    )?;
+                for net in nets {
+                    write!(f, "; {net}")?;
                 }
                 write!(
                     f,
@@ -1233,7 +1237,7 @@ impl MixedSignalHost {
         let (adc_history, dac_history) = self.folded_boundary_histories(&trial);
         if let Some(oscillation) = self.boundary_flip_run(&adc_history, &dac_history, trial.tick) {
             self.state = trial.rollback;
-            return Err(MixedSignalError::BoundaryOscillation(oscillation));
+            return Err(oscillation);
         }
         self.state.adc_history = adc_history;
         self.state.dac_history = dac_history;
@@ -1410,7 +1414,7 @@ impl MixedSignalHost {
         adc_history: &[BoundaryNetHistory],
         dac_history: &[BoundaryNetHistory],
         tick: u64,
-    ) -> Option<BoundaryOscillation> {
+    ) -> Option<MixedSignalError> {
         let tripped = adc_history
             .iter()
             .chain(dac_history)
@@ -1450,11 +1454,11 @@ impl MixedSignalHost {
         // Busiest first, and stable in wiring order under a tie, so two runs of
         // one deck report the participants in one order.
         nets.sort_by(|left, right| right.moves.cmp(&left.moves));
-        Some(BoundaryOscillation {
-            cause: BoundaryOscillationCause::AcceptedFlipRun,
+        Some(MixedSignalError::BoundaryOscillation {
             tick,
             limit: MAX_CONSECUTIVE_BOUNDARY_FLIPS,
-            nets,
+            within_one_timepoint: false,
+            nets: nets.iter().map(BoundaryNetActivity::to_string).collect(),
         })
     }
 
@@ -1505,12 +1509,12 @@ impl MixedSignalHost {
                 .filter(|net| net.moves > 0)
                 .collect();
         nets.sort_by(|left, right| right.moves.cmp(&left.moves));
-        MixedSignalError::BoundaryOscillation(BoundaryOscillation {
-            cause: BoundaryOscillationCause::SettlePassLimit,
+        MixedSignalError::BoundaryOscillation {
             tick: trial.tick,
             limit,
-            nets,
-        })
+            within_one_timepoint: true,
+            nets: nets.iter().map(BoundaryNetActivity::to_string).collect(),
+        }
     }
 
     fn active_tick(&self) -> Result<u64, MixedSignalError> {
