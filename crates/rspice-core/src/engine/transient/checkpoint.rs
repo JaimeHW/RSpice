@@ -4546,6 +4546,53 @@ fn accepted_integration_runtime_retained_value_count(
 }
 
 impl TransientCheckpoint {
+    /// Refuse to persist a checkpoint that capture already proved cannot be
+    /// resumed. This runs before encoding so an unusable image cannot consume
+    /// serialization work or reach the atomic writer's temporary-file path.
+    fn validate_persistence_preflight(&self) -> Result<(), String> {
+        self.validate_numeric_state()?;
+
+        let blocker = self
+            .accepted_junction_history
+            .resume_blockers
+            .first()
+            .map(|blocker| ("accepted BJT/diode transient history", blocker.as_str()))
+            .or_else(|| {
+                self.accepted_nonlinear_states
+                    .resume_blockers
+                    .first()
+                    .map(|blocker| ("accepted native diode/BJT state", blocker.as_str()))
+            })
+            .or_else(|| {
+                self.tline_resume_blockers
+                    .first()
+                    .map(|blocker| ("transmission-line state", blocker.as_str()))
+            })
+            .or_else(|| {
+                self.xspice_resume_blockers
+                    .first()
+                    .map(|blocker| ("XSPICE state", blocker.as_str()))
+            })
+            .or_else(|| match &self.accepted_integration_runtime {
+                AcceptedIntegrationRuntime::UnavailableLegacy => None,
+                AcceptedIntegrationRuntime::RestartNormalized(runtime) => runtime
+                    .resume_blockers
+                    .first()
+                    .map(|blocker| ("restart-normalized integration runtime", blocker.as_str())),
+                AcceptedIntegrationRuntime::Exact(runtime) => runtime
+                    .resume_blockers
+                    .first()
+                    .map(|blocker| ("accepted integration runtime", blocker.as_str())),
+            });
+
+        if let Some((state, blocker)) = blocker {
+            return Err(format!(
+                "refusing to save unusable transient checkpoint: captured {state} resume blocker: {blocker}"
+            ));
+        }
+        Ok(())
+    }
+
     fn validate_numeric_state(&self) -> Result<(), String> {
         self.validate_numeric_state_with_budget(None)
     }
@@ -7757,6 +7804,7 @@ impl TransientCheckpoint {
         path: &std::path::Path,
         encoding: TransientCheckpointEncoding,
     ) -> Result<(), String> {
+        self.validate_persistence_preflight()?;
         let bytes = self.to_bytes(encoding)?;
         atomic_write_checkpoint(path, &bytes)
             .map_err(|e| format!("cannot write checkpoint '{}': {e}", path.display()))
@@ -10230,6 +10278,169 @@ mod tests {
         assert_eq!(
             std::fs::read(&path).expect("read preserved checkpoint"),
             b"last known good checkpoint"
+        );
+        std::fs::remove_dir_all(directory).expect("remove checkpoint test directory");
+    }
+
+    #[test]
+    fn persistence_preflight_covers_every_captured_resume_blocker_source() {
+        let mut cases = Vec::new();
+
+        let mut junction = sample();
+        junction.accepted_junction_history.resume_blockers =
+            vec!["Q1: exact accepted charge history is unavailable".to_string()];
+        cases.push((
+            junction,
+            "accepted BJT/diode transient history",
+            "Q1: exact accepted charge history is unavailable",
+        ));
+
+        let mut nonlinear = sample();
+        nonlinear.accepted_nonlinear_states.resume_blockers =
+            vec!["M1: native limiter state is unavailable".to_string()];
+        cases.push((
+            nonlinear,
+            "accepted native diode/BJT state",
+            "M1: native limiter state is unavailable",
+        ));
+
+        let mut tline = sample();
+        tline.tline_resume_blockers =
+            vec!["T1: distributed delay history is unavailable".to_string()];
+        cases.push((
+            tline,
+            "transmission-line state",
+            "T1: distributed delay history is unavailable",
+        ));
+
+        let mut xspice = sample();
+        xspice.xspice_resume_blockers = vec!["A1(gain): model owns pending state".to_string()];
+        cases.push((xspice, "XSPICE state", "A1(gain): model owns pending state"));
+
+        let mut runtime = sample();
+        let AcceptedIntegrationRuntime::Exact(accepted) = &mut runtime.accepted_integration_runtime
+        else {
+            unreachable!("sample has exact accepted integration runtime")
+        };
+        accepted.resume_blockers =
+            vec!["QVBIC: direct-DAE history is not checkpointable".to_string()];
+        cases.push((
+            runtime,
+            "accepted integration runtime",
+            "QVBIC: direct-DAE history is not checkpointable",
+        ));
+
+        let mut normalized = sample();
+        normalized.integration_continuation = IntegrationContinuation::BreakpointRestart;
+        normalized.accepted_integration_runtime =
+            sample_restart_normalized_runtime(normalized.time, 17);
+        let AcceptedIntegrationRuntime::RestartNormalized(runtime) =
+            &mut normalized.accepted_integration_runtime
+        else {
+            unreachable!("fixture has restart-normalized integration runtime")
+        };
+        runtime.resume_blockers = vec!["pending retry state is not canonical".to_string()];
+        cases.push((
+            normalized,
+            "restart-normalized integration runtime",
+            "pending retry state is not canonical",
+        ));
+
+        for (checkpoint, state, blocker) in cases {
+            assert_eq!(
+                checkpoint
+                    .validate_persistence_preflight()
+                    .expect_err("captured resume blocker must refuse persistence"),
+                format!(
+                    "refusing to save unusable transient checkpoint: captured {state} resume blocker: {blocker}"
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn blocked_save_does_not_create_a_destination_or_temporary_file() {
+        let directory = std::env::temp_dir().join(format!(
+            "rspice-checkpoint-blocked-absent-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).expect("create checkpoint test directory");
+        let path = directory.join("state.chk");
+        let blocker = "Q1: exact accepted charge history is unavailable";
+        let mut checkpoint = sample();
+        checkpoint.accepted_junction_history.resume_blockers = vec![blocker.to_string()];
+
+        let error = checkpoint
+            .save(&path)
+            .expect_err("unusable checkpoint must fail before filesystem mutation");
+
+        assert_eq!(
+            error,
+            format!(
+                "refusing to save unusable transient checkpoint: captured accepted BJT/diode transient history resume blocker: {blocker}"
+            )
+        );
+        assert!(
+            !path.exists(),
+            "refused save must not create its destination"
+        );
+        assert_eq!(
+            std::fs::read_dir(&directory)
+                .expect("read checkpoint test directory")
+                .count(),
+            0,
+            "refused save must not create a temporary sibling"
+        );
+        std::fs::remove_dir_all(directory).expect("remove checkpoint test directory");
+    }
+
+    #[test]
+    fn blocked_save_with_encoding_preserves_existing_destination_bytes() {
+        let directory = std::env::temp_dir().join(format!(
+            "rspice-checkpoint-blocked-existing-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).expect("create checkpoint test directory");
+        let original = b"last known good checkpoint\0with exact bytes";
+        let blocker = "T1: distributed delay history is unavailable";
+        let mut checkpoint = sample();
+        checkpoint.tline_resume_blockers = vec![blocker.to_string()];
+
+        for encoding in [
+            TransientCheckpointEncoding::Unpacked,
+            TransientCheckpointEncoding::Packed,
+        ] {
+            let path = directory.join(format!("state-{encoding:?}.chk"));
+            std::fs::write(&path, original).expect("seed last known good checkpoint");
+            let error = checkpoint
+                .save_with_encoding(&path, encoding)
+                .expect_err("unusable checkpoint must not replace the last good file");
+            assert_eq!(
+                error,
+                format!(
+                    "refusing to save unusable transient checkpoint: captured transmission-line state resume blocker: {blocker}"
+                )
+            );
+            assert_eq!(
+                std::fs::read(&path).expect("read preserved checkpoint"),
+                original,
+                "{encoding:?} refusal must preserve the destination byte-for-byte"
+            );
+        }
+        assert_eq!(
+            std::fs::read_dir(&directory)
+                .expect("read checkpoint test directory")
+                .count(),
+            2,
+            "refused encodings must not create temporary siblings"
         );
         std::fs::remove_dir_all(directory).expect("remove checkpoint test directory");
     }
