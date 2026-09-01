@@ -4193,17 +4193,20 @@ mod parenthesized_subckt_port_tests {
     }
 
     #[test]
-    fn subcircuit_instance_actual_nodes_do_not_gain_parenthesis_syntax() {
-        let source = "instance parentheses remain nodes\n\
+    fn xyce_subcircuit_instance_accepts_one_parenthesized_actual_node_list() {
+        let source = "instance parentheses are structural actual nodes\n\
                       .SUBCKT R 1 2\n\
                       R1 1 2 10\n\
                       .ENDS R\n\
                       X1 (in 0) R\n\
                       .END\n";
-        let error = Netlist::parse_with_options(source, xyce_options())
-            .expect_err("parentheses on an X line must not be normalized into actual nodes");
-        assert!(matches!(error, ParseError::Syntax { line: 5, message }
-            if message.contains("subcircuit-instance actual nodes")));
+        let parsed = Netlist::parse_with_options(source, xyce_options())
+            .expect("balanced X-instance actual-node wrapper parses");
+        assert_eq!(parsed.elements[0].nodes, ["IN", "0"]);
+
+        let flattened = flatten_netlist_with_models(&parsed)
+            .expect("parenthesized X-instance actual nodes retain strict flattening semantics");
+        assert_eq!(flattened.elements[0].nodes, ["IN", "0"]);
     }
 }
 

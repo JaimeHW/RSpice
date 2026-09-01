@@ -5628,7 +5628,11 @@ pub(super) fn parse_subcircuit_instance(
     // `W = 10u` must become one field before the scan below looks for the
     // first field containing `=`; otherwise the bare `=` is that field and
     // the subcircuit name is read off the parameter name preceding it.
-    let fields = coalesce_assignment_fields(split_spice_fields(line));
+    let (fields, parenthesized_node_count) = split_subcircuit_instance_fields(
+        line,
+        line_num,
+        params_ctx.expression_dialect() == ExpressionDialect::Xyce,
+    )?;
     if fields.len() < 2 {
         return Err(ParseError::Syntax {
             line: line_num,
@@ -5637,16 +5641,27 @@ pub(super) fn parse_subcircuit_instance(
     }
 
     let name = fields[0].clone();
-    let mut param_start = fields.len();
-    for (idx, field) in fields.iter().enumerate().skip(1) {
-        if field.eq_ignore_ascii_case("PARAMS")
-            || field.eq_ignore_ascii_case("PARAMS:")
-            || field.contains('=')
-        {
-            param_start = idx;
-            break;
+    let param_start = if let Some(node_count) = parenthesized_node_count {
+        2usize
+            .checked_add(node_count)
+            .ok_or_else(|| ParseError::Syntax {
+                line: line_num,
+                message: "parenthesized subcircuit-instance actual-node count overflowed"
+                    .to_string(),
+            })?
+    } else {
+        let mut param_start = fields.len();
+        for (idx, field) in fields.iter().enumerate().skip(1) {
+            if field.eq_ignore_ascii_case("PARAMS")
+                || field.eq_ignore_ascii_case("PARAMS:")
+                || field.contains('=')
+            {
+                param_start = idx;
+                break;
+            }
         }
-    }
+        param_start
+    };
 
     if param_start < 2 {
         return Err(ParseError::Syntax {
@@ -5656,15 +5671,15 @@ pub(super) fn parse_subcircuit_instance(
     }
 
     let subckt_name = fields[param_start - 1].clone();
-    if params_ctx.expression_dialect() == ExpressionDialect::Xyce
+    if parenthesized_node_count.is_none()
+        && params_ctx.expression_dialect() == ExpressionDialect::Xyce
         && fields[1..param_start - 1]
             .iter()
             .any(|field| field.contains(['(', ')']))
     {
         return Err(ParseError::Syntax {
             line: line_num,
-            message: "parentheses around subcircuit-instance actual nodes are not supported"
-                .to_string(),
+            message: "a Xyce parenthesized subcircuit-instance actual-node list must be one balanced outer list immediately after the instance name".to_string(),
         });
     }
     let nodes = fields[1..param_start - 1]
@@ -5697,6 +5712,166 @@ pub(super) fn parse_subcircuit_instance(
     });
 
     Ok(())
+}
+
+/// Split an X-instance while recognizing Xyce's `Xname (actual ...) subckt`
+/// form as a structural actual-node list.
+///
+/// Parentheses in the parameter tail are deliberately handled only after the
+/// subcircuit name. This prevents an expression such as `P=pow(2, 3)` from
+/// being mistaken for node-list syntax. Ordinary X-instance syntax uses the
+/// historical splitter unchanged.
+fn split_subcircuit_instance_fields(
+    line: &str,
+    line_num: usize,
+    xyce_syntax: bool,
+) -> Result<(Vec<String>, Option<usize>), ParseError> {
+    let ordinary = || coalesce_assignment_fields(split_spice_fields(line));
+    if !xyce_syntax {
+        return Ok((ordinary(), None));
+    }
+
+    let trimmed = line.trim_start();
+    let mut cursor = 0usize;
+    while cursor < trimmed.len() {
+        let character = trimmed[cursor..]
+            .chars()
+            .next()
+            .expect("cursor remains on a character boundary");
+        if character.is_whitespace() || character == ',' {
+            break;
+        }
+        cursor += character.len_utf8();
+    }
+    let instance_name = &trimmed[..cursor];
+    if instance_name.contains(['(', ')']) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "a parenthesized subcircuit-instance actual-node list must be separated from the instance name by whitespace".to_string(),
+        });
+    }
+
+    let separator_start = cursor;
+    let wrapper_may_follow = trimmed[cursor..]
+        .chars()
+        .next()
+        .is_some_and(char::is_whitespace);
+    cursor = skip_subckt_header_separators(trimmed, cursor);
+    let Some(first_after_name) = trimmed[cursor..].chars().next() else {
+        return Ok((ordinary(), None));
+    };
+    if first_after_name == ')' {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message:
+                "closing ')' has no matching parenthesized subcircuit-instance actual-node list"
+                    .to_string(),
+        });
+    }
+    if first_after_name != '(' {
+        return Ok((ordinary(), None));
+    }
+    if !wrapper_may_follow || trimmed[separator_start..cursor].contains(',') {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "a parenthesized subcircuit-instance actual-node list must be separated from the instance name by whitespace only".to_string(),
+        });
+    }
+
+    let open = cursor;
+    cursor += '('.len_utf8();
+    let mut close = None;
+    while cursor < trimmed.len() {
+        let character = trimmed[cursor..]
+            .chars()
+            .next()
+            .expect("cursor remains on a character boundary");
+        match character {
+            '(' => {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: "nested parentheses are not allowed in a subcircuit-instance actual-node list"
+                        .to_string(),
+                });
+            }
+            ')' => {
+                close = Some(cursor);
+                break;
+            }
+            _ => cursor += character.len_utf8(),
+        }
+    }
+    let Some(close) = close else {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "unterminated parenthesized subcircuit-instance actual-node list".to_string(),
+        });
+    };
+
+    let actual_node_source = &trimmed[open + '('.len_utf8()..close];
+    if actual_node_source.contains(',') {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "commas are not separators in a Xyce parenthesized subcircuit-instance actual-node list"
+                .to_string(),
+        });
+    }
+    let actual_nodes = split_spice_fields(actual_node_source);
+    if actual_nodes.is_empty() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "parenthesized subcircuit-instance actual-node list cannot be empty"
+                .to_string(),
+        });
+    }
+
+    let after_close = close + ')'.len_utf8();
+    if let Some(character) = trimmed[after_close..].chars().next()
+        && !character.is_whitespace()
+    {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "the subcircuit name after a parenthesized actual-node list must be separated by whitespace"
+                .to_string(),
+        });
+    }
+    let tail = coalesce_assignment_fields(split_subckt_header_tail_fields(&trimmed[after_close..]));
+    let Some(subckt_name) = tail.first() else {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "parenthesized subcircuit instance requires a subcircuit reference after ')'"
+                .to_string(),
+        });
+    };
+    if subckt_name.eq_ignore_ascii_case("PARAMS")
+        || subckt_name.eq_ignore_ascii_case("PARAMS:")
+        || subckt_name.contains('=')
+    {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "parenthesized subcircuit instance requires a subcircuit reference before its parameter list"
+                .to_string(),
+        });
+    }
+    if let Some(unexpected) = tail.iter().skip(1).find(|field| {
+        !field.eq_ignore_ascii_case("PARAMS")
+            && !field.eq_ignore_ascii_case("PARAMS:")
+            && !field.contains('=')
+    }) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "unexpected trailing token '{unexpected}' after parenthesized subcircuit-instance reference '{subckt_name}'; expected a parameter assignment"
+            ),
+        });
+    }
+
+    let actual_node_count = actual_nodes.len();
+    let mut fields = Vec::with_capacity(2 + actual_node_count + tail.len());
+    fields.push(instance_name.to_string());
+    fields.extend(actual_nodes);
+    fields.extend(tail);
+    Ok((fields, Some(actual_node_count)))
 }
 
 //=============================================================================
