@@ -41,12 +41,112 @@ pub(crate) enum ValueType {
     F64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct BlockId(u32);
 
+impl BlockId {
+    fn new(index: usize) -> JitResult<Self> {
+        u32::try_from(index)
+            .map(Self)
+            .map_err(|_| JitError::Verifier {
+                model: MODEL.into(),
+                detail: format!("SSA block count {index} exceeds the u32 identity space").into(),
+            })
+    }
+
+    pub(crate) fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+/// One typed value a block receives from each of its predecessors.
+///
+/// Block parameters, not phi nodes: the CFG level already carries typed SSA
+/// block parameters, and an edge that names its arguments keeps the merge
+/// explicit at the one place a backend has to realize it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct BlockParameter {
+    value: ValueId,
+    value_type: ValueType,
+}
+
+impl BlockParameter {
+    pub(crate) fn value(self) -> ValueId {
+        self.value
+    }
+
+    pub(crate) fn value_type(self) -> ValueType {
+        self.value_type
+    }
+}
+
+/// One control-flow edge and the arguments it binds to its target's parameters.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Edge {
+    target: BlockId,
+    arguments: Box<[ValueId]>,
+}
+
+impl Edge {
+    pub(crate) fn new(target: BlockId, arguments: impl Into<Box<[ValueId]>>) -> Self {
+        Self {
+            target,
+            arguments: arguments.into(),
+        }
+    }
+
+    pub(crate) fn target(&self) -> BlockId {
+        self.target
+    }
+
+    pub(crate) fn arguments(&self) -> &[ValueId] {
+        &self.arguments
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Terminator {
     Return(ValueId),
+    Jump(Edge),
+    Branch {
+        condition: ValueId,
+        then_edge: Edge,
+        else_edge: Edge,
+    },
+}
+
+impl Terminator {
+    fn edges(&self) -> impl Iterator<Item = &Edge> {
+        match self {
+            Self::Return(_) => [None, None],
+            Self::Jump(edge) => [Some(edge), None],
+            Self::Branch {
+                then_edge,
+                else_edge,
+                ..
+            } => [Some(then_edge), Some(else_edge)],
+        }
+        .into_iter()
+        .flatten()
+    }
+
+    /// Every value this terminator reads, in a fixed order.
+    fn uses(&self) -> Vec<ValueId> {
+        match self {
+            Self::Return(value) => vec![*value],
+            Self::Jump(edge) => edge.arguments.to_vec(),
+            Self::Branch {
+                condition,
+                then_edge,
+                else_edge,
+            } => {
+                let mut uses = vec![*condition];
+                uses.extend(then_edge.arguments.iter().copied());
+                uses.extend(else_edge.arguments.iter().copied());
+                uses
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,6 +197,10 @@ impl Effects {
 
     pub(crate) fn may_fail(self) -> bool {
         self.contains(Self::MAY_FAIL)
+    }
+
+    pub(crate) fn writes_state(self) -> bool {
+        self.contains(Self::WRITE_STATE)
     }
 
     pub(crate) fn reads_entry_args(self) -> bool {
@@ -167,22 +271,54 @@ impl Instruction {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct BasicBlock {
     id: BlockId,
+    parameter_start: usize,
+    parameter_end: usize,
     instruction_start: usize,
     instruction_end: usize,
     terminator: Terminator,
 }
 
 impl BasicBlock {
-    #[cfg(test)]
-    fn terminator(&self) -> Terminator {
-        self.terminator
+    pub(crate) fn id(&self) -> BlockId {
+        self.id
+    }
+
+    pub(crate) fn instruction_start(&self) -> usize {
+        self.instruction_start
+    }
+
+    pub(crate) fn instruction_end(&self) -> usize {
+        self.instruction_end
+    }
+
+    pub(crate) fn terminator(&self) -> &Terminator {
+        &self.terminator
     }
 }
 
+/// A typed SSA program over one or more basic blocks.
+///
+/// Two identity rules make every consumer's indexing total and let a
+/// single-block program stay byte-for-byte what the postfix lift always
+/// produced:
+///
+/// * an instruction's [`ValueId`] is its index in the flat `instructions`
+///   vector, and every block owns a contiguous, increasing instruction range,
+///   so the flat vector is also the block layout order;
+/// * a block parameter's [`ValueId`] is `instructions.len()` plus its index in
+///   the flat `block_parameters` vector, so a program with no parameters
+///   numbers values exactly as it did before block parameters existed.
+///
+/// The verifier ([`Program::validate`]) is the authority on the rest: exactly
+/// one `Return`, a reachable acyclic CFG, edge arity and type agreement,
+/// dominance of every use by its definition, and the rule that keeps state
+/// writes unconditional.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Program {
     entry: BlockId,
-    block: BasicBlock,
+    exit: BlockId,
+    blocks: Vec<BasicBlock>,
+    block_parameters: Vec<BlockParameter>,
     instructions: Vec<Instruction>,
     maximum_stack_depth: usize,
 }
@@ -192,6 +328,31 @@ impl Program {
         let mut lowerer = ProgramLowerer::with_capacity(program.ops().len());
         let (result, maximum_stack_depth) = lowerer.append(program)?;
         eliminate_dead_instructions(lowerer.finish(result, maximum_stack_depth)?, &mut [])
+    }
+
+    fn single_block(
+        instructions: Vec<Instruction>,
+        result: ValueId,
+        maximum_stack_depth: usize,
+    ) -> JitResult<Self> {
+        let entry = BlockId(0);
+        let program = Self {
+            entry,
+            exit: entry,
+            blocks: vec![BasicBlock {
+                id: entry,
+                parameter_start: 0,
+                parameter_end: 0,
+                instruction_start: 0,
+                instruction_end: instructions.len(),
+                terminator: Terminator::Return(result),
+            }],
+            block_parameters: Vec::new(),
+            instructions,
+            maximum_stack_depth,
+        };
+        program.validate()?;
+        Ok(program)
     }
 
     #[cfg(all(test, target_arch = "x86_64"))]
@@ -216,30 +377,56 @@ impl Program {
                 })
             })
             .collect::<JitResult<Vec<_>>>()?;
-        let result = ValueId::new(result)?;
-        let entry = BlockId(0);
-        let program = Self {
-            entry,
-            block: BasicBlock {
-                id: entry,
-                instruction_start: 0,
-                instruction_end: instructions.len(),
-                terminator: Terminator::Return(result),
-            },
-            instructions,
-            maximum_stack_depth: 1,
-        };
-        program.validate()?;
-        Ok(program)
+        Self::single_block(instructions, ValueId::new(result)?, 1)
     }
 
     pub(crate) fn instructions(&self) -> &[Instruction] {
         &self.instructions
     }
 
+    pub(crate) fn blocks(&self) -> &[BasicBlock] {
+        &self.blocks
+    }
+
+    pub(crate) fn entry(&self) -> BlockId {
+        self.entry
+    }
+
+    pub(crate) fn is_single_block(&self) -> bool {
+        self.blocks.len() == 1
+    }
+
+    pub(crate) fn block(&self, id: BlockId) -> JitResult<&BasicBlock> {
+        self.blocks
+            .get(id.index())
+            .ok_or_else(|| JitError::Verifier {
+                model: MODEL.into(),
+                detail: format!("SSA block {} is not defined", id.index()).into(),
+            })
+    }
+
+    pub(crate) fn parameters(&self, block: &BasicBlock) -> &[BlockParameter] {
+        &self.block_parameters[block.parameter_start..block.parameter_end]
+    }
+
+    pub(crate) fn block_parameter_count(&self) -> usize {
+        self.block_parameters.len()
+    }
+
+    /// Total number of distinct SSA values: instruction results then block
+    /// parameters, in that identity order.
+    pub(crate) fn value_count(&self) -> usize {
+        self.instructions.len() + self.block_parameters.len()
+    }
+
     pub(crate) fn result(&self) -> ValueId {
-        match self.block.terminator {
-            Terminator::Return(value) => value,
+        match &self.blocks[self.exit.index()].terminator {
+            Terminator::Return(value) => *value,
+            // `validate` admits a program only when `exit` names its single
+            // `Return`, and every constructor validates before publishing.
+            Terminator::Jump(_) | Terminator::Branch { .. } => {
+                unreachable!("validated SSA exit block terminates with Return")
+            }
         }
     }
 
@@ -279,46 +466,750 @@ impl Program {
             .all(|instruction| instruction.effects.permits_result_sharing())
     }
 
-    fn validate(&self) -> JitResult<()> {
-        if self.entry != self.block.id
-            || self.block.instruction_start != 0
-            || self.block.instruction_end != self.instructions.len()
-        {
-            return Err(JitError::Verifier {
+    /// Which block defines `value`, and the block-layout position at which it
+    /// becomes available.
+    ///
+    /// An instruction is available after itself; a block parameter is available
+    /// from the earliest predecessor terminator that binds it, because that is
+    /// where a backend performs the edge's parallel move.
+    fn definition_block(&self, value: ValueId) -> JitResult<BlockId> {
+        if value.index() < self.instructions.len() {
+            let index = value.index();
+            let block = self
+                .blocks
+                .iter()
+                .position(|block| block.instruction_start <= index && index < block.instruction_end)
+                .ok_or_else(|| JitError::Verifier {
+                    model: MODEL.into(),
+                    detail: format!("SSA instruction {index} lies outside every block range")
+                        .into(),
+                })?;
+            return BlockId::new(block);
+        }
+        let parameter = value.index() - self.instructions.len();
+        let block = self
+            .blocks
+            .iter()
+            .position(|block| block.parameter_start <= parameter && parameter < block.parameter_end)
+            .ok_or_else(|| JitError::Verifier {
                 model: MODEL.into(),
-                detail: "SSA entry block does not cover the declared instruction range".into(),
-            });
+                detail: format!("SSA block parameter {parameter} belongs to no block").into(),
+            })?;
+        BlockId::new(block)
+    }
+
+    /// For every block parameter, the instruction boundary at which a backend
+    /// first writes it: the earliest predecessor terminator in layout order.
+    fn parameter_definition_positions(&self) -> JitResult<Vec<usize>> {
+        let mut positions = vec![None; self.block_parameters.len()];
+        for block in &self.blocks {
+            for edge in block.terminator.edges() {
+                let target = &self.blocks[edge.target.index()];
+                for parameter in target.parameter_start..target.parameter_end {
+                    let position = positions[parameter].unwrap_or(block.instruction_end);
+                    positions[parameter] = Some(position.min(block.instruction_end));
+                }
+            }
+        }
+        positions
+            .into_iter()
+            .enumerate()
+            .map(|(index, position)| {
+                position.ok_or_else(|| JitError::Verifier {
+                    model: MODEL.into(),
+                    detail: format!("SSA block parameter {index} has no binding predecessor")
+                        .into(),
+                })
+            })
+            .collect()
+    }
+
+    fn value_type_of(&self, value: ValueId) -> JitResult<ValueType> {
+        if let Some(instruction) = self.instructions.get(value.index()) {
+            return Ok(instruction.value_type);
+        }
+        self.block_parameters
+            .get(value.index() - self.instructions.len())
+            .map(|parameter| parameter.value_type)
+            .ok_or_else(|| JitError::Verifier {
+                model: MODEL.into(),
+                detail: format!("SSA value {} is not defined", value.index()).into(),
+            })
+    }
+
+    fn predecessors(&self) -> Vec<Vec<BlockId>> {
+        let mut predecessors = vec![Vec::new(); self.blocks.len()];
+        for block in &self.blocks {
+            for edge in block.terminator.edges() {
+                if let Some(entry) = predecessors.get_mut(edge.target.index())
+                    && !entry.contains(&block.id)
+                {
+                    entry.push(block.id);
+                }
+            }
+        }
+        predecessors
+    }
+
+    /// Immediate dominators, indexed by block, computed over the layout order.
+    ///
+    /// Layout order is a topological order of the acyclic CFG the verifier
+    /// admits, so one forward pass reaches the fixed point.
+    fn immediate_dominators(&self, predecessors: &[Vec<BlockId>]) -> Vec<Option<BlockId>> {
+        let mut idom: Vec<Option<BlockId>> = vec![None; self.blocks.len()];
+        let mut processed = vec![false; self.blocks.len()];
+        processed[self.entry.index()] = true;
+        for index in 0..self.blocks.len() {
+            if index == self.entry.index() {
+                continue;
+            }
+            let mut candidate: Option<BlockId> = None;
+            for predecessor in predecessors[index].iter().copied() {
+                if !processed[predecessor.index()] {
+                    continue;
+                }
+                candidate = Some(match candidate {
+                    None => predecessor,
+                    Some(current) => {
+                        Self::common_dominator(&idom, self.entry, current, predecessor)
+                    }
+                });
+            }
+            idom[index] = candidate;
+            processed[index] = candidate.is_some();
+        }
+        idom
+    }
+
+    fn common_dominator(
+        idom: &[Option<BlockId>],
+        entry: BlockId,
+        left: BlockId,
+        right: BlockId,
+    ) -> BlockId {
+        let mut left = left;
+        let mut right = right;
+        while left != right {
+            while left > right {
+                match idom[left.index()] {
+                    Some(parent) => left = parent,
+                    None => return entry,
+                }
+            }
+            while right > left {
+                match idom[right.index()] {
+                    Some(parent) => right = parent,
+                    None => return entry,
+                }
+            }
+        }
+        left
+    }
+
+    fn dominates(
+        idom: &[Option<BlockId>],
+        entry: BlockId,
+        ancestor: BlockId,
+        block: BlockId,
+    ) -> bool {
+        let mut current = block;
+        loop {
+            if current == ancestor {
+                return true;
+            }
+            if current == entry {
+                return false;
+            }
+            match idom[current.index()] {
+                Some(parent) => current = parent,
+                None => return false,
+            }
+        }
+    }
+
+    fn validate(&self) -> JitResult<()> {
+        self.validate_layout()?;
+        let predecessors = self.predecessors_checked()?;
+        self.validate_edges()?;
+        let idom = self.immediate_dominators(&predecessors);
+        self.validate_dominance(&idom)?;
+        self.validate_effect_discipline(&idom)
+    }
+
+    /// Structural identity rules: block ranges partition the instruction and
+    /// parameter vectors in layout order, values are canonically numbered, the
+    /// entry block takes no parameters, and exactly one block returns.
+    fn validate_layout(&self) -> JitResult<()> {
+        let verifier = |detail: String| JitError::Verifier {
+            model: MODEL.into(),
+            detail: detail.into(),
+        };
+        if self.blocks.is_empty() {
+            return Err(verifier("SSA program declares no blocks".into()));
+        }
+        if self.entry != BlockId(0) {
+            return Err(verifier("SSA entry block is not the first block".into()));
+        }
+        let mut instruction_cursor = 0;
+        let mut parameter_cursor = 0;
+        let mut return_blocks = 0;
+        for (index, block) in self.blocks.iter().enumerate() {
+            if block.id != BlockId::new(index)? {
+                return Err(verifier(format!(
+                    "SSA block {index} has non-canonical identity"
+                )));
+            }
+            if block.instruction_start != instruction_cursor
+                || block.instruction_end < block.instruction_start
+                || block.instruction_end > self.instructions.len()
+            {
+                return Err(verifier(format!(
+                    "SSA block {index} does not continue the instruction layout"
+                )));
+            }
+            if block.parameter_start != parameter_cursor
+                || block.parameter_end < block.parameter_start
+                || block.parameter_end > self.block_parameters.len()
+            {
+                return Err(verifier(format!(
+                    "SSA block {index} does not continue the parameter layout"
+                )));
+            }
+            if index == self.entry.index() && block.parameter_end != block.parameter_start {
+                return Err(verifier(
+                    "SSA entry block cannot declare block parameters".into(),
+                ));
+            }
+            if matches!(block.terminator, Terminator::Return(_)) {
+                return_blocks += 1;
+            }
+            instruction_cursor = block.instruction_end;
+            parameter_cursor = block.parameter_end;
+        }
+        if instruction_cursor != self.instructions.len()
+            || parameter_cursor != self.block_parameters.len()
+        {
+            return Err(verifier(
+                "SSA blocks do not cover every instruction and parameter".into(),
+            ));
+        }
+        if return_blocks != 1 {
+            return Err(verifier(format!(
+                "SSA program has {return_blocks} return terminators, expected exactly one"
+            )));
+        }
+        if !matches!(
+            self.blocks[self.exit.index()].terminator,
+            Terminator::Return(_)
+        ) {
+            return Err(verifier(
+                "SSA exit block does not terminate with Return".into(),
+            ));
         }
         for (index, instruction) in self.instructions.iter().enumerate() {
             if instruction.result != ValueId::new(index)? {
-                return Err(JitError::Verifier {
-                    model: MODEL.into(),
-                    detail: format!("SSA instruction {index} has non-canonical result identity")
-                        .into(),
-                });
-            }
-            if instruction
-                .operands
-                .iter()
-                .any(|operand| usize::try_from(operand.0).map_or(true, |value| value >= index))
-            {
-                return Err(JitError::Verifier {
-                    model: MODEL.into(),
-                    detail: format!("SSA instruction {index} uses a non-dominating value").into(),
-                });
+                return Err(verifier(format!(
+                    "SSA instruction {index} has non-canonical result identity"
+                )));
             }
         }
-        if self
-            .instructions
-            .get(self.result().0 as usize)
-            .is_none_or(|instruction| instruction.value_type != ValueType::F64)
-        {
-            return Err(JitError::Verifier {
-                model: MODEL.into(),
-                detail: "SSA return does not reference a defined f64 value".into(),
-            });
+        for (index, parameter) in self.block_parameters.iter().enumerate() {
+            if parameter.value != ValueId::new(self.instructions.len() + index)? {
+                return Err(verifier(format!(
+                    "SSA block parameter {index} has non-canonical identity"
+                )));
+            }
         }
         Ok(())
+    }
+
+    /// The CFG must be acyclic and every block both reachable from the entry
+    /// and able to reach the single exit.
+    ///
+    /// Loops are out of scope here on purpose: nothing lowers to a back edge
+    /// yet, and the allocator's linear live intervals and the WebAssembly
+    /// structurizer both rely on the layout order being topological. Digital
+    /// process control flow (W-C3) is what lifts this.
+    fn predecessors_checked(&self) -> JitResult<Vec<Vec<BlockId>>> {
+        let verifier = |detail: String| JitError::Verifier {
+            model: MODEL.into(),
+            detail: detail.into(),
+        };
+        for block in &self.blocks {
+            for edge in block.terminator.edges() {
+                if edge.target.index() >= self.blocks.len() {
+                    return Err(verifier(format!(
+                        "SSA block {} branches to undefined block {}",
+                        block.id.index(),
+                        edge.target.index()
+                    )));
+                }
+                if edge.target <= block.id {
+                    return Err(verifier(format!(
+                        "SSA block {} has a back edge to block {}; loops are not yet lowered",
+                        block.id.index(),
+                        edge.target.index()
+                    )));
+                }
+            }
+        }
+        let mut reachable = vec![false; self.blocks.len()];
+        reachable[self.entry.index()] = true;
+        for block in &self.blocks {
+            if !reachable[block.id.index()] {
+                return Err(verifier(format!(
+                    "SSA block {} is unreachable from the entry block",
+                    block.id.index()
+                )));
+            }
+            if block.terminator.edges().next().is_none()
+                && !matches!(block.terminator, Terminator::Return(_))
+            {
+                return Err(verifier(format!(
+                    "SSA block {} has no successor and does not return",
+                    block.id.index()
+                )));
+            }
+            for edge in block.terminator.edges() {
+                reachable[edge.target.index()] = true;
+            }
+        }
+        let mut reaches_exit = vec![false; self.blocks.len()];
+        reaches_exit[self.exit.index()] = true;
+        for block in self.blocks.iter().rev() {
+            if matches!(block.terminator, Terminator::Return(_)) {
+                continue;
+            }
+            let reaches = block
+                .terminator
+                .edges()
+                .any(|edge| reaches_exit[edge.target.index()]);
+            if !reaches {
+                return Err(verifier(format!(
+                    "SSA block {} cannot reach the exit block",
+                    block.id.index()
+                )));
+            }
+            reaches_exit[block.id.index()] = true;
+        }
+        Ok(self.predecessors())
+    }
+
+    fn validate_edges(&self) -> JitResult<()> {
+        for block in &self.blocks {
+            for edge in block.terminator.edges() {
+                let target = &self.blocks[edge.target.index()];
+                let parameters = self.parameters(target);
+                if edge.arguments.len() != parameters.len() {
+                    return Err(JitError::Verifier {
+                        model: MODEL.into(),
+                        detail: format!(
+                            "SSA edge {}->{} passes {} argument(s) to {} parameter(s)",
+                            block.id.index(),
+                            edge.target.index(),
+                            edge.arguments.len(),
+                            parameters.len()
+                        )
+                        .into(),
+                    });
+                }
+                for (argument, parameter) in edge.arguments.iter().copied().zip(parameters) {
+                    if self.value_type_of(argument)? != parameter.value_type {
+                        return Err(JitError::Verifier {
+                            model: MODEL.into(),
+                            detail: format!(
+                                "SSA edge {}->{} binds value {} to a parameter of a different type",
+                                block.id.index(),
+                                edge.target.index(),
+                                argument.index()
+                            )
+                            .into(),
+                        });
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Every use is dominated by its definition, and the returned value is a
+    /// defined f64.
+    fn validate_dominance(&self, idom: &[Option<BlockId>]) -> JitResult<()> {
+        let verifier = |detail: String| JitError::Verifier {
+            model: MODEL.into(),
+            detail: detail.into(),
+        };
+        for (index, instruction) in self.instructions.iter().enumerate() {
+            let using_block = self.definition_block(instruction.result)?;
+            for operand in instruction.operands.iter().copied() {
+                if operand.index() < self.instructions.len() && operand.index() >= index {
+                    return Err(verifier(format!(
+                        "SSA instruction {index} uses instruction value {} defined no earlier",
+                        operand.index()
+                    )));
+                }
+                let defining_block = self.definition_block(operand)?;
+                if !Self::dominates(idom, self.entry, defining_block, using_block) {
+                    return Err(verifier(format!(
+                        "SSA instruction {index} uses value {} from a non-dominating block",
+                        operand.index()
+                    )));
+                }
+            }
+        }
+        for block in &self.blocks {
+            for use_value in block.terminator.uses() {
+                let defining_block = self.definition_block(use_value)?;
+                if !Self::dominates(idom, self.entry, defining_block, block.id) {
+                    return Err(verifier(format!(
+                        "SSA block {} terminator uses value {} from a non-dominating block",
+                        block.id.index(),
+                        use_value.index()
+                    )));
+                }
+                if use_value.index() < self.instructions.len()
+                    && use_value.index() >= block.instruction_end
+                {
+                    return Err(verifier(format!(
+                        "SSA block {} terminator uses instruction value {} defined after it",
+                        block.id.index(),
+                        use_value.index()
+                    )));
+                }
+            }
+        }
+        if self.value_type_of(self.result())? != ValueType::F64 {
+            return Err(verifier(
+                "SSA return does not reference a defined f64 value".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// A state write must execute on every evaluation.
+    ///
+    /// Verilog-A analog operators carry per-evaluation state whose continuity
+    /// the solver depends on, so sinking one into a conditional arm silently
+    /// desynchronizes it. Requiring its block to dominate the exit block is
+    /// exactly the condition that it runs unconditionally, and it is the rule
+    /// that keeps the conditional-splitting transform sound.
+    fn validate_effect_discipline(&self, idom: &[Option<BlockId>]) -> JitResult<()> {
+        for block in &self.blocks {
+            if Self::dominates(idom, self.entry, block.id, self.exit) {
+                continue;
+            }
+            for instruction in &self.instructions[block.instruction_start..block.instruction_end] {
+                if instruction.effects.writes_state() {
+                    return Err(JitError::Verifier {
+                        model: MODEL.into(),
+                        detail: format!(
+                            "SSA block {} executes conditionally but writes state with {:?}",
+                            block.id.index(),
+                            instruction.op
+                        )
+                        .into(),
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Which conditional arm exclusively consumes an instruction's result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct ArmOwner {
+    conditional: usize,
+    taken: bool,
+}
+
+impl Program {
+    /// Re-express every `NativeOp::IfElse` as a real two-way branch over
+    /// blocks, with the conditional's result arriving as a block parameter.
+    ///
+    /// The postfix stream evaluates both arms before selecting between them,
+    /// so this is the inverse of that if-conversion: an instruction whose
+    /// every consumer sits inside one arm sinks into that arm's block and
+    /// therefore executes only when the arm is taken. A `MAY_FAIL` operand —
+    /// a bounds-checked dynamic array read, a table lookup — then raises a
+    /// runtime error only on the path that actually reads it, which the select
+    /// form cannot express. State writes never sink: the verifier's effect
+    /// discipline requires them to stay on a block that dominates the exit,
+    /// because analog operator state must advance on every evaluation whatever
+    /// the condition does.
+    ///
+    /// Values agree bit-for-bit with the select form whenever both arms are
+    /// pure, and the conditional's own truthiness (nonzero, NaN included) is
+    /// unchanged; the backends realize it with the same comparison.
+    pub(crate) fn with_branching_conditionals(&self) -> JitResult<Self> {
+        if !self.is_single_block() {
+            return Err(JitError::Verifier {
+                model: MODEL.into(),
+                detail: "conditional splitting consumes the single-block postfix lift".into(),
+            });
+        }
+        if !self
+            .instructions
+            .iter()
+            .any(|instruction| matches!(instruction.op, NativeOp::IfElse))
+        {
+            return Ok(self.clone());
+        }
+        let owners = self.conditional_arm_owners();
+        ConditionalSplitter::new(self, &owners)?.run()
+    }
+
+    /// For each instruction, the conditional arm that exclusively consumes it.
+    ///
+    /// Uses always carry a larger index than their definition, so one reverse
+    /// pass reaches the fixed point: an instruction belongs to an arm exactly
+    /// when every one of its use sites is either that conditional's arm
+    /// operand or another instruction already attributed to the same arm.
+    fn conditional_arm_owners(&self) -> Vec<Option<ArmOwner>> {
+        enum UseSite {
+            /// The arm operand of a conditional: the use happens only when
+            /// that arm is taken.
+            Arm(ArmOwner),
+            /// An ordinary operand of another instruction: the use inherits
+            /// whatever arm that instruction turns out to belong to.
+            Operand(usize),
+            /// The program result, or a conditional's own condition operand:
+            /// the use happens unconditionally.
+            Unconditional,
+        }
+
+        let mut use_sites: Vec<Vec<UseSite>> = Vec::with_capacity(self.instructions.len());
+        use_sites.resize_with(self.instructions.len(), Vec::new);
+        for (index, instruction) in self.instructions.iter().enumerate() {
+            let conditional = matches!(instruction.op, NativeOp::IfElse);
+            for (position, operand) in instruction.operands.iter().copied().enumerate() {
+                let site = if conditional && (position == 1 || position == 2) {
+                    UseSite::Arm(ArmOwner {
+                        conditional: index,
+                        taken: position == 1,
+                    })
+                } else if conditional {
+                    UseSite::Unconditional
+                } else {
+                    UseSite::Operand(index)
+                };
+                use_sites[operand.index()].push(site);
+            }
+        }
+        use_sites[self.result().index()].push(UseSite::Unconditional);
+
+        let mut owners: Vec<Option<ArmOwner>> = vec![None; self.instructions.len()];
+        for index in (0..self.instructions.len()).rev() {
+            if self.instructions[index].effects.writes_state() {
+                continue;
+            }
+            let mut owner: Option<ArmOwner> = None;
+            let mut exclusive = !use_sites[index].is_empty();
+            for site in &use_sites[index] {
+                let candidate = match site {
+                    UseSite::Arm(arm) => Some(*arm),
+                    UseSite::Operand(user) => owners[*user],
+                    UseSite::Unconditional => None,
+                };
+                let Some(candidate) = candidate else {
+                    exclusive = false;
+                    break;
+                };
+                match owner {
+                    None => owner = Some(candidate),
+                    Some(existing) if existing == candidate => {}
+                    Some(_) => {
+                        exclusive = false;
+                        break;
+                    }
+                }
+            }
+            if exclusive {
+                owners[index] = owner;
+            }
+        }
+        owners
+    }
+}
+
+/// Rebuilds a single-block program as a diamond-structured block program.
+///
+/// Blocks are emitted in layout order, so a block's instruction range is
+/// closed before the next block opens. A branch's terminator is written after
+/// its arms are laid out, which is the only point at which the join block's
+/// identity is known.
+struct ConditionalSplitter<'a> {
+    source: &'a Program,
+    /// Every `IfElse` becomes a terminator rather than an instruction, so the
+    /// rebuilt program is shorter and block parameters number from here.
+    instruction_count: usize,
+    regions: HashMap<ArmOwner, Vec<usize>>,
+    outer: Vec<usize>,
+    remap: Vec<Option<ValueId>>,
+    instructions: Vec<Instruction>,
+    parameters: Vec<BlockParameter>,
+    blocks: Vec<BasicBlock>,
+    current: BlockId,
+}
+
+impl<'a> ConditionalSplitter<'a> {
+    fn new(source: &'a Program, owners: &[Option<ArmOwner>]) -> JitResult<Self> {
+        let mut regions: HashMap<ArmOwner, Vec<usize>> = HashMap::new();
+        let mut outer = Vec::new();
+        for (index, owner) in owners.iter().enumerate() {
+            match owner {
+                Some(arm) => regions.entry(*arm).or_default().push(index),
+                None => outer.push(index),
+            }
+        }
+        let conditionals = source
+            .instructions
+            .iter()
+            .filter(|instruction| matches!(instruction.op, NativeOp::IfElse))
+            .count();
+        let mut splitter = Self {
+            source,
+            instruction_count: source.instructions.len() - conditionals,
+            regions,
+            outer,
+            remap: vec![None; source.instructions.len()],
+            instructions: Vec::with_capacity(source.instructions.len()),
+            parameters: Vec::new(),
+            blocks: Vec::new(),
+            current: BlockId(0),
+        };
+        splitter.current = splitter.open_block(0)?;
+        Ok(splitter)
+    }
+
+    fn open_block(&mut self, parameter_count: usize) -> JitResult<BlockId> {
+        let id = BlockId::new(self.blocks.len())?;
+        let parameter_start = self.parameters.len();
+        for offset in 0..parameter_count {
+            self.parameters.push(BlockParameter {
+                value: ValueId::new(self.instruction_count + parameter_start + offset)?,
+                value_type: ValueType::F64,
+            });
+        }
+        self.blocks.push(BasicBlock {
+            id,
+            parameter_start,
+            parameter_end: self.parameters.len(),
+            instruction_start: self.instructions.len(),
+            instruction_end: self.instructions.len(),
+            // Every block created here is closed with its real terminator
+            // before `finish`; a leaked placeholder produces a second `Return`
+            // and the verifier rejects the program.
+            terminator: Terminator::Return(ValueId(0)),
+        });
+        Ok(id)
+    }
+
+    fn close_range(&mut self, id: BlockId) {
+        self.blocks[id.index()].instruction_end = self.instructions.len();
+    }
+
+    fn take_region(&mut self, conditional: usize, taken: bool) -> Vec<usize> {
+        self.regions
+            .remove(&ArmOwner { conditional, taken })
+            .unwrap_or_default()
+    }
+
+    fn mapped(&self, value: ValueId) -> JitResult<ValueId> {
+        self.remap[value.index()].ok_or_else(|| JitError::Verifier {
+            model: MODEL.into(),
+            detail: format!(
+                "conditional splitting reached value {} before its definition",
+                value.index()
+            )
+            .into(),
+        })
+    }
+
+    fn emit(&mut self, region: &[usize]) -> JitResult<()> {
+        let source = self.source;
+        for index in region.iter().copied() {
+            let instruction = &source.instructions[index];
+            if !matches!(instruction.op, NativeOp::IfElse) {
+                let operands = instruction
+                    .operands
+                    .iter()
+                    .copied()
+                    .map(|operand| self.mapped(operand))
+                    .collect::<JitResult<Vec<_>>>()?
+                    .into_boxed_slice();
+                let result = ValueId::new(self.instructions.len())?;
+                self.instructions.push(Instruction {
+                    result,
+                    value_type: instruction.value_type,
+                    op: instruction.op,
+                    operands,
+                    effects: instruction.effects,
+                });
+                self.remap[index] = Some(result);
+                continue;
+            }
+
+            let [condition, then_value, else_value] = *instruction.operands else {
+                return Err(JitError::Verifier {
+                    model: MODEL.into(),
+                    detail: "conditional splitting requires three IfElse operands".into(),
+                });
+            };
+            let condition = self.mapped(condition)?;
+            let branch_block = self.current;
+            self.close_range(branch_block);
+
+            let then_entry = self.open_block(0)?;
+            self.current = then_entry;
+            let then_members = self.take_region(index, true);
+            self.emit(&then_members)?;
+            let then_tail = self.current;
+            let then_argument = self.mapped(then_value)?;
+            self.close_range(then_tail);
+
+            let else_entry = self.open_block(0)?;
+            self.current = else_entry;
+            let else_members = self.take_region(index, false);
+            self.emit(&else_members)?;
+            let else_tail = self.current;
+            let else_argument = self.mapped(else_value)?;
+            self.close_range(else_tail);
+
+            let join = self.open_block(1)?;
+            let merged = self.parameters[self.blocks[join.index()].parameter_start].value;
+            self.blocks[branch_block.index()].terminator = Terminator::Branch {
+                condition,
+                then_edge: Edge::new(then_entry, Vec::new()),
+                else_edge: Edge::new(else_entry, Vec::new()),
+            };
+            self.blocks[then_tail.index()].terminator =
+                Terminator::Jump(Edge::new(join, vec![then_argument]));
+            self.blocks[else_tail.index()].terminator =
+                Terminator::Jump(Edge::new(join, vec![else_argument]));
+            self.current = join;
+            self.remap[index] = Some(merged);
+        }
+        Ok(())
+    }
+
+    fn run(mut self) -> JitResult<Program> {
+        let outer = std::mem::take(&mut self.outer);
+        self.emit(&outer)?;
+        let result = self.mapped(self.source.result())?;
+        let exit = self.current;
+        self.close_range(exit);
+        self.blocks[exit.index()].terminator = Terminator::Return(result);
+        let program = Program {
+            entry: BlockId(0),
+            exit,
+            blocks: self.blocks,
+            block_parameters: self.parameters,
+            instructions: self.instructions,
+            maximum_stack_depth: self.source.maximum_stack_depth,
+        };
+        program.validate()?;
+        Ok(program)
     }
 }
 
@@ -505,20 +1396,7 @@ impl ProgramLowerer {
     }
 
     fn finish(self, result: ValueId, maximum_stack_depth: usize) -> JitResult<Program> {
-        let entry = BlockId(0);
-        let program = Program {
-            entry,
-            block: BasicBlock {
-                id: entry,
-                instruction_start: 0,
-                instruction_end: self.instructions.len(),
-                terminator: Terminator::Return(result),
-            },
-            instructions: self.instructions,
-            maximum_stack_depth,
-        };
-        program.validate()?;
-        Ok(program)
+        Program::single_block(self.instructions, result, maximum_stack_depth)
     }
 }
 
@@ -615,6 +1493,12 @@ fn eliminate_dead_instructions(
     program: Program,
     outputs: &mut [AssignmentOutput],
 ) -> JitResult<Program> {
+    if !program.is_single_block() {
+        return Err(JitError::Verifier {
+            model: MODEL.into(),
+            detail: "dead-instruction elimination runs before conditional splitting and requires a single-block program".into(),
+        });
+    }
     let instruction_count = program.instructions.len();
     let mut live = vec![false; instruction_count];
     let mut work = vec![program.result()];
@@ -699,20 +1583,7 @@ fn eliminate_dead_instructions(
                 })?;
     }
     let result = remap_value(old_result)?;
-    let entry = BlockId(0);
-    let compact = Program {
-        entry,
-        block: BasicBlock {
-            id: entry,
-            instruction_start: 0,
-            instruction_end: instructions.len(),
-            terminator: Terminator::Return(result),
-        },
-        instructions,
-        maximum_stack_depth,
-    };
-    compact.validate()?;
-    Ok(compact)
+    Program::single_block(instructions, result, maximum_stack_depth)
 }
 
 /// One computation and every output slot that consumes its result.
@@ -824,7 +1695,7 @@ impl RegisterBank {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum ValueLocation {
     Register(usize),
     Spill(usize),
@@ -851,6 +1722,26 @@ impl AllocatedInstruction {
     }
 }
 
+/// One step of an edge's parallel move.
+///
+/// A naive sequential move loses a value whenever two edge arguments swap
+/// locations, so the sequencer orders every move whose destination is not
+/// still somebody's source and breaks the remaining cycles through one
+/// reserved scratch slot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MoveStep {
+    Move {
+        from: ValueLocation,
+        to: ValueLocation,
+    },
+    SaveToScratch {
+        from: ValueLocation,
+    },
+    RestoreFromScratch {
+        to: ValueLocation,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RegisterAllocation {
     instructions: Vec<AllocatedInstruction>,
@@ -859,6 +1750,136 @@ pub(crate) struct RegisterAllocation {
     spill_slot_count: usize,
     used_register_count: usize,
     required_register_count: usize,
+    edge_moves: Vec<Box<[Box<[MoveStep]>]>>,
+    scratch_spill_slot: Option<usize>,
+}
+
+fn expire_owners(
+    register_owners: &mut [Option<ValueId>],
+    spill_owners: &mut [Option<ValueId>],
+    last_use_position: &[usize],
+    position: usize,
+) {
+    for owner in register_owners.iter_mut().chain(spill_owners.iter_mut()) {
+        if owner.is_some_and(|value: ValueId| last_use_position[value.index()] < position) {
+            *owner = None;
+        }
+    }
+}
+
+fn select_location(
+    value: ValueId,
+    reusable_first: Option<usize>,
+    crosses_call: bool,
+    bank: RegisterBank,
+    register_owners: &[Option<ValueId>],
+    spill_owners: &mut Vec<Option<ValueId>>,
+) -> ValueLocation {
+    if crosses_call {
+        // A caller-saved register does not survive the call this value is live
+        // across; a callee-saved one does, and costs the function one shared
+        // prologue save rather than a store here and a reload at every use.
+        // See [`RegisterBank`]. Reusing a dying operand's register is still
+        // preferable when that register is itself preserved.
+        return reusable_first
+            .filter(|register| bank.is_callee_saved(*register))
+            .or_else(|| {
+                register_owners
+                    .iter()
+                    .enumerate()
+                    .skip(bank.callee_saved_base)
+                    .find_map(|(register, owner)| owner.is_none().then_some(register))
+            })
+            .map_or_else(
+                || ValueLocation::Spill(allocate_spill_slot(spill_owners, value)),
+                ValueLocation::Register,
+            );
+    }
+    if let Some(register) = reusable_first {
+        return ValueLocation::Register(register);
+    }
+    register_owners
+        .iter()
+        .position(Option::is_none)
+        .map_or_else(
+            || ValueLocation::Spill(allocate_spill_slot(spill_owners, value)),
+            ValueLocation::Register,
+        )
+}
+
+/// Order one edge's simultaneous location assignments into machine moves.
+///
+/// Sources may repeat; destinations may not. Any move whose destination is no
+/// longer read can be emitted immediately, and what remains once nothing is
+/// emittable is a set of disjoint permutation cycles. Breaking one cycle
+/// through the scratch slot unblocks exactly that cycle and no other, so at
+/// most one saved value is ever outstanding.
+fn sequence_parallel_move(pairs: &[(ValueLocation, ValueLocation)]) -> JitResult<Vec<MoveStep>> {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Source {
+        Location(ValueLocation),
+        Scratch,
+    }
+
+    for (index, (_, destination)) in pairs.iter().enumerate() {
+        if pairs[..index]
+            .iter()
+            .any(|(_, earlier)| earlier == destination)
+        {
+            return Err(JitError::Verifier {
+                model: MODEL.into(),
+                detail: "SSA edge binds two block parameters to one location".into(),
+            });
+        }
+    }
+
+    let mut pending: Vec<(Source, ValueLocation)> = pairs
+        .iter()
+        .filter(|(from, to)| from != to)
+        .map(|(from, to)| (Source::Location(*from), *to))
+        .collect();
+    let mut steps = Vec::with_capacity(pending.len());
+    let budget = pending.len().saturating_mul(2).saturating_add(1);
+    for _ in 0..budget {
+        if pending.is_empty() {
+            return Ok(steps);
+        }
+        let ready = pending.iter().position(|(_, destination)| {
+            !pending
+                .iter()
+                .any(|(source, _)| *source == Source::Location(*destination))
+        });
+        match ready {
+            Some(index) => {
+                let (source, destination) = pending.remove(index);
+                steps.push(match source {
+                    Source::Location(from) => MoveStep::Move {
+                        from,
+                        to: destination,
+                    },
+                    Source::Scratch => MoveStep::RestoreFromScratch { to: destination },
+                });
+            }
+            None => {
+                let (Source::Location(cycle_source), _) = pending[0] else {
+                    return Err(JitError::Verifier {
+                        model: MODEL.into(),
+                        detail: "SSA parallel move reached a second scratch cycle".into(),
+                    });
+                };
+                steps.push(MoveStep::SaveToScratch { from: cycle_source });
+                for entry in &mut pending {
+                    if entry.0 == Source::Location(cycle_source) {
+                        entry.0 = Source::Scratch;
+                    }
+                }
+            }
+        }
+    }
+    Err(JitError::Verifier {
+        model: MODEL.into(),
+        detail: "SSA parallel move did not terminate within its step budget".into(),
+    })
 }
 
 impl RegisterAllocation {
@@ -895,17 +1916,42 @@ impl RegisterAllocation {
             });
         }
         let instruction_count = program.instructions.len();
+        let value_count = program.value_count();
+        // A block parameter is available from the earliest predecessor
+        // terminator that binds it, because that is where the backend performs
+        // the edge's parallel move. Holding its location from that point keeps
+        // an intervening sibling block from clobbering it.
+        let parameter_definition = program.parameter_definition_positions()?;
         // Positions before/after one instruction are distinct. An ordinary
         // operand use is at 2*i; a source-order assignment publication is at
         // 2*i+1. This prevents the allocator from overwriting a value with an
         // instruction result before that value has been stored.
-        let mut last_use_position: Vec<usize> =
-            (0..instruction_count).map(|index| index * 2).collect();
+        let mut last_use_position: Vec<usize> = (0..value_count)
+            .map(|index| {
+                if index < instruction_count {
+                    index * 2
+                } else {
+                    parameter_definition[index - instruction_count] * 2
+                }
+            })
+            .collect();
         for (instruction_index, instruction) in program.instructions.iter().enumerate() {
             for operand in instruction.operands.iter().copied() {
                 let operand_index = operand.0 as usize;
                 last_use_position[operand_index] =
                     last_use_position[operand_index].max(instruction_index * 2);
+            }
+        }
+        for block in program.blocks() {
+            let terminator_position = block.instruction_end.checked_mul(2).ok_or_else(|| {
+                JitError::RegisterAllocation {
+                    model: MODEL.into(),
+                    detail: "SSA terminator liveness position overflow".into(),
+                }
+            })?;
+            for use_value in block.terminator.uses() {
+                last_use_position[use_value.index()] =
+                    last_use_position[use_value.index()].max(terminator_position);
             }
         }
         for &(instruction_end, value) in output_uses {
@@ -931,12 +1977,6 @@ impl RegisterAllocation {
                 })?;
             last_use_position[value.index()] = last_use_position[value.index()].max(use_position);
         }
-        last_use_position[program.result().0 as usize] = instruction_count
-            .checked_mul(2)
-            .ok_or_else(|| JitError::RegisterAllocation {
-                model: MODEL.into(),
-                detail: "SSA return liveness position overflow".into(),
-            })?;
 
         let mut call_prefix = Vec::with_capacity(instruction_count + 1);
         call_prefix.push(0_usize);
@@ -948,45 +1988,59 @@ impl RegisterAllocation {
                 .saturating_add(usize::from(instruction.effects.may_call()));
             call_prefix.push(next);
         }
-        let crosses_call = |definition: usize| {
-            let position = last_use_position[definition];
+        // `bound` is the first instruction index at which the value already
+        // holds its definition: `i + 1` for instruction `i`, and the binding
+        // terminator's boundary for a block parameter.
+        let crosses_call = |value: ValueId| {
+            let position = last_use_position[value.index()];
             let end_instruction = (position / 2).min(instruction_count);
             let end_exclusive = end_instruction
                 .saturating_add(usize::from(position & 1 != 0))
                 .min(instruction_count);
-            end_exclusive > definition + 1
-                && call_prefix[end_exclusive] > call_prefix[definition + 1]
+            let bound = if value.index() < instruction_count {
+                value.index() + 1
+            } else {
+                parameter_definition[value.index() - instruction_count]
+            };
+            end_exclusive > bound && call_prefix[end_exclusive] > call_prefix[bound]
         };
 
-        let mut locations = vec![None; instruction_count];
+        let mut locations = vec![None; value_count];
         let mut register_owners = vec![None; allocatable_register_count];
         let mut spill_owners: Vec<Option<ValueId>> = Vec::new();
         let mut instructions = Vec::with_capacity(instruction_count);
         let mut used_register_count = 0;
+        let mut edge_moves: Vec<Box<[Box<[MoveStep]>]>> =
+            Vec::with_capacity(program.blocks().len());
+        let mut needs_move_scratch = false;
 
-        for (instruction_index, instruction) in program.instructions.iter().enumerate() {
-            let instruction_position = instruction_index * 2;
-            for owner in &mut register_owners {
-                if owner.is_some_and(|value: ValueId| {
-                    last_use_position[value.index()] < instruction_position
-                }) {
-                    *owner = None;
-                }
-            }
-            for owner in &mut spill_owners {
-                if owner.is_some_and(|value: ValueId| {
-                    last_use_position[value.index()] < instruction_position
-                }) {
-                    *owner = None;
-                }
-            }
-            let live_register_mask = register_owners
+        for block in program.blocks() {
+            expire_owners(
+                &mut register_owners,
+                &mut spill_owners,
+                &last_use_position,
+                block.instruction_start * 2,
+            );
+            for (instruction_index, instruction) in program.instructions
+                [block.instruction_start..block.instruction_end]
                 .iter()
                 .enumerate()
-                .fold(0_u32, |mask, (register, owner)| {
-                    mask | (u32::from(owner.is_some()) << register)
-                });
-            let operands: Box<[ValueLocation]> = instruction
+                .map(|(offset, instruction)| (block.instruction_start + offset, instruction))
+            {
+                let instruction_position = instruction_index * 2;
+                expire_owners(
+                    &mut register_owners,
+                    &mut spill_owners,
+                    &last_use_position,
+                    instruction_position,
+                );
+                let live_register_mask = register_owners
+                    .iter()
+                    .enumerate()
+                    .fold(0_u32, |mask, (register, owner)| {
+                        mask | (u32::from(owner.is_some()) << register)
+                    });
+                let operands: Box<[ValueLocation]> = instruction
                 .operands
                 .iter()
                 .map(|operand| {
@@ -1001,86 +2055,128 @@ impl RegisterAllocation {
                 .collect::<JitResult<Vec<_>>>()?
                 .into_boxed_slice();
 
-            let reusable_first = instruction
-                .operands
-                .first()
-                .copied()
-                .filter(|operand| last_use_position[operand.0 as usize] == instruction_position)
-                .and_then(|operand| locations[operand.0 as usize])
-                .and_then(|location| match location {
-                    ValueLocation::Register(register) => Some(register),
-                    ValueLocation::Spill(_) => None,
+                let reusable_first = instruction
+                    .operands
+                    .first()
+                    .copied()
+                    .filter(|operand| last_use_position[operand.0 as usize] == instruction_position)
+                    .and_then(|operand| locations[operand.0 as usize])
+                    .and_then(|location| match location {
+                        ValueLocation::Register(register) => Some(register),
+                        ValueLocation::Spill(_) => None,
+                    });
+
+                let result = select_location(
+                    instruction.result,
+                    reusable_first,
+                    crosses_call(instruction.result),
+                    bank,
+                    &register_owners,
+                    &mut spill_owners,
+                );
+
+                for (operand, location) in instruction
+                    .operands
+                    .iter()
+                    .copied()
+                    .zip(operands.iter().copied())
+                {
+                    if last_use_position[operand.0 as usize] != instruction_position {
+                        continue;
+                    }
+                    match location {
+                        ValueLocation::Register(register)
+                            if result != ValueLocation::Register(register) =>
+                        {
+                            register_owners[register] = None;
+                        }
+                        ValueLocation::Spill(slot) if result != ValueLocation::Spill(slot) => {
+                            spill_owners[slot] = None;
+                        }
+                        ValueLocation::Register(_) | ValueLocation::Spill(_) => {}
+                    }
+                }
+
+                match result {
+                    ValueLocation::Register(register) => {
+                        register_owners[register] = Some(instruction.result);
+                        used_register_count = used_register_count.max(register + 1);
+                    }
+                    ValueLocation::Spill(slot) => spill_owners[slot] = Some(instruction.result),
+                }
+                locations[instruction.result.0 as usize] = Some(result);
+                instructions.push(AllocatedInstruction {
+                    operands,
+                    result,
+                    live_register_mask,
                 });
-
-            let result = if crosses_call(instruction_index) {
-                // A caller-saved register does not survive the call this value
-                // is live across; a callee-saved one does, and costs the
-                // function one shared prologue save rather than a store here
-                // and a reload at every use. See [`RegisterBank`]. Reusing a
-                // dying operand's register is still preferable when that
-                // register is itself preserved.
-                reusable_first
-                    .filter(|register| bank.is_callee_saved(*register))
-                    .or_else(|| {
-                        register_owners
-                            .iter()
-                            .enumerate()
-                            .skip(bank.callee_saved_base)
-                            .find_map(|(register, owner)| owner.is_none().then_some(register))
-                    })
-                    .map_or_else(
-                        || {
-                            ValueLocation::Spill(allocate_spill_slot(
-                                &mut spill_owners,
-                                instruction.result,
-                            ))
-                        },
-                        ValueLocation::Register,
-                    )
-            } else if let Some(register) = reusable_first {
-                ValueLocation::Register(register)
-            } else if let Some(register) = register_owners.iter().position(Option::is_none) {
-                used_register_count = used_register_count.max(register + 1);
-                ValueLocation::Register(register)
-            } else {
-                ValueLocation::Spill(allocate_spill_slot(&mut spill_owners, instruction.result))
-            };
-
-            for (operand, location) in instruction
-                .operands
-                .iter()
-                .copied()
-                .zip(operands.iter().copied())
-            {
-                if last_use_position[operand.0 as usize] != instruction_position {
-                    continue;
-                }
-                match location {
-                    ValueLocation::Register(register)
-                        if result != ValueLocation::Register(register) =>
-                    {
-                        register_owners[register] = None;
-                    }
-                    ValueLocation::Spill(slot) if result != ValueLocation::Spill(slot) => {
-                        spill_owners[slot] = None;
-                    }
-                    ValueLocation::Register(_) | ValueLocation::Spill(_) => {}
-                }
             }
 
-            match result {
-                ValueLocation::Register(register) => {
-                    register_owners[register] = Some(instruction.result);
-                    used_register_count = used_register_count.max(register + 1);
+            let terminator_position = block.instruction_end * 2;
+            expire_owners(
+                &mut register_owners,
+                &mut spill_owners,
+                &last_use_position,
+                terminator_position,
+            );
+            // The first predecessor in layout order owns the target's
+            // parameter locations; every later predecessor reuses them.
+            for edge in block.terminator.edges() {
+                let target = &program.blocks()[edge.target.index()];
+                for parameter in program.parameters(target) {
+                    if locations[parameter.value.index()].is_some() {
+                        continue;
+                    }
+                    let location = select_location(
+                        parameter.value,
+                        None,
+                        crosses_call(parameter.value),
+                        bank,
+                        &register_owners,
+                        &mut spill_owners,
+                    );
+                    match location {
+                        ValueLocation::Register(register) => {
+                            register_owners[register] = Some(parameter.value);
+                            used_register_count = used_register_count.max(register + 1);
+                        }
+                        ValueLocation::Spill(slot) => spill_owners[slot] = Some(parameter.value),
+                    }
+                    locations[parameter.value.index()] = Some(location);
                 }
-                ValueLocation::Spill(slot) => spill_owners[slot] = Some(instruction.result),
             }
-            locations[instruction.result.0 as usize] = Some(result);
-            instructions.push(AllocatedInstruction {
-                operands,
-                result,
-                live_register_mask,
-            });
+            let mut block_edge_moves = Vec::new();
+            for edge in block.terminator.edges() {
+                let target = &program.blocks()[edge.target.index()];
+                let parameters = program.parameters(target);
+                let mut pairs = Vec::with_capacity(parameters.len());
+                for (argument, parameter) in edge.arguments.iter().copied().zip(parameters) {
+                    let from = locations[argument.index()].ok_or_else(|| JitError::Verifier {
+                        model: MODEL.into(),
+                        detail: format!(
+                            "SSA allocator reached unassigned edge argument {}",
+                            argument.index()
+                        )
+                        .into(),
+                    })?;
+                    let to =
+                        locations[parameter.value.index()].ok_or_else(|| JitError::Verifier {
+                            model: MODEL.into(),
+                            detail: format!(
+                                "SSA allocator reached unassigned block parameter {}",
+                                parameter.value.index()
+                            )
+                            .into(),
+                        })?;
+                    pairs.push((from, to));
+                }
+                let steps = sequence_parallel_move(&pairs)?;
+                needs_move_scratch |= steps
+                    .iter()
+                    .any(|step| !matches!(step, MoveStep::Move { .. }));
+                block_edge_moves.push(steps.into_boxed_slice());
+            }
+            edge_moves.push(block_edge_moves.into_boxed_slice());
         }
 
         let required_register_count = instructions
@@ -1094,6 +2190,7 @@ impl RegisterAllocation {
             detail: "SSA allocator did not assign the validated return value".into(),
         })?;
 
+        let scratch_spill_slot = needs_move_scratch.then_some(spill_owners.len());
         Ok(Self {
             instructions,
             result,
@@ -1107,9 +2204,36 @@ impl RegisterAllocation {
                     })
                 })
                 .collect::<JitResult<Vec<_>>>()?,
-            spill_slot_count: spill_owners.len(),
+            spill_slot_count: spill_owners.len() + usize::from(needs_move_scratch),
             used_register_count,
             required_register_count,
+            edge_moves,
+            scratch_spill_slot,
+        })
+    }
+
+    /// The parallel move a backend must perform on one outgoing edge before
+    /// branching to its target.
+    pub(crate) fn edge_moves(&self, block: BlockId, edge: usize) -> JitResult<&[MoveStep]> {
+        self.edge_moves
+            .get(block.index())
+            .and_then(|edges| edges.get(edge))
+            .map(|steps| steps.as_ref())
+            .ok_or_else(|| JitError::Verifier {
+                model: MODEL.into(),
+                detail: format!(
+                    "SSA allocation has no move plan for edge {edge} of block {}",
+                    block.index()
+                )
+                .into(),
+            })
+    }
+
+    /// The spill slot reserved for breaking parallel-move cycles.
+    pub(crate) fn move_scratch_slot(&self) -> JitResult<usize> {
+        self.scratch_spill_slot.ok_or_else(|| JitError::Verifier {
+            model: MODEL.into(),
+            detail: "SSA allocation reserved no parallel-move scratch slot".into(),
         })
     }
 
@@ -1437,11 +2561,13 @@ fn unary_math_uses_helper(op: UnaryMathOp) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        ALLOCATABLE_VALUE_REGISTERS, AllocatedInstruction, AssignmentProgram, BasicBlock, BlockId,
-        Effects, Instruction, Program, RegisterAllocation, RegisterBank, Terminator, ValueId,
-        ValueLocation, ValueType, plan_shared_outputs, required_register_count,
+        ALLOCATABLE_VALUE_REGISTERS, AllocatedInstruction, AssignmentProgram, BlockId, Edge,
+        Effects, Instruction, MoveStep, Program, RegisterAllocation, RegisterBank, Terminator,
+        ValueId, ValueLocation, ValueType, plan_shared_outputs, required_register_count,
+        sequence_parallel_move,
     };
     use crate::jit::expr::{NativeOp, NativeProgram, native_op_stack_effect};
+    use std::collections::HashMap;
 
     /// The bank as a backend that preserves no floating-point register sees
     /// it: AArch64 and System V x64.
@@ -1453,6 +2579,15 @@ mod tests {
 
     fn program(ops: Vec<NativeOp>, max_stack_depth: usize) -> NativeProgram {
         NativeProgram::from_ops_for_test(ops, max_stack_depth, Vec::new(), Vec::new())
+    }
+
+    fn single_block(
+        instructions: Vec<Instruction>,
+        result: ValueId,
+        maximum_stack_depth: usize,
+    ) -> Program {
+        Program::single_block(instructions, result, maximum_stack_depth)
+            .expect("hand-built single-block SSA")
     }
 
     #[test]
@@ -1477,7 +2612,11 @@ mod tests {
             lowered.instructions()[4].operands(),
             &[ValueId(2), ValueId(3)]
         );
-        assert_eq!(lowered.block.terminator(), Terminator::Return(ValueId(4)));
+        assert_eq!(lowered.blocks().len(), 1);
+        assert_eq!(
+            lowered.blocks()[0].terminator(),
+            &Terminator::Return(ValueId(4))
+        );
         assert_eq!(lowered.maximum_stack_depth(), 2);
     }
 
@@ -1712,17 +2851,7 @@ mod tests {
                 effects: Effects::for_op(NativeOp::Add),
             },
         ];
-        let shared = Program {
-            entry: BlockId(0),
-            block: BasicBlock {
-                id: BlockId(0),
-                instruction_start: 0,
-                instruction_end: instructions.len(),
-                terminator: Terminator::Return(ValueId(2)),
-            },
-            instructions,
-            maximum_stack_depth: 2,
-        };
+        let shared = single_block(instructions, ValueId(2), 2);
         let allocation =
             RegisterAllocation::build(&shared, CALLER_SAVED_BANK).expect("register allocation");
 
@@ -1779,17 +2908,7 @@ mod tests {
             accumulator = sum;
         }
 
-        Program {
-            entry: BlockId(0),
-            block: BasicBlock {
-                id: BlockId(0),
-                instruction_start: 0,
-                instruction_end: instructions.len(),
-                terminator: Terminator::Return(accumulator),
-            },
-            instructions,
-            maximum_stack_depth: 2,
-        }
+        single_block(instructions, accumulator, 2)
     }
 
     #[test]
@@ -1879,5 +2998,357 @@ mod tests {
             4,
             "register 1 is the future result, register 2 materializes the spill, and register 3 remains available for opcode legalization"
         );
+    }
+
+    // ---------------------------------------------------------------- blocks
+
+    fn register(index: usize) -> ValueLocation {
+        ValueLocation::Register(index)
+    }
+
+    fn moves(pairs: &[(ValueLocation, ValueLocation)]) -> Vec<MoveStep> {
+        sequence_parallel_move(pairs).expect("sequenced parallel move")
+    }
+
+    /// Replay a move plan against a model of the machine's locations and
+    /// report where each destination ends up.
+    fn replay(plan: &[MoveStep], initial: &[(ValueLocation, u32)]) -> HashMap<ValueLocation, u32> {
+        let mut state: HashMap<ValueLocation, u32> = initial.iter().copied().collect();
+        let mut scratch = None;
+        for step in plan {
+            match *step {
+                MoveStep::Move { from, to } => {
+                    let value = state
+                        .get(&from)
+                        .copied()
+                        .expect("move reads a live location");
+                    state.insert(to, value);
+                }
+                MoveStep::SaveToScratch { from } => {
+                    assert!(scratch.is_none(), "only one value may occupy the scratch");
+                    scratch = state.get(&from).copied();
+                    assert!(scratch.is_some(), "scratch save reads a live location");
+                }
+                MoveStep::RestoreFromScratch { to } => {
+                    let value = scratch.take().expect("scratch restore follows a save");
+                    state.insert(to, value);
+                }
+            }
+        }
+        state
+    }
+
+    #[test]
+    fn parallel_move_orders_chains_and_needs_no_scratch() {
+        // r1 <- r0 and r2 <- r1 must run in the order that preserves r1.
+        let plan = moves(&[(register(0), register(1)), (register(1), register(2))]);
+        assert_eq!(
+            plan,
+            vec![
+                MoveStep::Move {
+                    from: register(1),
+                    to: register(2)
+                },
+                MoveStep::Move {
+                    from: register(0),
+                    to: register(1)
+                },
+            ]
+        );
+        let final_state = replay(&plan, &[(register(0), 10), (register(1), 11)]);
+        assert_eq!(final_state[&register(1)], 10);
+        assert_eq!(final_state[&register(2)], 11);
+    }
+
+    #[test]
+    fn parallel_move_breaks_a_swap_through_the_scratch_slot() {
+        let plan = moves(&[(register(0), register(1)), (register(1), register(0))]);
+        assert!(
+            plan.iter()
+                .any(|step| matches!(step, MoveStep::SaveToScratch { .. })),
+            "a two-cycle cannot be realized by sequential moves alone"
+        );
+        let final_state = replay(&plan, &[(register(0), 10), (register(1), 11)]);
+        assert_eq!(final_state[&register(0)], 11);
+        assert_eq!(final_state[&register(1)], 10);
+    }
+
+    #[test]
+    fn parallel_move_rotates_a_three_cycle_and_mixed_locations() {
+        let cycle = [
+            (register(0), register(1)),
+            (register(1), ValueLocation::Spill(0)),
+            (ValueLocation::Spill(0), register(0)),
+        ];
+        let plan = moves(&cycle);
+        let final_state = replay(
+            &plan,
+            &[
+                (register(0), 10),
+                (register(1), 11),
+                (ValueLocation::Spill(0), 12),
+            ],
+        );
+        assert_eq!(final_state[&register(1)], 10);
+        assert_eq!(final_state[&ValueLocation::Spill(0)], 11);
+        assert_eq!(final_state[&register(0)], 12);
+    }
+
+    #[test]
+    fn parallel_move_fans_one_source_out_and_drops_identities() {
+        let plan = moves(&[
+            (register(0), register(1)),
+            (register(0), register(2)),
+            (register(3), register(3)),
+        ]);
+        assert_eq!(plan.len(), 2, "a location moved onto itself emits nothing");
+        let final_state = replay(&plan, &[(register(0), 7), (register(3), 9)]);
+        assert_eq!(final_state[&register(1)], 7);
+        assert_eq!(final_state[&register(2)], 7);
+    }
+
+    #[test]
+    fn parallel_move_rejects_two_parameters_bound_to_one_location() {
+        let error =
+            sequence_parallel_move(&[(register(0), register(2)), (register(1), register(2))])
+                .expect_err("aliased destinations are not a parallel move");
+        assert!(error.to_string().contains("two block parameters"));
+    }
+
+    /// `variable(0) ? load_dyn : constant`, whose taken arm owns the failing
+    /// dynamic load.
+    fn conditional_with_a_failing_arm() -> Program {
+        Program::lower(&program(
+            vec![
+                NativeOp::LoadVariable(0),
+                NativeOp::LoadVariable(1),
+                NativeOp::LoadVariableDyn {
+                    base: 4,
+                    len: 2,
+                    lower: 0,
+                },
+                NativeOp::Const(0.0),
+                NativeOp::IfElse,
+            ],
+            3,
+        ))
+        .expect("valid SSA")
+    }
+
+    #[test]
+    fn conditional_splitting_sinks_an_arm_only_operand_into_its_block() {
+        let flat = conditional_with_a_failing_arm();
+        assert!(flat.is_single_block());
+        let split = flat
+            .with_branching_conditionals()
+            .expect("split conditional");
+
+        assert_eq!(split.blocks().len(), 4, "branch, then, else, join");
+        assert_eq!(split.instructions().len(), flat.instructions().len() - 1);
+        assert_eq!(split.block_parameter_count(), 1);
+
+        let then_block = &split.blocks()[1];
+        let sunk =
+            &split.instructions()[then_block.instruction_start()..then_block.instruction_end()];
+        assert_eq!(
+            sunk.len(),
+            2,
+            "the dynamic load and the index it alone consumes both sink"
+        );
+        assert!(matches!(sunk[0].op(), NativeOp::LoadVariable(1)));
+        assert!(matches!(sunk[1].op(), NativeOp::LoadVariableDyn { .. }));
+        assert!(
+            sunk[1].effects().may_fail(),
+            "the point of the branch form is that this runs only when taken"
+        );
+
+        let else_block = &split.blocks()[2];
+        assert_eq!(
+            else_block.instruction_end() - else_block.instruction_start(),
+            1,
+            "the constant arm keeps its own constant"
+        );
+        assert!(matches!(
+            split.blocks()[0].terminator(),
+            Terminator::Branch { .. }
+        ));
+        assert!(matches!(
+            split.blocks()[3].terminator(),
+            Terminator::Return(_)
+        ));
+    }
+
+    #[test]
+    fn conditional_splitting_keeps_a_shared_operand_unconditional() {
+        // The dynamic load feeds both the arm and the final sum, so it escapes
+        // the arm and must stay in the entry block.
+        let flat = Program::lower(&program(
+            vec![
+                NativeOp::LoadVariable(0),
+                NativeOp::LoadVariable(1),
+                NativeOp::Square,
+                NativeOp::Const(0.0),
+                NativeOp::IfElse,
+                NativeOp::LoadVariable(1),
+                NativeOp::Square,
+                NativeOp::Add,
+            ],
+            3,
+        ))
+        .expect("valid SSA");
+        let split = flat
+            .with_branching_conditionals()
+            .expect("split conditional");
+        let entry = &split.blocks()[0];
+        assert!(
+            split.instructions()[entry.instruction_start()..entry.instruction_end()]
+                .iter()
+                .any(|instruction| matches!(instruction.op(), NativeOp::Square)),
+            "a value read on both paths stays unconditional"
+        );
+        assert_eq!(
+            split.blocks()[1].instruction_end() - split.blocks()[1].instruction_start(),
+            0,
+            "the taken arm owns nothing of its own"
+        );
+    }
+
+    #[test]
+    fn conditional_splitting_never_sinks_a_state_write() {
+        let flat = Program::lower(&program(
+            vec![
+                NativeOp::LoadVariable(0),
+                NativeOp::LoadVariable(1),
+                NativeOp::DdtState(0),
+                NativeOp::Const(0.0),
+                NativeOp::IfElse,
+            ],
+            3,
+        ))
+        .expect("valid SSA");
+        let split = flat
+            .with_branching_conditionals()
+            .expect("split conditional");
+        let entry = &split.blocks()[0];
+        assert!(
+            split.instructions()[entry.instruction_start()..entry.instruction_end()]
+                .iter()
+                .any(|instruction| instruction.effects().writes_state()),
+            "analog state must advance whichever arm the condition selects"
+        );
+    }
+
+    #[test]
+    fn verifier_rejects_a_state_write_on_a_conditional_block() {
+        let flat = conditional_with_a_failing_arm();
+        let mut split = flat
+            .with_branching_conditionals()
+            .expect("split conditional");
+        let sunk = split.blocks()[1].instruction_start();
+        split.instructions[sunk].op = NativeOp::DdtState(0);
+        split.instructions[sunk].effects = Effects::for_op(NativeOp::DdtState(0));
+        let error = split
+            .validate()
+            .expect_err("a conditional state write must not verify");
+        assert!(error.to_string().contains("writes state"));
+    }
+
+    #[test]
+    fn verifier_rejects_back_edges_unreachable_blocks_and_edge_arity() {
+        let split = conditional_with_a_failing_arm()
+            .with_branching_conditionals()
+            .expect("split conditional");
+
+        let mut back_edge = split.clone();
+        back_edge.blocks[1].terminator = Terminator::Jump(Edge::new(BlockId(0), Vec::new()));
+        assert!(
+            back_edge
+                .validate()
+                .expect_err("loops are not lowered yet")
+                .to_string()
+                .contains("back edge")
+        );
+
+        let mut arity = split.clone();
+        arity.blocks[1].terminator = Terminator::Jump(Edge::new(BlockId(3), Vec::new()));
+        assert!(
+            arity
+                .validate()
+                .expect_err("an edge must bind every parameter")
+                .to_string()
+                .contains("argument(s) to 1 parameter(s)")
+        );
+
+        let mut unreachable = split.clone();
+        let Terminator::Branch {
+            condition,
+            else_edge,
+            ..
+        } = unreachable.blocks[0].terminator.clone()
+        else {
+            panic!("entry block branches");
+        };
+        unreachable.blocks[0].terminator = Terminator::Branch {
+            condition,
+            then_edge: else_edge.clone(),
+            else_edge,
+        };
+        assert!(
+            unreachable
+                .validate()
+                .expect_err("a block nothing reaches is dead code")
+                .to_string()
+                .contains("unreachable")
+        );
+    }
+
+    #[test]
+    fn block_parameters_and_arguments_take_distinct_live_locations() {
+        let split = conditional_with_a_failing_arm()
+            .with_branching_conditionals()
+            .expect("split conditional");
+        let allocation =
+            RegisterAllocation::build(&split, CALLER_SAVED_BANK).expect("register allocation");
+
+        let parameter = split.parameters(&split.blocks()[3])[0];
+        let parameter_location = allocation
+            .location(parameter.value())
+            .expect("allocated block parameter");
+        let then_plan = allocation
+            .edge_moves(BlockId(1), 0)
+            .expect("then edge move plan");
+        assert_eq!(then_plan.len(), 1);
+        assert_eq!(
+            then_plan[0],
+            MoveStep::Move {
+                from: allocation
+                    .location(ValueId(1))
+                    .expect("allocated arm value"),
+                to: parameter_location,
+            }
+        );
+        assert!(
+            allocation
+                .edge_moves(BlockId(0), 0)
+                .expect("branch edges carry no arguments")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn single_block_allocation_is_unchanged_by_the_block_model() {
+        // Every quantity the emitters read is derived from a position axis
+        // that collapses to the old instruction indices when there is one
+        // block, so a one-block program allocates exactly as it always did.
+        let across_call = program_with_values_live_across_a_call(3);
+        let allocation =
+            RegisterAllocation::build(&across_call, WIN64_BANK).expect("register allocation");
+        assert_eq!(
+            allocation.instructions().len(),
+            across_call.instructions().len()
+        );
+        assert!(allocation.scratch_spill_slot.is_none());
+        assert_eq!(allocation.edge_moves.len(), 1);
+        assert!(allocation.edge_moves[0].is_empty());
     }
 }
