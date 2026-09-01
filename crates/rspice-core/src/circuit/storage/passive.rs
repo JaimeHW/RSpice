@@ -642,7 +642,7 @@ impl ResistorBranches {
 
 /// Accepted charge/incremental-derivative history for one
 /// solution-dependent capacitor.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SolutionDependentCapacitorState {
     /// Effective capacitance at the previous accepted solution.
     pub c_prev: Value,
@@ -696,6 +696,10 @@ pub struct Capacitors {
     pub value_expression_states: Vec<Option<SolutionDependentCapacitorState>>,
     /// Last accepted effective capacitance for device operating-point output.
     pub effective_capacitances: Vec<Value>,
+    /// Incremental `dQ/dx` coefficients at the active small-signal operating
+    /// point, aligned with the capacitor storage. Static capacitors use an
+    /// empty row and retain the compact ordinary `C*dV` stamp.
+    pub small_signal_charge_partials: Vec<Vec<(usize, Value)>>,
     /// Previous timestep voltage (t - dt)
     pub v_prev: Vec<Value>,
     /// Voltage from 2 steps ago (t - 2*dt) for Gear2/BDF2
@@ -736,6 +740,7 @@ impl Capacitors {
         self.value_expressions.push(None);
         self.value_expression_states.push(None);
         self.effective_capacitances.push(capacitance);
+        self.small_signal_charge_partials.push(Vec::new());
         self.v_prev.push(0.0);
         self.v_prev_prev.push(0.0);
         self.v_prev_prev_prev.push(0.0);
@@ -761,6 +766,7 @@ impl Capacitors {
         self.value_expressions.push(None);
         self.value_expression_states.push(None);
         self.effective_capacitances.push(capacitance);
+        self.small_signal_charge_partials.push(Vec::new());
         self.v_prev.push(ic); // Initialize v_prev to IC
         self.v_prev_prev.push(ic); // Initialize v_prev_prev to IC as well
         self.v_prev_prev_prev.push(ic);
@@ -783,6 +789,40 @@ impl Capacitors {
         value_expression: SolutionDependentCapacitor,
     ) {
         self.add(name, node_pos, node_neg, capacitance);
+        *self
+            .value_expressions
+            .last_mut()
+            .expect("capacitor expression storage follows capacitor storage") =
+            Some(value_expression);
+        *self
+            .value_expression_states
+            .last_mut()
+            .expect("capacitor expression state follows capacitor storage") =
+            Some(SolutionDependentCapacitorState::default());
+    }
+
+    /// Add a solution-dependent capacitor with a device-line `IC=` seed.
+    ///
+    /// `branch_ordinal` is present only for Xyce, where the initial voltage is
+    /// an enforced operating-point constraint and the same branch becomes the
+    /// capacitor's physical lead-current observable after startup. Native and
+    /// ngspice-compatible circuits retain only the transient seed.
+    pub fn add_with_value_expression_and_ic(
+        &mut self,
+        name: String,
+        node_pos: NodeId,
+        node_neg: NodeId,
+        capacitance: Value,
+        value_expression: SolutionDependentCapacitor,
+        ic: Value,
+        branch_ordinal: Option<NodeId>,
+    ) {
+        match branch_ordinal {
+            Some(branch_ordinal) => {
+                self.add_with_ic_branch(name, node_pos, node_neg, capacitance, ic, branch_ordinal)
+            }
+            None => self.add_with_ic(name, node_pos, node_neg, capacitance, ic),
+        }
         *self
             .value_expressions
             .last_mut()
@@ -879,6 +919,75 @@ impl Capacitors {
         Some(linearization)
     }
 
+    /// Evaluate and cache every solution-dependent capacitance at a
+    /// small-signal operating state. The incremental charge law follows the
+    /// transient DAE exactly: terminal derivatives are `+/-C(op)`, while a
+    /// non-terminal dependency contributes `Vcap(op) * dC/dx`.
+    pub fn prepare_solution_dependent_small_signal(
+        &mut self,
+        solution: &[Value],
+        frequency: Value,
+    ) -> Result<(), String> {
+        for index in 0..self.len() {
+            if self.value_expression(index).is_none() {
+                continue;
+            }
+            self.value_expression_mut(index)
+                .expect("checked above")
+                .set_frequency(frequency);
+            let linearization = self
+                .linearize_effective_capacitance(index, solution, 0.0)
+                .ok_or_else(|| {
+                    format!(
+                        "solution-dependent capacitor '{}' has no evaluator",
+                        self.names[index]
+                    )
+                })?;
+            let capacitance = linearization.value;
+            if !capacitance.is_finite() || capacitance < 0.0 {
+                return Err(format!(
+                    "solution-dependent capacitor '{}' evaluated to invalid small-signal capacitance {capacitance} at {frequency:.17e} Hz",
+                    self.names[index]
+                ));
+            }
+            self.effective_capacitances[index] = capacitance;
+            let stamp = self.stamps[index];
+            let v_op = if stamp.pp.row > 0 {
+                solution.get(stamp.pp.row - 1).copied().unwrap_or(0.0)
+            } else {
+                0.0
+            } - if stamp.nn.row > 0 {
+                solution.get(stamp.nn.row - 1).copied().unwrap_or(0.0)
+            } else {
+                0.0
+            };
+            let pos_col = stamp.pp.row.checked_sub(1);
+            let neg_col = stamp.nn.row.checked_sub(1);
+            let partials = &mut self.small_signal_charge_partials[index];
+            partials.clear();
+            if let Some(column) = pos_col {
+                partials.push((column, capacitance));
+            }
+            if let Some(column) = neg_col {
+                partials.push((column, -capacitance));
+            }
+            for (column, dcdx) in linearization.partials {
+                if Some(column) == pos_col || Some(column) == neg_col {
+                    continue;
+                }
+                let derivative = v_op * dcdx;
+                if !derivative.is_finite() {
+                    return Err(format!(
+                        "solution-dependent capacitor '{}' produced invalid small-signal dQ/dX {derivative} at {frequency:.17e} Hz",
+                        self.names[index]
+                    ));
+                }
+                partials.push((column, derivative));
+            }
+        }
+        Ok(())
+    }
+
     /// Initialize solution-dependent charge history from an accepted DC
     /// solution. Xyce's DC charge remains `C(V)*V`; transient steps then
     /// integrate the effective capacitance between accepted points.
@@ -946,6 +1055,7 @@ impl Capacitors {
         time: Value,
         dt: Value,
         coeff: &CompanionCoefficients,
+        num_nodes: usize,
     ) -> Result<(), String> {
         if !dt.is_finite() || dt <= 0.0 {
             return Err(format!(
@@ -1067,6 +1177,7 @@ impl Capacitors {
             }
 
             let mut affine = current;
+            let mut current_derivatives = Vec::with_capacity(derivative_terms.len());
             for (column, derivative) in derivative_terms {
                 let d_current = charge_factor * derivative;
                 if !d_current.is_finite() {
@@ -1075,19 +1186,56 @@ impl Capacitors {
                         self.names[index]
                     ));
                 }
+                affine -= d_current * solution.get(column).copied().unwrap_or(0.0);
+                current_derivatives.push((column, d_current));
+            }
+
+            if let Some(branch_ordinal) = self.ic_branch_indices[index] {
+                let branch = num_nodes + branch_ordinal - 1;
                 if stamp.pp.row > 0 {
-                    matrix.add(stamp.pp.row - 1, column, d_current);
+                    matrix.add(stamp.pp.row - 1, branch, 1.0);
                 }
                 if stamp.nn.row > 0 {
-                    matrix.add(stamp.nn.row - 1, column, -d_current);
+                    matrix.add(stamp.nn.row - 1, branch, -1.0);
                 }
-                affine -= d_current * solution.get(column).copied().unwrap_or(0.0);
-            }
-            if stamp.pp.row > 0 {
-                rhs[stamp.pp.row - 1] -= affine;
-            }
-            if stamp.nn.row > 0 {
-                rhs[stamp.nn.row - 1] += affine;
+
+                // Ibranch is the physical lead current. Scale a stiff
+                // companion row by its terminal conductance without changing
+                // the exact nonlinear affine equation:
+                //
+                //     Ibranch - sum(dI/dx * x) = affine.
+                let terminal_conductance = charge_factor * capacitance;
+                let use_scaled_row = terminal_conductance.is_finite()
+                    && terminal_conductance.abs() > 1.0
+                    && coeff.coeff_g != 0.0;
+                if use_scaled_row {
+                    for (column, derivative) in current_derivatives {
+                        matrix.add(branch, column, derivative / terminal_conductance);
+                    }
+                    matrix.add(branch, branch, -1.0 / terminal_conductance);
+                    rhs[branch] -= affine / terminal_conductance;
+                } else {
+                    for (column, derivative) in current_derivatives {
+                        matrix.add(branch, column, -derivative);
+                    }
+                    matrix.add(branch, branch, 1.0);
+                    rhs[branch] += affine;
+                }
+            } else {
+                for (column, derivative) in current_derivatives {
+                    if stamp.pp.row > 0 {
+                        matrix.add(stamp.pp.row - 1, column, derivative);
+                    }
+                    if stamp.nn.row > 0 {
+                        matrix.add(stamp.nn.row - 1, column, -derivative);
+                    }
+                }
+                if stamp.pp.row > 0 {
+                    rhs[stamp.pp.row - 1] -= affine;
+                }
+                if stamp.nn.row > 0 {
+                    rhs[stamp.nn.row - 1] += affine;
+                }
             }
             self.effective_capacitances[index] = capacitance;
         }
@@ -1104,6 +1252,7 @@ impl Capacitors {
         accepted_time: Value,
         dt: Value,
         coeff: &CompanionCoefficients,
+        num_nodes: usize,
     ) {
         if !dt.is_finite() || dt <= 0.0 {
             return;
@@ -1164,6 +1313,16 @@ impl Capacitors {
                 let old_dqdx = solution_partial(&state.dqdx_prev, *column);
                 dqd_x.push((*column, old_dqdx + 0.5 * (old_dcdx + *dcdx) * delta_v));
             }
+            for (column, old_dqdx) in &state.dqdx_prev {
+                if !linearization
+                    .partials
+                    .iter()
+                    .any(|(current_column, _)| current_column == column)
+                {
+                    let old_dcdx = solution_partial(&state.dcdx_prev, *column);
+                    dqd_x.push((*column, *old_dqdx + 0.5 * old_dcdx * delta_v));
+                }
+            }
             let mut current = charge_factor * charge - coeff.coeff_v_n / dt * state.q_prev;
             if coeff.needs_two_history {
                 current -= coeff.coeff_v_n_minus_1 / dt * state.q_prev_prev;
@@ -1180,7 +1339,10 @@ impl Capacitors {
             self.v_prev_prev_prev[index] = self.v_prev_prev[index];
             self.v_prev_prev[index] = self.v_prev[index];
             self.v_prev[index] = v_new;
-            self.i_prev[index] = current;
+            self.i_prev[index] = self.ic_branch_indices[index]
+                .and_then(|branch_ordinal| solution.get(num_nodes + branch_ordinal - 1))
+                .copied()
+                .unwrap_or(current);
             self.effective_capacitances[index] = capacitance;
             if let Some(expression) = self.value_expression_mut(index) {
                 expression.accept_transient_step(solution, accepted_time);
@@ -1256,6 +1418,15 @@ impl Capacitors {
     /// circuit solution rather than treated as a fixed numeric value.
     pub fn has_solution_dependent_values(&self) -> bool {
         self.value_expressions.iter().any(Option::is_some)
+    }
+
+    /// Whether any value expression carries accepted operator state that is
+    /// not represented by the capacitor charge checkpoint contract.
+    pub fn has_stateful_value_expressions(&self) -> bool {
+        self.value_expressions
+            .iter()
+            .flatten()
+            .any(|expression| expression.program.sdt_count != 0)
     }
 
     /// Link all stamps to a StaticMatrix for O(1) access
@@ -1365,26 +1536,36 @@ impl Capacitors {
             let Some(branch_ordinal) = branch_ordinal else {
                 continue;
             };
-            let stamp = self.stamps[index];
-            let v_pos = stamp
-                .pp
-                .row
-                .checked_sub(1)
-                .and_then(|slot| solution.get(slot))
-                .copied()
-                .unwrap_or_default();
-            let v_neg = stamp
-                .nn
-                .row
-                .checked_sub(1)
-                .and_then(|slot| solution.get(slot))
-                .copied()
-                .unwrap_or_default();
+            let incremental_charge = if self.value_expression(index).is_some() {
+                self.small_signal_charge_partials[index]
+                    .iter()
+                    .map(|(column, derivative)| {
+                        solution.get(*column).copied().unwrap_or_default() * *derivative
+                    })
+                    .sum()
+            } else {
+                let stamp = self.stamps[index];
+                let v_pos = stamp
+                    .pp
+                    .row
+                    .checked_sub(1)
+                    .and_then(|slot| solution.get(slot))
+                    .copied()
+                    .unwrap_or_default();
+                let v_neg = stamp
+                    .nn
+                    .row
+                    .checked_sub(1)
+                    .and_then(|slot| solution.get(slot))
+                    .copied()
+                    .unwrap_or_default();
+                self.effective_capacitances[index] * (v_pos - v_neg)
+            };
             if let Some(current) = branch_ordinal
                 .checked_sub(1)
                 .and_then(|slot| currents.get_mut(slot))
             {
-                *current = Complex64::new(0.0, omega) * self.capacitances[index] * (v_pos - v_neg);
+                *current = Complex64::new(0.0, omega) * incremental_charge;
             }
         }
     }

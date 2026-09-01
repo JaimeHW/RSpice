@@ -258,7 +258,8 @@ impl CircuitData {
                 .linearize_at(dc_solution)
                 .map_err(|error| error.to_string())?;
         }
-        Ok(())
+        self.capacitors
+            .prepare_solution_dependent_small_signal(dc_solution, 0.0)
     }
 
     /// Refresh behavioral-source Jacobians for one AC frequency point.
@@ -286,7 +287,8 @@ impl CircuitData {
                     .map_err(|error| error.to_string())?;
             }
         }
-        Ok(())
+        self.capacitors
+            .prepare_solution_dependent_small_signal(dc_solution, frequency)
     }
 
     /// Linearize every behavioral source at an arbitrary state and active
@@ -308,7 +310,8 @@ impl CircuitData {
                 .linearize_at_state_and_frequency(state, frequency)
                 .map_err(|error| error.to_string())?;
         }
-        Ok(())
+        self.capacitors
+            .prepare_solution_dependent_small_signal(state, frequency)
     }
 
     /// Build the per-device operating-point report from the device state

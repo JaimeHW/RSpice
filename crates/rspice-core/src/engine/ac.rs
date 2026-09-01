@@ -2092,11 +2092,29 @@ impl Engine {
             }
         }
 
-        // Stamp capacitors: jωC
+        // Stamp capacitors: jω*dQ/dx. Ordinary capacitors reduce to jωC;
+        // expression-valued devices also carry their bias-dependent external
+        // charge derivatives.
         for (i, stamp) in circuit.capacitors.stamps.iter().enumerate() {
+            if circuit.capacitors.value_expression(i).is_some() {
+                for &(column, dqdx) in &circuit.capacitors.small_signal_charge_partials[i] {
+                    let omega_dqdx = omega * dqdx;
+                    if stamp.pp.row > 0 {
+                        ac_matrix.add_imag(stamp.pp.row - 1, column, omega_dqdx);
+                    }
+                    if stamp.nn.row > 0 {
+                        ac_matrix.add_imag(stamp.nn.row - 1, column, -omega_dqdx);
+                    }
+                    if let Some(branch_ordinal) = circuit.capacitors.ic_branch_indices[i] {
+                        let branch = circuit.get_branch_matrix_index(branch_ordinal) - 1;
+                        ac_matrix.add_imag(branch, column, -omega_dqdx);
+                    }
+                }
+                continue;
+            }
             let c = circuit
                 .capacitors
-                .capacitances
+                .effective_capacitances
                 .get(i)
                 .copied()
                 .unwrap_or(0.0);
@@ -3346,6 +3364,49 @@ mod tests {
                 .count(),
             1,
             "capacitor IC current must not be duplicated"
+        );
+    }
+
+    #[test]
+    fn solution_dependent_ic_capacitor_uses_operating_point_capacitance_in_ac() {
+        let netlist = Netlist::parse_with_options(
+            "Xyce solution-dependent capacitor IC AC current\n\
+             V1 in 0 DC 0 AC 1\n\
+             VCTRL ctrl 0 DC 3 AC 0.5\n\
+             R1 in out 1k\n\
+             C1 out 0 C={1u*(1+V(ctrl))} IC=0.2\n\
+             .AC LIN 1 1k 1k\n\
+             .END\n",
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("solution-dependent capacitor AC deck parses");
+        let engine = Engine::new(
+            crate::engine::SimulationConfig::default()
+                .with_spice_dialect(crate::engine::SpiceDialect::Xyce),
+        );
+        let point = engine
+            .run_ac(&netlist, &[1.0e3])
+            .expect("solution-dependent capacitor AC solve succeeds")
+            .remove(0);
+        let current_index = point
+            .branch_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("C1"))
+            .expect("IC capacitor current branch exists");
+        let current = point.currents[current_index];
+        let omega = 2.0 * PI * 1.0e3;
+        let capacitance = 4.0e-6;
+        let controlled_charge = 0.2 * 1.0e-6 * 0.5;
+        let vout = (Complex64::new(1.0e-3, 0.0) - Complex64::new(0.0, omega * controlled_charge))
+            / Complex64::new(1.0e-3, omega * capacitance);
+        let expected = Complex64::new(0.0, omega)
+            * (capacitance * vout + Complex64::new(controlled_charge, 0.0));
+        assert!(
+            (current - expected).norm() <= 1.0e-12,
+            "expected I(C1)={expected}, got {current}"
         );
     }
 

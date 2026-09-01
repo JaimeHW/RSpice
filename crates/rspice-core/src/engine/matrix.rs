@@ -103,7 +103,12 @@ impl Engine {
             };
             let stamp = &circuit.capacitors.stamps[index];
             let referenced_cols: Vec<usize> = expression.bound_solution_indices().collect();
-            for &row in &[stamp.pp.row, stamp.nn.row] {
+            let ic_branch_row = circuit.capacitors.ic_branch_indices[index]
+                .map(|ordinal| circuit.get_branch_matrix_index(ordinal));
+            for row in [stamp.pp.row, stamp.nn.row]
+                .into_iter()
+                .chain(ic_branch_row)
+            {
                 if row == 0 {
                     continue;
                 }

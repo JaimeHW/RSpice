@@ -108,6 +108,7 @@ impl Engine {
                 accepted_time,
                 dt,
                 coeff,
+                num_nodes,
             );
 
         for l_idx in 0..circuit.inductors.names.len() {

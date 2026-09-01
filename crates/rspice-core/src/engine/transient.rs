@@ -2572,8 +2572,8 @@ impl Engine {
         );
         block_if_present(
             &mut blockers,
-            circuit.capacitors.has_solution_dependent_values(),
-            "solution-dependent capacitor accepted expression state is not checkpointed",
+            circuit.capacitors.has_stateful_value_expressions(),
+            "solution-dependent capacitor accepted SDT expression state is not checkpointed",
         );
         block_if_present(
             &mut blockers,
@@ -9511,6 +9511,27 @@ D1 D 0 DMOD
             ["behavioral-source accepted SDT state is not checkpointed"]
         );
         assert!(Engine::exact_integration_runtime_resume_blockers(&stateful, 0).is_empty());
+
+        let stateful_capacitor = Netlist::parse_with_options(
+            "stateful capacitor expression\n\
+             V1 in 0 1\n\
+             R1 out 0 1k\n\
+             C1 out 0 C={1p*(1+SDT(V(in)))} IC=0.1\n\
+             .end",
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("stateful capacitor fixture parses");
+        let stateful_capacitor =
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
+                .build_circuit(&stateful_capacitor)
+                .expect("stateful capacitor fixture builds");
+        assert_eq!(
+            Engine::exact_integration_runtime_resume_blockers(&stateful_capacitor, 1),
+            ["solution-dependent capacitor accepted SDT expression state is not checkpointed"]
+        );
     }
 
     #[test]
@@ -12258,5 +12279,203 @@ D1 D 0 DMOD
             .validate_periodic_source_contract(&netlist, &["V1".to_owned()], 1.0e3)
             .expect_err("incommensurate source is rejected");
         assert!(error.to_string().contains("not an integer multiple"));
+    }
+
+    fn parse_solution_dependent_capacitor_deck(source: &str) -> Netlist {
+        Netlist::parse_with_options(
+            source,
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("solution-dependent capacitor deck parses")
+    }
+
+    #[test]
+    fn solution_dependent_capacitor_ic_obeys_xyce_and_ngspice_startup_semantics() {
+        let non_ground = parse_solution_dependent_capacitor_deck(
+            "solution-dependent capacitor IC dialect semantics\n\
+             VBIAS bias 0 2\n\
+             VCTRL ctrl 0 1\n\
+             R1 out 0 1k\n\
+             C1 out bias C={1n*(1+0.25*V(ctrl))} IC=0.25\n\
+             .end\n",
+        );
+        let xyce = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+        let circuit = xyce
+            .build_circuit(&non_ground)
+            .expect("combined Xyce expression/IC capacitor builds");
+        assert!(circuit.capacitors.value_expression(0).is_some());
+        assert_eq!(circuit.capacitors.ic[0], Some(0.25));
+        assert!(circuit.capacitors.ic_branch_indices[0].is_some());
+
+        let xyce_result = xyce
+            .run_tran_with_startup_mode(
+                &non_ground,
+                1.0e-10,
+                1.0e-10,
+                TransientStartupMode::OperatingPoint,
+            )
+            .expect("Xyce constrained startup solves");
+        let out = xyce_result
+            .try_voltage_waveform_named("out")
+            .expect("out waveform exists")[0];
+        let bias = xyce_result
+            .try_voltage_waveform_named("bias")
+            .expect("bias waveform exists")[0];
+        assert!((out - bias - 0.25).abs() <= 32.0 * Value::EPSILON);
+
+        let grounded = parse_solution_dependent_capacitor_deck(
+            "solution-dependent capacitor native seed\n\
+             VCTRL ctrl 0 1\n\
+             R1 out 0 1k\n\
+             C1 out 0 C={1n*(1+0.25*V(ctrl))} IC=0.25\n\
+             .end\n",
+        );
+        for dialect in [SpiceDialect::BestAvailable, SpiceDialect::Ngspice] {
+            let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+            let circuit = engine.build_circuit(&grounded).unwrap_or_else(|error| {
+                panic!("combined {dialect:?} expression/IC capacitor must build: {error}")
+            });
+            assert!(circuit.capacitors.value_expression(0).is_some());
+            assert_eq!(circuit.capacitors.ic[0], Some(0.25));
+            assert!(circuit.capacitors.ic_branch_indices[0].is_none());
+
+            let ordinary = engine
+                .run_tran_with_startup_mode(
+                    &grounded,
+                    1.0e-10,
+                    1.0e-10,
+                    TransientStartupMode::OperatingPoint,
+                )
+                .unwrap_or_else(|error| {
+                    panic!("{dialect:?} operating-point startup must solve: {error}")
+                });
+            assert_eq!(
+                ordinary
+                    .try_voltage_waveform_named("out")
+                    .expect("ordinary out waveform exists")[0]
+                    .to_bits(),
+                0.0_f64.to_bits(),
+                "without UIC, {dialect:?} IC= must not become a DC voltage constraint"
+            );
+            let uic = engine
+                .run_tran_with_startup_mode(&grounded, 1.0e-10, 1.0e-10, TransientStartupMode::Uic)
+                .unwrap_or_else(|error| panic!("{dialect:?} UIC startup must solve: {error}"));
+            assert_eq!(
+                uic.try_voltage_waveform_named("out")
+                    .expect("UIC out waveform exists")[0]
+                    .to_bits(),
+                0.25_f64.to_bits(),
+                "UIC must seed the {dialect:?} expression-valued capacitor terminal voltage exactly"
+            );
+        }
+    }
+
+    #[test]
+    fn rejected_solution_dependent_ic_capacitor_trial_restores_accepted_state() {
+        let netlist = parse_solution_dependent_capacitor_deck(
+            "solution-dependent capacitor rollback\n\
+             VCTRL ctrl 0 1\n\
+             R1 out 0 1k\n\
+             C1 out 0 C={1n*(1+V(ctrl))} IC=0.2\n\
+             .end\n",
+        );
+        let engine =
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+        let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
+        circuit.link_indices(&matrix);
+        let mut accepted = vec![0.0; circuit.matrix_size()];
+        let out = circuit.get_node_by_name("out").expect("out node");
+        let ctrl = circuit.get_node_by_name("ctrl").expect("ctrl node");
+        accepted[out - 1] = 0.2;
+        accepted[ctrl - 1] = 1.0;
+        circuit
+            .capacitors
+            .initialize_solution_dependent_from_dc(&accepted, 0.0);
+        let accepted_states = circuit.capacitors.value_expression_states.clone();
+        let accepted_effective = circuit.capacitors.effective_capacitances.clone();
+        let snapshot = circuit.transient_trial_state_snapshot();
+
+        let mut rejected = accepted.clone();
+        rejected[out - 1] = -0.1;
+        rejected[ctrl - 1] = 3.0;
+        let mut rhs = vec![0.0; circuit.matrix_size()];
+        let num_nodes = circuit.num_nodes();
+        circuit
+            .capacitors
+            .stamp_solution_dependent_transient_companion(
+                &mut matrix,
+                &mut rhs,
+                &rejected,
+                1.0e-9,
+                1.0e-9,
+                &CompanionCoefficients::backward_euler(),
+                num_nodes,
+            )
+            .expect("rejected trial stamps");
+        assert_ne!(
+            circuit.capacitors.effective_capacitances, accepted_effective,
+            "trial evaluation must exercise mutable expression state"
+        );
+
+        circuit.restore_nonlinear_state(snapshot);
+        assert_eq!(circuit.capacitors.value_expression_states, accepted_states);
+        assert_eq!(
+            circuit.capacitors.effective_capacitances,
+            accepted_effective
+        );
+    }
+
+    #[test]
+    fn solution_dependent_ic_capacitor_checkpoint_resume_is_bit_exact() {
+        let netlist = parse_solution_dependent_capacitor_deck(
+            "solution-dependent capacitor checkpoint\n\
+             VDRV src 0 PULSE(0 1 0.25n 0.25n 0.25n 1n 2n)\n\
+             VCTRL ctrl 0 PULSE(0 1 0.5n 0.25n 0.25n 0.75n 2n)\n\
+             R1 src out 1k\n\
+             C1 out 0 C={1p*(1+0.5*V(ctrl))} IC=0.2\n\
+             .end\n",
+        );
+        let engine =
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+        let (uninterrupted, scheduled) = engine
+            .run_tran_checkpoint_schedule_with_startup_mode(
+                &netlist,
+                4.0e-9,
+                0.25e-9,
+                TransientStartupMode::OperatingPoint,
+                &[2.0e-9],
+            )
+            .expect("checkpointed trajectory solves");
+        assert_eq!(scheduled.len(), 1);
+        let checkpoint = TransientCheckpoint::from_text(&scheduled[0].checkpoint.to_text())
+            .expect("solution-dependent capacitor checkpoint round-trips");
+        let (resumed, _) = engine
+            .run_tran_resume(&netlist, &checkpoint, 4.0e-9, 0.25e-9)
+            .expect("solution-dependent capacitor checkpoint resumes");
+        let seam = uninterrupted
+            .time
+            .iter()
+            .position(|time| time.to_bits() == checkpoint.time.to_bits())
+            .expect("uninterrupted result contains checkpoint seam");
+        assert_eq!(resumed.time, uninterrupted.time[seam..]);
+        assert_eq!(resumed.step_sizes[0].to_bits(), 0.0_f64.to_bits());
+        assert_eq!(
+            resumed.step_sizes[1..],
+            uninterrupted.step_sizes[seam + 1..]
+        );
+        for (resumed, uninterrupted) in resumed.voltages.iter().zip(&uninterrupted.voltages) {
+            assert_eq!(resumed, &uninterrupted[seam..]);
+        }
+        for (resumed, uninterrupted) in resumed
+            .branch_currents
+            .iter()
+            .zip(&uninterrupted.branch_currents)
+        {
+            assert_eq!(resumed, &uninterrupted[seam..]);
+        }
     }
 }
