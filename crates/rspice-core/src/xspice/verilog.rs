@@ -27,6 +27,50 @@
 //! samples with hysteresis, and scalar DAC bridges stamp Thevenin equivalents.
 //! Vector and bidirectional coercions remain fail-closed until their resolution
 //! semantics are represented directly.
+//!
+//! # Where a `wreal` meets an analog node
+//!
+//! Not here yet, and the boundary's rulings are recorded here because they
+//! have a right answer worth writing down before somebody guesses one. The
+//! mixed host above does not settle them: it *refuses* any trial time off its
+//! integer-nanosecond grid, which dissolves the time-translation question
+//! rather than answering it, and an LTE-controlled transient does not land on
+//! integer nanoseconds — so the general boundary still needs exactly what
+//! follows.
+//!
+//! **The two event worlds do not share a tick encoding**:
+//!
+//! * the circuit's queue keys an event by `f64::to_bits(seconds)`, which is
+//!   exact and unquantized because XSPICE event times are chosen by code models
+//!   and by the step controller rather than lying on a declared grid;
+//! * this host keys one by an integer count of the declared time unit, which
+//!   at [`TIME_UNIT_RULING`]'s 1 ns is a coarse grid indeed.
+//!
+//! No mapping between the two is exact in both directions, so the choice is
+//! which property to keep, and there is one answer that keeps the right ones:
+//! **floor an analog time to the tick at or before it, and publish an event at
+//! the unquantized analog time.** Flooring is monotone, so a non-decreasing
+//! sequence of accepted analog times gives [`DigitalHost::advance_to`] a
+//! non-decreasing sequence of ticks; it never runs the digital world past an
+//! instant the integrator has accepted, which rounding to nearest would;
+//! and two analog times inside one tick collapse rather than reorder, which is
+//! what a declared precision *means*. Publishing at the analog time rather than
+//! at the tick's seconds is what keeps D5 clause 2 — the step controller stops
+//! bit-exactly at an event time — untouched by the grid.
+//!
+//! **One hazard to check when that boundary is wired.** The two sides resolve
+//! multiple drivers differently. A circuit real event node *sums* its drivers
+//! (`circuit::external_models`), while Verilog-AMS LRM 2.4 section 6.5.3 permits
+//! exactly one driver of a `wreal` and the front end refuses a second. A
+//! published `wreal` must therefore be the only driver of the node it lands on,
+//! or the analog side sees a sum neither standard asked for, silently.
+//!
+//! The bridge halves already exist as code models — `real_to_v` (planned in by
+//! `engine::builder`'s `plan_xspice_auto_bridges`, the single planner a
+//! connect-module route extends) and `v_to_real` (sample on accepted step, no
+//! threshold, no breakpoint) — and neither needs anything from this host.
+//!
+//! [`DigitalHost::advance_to`]: host::DigitalHost::advance_to
 
 pub(crate) mod host;
 mod mixed;
