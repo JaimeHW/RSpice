@@ -495,15 +495,18 @@ class CiConfigurationTests(unittest.TestCase):
 
         The conformance step names its test targets explicitly rather than
         using `--tests`, so a new target that nobody adds here is a suite that
-        exists and never runs. Three of them are digital: `verilog_oracles` is
+        exists and never runs. Four of them are digital: `verilog_oracles` is
         the IEEE 1364-2005 language corpus, `verilog_scale` is the gate-level
-        scale suite, and `verilog_ams` is the Verilog-AMS real-net corpus.
+        scale suite, `verilog_ams` is the Verilog-AMS real-net corpus, and
+        `verilog_rnm_agreement` holds each reference block's analog and
+        real-number representations to one another.
 
         None needs an external simulator installed to be worth running. The
         first two check their designs against expectations derived without one;
-        the third has no oracle arm at all, because neither Icarus nor
+        the last two have no oracle arm at all, because neither Icarus nor
         Verilator implements `wreal` in a form the harness could hold to an
-        answer, so it is RSpice against reference models throughout.
+        answer — so one is RSpice against reference models and the other is
+        RSpice against itself through two representations that share no code.
         """
         workflow = read_text(".github/workflows/ci.yml")
         step = workflow.split("- name: Conformance suite unit tests", 1)[1].split(
@@ -514,10 +517,40 @@ class CiConfigurationTests(unittest.TestCase):
             "--test verilog_oracles",
             "--test verilog_scale",
             "--test verilog_ams",
+            "--test verilog_rnm_agreement",
         ):
             self.assertIn(target, step)
         self.assertEqual(step.count("--test verilog_scale"), 1)
         self.assertEqual(step.count("--test verilog_ams"), 1)
+        self.assertEqual(step.count("--test verilog_rnm_agreement"), 1)
+
+    def test_rnm_performance_is_a_nightly_release_measurement_only(self) -> None:
+        """The wall-clock leg runs in nightly, in release, and never on push.
+
+        Two halves, and both matter. In the fast tier it would be a timing
+        assertion on a shared runner, which is a flake generator; in a debug
+        build it would be measuring a different ratio, because the analog side
+        is matrix work and the RNM side is a compiler front end and
+        `opt-level = 0` slows the two by different factors.
+
+        The fast-tier half is checked by absence of the `--test` selector
+        rather than of the bare name, because the conformance step's comment
+        names the target to say why it is not there — and a rule that forbade
+        mentioning it would push that explanation out of the file it explains.
+        Absence of the selector is what decides whether it runs, since that
+        step names its targets explicitly.
+        """
+        ci_workflow = read_text(".github/workflows/ci.yml")
+        nightly_workflow = read_text(".github/workflows/nightly.yml")
+
+        self.assertNotIn("--test verilog_rnm_performance", ci_workflow)
+
+        step = nightly_workflow.split("- name: RNM against analog wall clock", 1)[
+            1
+        ].split("- name:", 1)[0]
+        self.assertIn("--test verilog_rnm_performance", step)
+        self.assertIn("--release", step)
+        self.assertIn("--nocapture", step)
 
     def test_nightly_qualifies_shipped_models_through_native_x64(self) -> None:
         nightly_workflow = read_text(".github/workflows/nightly.yml")

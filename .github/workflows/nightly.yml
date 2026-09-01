@@ -57,6 +57,24 @@ jobs:
           cargo test --locked -p rspice-conformance --lib
           --test ngspice_oracle_audit --test verilog_oracles --release
           -- --nocapture
+      - name: RNM against analog wall clock (release)
+        # The performance leg of the dual-representation suite: what a
+        # real-number model of a reference block costs against simulating the
+        # block. Here rather than in CI for two reasons. It is a wall-clock
+        # measurement, which flaps on a loaded per-push runner; and it is only
+        # meaningful in release, because the two sides are dominated by
+        # different work — matrix solves on one, a Verilog front end on the
+        # other — that `opt-level = 0` slows by different factors, so a debug
+        # measurement is a different ratio rather than a slower one.
+        #
+        # --nocapture because the table is the deliverable. The assertion is
+        # only that the RNM is the cheaper of the two; P3's 100x exit gate is
+        # printed against the measurement rather than asserted, since a
+        # wall-clock ratio asserted in CI is a test that fails when the runner
+        # is busy.
+        run: >-
+          cargo test --locked -p rspice-conformance --release
+          --test verilog_rnm_performance -- --nocapture
       - name: GF180MCU device corpus (release)
         # A released Apache-2.0 foundry PDK: BSIM4 through the vendor's own
         # subcircuit wrappers and corner libraries, across four temperatures.

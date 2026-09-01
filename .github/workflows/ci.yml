@@ -178,10 +178,21 @@ jobs:
         # suite is RSpice against reference models written from the clause, and
         # installing a simulator would not change what it runs. Two cases and
         # twelve vectors — it is milliseconds.
+        #
+        # `verilog_rnm_agreement` is the same corpus's second answer to having
+        # no oracle: four reference blocks, each authored twice — once as a
+        # SPICE deck simulated by the transient engine, once as a `wreal` design
+        # run on the digital host — held to a bound derived from the block's own
+        # physics. It runs here because it is a correctness gate and it is
+        # cheap: four small decks, a few hundred accepted transient points each,
+        # under a second in this debug build. Its sibling target
+        # `verilog_rnm_performance` is deliberately *not* named here — it is a
+        # wall-clock measurement, which belongs in nightly and in release.
         run: >-
           cargo test --locked -p rspice-conformance --lib
           --test ngspice_oracle_audit --test y_device_policy
           --test verilog_oracles --test verilog_scale --test verilog_ams
+          --test verilog_rnm_agreement
       - name: Oracle-free corpora (routine tier)
         # The execution corpora are cheap here only because the expensive
         # decks opt out: every ISCAS85 deck is marked `!extended` and is
