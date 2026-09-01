@@ -20,9 +20,6 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::state::SimulationPage;
 
 const APPROVED_PAGE_WIDTH: f32 = 1100.0;
-const PENDING_FINGERPRINT: &str =
-    "0000000000000000000000000000000000000000000000000000000000000000";
-
 #[derive(Clone, Copy)]
 struct StudioBaseline {
     name: &'static str,
@@ -34,47 +31,47 @@ const STUDIO_BASELINES: [StudioBaseline; 9] = [
     StudioBaseline {
         name: "studio-analyses",
         page: SimulationPage::Analyses,
-        fingerprint: PENDING_FINGERPRINT,
+        fingerprint: "293b4c4af45a6af9eaf800ae3ef775c220c66d02c5cc906bbc814dd7c7823ecd",
     },
     StudioBaseline {
         name: "studio-excitations",
         page: SimulationPage::Excitations,
-        fingerprint: PENDING_FINGERPRINT,
+        fingerprint: "130884c32e9441b618358c0623b563c794d257aea2a20f86fda029157b613c97",
     },
     StudioBaseline {
         name: "studio-variables",
         page: SimulationPage::Variables,
-        fingerprint: PENDING_FINGERPRINT,
+        fingerprint: "a5a43bf7609649d230c12ab5e78afd498cad27c01e19e7932d6283382dee2e05",
     },
     StudioBaseline {
         name: "studio-outputs",
         page: SimulationPage::Outputs,
-        fingerprint: PENDING_FINGERPRINT,
+        fingerprint: "9026ed061e491ad77a57adfa8a6745df39302029c3bcc025fd3aa9c94b989de0",
     },
     StudioBaseline {
         name: "studio-specifications",
         page: SimulationPage::Specifications,
-        fingerprint: PENDING_FINGERPRINT,
+        fingerprint: "aa3e73e6c11b9f29249ffffb891ea536a4684489b6613f40b074a4b6148d899a",
     },
     StudioBaseline {
         name: "studio-run-set",
         page: SimulationPage::RunSet,
-        fingerprint: PENDING_FINGERPRINT,
+        fingerprint: "f5ffe09b9eb517a4e1db9f2bdc5bcc16898049f40adf92f99a33bb8c38045f04",
     },
     StudioBaseline {
         name: "studio-models",
         page: SimulationPage::Models,
-        fingerprint: PENDING_FINGERPRINT,
+        fingerprint: "e54b9c7a27a6816e439df19a25f5500143844c9fc06cc9e60824fa74435b3119",
     },
     StudioBaseline {
         name: "studio-solver",
         page: SimulationPage::Solver,
-        fingerprint: PENDING_FINGERPRINT,
+        fingerprint: "081f972432fdad09bed457b0f59efcd4a0d9eb32911cd006d26d2967cfefb3e5",
     },
     StudioBaseline {
         name: "studio-save",
         page: SimulationPage::Save,
-        fingerprint: PENDING_FINGERPRINT,
+        fingerprint: "cb780291a143be66782c050dd7ab6099a2211aef946bf8537ab4ea112478f424",
     },
 ];
 
