@@ -12,6 +12,17 @@ pub(in crate::engine) enum DcOpStartup<'a> {
     PreviousSolution(&'a [Value]),
     Zero,
 }
+
+/// One independent startup equation `V(positive) - V(negative) = voltage`.
+/// Node zero is the ground terminal. Collection reduces consistent dependent
+/// authored equations to a deterministic spanning forest, so every non-ground
+/// `positive` appears at most once and solver rows remain full-rank.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct StartupVoltageConstraint {
+    pub positive: usize,
+    pub negative: usize,
+    pub voltage: Value,
+}
 use crate::diagnostics::{
     ConvergenceDiagnostic, ConvergenceFailureClass, ConvergenceQuality, ConvergenceSite,
     ConvergenceSiteKind,
@@ -940,10 +951,24 @@ R2 b out 1
             .expect("flattened internal node exists");
 
         let ic_hints = engine.collect_initial_condition_hints(&netlist, &circuit);
-        assert_eq!(ic_hints, vec![(flattened_node, 0.25)]);
+        assert_eq!(
+            ic_hints,
+            vec![StartupVoltageConstraint {
+                positive: flattened_node,
+                negative: 0,
+                voltage: 0.25,
+            }]
+        );
 
         let voltage_hints = engine.collect_node_voltage_hints(&netlist, &circuit);
-        assert_eq!(voltage_hints, vec![(flattened_node, 0.25)]);
+        assert_eq!(
+            voltage_hints,
+            vec![StartupVoltageConstraint {
+                positive: flattened_node,
+                negative: 0,
+                voltage: 0.25,
+            }]
+        );
     }
 
     #[test]
@@ -970,7 +995,14 @@ C1 mid b 1u
             .expect("connected top-level node exists");
 
         let ic_hints = engine.collect_initial_condition_hints(&netlist, &circuit);
-        assert_eq!(ic_hints, vec![(connected_node, 0.5)]);
+        assert_eq!(
+            ic_hints,
+            vec![StartupVoltageConstraint {
+                positive: connected_node,
+                negative: 0,
+                voltage: 0.5,
+            }]
+        );
     }
 
     #[test]
@@ -1037,6 +1069,98 @@ impl Engine {
         }
     }
 
+    fn raw_startup_constraints<T>(
+        netlist: &Netlist,
+        circuit: &crate::CircuitData,
+        entries: impl IntoIterator<Item = T>,
+        terminals: impl Fn(T) -> (String, Option<String>, Value),
+    ) -> Vec<StartupVoltageConstraint> {
+        entries
+            .into_iter()
+            .filter_map(|entry| {
+                let (positive, negative, voltage) = terminals(entry);
+                if !voltage.is_finite() {
+                    return None;
+                }
+                let positive = Self::startup_node_id(netlist, circuit, &positive)?;
+                let negative = match negative {
+                    Some(negative) => Self::startup_node_id(netlist, circuit, &negative)?,
+                    None => 0,
+                };
+                (positive <= circuit.num_nodes() && negative <= circuit.num_nodes()).then_some(
+                    StartupVoltageConstraint {
+                        positive,
+                        negative,
+                        voltage,
+                    },
+                )
+            })
+            .collect()
+    }
+
+    /// Reduce a consistent difference-constraint graph to a deterministic
+    /// full-rank star forest. Ground is the root when present; otherwise the
+    /// lowest node id owns the component common mode and retains its physical
+    /// KCL equation during constrained startup.
+    fn reduce_startup_constraints(
+        constraints: &[StartupVoltageConstraint],
+    ) -> Vec<StartupVoltageConstraint> {
+        let mut graph = HashMap::<usize, Vec<(usize, Value)>>::new();
+        for constraint in constraints {
+            graph
+                .entry(constraint.negative)
+                .or_default()
+                .push((constraint.positive, constraint.voltage));
+            graph
+                .entry(constraint.positive)
+                .or_default()
+                .push((constraint.negative, -constraint.voltage));
+        }
+        let mut remaining = graph.keys().copied().collect::<Vec<_>>();
+        remaining.sort_unstable();
+        let mut visited = HashSet::new();
+        let mut reduced = Vec::new();
+        for first in remaining {
+            if !visited.insert(first) {
+                continue;
+            }
+            let mut component = vec![(first, 0.0)];
+            let mut pending = std::collections::VecDeque::from([(first, 0.0)]);
+            while let Some((node, potential)) = pending.pop_front() {
+                for &(target, delta) in graph.get(&node).into_iter().flatten() {
+                    if visited.insert(target) {
+                        let target_potential = potential + delta;
+                        component.push((target, target_potential));
+                        pending.push_back((target, target_potential));
+                    }
+                }
+            }
+            component.sort_unstable_by_key(|(node, _)| *node);
+            let (root, root_potential) = component[0];
+            for (node, potential) in component.into_iter().skip(1) {
+                reduced.push(StartupVoltageConstraint {
+                    positive: node,
+                    negative: root,
+                    voltage: potential - root_potential,
+                });
+            }
+        }
+        reduced
+    }
+
+    fn initial_condition_constraints(
+        netlist: &Netlist,
+        circuit: &crate::CircuitData,
+        scoped: &[crate::netlist::InitialCondition],
+    ) -> Vec<StartupVoltageConstraint> {
+        Self::raw_startup_constraints(
+            netlist,
+            circuit,
+            netlist.initial_conditions.iter().chain(scoped.iter()),
+            |entry| (entry.node.clone(), entry.reference.clone(), entry.voltage),
+        )
+    }
+
     /// Collect node-voltage hints from .NODESET and .IC directives.
     ///
     /// .IC entries override .NODESET entries for the same node.
@@ -1044,48 +1168,33 @@ impl Engine {
         &self,
         netlist: &Netlist,
         circuit: &crate::CircuitData,
-    ) -> Vec<(usize, Value)> {
+    ) -> Vec<StartupVoltageConstraint> {
         let Some(validated) = self.validated_startup_netlist(netlist) else {
             return Vec::new();
         };
         let netlist = validated.as_ref();
-        let mut by_node: Vec<Option<Value>> = vec![None; circuit.num_nodes() + 1];
         let (scoped_initial_conditions, scoped_node_sets) = self.scoped_startup_directives(netlist);
-
-        for nodeset in netlist.node_sets.iter().chain(scoped_node_sets.iter()) {
-            if !nodeset.voltage.is_finite() {
-                continue;
-            }
-            if let Some(node_id) = Self::startup_node_id(netlist, circuit, &nodeset.node)
-                && node_id > 0
-                && node_id <= circuit.num_nodes()
-            {
-                by_node[node_id] = Some(nodeset.voltage);
-            }
-        }
-
-        for ic in netlist
-            .initial_conditions
+        let initial_conditions =
+            Self::initial_condition_constraints(netlist, circuit, &scoped_initial_conditions);
+        let ic_nodes = initial_conditions
             .iter()
-            .chain(scoped_initial_conditions.iter())
-        {
-            if !ic.voltage.is_finite() {
-                continue;
-            }
-            if let Some(node_id) = Self::startup_node_id(netlist, circuit, &ic.node)
-                && node_id > 0
-                && node_id <= circuit.num_nodes()
-            {
-                by_node[node_id] = Some(ic.voltage);
-            }
-        }
-
-        by_node
-            .into_iter()
-            .enumerate()
-            .skip(1)
-            .filter_map(|(node_id, voltage)| voltage.map(|v| (node_id, v)))
-            .collect()
+            .flat_map(|constraint| [constraint.positive, constraint.negative])
+            .filter(|&node| node != 0)
+            .collect::<HashSet<_>>();
+        let mut combined = Self::raw_startup_constraints(
+            netlist,
+            circuit,
+            netlist.node_sets.iter().chain(scoped_node_sets.iter()),
+            |entry| (entry.node.clone(), entry.reference.clone(), entry.voltage),
+        );
+        // `.IC` owns every component node it names; a `.NODESET` involving
+        // one of those nodes must not reintroduce a contradictory weaker hint.
+        combined.retain(|constraint| {
+            !ic_nodes.contains(&constraint.positive)
+                && (constraint.negative == 0 || !ic_nodes.contains(&constraint.negative))
+        });
+        combined.extend(initial_conditions);
+        Self::reduce_startup_constraints(&combined)
     }
 
     /// Collect node-voltage initial conditions from .IC directives only.
@@ -1093,27 +1202,17 @@ impl Engine {
         &self,
         netlist: &Netlist,
         circuit: &crate::CircuitData,
-    ) -> Vec<(usize, Value)> {
+    ) -> Vec<StartupVoltageConstraint> {
         let Some(validated) = self.validated_startup_netlist(netlist) else {
             return Vec::new();
         };
         let netlist = validated.as_ref();
         let (scoped_initial_conditions, _) = self.scoped_startup_directives(netlist);
-        netlist
-            .initial_conditions
-            .iter()
-            .chain(scoped_initial_conditions.iter())
-            .filter_map(|ic| {
-                if !ic.voltage.is_finite() {
-                    return None;
-                }
-                let node_id = Self::startup_node_id(netlist, circuit, &ic.node)?;
-                if node_id == 0 || node_id > circuit.num_nodes() {
-                    return None;
-                }
-                Some((node_id, ic.voltage))
-            })
-            .collect()
+        Self::reduce_startup_constraints(&Self::initial_condition_constraints(
+            netlist,
+            circuit,
+            &scoped_initial_conditions,
+        ))
     }
 
     /// Apply .IC node overrides to an operating-point solution vector.
@@ -1128,10 +1227,20 @@ impl Engine {
         let hints = self.collect_initial_condition_hints(netlist, circuit);
         let mut applied = 0usize;
 
-        for (node_id, voltage) in hints {
-            let idx = node_id - 1;
-            if idx < solution.len() {
-                solution[idx] = voltage;
+        for constraint in hints {
+            if constraint.positive == 0 || constraint.positive > circuit.num_nodes() {
+                continue;
+            }
+            let reference = if constraint.negative == 0 {
+                0.0
+            } else {
+                solution
+                    .get(constraint.negative - 1)
+                    .copied()
+                    .unwrap_or(0.0)
+            };
+            if let Some(slot) = solution.get_mut(constraint.positive - 1) {
+                *slot = reference + constraint.voltage;
                 applied += 1;
             }
         }

@@ -3,6 +3,7 @@
 //! the non-finite result guard behind `--allow-nonfinite`.
 
 use crate::cli::CliError;
+use crate::report::MeasurementReport;
 use rspice_core::{Engine, Netlist};
 use std::collections::HashMap;
 use std::path::Path;
@@ -228,6 +229,151 @@ pub(super) fn ensure_finite_series<'a>(
         }
     }
     Ok(())
+}
+
+/// Retain every row from a vector-valued continuous measurement and project
+/// its per-record verification contract into the common report model.
+///
+/// A stream passes only when evaluation succeeds and every retained row
+/// passes.  Individual failed rows are never collapsed into one scalar result.
+pub(super) fn record_continuous_measurements(
+    ctx: &super::RunContext<'_>,
+    analysis: &str,
+    results: Vec<rspice_core::analysis::ContinuousMeasureResult>,
+) {
+    if results.is_empty() {
+        return;
+    }
+    ctx.evaluated_meas
+        .borrow_mut()
+        .insert(analysis.to_ascii_uppercase());
+
+    if ctx.args.meas && !ctx.quiet {
+        let row_count = results
+            .iter()
+            .map(|result| result.records.len())
+            .sum::<usize>();
+        println!(
+            "  Continuous Measurement Results ({analysis}, {} streams, {row_count} records):",
+            results.len()
+        );
+        for result in &results {
+            if let Some(failure) = result.failure.as_deref() {
+                println!("    {} = FAILED ({failure})", result.name);
+                continue;
+            }
+            for (index, record) in result.records.iter().enumerate() {
+                let verdict = if record.passed { "PASS" } else { "FAILED" };
+                let coordinate = if let Some(axis) = record.event_axis {
+                    format!("axis={}", crate::report::format_spice_exponent(axis))
+                } else {
+                    format!(
+                        "trigger={}, target={}",
+                        record
+                            .trigger_axis
+                            .map(crate::report::format_spice_exponent)
+                            .unwrap_or_else(|| "missing".to_string()),
+                        record
+                            .target_axis
+                            .map(crate::report::format_spice_exponent)
+                            .unwrap_or_else(|| "missing".to_string())
+                    )
+                };
+                println!(
+                    "    {}[record {index}] = {} {verdict} ({coordinate})",
+                    result.name,
+                    crate::report::format_spice_exponent(record.value)
+                );
+            }
+            println!(
+                "    {} aggregate = {} (all_records_must_pass)",
+                result.name,
+                if result.passed() { "PASS" } else { "FAILED" }
+            );
+        }
+    }
+
+    let mut reports = ctx.measurements.borrow_mut();
+    for result in results {
+        let authored_failure_limit = ctx
+            .netlist
+            .measurements
+            .iter()
+            .find(|statement| {
+                statement.analysis.eq_ignore_ascii_case(analysis)
+                    && statement.name.eq_ignore_ascii_case(&result.name)
+            })
+            .and_then(|statement| statement.fail_value);
+
+        if let Some(failure) = result.failure {
+            reports.push(MeasurementReport {
+                name: result.name,
+                value: None,
+                raw_value: None,
+                expected: None,
+                tolerance: None,
+                failure_limit: authored_failure_limit,
+                failure_limit_exceeded: false,
+                passed: false,
+                error: Some(failure),
+                record_index: None,
+                event_axis: None,
+                trigger_axis: result
+                    .failure_metadata
+                    .and_then(|metadata| metadata.trigger_axis),
+                target_axis: result
+                    .failure_metadata
+                    .and_then(|metadata| metadata.target_axis),
+                aggregate_policy: Some("all_records_must_pass".to_string()),
+            });
+            continue;
+        }
+
+        if result.records.is_empty() {
+            reports.push(MeasurementReport {
+                name: result.name,
+                value: None,
+                raw_value: None,
+                expected: None,
+                tolerance: None,
+                failure_limit: authored_failure_limit,
+                failure_limit_exceeded: false,
+                passed: false,
+                error: Some(
+                    "continuous measurement returned no records and no failure reason".to_string(),
+                ),
+                record_index: None,
+                event_axis: None,
+                trigger_axis: None,
+                target_axis: None,
+                aggregate_policy: Some("all_records_must_pass".to_string()),
+            });
+            continue;
+        }
+
+        reports.extend(
+            result
+                .records
+                .into_iter()
+                .enumerate()
+                .map(|(index, record)| MeasurementReport {
+                    name: result.name.clone(),
+                    value: Some(record.value),
+                    raw_value: Some(record.raw_value),
+                    expected: None,
+                    tolerance: None,
+                    failure_limit: record.failure_limit,
+                    failure_limit_exceeded: record.failure_limit_exceeded,
+                    passed: record.passed,
+                    error: record.verification_failure_message(),
+                    record_index: Some(index),
+                    event_axis: record.event_axis,
+                    trigger_axis: record.trigger_axis,
+                    target_axis: record.target_axis,
+                    aggregate_policy: Some("all_records_must_pass".to_string()),
+                }),
+        );
+    }
 }
 
 #[cfg(test)]

@@ -137,3 +137,36 @@ fn projected_extrema_verify_and_feed_param_from_the_raw_dependent_value() {
     assert_eq!(results[1].raw_value, Some(5.0));
     assert!(results[1].passed);
 }
+
+#[test]
+fn continuous_dc_ac_and_tran_retain_every_record_and_verify_independently() {
+    for analysis in ["DC_CONT", "AC_CONT", "TRAN_CONT"] {
+        let netlist = parse_xyce(&format!(
+            "continuous FAILVALUE contract\n\
+             V1 out 0 0\n\
+             .measure {analysis} stream WHEN V(out)=0 CROSS=1 FAILVALUE=1\n\
+             .end\n"
+        ));
+        let mut engine = MeasureEngine::new();
+        engine.add(netlist.measurements[0].clone());
+        let axis = [0.0, 1.0, 2.0];
+        let values = [-1.0, 1.0, -1.0];
+        let signals = HashMap::from([("V(OUT)".to_string(), values.as_slice())]);
+
+        let results = engine.evaluate_continuous(&axis, &signals, &[]);
+        assert_eq!(results.len(), 1, "{analysis}");
+        let result = &results[0];
+        assert_eq!(result.failure, None, "{analysis}");
+        assert_eq!(result.records.len(), 2, "{analysis}");
+        assert_eq!(result.records[0].event_axis, Some(0.5), "{analysis}");
+        assert_eq!(result.records[0].raw_value, 0.5, "{analysis}");
+        assert_eq!(result.records[0].failure_limit, Some(1.0), "{analysis}");
+        assert!(result.records[0].passed, "{analysis}");
+        assert_eq!(result.records[1].event_axis, Some(1.5), "{analysis}");
+        assert_eq!(result.records[1].raw_value, 1.5, "{analysis}");
+        assert!(result.records[1].failure_limit_exceeded, "{analysis}");
+        assert!(!result.records[1].passed, "{analysis}");
+        assert_eq!(result.failed_record_count(), 1, "{analysis}");
+        assert!(!result.passed(), "{analysis}");
+    }
+}

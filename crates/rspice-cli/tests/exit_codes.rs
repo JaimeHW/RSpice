@@ -641,7 +641,7 @@ fn failed_step_point_exits_one_without_truncated_success() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stderr_upper = stderr.to_ascii_uppercase();
     assert!(
-        stderr_upper.contains(".STEP DEVICE D1 = 1"),
+        stderr_upper.contains(".STEP RUN-") && stderr_upper.contains("(DEVICE D1 = 1) PREFLIGHT"),
         "stderr should identify the failed step point: {stderr}"
     );
 

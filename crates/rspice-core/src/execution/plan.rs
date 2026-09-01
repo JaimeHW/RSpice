@@ -976,9 +976,10 @@ impl DeckPlan {
 
     /// Materialize Cartesian coordinates in declared axis order.
     ///
-    /// The final axis varies fastest. A plan without axes has exactly one
-    /// coordinate, which prevents frontends from inventing separate implicit
-    /// no-axis behavior.
+    /// The first axis varies fastest, matching Xyce's nested `.STEP` ordering
+    /// and the established RSpice materialization contract. A plan without
+    /// axes has exactly one coordinate, which prevents frontends from
+    /// inventing separate implicit no-axis behavior.
     pub fn coordinates_with_abort(
         &self,
         limits: &ResourceLimits,
@@ -1033,7 +1034,7 @@ impl DeckPlan {
                 .checked_add(1)
                 .ok_or(DeckPlanError::CoordinateCountOverflow)?;
 
-            for axis_index in (0..indices.len()).rev() {
+            for axis_index in 0..indices.len() {
                 indices[axis_index] += 1;
                 if indices[axis_index] < self.axes[axis_index].values.len() {
                     break;
@@ -1589,7 +1590,7 @@ mod tests {
     }
 
     #[test]
-    fn cartesian_coordinates_are_bounded_abortable_and_stable() {
+    fn cartesian_coordinates_are_first_axis_fastest_bounded_abortable_and_stable() {
         let temperature = RunAxis::new(
             AxisKind::Temperature,
             "temperature",
@@ -1610,10 +1611,12 @@ mod tests {
         assert_eq!(coordinates.len(), 4);
         assert_eq!(coordinates[0].assignments()[0].value_index(), 0);
         assert_eq!(coordinates[0].assignments()[1].value_index(), 0);
-        assert_eq!(coordinates[1].assignments()[0].value_index(), 0);
-        assert_eq!(coordinates[1].assignments()[1].value_index(), 1);
-        assert_eq!(coordinates[2].assignments()[0].value_index(), 1);
-        assert_eq!(coordinates[2].assignments()[1].value_index(), 0);
+        assert_eq!(coordinates[1].assignments()[0].value_index(), 1);
+        assert_eq!(coordinates[1].assignments()[1].value_index(), 0);
+        assert_eq!(coordinates[2].assignments()[0].value_index(), 0);
+        assert_eq!(coordinates[2].assignments()[1].value_index(), 1);
+        // This explicitly distinguishes Xyce's first-axis-fastest order from
+        // ordinary row-major products, where coordinate 1 would be (0, 1).
         assert!(
             coordinates
                 .iter()
@@ -2060,10 +2063,10 @@ mod tests {
         assert_eq!(coordinates.len(), 6);
         assert_eq!(coordinates[0].assignments()[0].value_index(), 0);
         assert_eq!(coordinates[0].assignments()[1].value_index(), 0);
-        assert_eq!(coordinates[1].assignments()[0].value_index(), 0);
-        assert_eq!(coordinates[1].assignments()[1].value_index(), 1);
-        assert_eq!(coordinates[3].assignments()[0].value_index(), 1);
-        assert_eq!(coordinates[3].assignments()[1].value_index(), 0);
+        assert_eq!(coordinates[1].assignments()[0].value_index(), 1);
+        assert_eq!(coordinates[1].assignments()[1].value_index(), 0);
+        assert_eq!(coordinates[2].assignments()[0].value_index(), 0);
+        assert_eq!(coordinates[2].assignments()[1].value_index(), 1);
         assert_eq!(
             coordinates,
             plan.coordinates_with_abort(&ResourceLimits::default(), &crate::NoAbort)

@@ -2682,10 +2682,18 @@ pub struct StartupDirectiveEntry {
     /// Parser-normalized node spelling used by the existing numeric startup
     /// representation. Kept distinct so diagnostics never alter execution.
     pub(crate) execution_node: String,
+    /// Optional negative terminal of a differential `V(positive,negative)`
+    /// startup constraint. `None` is the canonical single-ended form.
+    pub(crate) authored_reference: Option<String>,
+    pub(crate) execution_reference: Option<String>,
     /// Case- and hierarchy-separator-normalized node identity.
     pub(crate) canonical_node: String,
+    pub(crate) canonical_reference: Option<String>,
     /// Concrete execution node after hierarchy expansion, when applicable.
     pub(crate) qualified_nodes: Vec<String>,
+    /// Concrete negative terminals aligned one-for-one with
+    /// [`Self::qualified_nodes`]. Ground is retained as `0`.
+    pub(crate) qualified_references: Vec<Option<String>>,
     pub(crate) disposition: StartupDirectiveDisposition,
     /// Immutable parsed payload used to rebuild the effective execution
     /// vectors transactionally during semantic revalidation.
@@ -2702,12 +2710,28 @@ impl StartupDirectiveEntry {
         &self.execution_node
     }
 
+    pub fn authored_reference(&self) -> Option<&str> {
+        self.authored_reference.as_deref()
+    }
+
+    pub fn execution_reference(&self) -> Option<&str> {
+        self.execution_reference.as_deref()
+    }
+
     pub fn canonical_node(&self) -> &str {
         &self.canonical_node
     }
 
+    pub fn canonical_reference(&self) -> Option<&str> {
+        self.canonical_reference.as_deref()
+    }
+
     pub fn qualified_nodes(&self) -> &[String] {
         &self.qualified_nodes
+    }
+
+    pub fn qualified_references(&self) -> &[Option<String>] {
+        &self.qualified_references
     }
 
     pub fn disposition(&self) -> StartupDirectiveDisposition {
@@ -2771,8 +2795,10 @@ pub struct StartupDiagnostic {
 /// Initial condition specification
 #[derive(Debug, Clone)]
 pub struct InitialCondition {
-    /// Node name
+    /// Positive node name.
     pub node: String,
+    /// Optional negative terminal. `None` means ground.
+    pub reference: Option<String>,
     /// Initial voltage
     pub voltage: Value,
     /// Deferred voltage expression for subcircuit-scoped startup directives.
@@ -2840,8 +2866,10 @@ impl DeviceInitialConditionDirective {
 /// Nodeset hint for operating point
 #[derive(Debug, Clone)]
 pub struct NodeSet {
-    /// Node name
+    /// Positive node name.
     pub node: String,
+    /// Optional negative terminal. `None` means ground.
+    pub reference: Option<String>,
     /// Suggested voltage
     pub voltage: Value,
     /// Deferred voltage expression for subcircuit-scoped startup directives.

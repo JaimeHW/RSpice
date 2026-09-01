@@ -1,23 +1,24 @@
 //! SPEF (IEEE 1481) parasitic ingestion for post-layout simulation.
 //!
-//! A SPEF file describes each net's extracted RC network: internal
-//! subnodes, grounded and coupling capacitances, resistances, and which
-//! instance pin or top-level port sits on which subnode. Ingestion is a
-//! *back-annotation* transform on a parsed [`Netlist`]:
+//! A SPEF file describes each net's extracted RLC network: internal
+//! subnodes, grounded and coupling capacitances, resistances, inductances,
+//! and which instance pin or top-level port sits on which subnode. Ingestion
+//! is a *back-annotation* transform on a parsed [`Netlist`]:
 //!
 //! * every `*I inst:pin` connection rewires that instance's terminal from
 //!   the ideal net onto its SPEF subnode (`inst__pin`), so the parasitic
 //!   resistance genuinely sits between driver and load;
 //! * `*P` port connections keep the original net name, preserving the
 //!   deck's external connectivity;
-//! * the net's R/C elements are appended as ordinary resistors and
-//!   capacitors (coupling caps included), with SPEF units honored.
+//! * the net's R/L/C elements are appended as ordinary resistors,
+//!   inductors, and capacitors (coupling caps included), with SPEF units
+//!   honored.
 //!
 //! Decks reference a SPEF file with `.spef_include "file.spef"`
 //! (Spectre's spelling) — `.include file.spef` routes there too. DSPF
 //! files need none of this: DSPF is SPICE syntax and parses directly.
 //!
-//! Unsupported sections (`*INDUC`, reduced `*R_NET`/`*C_NET`) are rejected:
+//! Unsupported reduced sections (`*R_NET`/`*C_NET`) are rejected:
 //! silently dropping extracted parasitics would simulate a different circuit.
 
 use std::collections::{HashMap, HashSet};
@@ -68,12 +69,21 @@ struct Res {
 }
 
 #[derive(Debug, Clone)]
+struct Induc {
+    a: NodeRef,
+    b: NodeRef,
+    henries: Value,
+    line: usize,
+}
+
+#[derive(Debug, Clone)]
 struct DNet {
     name: String,
     line: usize,
     conns: Vec<Conn>,
     caps: Vec<Cap>,
     ress: Vec<Res>,
+    inductors: Vec<Induc>,
 }
 
 /// Parsed SPEF document.
@@ -95,6 +105,8 @@ pub struct SpefReport {
     pub resistors: usize,
     /// Parasitic capacitors added.
     pub capacitors: usize,
+    /// Parasitic inductors added.
+    pub inductors: usize,
 }
 
 impl SpefFile {
@@ -158,10 +170,10 @@ impl SpefFile {
                 "document contains no *D_NET annotation",
             ));
         }
-        if report.resistors + report.capacitors == 0 {
+        if report.resistors + report.capacitors + report.inductors == 0 {
             return Err(spef_annotation_error(
                 0,
-                "document did not apply any supported R/C parasitic",
+                "document did not apply any supported R/L/C parasitic",
             ));
         }
         ensure_parse_not_aborted(abort)?;
@@ -197,6 +209,7 @@ impl SpefFile {
 
         let mut new_elements: Vec<Element> = Vec::new();
         let mut parasitic_seq = 0_usize;
+        let mut occupied_element_names: HashSet<String> = element_index.keys().cloned().collect();
         let declared_nets: HashSet<String> = self
             .nets
             .iter()
@@ -335,9 +348,10 @@ impl SpefFile {
                     .as_ref()
                     .map(&node_name)
                     .unwrap_or_else(|| "0".to_owned());
-                parasitic_seq += 1;
+                let name =
+                    next_parasitic_name("CSPEF", &mut parasitic_seq, &mut occupied_element_names)?;
                 new_elements.push(Element {
-                    name: format!("CSPEF{parasitic_seq}"),
+                    name,
                     kind: ElementKind::Capacitor {
                         value: cap.farads,
                         value_expr: None,
@@ -383,9 +397,10 @@ impl SpefFile {
                         res.line,
                     )?;
                 }
-                parasitic_seq += 1;
+                let name =
+                    next_parasitic_name("RSPEF", &mut parasitic_seq, &mut occupied_element_names)?;
                 new_elements.push(Element {
-                    name: format!("RSPEF{parasitic_seq}"),
+                    name,
                     kind: ElementKind::Resistor {
                         value: res.ohms,
                         value_expr: None,
@@ -397,6 +412,55 @@ impl SpefFile {
                     provenance: crate::netlist::ElementProvenance::Authored,
                 });
                 report.resistors += 1;
+                net_parasitics += 1;
+            }
+
+            for (inductor_index, inductor) in net.inductors.iter().enumerate() {
+                poll_parse_abort(abort, inductor_index)?;
+                if !(inductor.henries.is_finite() && inductor.henries > 0.0) {
+                    if strict {
+                        return Err(spef_annotation_error(
+                            inductor.line,
+                            format!(
+                                "inductance on net `{}` must be finite and positive, got {}",
+                                net.name, inductor.henries
+                            ),
+                        ));
+                    }
+                    continue;
+                }
+                if strict {
+                    validate_node_reference(
+                        &inductor.a,
+                        &original_nodes,
+                        &declared_nets,
+                        &declared_pins,
+                        inductor.line,
+                    )?;
+                    validate_node_reference(
+                        &inductor.b,
+                        &original_nodes,
+                        &declared_nets,
+                        &declared_pins,
+                        inductor.line,
+                    )?;
+                }
+                let name =
+                    next_parasitic_name("LSPEF", &mut parasitic_seq, &mut occupied_element_names)?;
+                new_elements.push(Element {
+                    name,
+                    kind: ElementKind::Inductor {
+                        value: inductor.henries,
+                        value_expr: None,
+                        initial_current: None,
+                        model: None,
+                        instance_params: Vec::new(),
+                        deferred_params: Vec::new(),
+                    },
+                    nodes: vec![node_name(&inductor.a), node_name(&inductor.b)],
+                    provenance: crate::netlist::ElementProvenance::Authored,
+                });
+                report.inductors += 1;
                 net_parasitics += 1;
             }
 
@@ -413,7 +477,7 @@ impl SpefFile {
                 return Err(spef_annotation_error(
                     net.line,
                     format!(
-                        "net `{}` did not apply any supported R/C parasitic",
+                        "net `{}` did not apply any supported R/L/C parasitic",
                         net.name
                     ),
                 ));
@@ -426,6 +490,22 @@ impl SpefFile {
         }
         ensure_parse_not_aborted(abort)?;
         Ok(report)
+    }
+}
+
+fn next_parasitic_name(
+    prefix: &str,
+    sequence: &mut usize,
+    occupied: &mut HashSet<String>,
+) -> Result<String, ParseWithAbortError> {
+    loop {
+        *sequence = sequence.checked_add(1).ok_or_else(|| {
+            spef_annotation_error(0, "too many parasitic elements to assign unique names")
+        })?;
+        let candidate = format!("{prefix}{sequence}");
+        if occupied.insert(candidate.clone()) {
+            return Ok(candidate);
+        }
     }
 }
 
@@ -566,6 +646,7 @@ struct Parser<'a> {
     delimiter: char,
     cap_scale: Value,
     res_scale: Value,
+    induc_scale: Value,
 }
 
 /// Sections within a `*D_NET`.
@@ -575,6 +656,7 @@ enum NetSection {
     Conn,
     Cap,
     Res,
+    Induc,
 }
 
 impl<'a> Parser<'a> {
@@ -586,6 +668,7 @@ impl<'a> Parser<'a> {
             delimiter: ':',
             cap_scale: 1e-12, // SPEF default exchange unit is PF / OHM
             res_scale: 1.0,
+            induc_scale: 1.0,
         }
     }
 
@@ -636,7 +719,7 @@ impl<'a> Parser<'a> {
 
             match keyword.as_str() {
                 "*SPEF" | "*DESIGN" | "*DATE" | "*VENDOR" | "*PROGRAM" | "*VERSION"
-                | "*DESIGN_FLOW" | "*DIVIDER" | "*BUS_DELIMITER" | "*T_UNIT" | "*L_UNIT" => {
+                | "*DESIGN_FLOW" | "*DIVIDER" | "*BUS_DELIMITER" | "*T_UNIT" => {
                     in_name_map = false;
                 }
                 "*DELIMITER" => {
@@ -664,6 +747,12 @@ impl<'a> Parser<'a> {
                     in_name_map = false;
                     self.res_scale = self
                         .parse_unit(&fields, &[("OHM", 1.0), ("KOHM", 1e3), ("MOHM", 1e6)])
+                        .map_err(ParseWithAbortError::from)?;
+                }
+                "*L_UNIT" => {
+                    in_name_map = false;
+                    self.induc_scale = self
+                        .parse_unit(&fields, &[("HENRY", 1.0), ("MH", 1e-3), ("UH", 1e-6)])
                         .map_err(ParseWithAbortError::from)?;
                 }
                 "*NAME_MAP" => in_name_map = true,
@@ -696,6 +785,7 @@ impl<'a> Parser<'a> {
                         conns: Vec::new(),
                         caps: Vec::new(),
                         ress: Vec::new(),
+                        inductors: Vec::new(),
                     });
                     section = NetSection::None;
                 }
@@ -709,11 +799,7 @@ impl<'a> Parser<'a> {
                 "*CONN" => section = NetSection::Conn,
                 "*CAP" => section = NetSection::Cap,
                 "*RES" => section = NetSection::Res,
-                "*INDUC" => {
-                    return Err(self
-                        .error("*INDUC parasitics are not supported and cannot be skipped")
-                        .into());
-                }
+                "*INDUC" => section = NetSection::Induc,
                 "*END" => {
                     if let Some(net) = current.take() {
                         nets.push(net);
@@ -811,6 +897,34 @@ impl<'a> Parser<'a> {
                         a,
                         b,
                         ohms,
+                        line: self.line_num,
+                    });
+                }
+                _ if section == NetSection::Induc => {
+                    let net = current
+                        .as_mut()
+                        .ok_or_else(|| self.error("*INDUC entry outside *D_NET"))
+                        .map_err(ParseWithAbortError::from)?;
+                    if fields.len() != 4 {
+                        return Err(self
+                            .error(format!(
+                                "malformed *INDUC entry `{line}` (expected 4 fields)"
+                            ))
+                            .into());
+                    }
+                    let henries = self
+                        .parse_scaled_value(fields[3], self.induc_scale, "inductance", false)
+                        .map_err(ParseWithAbortError::from)?;
+                    let a = self
+                        .parse_node_ref(fields[1])
+                        .map_err(ParseWithAbortError::from)?;
+                    let b = self
+                        .parse_node_ref(fields[2])
+                        .map_err(ParseWithAbortError::from)?;
+                    net.inductors.push(Induc {
+                        a,
+                        b,
+                        henries,
                         line: self.line_num,
                     });
                 }
@@ -1062,6 +1176,50 @@ mod tests {
         assert!((net.caps[0].farads - 1.5e-15).abs() < 1e-22);
         // 0.5 in 1-KOHM units.
         assert!((net.ress[0].ohms - 500.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parses_every_standard_inductance_unit() {
+        for (unit, expected) in [("HENRY", 2.0), ("MH", 2.0e-3), ("UH", 2.0e-6)] {
+            let source = format!(
+                "*SPEF \"IEEE 1481-2009\"\n*L_UNIT 1 {unit}\n*D_NET in 0\n*INDUC\n1 in in:1 2\n*END\n"
+            );
+            let spef = SpefFile::parse(&source).expect("standard inductance unit parses");
+            assert_eq!(spef.nets[0].inductors.len(), 1);
+            assert_eq!(spef.nets[0].inductors[0].henries, expected, "{unit}");
+        }
+    }
+
+    #[test]
+    fn generated_inductor_names_do_not_collide_with_authored_elements() {
+        let spef = SpefFile::parse(
+            "*SPEF \"IEEE 1481-2009\"\n*L_UNIT 1 UH\n*D_NET in 0\n*INDUC\n1 in in:1 2\n*END\n",
+        )
+        .expect("SPEF parses");
+        let mut netlist = Netlist::parse(
+            "collision guard\nI1 0 in DC 0\nLSPEF1 spare 0 1u\nR1 spare 0 1\n.op\n.end\n",
+        )
+        .expect("deck parses");
+
+        let report = spef.apply(&mut netlist);
+
+        assert_eq!(report.inductors, 1);
+        assert_eq!(
+            netlist
+                .elements
+                .iter()
+                .filter(|element| element.name.eq_ignore_ascii_case("LSPEF1"))
+                .count(),
+            1,
+            "the authored element name must remain unique"
+        );
+        assert!(
+            netlist
+                .elements
+                .iter()
+                .any(|element| element.name.eq_ignore_ascii_case("LSPEF2")),
+            "the generated element must advance past the collision"
+        );
     }
 
     #[test]

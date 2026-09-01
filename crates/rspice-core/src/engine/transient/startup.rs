@@ -1,4 +1,5 @@
 use super::super::convergence::AcceptedTransientOperatingPointContract;
+use super::super::core::StartupVoltageConstraint;
 use super::{
     AbortSignal, AnalysisCommand, Engine, Netlist, SOURCE_ACTIVE_DELTA, STARTUP_RECOVERY_DELTA_V,
     SimulationError, SpiceDialect, Value,
@@ -355,7 +356,14 @@ impl Engine {
                     return Ok(None);
                 }
                 let capacitor_hints =
-                    Self::grounded_capacitor_startup_voltage_hints(circuit, dc_solution);
+                    Self::grounded_capacitor_startup_voltage_hints(circuit, dc_solution)
+                        .into_iter()
+                        .map(|(positive, voltage)| StartupVoltageConstraint {
+                            positive,
+                            negative: 0,
+                            voltage,
+                        })
+                        .collect::<Vec<_>>();
                 match self.solve_nonlinear_transient_op_startup_with_guess_and_hints_abort(
                     circuit,
                     matrix,
@@ -527,7 +535,7 @@ impl Engine {
         netlist: &Netlist,
         circuit: &mut crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
-        ic_constraints: &[(usize, Value)],
+        ic_constraints: &[StartupVoltageConstraint],
         abort: &dyn AbortSignal,
     ) -> Result<Option<Vec<Value>>, SimulationError> {
         if !circuit.has_nonlinear_devices() {

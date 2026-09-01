@@ -326,10 +326,12 @@ pub(super) fn parse_command(
                 initial_conditions[first_entry..]
                     .iter()
                     .zip(authored_nodes.iter())
-                    .map(|(entry, authored_node)| {
+                    .map(|(entry, (authored_node, authored_reference))| {
                         (
                             authored_node.as_str(),
                             entry.node.as_str(),
+                            authored_reference.as_deref(),
+                            entry.reference.as_deref(),
                             entry.voltage,
                             entry.voltage_expr.as_deref(),
                         )
@@ -356,10 +358,12 @@ pub(super) fn parse_command(
                 node_sets[first_entry..]
                     .iter()
                     .zip(authored_nodes.iter())
-                    .map(|(entry, authored_node)| {
+                    .map(|(entry, (authored_node, authored_reference))| {
                         (
                             authored_node.as_str(),
                             entry.node.as_str(),
+                            authored_reference.as_deref(),
+                            entry.reference.as_deref(),
                             entry.voltage,
                             entry.voltage_expr.as_deref(),
                         )
@@ -631,16 +635,37 @@ fn startup_directive_record<'a>(
     kind: StartupDirectiveKind,
     origin: &NetlistSourceLocation,
     scope: StartupDirectiveScope,
-    entries: impl IntoIterator<Item = (&'a str, &'a str, Value, Option<&'a str>)>,
+    entries: impl IntoIterator<
+        Item = (
+            &'a str,
+            &'a str,
+            Option<&'a str>,
+            Option<&'a str>,
+            Value,
+            Option<&'a str>,
+        ),
+    >,
 ) -> StartupDirectiveRecord {
     let entries = entries
         .into_iter()
         .map(
-            |(authored_node, execution_node, voltage, voltage_expr)| StartupDirectiveEntry {
+            |(
+                authored_node,
+                execution_node,
+                authored_reference,
+                execution_reference,
+                voltage,
+                voltage_expr,
+            )| StartupDirectiveEntry {
                 authored_node: authored_node.to_string(),
                 execution_node: execution_node.to_string(),
+                authored_reference: authored_reference.map(ToString::to_string),
+                execution_reference: execution_reference.map(ToString::to_string),
                 canonical_node: execution_node.replace(':', ".").to_ascii_uppercase(),
+                canonical_reference: execution_reference
+                    .map(|reference| reference.replace(':', ".").to_ascii_uppercase()),
                 qualified_nodes: Vec::new(),
+                qualified_references: Vec::new(),
                 disposition: StartupDirectiveDisposition::Applied,
                 voltage,
                 voltage_expr: voltage_expr.map(ToString::to_string),
@@ -3935,14 +3960,6 @@ pub(super) fn parse_meas_command(
         });
     }
     let statement_options = scan_meas_statement_options(stream, line_num, params)?;
-    if analysis.ends_with("_CONT") && statement_options.fail_value.is_some() {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: format!(
-                "FAILVALUE is not supported for continuous .MEASURE mode {analysis}; continuous results require per-record verification semantics"
-            ),
-        });
-    }
 
     // Create the measurement type based on keyword
     let measure_type = match measure_type_key.as_str() {
@@ -7998,7 +8015,7 @@ mod tests {
     }
 
     #[test]
-    fn measure_failvalue_rejects_continuous_modes_without_per_record_semantics() {
+    fn measure_failvalue_is_retained_for_every_continuous_mode() {
         let options = crate::netlist::NetlistParseOptions {
             expression_dialect: crate::config::ExpressionDialect::Xyce,
             ..Default::default()
@@ -8010,12 +8027,11 @@ mod tests {
                  .measure {analysis} sample FIND V(out) AT=1 FAILVALUE=2\n\
                  .end\n"
             );
-            let error = Netlist::parse_with_options(&deck, options)
-                .expect_err("continuous FAILVALUE must be rejected before execution");
-            let message = error.to_string();
-            assert!(message.contains("FAILVALUE"), "{analysis}: {message}");
-            assert!(message.contains("continuous"), "{analysis}: {message}");
-            assert!(message.contains(analysis), "{analysis}: {message}");
+            let netlist = Netlist::parse_with_options(&deck, options)
+                .expect("continuous FAILVALUE has defined per-record semantics");
+            assert_eq!(netlist.measurements.len(), 1, "{analysis}");
+            assert_eq!(netlist.measurements[0].analysis, analysis);
+            assert_eq!(netlist.measurements[0].fail_value, Some(2.0));
         }
     }
 

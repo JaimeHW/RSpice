@@ -76,6 +76,35 @@ pub enum RedefinedParamsMode {
     Error,
 }
 
+/// Compatibility policy applied consistently to parsing and simulation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum SpiceDialectArg {
+    /// Use RSpice's most accurate available device evaluator while retaining
+    /// ngspice-compatible expression syntax.
+    Best,
+    /// Prefer ngspice-compatible expression and device semantics.
+    Ngspice,
+    /// Prefer Xyce-compatible expression, measurement, and device semantics.
+    Xyce,
+}
+
+impl SpiceDialectArg {
+    pub const fn expression_dialect(self) -> rspice_core::config::ExpressionDialect {
+        match self {
+            Self::Best | Self::Ngspice => rspice_core::config::ExpressionDialect::Ngspice,
+            Self::Xyce => rspice_core::config::ExpressionDialect::Xyce,
+        }
+    }
+
+    pub const fn simulation_dialect(self) -> rspice_core::SpiceDialect {
+        match self {
+            Self::Best => rspice_core::SpiceDialect::BestAvailable,
+            Self::Ngspice => rspice_core::SpiceDialect::Ngspice,
+            Self::Xyce => rspice_core::SpiceDialect::Xyce,
+        }
+    }
+}
+
 impl RedefinedParamsMode {
     pub fn parse_policies(
         self,
@@ -229,6 +258,10 @@ pub struct RunArgs {
     /// Override simulation temperature (Celsius)
     #[arg(long, value_name = "TEMP", value_parser = spice_value)]
     pub temp: Option<f64>,
+
+    /// Select a consistent parsing and simulation compatibility dialect
+    #[arg(long, value_enum, value_name = "DIALECT")]
+    pub spice_dialect: Option<SpiceDialectArg>,
 
     /// Print .MEAS measurement results
     #[arg(long)]
@@ -789,6 +822,32 @@ mod tests {
             let actual = args.redefined_params.expect("mode retained");
             assert_eq!(actual, expected_mode);
             assert_eq!(actual.parse_policies(), expected_policies);
+        }
+    }
+
+    #[test]
+    fn spice_dialect_selects_matching_parser_and_simulator_policies() {
+        use rspice_core::SpiceDialect;
+        use rspice_core::config::ExpressionDialect;
+
+        for (spelling, expression, simulation) in [
+            (
+                "best",
+                ExpressionDialect::Ngspice,
+                SpiceDialect::BestAvailable,
+            ),
+            ("ngspice", ExpressionDialect::Ngspice, SpiceDialect::Ngspice),
+            ("xyce", ExpressionDialect::Xyce, SpiceDialect::Xyce),
+        ] {
+            let cli =
+                Cli::try_parse_from(["rspice", "run", "dialect.cir", "--spice-dialect", spelling])
+                    .unwrap_or_else(|error| panic!("failed to parse {spelling}: {error}"));
+            let Commands::Run(args) = cli.command else {
+                panic!("run command changed")
+            };
+            let actual = args.spice_dialect.expect("dialect retained");
+            assert_eq!(actual.expression_dialect(), expression);
+            assert_eq!(actual.simulation_dialect(), simulation);
         }
     }
 }

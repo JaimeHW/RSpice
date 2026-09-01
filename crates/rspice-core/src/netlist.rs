@@ -394,6 +394,22 @@ pub struct StartupDirectiveConflictError {
     pub conflicting: NetlistSourceLocation,
 }
 
+/// Two effective startup voltage constraints prescribe incompatible
+/// potentials for the same connected constraint component.
+#[derive(Debug, Clone, PartialEq, Error)]
+#[error(
+    "{conflicting}: inconsistent {kind:?} startup constraint V({positive},{negative})={actual:.17e}; the constraint graph established {expected:.17e} from {established}"
+)]
+pub struct StartupConstraintConflictError {
+    pub kind: StartupDirectiveKind,
+    pub established: NetlistSourceLocation,
+    pub conflicting: NetlistSourceLocation,
+    pub positive: String,
+    pub negative: String,
+    pub expected: Value,
+    pub actual: Value,
+}
+
 /// Structured `.INITCOND` failures retained across parser, source-provider,
 /// hierarchy, and public adapter boundaries.
 #[derive(Debug, Clone, PartialEq, Error)]
@@ -529,6 +545,9 @@ pub enum ParseError {
 
     #[error(transparent)]
     StartupDirectiveConflict(Box<StartupDirectiveConflictError>),
+
+    #[error(transparent)]
+    StartupConstraintConflict(Box<StartupConstraintConflictError>),
 
     #[error(transparent)]
     DeviceInitialCondition(Box<DeviceInitialConditionError>),
@@ -1598,12 +1617,13 @@ impl Netlist {
                 .apply_path_backed_with_abort(netlist, abort)
                 .map_err(contextualize)?;
             log::info!(
-                "SPEF `{}`: {} net(s), {} pin(s) rewired ({} skipped), {} R + {} C added",
+                "SPEF `{}`: {} net(s), {} pin(s) rewired ({} skipped), {} R + {} L + {} C added",
                 path.display(),
                 report.nets,
                 report.rewired_pins,
                 report.skipped_pins,
                 report.resistors,
+                report.inductors,
                 report.capacitors
             );
         }
@@ -12899,23 +12919,24 @@ mod tests {
     }
 
     #[test]
-    fn differential_ic_and_nodeset_targets_fail_closed() {
+    fn differential_ic_and_nodeset_targets_preserve_both_terminals() {
         for directive in [".IC V(OUT,REF)=1", ".NODESET V(OUT,REF)=1"] {
             let source =
                 format!("differential startup target\nV1 OUT 0 1\nV2 REF 0 0\n{directive}\n.END\n");
-            let error = match Netlist::parse(&source) {
-                Err(error) => error,
-                Ok(_) => panic!("{directive} must not discard its reference node"),
+            let netlist = Netlist::parse(&source).expect("differential startup target parses");
+            let (node, reference, voltage) = if directive.starts_with(".IC") {
+                let entry = &netlist.initial_conditions[0];
+                (&entry.node, entry.reference.as_deref(), entry.voltage)
+            } else {
+                let entry = &netlist.node_sets[0];
+                (&entry.node, entry.reference.as_deref(), entry.voltage)
             };
-            let message = error.to_string();
-            assert!(
-                message.contains("Differential startup target V(OUT,REF) is not supported"),
-                "unexpected {directive} diagnostic: {message}"
-            );
-            assert!(
-                message.contains("require one node referenced to ground"),
-                "{directive} diagnostic must prescribe supported syntax: {message}"
-            );
+            assert_eq!(node, "OUT");
+            assert_eq!(reference, Some("REF"));
+            assert_eq!(voltage, 1.0);
+            let sidecar = &netlist.startup_directives()[0].entries()[0];
+            assert_eq!(sidecar.execution_node(), "OUT");
+            assert_eq!(sidecar.execution_reference(), Some("REF"));
         }
     }
 

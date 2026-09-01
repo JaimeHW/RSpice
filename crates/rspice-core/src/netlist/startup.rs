@@ -3,12 +3,14 @@ use crate::config::ExpressionDialect;
 
 use super::{
     InitialCondition, Netlist, NodeSet, ParseDiagnostic, ParseError, ParseWithAbortError,
-    StartupDiagnostic, StartupDiagnosticCode, StartupDirectiveConflictError,
-    StartupDirectiveDisposition, StartupDirectiveKind, StartupDirectiveRecord,
-    StartupDirectiveScope, collect_output_node_namespace_from_elements_with_abort,
-    ensure_parse_not_aborted, finish_non_aborting_parse, flatten_netlist_with_models_with_abort,
-    poll_parse_abort, poll_parse_text,
+    StartupConstraintConflictError, StartupDiagnostic, StartupDiagnosticCode,
+    StartupDirectiveConflictError, StartupDirectiveDisposition, StartupDirectiveKind,
+    StartupDirectiveRecord, StartupDirectiveScope,
+    collect_output_node_namespace_from_elements_with_abort, ensure_parse_not_aborted,
+    finish_non_aborting_parse, flatten_netlist_with_models_with_abort, poll_parse_abort,
+    poll_parse_text,
 };
+use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
 use std::collections::{BTreeSet, HashSet};
 
@@ -93,6 +95,12 @@ fn validate_candidate(
                 abort,
             )?;
             filter_unknown_entries(netlist, &namespace, abort)?;
+            validate_constraint_consistency(
+                netlist,
+                &flattened.scoped_startup_directives,
+                &namespace,
+                abort,
+            )?;
             rebuild_effective_vectors(netlist, &unowned, abort)?;
         }
         Err(ParseWithAbortError::Aborted) => return Err(ParseWithAbortError::Aborted),
@@ -247,10 +255,20 @@ fn reset_records(
                 .canonical_node(&entry.execution_node)
                 .replace(':', ".")
                 .to_ascii_uppercase();
+            entry.canonical_reference = entry.execution_reference.as_ref().map(|reference| {
+                ground_policy
+                    .canonical_node(reference)
+                    .replace(':', ".")
+                    .to_ascii_uppercase()
+            });
             entry.qualified_nodes.clear();
+            entry.qualified_references.clear();
             entry.disposition = StartupDirectiveDisposition::Applied;
             if matches!(record.scope, StartupDirectiveScope::TopLevel) {
                 entry.qualified_nodes.push(entry.canonical_node.clone());
+                entry
+                    .qualified_references
+                    .push(entry.canonical_reference.clone());
             }
         }
         record.disposition = if record.entries.is_empty() {
@@ -380,11 +398,17 @@ fn merge_qualified_expansions(
                 entry
                     .qualified_nodes
                     .extend(expanded_entry.qualified_nodes.iter().cloned());
+                entry
+                    .qualified_references
+                    .extend(expanded_entry.qualified_references.iter().cloned());
             }
         }
         sort_dedup_case_insensitive(qualified_instances);
         for entry in &mut source.entries {
-            sort_dedup_case_insensitive(&mut entry.qualified_nodes);
+            sort_dedup_qualified_targets(
+                &mut entry.qualified_nodes,
+                &mut entry.qualified_references,
+            );
         }
     }
     Ok(())
@@ -407,7 +431,14 @@ fn filter_unknown_entries(
                 && entry
                     .qualified_nodes
                     .iter()
-                    .any(|node| namespace.contains(&canonical_symbol(node)));
+                    .zip(entry.qualified_references.iter())
+                    .any(|(node, reference)| {
+                        namespace.contains(&canonical_symbol(node))
+                            && reference.as_ref().is_none_or(|reference| {
+                                canonical_symbol(reference) == "0"
+                                    || namespace.contains(&canonical_symbol(reference))
+                            })
+                    });
             if exists
                 || entry.qualified_nodes.is_empty()
                     && matches!(record.scope, StartupDirectiveScope::Subcircuit { .. })
@@ -494,19 +525,25 @@ fn remove_matching_initial_condition(
     entries: &mut Vec<InitialCondition>,
     owned: &super::StartupDirectiveEntry,
 ) {
-    if let Some(index) = entries
-        .iter()
-        .position(|entry| entry.node.eq_ignore_ascii_case(&owned.execution_node))
-    {
+    if let Some(index) = entries.iter().position(|entry| {
+        entry.node.eq_ignore_ascii_case(&owned.execution_node)
+            && optional_node_eq(
+                entry.reference.as_deref(),
+                owned.execution_reference.as_deref(),
+            )
+    }) {
         entries.remove(index);
     }
 }
 
 fn remove_matching_node_set(entries: &mut Vec<NodeSet>, owned: &super::StartupDirectiveEntry) {
-    if let Some(index) = entries
-        .iter()
-        .position(|entry| entry.node.eq_ignore_ascii_case(&owned.execution_node))
-    {
+    if let Some(index) = entries.iter().position(|entry| {
+        entry.node.eq_ignore_ascii_case(&owned.execution_node)
+            && optional_node_eq(
+                entry.reference.as_deref(),
+                owned.execution_reference.as_deref(),
+            )
+    }) {
         entries.remove(index);
     }
 }
@@ -587,11 +624,13 @@ fn append_applied_entries(
         match record.kind {
             StartupDirectiveKind::Ic => initial_conditions.push(InitialCondition {
                 node: entry.execution_node.clone(),
+                reference: entry.execution_reference.clone(),
                 voltage: entry.voltage,
                 voltage_expr: entry.voltage_expr.clone(),
             }),
             StartupDirectiveKind::NodeSet => node_sets.push(NodeSet {
                 node: entry.execution_node.clone(),
+                reference: entry.execution_reference.clone(),
                 voltage: entry.voltage,
                 voltage_expr: entry.voltage_expr.clone(),
             }),
@@ -606,6 +645,168 @@ fn canonical_symbol(symbol: &str) -> String {
 fn sort_dedup_case_insensitive(values: &mut Vec<String>) {
     values.sort_unstable_by_key(|value| value.to_ascii_uppercase());
     values.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+}
+
+#[derive(Clone)]
+struct ConstraintGraphEdge {
+    target: String,
+    delta: Value,
+    origin: super::NetlistSourceLocation,
+}
+
+/// Validate the rank-consistency of each startup family before it reaches a
+/// solver. Consistent dependent rows are accepted (the engine later reduces
+/// them to a spanning forest); an inconsistent cycle fails at the exact card
+/// that closes it.
+fn validate_constraint_consistency(
+    netlist: &Netlist,
+    scoped: &[StartupDirectiveRecord],
+    namespace: &HashSet<String>,
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
+    for kind in [StartupDirectiveKind::Ic, StartupDirectiveKind::NodeSet] {
+        let mut graph = std::collections::HashMap::<String, Vec<ConstraintGraphEdge>>::new();
+        let records = netlist
+            .startup_directives
+            .iter()
+            .filter(|record| matches!(record.scope, StartupDirectiveScope::TopLevel))
+            .chain(scoped.iter());
+        for (record_index, record) in records.enumerate() {
+            poll_parse_abort(abort, record_index)?;
+            if record.kind != kind
+                || matches!(record.disposition, StartupDirectiveDisposition::Ignored(_))
+            {
+                continue;
+            }
+            for entry in &record.entries {
+                if !entry.voltage.is_finite()
+                    || matches!(entry.disposition, StartupDirectiveDisposition::Ignored(_))
+                {
+                    continue;
+                }
+                for (positive, reference) in entry
+                    .qualified_nodes
+                    .iter()
+                    .zip(entry.qualified_references.iter())
+                {
+                    let positive = canonical_symbol(positive);
+                    let negative = reference
+                        .as_ref()
+                        .map_or_else(|| "0".to_string(), |node| canonical_symbol(node));
+                    if !constraint_terminal_exists(&positive, namespace)
+                        || !constraint_terminal_exists(&negative, namespace)
+                    {
+                        continue;
+                    }
+                    if let Some((expected, established)) =
+                        constraint_path(&graph, &negative, &positive)
+                    {
+                        if !startup_values_equivalent(expected, entry.voltage) {
+                            return Err(ParseError::StartupConstraintConflict(Box::new(
+                                StartupConstraintConflictError {
+                                    kind,
+                                    established: established
+                                        .unwrap_or_else(|| record.origin.clone()),
+                                    conflicting: record.origin.clone(),
+                                    positive,
+                                    negative,
+                                    expected,
+                                    actual: entry.voltage,
+                                },
+                            ))
+                            .into());
+                        }
+                        continue;
+                    }
+                    graph
+                        .entry(negative.clone())
+                        .or_default()
+                        .push(ConstraintGraphEdge {
+                            target: positive.clone(),
+                            delta: entry.voltage,
+                            origin: record.origin.clone(),
+                        });
+                    graph
+                        .entry(positive)
+                        .or_default()
+                        .push(ConstraintGraphEdge {
+                            target: negative,
+                            delta: -entry.voltage,
+                            origin: record.origin.clone(),
+                        });
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn constraint_terminal_exists(terminal: &str, namespace: &HashSet<String>) -> bool {
+    terminal == "0" || namespace.contains(terminal)
+}
+
+fn constraint_path(
+    graph: &std::collections::HashMap<String, Vec<ConstraintGraphEdge>>,
+    start: &str,
+    target: &str,
+) -> Option<(Value, Option<super::NetlistSourceLocation>)> {
+    if start == target {
+        return Some((0.0, None));
+    }
+    let mut pending = std::collections::VecDeque::from([(start.to_string(), 0.0, None)]);
+    let mut visited = HashSet::from([start.to_string()]);
+    while let Some((node, potential, established)) = pending.pop_front() {
+        for edge in graph.get(&node).into_iter().flatten() {
+            if !visited.insert(edge.target.clone()) {
+                continue;
+            }
+            let next_potential = potential + edge.delta;
+            let next_established = established.clone().or_else(|| Some(edge.origin.clone()));
+            if edge.target == target {
+                return Some((next_potential, next_established));
+            }
+            pending.push_back((edge.target.clone(), next_potential, next_established));
+        }
+    }
+    None
+}
+
+fn startup_values_equivalent(left: Value, right: Value) -> bool {
+    let scale = left.abs().max(right.abs()).max(1.0);
+    (left - right).abs() <= 64.0 * Value::EPSILON * scale
+}
+
+fn optional_node_eq(left: Option<&str>, right: Option<&str>) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(left), Some(right)) => left.eq_ignore_ascii_case(right),
+        _ => false,
+    }
+}
+
+fn sort_dedup_qualified_targets(nodes: &mut Vec<String>, references: &mut Vec<Option<String>>) {
+    let mut targets = nodes
+        .drain(..)
+        .zip(references.drain(..))
+        .collect::<Vec<_>>();
+    targets.sort_unstable_by_key(|(node, reference)| {
+        (
+            node.to_ascii_uppercase(),
+            reference.as_ref().map(|value| value.to_ascii_uppercase()),
+        )
+    });
+    targets.dedup_by(|left, right| {
+        left.0.eq_ignore_ascii_case(&right.0)
+            && match (&left.1, &right.1) {
+                (None, None) => true,
+                (Some(left), Some(right)) => left.eq_ignore_ascii_case(right),
+                _ => false,
+            }
+    });
+    for (node, reference) in targets {
+        nodes.push(node);
+        references.push(reference);
+    }
 }
 
 fn remove_projected_diagnostics(netlist: &mut Netlist) {
@@ -651,7 +852,10 @@ fn project_typed_diagnostics(netlist: &mut Netlist) {
 mod tests {
     use super::*;
     use crate::abort_signal::CountingAbort;
-    use crate::netlist::{NetlistParseOptions, ParameterRedefinitionPolicy, StatisticalParamMode};
+    use crate::netlist::{
+        NetlistParseOptions, ParameterRedefinitionPolicy, StatisticalParamMode,
+        flatten_netlist_with_models,
+    };
 
     fn xyce_options() -> NetlistParseOptions {
         NetlistParseOptions {
@@ -1001,11 +1205,13 @@ mod tests {
             Netlist::parse("programmatic\nV1 1 0 1\n.OP\n.END\n").expect("base deck parses");
         netlist.initial_conditions.push(InitialCondition {
             node: "1".to_string(),
+            reference: None,
             voltage: 0.75,
             voltage_expr: None,
         });
         netlist.node_sets.push(NodeSet {
             node: "1".to_string(),
+            reference: None,
             voltage: 0.25,
             voltage_expr: None,
         });
@@ -1039,6 +1245,7 @@ mod tests {
             .node_sets
             .push(NodeSet {
                 node: "P".to_string(),
+                reference: None,
                 voltage: 0.25,
                 voltage_expr: Some("0.5/2".to_string()),
             });
@@ -1059,6 +1266,7 @@ mod tests {
 
         netlist.initial_conditions.push(InitialCondition {
             node: "1".to_string(),
+            reference: None,
             voltage: 0.75,
             voltage_expr: None,
         });
@@ -1067,6 +1275,76 @@ mod tests {
         assert_eq!(netlist.initial_conditions.len(), 2);
         assert_eq!(netlist.initial_conditions[0].voltage, 0.25);
         assert_eq!(netlist.initial_conditions[1].voltage, 0.75);
+    }
+
+    #[test]
+    fn consistent_dependent_differential_constraints_survive_rank_reduction() {
+        let netlist = Netlist::parse(
+            "consistent startup graph\n\
+             V1 a 0 0\n\
+             V2 b 0 0\n\
+             .IC V(a,b)=1 V(b,0)=2 V(a,0)=3\n\
+             .END\n",
+        )
+        .expect("consistent dependent constraints parse");
+        assert_eq!(netlist.initial_conditions.len(), 3);
+        assert_eq!(
+            netlist.initial_conditions[0].reference.as_deref(),
+            Some("B")
+        );
+        assert_eq!(
+            netlist.initial_conditions[1].reference.as_deref(),
+            Some("0")
+        );
+    }
+
+    #[test]
+    fn inconsistent_differential_constraint_cycle_is_source_located() {
+        let error = Netlist::parse(
+            "inconsistent startup graph\n\
+             V1 a 0 0\n\
+             V2 b 0 0\n\
+             .NODESET V(a,b)=1\n\
+             .NODESET V(b,0)=2\n\
+             .NODESET V(a,0)=4\n\
+             .END\n",
+        )
+        .expect_err("inconsistent constraint cycle must fail closed");
+        let ParseError::StartupConstraintConflict(conflict) = error else {
+            panic!("expected typed startup conflict, got {error}");
+        };
+        assert_eq!(conflict.kind, StartupDirectiveKind::NodeSet);
+        assert_eq!(conflict.established.line, 5);
+        assert_eq!(conflict.conflicting.line, 6);
+        assert_eq!(conflict.positive, "A");
+        assert_eq!(conflict.negative, "0");
+        assert_eq!(conflict.expected, 3.0);
+        assert_eq!(conflict.actual, 4.0);
+    }
+
+    #[test]
+    fn scoped_differential_constraints_resolve_instance_parameters_and_nodes() {
+        let netlist = Netlist::parse(
+            "scoped differential startup\n\
+             X1 a b CELL PARAMS: DV=0.75\n\
+             C1 a 0 1u\n\
+             C2 b 0 1u\n\
+             .SUBCKT CELL p n PARAMS: DV=1\n\
+             .IC V(p,n)={DV}\n\
+             R1 p n 1k\n\
+             .ENDS\n\
+             .END\n",
+        )
+        .expect("scoped differential constraint parses");
+        let flattened = flatten_netlist_with_models(&netlist).expect("hierarchy flattens");
+        assert_eq!(flattened.scoped_initial_conditions.len(), 1);
+        let constraint = &flattened.scoped_initial_conditions[0];
+        assert_eq!(constraint.node, "A");
+        assert_eq!(constraint.reference.as_deref(), Some("B"));
+        assert_eq!(constraint.voltage, 0.75);
+        let provenance = &netlist.startup_directives()[0].entries()[0];
+        assert_eq!(provenance.qualified_nodes(), ["A"]);
+        assert_eq!(provenance.qualified_references(), &[Some("B".to_string())]);
     }
 
     #[test]

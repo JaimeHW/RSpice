@@ -74,6 +74,10 @@ HSPICE `.ALTER` and `.DATA` constructs expand into a plan of concrete decks, eac
 
 Any statement may add `GOAL=value [TOL=value]`: a computed value that misses its goal fails the measurement (TOL defaults to max(1% of |goal|, 1e-12)). Results print under `--meas` and are always collected for report files.
 
+Xyce `TRAN_CONT`, `DC_CONT`, and `AC_CONT` measurements may add `FAILVALUE=value` when the run selects `--spice-dialect xyce`. The threshold is checked independently for every retained record with the exact inclusive contract `abs(raw_value) >= FAILVALUE`. A non-finite raw value or threshold fails closed. The stream passes only when evaluation succeeds, produces at least one record, and every record passes; failed records remain in the stream instead of being replaced by a single aggregate failure.
+
+Continuous rows are serialized additively. JSON and CSV retain `record_index`, raw value, threshold, per-record verdict, event or trigger/target coordinates, and `aggregate_policy=all_records_must_pass`. JUnit and TAP emit one named case per row (`name[record N]`) and include the same contract metadata in their diagnostics. `--allow-failed-meas` changes only the process exit code; it does not change or remove any verdict.
+
 **A failed measurement fails the run with exit code 3** — a missed GOAL, an unevaluated statement, or a measurement whose analysis never ran. Pass `--allow-failed-meas` to restore exit 0. Results containing NaN/Inf are a simulation error (exit 1) unless `--allow-nonfinite` is given.
 
 ### Output files for every mode
@@ -152,6 +156,7 @@ Accepts `.sp`, `.cir`, `.net`, and `.spice` netlists, or `-` to read the netlist
 
 | Flag | Description |
 | :--- | :--- |
+| `--spice-dialect <DIALECT>` | Select consistent parser and simulator compatibility semantics: `best`, `ngspice`, or `xyce`. `best` uses RSpice's preferred device evaluators with ngspice-compatible expressions |
 | `--temp <TEMP>` | Override simulation temperature (Celsius) |
 | `--maxiter <N>` | Maximum Newton-Raphson iterations |
 | `--abstol <TOL>` | Absolute convergence tolerance |

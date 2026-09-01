@@ -355,3 +355,67 @@ fn meas_file_writers_keep_full_precision() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn xyce_continuous_failvalue_is_reachable_through_the_cli() {
+    let dir = test_dir("continuous_failvalue");
+    let deck = dir.join("continuous.sp");
+    let json_path = dir.join("continuous.json");
+    std::fs::write(
+        &deck,
+        "* Xyce continuous measurement\n\
+         V1 out 0 PWL(0 -1 1 1 2 -1)\n\
+         R1 out 0 1k\n\
+         .TRAN 0.1 2\n\
+         .MEASURE TRAN_CONT crossings WHEN V(out)=0 CROSS=1 FAILVALUE=1\n\
+         .END\n",
+    )
+    .expect("write continuous deck");
+
+    let output = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "--spice-dialect",
+        "xyce",
+        "--meas-file",
+        json_path.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "the second record must fail FAILVALUE: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&json_path).expect("read JSON report"))
+            .expect("parse JSON report");
+    let rows = json["measurements"]
+        .as_array()
+        .expect("continuous measurement rows");
+    assert_eq!(rows.len(), 2, "every crossing must remain a distinct row");
+    assert_eq!(rows[0]["record_index"], 0);
+    assert_eq!(rows[0]["event_axis"], 0.5);
+    assert_eq!(rows[0]["raw_value"], 0.5);
+    assert_eq!(rows[0]["failure_limit"], 1.0);
+    assert_eq!(rows[0]["passed"], true);
+    assert_eq!(rows[1]["record_index"], 1);
+    assert_eq!(rows[1]["event_axis"], 1.5);
+    assert_eq!(rows[1]["raw_value"], 1.5);
+    assert_eq!(rows[1]["failure_limit_exceeded"], true);
+    assert_eq!(rows[1]["passed"], false);
+    assert_eq!(rows[1]["aggregate_policy"], "all_records_must_pass");
+
+    let allowed = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "--spice-dialect",
+        "xyce",
+        "--allow-failed-meas",
+    ]);
+    assert_eq!(allowed.status.code(), Some(0));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

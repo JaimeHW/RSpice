@@ -270,7 +270,12 @@ use rspice_core::analysis::harmonic_balance::{
 /// or `pub(crate)`.
 // The canonical run-axis planner deliberately exposes typed STEP targets,
 // abort-aware construction, and fail-closed planning errors to every frontend.
-const MAX_PUBLIC_ITEMS: usize = 4424;
+//
+// 2026-09-01, +11 deliberate (4,424 -> 4,435): frontends need the typed
+// differential-startup references and conflicts, per-record continuous
+// FAILVALUE verdicts/coordinates, and imported SPEF inductor count. Solver,
+// parser, graph-reduction, and import-construction helpers remain internal.
+const MAX_PUBLIC_ITEMS: usize = 4435;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

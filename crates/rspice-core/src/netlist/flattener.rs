@@ -1096,6 +1096,10 @@ impl<'a> Flattener<'a> {
             poll_parse_abort(abort, index)?;
             self.scoped_initial_conditions.push(InitialCondition {
                 node: self.remap_node(&ic.node, prefix, node_map),
+                reference: ic
+                    .reference
+                    .as_ref()
+                    .map(|reference| self.remap_node(reference, prefix, node_map)),
                 voltage: self.resolve_startup_voltage(
                     ic.voltage,
                     ic.voltage_expr.as_deref(),
@@ -1111,6 +1115,10 @@ impl<'a> Flattener<'a> {
             poll_parse_abort(abort, index)?;
             self.scoped_node_sets.push(NodeSet {
                 node: self.remap_node(&nodeset.node, prefix, node_map),
+                reference: nodeset
+                    .reference
+                    .as_ref()
+                    .map(|reference| self.remap_node(reference, prefix, node_map)),
                 voltage: self.resolve_startup_voltage(
                     nodeset.voltage,
                     nodeset.voltage_expr.as_deref(),
@@ -1143,10 +1151,23 @@ impl<'a> Flattener<'a> {
                 qualified_instances: vec![prefix.replace(':', ".")],
             };
             for entry in &mut elaborated.entries {
+                entry.voltage = self.resolve_startup_voltage(
+                    entry.voltage,
+                    entry.voltage_expr.as_deref(),
+                    scope,
+                    record.kind.as_spice_directive(),
+                    &entry.execution_node,
+                )?;
+                entry.voltage_expr = None;
                 entry.qualified_nodes = vec![
                     self.remap_node(&entry.execution_node, prefix, node_map)
                         .replace(':', "."),
                 ];
+                entry.qualified_references =
+                    vec![entry.execution_reference.as_ref().map(|reference| {
+                        self.remap_node(reference, prefix, node_map)
+                            .replace(':', ".")
+                    })];
             }
             self.scoped_startup_directives.push(elaborated);
         }

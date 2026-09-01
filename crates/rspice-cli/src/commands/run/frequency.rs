@@ -694,6 +694,9 @@ fn finish_ac_results(
         analysis: Some("AC measurement projection".to_string()),
     })?;
     ctx.record_measurements("AC", measurements);
+    let continuous_measurements =
+        rspice_core::analysis::evaluate_ac_continuous_measurements(ctx.netlist, &results);
+    super::shared::record_continuous_measurements(ctx, "AC_CONT", continuous_measurements);
 
     if !ctx.quiet {
         println!("AC Analysis: {} frequency points", results.len());

@@ -200,6 +200,162 @@ fn two_step_dimensions_wrap_the_complete_dc_sweep_in_xyce_order() {
 }
 
 #[test]
+fn canonical_data_step_temp_order_drives_cli_coordinate_namespaces() {
+    let dir = test_dir("canonical_axis_order");
+    let deck = dir.join("canonical_axis_order.sp");
+    let output_path = dir.join("operating_point.csv");
+    std::fs::write(
+        &deck,
+        "* DeckPlan orders DATA, numeric STEP, then TEMP\n\
+         .param rleft=1k rright=1k\n\
+         V1 in 0 1\n\
+         R1 in out {rleft}\n\
+         R2 out 0 {rright}\n\
+         .step param rright list 1k 2k\n\
+         .temp 25 75\n\
+         .data left_values rleft\n\
+         1k\n\
+         3k\n\
+         .enddata\n\
+         .step data=left_values\n\
+         .op\n\
+         .end\n",
+    )
+    .expect("write mixed canonical-axis deck");
+
+    let run = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "-o",
+        output_path.to_str().unwrap(),
+        "-f",
+        "csv",
+    ]);
+    assert!(
+        run.status.success(),
+        "stdout: {}; stderr: {}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(!output_path.exists(), "base path must remain unused");
+
+    // DATA is canonical axis 0 and therefore varies fastest, even though its
+    // card appeared after the numeric STEP and TEMP cards in source order.
+    let expected = [0.5, 0.25, 2.0 / 3.0, 0.4, 0.5, 0.25, 2.0 / 3.0, 0.4];
+    for (index, expected_vout) in expected.into_iter().enumerate() {
+        let path = step_output(&output_path, index + 1);
+        let csv = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        let vout = scalar_csv_value(&csv, "V(OUT)");
+        assert!(
+            (vout - expected_vout).abs() < 1.0e-9,
+            "coordinate {} is not in canonical DATA→STEP→TEMP order: {csv}",
+            index + 1
+        );
+    }
+    assert!(!step_output(&output_path, 9).exists());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn verbose_coordinate_ids(stdout: &[u8]) -> Vec<String> {
+    String::from_utf8_lossy(stdout)
+        .lines()
+        .filter(|line| line.starts_with("=== step-"))
+        .map(|line| {
+            let (_, suffix) = line
+                .split_once("(run-")
+                .unwrap_or_else(|| panic!("missing canonical run ID in '{line}'"));
+            let (id, _) = suffix
+                .split_once(')')
+                .unwrap_or_else(|| panic!("unterminated canonical run ID in '{line}'"));
+            format!("run-{id}")
+        })
+        .collect()
+}
+
+#[test]
+fn cli_reports_deterministic_canonical_coordinate_ids() {
+    let dir = test_dir("canonical_ids");
+    let deck = dir.join("canonical_ids.sp");
+    std::fs::write(
+        &deck,
+        "* canonical coordinate identity\n\
+         .param a=1 b=10\n\
+         V1 out 0 1\n\
+         R1 out 0 1k\n\
+         .step param a list 1 2\n\
+         .step param b list 10 20\n\
+         .op\n\
+         .end\n",
+    )
+    .expect("write canonical-ID deck");
+
+    let first = run_rspice(&["--verbose", "run", deck.to_str().unwrap()]);
+    let second = run_rspice(&["--verbose", "run", deck.to_str().unwrap()]);
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert!(
+        second.status.success(),
+        "{}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let first_ids = verbose_coordinate_ids(&first.stdout);
+    let second_ids = verbose_coordinate_ids(&second.stdout);
+    assert_eq!(
+        first_ids.len(),
+        4,
+        "{}",
+        String::from_utf8_lossy(&first.stdout)
+    );
+    assert_eq!(first_ids, second_ids, "coordinate IDs changed across runs");
+    let unique = first_ids.iter().collect::<std::collections::HashSet<_>>();
+    assert_eq!(unique.len(), 4, "every Cartesian coordinate needs one ID");
+    assert!(
+        first_ids.iter().all(|id| id.ends_with("-001")),
+        "distinct semantic coordinates must use occurrence 1: {first_ids:?}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cli_materializer_bit_matches_canonical_lin_dec_oct_coordinates() {
+    let dir = test_dir("canonical_numeric_generators");
+    let deck = dir.join("canonical_numeric_generators.sp");
+    std::fs::write(
+        &deck,
+        "* exercise intermediate LIN/DEC/OCT values through both planners\n\
+         .param linear=0.1 decade=1 octave=1\n\
+         V1 out 0 1\n\
+         R1 out 0 1k\n\
+         .step lin param linear 0.1 0.3 0.1\n\
+         .step dec param decade 1 10 2\n\
+         .step oct param octave 1 2 2\n\
+         .op\n\
+         .end\n",
+    )
+    .expect("write canonical numeric-generator deck");
+
+    // The CLI validates every materialized value against the canonical
+    // coordinate with exact f64 equality. Intermediate logarithmic values
+    // make this a regression against independently rounded generators.
+    let run = run_rspice(&["--quiet", "run", deck.to_str().unwrap()]);
+    assert!(
+        run.status.success(),
+        "stdout: {}; stderr: {}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn femto_step_runs_exactly_six_fresh_transient_analyses() {
     let dir = test_dir("tran");
     let deck = dir.join("transient.sp");
@@ -697,7 +853,7 @@ fn stepped_measurement_exports_identify_every_coordinate_run() {
     let lines = csv.lines().collect::<Vec<_>>();
     assert_eq!(
         lines[0],
-        "netlist,name,value,expected,tolerance,passed,error,run,raw_value,failure_limit,failure_limit_exceeded"
+        "netlist,name,value,expected,tolerance,passed,error,run,raw_value,failure_limit,failure_limit_exceeded,record_index,event_axis,trigger_axis,target_axis,aggregate_policy"
     );
     let run_column = lines[0]
         .split(',')

@@ -403,6 +403,9 @@ pub(super) fn run_dc_sweep(
                 analysis: Some("DC measurement projection".to_string()),
             })?;
             ctx.record_measurements("DC", measurements);
+            let continuous_measurements =
+                rspice_core::analysis::evaluate_dc_continuous_measurements(ctx.netlist, &results);
+            super::shared::record_continuous_measurements(ctx, "DC_CONT", continuous_measurements);
 
             // Resolve the authored output contract even when the caller did
             // not request a file. A valid `.SAVE @device[param]` is part of
@@ -770,6 +773,13 @@ pub(super) fn run_transient(
                 analysis: Some("Transient measurement projection".to_string()),
             })?;
             ctx.record_measurements("TRAN", measurements);
+            let continuous_measurements =
+                rspice_core::analysis::evaluate_tran_continuous_measurements(ctx.netlist, &result);
+            super::shared::record_continuous_measurements(
+                ctx,
+                "TRAN_CONT",
+                continuous_measurements,
+            );
 
             // Perform checked SAVE/PRINT materialization independently of
             // file publication, matching OP and DC behavior.

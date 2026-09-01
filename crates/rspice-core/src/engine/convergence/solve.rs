@@ -3,6 +3,7 @@
 use super::continuation::explicit_source_continuation_policy;
 use super::*;
 use crate::SpiceDialect;
+use crate::engine::core::StartupVoltageConstraint;
 
 /// How many deficient rows the prose names before it summarizes the rest.
 pub(in crate::engine::convergence) const SINGULAR_ROWS_SHOWN: usize = 8;
@@ -221,13 +222,13 @@ impl Engine {
     /// Performs a linear pre-solve to get a warm-start initial guess, which
     /// helps convergence especially for BJT circuits where starting from 0V
     /// puts the transistor in an unphysical state. `node_hints` entries are
-    /// `(node_id, voltage)` with node IDs using the standard 1-based
-    /// non-ground circuit numbering.
+    /// independent difference equations with node IDs using the standard
+    /// 1-based non-ground circuit numbering (zero is ground).
     pub(crate) fn solve_nonlinear_with_node_hints_and_abort(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
-        node_hints: &[(usize, Value)],
+        node_hints: &[StartupVoltageConstraint],
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
@@ -310,7 +311,7 @@ impl Engine {
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         mut initial_guess: Vec<Value>,
-        node_hints: &[(usize, Value)],
+        node_hints: &[StartupVoltageConstraint],
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
         if !node_hints.is_empty() {
@@ -344,11 +345,18 @@ impl Engine {
         circuit: &CircuitData,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
-        node_hints: &[(usize, Value)],
+        node_hints: &[StartupVoltageConstraint],
+        reference_solution: &[Value],
     ) -> Result<(), SimulationError> {
         let first_current_column = circuit.num_nodes();
-        for &(node_id, voltage) in node_hints {
-            if !voltage.is_finite() || node_id == 0 || node_id > circuit.num_nodes() {
+        for constraint in node_hints {
+            let (node_id, reference_id, voltage) =
+                Self::startup_constraint_clamp_orientation(circuit, matrix, constraint);
+            if !constraint.voltage.is_finite()
+                || node_id == 0
+                || node_id > circuit.num_nodes()
+                || reference_id > circuit.num_nodes()
+            {
                 continue;
             }
             let row = node_id - 1;
@@ -362,7 +370,15 @@ impl Engine {
                     Self::NODE_VOLTAGE_CLAMP_CONDUCTANCE,
                 )
                 .map_err(SimulationError::Solver)?;
-            rhs[row] = diagonal * voltage;
+            let reference = if reference_id == 0 {
+                0.0
+            } else {
+                reference_solution
+                    .get(reference_id - 1)
+                    .copied()
+                    .unwrap_or(0.0)
+            };
+            rhs[row] = diagonal * (reference + voltage);
         }
         Ok(())
     }
@@ -385,20 +401,53 @@ impl Engine {
             && !matrix.row_has_position_from(node_id - 1, first_current_column)
     }
 
+    /// Choose the constraint terminal whose KCL row can safely become the
+    /// temporary startup equation. A terminal carrying an ideal branch
+    /// current remains the reference when the opposite terminal has an
+    /// ordinary nodal row, preserving both the authored difference and the
+    /// ideal source equation.
+    fn startup_constraint_clamp_orientation(
+        circuit: &CircuitData,
+        matrix: &StaticMatrix,
+        constraint: &StartupVoltageConstraint,
+    ) -> (usize, usize, Value) {
+        let first_current_column = circuit.num_nodes();
+        let positive_has_branch = constraint.positive > 0
+            && matrix.row_has_position_from(constraint.positive - 1, first_current_column);
+        let negative_has_branch = constraint.negative > 0
+            && matrix.row_has_position_from(constraint.negative - 1, first_current_column);
+        if positive_has_branch && constraint.negative > 0 && !negative_has_branch {
+            (
+                constraint.negative,
+                constraint.positive,
+                -constraint.voltage,
+            )
+        } else {
+            (constraint.positive, constraint.negative, constraint.voltage)
+        }
+    }
+
     fn enforce_node_voltage_hints(
         circuit: &CircuitData,
         matrix: &StaticMatrix,
         solution: &mut [Value],
-        node_hints: &[(usize, Value)],
+        node_hints: &[StartupVoltageConstraint],
     ) {
-        for &(node_id, voltage) in node_hints {
-            if !voltage.is_finite()
+        for constraint in node_hints {
+            let (node_id, reference_id, voltage) =
+                Self::startup_constraint_clamp_orientation(circuit, matrix, constraint);
+            if !constraint.voltage.is_finite()
                 || !Self::node_voltage_constraint_pins_node(circuit, matrix, node_id)
             {
                 continue;
             }
+            let reference = if reference_id == 0 {
+                0.0
+            } else {
+                solution.get(reference_id - 1).copied().unwrap_or(0.0)
+            };
             if let Some(slot) = solution.get_mut(node_id - 1) {
-                *slot = voltage;
+                *slot = reference + voltage;
             }
         }
     }
@@ -411,14 +460,27 @@ impl Engine {
     fn seed_node_voltage_hints(
         circuit: &CircuitData,
         solution: &mut [Value],
-        node_hints: &[(usize, Value)],
+        node_hints: &[StartupVoltageConstraint],
     ) {
-        for &(node_id, voltage) in node_hints {
-            if !voltage.is_finite() || node_id == 0 || node_id > circuit.num_nodes() {
+        for constraint in node_hints {
+            let node_id = constraint.positive;
+            if !constraint.voltage.is_finite()
+                || node_id == 0
+                || node_id > circuit.num_nodes()
+                || constraint.negative > circuit.num_nodes()
+            {
                 continue;
             }
+            let reference = if constraint.negative == 0 {
+                0.0
+            } else {
+                solution
+                    .get(constraint.negative - 1)
+                    .copied()
+                    .unwrap_or(0.0)
+            };
             if let Some(slot) = solution.get_mut(node_id - 1) {
-                *slot = voltage;
+                *slot = reference + constraint.voltage;
             }
         }
     }
@@ -428,7 +490,7 @@ impl Engine {
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         solution: &[Value],
-        node_hints: &[(usize, Value)],
+        node_hints: &[StartupVoltageConstraint],
     ) -> Result<bool, SimulationError> {
         let snapshot = circuit.nonlinear_state_snapshot();
         let gmin_floor = self.dc_nodal_gmin_floor(circuit);
@@ -444,7 +506,7 @@ impl Engine {
                 solution,
                 junction_gmin,
             )?;
-            Self::apply_node_voltage_constraints(circuit, probe, rhs, node_hints)?;
+            Self::apply_node_voltage_constraints(circuit, probe, rhs, node_hints, solution)?;
             Ok(self.residual_probe_fixed_point_converged(circuit, probe, solution, rhs))
         });
         circuit.restore_nonlinear_state(snapshot);
@@ -457,7 +519,7 @@ impl Engine {
         matrix: &mut StaticMatrix,
         solution: &[Value],
         time: Value,
-        node_hints: &[(usize, Value)],
+        node_hints: &[StartupVoltageConstraint],
         nodal_gmin: Value,
         junction_gmin: Value,
         use_transient_current_seed: bool,
@@ -483,7 +545,7 @@ impl Engine {
                 crate::xspice::AnalysisType::Transient,
                 junction_gmin,
             )?;
-            Self::apply_node_voltage_constraints(circuit, probe, rhs, node_hints)?;
+            Self::apply_node_voltage_constraints(circuit, probe, rhs, node_hints, solution)?;
             Ok(self.residual_probe_fixed_point_converged(circuit, probe, solution, rhs))
         });
         circuit.restore_nonlinear_state(snapshot);
@@ -495,7 +557,7 @@ impl Engine {
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         initial_guess: &[Value],
-        node_hints: &[(usize, Value)],
+        node_hints: &[StartupVoltageConstraint],
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
@@ -521,7 +583,7 @@ impl Engine {
             Self::stamp_nodal_gmin(circuit, matrix, gmin_floor);
             circuit.stamp_dc_direct(matrix, &mut rhs);
             self.try_stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution)?;
-            Self::apply_node_voltage_constraints(circuit, matrix, &mut rhs, node_hints)?;
+            Self::apply_node_voltage_constraints(circuit, matrix, &mut rhs, node_hints, &solution)?;
 
             Self::solve_dc_linearization(
                 matrix,
@@ -940,7 +1002,14 @@ impl Engine {
         }
 
         if hit_voltage_limit && limit_cycle_detected && !circuit.bjts.is_empty() {
-            let hints = Self::legacy_bjt_half_bias_startup_hints(circuit, &startup_seed);
+            let hints = Self::legacy_bjt_half_bias_startup_hints(circuit, &startup_seed)
+                .into_iter()
+                .map(|(positive, voltage)| StartupVoltageConstraint {
+                    positive,
+                    negative: 0,
+                    voltage,
+                })
+                .collect::<Vec<_>>();
             if std::env::var("RSPICE_DC_TRACE").as_deref() == Ok("1") {
                 log::debug!(
                     "DCTRACE legacy_bjt_half_bias hints={hints:?} startup={:?}",
@@ -1398,7 +1467,7 @@ impl Engine {
         matrix: &mut StaticMatrix,
         time: Value,
         initial_guess: &[Value],
-        node_hints: &[(usize, Value)],
+        node_hints: &[StartupVoltageConstraint],
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
@@ -1438,7 +1507,7 @@ impl Engine {
                 crate::xspice::AnalysisType::Transient,
                 junction_gmin,
             )?;
-            Self::apply_node_voltage_constraints(circuit, matrix, &mut rhs, node_hints)?;
+            Self::apply_node_voltage_constraints(circuit, matrix, &mut rhs, node_hints, &solution)?;
 
             matrix
                 .solve_into(&rhs, &mut new_solution)
@@ -1499,88 +1568,227 @@ impl Engine {
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         time: Value,
-        node_constraints: &[(usize, Value)],
+        node_constraints: &[StartupVoltageConstraint],
         abort: &dyn AbortSignal,
     ) -> Result<TransientOperatingPointSolution, SimulationError> {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
 
-        let size = circuit.matrix_size();
-        matrix.clear_values();
-        let mut rhs = vec![0.0; size];
         let nodal_gmin =
             if self.config.spice_dialect == SpiceDialect::Xyce && !node_constraints.is_empty() {
                 0.0
             } else {
                 self.dc_nodal_gmin_floor(circuit)
             };
-        Self::stamp_linear_transient_operating_point_system(
+        let primary = self.solve_linear_transient_constraint_system(
             circuit,
             matrix,
-            &mut rhs,
             time,
             nodal_gmin,
             TransientOperatingPointLinearSystem::IdealInductorShorts,
-        )?;
-        Self::apply_node_voltage_constraints(circuit, matrix, &mut rhs, node_constraints)?;
-        match matrix.solve(&rhs) {
-            Ok(mut values) if values.iter().all(|value| value.is_finite()) => {
-                Self::enforce_node_voltage_hints(circuit, matrix, &mut values, node_constraints);
-                Ok(TransientOperatingPointSolution {
-                    values,
-                    accepted_contract: node_constraints.is_empty().then_some(
-                        AcceptedTransientOperatingPointContract {
-                            linear_system: TransientOperatingPointLinearSystem::IdealInductorShorts,
-                            nodal_gmin,
-                            junction_gmin: None,
-                        },
-                    ),
-                })
-            }
-            Ok(_) | Err(_) if !circuit.inductors.is_empty() => {
-                matrix.clear_values();
-                rhs.fill(0.0);
-                Self::stamp_linear_transient_operating_point_system(
+            node_constraints,
+            abort,
+        );
+        match primary {
+            Ok(values) => Ok(TransientOperatingPointSolution {
+                values,
+                accepted_contract: node_constraints.is_empty().then_some(
+                    AcceptedTransientOperatingPointContract {
+                        linear_system: TransientOperatingPointLinearSystem::IdealInductorShorts,
+                        nodal_gmin,
+                        junction_gmin: None,
+                    },
+                ),
+            }),
+            Err(_) if !circuit.inductors.is_empty() => {
+                match self.solve_linear_transient_constraint_system(
                     circuit,
                     matrix,
-                    &mut rhs,
                     time,
                     nodal_gmin,
                     TransientOperatingPointLinearSystem::CurrentSeededInductors,
-                )?;
-                Self::apply_node_voltage_constraints(circuit, matrix, &mut rhs, node_constraints)?;
-                match matrix.solve(&rhs) {
-                    Ok(mut values) if values.iter().all(|value| value.is_finite()) => {
-                        Self::enforce_node_voltage_hints(
-                            circuit,
-                            matrix,
-                            &mut values,
-                            node_constraints,
-                        );
-                        Ok(TransientOperatingPointSolution {
-                            values,
-                            accepted_contract: node_constraints.is_empty().then_some(
-                                AcceptedTransientOperatingPointContract {
-                                    linear_system:
-                                        TransientOperatingPointLinearSystem::CurrentSeededInductors,
-                                    nodal_gmin,
-                                    junction_gmin: None,
-                                },
-                            ),
-                        })
-                    }
-                    Ok(_) => Err(SimulationError::Solver(
-                        crate::solver::SolverError::SingularMatrix,
-                    )),
-                    Err(err) => Err(SimulationError::Solver(err)),
+                    node_constraints,
+                    abort,
+                ) {
+                    Ok(values) => Ok(TransientOperatingPointSolution {
+                        values,
+                        accepted_contract: node_constraints.is_empty().then_some(
+                            AcceptedTransientOperatingPointContract {
+                                linear_system:
+                                    TransientOperatingPointLinearSystem::CurrentSeededInductors,
+                                nodal_gmin,
+                                junction_gmin: None,
+                            },
+                        ),
+                    }),
+                    Err(err) => Err(err),
                 }
             }
-            Ok(_) => Err(SimulationError::Solver(
-                crate::solver::SolverError::SingularMatrix,
-            )),
-            Err(err) => Err(SimulationError::Solver(err)),
+            Err(err) => Err(err),
         }
+    }
+
+    fn solve_linear_transient_constraint_system(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        time: Value,
+        nodal_gmin: Value,
+        linear_system: TransientOperatingPointLinearSystem,
+        constraints: &[StartupVoltageConstraint],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
+        let size = circuit.matrix_size();
+        let mut roots = constraints
+            .iter()
+            .map(|constraint| {
+                Self::startup_constraint_clamp_orientation(circuit, matrix, constraint).1
+            })
+            .filter(|&node| node != 0)
+            .collect::<Vec<_>>();
+        roots.sort_unstable();
+        roots.dedup();
+
+        let solve_for_roots = |root_values: &[Value],
+                               circuit: &mut CircuitData,
+                               matrix: &mut StaticMatrix|
+         -> Result<Vec<Value>, SimulationError> {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            matrix.clear_values();
+            let mut rhs = vec![0.0; size];
+            Self::stamp_linear_transient_operating_point_system(
+                circuit,
+                matrix,
+                &mut rhs,
+                time,
+                nodal_gmin,
+                linear_system,
+            )?;
+            let mut reference_solution = vec![0.0; size];
+            for (&root, &value) in roots.iter().zip(root_values) {
+                reference_solution[root - 1] = value;
+            }
+            Self::apply_node_voltage_constraints(
+                circuit,
+                matrix,
+                &mut rhs,
+                constraints,
+                &reference_solution,
+            )?;
+            let values = matrix.solve(&rhs).map_err(SimulationError::Solver)?;
+            if values.iter().all(|value| value.is_finite()) {
+                Ok(values)
+            } else {
+                Err(SimulationError::Solver(
+                    crate::solver::SolverError::SingularMatrix,
+                ))
+            }
+        };
+
+        let zero_roots = vec![0.0; roots.len()];
+        let base = solve_for_roots(&zero_roots, circuit, matrix)?;
+        let root_values = if roots.is_empty() {
+            Vec::new()
+        } else {
+            let mut system = vec![vec![0.0; roots.len()]; roots.len()];
+            let mut rhs = roots.iter().map(|&root| base[root - 1]).collect::<Vec<_>>();
+            for (column, _) in roots.iter().enumerate() {
+                let mut excitation = vec![0.0; roots.len()];
+                excitation[column] = 1.0;
+                let response = solve_for_roots(&excitation, circuit, matrix)?;
+                for (row, &root) in roots.iter().enumerate() {
+                    let transfer = response[root - 1] - rhs[row];
+                    system[row][column] = if row == column { 1.0 } else { 0.0 } - transfer;
+                }
+            }
+            Self::solve_startup_common_modes(&mut system, &mut rhs)?
+        };
+        let mut values = solve_for_roots(&root_values, circuit, matrix)?;
+        Self::enforce_node_voltage_hints(circuit, matrix, &mut values, constraints);
+        for constraint in constraints {
+            let (clamped, _, _) =
+                Self::startup_constraint_clamp_orientation(circuit, matrix, constraint);
+            if !Self::node_voltage_constraint_pins_node(circuit, matrix, clamped) {
+                // Preserve SPICE's established source-conflict contract: a
+                // node row carrying an ideal branch current outvotes a
+                // startup clamp rather than pretending both ideal equations
+                // were satisfied.
+                continue;
+            }
+            let positive = values.get(constraint.positive.wrapping_sub(1)).copied();
+            let negative = if constraint.negative == 0 {
+                Some(0.0)
+            } else {
+                values.get(constraint.negative - 1).copied()
+            };
+            let Some((positive, negative)) = positive.zip(negative) else {
+                continue;
+            };
+            let residual = positive - negative - constraint.voltage;
+            let tolerance = 256.0
+                * Value::EPSILON
+                * positive
+                    .abs()
+                    .max(negative.abs())
+                    .max(constraint.voltage.abs())
+                    .max(1.0);
+            if residual.abs() > tolerance {
+                return Err(SimulationError::Circuit(format!(
+                    "differential startup constraint solve residual {residual:.17e} exceeds {tolerance:.17e}"
+                )));
+            }
+        }
+        Ok(values)
+    }
+
+    fn solve_startup_common_modes(
+        matrix: &mut [Vec<Value>],
+        rhs: &mut [Value],
+    ) -> Result<Vec<Value>, SimulationError> {
+        let order = rhs.len();
+        for pivot in 0..order {
+            let best = (pivot..order)
+                .max_by(|&left, &right| {
+                    matrix[left][pivot]
+                        .abs()
+                        .total_cmp(&matrix[right][pivot].abs())
+                })
+                .unwrap_or(pivot);
+            let scale = matrix[best]
+                .iter()
+                .map(|value| value.abs())
+                .fold(0.0, Value::max)
+                .max(1.0);
+            if matrix[best][pivot].abs() <= 256.0 * Value::EPSILON * scale {
+                return Err(SimulationError::Circuit(
+                    "differential startup constraint system is rank deficient; its common-mode voltage is not determined by the circuit"
+                        .to_string(),
+                ));
+            }
+            matrix.swap(pivot, best);
+            rhs.swap(pivot, best);
+            for row in pivot + 1..order {
+                let factor = matrix[row][pivot] / matrix[pivot][pivot];
+                matrix[row][pivot] = 0.0;
+                for column in pivot + 1..order {
+                    matrix[row][column] -= factor * matrix[pivot][column];
+                }
+                rhs[row] -= factor * rhs[pivot];
+            }
+        }
+        let mut solution = vec![0.0; order];
+        for row in (0..order).rev() {
+            let remainder = matrix[row][row + 1..]
+                .iter()
+                .zip(&solution[row + 1..])
+                .map(|(coefficient, value)| coefficient * value)
+                .sum::<Value>();
+            solution[row] = (rhs[row] - remainder) / matrix[row][row];
+        }
+        Ok(solution)
     }
 
     pub(in crate::engine) fn solve_nonlinear_transient_op_with_node_hints_and_abort(
@@ -1588,8 +1796,8 @@ impl Engine {
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         time: Value,
-        node_hints: &[(usize, Value)],
-        node_constraints: &[(usize, Value)],
+        node_hints: &[StartupVoltageConstraint],
+        node_constraints: &[StartupVoltageConstraint],
         abort: &dyn AbortSignal,
     ) -> Result<TransientOperatingPointSolution, SimulationError> {
         let size = circuit.matrix_size();
@@ -1639,12 +1847,7 @@ impl Engine {
             None => vec![0.0; size],
         };
 
-        for &(node_id, voltage) in node_hints {
-            if !voltage.is_finite() || node_id == 0 || node_id > circuit.num_nodes() {
-                continue;
-            }
-            solution[node_id - 1] = voltage;
-        }
+        Self::seed_node_voltage_hints(circuit, &mut solution, node_hints);
 
         solution =
             Self::sanitize_initial_guess(circuit, &solution, size, circuit.num_nodes().min(size));
@@ -1715,7 +1918,13 @@ impl Engine {
                 crate::xspice::AnalysisType::Transient,
                 junction_gmin,
             )?;
-            Self::apply_node_voltage_constraints(circuit, matrix, &mut rhs, node_constraints)?;
+            Self::apply_node_voltage_constraints(
+                circuit,
+                matrix,
+                &mut rhs,
+                node_constraints,
+                &solution,
+            )?;
 
             match matrix.solve_into(&rhs, &mut raw_solution) {
                 Ok(()) => {}

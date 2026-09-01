@@ -1296,7 +1296,7 @@ pub(super) fn parse_nodeset_command(
     params: &ParamContext,
     node_sets: &mut Vec<NodeSet>,
     defer_values: bool,
-) -> Result<Vec<String>, ParseError> {
+) -> Result<Vec<(String, Option<String>)>, ParseError> {
     let mut authored_nodes = Vec::new();
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
@@ -1304,7 +1304,7 @@ pub(super) fn parse_nodeset_command(
             break;
         }
 
-        let Some((node, authored_node)) = parse_voltage_hint_target(stream, line_num)? else {
+        let Some(target) = parse_voltage_hint_target(stream, line_num)? else {
             break;
         };
 
@@ -1312,11 +1312,12 @@ pub(super) fn parse_nodeset_command(
         let (voltage, voltage_expr) =
             parse_voltage_hint_value(stream, line_num, params, defer_values)?;
         node_sets.push(NodeSet {
-            node,
+            node: target.node,
+            reference: target.reference,
             voltage,
             voltage_expr,
         });
-        authored_nodes.push(authored_node);
+        authored_nodes.push((target.authored_node, target.authored_reference));
     }
 
     Ok(authored_nodes)
@@ -1332,7 +1333,7 @@ pub(super) fn parse_ic_command(
     params: &ParamContext,
     initial_conditions: &mut Vec<InitialCondition>,
     defer_values: bool,
-) -> Result<Vec<String>, ParseError> {
+) -> Result<Vec<(String, Option<String>)>, ParseError> {
     let mut authored_nodes = Vec::new();
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
@@ -1340,7 +1341,7 @@ pub(super) fn parse_ic_command(
             break;
         }
 
-        let Some((node, authored_node)) = parse_voltage_hint_target(stream, line_num)? else {
+        let Some(target) = parse_voltage_hint_target(stream, line_num)? else {
             break;
         };
 
@@ -1348,11 +1349,12 @@ pub(super) fn parse_ic_command(
         let (voltage, voltage_expr) =
             parse_voltage_hint_value(stream, line_num, params, defer_values)?;
         initial_conditions.push(InitialCondition {
-            node,
+            node: target.node,
+            reference: target.reference,
             voltage,
             voltage_expr,
         });
-        authored_nodes.push(authored_node);
+        authored_nodes.push((target.authored_node, target.authored_reference));
     }
 
     Ok(authored_nodes)
@@ -1465,10 +1467,17 @@ fn looks_like_voltage_hint_target(stream: &TokenStream) -> bool {
         && matches!(stream.peek_n(1).kind, TokenKind::LParen)
 }
 
+struct VoltageHintTarget {
+    node: String,
+    reference: Option<String>,
+    authored_node: String,
+    authored_reference: Option<String>,
+}
+
 fn parse_voltage_hint_target(
     stream: &mut TokenStream,
     line_num: usize,
-) -> Result<Option<(String, String)>, ParseError> {
+) -> Result<Option<VoltageHintTarget>, ParseError> {
     skip_commas(stream);
     if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         return Ok(None);
@@ -1482,15 +1491,13 @@ fn parse_voltage_hint_target(
         stream.advance(); // (
 
         let (node, authored_node) = expect_node_with_authored_spelling(stream, line_num)?;
-        if stream.consume(&TokenKind::Comma) {
-            let reference = expect_node(stream, line_num)?;
-            return Err(ParseError::Syntax {
-                line: line_num,
-                message: format!(
-                    "Differential startup target V({node},{reference}) is not supported; .IC and .NODESET require one node referenced to ground"
-                ),
-            });
-        }
+        let (reference, authored_reference) = if stream.consume(&TokenKind::Comma) {
+            let (reference, authored_reference) =
+                expect_node_with_authored_spelling(stream, line_num)?;
+            (Some(reference), Some(authored_reference))
+        } else {
+            (None, None)
+        };
 
         if !stream.consume(&TokenKind::RParen) {
             return Err(ParseError::Syntax {
@@ -1498,10 +1505,21 @@ fn parse_voltage_hint_target(
                 message: "Expected ')' in voltage target specification".to_string(),
             });
         }
-        return Ok(Some((node, authored_node)));
+        return Ok(Some(VoltageHintTarget {
+            node,
+            reference,
+            authored_node,
+            authored_reference,
+        }));
     }
 
-    Ok(Some(expect_node_with_authored_spelling(stream, line_num)?))
+    let (node, authored_node) = expect_node_with_authored_spelling(stream, line_num)?;
+    Ok(Some(VoltageHintTarget {
+        node,
+        reference: None,
+        authored_node,
+        authored_reference: None,
+    }))
 }
 
 fn expect_node_with_authored_spelling(

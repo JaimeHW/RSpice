@@ -190,30 +190,126 @@ impl MeasureResult {
 /// `event_axis`; delay measurements instead retain the independently matched
 /// trigger and target locations.  Keeping this provenance avoids forcing
 /// output adapters to reverse-engineer event locations from a scalar value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContinuousMeasureVerificationFailure {
+    /// A FAILVALUE comparison cannot classify a NaN or infinity as passing.
+    NonFiniteRawValue,
+    /// A malformed programmatic threshold must not silently disable checking.
+    NonFiniteFailureLimit,
+    /// The inclusive `abs(raw_value) >= FAILVALUE` contract was met.
+    FailureLimitExceeded,
+}
+
+/// Typed independent-axis provenance for one continuous measurement row.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ContinuousMeasureCoordinate {
+    Point {
+        axis: Value,
+    },
+    Delay {
+        trigger_axis: Value,
+        target_axis: Value,
+    },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ContinuousMeasureRecord {
+    /// Published record value.
     pub value: Value,
+    /// Exact dependent value to which verification contracts apply. This is
+    /// additive to `value` so future output projections cannot accidentally
+    /// verify an independent-axis coordinate instead.
+    pub raw_value: Value,
     pub event_axis: Option<Value>,
     pub trigger_axis: Option<Value>,
     pub target_axis: Option<Value>,
+    /// Authored Xyce FAILVALUE threshold for this row.
+    pub failure_limit: Option<Value>,
+    /// Exact inclusive comparator verdict.
+    pub failure_limit_exceeded: bool,
+    /// Per-record verification outcome.
+    pub passed: bool,
+    /// Typed reason for a failed per-record verification contract.
+    pub verification_failure: Option<ContinuousMeasureVerificationFailure>,
 }
 
 impl ContinuousMeasureRecord {
     fn point(value: Value, event_axis: Value) -> Self {
         Self {
             value,
+            raw_value: value,
             event_axis: Some(event_axis),
             trigger_axis: None,
             target_axis: None,
+            failure_limit: None,
+            failure_limit_exceeded: false,
+            passed: true,
+            verification_failure: None,
         }
     }
 
     fn delay(trigger_axis: Value, target_axis: Value) -> Self {
         Self {
             value: target_axis - trigger_axis,
+            raw_value: target_axis - trigger_axis,
             event_axis: None,
             trigger_axis: Some(trigger_axis),
             target_axis: Some(target_axis),
+            failure_limit: None,
+            failure_limit_exceeded: false,
+            passed: true,
+            verification_failure: None,
+        }
+    }
+
+    fn check_fail_value(mut self, failure_limit: Option<Value>) -> Self {
+        self.failure_limit = failure_limit;
+        let Some(limit) = failure_limit else {
+            return self;
+        };
+        self.verification_failure = if !self.raw_value.is_finite() {
+            Some(ContinuousMeasureVerificationFailure::NonFiniteRawValue)
+        } else if !limit.is_finite() {
+            Some(ContinuousMeasureVerificationFailure::NonFiniteFailureLimit)
+        } else {
+            self.failure_limit_exceeded = self.raw_value.abs() >= limit;
+            self.failure_limit_exceeded
+                .then_some(ContinuousMeasureVerificationFailure::FailureLimitExceeded)
+        };
+        self.passed = self.verification_failure.is_none();
+        self
+    }
+
+    /// Independent-axis coordinate retained for this row.
+    pub fn coordinate(&self) -> Option<ContinuousMeasureCoordinate> {
+        match (self.event_axis, self.trigger_axis, self.target_axis) {
+            (Some(axis), None, None) => Some(ContinuousMeasureCoordinate::Point { axis }),
+            (None, Some(trigger_axis), Some(target_axis)) => {
+                Some(ContinuousMeasureCoordinate::Delay {
+                    trigger_axis,
+                    target_axis,
+                })
+            }
+            _ => None,
+        }
+    }
+
+    /// Stable human-readable verification diagnostic for reporting adapters.
+    pub fn verification_failure_message(&self) -> Option<String> {
+        match self.verification_failure? {
+            ContinuousMeasureVerificationFailure::NonFiniteRawValue => Some(format!(
+                "continuous measurement raw value is non-finite: {}",
+                self.raw_value
+            )),
+            ContinuousMeasureVerificationFailure::NonFiniteFailureLimit => Some(format!(
+                "continuous measurement FAILVALUE must be finite, got {}",
+                self.failure_limit.unwrap_or(Value::NAN)
+            )),
+            ContinuousMeasureVerificationFailure::FailureLimitExceeded => Some(format!(
+                "continuous measurement magnitude {:e} meets or exceeds FAILVALUE {:e}",
+                self.raw_value,
+                self.failure_limit.unwrap_or(Value::NAN)
+            )),
         }
     }
 }
@@ -276,6 +372,31 @@ impl ContinuousMeasureResult {
         }
     }
 
+    fn check_contract(mut self, statement: &MeasureStatement) -> Self {
+        if self.failure.is_none() {
+            for record in &mut self.records {
+                *record = record.check_fail_value(statement.fail_value);
+            }
+        }
+        match self.validate_invariants() {
+            Ok(()) => self,
+            Err(error) => Self::failed(&statement.name, error),
+        }
+    }
+
+    /// Aggregate policy: evaluation must succeed and every emitted record
+    /// must pass its own verification contract. Failed records remain present.
+    pub fn passed(&self) -> bool {
+        self.failure.is_none()
+            && !self.records.is_empty()
+            && self.records.iter().all(|record| record.passed)
+    }
+
+    /// Number of retained rows that failed their per-record contract.
+    pub fn failed_record_count(&self) -> usize {
+        self.records.iter().filter(|record| !record.passed).count()
+    }
+
     /// Validate the mutually exclusive success/failure representation and
     /// the structural validity of published records. Numeric fields retain
     /// IEEE extended-real values, including NaN, to distinguish a computed
@@ -299,6 +420,42 @@ impl ContinuousMeasureResult {
                 }
                 if self.failure_metadata.is_some() {
                     return Err("successful continuous measurement contains failure metadata");
+                }
+                for record in &self.records {
+                    if record.coordinate().is_none() {
+                        return Err(
+                            "continuous measurement record has invalid coordinate metadata",
+                        );
+                    }
+                    let expected_failure = match record.failure_limit {
+                        None => None,
+                        Some(_) if !record.raw_value.is_finite() => {
+                            Some(ContinuousMeasureVerificationFailure::NonFiniteRawValue)
+                        }
+                        Some(limit) if !limit.is_finite() => {
+                            Some(ContinuousMeasureVerificationFailure::NonFiniteFailureLimit)
+                        }
+                        Some(limit) if record.raw_value.abs() >= limit => {
+                            Some(ContinuousMeasureVerificationFailure::FailureLimitExceeded)
+                        }
+                        Some(_) => None,
+                    };
+                    if record.verification_failure != expected_failure {
+                        return Err(
+                            "continuous measurement typed verification failure is inconsistent",
+                        );
+                    }
+                    if record.passed != expected_failure.is_none() {
+                        return Err("continuous measurement record verdict is inconsistent");
+                    }
+                    if record.failure_limit_exceeded
+                        != matches!(
+                            expected_failure,
+                            Some(ContinuousMeasureVerificationFailure::FailureLimitExceeded)
+                        )
+                    {
+                        return Err("continuous measurement FAILVALUE verdict is inconsistent");
+                    }
                 }
             }
         }
@@ -662,12 +819,6 @@ impl MeasureEngine {
         self.measurements
             .iter()
             .map(|statement| {
-                if statement.fail_value.is_some() {
-                    return ContinuousMeasureResult::failed(
-                        &statement.name,
-                        "FAILVALUE is not supported for continuous measurements because its per-record semantics are undefined",
-                    );
-                }
                 if !matches!(
                     statement.analysis.to_ascii_uppercase().as_str(),
                     "TRAN_CONT" | "DC_CONT" | "AC_CONT" | "NOISE_CONT"
@@ -681,6 +832,7 @@ impl MeasureEngine {
                     );
                 }
                 self.evaluate_continuous_one(statement, axis, &indexed_signals, segment_starts)
+                    .check_contract(statement)
             })
             .collect()
     }
@@ -5430,11 +5582,11 @@ mod tests {
     }
 
     #[test]
-    fn continuous_evaluation_rejects_programmatic_failvalue_contracts() {
+    fn continuous_failvalue_verifies_each_record_without_collapsing_the_stream() {
         let axis = [0.0, 1.0, 2.0];
         let signal = [-1.0, 1.0, -1.0];
         let mut signals = HashMap::new();
-        signals.insert("Y".to_string(), signal.as_slice());
+        signals.insert("ALT".to_string(), signal.as_slice());
 
         let mut statement = continuous_statement(
             "contract",
@@ -5451,10 +5603,119 @@ mod tests {
         engine.add(statement);
 
         let result = &engine.evaluate_continuous(&axis, &signals, &[])[0];
-        assert!(result.records.is_empty());
-        assert!(result.failure.as_deref().is_some_and(|error| {
-            error.contains("FAILVALUE") && error.contains("per-record semantics are undefined")
-        }));
+        assert_eq!(result.failure, None);
+        assert_eq!(result.records.len(), 2);
+        assert_eq!(result.records[0].raw_value, 0.5);
+        assert_eq!(result.records[0].failure_limit, Some(1.0));
+        assert!(!result.records[0].failure_limit_exceeded);
+        assert!(result.records[0].passed);
+        assert_eq!(
+            result.records[0].coordinate(),
+            Some(ContinuousMeasureCoordinate::Point { axis: 0.5 })
+        );
+        assert_eq!(result.records[1].raw_value, 1.5);
+        assert!(result.records[1].failure_limit_exceeded);
+        assert!(!result.records[1].passed);
+        assert_eq!(
+            result.records[1].verification_failure,
+            Some(ContinuousMeasureVerificationFailure::FailureLimitExceeded)
+        );
+        assert!(!result.passed());
+        assert_eq!(result.failed_record_count(), 1);
+    }
+
+    #[test]
+    fn continuous_failvalue_fails_closed_for_non_finite_values_and_thresholds() {
+        let axis = [0.0, 1.0];
+        let crossing = [-1.0, 1.0];
+        let infinite = [Value::INFINITY, Value::INFINITY];
+        let signals = HashMap::from([
+            ("CROSSING".to_string(), crossing.as_slice()),
+            ("INFINITE".to_string(), infinite.as_slice()),
+        ]);
+        let when = || WhenCondition {
+            left: "CROSSING".to_string(),
+            right: MeasureOperand::Constant(0.0),
+            occurrence: EventOccurrence::default(),
+        };
+
+        let mut non_finite_raw = continuous_statement(
+            "raw",
+            MeasureType::Find {
+                signal: "INFINITE".to_string(),
+                at: None,
+                when: Some(when()),
+                from: None,
+                to: None,
+                td: None,
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
+            },
+        );
+        non_finite_raw.fail_value = Some(1.0);
+        let mut non_finite_limit = continuous_statement(
+            "limit",
+            MeasureType::When {
+                condition: when(),
+                from: None,
+                to: None,
+                td: None,
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
+            },
+        );
+        non_finite_limit.fail_value = Some(Value::NAN);
+
+        let mut engine = MeasureEngine::new();
+        engine.add(non_finite_raw);
+        engine.add(non_finite_limit);
+        let results = engine.evaluate_continuous(&axis, &signals, &[]);
+
+        assert_eq!(results[0].records[0].raw_value, Value::INFINITY);
+        assert_eq!(
+            results[0].records[0].verification_failure,
+            Some(ContinuousMeasureVerificationFailure::NonFiniteRawValue)
+        );
+        assert!(!results[0].records[0].passed);
+        assert_eq!(
+            results[1].records[0].verification_failure,
+            Some(ContinuousMeasureVerificationFailure::NonFiniteFailureLimit)
+        );
+        assert!(!results[1].records[0].passed);
+        assert!(results.iter().all(|result| !result.passed()));
+    }
+
+    #[test]
+    fn continuous_public_records_fail_invariants_when_contract_fields_disagree() {
+        let malformed = ContinuousMeasureRecord {
+            value: 2.0,
+            raw_value: 2.0,
+            event_axis: Some(0.5),
+            trigger_axis: None,
+            target_axis: None,
+            failure_limit: Some(1.0),
+            failure_limit_exceeded: false,
+            passed: false,
+            verification_failure: Some(ContinuousMeasureVerificationFailure::FailureLimitExceeded),
+        };
+        let result = ContinuousMeasureResult {
+            name: "malformed".to_string(),
+            records: vec![malformed],
+            failure: None,
+            failure_metadata: None,
+        };
+
+        assert_eq!(
+            result.validate_invariants(),
+            Err("continuous measurement FAILVALUE verdict is inconsistent")
+        );
+
+        let mut wrong_reason = result;
+        wrong_reason.records[0].failure_limit_exceeded = true;
+        wrong_reason.records[0].verification_failure =
+            Some(ContinuousMeasureVerificationFailure::NonFiniteRawValue);
+        assert_eq!(
+            wrong_reason.validate_invariants(),
+            Err("continuous measurement typed verification failure is inconsistent")
+        );
     }
 
     fn alternating_condition(number: isize) -> WhenCondition {
