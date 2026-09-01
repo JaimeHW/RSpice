@@ -177,14 +177,15 @@ impl DigitalSignalClass {
 
     /// Whether the name carries a real value rather than four-state bits.
     ///
-    /// Only a `wreal` net does. Verilog-AMS LRM 2.4 section 3.7 gives real
-    /// values to nets and to nothing else in the discrete domain — a `reg` is
-    /// four-state and a process-local `real` is a variable of the process, not
-    /// a signal.
+    /// Two spellings reach it, and they differ by IEEE 1364-2005 section 6.2's
+    /// rule rather than by what they carry: a `wreal` is Verilog-AMS LRM 2.4
+    /// section 3.7's real *net*, driven by continuous assignments, and a `real`
+    /// is section 3.9's real *variable*, written procedurally. A process-local
+    /// `real` is neither — it belongs to the process and is not a signal at all.
     pub const fn is_real(self) -> bool {
         match self {
             Self::Net(kind) => kind.is_real(),
-            Self::Variable(_) => false,
+            Self::Variable(kind) => kind.is_real(),
         }
     }
 
@@ -544,7 +545,26 @@ impl SemanticAnalyzer {
             }
         }
         for declaration in &module.digital_variables {
-            let bounds = self.resolve_vector_range(declaration.range.as_ref(), "reg");
+            // A `real` variable has neither a packed range nor a sign: IEEE
+            // 1364-2005 section 3.9 gives it no bits to range over and no sign
+            // bit to interpret. Each is refused where the source wrote it
+            // rather than dropped, because `output real signed [3:0] v;` says
+            // three things and only one of them is a real.
+            let bounds = if declaration.kind.is_real() {
+                if let Some(range) = &declaration.range {
+                    self.record_error_at(
+                        SemanticErrorKind::UnsupportedFeature(
+                            "a packed range on a `real` has no meaning; IEEE 1364-2005 section \
+                             3.9 makes a `real` a variable with no bit width"
+                                .to_string(),
+                        ),
+                        range.span,
+                    );
+                }
+                None
+            } else {
+                self.resolve_vector_range(declaration.range.as_ref(), "reg")
+            };
             for item in &declaration.items {
                 self.push_digital_signal(
                     &mut signals,
@@ -556,8 +576,135 @@ impl SemanticAnalyzer {
                 );
             }
         }
+        self.promote_module_level_reals(module, &mut signals, &mut seen);
         self.push_implicit_port_nets(module, &mut signals, &mut seen);
         signals
+    }
+
+    /// Move a module-level `real` into the discrete domain when a process owns
+    /// it, and refuse the case where both halves would.
+    ///
+    /// # The ownership rule
+    ///
+    /// `real state;` at module level is the *continuous* domain's declaration —
+    /// it is the same production a Verilog-A model writes, and every one of the
+    /// shipped analog models is full of them. It becomes a discrete-domain
+    /// variable exactly when both of these hold:
+    ///
+    /// 1. some `always`, `initial` or continuous assignment **writes** it, and
+    /// 2. the module declares **no** analog block — no `analog`, no `analog
+    ///    initial`, no `analog final`.
+    ///
+    /// Condition 1 is what makes the promotion necessary: a variable no process
+    /// writes has nothing to gain from moving, and leaving it where it was
+    /// keeps a module that merely *reads* one across the domain boundary
+    /// refused by name rather than silently rehoused.
+    ///
+    /// Condition 2 is what makes it safe, and it is a statement about the
+    /// module rather than about the name. A module with an analog block is an
+    /// analog device: its `real` variables are the continuous body's state, and
+    /// taking one of them away would leave that body reading storage the
+    /// discrete half now writes — a wrong answer rather than a missing one.
+    /// A module with no analog block is not a device at all; its `real`s belong
+    /// to nobody until a process writes one.
+    ///
+    /// So a pure-analog module is untouched by construction: condition 1 fails
+    /// (it has no processes) and condition 2 fails (it has an analog block).
+    /// Neither of the two questions this asks can change how one compiles.
+    ///
+    /// A module that fails only condition 2 — analog block *and* a process
+    /// writing a module-level `real` — is refused by name. That is genuine
+    /// mixed-signal coupling: the two domains advance on different clocks, and
+    /// which of them holds the variable between two time points is a question
+    /// this compiler does not yet answer.
+    ///
+    /// An `output real` port does not come through here at all. It is an
+    /// explicit discrete-domain declaration — IEEE 1364-2005 section 12.3.4's
+    /// variable port form, with section 3.9's `real` as the type — so the
+    /// parser already put it in `digital_variables`, exactly as it does for
+    /// `output reg`.
+    fn promote_module_level_reals(
+        &mut self,
+        module: &Module,
+        signals: &mut Vec<AnalyzedDigitalSignal>,
+        seen: &mut HashMap<SmolStr, Span>,
+    ) {
+        let mut written: std::collections::HashSet<SmolStr> = std::collections::HashSet::new();
+        for process in &module.digital_processes {
+            collect_written_names(&process.body, &mut written);
+        }
+        for assignment in &module.continuous_assigns {
+            for (name, _) in assignment.target.written_names() {
+                written.insert(name.clone());
+            }
+        }
+        if written.is_empty() {
+            return;
+        }
+        let analog = module
+            .analog_block
+            .as_ref()
+            .or(module.analog_initial.as_ref())
+            .or(module.analog_final.as_ref());
+
+        for declaration in &module.variables {
+            if declaration.var_type != VarType::Real {
+                continue;
+            }
+            for item in &declaration.items {
+                if !written.contains(&item.name) || seen.contains_key(&item.name) {
+                    continue;
+                }
+                if let Some(block) = analog {
+                    self.record_error_at(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "`{}` is a module-level `real` that a process writes, in a module \
+                             that also has an analog block; the continuous body and the \
+                             discrete processes would both own the variable and they advance \
+                             on different clocks, which this compiler does not resolve yet — \
+                             declare it inside the process, or move the analog block out",
+                            item.name
+                        )),
+                        block.span,
+                    );
+                    continue;
+                }
+                if !item.dimensions.is_empty() {
+                    self.record_error_at(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "`{}` is an array of `real`, and a process writes it; an array has \
+                             no discrete-domain signal form yet",
+                            item.name
+                        )),
+                        item.span,
+                    );
+                    continue;
+                }
+                if item.init.is_some() {
+                    self.record_error_at(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "a declaration initializer on the module-level `real` `{}` that a \
+                             process writes is not supported yet; IEEE 1364-2005 section 6.2.1 \
+                             makes it equivalent to an `initial` assignment, so write one",
+                            item.name
+                        )),
+                        item.span,
+                    );
+                    continue;
+                }
+                seen.insert(item.name.clone(), item.span);
+                signals.push(AnalyzedDigitalSignal {
+                    name: item.name.clone(),
+                    class: DigitalSignalClass::Variable(DigitalVariableKind::Real),
+                    signedness: Signedness::Unsigned,
+                    range: None,
+                    // No bits, the way every real quantity says it here.
+                    width: 0,
+                    redeclares_port: false,
+                    span: item.span,
+                });
+            }
+        }
     }
 
     /// Refuse a continuous assignment that drives one of this module's own
@@ -1587,6 +1734,73 @@ impl SemanticAnalyzer {
         match self.symbols.lookup(name) {
             Some(Symbol { kind, .. }) => Resolution::Analog(*kind),
             None => Resolution::Undeclared,
+        }
+    }
+}
+
+/// Every name a process assigns to, anywhere in its body.
+///
+/// Over-approximating on purpose in one direction only: a name inside a branch
+/// that never runs still counts, because whether it runs is a question about a
+/// simulation and this is a question about a declaration. It does not
+/// over-approximate the other way — a name is here only if it is an assignment
+/// *target*, so reading one does not claim it.
+///
+/// A process-local declaration is not filtered out. A local shadows the module
+/// name for the statements under it, so a body that declares `real acc;` and
+/// writes `acc` never means the module's — but the module's `acc` is then not
+/// promoted, and stays exactly where it was. Erring toward "the process writes
+/// it" would promote a variable the process cannot reach; erring the other way,
+/// which is what would happen if this filtered, would leave a written variable
+/// behind. The match is exhaustive so a new statement form cannot slip past it.
+fn collect_written_names(
+    statement: &DigitalStatement,
+    written: &mut std::collections::HashSet<SmolStr>,
+) {
+    match statement {
+        DigitalStatement::Null(_) => {}
+        DigitalStatement::Block(block) => {
+            for statement in &block.statements {
+                collect_written_names(statement, written);
+            }
+        }
+        DigitalStatement::BlockingAssign(assign) | DigitalStatement::NonblockingAssign(assign) => {
+            for (name, _) in assign.target.written_names() {
+                written.insert(name.clone());
+            }
+        }
+        DigitalStatement::Conditional(conditional) => {
+            collect_written_names(&conditional.then_branch, written);
+            if let Some(branch) = &conditional.else_branch {
+                collect_written_names(branch, written);
+            }
+        }
+        DigitalStatement::Case(case) => {
+            for item in &case.items {
+                collect_written_names(&item.statement, written);
+            }
+            if let Some(default) = &case.default {
+                collect_written_names(default, written);
+            }
+        }
+        DigitalStatement::For(statement) => {
+            collect_written_names(
+                &DigitalStatement::BlockingAssign((*statement.init).clone()),
+                written,
+            );
+            collect_written_names(
+                &DigitalStatement::BlockingAssign((*statement.update).clone()),
+                written,
+            );
+            collect_written_names(&statement.body, written);
+        }
+        DigitalStatement::While(statement) => collect_written_names(&statement.body, written),
+        DigitalStatement::Repeat(statement) => collect_written_names(&statement.body, written),
+        DigitalStatement::Forever(statement) => collect_written_names(&statement.body, written),
+        DigitalStatement::Timing(timing) => {
+            if let Some(statement) = &timing.statement {
+                collect_written_names(statement, written);
+            }
         }
     }
 }

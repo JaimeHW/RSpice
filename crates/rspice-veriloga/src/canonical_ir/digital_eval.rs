@@ -119,6 +119,19 @@ pub trait DigitalEnvironment {
     /// [`apply_deferred`] when the region it names drains.
     fn defer_update(&mut self, update: DigitalDeferredUpdate);
 
+    /// Replace a real variable's whole value.
+    ///
+    /// The real twin of [`write_signal`](Self::write_signal), and deliberately
+    /// not [`drive_real_signal`](Self::drive_real_signal): a procedural write
+    /// is IEEE 1364-2005 section 6.2's write of a *variable*, which has no
+    /// drivers and therefore no resolution. Routing one through the driver
+    /// table would give it a contribution slot to be folded against, and a
+    /// `wrealsum` variable is not a thing the language has.
+    ///
+    /// No select rides along, for the reason [`DigitalRealDrive`] carries none:
+    /// a real has no bits, so a partial write of one does not exist.
+    fn write_real_signal(&mut self, signal: DigitalSignalId, value: f64);
+
     /// The real net's value right now (Verilog-AMS LRM 2.4 section 3.7).
     ///
     /// A second method rather than a widened return type on
@@ -187,17 +200,35 @@ pub struct DigitalRealDrive {
 }
 
 /// A nonblocking write, evaluated but not yet applied.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `PartialEq` and not `Eq` since [`DigitalUpdate::Real`] arrived, for the
+/// reason [`DigitalRealDrive`] gives: an `f64` is not `Eq`.
+#[derive(Debug, Clone, PartialEq)]
 pub struct DigitalDeferredUpdate {
     pub target: DigitalWriteTarget,
-    /// The right-hand side, already resized to the target's width per IEEE
-    /// 1364-2005 section 5.2.1.
-    ///
-    /// Resized at evaluation rather than at application because that is where
-    /// the width is a property of the assignment; by the time the update lands
-    /// the statement it came from is over.
-    pub value: FourStateValue,
+    /// The right-hand side, evaluated.
+    pub value: DigitalUpdate,
     pub region: DigitalSchedulingRegion,
+}
+
+/// The value half of a deferred update.
+///
+/// Two cases because the two domains defer differently in one respect that
+/// matters: a four-state update was resized to the target's width when the
+/// process ran (IEEE 1364-2005 section 5.2.1 makes the width a property of the
+/// assignment, and by the time the update lands the statement is over), and a
+/// real update has no width to have been resized to.
+///
+/// The alternative — one `FourStateValue` field and a real tunnelled through
+/// its bits — would put a `$realtobits` in the nonblocking queue that the
+/// author did not write, and section 3.7 is explicit that the conversion is a
+/// call rather than a coincidence of storage.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DigitalUpdate {
+    /// Already resized to the target's width per section 5.2.1.
+    FourState(FourStateValue),
+    /// A real variable's next value. No width, no select.
+    Real(f64),
 }
 
 // ============================================================================
@@ -646,7 +677,19 @@ pub fn apply_deferred<E: DigitalEnvironment + ?Sized>(
     environment: &mut E,
     update: &DigitalDeferredUpdate,
 ) -> Result<(), DigitalEvalError> {
-    apply_write(plan, environment, &update.target, &update.value)
+    match &update.value {
+        DigitalUpdate::FourState(value) => apply_write(plan, environment, &update.target, value),
+        // A real variable is written whole, so there is no target to resolve
+        // against what the signal holds now — the read-modify-write the
+        // four-state path performs has no partial write to perform.
+        DigitalUpdate::Real(value) => {
+            let signal = plan
+                .signal(update.target.signal)
+                .ok_or(DigitalEvalError::UndeclaredSignal(update.target.signal))?;
+            environment.write_real_signal(signal.id, *value);
+            Ok(())
+        }
+    }
 }
 
 /// Overwrite the bits of `current` starting at declared index `low`.
@@ -1154,6 +1197,15 @@ impl<'a, E: DigitalEnvironment + ?Sized> Interpreter<'a, E> {
             }
             CfgValueKind::DigitalBlockingWrite { target, value } => {
                 let (target, value) = (target.clone(), *value);
+                // One write node for both domains, the way
+                // [`CfgValueKind::DigitalDriverWrite`] is: what the written
+                // name carries is a property of the declaration, and the plan
+                // recorded it.
+                if self.signal(target.signal)?.kind.is_real() {
+                    let value = self.real(value)?;
+                    self.environment.write_real_signal(target.signal, value);
+                    return Ok(DigitalScalar::Effect);
+                }
                 let value = self.four_state(value)?;
                 apply_write(self.plan, self.environment, &target, &value)?;
                 Ok(DigitalScalar::Effect)
@@ -1194,6 +1246,15 @@ impl<'a, E: DigitalEnvironment + ?Sized> Interpreter<'a, E> {
                 region,
             } => {
                 let (target, value, region) = (target.clone(), *value, *region);
+                if self.signal(target.signal)?.kind.is_real() {
+                    let value = self.real(value)?;
+                    self.environment.defer_update(DigitalDeferredUpdate {
+                        target,
+                        value: DigitalUpdate::Real(value),
+                        region,
+                    });
+                    return Ok(DigitalScalar::Effect);
+                }
                 let value = self.four_state(value)?;
                 // Resized here, where the assignment is, rather than at the
                 // flush: section 5.2.1's width is the target's, and the target
@@ -1202,7 +1263,7 @@ impl<'a, E: DigitalEnvironment + ?Sized> Interpreter<'a, E> {
                 let width = target_width(signal, &target.select);
                 self.environment.defer_update(DigitalDeferredUpdate {
                     target,
-                    value: value.resized(width),
+                    value: DigitalUpdate::FourState(value.resized(width)),
                     region,
                 });
                 Ok(DigitalScalar::Effect)

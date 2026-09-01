@@ -33,6 +33,50 @@
 //! routed the state through the terminator rather than assuming a register
 //! kept it.
 //!
+//! That machinery is typed rather than four-state. A process-local `real`
+//! (IEEE 1364-2005 section 3.9) is an SSA variable of type
+//! [`CfgValueType::Real`], merged at joins by a real-typed block parameter and
+//! carried across a suspension by a real-typed resume argument, exactly as a
+//! `reg` is by a four-state one. Its unwritten value is `0.0` and not `x`:
+//! section 3.9 gives a `real` an initial value of zero, and it has no `x` to
+//! start at, which is why it needs its own answer rather than section 4.2.2's.
+//!
+//! # Who owns a module-level `real`
+//!
+//! A module-level `real` is written with the *continuous* domain's declaration
+//! — the same production every shipped Verilog-A model uses — so which half of
+//! the language owns its storage is a question this compiler has to answer
+//! rather than read off the keyword. The rule, applied by
+//! `SemanticAnalyzer::promote_module_level_reals`, is:
+//!
+//! * A `real` that some `always`, `initial` or continuous assignment **writes**
+//!   becomes a **digital-owned real variable** — an entry in
+//!   [`CanonicalDigitalPlan::signals`] with
+//!   [`DigitalSignalKind::Real`] and `procedurally_assignable`, written
+//!   straight into the signal store and never through a driver — **provided the
+//!   module declares no analog block**.
+//! * A `real` in a module that *does* declare one is refused by name. That is
+//!   real mixed-signal coupling: the continuous body's variables are its state,
+//!   the two domains advance on different clocks, and which of them holds the
+//!   variable between two time points is not a question this compiler answers.
+//! * A `real` no process writes is left exactly where it was. So a pure-analog
+//!   module cannot be affected by either question — it has no processes to
+//!   satisfy the first and an analog block to fail the second.
+//!
+//! A real variable is not a real net, and the difference is IEEE 1364-2005
+//! section 6.2's: a `wreal` is driven by continuous assignments and resolved
+//! from its drivers (Verilog-AMS LRM 2.4 section 3.7), a `real` is written
+//! procedurally and has no drivers to resolve. `procedurally_assignable` is
+//! what tells them apart wherever it matters — including in
+//! `reject_overdriven_real_nets`, which is a rule about nets and skips
+//! variables rather than counting the drivers they cannot have.
+//!
+//! An `output real` port does not go through the ownership question at all. It
+//! is an explicit discrete-domain declaration — section 12.3.4's variable port
+//! form with section 3.9's `real` as the type, which is `output reg q;` with a
+//! different variable type — so it is a digital real variable wherever it
+//! appears.
+//!
 //! # The subset
 //!
 //! Everything the front end parses is not everything this lowers. Refusals are
@@ -40,12 +84,13 @@
 //! missing rather than compiled into a device that is quietly short of what
 //! its author wrote. What still refuses here:
 //!
-//! - A module-level analog `integer` or `real` read from a process. It is
-//!   shared with the continuous-domain body, which runs on a different clock
-//!   in a different value domain; a process-local declaration is the lowered
-//!   form of the same intent.
-//! - A process-local `real` or `string`, for the same reason from the other
-//!   side: a process computes in four-state values.
+//! - A module-level analog `integer` read from a process, and a `real` the
+//!   ownership rule above left in the continuous domain. Either is shared with
+//!   the continuous-domain body, which runs on a different clock in a different
+//!   value domain; a process-local declaration is the lowered form of the same
+//!   intent.
+//! - A process-local `string`: a process computes in four-state and real
+//!   values, and a string is neither.
 //! - A nonblocking assignment to a process-local, which would need a store to
 //!   defer the update into, and a partial (bit- or part-select) write to one,
 //!   which is a read-modify-write this wave has no node for outside the signal
@@ -321,6 +366,13 @@ fn reject_overdriven_real_nets(
         if signal.kind != DigitalSignalKind::Real(DigitalRealResolution::Single) {
             continue;
         }
+        // A real *variable* is not a net and has no drivers to count: section
+        // 6.2 keeps a continuous assignment off it, and the analyzer already
+        // refuses one by name. Skipping it here keeps this check about what it
+        // says it is about — how many drivers a net may have.
+        if signal.procedurally_assignable {
+            continue;
+        }
         let on_this_net: Vec<&DigitalDriver> = drivers
             .iter()
             .filter(|driver| driver.id.signal == signal.id)
@@ -482,15 +534,22 @@ fn lower_signal(
     DigitalSignal {
         id,
         name,
-        kind: match signal.class.wreal_resolution() {
-            None => DigitalSignalKind::FourState,
-            Some(resolution) => DigitalSignalKind::Real(match resolution {
+        kind: match (signal.class.is_real(), signal.class.wreal_resolution()) {
+            (false, _) => DigitalSignalKind::FourState,
+            (true, Some(resolution)) => DigitalSignalKind::Real(match resolution {
                 WrealResolution::Single => DigitalRealResolution::Single,
                 WrealResolution::Sum => DigitalRealResolution::Sum,
                 WrealResolution::Average => DigitalRealResolution::Average,
                 WrealResolution::Minimum => DigitalRealResolution::Minimum,
                 WrealResolution::Maximum => DigitalRealResolution::Maximum,
             }),
+            // A real *variable*: no net-type keyword and so no resolution. It
+            // carries [`DigitalRealResolution::Single`] because that is the
+            // truth about it — one writer at a time and no fold — but nothing
+            // ever consults the field, because a variable has no drivers to
+            // fold. `procedurally_assignable` below is what tells the two
+            // apart everywhere it matters.
+            (true, None) => DigitalSignalKind::Real(DigitalRealResolution::Single),
         },
         width: signal.width,
         bounds: signal.range.map(|range| (range.msb, range.lsb)),

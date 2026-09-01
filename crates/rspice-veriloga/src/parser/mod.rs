@@ -196,6 +196,14 @@ impl<'a> Parser<'a> {
                             self.advance();
                             Some(PortNetType::Wreal(resolution))
                         }
+                        // And a *variable* type where 1364 section 12.3.4 puts
+                        // `reg`. `output real vout;` is that form with section
+                        // 3.9's `real`, which is the only port a process may
+                        // procedurally assign a real to.
+                        TokenKind::Real => {
+                            self.advance();
+                            Some(PortNetType::Real)
+                        }
                         _ => None,
                     };
                     let discipline: Option<SmolStr> = if self.is_discipline_keyword()
@@ -751,6 +759,12 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Some(PortNetType::Wreal(resolution))
             }
+            // The variable half of the same grammar rule, as IEEE 1364-2005
+            // section 12.3.4 already reads `output reg q;`.
+            TokenKind::Real => {
+                self.advance();
+                Some(PortNetType::Real)
+            }
             _ => None,
         };
 
@@ -831,6 +845,18 @@ impl<'a> Parser<'a> {
             }),
             PortNetType::Reg => module.digital_variables.push(DigitalVariableDecl {
                 kind: DigitalVariableKind::Reg,
+                signedness: declaration.signedness,
+                range: declaration.range.clone(),
+                items,
+                span: declaration.span,
+            }),
+            // `output real vout;` stands for `output vout; real vout;` with the
+            // second declaration being the discrete domain's. The range and the
+            // `signed` marker ride along rather than being dropped: a real has
+            // neither, and the analyzer refuses each by name where it can say
+            // which one was written.
+            PortNetType::Real => module.digital_variables.push(DigitalVariableDecl {
+                kind: DigitalVariableKind::Real,
                 signedness: declaration.signedness,
                 range: declaration.range.clone(),
                 items,

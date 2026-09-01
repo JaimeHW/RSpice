@@ -17,7 +17,7 @@ use rspice_veriloga::canonical_ir::digital::{
 };
 use rspice_veriloga::canonical_ir::digital_eval::{
     DigitalDeferredUpdate, DigitalDrive, DigitalEnvironment, DigitalEvalError,
-    DigitalProcessOutcome, DigitalRealDrive, DigitalResumeState, DigitalSuspension,
+    DigitalProcessOutcome, DigitalRealDrive, DigitalResumeState, DigitalSuspension, DigitalUpdate,
     DigitalWaitRequest, any_term_is_satisfied, apply_deferred, classify_edge, resume, start,
 };
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
@@ -90,6 +90,10 @@ impl DigitalEnvironment for Store {
 
     fn drive_signal(&mut self, drive: DigitalDrive) {
         self.driven.insert(drive.driver, drive);
+    }
+
+    fn write_real_signal(&mut self, signal: DigitalSignalId, value: f64) {
+        self.reals[usize::from(signal)] = value;
     }
 
     fn read_real_signal(&self, signal: DigitalSignalId) -> Option<f64> {
@@ -223,7 +227,7 @@ impl Harness {
                 &mut self.store,
                 &DigitalDeferredUpdate {
                     target: drive.target.clone(),
-                    value: drive.value.clone(),
+                    value: DigitalUpdate::FourState(drive.value.clone()),
                     region: DigitalSchedulingRegion::Active,
                 },
             )
@@ -2710,7 +2714,7 @@ impl Design {
                 &mut self.store,
                 &DigitalDeferredUpdate {
                     target: drive.target.clone(),
-                    value: drive.value.clone(),
+                    value: DigitalUpdate::FourState(drive.value.clone()),
                     region: DigitalSchedulingRegion::Active,
                 },
             )

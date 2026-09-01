@@ -1034,7 +1034,7 @@ fn the_backend_refusal_names_the_first_digital_construct() {
     for (section, keyword) in [
         ("    reg q;\n     always @(p) q <= 1'b1;", "reg"),
         ("    wire y;\n     assign y = 1'b1;", "wire"),
-        ("    always @(p) gain = 1.0;\n     reg q;", "always"),
+        ("    always @(p) q = 1'b1;\n     reg q;", "always"),
     ] {
         let error = compile_error(&digital_module(section), None);
         let message = error.to_string();

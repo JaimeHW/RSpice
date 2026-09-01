@@ -292,6 +292,20 @@ pub enum PortNetType {
     /// port, whose syntax (section 6.5.2) admits `wreal` wherever a net type
     /// may be written.
     Wreal(WrealResolution),
+    /// `output real vout;` — a real-valued *variable* port.
+    ///
+    /// The other half of Verilog-AMS LRM 2.4 section 6.5.2's port grammar: a
+    /// port may carry a net type, of which `wreal` is one, or a variable type,
+    /// of which `real` is one. IEEE 1364-2005 section 12.3.4 already reads the
+    /// variable form for `output reg q;` — a port declaration carrying its own
+    /// type, standing for the two-declaration form — and this is exactly that
+    /// form with section 3.9's `real` as the type.
+    ///
+    /// The difference from [`Self::Wreal`] is the difference between a net and
+    /// a variable, and it is the whole point of admitting it: section 6.2 lets
+    /// a procedural assignment write a variable and not a net, so `output real`
+    /// is the port a process can write and `output wreal` is not.
+    Real,
 }
 
 /// Port direction
@@ -1701,13 +1715,33 @@ pub struct DigitalNetDecl {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DigitalVariableKind {
     Reg,
+    /// `real`, as a variable of the *discrete* domain.
+    ///
+    /// The same keyword the continuous domain declares its variables with, and
+    /// deliberately the same keyword: IEEE 1364-2005 section 3.9 defines one
+    /// `real` variable type, and Verilog-AMS does not fork it. What differs is
+    /// which half of the language owns the storage, which is a question about
+    /// the module rather than about the declaration — see the ownership rule in
+    /// [`crate::canonical_ir::digital_lower`].
+    ///
+    /// A declaration reaches this kind two ways: an `output real` port, where
+    /// the discrete domain is what the port grammar was asking for, and a
+    /// module-level `real` promoted out of the continuous domain because a
+    /// process writes it and nothing analog can.
+    Real,
 }
 
 impl DigitalVariableKind {
     pub const fn keyword(self) -> &'static str {
         match self {
             Self::Reg => "reg",
+            Self::Real => "real",
         }
+    }
+
+    /// Whether the variable carries a real rather than four-state bits.
+    pub const fn is_real(self) -> bool {
+        matches!(self, Self::Real)
     }
 }
 

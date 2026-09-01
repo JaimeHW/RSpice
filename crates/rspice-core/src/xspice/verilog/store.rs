@@ -686,6 +686,27 @@ impl DigitalEnvironment for DigitalSignalStore {
         self.publish(drive.driver.signal, resolved);
     }
 
+    fn write_real_signal(&mut self, signal: DigitalSignalId, value: f64) {
+        // The real twin of `write_signal`, and it shares that method's reading
+        // of a write that should not have reached here: a procedural write to a
+        // `wreal` is IEEE 1364-2005 section 6.2's refusal and the front end
+        // makes it, so a store that sees one is out of step with its plan.
+        debug_assert!(
+            self.variables
+                .get(usize::from(signal))
+                .copied()
+                .unwrap_or(true),
+            "procedural write to a real net; the front end should have refused it"
+        );
+        if usize::from(signal) >= self.reals.len() {
+            return;
+        }
+        // Published rather than folded. A variable has no contribution slot,
+        // because it has no drivers to combine — which is exactly why this is
+        // not `drive_real_signal`.
+        self.publish_real(signal, value);
+    }
+
     fn read_real_signal(&self, signal: DigitalSignalId) -> Option<f64> {
         self.reals.get(usize::from(signal)).copied()
     }
