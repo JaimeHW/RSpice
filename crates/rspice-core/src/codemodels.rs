@@ -107,6 +107,8 @@ pub(crate) const BUILTIN_MODEL_NAMES: &[&str] = &[
     "table3d",
     "tline",
     "triangle",
+    // RSpice's own: the analog-to-real observer ngspice has no counterpart for.
+    "v_to_real",
     "xfer",
     "xyce_d_and",
     "xyce_d_add",

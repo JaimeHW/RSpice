@@ -214,5 +214,6 @@ pub use xtradev::{
 };
 
 pub use xtraevt::{DigitalToReal, RealDelay, RealGain, RealToVoltage, RealToVoltageAlias};
+pub(crate) use xtraevt::VoltageToReal;
 
 pub use debug::PrintParamTypes;

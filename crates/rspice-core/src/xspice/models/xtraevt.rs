@@ -482,6 +482,140 @@ impl CodeModel for RealToVoltageAlias {
     }
 }
 
+/// Analog input observed into a real-valued event.
+///
+/// The mirror of [`RealToVoltage`], and the direction the XSPICE estate did not
+/// have: every other analog-observing bridge produces four-state values.
+///
+/// # The sampling ruling
+///
+/// **`v_to_real` samples its analog input at every accepted analog step and
+/// publishes the sample as a real event with no delay. It requests no
+/// breakpoints.**
+///
+/// The estate's other analog-observing bridges — `adc_bridge`, `bidi_bridge`,
+/// and the Xyce `DIG` family — observe by *threshold crossing*, and
+/// `models::digital_output`'s `input_transition_time` interpolates that
+/// crossing inside the accepted step so the transition is dated at a real
+/// instant of the analog solution. That is D5 clause 5, and none of it
+/// transfers to a real-valued observer. A crossing is an event because a
+/// threshold turns a continuous quantity into a discrete one, and the moment it
+/// changes is well defined. A real net carries the quantity *itself*, whose
+/// next change is not an event and has no time to interpolate for.
+///
+/// So there is no crossing to date, and the two limits of sampling are stated
+/// rather than hidden:
+///
+/// * The observed value is a **staircase at the analog step sequence**. The
+///   event world's view of an analog node is as fine as the accepted steps and
+///   no finer.
+/// * The model **names no future time**, because it has none to name. It
+///   therefore requests no breakpoints and cannot move the accepted step
+///   sequence by observing, which is what keeps D5 clause 6 — pure-analog
+///   inertness — true of a deck it appears in.
+///
+/// [`RealToVoltage`] is deliberately the contrast: the same boundary crossed
+/// the other way, and it *does* know a future time — its own ramp completion —
+/// and asks for it.
+///
+/// # Not an ngspice model
+///
+/// ngspice 46 ships `d_to_real`, `real_gain`, `real_delay` and `real_to_v`, and
+/// no observer at all — a real event value can be produced from bits and
+/// consumed by the matrix, but an analog node cannot be read into one. This
+/// fills that gap, so it takes RSpice's own reading rather than a foreign one,
+/// and `OFFICIAL_NGSPICE_46_XSPICE_MODELS` deliberately does not list it.
+///
+/// One consequence of not being ngspice's is worth naming, because the sibling
+/// model is a trap: `real_to_v`'s `gain` scales *the ramp delta only*, which is
+/// ngspice's behaviour and is pinned as such. This model's `gain` is a plain
+/// multiplication of the sampled value, because there is no ramp for it to
+/// apply to and no foreign behaviour to match.
+/// `pub(crate)` where its siblings are `pub`, and deliberately: the registry
+/// erases it to `Arc<dyn CodeModel>` at registration and a deck names it by
+/// string, so nothing outside this crate has a use for the type itself.
+#[derive(Debug, Default)]
+pub(crate) struct VoltageToReal;
+
+impl CodeModel for VoltageToReal {
+    fn name(&self) -> &str {
+        "v_to_real"
+    }
+
+    fn description(&self) -> &str {
+        "Analog input sampled into a real-valued event"
+    }
+
+    fn ports(&self) -> &[PortSpec] {
+        use std::sync::OnceLock;
+        static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
+        PORTS.get_or_init(|| {
+            vec![
+                PortSpec {
+                    name: "in".to_string(),
+                    direction: PortDirection::In,
+                    default_type: PortType::Voltage,
+                    // The same set `gain` admits. A real event carries a
+                    // number, not a unit, so a current is as observable as a
+                    // voltage and nothing here has to know which it was.
+                    allowed_types: vec![
+                        PortType::Voltage,
+                        PortType::DifferentialVoltage,
+                        PortType::Current,
+                        PortType::DifferentialCurrent,
+                        PortType::VoltageName,
+                    ],
+                    is_vector: false,
+                    null_allowed: false,
+                    vector_min_len: None,
+                    vector_max_len: None,
+                    description: "Analog input".to_string(),
+                },
+                PortSpec::output("out", PortType::Real),
+            ]
+        })
+    }
+
+    fn parameters(&self) -> &[ParamSpec] {
+        use std::sync::OnceLock;
+        static PARAMS: OnceLock<Vec<ParamSpec>> = OnceLock::new();
+        PARAMS.get_or_init(|| {
+            // `gain` and nothing else. Offsets and further scaling are
+            // `real_gain`'s, which already exists and composes; duplicating its
+            // parameters here would give one arithmetic two spellings.
+            //
+            // In particular there is no `delay`. A delayed sample would land at
+            // a future time, which is a breakpoint request, which is exactly
+            // what `V_TO_REAL_SAMPLING_RULING` says an observer must not make.
+            vec![
+                ParamSpec::real("gain", 1.0)
+                    .with_description("Scale applied to the sampled analog value"),
+            ]
+        })
+    }
+
+    fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
+        Ok(())
+    }
+
+    fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+        let gain = finite_event_param(ctx, "v_to_real", "gain", 1.0)?;
+        let sample = gain * ctx.input("in");
+        // Zero delay: the sample *is* the node's value now, so dating it later
+        // would report a value the analog side never held at that time.
+        //
+        // The change test is the real-event family's — `set_real_output_when_changed`
+        // — rather than a rule invented here, and it is what stops the last few
+        // Newton iterates at one timepoint from each publishing an event that
+        // differs only in the far decimals. It is an *observer's* threshold and
+        // is a different thing from the tolerance-free change test Verilog-AMS
+        // LRM 2.4 section 3.7 requires inside a `wreal` store, which compares a
+        // value the design computed rather than one a solver converged to.
+        set_real_output_when_changed(ctx, "out", sample, 0.0);
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -845,5 +979,159 @@ mod tests {
         assert_eq!(ctx.state(1), 4.0);
         assert_eq!(ctx.state(2), 1.0e-9);
         assert_eq!(ctx.take_requested_breakpoints(), vec![2.0e-9]);
+    }
+
+    // =======================================================================
+    // v_to_real — the observer half of the boundary
+    // =======================================================================
+
+    /// A context holding one analog sample, at a transient timepoint.
+    fn observer_at(time: Value, sample: Value) -> CmContext {
+        let mut ctx = CmContext::new();
+        ctx.analysis = AnalysisType::Transient;
+        ctx.time = time;
+        ctx.set_input_analog("in", sample);
+        ctx
+    }
+
+    /// The sample is the analog value scaled by `gain`, and `gain` is a plain
+    /// multiplication.
+    ///
+    /// Stated as a test because the sibling is a trap: `real_to_v`'s `gain`
+    /// scales only the ramp delta, which is ngspice's behaviour and is pinned
+    /// by `real_to_v_gain_scales_only_the_mid_transition_delta_like_ngspice`.
+    /// This model has no ramp, is not ngspice's, and multiplies.
+    #[test]
+    fn v_to_real_publishes_the_gain_scaled_sample() {
+        let mut ctx = observer_at(1.0e-9, 1.25);
+        ctx.set_param("gain", 4.0);
+
+        VoltageToReal.init(&mut ctx).expect("v_to_real initializes");
+        VoltageToReal
+            .evaluate(&mut ctx)
+            .expect("v_to_real evaluates");
+
+        assert_eq!(ctx.output_real("out"), Some(5.0));
+    }
+
+    /// The observer names no future time, so it requests no breakpoints and
+    /// publishes at zero delay.
+    ///
+    /// This is the sampling ruling on [`VoltageToReal`] in its machine-checked
+    /// form, and it is what keeps D5 clause 6 — pure-analog inertness — true of
+    /// a deck the observer appears in: a model that asked for a breakpoint
+    /// would move the accepted step sequence merely by watching.
+    #[test]
+    fn v_to_real_requests_no_breakpoints_and_publishes_without_delay() {
+        let mut ctx = observer_at(3.0e-9, 2.0);
+
+        VoltageToReal.init(&mut ctx).expect("v_to_real initializes");
+        VoltageToReal
+            .evaluate(&mut ctx)
+            .expect("v_to_real evaluates");
+
+        assert!(
+            ctx.take_requested_breakpoints().is_empty(),
+            "an observer of a continuous quantity has no future time to name"
+        );
+        let events = ctx.take_pending_real_events();
+        assert_eq!(events.len(), 1, "one sample is one event");
+        assert_eq!(events[0].port_name, "out");
+        assert_eq!(events[0].values, vec![2.0]);
+        assert_eq!(
+            events[0].delay, 0.0,
+            "the sample is the node's value now; dating it later would report a \
+             value the analog side never held at that time"
+        );
+    }
+
+    /// A sample that has not moved produces no event.
+    ///
+    /// The hold discipline: a real event value stands until the next event on
+    /// its net, so republishing what the net already carries would restart a
+    /// `real_to_v` ramp and cost a settle pass for nothing. The change test is
+    /// the real-event family's shared one, not a rule this model invents.
+    #[test]
+    fn v_to_real_republishes_only_when_the_sample_moves() {
+        let mut ctx = observer_at(1.0e-9, 2.0);
+
+        VoltageToReal.init(&mut ctx).expect("v_to_real initializes");
+        VoltageToReal
+            .evaluate(&mut ctx)
+            .expect("v_to_real evaluates the first sample");
+        assert_eq!(ctx.take_pending_real_events().len(), 1);
+
+        // Same node voltage at a later timepoint: nothing to say.
+        ctx.time = 2.0e-9;
+        VoltageToReal
+            .evaluate(&mut ctx)
+            .expect("v_to_real evaluates an unchanged sample");
+        assert!(
+            ctx.take_pending_real_events().is_empty(),
+            "an unchanged sample must not republish"
+        );
+
+        // And a moved one does.
+        ctx.time = 3.0e-9;
+        ctx.set_input_analog("in", 2.5);
+        VoltageToReal
+            .evaluate(&mut ctx)
+            .expect("v_to_real evaluates a moved sample");
+        let events = ctx.take_pending_real_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].values, vec![2.5]);
+    }
+
+    /// A rollbackable probe observes without publishing.
+    ///
+    /// D5 clause 1: a timepoint the integrator ultimately rejects must leave
+    /// the event world exactly as it found it. The observer is gated by the
+    /// same `commit_event_outputs` check its siblings use, so a discarded
+    /// trial's sample never becomes an event — and the accepted evaluation that
+    /// follows still publishes, rather than being suppressed by a value the
+    /// probe recorded.
+    #[test]
+    fn v_to_real_does_not_publish_from_a_rollbackable_probe() {
+        let mut ctx = observer_at(1.0e-9, 7.0);
+        ctx.set_evaluation_phase(EvaluationPhase::RollbackableProbe);
+
+        VoltageToReal.init(&mut ctx).expect("v_to_real initializes");
+        VoltageToReal
+            .evaluate(&mut ctx)
+            .expect("rollbackable v_to_real probe evaluates");
+
+        assert_eq!(
+            ctx.output_real("out"),
+            None,
+            "rollbackable probes must not publish a sample"
+        );
+        assert!(ctx.take_pending_real_events().is_empty());
+
+        ctx.set_evaluation_phase(EvaluationPhase::AcceptedStep);
+        VoltageToReal
+            .evaluate(&mut ctx)
+            .expect("accepted v_to_real step evaluates");
+        assert_eq!(ctx.output_real("out"), Some(7.0));
+        assert_eq!(ctx.take_pending_real_events().len(), 1);
+    }
+
+    /// A nonfinite `gain` is refused by name rather than propagated into the
+    /// event world, where a NaN would become one net's resolved value and
+    /// spread through every driver summed onto it.
+    #[test]
+    fn v_to_real_rejects_a_nonfinite_gain() {
+        let mut ctx = observer_at(1.0e-9, 1.0);
+        ctx.set_param("gain", f64::NAN);
+
+        VoltageToReal.init(&mut ctx).expect("v_to_real initializes");
+        let err = VoltageToReal
+            .evaluate(&mut ctx)
+            .expect_err("v_to_real must reject a nonfinite gain");
+        assert!(
+            err.to_string().contains("v_to_real: gain must be finite"),
+            "the refusal should name the model and the parameter, got {err:?}"
+        );
+        assert_eq!(ctx.output_real("out"), None);
+        assert!(ctx.take_pending_real_events().is_empty());
     }
 }

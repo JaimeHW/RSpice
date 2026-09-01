@@ -176,6 +176,10 @@ impl CodeModelRegistry {
         self.register(Arc::new(super::models::RealDelay));
         self.register(Arc::new(super::models::RealToVoltage));
         self.register(Arc::new(super::models::RealToVoltageAlias));
+        // The observer half of the boundary, and the only one of these five
+        // ngspice does not ship. See `VoltageToReal` for why an analog node is
+        // sampled rather than crossed.
+        self.register(Arc::new(super::models::VoltageToReal));
 
         // Digital sources
         self.register(Arc::new(super::models::DigitalSource));
