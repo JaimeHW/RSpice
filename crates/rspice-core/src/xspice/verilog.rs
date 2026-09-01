@@ -208,6 +208,24 @@ pub struct DigitalObservation {
 }
 
 /// The result of one digital run.
+///
+/// # One observation per vector, and what that is not
+///
+/// The resolution is the stimulus's, not the host's. A design may change a
+/// signal many times between two sample instants — a `#delay` chain, a clock
+/// the stimulus drives, a delta cycle — and none of it appears here; what
+/// appears is the value at `k * step + settle`, which is what a `.stim`-style
+/// harness asks for.
+///
+/// A caller that wants the transitions themselves has no route to them today.
+/// The compile-once split does not open one: [`CompiledDigitalDesign::run`]
+/// builds and drops its host inside the call, so there is nothing left for a
+/// reader to read afterwards, and a per-tick observation would have to be
+/// collected *during* the run — a callback or a signal subscription on the
+/// stimulus, not an accessor on this. That is a change to what a run is asked
+/// for rather than a change to what it returns, so it is left undone and
+/// recorded here rather than approximated with a finer `step`, which would
+/// change what the design sees as well as what the caller sees.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DigitalRunReport {
     /// One observation per vector, in order.

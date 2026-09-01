@@ -80,7 +80,8 @@ const TARGET_SPEEDUP: f64 = 100.0;
 
 /// Where the recorded numbers came from, so a reader can tell whether the ones
 /// they are looking at are comparable.
-const BASELINE_MACHINE: &str = "recorded on Windows 11, x86-64, release profile, 2026-08-31";
+const BASELINE_MACHINE: &str =
+    "recorded on Windows 11, x86-64, release profile, otherwise idle, 2026-09-01";
 
 /// One block's measurement.
 struct Measurement {
@@ -223,18 +224,25 @@ fn measured_blocks() -> Vec<RnmBlock> {
 ///
 /// ```text
 /// block              samples  analog(ms)  rnm(ms)   ratio  compile(ms)  run(ms)   run x  nodes  tran pts  us/pt  us/vec
-/// r2r_dac                 16      2.4600   0.1281   19.20       0.0484   0.0633   38.86      8       630   3.905   3.956
-/// schmitt_hysteresis      16      3.7227   0.1609   23.14       0.0616   0.0862   43.19      4       652   5.710   5.387
-/// flash_quantizer         13      4.4181   0.1746   25.30       0.0779   0.0845   52.29      9       508   8.697   6.500
-/// ramp_integrator         32      2.5190   0.3343    7.54       0.0684   0.2525    9.98      1      1268   1.987   7.891
-/// rc_lowpass              16      1.4261   0.1387   10.28       0.0515   0.0710   20.09      2       628   2.271   4.438
-/// flash_adc_7bit         138    931.3399   2.8071  331.78       0.1800   2.5925  359.24    257      5508 169.089  18.786
+/// r2r_dac                 16      2.2488   0.1045   21.52       0.0423   0.0582   38.64      8       630   3.570   3.637
+/// schmitt_hysteresis      16      3.5112   0.1466   23.95       0.0557   0.0811   43.29      4       652   5.385   5.069
+/// flash_quantizer         13      4.0336   0.1681   24.00       0.0753   0.0812   49.67      9       508   7.940   6.246
+/// ramp_integrator         32      2.3534   0.3164    7.44       0.0636   0.2383    9.88      1      1268   1.856   7.447
+/// rc_lowpass              16      1.2690   0.1184   10.72       0.0461   0.0673   18.86      2       628   2.021   4.206
+/// flash_adc_7bit         138    900.8901   1.7182  524.32       0.1116   1.6626  541.86    257      5508 163.560  12.048
 /// ```
 ///
-/// One run's numbers, not an average of several. A second run on the same
-/// machine minutes later gave 359.82x and 386.24x on the last row, so read the
-/// ratios as good to about a tenth — which is why the gate is reported rather
-/// than asserted, and why nothing here is quoted to more precision than it has.
+/// One run's numbers, not an average of several, and the machine has to be
+/// quiet. Four runs were taken. The two while other builds were in flight gave
+/// 331.78x and 359.82x on the last row; the two on an idle machine gave 492.49x
+/// and 524.32x, and the second of those is the table above. The reference-block
+/// rows moved by a few per cent across all four — they are milliseconds, and a
+/// millisecond of contention does not show. The converter's row moved by half,
+/// because it is the only row where the RNM side is short enough for a
+/// scheduler slice to matter and long enough to catch one.
+///
+/// That spread is the reason the gate is reported rather than asserted. It does
+/// not touch the finding: the worst of the four is still five times the target.
 ///
 /// # What the ratio decomposes into
 ///
@@ -249,14 +257,14 @@ fn measured_blocks() -> Vec<RnmBlock> {
 /// breakpoints the `PWL` corners force, and it is the same whatever the block
 /// is. So the *whole* of the difference between a reference block's ratio and
 /// this one's is the second factor — the cost of one evaluation on each side —
-/// and that factor is 1.0 on `r2r_dac` and 9.0 on `flash_adc_7bit`.
+/// and that factor is 1.0 on `r2r_dac` and 13.6 on `flash_adc_7bit`.
 ///
 /// # P3's exit gate, and the configuration that meets it
 ///
 /// **Met, on `flash_adc_7bit`, on both RNM columns.** The whole call — front end
-/// included, which is what a caller with one stimulus pays — is 331.78x cheaper
+/// included, which is what a caller with one stimulus pays — is 524.32x cheaper
 /// than the analog representation of the same converter over the same simulated
-/// timespan. A run of an already-compiled design is 359.24x cheaper.
+/// timespan. A run of an already-compiled design is 541.86x cheaper.
 ///
 /// The configuration, stated so that the number can be reproduced or disputed:
 ///
@@ -277,14 +285,14 @@ fn measured_blocks() -> Vec<RnmBlock> {
 /// # Why the reference blocks do not meet it and this one does
 ///
 /// Both per-evaluation columns grew, and the ratio is what they grew *by*. The
-/// RNM's cost per vector went from four to eight microseconds on the reference
-/// blocks to nineteen on the converter — it did grow, because the real-number
+/// RNM's cost per vector went from three to eight microseconds on the reference
+/// blocks to twelve on the converter — it did grow, because the real-number
 /// model has ten real assignments where the small blocks have one to four. The
-/// analog's cost per accepted point went from two to nine microseconds to a
-/// hundred and sixty-nine, because it is set by the size of the matrix and the
+/// analog's cost per accepted point went from two to eight microseconds to a
+/// hundred and sixty-four, because it is set by the size of the matrix and the
 /// number of nonlinear devices in it.
 ///
-/// So a factor of three against a factor of thirty, and the difference between
+/// So a factor of two against a factor of twenty, and the difference between
 /// them is the gate. That is the claim a real-number model makes, now measured
 /// rather than asserted: **the cost of an RNM is set by how much arithmetic the
 /// model writes, and the cost of what it replaces is set by how much circuit
@@ -296,9 +304,9 @@ fn measured_blocks() -> Vec<RnmBlock> {
 ///
 /// Read `rnm` against `compile + run`. On the reference blocks the front end is
 /// a third to a half of the whole call, so hoisting it roughly doubles the ratio
-/// — `r2r_dac` goes from 19.20x to 38.86x, `rc_lowpass` from 10.28x to 20.09x.
+/// — `r2r_dac` goes from 21.52x to 38.64x, `rc_lowpass` from 10.72x to 18.86x.
 /// On the converter it is six per cent of the call and moves the ratio from
-/// 331.78x to 359.24x.
+/// 524.32x to 541.86x.
 ///
 /// That ordering is itself a result, and it is the opposite way round from what
 /// the earlier measurement predicted: compile cost tracks the size of the
@@ -308,7 +316,7 @@ fn measured_blocks() -> Vec<RnmBlock> {
 /// the gate would have been met without it.
 ///
 /// `exec` and `exec x` are the slope estimate this target used before the split
-/// existed, kept beside the measured `run`. They agree to four per cent on the
+/// existed, kept beside the measured `run`. They agree to three per cent on the
 /// converter and to within a fifth on the small blocks, which is what says the
 /// split moved the compile out of the timed region rather than moving work
 /// somewhere the timer cannot see.
