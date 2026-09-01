@@ -59,8 +59,10 @@ struct DigParams {
     s0_rlo: Value,
     s0_rhi: Value,
     s0_tsw: Value,
-    /// Parsed and finite-checked for ngspice parameter-set parity; the input
-    /// threshold logic reads the `s0_vhi`/`s1_vlo` pair only.
+    /// Parsed and finite-checked for Xyce parameter-set parity.  Xyce's
+    /// `N_DEV_Digital.C` declares `S0VLO`/`S1VHI` on the DIG card and never
+    /// reads them; the input threshold logic reads the `s0_vhi`/`s1_vlo`
+    /// pair only.
     #[allow(dead_code)]
     s0_vlo: Value,
     s0_vhi: Value,
@@ -68,8 +70,10 @@ struct DigParams {
     s1_rhi: Value,
     s1_tsw: Value,
     s1_vlo: Value,
-    /// Parsed and finite-checked for ngspice parameter-set parity; the input
-    /// threshold logic reads the `s0_vhi`/`s1_vlo` pair only.
+    /// Parsed and finite-checked for Xyce parameter-set parity.  Xyce's
+    /// `N_DEV_Digital.C` declares `S0VLO`/`S1VHI` on the DIG card and never
+    /// reads them; the input threshold logic reads the `s0_vhi`/`s1_vlo`
+    /// pair only.
     #[allow(dead_code)]
     s1_vhi: Value,
     delay: Value,
@@ -398,6 +402,29 @@ impl XyceDTff {
         }
     }
 
+    /// Decode one analog input against the DIG Schmitt thresholds.
+    ///
+    /// This is the input half of `Instance::updatePrimaryState` in Xyce's
+    /// `N_DEV_Digital.C`.  A running input keeps its state until it clears
+    /// *both* thresholds in the new direction: it rises strictly above
+    /// `max(s0vhi, s1vlo)` and falls strictly below `min(s1vlo, s0vhi)`.
+    ///
+    /// Cold start (`previous == None`: every DC evaluation, and any input
+    /// whose state is still unknown) is Xyce's DCOP seed, `V >= s0vhi`, on
+    /// purpose.  Xyce seeds `currentState = (V < s0vhi) ? 0 : 1` and then
+    /// runs the same two-threshold step in the same call, and that step can
+    /// never move the seed: a seed of 1 means `V >= s0vhi`, which fails the
+    /// fall test, and a seed of 0 means `V < s0vhi`, which fails the rise
+    /// test.  The seed is therefore the whole DCOP decode whichever way the
+    /// card orders the thresholds.  With the shipped card
+    /// (`s0vhi=1.7 > s1vlo=0.9`) an input parked between the thresholds
+    /// starts LOW; with a separated card (`s0vhi < s1vlo`) the same input
+    /// starts HIGH.  That asymmetry is Xyce's, the corpus decks are compared
+    /// against it, and a symmetric band rule here would be a parity
+    /// regression rather than a fix.
+    ///
+    /// Only a non-finite voltage decodes to no state.  Xyce's input states
+    /// are plain booleans; its X state exists for DFF/DLTCH outputs alone.
     fn input_logic_state(
         voltage: Value,
         previous: Option<bool>,
@@ -4117,5 +4144,162 @@ mod tests {
         gate.evaluate(&mut ctx)
             .expect("apply delayed YNAND truth-table state");
         assert_eq!(q_state(ctx.state(XyceDLegacyGate::Q_STATE)), Some(false));
+    }
+
+    /// Literal port of the input decode in Xyce's
+    /// `Instance::updatePrimaryState` (`N_DEV_Digital.C`) with `dcopFlag`
+    /// set: seed the state from `s0vhi` alone, then run the two-threshold
+    /// hysteresis step on that seed.
+    fn xyce_dcop_input_state(voltage: Value, s0vhi: Value, s1vlo: Value) -> bool {
+        let mut current_state = if voltage < s0vhi { 0 } else { 1 };
+        if current_state == 0 {
+            if voltage > s0vhi && voltage > s1vlo {
+                current_state = 1;
+            }
+        } else if voltage < s1vlo && voltage < s0vhi {
+            current_state = 0;
+        }
+        current_state == 1
+    }
+
+    fn thresholds(s0vhi: Value, s1vlo: Value) -> DigParams {
+        let mut ctx = CmContext::new();
+        for spec in q_parameters() {
+            ctx.set_param(&spec.name, spec.default);
+        }
+        ctx.set_param("s0vhi", s0vhi);
+        ctx.set_param("s1vlo", s1vlo);
+        dig_params(&ctx).expect("threshold parameters are finite")
+    }
+
+    /// `(s0vhi, s1vlo)` in every ordering a card can give: the shipped
+    /// overlapping defaults, the Xyce corpus card, a separated band, and
+    /// coincident thresholds.
+    const THRESHOLD_ORDERINGS: [(Value, Value); 4] =
+        [(1.7, 0.9), (1.8, 1.0), (0.8, 2.0), (1.5, 1.5)];
+
+    #[test]
+    fn cold_start_decode_is_xyce_dcop_seed_for_every_threshold_ordering() {
+        for (s0vhi, s1vlo) in THRESHOLD_ORDERINGS {
+            let params = thresholds(s0vhi, s1vlo);
+            let mut probes: Vec<Value> = (-40..=160).map(|step| Value::from(step) * 0.05).collect();
+            probes.extend([
+                s0vhi,
+                s1vlo,
+                s0vhi - 1.0e-9,
+                s0vhi + 1.0e-9,
+                s1vlo - 1.0e-9,
+                s1vlo + 1.0e-9,
+            ]);
+            for voltage in probes {
+                assert_eq!(
+                    XyceDTff::input_logic_state(voltage, None, params),
+                    Some(xyce_dcop_input_state(voltage, s0vhi, s1vlo)),
+                    "cold start at {voltage} V with s0vhi={s0vhi} s1vlo={s1vlo}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn cold_start_band_bias_follows_s0vhi_like_xyce() {
+        // 1.2 V sits between the thresholds of both cards.  Xyce parks it
+        // LOW when s0vhi is the upper threshold and HIGH when it is the lower
+        // one: the bias flips with the card, and that flip is the reference
+        // behaviour this model exists to reproduce.
+        let overlapping = thresholds(1.7, 0.9);
+        let separated = thresholds(0.8, 2.0);
+        assert_eq!(
+            XyceDTff::input_logic_state(1.2, None, overlapping),
+            Some(false)
+        );
+        assert_eq!(
+            XyceDTff::input_logic_state(1.2, None, separated),
+            Some(true)
+        );
+        // Exactly at s0vhi decodes HIGH: Xyce's seed is `V < s0vhi ? 0 : 1`.
+        assert_eq!(
+            XyceDTff::input_logic_state(1.7, None, overlapping),
+            Some(true)
+        );
+        assert_eq!(
+            XyceDTff::input_logic_state(0.8, None, separated),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn running_input_holds_inside_the_band_for_both_threshold_orderings() {
+        for (s0vhi, s1vlo) in [(1.7, 0.9), (0.8, 2.0)] {
+            let params = thresholds(s0vhi, s1vlo);
+            let rise = s0vhi.max(s1vlo);
+            let fall = s0vhi.min(s1vlo);
+            let in_band = 0.5 * (rise + fall);
+            // From LOW: hold through the band and at the rise threshold
+            // itself; switch only strictly above it.
+            assert_eq!(
+                XyceDTff::input_logic_state(in_band, Some(false), params),
+                Some(false)
+            );
+            assert_eq!(
+                XyceDTff::input_logic_state(rise, Some(false), params),
+                Some(false)
+            );
+            assert_eq!(
+                XyceDTff::input_logic_state(rise + 1.0e-9, Some(false), params),
+                Some(true)
+            );
+            // From HIGH: hold through the band and at the fall threshold
+            // itself; switch only strictly below it.
+            assert_eq!(
+                XyceDTff::input_logic_state(in_band, Some(true), params),
+                Some(true)
+            );
+            assert_eq!(
+                XyceDTff::input_logic_state(fall, Some(true), params),
+                Some(true)
+            );
+            assert_eq!(
+                XyceDTff::input_logic_state(fall - 1.0e-9, Some(true), params),
+                Some(false)
+            );
+        }
+    }
+
+    #[test]
+    fn non_finite_input_voltage_has_no_logic_state() {
+        let params = thresholds(1.7, 0.9);
+        for voltage in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for previous in [None, Some(false), Some(true)] {
+                assert_eq!(XyceDTff::input_logic_state(voltage, previous, params), None);
+            }
+        }
+    }
+
+    #[test]
+    fn dcop_toggle_input_inside_the_band_seeds_q_from_s0vhi() {
+        // The same 1.2 V toggle input: LOW under the shipped card, HIGH once
+        // the card puts s0vhi below s1vlo.  Q follows T at DCOP.
+        for ((s0vhi, s1vlo), expected) in [((1.7, 0.9), false), ((0.8, 2.0), true)] {
+            let mut ctx = context();
+            ctx.set_param("s0vhi", s0vhi);
+            ctx.set_param("s1vlo", s1vlo);
+            ctx.set_input_analog("t", 1.2);
+            ctx.analysis = AnalysisType::DcOp;
+            XyceDTff.init(&mut ctx).expect("initialize xyce_d_tff");
+            XyceDTff
+                .evaluate(&mut ctx)
+                .expect("evaluate xyce_d_tff at DCOP");
+            assert_eq!(
+                q_state(ctx.state(STATE_T)),
+                Some(expected),
+                "T with s0vhi={s0vhi} s1vlo={s1vlo}"
+            );
+            assert_eq!(
+                q_state(ctx.state(STATE_Q)),
+                Some(expected),
+                "Q with s0vhi={s0vhi} s1vlo={s1vlo}"
+            );
+        }
     }
 }
