@@ -93,7 +93,14 @@ impl ResultExportFormat {
     }
 
     const fn encoder_available(self) -> bool {
-        matches!(self, Self::CsvRfc4180 | Self::Tsv | Self::TouchstoneV2)
+        matches!(
+            self,
+            Self::RSpiceResultBundle
+                | Self::RSpiceDatasetBundle
+                | Self::CsvRfc4180
+                | Self::Tsv
+                | Self::TouchstoneV2
+        )
     }
 }
 
@@ -229,10 +236,41 @@ pub(crate) fn action_export_csv_with_io(
         EngineeringExportFormat::Csv => ResultExportFormat::CsvRfc4180,
         EngineeringExportFormat::Tsv => ResultExportFormat::Tsv,
         EngineeringExportFormat::TouchstoneWhereCompatible => ResultExportFormat::TouchstoneV2,
+        EngineeringExportFormat::RSpiceResultBundle => ResultExportFormat::RSpiceResultBundle,
+        EngineeringExportFormat::RSpiceDatasetBundle => ResultExportFormat::RSpiceDatasetBundle,
         EngineeringExportFormat::Hdf5EngineeringDataset => ResultExportFormat::Hdf5,
     };
     if let Err(error) = result_export_format_availability_by_id(contract_format.canonical_id()) {
         state.push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+        return;
+    }
+    if let Some(kind) = match export_format {
+        EngineeringExportFormat::RSpiceResultBundle => {
+            Some(crate::workbench::workflows::native_result_bundle::NativeBundleKind::Result)
+        }
+        EngineeringExportFormat::RSpiceDatasetBundle => {
+            Some(crate::workbench::workflows::native_result_bundle::NativeBundleKind::Dataset)
+        }
+        _ => None,
+    } {
+        // A native bundle carries the exact retained waveform analysis. It
+        // must not quietly substitute that source for a derived or tabular
+        // sheet that the reader is currently looking at.
+        let owns_non_waveform_view = prepare_active_derived_view_csv(state, &displayed).is_some()
+            || prepare_active_sheet_csv(state, &displayed).is_some()
+            || displayed
+                .primary_analysis(state)
+                .and_then(prepare_typed_result_csv)
+                .is_some()
+            || displayed.analysis_indices.len() != 1;
+        if owns_non_waveform_view {
+            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
+                "Native RSpice bundles export one retained shared-axis waveform analysis. Select a waveform sheet, or choose CSV/TSV for this derived or tabular view."
+                    .to_owned(),
+            ));
+            return;
+        }
+        export_native_result_bundle(state, io, &displayed, kind);
         return;
     }
     // What the reader is looking at comes first. Three sheets derive their
@@ -258,6 +296,10 @@ pub(crate) fn action_export_csv_with_io(
             }
             EngineeringExportFormat::Hdf5EngineeringDataset => {
                 unreachable!("unsupported export preferences resolve to CSV")
+            }
+            EngineeringExportFormat::RSpiceResultBundle
+            | EngineeringExportFormat::RSpiceDatasetBundle => {
+                unreachable!("native bundle formats dispatch before derived exports")
             }
         }
         return;
@@ -287,6 +329,10 @@ pub(crate) fn action_export_csv_with_io(
             EngineeringExportFormat::Hdf5EngineeringDataset => {
                 unreachable!("unsupported export preferences resolve to CSV")
             }
+            EngineeringExportFormat::RSpiceResultBundle
+            | EngineeringExportFormat::RSpiceDatasetBundle => {
+                unreachable!("native bundle formats dispatch before sheet exports")
+            }
         }
         return;
     }
@@ -306,6 +352,10 @@ pub(crate) fn action_export_csv_with_io(
             ),
             EngineeringExportFormat::Hdf5EngineeringDataset => {
                 unreachable!("unsupported export preferences resolve to CSV")
+            }
+            EngineeringExportFormat::RSpiceResultBundle
+            | EngineeringExportFormat::RSpiceDatasetBundle => {
+                unreachable!("native bundle formats dispatch before typed exports")
             }
         }
         return;
@@ -331,6 +381,10 @@ pub(crate) fn action_export_csv_with_io(
             EngineeringExportFormat::Hdf5EngineeringDataset => {
                 unreachable!("unsupported export preferences resolve to CSV")
             }
+            EngineeringExportFormat::RSpiceResultBundle
+            | EngineeringExportFormat::RSpiceDatasetBundle => {
+                unreachable!("native bundle formats dispatch before stacked exports")
+            }
         }
         return;
     }
@@ -355,6 +409,10 @@ pub(crate) fn action_export_csv_with_io(
         }
         EngineeringExportFormat::Hdf5EngineeringDataset => {
             unreachable!("unsupported export preferences resolve to CSV")
+        }
+        EngineeringExportFormat::RSpiceResultBundle
+        | EngineeringExportFormat::RSpiceDatasetBundle => {
+            unreachable!("native bundle formats dispatch before flat waveform exports")
         }
     }
 }
@@ -1621,6 +1679,175 @@ fn csv_to_tsv(contents: &str) -> Result<String, String> {
         .into_inner()
         .map_err(|error| format!("could not finish TSV encoding: {}", error.error()))?;
     String::from_utf8(bytes).map_err(|error| format!("TSV encoder returned invalid UTF-8: {error}"))
+}
+
+fn export_native_result_bundle(
+    state: &mut AppState,
+    io: &(impl ExportWorkflowIo + ?Sized),
+    displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
+    kind: crate::workbench::workflows::native_result_bundle::NativeBundleKind,
+) {
+    use crate::workbench::workflows::native_result_bundle::{
+        NativeBundleAnalysis, NativeBundleDataset, NativeBundleSignal, NativeBundleSignalValues,
+        encode_native_bundle,
+    };
+
+    let analysis = match displayed.primary_analysis(state) {
+        Some(analysis) => analysis,
+        None => {
+            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
+                NO_ACTIVE_ANALYSIS_MESSAGE.to_owned(),
+            ));
+            return;
+        }
+    };
+    let native_analysis = match analysis.analysis_type {
+        crate::state::AnalysisType::Transient => NativeBundleAnalysis::Transient,
+        crate::state::AnalysisType::Ac => NativeBundleAnalysis::Ac,
+        crate::state::AnalysisType::DcSweep => NativeBundleAnalysis::DcSweep,
+        other => {
+            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
+                "{} export currently preserves transient, AC, and DC-sweep waveform domains; the active {} analysis cannot be represented by the version-1 native waveform schema.",
+                kind.display_name(),
+                other.short_label(),
+            )));
+            return;
+        }
+    };
+    let waveforms = exported_waveforms(state, displayed.dataset_id, analysis);
+    if waveforms.is_empty() {
+        let message = if analysis.waveforms.is_empty() {
+            NO_SAMPLES_MESSAGE
+        } else {
+            ALL_TRACES_HIDDEN_MESSAGE
+        };
+        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
+            message.to_owned(),
+        ));
+        return;
+    }
+    let reference = match waveforms
+        .iter()
+        .filter(|waveform| !waveform.x.is_empty())
+        .max_by_key(|waveform| waveform.x.len())
+    {
+        Some(waveform) => waveform.x.as_ref(),
+        None => {
+            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
+                NO_SAMPLES_MESSAGE.to_owned(),
+            ));
+            return;
+        }
+    };
+    if let Err(error) = validate_shared_x_axis(&waveforms, reference) {
+        state.push_user_message(crate::diagnostics::ConsoleMessage::error(error));
+        return;
+    }
+    let (coordinate_name, _) = axis_signal_for_analysis_type(analysis.analysis_type);
+    let signals = waveforms
+        .iter()
+        .map(|waveform| {
+            if let Some(complex) = &waveform.complex {
+                let signal_type = complex_signal_type(&complex.source_name, true);
+                NativeBundleSignal {
+                    name: &complex.source_name,
+                    unit: nonempty_unit(signal_type.default_unit()),
+                    values: NativeBundleSignalValues::Complex {
+                        real: complex.real.as_ref(),
+                        imag: complex.imag.as_ref(),
+                    },
+                }
+            } else {
+                let signal_type = signal_type_from_waveform_name(&waveform.name);
+                NativeBundleSignal {
+                    name: &waveform.name,
+                    unit: nonempty_unit(signal_type.default_unit()),
+                    values: NativeBundleSignalValues::Real(waveform.y.as_ref()),
+                }
+            }
+        })
+        .collect();
+    let native_dataset = NativeBundleDataset {
+        analysis: native_analysis,
+        coordinate_name: &coordinate_name,
+        coordinate: reference,
+        signals,
+    };
+    let bytes = match encode_native_bundle(kind, &native_dataset) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            note_result_export_failure(
+                state,
+                format!("{} encoding failed: {error}", kind.display_name()),
+            );
+            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+                "{} export failed before destination selection: {error}",
+                kind.display_name()
+            )));
+            return;
+        }
+    };
+    let exported_signal_count = native_dataset.signals.len();
+    let exported_point_count = native_dataset.coordinate.len();
+    drop(native_dataset);
+    drop(waveforms);
+    let extension = kind.extension();
+    let default_name = format!("waveforms.{extension}");
+    let filter_extensions = [extension];
+    let (published_path, export) = match io.show_save_dialog(SaveDialogConfig {
+        title: match kind {
+            crate::workbench::workflows::native_result_bundle::NativeBundleKind::Result => {
+                "Export RSpice Result Bundle"
+            }
+            crate::workbench::workflows::native_result_bundle::NativeBundleKind::Dataset => {
+                "Export RSpice Dataset Bundle"
+            }
+        },
+        default_name: &default_name,
+        filter_name: kind.display_name(),
+        filter_extensions: &filter_extensions,
+    }) {
+        Ok(Some(mut path)) => {
+            crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, extension);
+            let export = io.observe_destination(&path).and_then(|destination| {
+                io.write_bytes_file_observed(&destination, &bytes, kind.media_type())
+            });
+            (path, export)
+        }
+        Ok(None) => return,
+        Err(error) => (std::path::PathBuf::from(default_name), Err(error)),
+    };
+    match export {
+        Ok(()) => {
+            note_result_export_success(state, kind.display_name());
+            let detail = format!(
+                "{} signals, {} points, SHA-256-bound dataset",
+                exported_signal_count, exported_point_count
+            );
+            state.push_user_message(crate::diagnostics::ConsoleMessage::info(
+                crate::workbench::workflows::export_workflow::export_completion_message(
+                    kind.display_name(),
+                    &published_path,
+                    Some(detail),
+                    io,
+                ),
+            ));
+        }
+        Err(error) => {
+            note_result_export_failure(
+                state,
+                format!("{} export failed: {error}", kind.display_name()),
+            );
+            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+                "{} export failed: {error}",
+                kind.display_name()
+            )));
+        }
+    }
+}
+
+fn nonempty_unit(unit: &'static str) -> Option<&'static str> {
+    (!unit.is_empty()).then_some(unit)
 }
 
 fn export_csv(

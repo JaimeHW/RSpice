@@ -2465,6 +2465,99 @@ mod tests {
         assert!(parse_native_bundle(&bad, ResultImportFormat::RSpiceDatasetBundle).is_err());
     }
 
+    #[test]
+    fn native_export_schema_is_deterministic_and_round_trips_real_and_complex() {
+        use crate::workbench::workflows::native_result_bundle::{
+            NativeBundleAnalysis, NativeBundleDataset, NativeBundleKind, NativeBundleSignal,
+            NativeBundleSignalValues, encode_native_bundle,
+        };
+
+        let coordinate = [1.0e3, 2.0e3, 4.0e3];
+        let real_values = [0.25, 0.5, 1.0];
+        let complex_real = [1.0, -2.0, 0.5];
+        let complex_imag = [0.125, 0.25, -0.75];
+        let dataset = NativeBundleDataset {
+            analysis: NativeBundleAnalysis::Ac,
+            coordinate_name: "frequency",
+            coordinate: &coordinate,
+            signals: vec![
+                NativeBundleSignal {
+                    name: "gain",
+                    unit: None,
+                    values: NativeBundleSignalValues::Real(&real_values),
+                },
+                NativeBundleSignal {
+                    name: "V(out)",
+                    unit: Some("V"),
+                    values: NativeBundleSignalValues::Complex {
+                        real: &complex_real,
+                        imag: &complex_imag,
+                    },
+                },
+            ],
+        };
+
+        for (kind, format) in [
+            (
+                NativeBundleKind::Result,
+                ResultImportFormat::RSpiceResultBundle,
+            ),
+            (
+                NativeBundleKind::Dataset,
+                ResultImportFormat::RSpiceDatasetBundle,
+            ),
+        ] {
+            let bytes = encode_native_bundle(kind, &dataset).expect("native bundle encode");
+            assert_eq!(
+                bytes,
+                encode_native_bundle(kind, &dataset).expect("repeat deterministic encode")
+            );
+
+            let mut archive = zip::ZipArchive::new(Cursor::new(bytes.as_slice())).unwrap();
+            assert_eq!(archive.len(), 2);
+            let manifest_bytes = read_zip_member(&mut archive, "manifest.json", format).unwrap();
+            let dataset_bytes = read_zip_member(&mut archive, "dataset.json", format).unwrap();
+            let manifest: serde_json::Value = serde_json::from_slice(&manifest_bytes).unwrap();
+            let document: serde_json::Value = serde_json::from_slice(&dataset_bytes).unwrap();
+            assert_eq!(manifest["schema"], kind.manifest_schema());
+            assert_eq!(manifest["dataset_member"], "dataset.json");
+            assert_eq!(document["schema"], "rspice-waveform-dataset/1");
+            assert_eq!(document["analysis"], "ac");
+            assert_eq!(document["signals"][0]["values"][1], 0.5);
+            assert_eq!(document["signals"][1]["real"][1], -2.0);
+            assert_eq!(document["signals"][1]["imag"][2], -0.75);
+            use sha2::Digest as _;
+            assert_eq!(
+                manifest["dataset_sha256"],
+                format!("{:x}", sha2::Sha256::digest(&dataset_bytes))
+            );
+
+            let parsed = parse_native_bundle(&bytes, format).expect("exporter/importer round-trip");
+            assert_eq!(parsed.analysis_type, AnalysisType::Ac);
+            assert_eq!(parsed.coordinate_name, "frequency");
+            assert_eq!(parsed.waveforms.len(), 2);
+            assert_eq!(parsed.waveforms[0].name, "gain");
+            assert_eq!(parsed.waveforms[0].y.as_ref(), real_values.as_slice());
+            let complex = parsed.waveforms[1]
+                .complex
+                .as_ref()
+                .expect("complex identity retained");
+            assert_eq!(complex.source_name, "V(out)");
+            assert_eq!(complex.real.as_ref(), complex_real.as_slice());
+            assert_eq!(complex.imag.as_ref(), complex_imag.as_slice());
+
+            let mut tampered_manifest = manifest;
+            tampered_manifest["dataset_sha256"] = serde_json::Value::String("00".repeat(32));
+            let tampered_manifest = serde_json::to_vec(&tampered_manifest).unwrap();
+            let tampered = zip_bytes(&[
+                ("manifest.json", &tampered_manifest),
+                ("dataset.json", &dataset_bytes),
+            ]);
+            let error = parse_native_bundle(&tampered, format).expect_err("digest tamper");
+            assert!(error.contains("SHA-256"), "{error}");
+        }
+    }
+
     fn generic_hdf5() -> Vec<u8> {
         let mut builder = rustyhdf5::FileBuilder::new();
         builder
