@@ -21,6 +21,7 @@ fn main() -> ExitCode {
     };
     let descriptors = generated_veriloga_model_descriptors();
     let mut errors = validate_catalog(descriptors);
+    errors.extend(validate_release_documentation(descriptors));
 
     if descriptors.len() != EXPECTED_SHIPPED_MODEL_COUNT {
         errors.push(format!(
@@ -55,6 +56,29 @@ fn main() -> ExitCode {
         dump_descriptor(descriptor);
     }
     ExitCode::SUCCESS
+}
+
+fn validate_release_documentation(descriptors: &[GeneratedVerilogAModelDescriptor]) -> Vec<String> {
+    const README: &str = include_str!("../../../README.md");
+
+    let mut errors = Vec::new();
+    let count = descriptors.len();
+    let required_claims = [
+        (format!("{count} generated Verilog-A models"), 1),
+        (format!("model, {count} devices today"), 1),
+        (format!("All {count} generated models compile"), 1),
+        (format!("All {count} generated models and"), 1),
+        (format!("All {count} generated model crates"), 2),
+    ];
+    for (claim, minimum_occurrences) in required_claims {
+        let occurrences = README.matches(&claim).count();
+        if occurrences < minimum_occurrences {
+            errors.push(format!(
+                "README.md contains {occurrences} occurrences of '{claim}', expected at least {minimum_occurrences}"
+            ));
+        }
+    }
+    errors
 }
 
 fn parse_arguments() -> Result<bool, String> {
