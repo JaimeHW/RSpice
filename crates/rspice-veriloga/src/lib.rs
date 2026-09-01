@@ -1408,8 +1408,20 @@ impl VerilogACompiler {
         let source_digest = canonical_ir::StableDigest::from_text(&preprocessed).as_hex();
         measurements.checkpoint(PipelinePhase::BytecodeGeneration)?;
         let phase_started = web_time::Instant::now();
-        let model = CodeGenerator::new()
-            .generate_analyzed_module_with_source_digest(&executable, source_digest)?;
+        // The same `enable_ams` branch the in-memory runtime entry takes. It
+        // used to be missing here, so a caller that opted in to mixed
+        // compilation got it for a source string and not for a file — and the
+        // engine's `.VERILOGA` cache reads files. Both entries produce a
+        // `RuntimeCompileReport`-shaped pair whose canonical half carries the
+        // discrete plan, so both have to lower the analog half the same way or
+        // the option means two different things depending on where the source
+        // came from.
+        let generator = CodeGenerator::new();
+        let model = if self.options.enable_ams {
+            generator.generate_mixed_analog_half_with_source_digest(&executable, source_digest)?
+        } else {
+            generator.generate_analyzed_module_with_source_digest(&executable, source_digest)?
+        };
         measurements.record(PipelinePhase::BytecodeGeneration, phase_started.elapsed())?;
         let canonical_ir = self.build_canonical_ir_artifact_from_module(
             &source_package,

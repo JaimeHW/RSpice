@@ -138,7 +138,22 @@ use super::*;
 // dropped and the file compiles. That is the same kind of change as 34's:
 // nothing in a cached plan is reinterpreted, but a cached artifact no longer
 // stands for the same compile, and the fail-closed reading is to rebuild.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 35;
+//
+// Version 36 is that situation once more, and this time the change is on *this*
+// side of the boundary rather than the compiler's: a `.VERILOGA` include is now
+// compiled with `enable_ams` on (see [`deck_include_compiler_options`]), so a
+// `.va` whose module carries digital content compiles instead of being refused
+// at code generation, and reaches the mixed host that executes it.
+//
+// Nothing cached is being reinterpreted, and for a stronger reason than 34's
+// and 35's. A mixed module under version 35 did not compile at all, so no
+// version-35 record for one exists to be misread; and for an analog-only module
+// the option changes nothing an artifact can carry, because its entire effect
+// in the compiler is to skip a check that an analog-only module passes. What
+// changes is once again what the front end accepts, so a cached artifact no
+// longer stands for the same compile, and the fail-closed reading is to rebuild
+// rather than to reason about which sources are unaffected.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 36;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
@@ -1505,6 +1520,38 @@ pub(super) fn resolve_cached_or_compile_veriloga(
     resolve_cached_or_compile_veriloga_with_limits(path, ResourceLimits::default())
 }
 
+/// How a `.VERILOGA` include named by a deck is compiled.
+///
+/// The one departure from the compiler's own defaults is `enable_ams`, and it
+/// is what gives a mixed module a deck route at all. With it off, code
+/// generation refuses the first digital declaration it meets, so a `.va` whose
+/// module carries both an analog block and a process could not be read by a
+/// deck; with it on, the front end emits the analog half as bytecode and hands
+/// the discrete half to the canonical plan, which is what
+/// [`MixedSignalHost`](crate::xspice::verilog::MixedSignalHost) executes.
+///
+/// Enabling it is only sound because the *builder* decides which half of the
+/// artifact each module reaches: a module whose canonical plan is empty is
+/// built as an ordinary [`VerilogADevice`](crate::device::veriloga::VerilogADevice)
+/// exactly as before, and a module whose plan is not empty is built as a mixed
+/// host that executes it. What `enable_ams` must never do is let an analog-only
+/// device route silently drop a process, and here it cannot: the same predicate
+/// that lets the digital half through the compiler selects the route that runs
+/// it.
+///
+/// For a module with no digital content the option changes nothing at all. Its
+/// entire effect inside the compiler is to skip `reject_digital_content`, which
+/// on an analog-only module is a no-op — so the `CompiledModel` and the
+/// canonical artifact a deck's analog `.va` produces are the ones it produced
+/// before.
+#[cfg(feature = "veriloga")]
+fn deck_include_compiler_options() -> rspice_veriloga::CompilerOptions {
+    rspice_veriloga::CompilerOptions {
+        enable_ams: true,
+        ..rspice_veriloga::CompilerOptions::default()
+    }
+}
+
 #[cfg(feature = "veriloga")]
 struct VerilogACompileControl<'a> {
     abort: &'a dyn AbortSignal,
@@ -1618,7 +1665,7 @@ pub(super) fn resolve_cached_or_compile_veriloga_with_limits_and_abort(
     )?;
 
     log::info!("Verilog-A cache miss, compiling '{}'", canonical.display());
-    let compiler = rspice_veriloga::VerilogACompiler::default();
+    let compiler = rspice_veriloga::VerilogACompiler::new(deck_include_compiler_options());
     let control = VerilogACompileControl { abort };
     VERILOGA_CACHE_TELEMETRY
         .compilations_started
