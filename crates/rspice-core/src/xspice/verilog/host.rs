@@ -63,13 +63,13 @@ use rspice_veriloga::canonical_ir::digital::{
 };
 use rspice_veriloga::canonical_ir::digital_eval::{
     DigitalEvalError, DigitalProcessOutcome, DigitalResumeState, DigitalWaitRequest,
-    any_term_is_satisfied, apply_deferred as apply_deferred_update, resume as resume_process,
-    start as start_process,
+    any_real_term_is_satisfied, any_term_is_satisfied, apply_deferred as apply_deferred_update,
+    resume as resume_process, start as start_process,
 };
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
 use rspice_veriloga::canonical_ir::ids::DigitalSignalId;
 
-use super::store::{DigitalSignalStore, StoreError, signal_name};
+use super::store::{DigitalSignalStore, StoreError, TransitionValues, signal_name};
 use crate::xspice::EventValue;
 use crate::xspice::digital::DigitalValue;
 use crate::xspice::event_scheduler::{
@@ -139,6 +139,26 @@ pub enum DigitalRunError {
         /// Width the stimulus offered.
         offered: u32,
     },
+    /// A stimulus offered a value in the wrong domain for the port.
+    ///
+    /// Verilog-AMS LRM 2.4 section 3.7 makes a `wreal` carry a real and a
+    /// `wire` carry bits, and converts between them only through the explicit
+    /// `$realtobits`/`$bitstoreal`. A harness that offers the wrong one is
+    /// refused rather than converted for, so a stimulus that has drifted away
+    /// from the design says so instead of running.
+    StimulusValueDomain {
+        /// The port.
+        name: String,
+        /// Whether the *design* declares the port real.
+        port_is_real: bool,
+    },
+    /// A vector column that is not a real number, for a real-valued port.
+    RealSpelling {
+        /// The port the column drives.
+        port: String,
+        /// What the column said.
+        spelling: String,
+    },
     /// A vector column that is not a four-state spelling.
     VectorSpelling {
         /// The port the column drives.
@@ -180,6 +200,20 @@ pub enum DigitalRunError {
     },
     /// The run needed more ticks than the decimal grid can represent exactly.
     TickOverflow,
+    /// A stimulus names a different module than the design was compiled for.
+    ///
+    /// Only reachable through [`super::CompiledDigitalDesign::run`], because
+    /// [`super::run_digital_verilog`] compiles the module its own stimulus
+    /// names. A compiled design outlives the stimulus that produced it, so the
+    /// two can drift apart; running one against the other would produce a trace
+    /// of the wrong design, and every port name the stimulus uses might well
+    /// resolve in it.
+    StimulusModule {
+        /// The module the design was compiled from.
+        compiled: String,
+        /// The module the stimulus asked for.
+        requested: String,
+    },
 }
 
 impl fmt::Display for DigitalRunError {
@@ -219,6 +253,24 @@ impl fmt::Display for DigitalRunError {
                 "`{name}` is declared {declared} bit(s) wide but the stimulus offered \
                  {offered} bit(s)"
             ),
+            Self::StimulusValueDomain { name, port_is_real } => {
+                if *port_is_real {
+                    write!(
+                        f,
+                        "`{name}` is a real-valued (`wreal`) port and the stimulus offered a \
+                         four-state value; Verilog-AMS LRM 2.4 section 3.7 makes it carry a real"
+                    )
+                } else {
+                    write!(
+                        f,
+                        "`{name}` is a four-state port and the stimulus offered a real value"
+                    )
+                }
+            }
+            Self::RealSpelling { port, spelling } => write!(
+                f,
+                "the column driving `{port}` reads `{spelling}`, which is not a real number"
+            ),
             Self::VectorSpelling { port, spelling } => write!(
                 f,
                 "the column driving `{port}` reads `{spelling}`, which is not a four-state \
@@ -248,6 +300,15 @@ impl fmt::Display for DigitalRunError {
             Self::TickOverflow => write!(
                 f,
                 "the run reached a time past the exactly representable tick range"
+            ),
+            Self::StimulusModule {
+                compiled,
+                requested,
+            } => write!(
+                f,
+                "the design was compiled from module `{compiled}` and the stimulus asks for \
+                 `{requested}`; compile the module the stimulus names rather than running it \
+                 against another"
             ),
         }
     }
@@ -282,6 +343,14 @@ impl From<StoreError> for DigitalRunError {
                 name,
                 declared,
                 offered,
+            },
+            StoreError::RealPortDrivenWithBits { name, .. } => Self::StimulusValueDomain {
+                name,
+                port_is_real: true,
+            },
+            StoreError::FourStatePortDrivenWithAReal { name, .. } => Self::StimulusValueDomain {
+                name,
+                port_is_real: false,
             },
         }
     }
@@ -337,20 +406,38 @@ impl DigitalHost {
         resolution: TimeResolution,
         limits: SchedulerLimits,
     ) -> Self {
+        Self::from_plan(Arc::new(plan.clone()), resolution, limits)
+    }
+
+    /// Build a host over a plan that is already shared.
+    ///
+    /// The seam a compile-once caller needs. [`Self::new`] deep-copies the plan
+    /// so that a caller holding a borrow does not have to give it up; a caller
+    /// that compiled once and runs many times has nothing to copy, because the
+    /// plan is immutable for the whole of a host's life — every field this
+    /// builds is per-run state, and the `Arc` is only ever read through.
+    ///
+    /// So two hosts over one plan share the compiled design and share no
+    /// running state, which is exactly the property
+    /// [`super::CompiledDigitalDesign::run`] rests on.
+    pub(crate) fn from_plan(
+        plan: Arc<CanonicalDigitalPlan>,
+        resolution: TimeResolution,
+        limits: SchedulerLimits,
+    ) -> Self {
         let targets = plan
             .processes
             .iter()
             .enumerate()
             .map(|(index, process)| EventTarget {
                 node_id: index,
-                port_name: driven_signal_name(plan, index),
+                port_name: driven_signal_name(&plan, index),
                 driver_index: 0,
                 instance: format!("{}#{}", process.kind.keyword(), usize::from(process.id)),
             })
             .collect();
         Self {
-            plan: Arc::new(plan.clone()),
-            store: DigitalSignalStore::new(plan),
+            store: DigitalSignalStore::new(&plan),
             scheduler: EventScheduler::new(resolution, limits),
             slots: vec![
                 ProcessSlot {
@@ -362,6 +449,7 @@ impl DigitalHost {
             waiters: vec![Vec::new(); plan.signals.len()],
             inactive: Vec::new(),
             targets,
+            plan,
         }
     }
 
@@ -380,6 +468,20 @@ impl DigitalHost {
     /// The value a signal holds right now.
     pub(crate) fn read(&self, signal: DigitalSignalId) -> Option<&FourStateValue> {
         self.store.value(signal)
+    }
+
+    /// The value a real net holds right now.
+    pub(crate) fn read_real(&self, signal: DigitalSignalId) -> Option<f64> {
+        self.store.real_value(signal)
+    }
+
+    /// Whether the compiled design declares this signal real.
+    ///
+    /// The *design* is the authority on a port's value domain, not the
+    /// stimulus: the net-type keyword its author wrote is what decides, and a
+    /// harness that disagrees is refused rather than believed.
+    pub(crate) fn is_real(&self, signal: DigitalSignalId) -> bool {
+        self.store.is_real(signal)
     }
 
     /// Earliest scheduled activation, used by the analog transient driver as
@@ -418,18 +520,49 @@ impl DigitalHost {
     /// All values enter the store before sensitivity is dispatched. This is
     /// essential for a bank of A/D bridges sampled from one converged Newton
     /// solution: no process may observe a half-updated bridge bank.
+    ///
+    /// Every drive is checked before any is published, so a bank containing
+    /// one unacceptable drive publishes none of it. This used to be done by
+    /// deep-copying the whole running host on the way in and restoring it on
+    /// the way out of a refusal — a copy of the plan handle, the store, the
+    /// scheduler, every process slot and the whole sensitivity index, paid on
+    /// every publish so that the rare refusal had somewhere to go back to.
+    /// [`DigitalSignalStore::check_force`] answers the same question without
+    /// writing, and the refusals it can return are the only ones `force` has.
     pub(crate) fn force_many(
         &mut self,
         drives: &[(DigitalSignalId, FourStateValue)],
         tick: u64,
     ) -> Result<(), DigitalRunError> {
-        let rollback = self.clone();
         for (signal, value) in drives {
-            if let Err(error) = self.store.force(*signal, value.clone(), &self.plan) {
-                *self = rollback;
-                return Err(error.into());
-            }
+            self.store.check_force(*signal, value, &self.plan)?;
         }
+        for (signal, value) in drives {
+            self.store.force(*signal, value.clone(), &self.plan)?;
+        }
+        self.dispatch(tick)?;
+        self.settle(tick)
+    }
+
+    /// Publish one converged analog solution's probe values into the store.
+    ///
+    /// Call this immediately before anything that can run a process, so that
+    /// every process activated by what follows reads the same analog
+    /// solution — Verilog-AMS LRM 2.4 section 7.3.6.3 fixes a probe's value by
+    /// the *time* the expression is evaluated, and a bank refreshed halfway
+    /// through a settle would give two processes in one slot two answers.
+    pub(crate) fn sample_analog_potentials(&mut self, values: &[f64]) {
+        self.store.sample_analog_potentials(values);
+    }
+
+    /// Write a real net from outside the design and settle the consequences.
+    pub(crate) fn force_real(
+        &mut self,
+        signal: DigitalSignalId,
+        value: f64,
+        tick: u64,
+    ) -> Result<(), DigitalRunError> {
+        self.store.force_real(signal, value, &self.plan)?;
         self.dispatch(tick)?;
         self.settle(tick)
     }
@@ -602,13 +735,20 @@ impl DigitalHost {
                 let mut position = 0usize;
                 while position < self.waiters[net].len() {
                     let index = self.waiters[net][position];
-                    let satisfied = match &self.slots[index].status {
-                        ProcessStatus::AwaitingEvent(terms) => any_term_is_satisfied(
-                            terms,
-                            transition.signal,
-                            &transition.previous,
-                            &transition.next,
-                        ),
+                    let satisfied = match (&self.slots[index].status, &transition.values) {
+                        (
+                            ProcessStatus::AwaitingEvent(terms),
+                            TransitionValues::FourState { previous, next },
+                        ) => any_term_is_satisfied(terms, transition.signal, previous, next),
+                        // Verilog-AMS LRM 2.4 section 3.7's event on a real net
+                        // is a change of value, and the front end has already
+                        // refused `posedge` on one. The rule is asked of the
+                        // canonical IR rather than restated here, for the same
+                        // reason the four-state arm asks it there.
+                        (
+                            ProcessStatus::AwaitingEvent(terms),
+                            TransitionValues::Real { previous, next },
+                        ) => any_real_term_is_satisfied(terms, transition.signal, *previous, *next),
                         _ => false,
                     };
                     if satisfied {

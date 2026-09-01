@@ -138,7 +138,11 @@ fn module_with_statement(statement: &str) -> String {
 fn verilog_ams_digital_constructs_are_refused_by_name() {
     // Declarations, in module-item position.
     for (keyword, item) in [
-        ("wreal", "wreal w;"),
+        // `wreal` itself has a production now (Verilog-AMS LRM 2.4 section
+        // 3.7) and is pinned by `tests/digital_grammar.rs`. `wreal4state` does
+        // not: a real net that can also hold `x` and `z` is a different type
+        // with no Accellera definition, so it stays refused by name.
+        ("wreal4state", "wreal4state w;"),
         ("wand", "wand w;"),
         ("wor", "wor w;"),
         ("tri", "tri t;"),
@@ -198,12 +202,12 @@ fn verilog_ams_digital_constructs_are_refused_by_name() {
         );
     }
 
-    // File-scope items.
+    // File-scope items. `connectmodule` used to be here and is not any more:
+    // Verilog-AMS LRM 2.4 Syntax 7-4 makes it a `module_keyword` and the
+    // parser now reads one, so its refusal moved to the connect specification
+    // machinery, where a module that does not bridge two domains is named for
+    // what is wrong with it rather than for its keyword.
     for (keyword, source) in [
-        (
-            "connectmodule",
-            "connectmodule l2e(l, e);\n    input l;\n    output e;\nendconnectmodule\n",
-        ),
         (
             "primitive",
             "primitive latch(q, clk, d);\n    output q;\nendprimitive\n",

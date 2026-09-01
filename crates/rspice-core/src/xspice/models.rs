@@ -113,6 +113,9 @@
 //! - **real_gain** - Real-valued event gain
 //! - **real_delay** - Clocked real-valued event delay
 //! - **real_to_v** / **r_to_v** - Real-valued event to analog converter
+//! - **v_to_real** - Analog input sampled into a real-valued event
+//!
+//! The last is RSpice's own; ngspice 46 ships the other four and no observer.
 //!
 //! # Debug/Example Models
 //!
@@ -213,6 +216,7 @@ pub use xtradev::{
     SeeGeneratorAlias, Sidiode, Zener,
 };
 
+pub(crate) use xtraevt::VoltageToReal;
 pub use xtraevt::{DigitalToReal, RealDelay, RealGain, RealToVoltage, RealToVoltageAlias};
 
 pub use debug::PrintParamTypes;

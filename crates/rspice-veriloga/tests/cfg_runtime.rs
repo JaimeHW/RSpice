@@ -557,6 +557,10 @@ fn agree(module: &str, tag: &str, emitted: &[f64], interpreted: &[f64]) {
 
 struct Bias {
     parameters: Vec<f64>,
+    /// One flag per declared port, all connected — the CFG level's own
+    /// convention, where `$port_connected` folds to a constant one. A shorter
+    /// vector would read as *unconnected*, which no model compiled here means.
+    port_connected: Vec<bool>,
     node_potentials: Vec<f64>,
     branch_flows: Vec<f64>,
     branch_unknown_flows: Vec<f64>,
@@ -571,6 +575,7 @@ impl Bias {
                 .iter()
                 .map(|parameter| parameter.default.unwrap_or(0.0))
                 .collect(),
+            port_connected: vec![true; artifact.hir.ports.len()],
             node_potentials: (0..artifact.mir.nodes.len())
                 .map(|index| 0.41 - 0.13 * index as f64)
                 .collect(),
@@ -587,6 +592,7 @@ impl Bias {
         CfgEvalInputs {
             parameters: self.parameters.clone(),
             parameter_given: vec![false; self.parameters.len()],
+            port_connected: self.port_connected.clone(),
             event_state: Vec::new(),
             event_controls: HashMap::new(),
             node_potentials: self.node_potentials.clone(),

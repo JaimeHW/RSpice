@@ -15,6 +15,27 @@ use crate::NodeId;
 /// is an addition here; the matches that decide something per kind are written
 /// without a wildcard arm so that addition surfaces as a compile error at each
 /// of them rather than as a silent fallthrough.
+///
+/// # Where the real-valued variant will attach
+///
+/// Not yet, and deliberately. Verilog-AMS LRM 2.4 section 3.7's `wreal` exists
+/// and executes — [`crate::xspice::verilog::run_digital_verilog`] compiles a
+/// real net, resolves its drivers and traces its value — but that route never
+/// builds a [`CircuitData`](crate::CircuitData) and so never asks this table
+/// anything. It goes source → [`DigitalHost`] → observations, with the plan's
+/// own `DigitalSignalKind` as the only authority on what a net carries.
+///
+/// This table gains a real-valued kind when a `wreal` first reaches a *netlist*
+/// net, which is when a Verilog-AMS module is instantiated as a device rather
+/// than run standalone. The mark would be recorded exactly where the
+/// four-state one is — beside [`NetKind::Discrete`] in
+/// `external_models.rs`'s port sweep — because that is the pass that knows
+/// which node each port of an instance landed on. Adding the variant before
+/// there is a caller to set it would leave a kind nothing can produce and a
+/// [`discrete_nodes`](NetKinds::discrete_nodes) whose answer nobody could tell
+/// apart from today's.
+///
+/// [`DigitalHost`]: crate::xspice::verilog::host::DigitalHost
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub(crate) enum NetKind {
     /// An analog net whose voltage the MNA system solves for.

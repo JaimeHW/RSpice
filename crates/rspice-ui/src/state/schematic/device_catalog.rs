@@ -441,6 +441,12 @@ pub const ENGINE_ONLY_XSPICE_DEVICES: &[CatalogXspiceDeviceDescriptor] = &[
         "xspice_triangle.svg"
     ),
     xspice_device!(
+        "rspice.xspice.v_to_real",
+        "v_to_real",
+        "Analog-to-Real Observer",
+        "xspice_adc_bridge.svg"
+    ),
+    xspice_device!(
         "rspice.xspice.xfer",
         "xfer",
         "AC Transfer Table",
@@ -1024,6 +1030,25 @@ mod tests {
         assert_eq!(contract.ports[0].name, "out");
         assert_eq!(contract.ports[0].vector_width, 1);
         assert_eq!(binding.parameter_order, ["stim_program"]);
+    }
+
+    #[test]
+    fn analog_to_real_observer_has_a_placeable_exact_catalog_contract() {
+        let descriptor = engine_only_xspice_devices()
+            .iter()
+            .find(|descriptor| descriptor.model_type == "v_to_real")
+            .expect("analog-to-real observer catalog disposition");
+        assert_eq!(descriptor.stable_id, "rspice.xspice.v_to_real");
+        assert_eq!(descriptor.display_name, "Analog-to-Real Observer");
+        assert_eq!(descriptor.symbol_asset, "xspice_adc_bridge.svg");
+
+        let binding = builtin_xspice_library_binding(descriptor)
+            .expect("analog-to-real observer placement binding");
+        let validated = validate_builtin_xspice_binding(&binding)
+            .expect("analog-to-real observer exact executable binding");
+        assert_eq!(validated.model_type, "v_to_real");
+        assert_eq!(binding.terminal_order, ["in", "out"]);
+        assert_eq!(binding.parameter_order, ["gain"]);
     }
 
     #[test]

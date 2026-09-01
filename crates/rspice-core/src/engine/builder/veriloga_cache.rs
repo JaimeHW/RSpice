@@ -88,7 +88,88 @@ use super::*;
 // injection. A version-30 artifact has neither the schema marker nor those
 // routing programs, so accepting it would silently revert repeated uses of one
 // process to independent sources and lose cancellation/correlation.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 31;
+// Version 32 gives the discrete domain a second value type: Verilog-AMS
+// LRM 2.4 section 3.7's real net. `wreal`, and the four resolved spellings
+// beside it, declare a net carrying a real rather than four-state bits; a
+// plan signal now records which, a real net starts at 0.0 rather than at
+// `z`, and real arithmetic, real comparison and a real conditional are
+// three new value kinds a process function can hold. A version-31 artifact
+// could not contain any of them — `wreal` was refused at the keyword — so
+// nothing cached is being reinterpreted here. What changes is the *shape*
+// of the record: a plan serialized by version 32 carries a field version
+// 31's reader does not know, and a version-31 plan decodes under version 32
+// only because that field defaults. Rebuilding rather than leaning on the
+// default is the fail-closed reading, so the record's identity changes.
+// Version 33 gives the discrete domain a real *variable*, which is where a
+// real-number model keeps state. `real` is now a discrete-domain signal class
+// beside `wreal` — written procedurally rather than driven, per IEEE 1364-2005
+// section 6.2 — reached either by `output real` or by a module-level `real` a
+// process writes in a module with no analog block. `$realtobits` and
+// `$bitstoreal` are two more value kinds, a `parameter real` folds into a real
+// expression, and a deferred nonblocking update carries either a four-state
+// value or a real. A version-32 artifact could contain none of that: every one
+// of those constructs was refused by name, so nothing cached is being
+// reinterpreted. What changes is the shape of the record again — a plan
+// serialized by version 33 can carry a real variable and a deferred real update
+// that version 32's reader has no case for — so the record's identity changes
+// rather than relying on a decode that would silently drop them.
+// Version 34 reserves the six Verilog-AMS connect keywords — `connect`,
+// `connectrules`, `endconnectrules`, `resolveto`, `merged` and `split` — and
+// reads the two constructs they belong to: `connectmodule`, which LRM 2.4
+// Syntax 7-4 makes a third `module_keyword` and which the parser refused
+// outright before, and the `connectrules` block of Syntax 7-5. It also reads
+// `` `default_discipline `` (section 10.2), which every module now carries.
+//
+// Unlike versions 32 and 33, this is not a new shape inside the plan: no
+// executable form of a connect module exists yet, so nothing new reaches a
+// cached artifact. What changes is what the *front end accepts* — a source
+// that was a hard parse error under version 33 compiles under 34, and six
+// identifiers that were legal names are not any more. A cached artifact
+// therefore no longer stands for the same compile, and the fail-closed
+// reading is to rebuild rather than to reason about which sources are
+// unaffected.
+//
+// Version 35 is version 34's situation again, for one line of the front end.
+// A compiler directive the preprocessor does not know now takes its operand
+// with it, per the preprocessor's own rule that a line opening with a backtick
+// is a directive line. Under version 34 the operand stayed in the token
+// stream, so `` `default_nettype wire `` was a hard parse error — the `wire`
+// reached the top-level item loop alone — and under 35 the whole line is
+// dropped and the file compiles. That is the same kind of change as 34's:
+// nothing in a cached plan is reinterpreted, but a cached artifact no longer
+// stands for the same compile, and the fail-closed reading is to rebuild.
+//
+// Version 36 is that situation once more, and this time the change is on *this*
+// side of the boundary rather than the compiler's: a `.VERILOGA` include is now
+// compiled with `enable_ams` on (see [`deck_include_compiler_options`]), so a
+// `.va` whose module carries digital content compiles instead of being refused
+// at code generation, and reaches the mixed host that executes it.
+//
+// Nothing cached is being reinterpreted, and for a stronger reason than 34's
+// and 35's. A mixed module under version 35 did not compile at all, so no
+// version-35 record for one exists to be misread; and for an analog-only module
+// the option changes nothing an artifact can carry, because its entire effect
+// in the compiler is to skip a check that an analog-only module passes. What
+// changes is once again what the front end accepts, so a cached artifact no
+// longer stands for the same compile, and the fail-closed reading is to rebuild
+// rather than to reason about which sources are unaffected.
+//
+// Version 37 changes the shape of a cached plan and what the front end
+// accepts, both at once, for the same construct: Verilog-AMS LRM 2.4 section
+// 7.3.3's probe of a continuous net from a discrete context. A plan now carries
+// an analog-probe table and process functions carry a value kind that reads
+// one, neither of which a version-36 reader has a case for; and a process that
+// wrote `V(p, n)` was refused by name under 36, so a source that did not
+// compile now does. It also moves the ownership rule for a module-level `real`
+// off the *module* and onto the *name*, per section 7.3's "Write operations of
+// nets and variables are only allowed from the context of their domain", which
+// makes a third class of source compile that did not: one whose analog body
+// neither reads nor writes the variable a process owns.
+//
+// Nothing cached is reinterpreted — every construct involved was refused under
+// 36, so no version-36 record contains one — but a cached artifact no longer
+// stands for the same compile, and the fail-closed reading is to rebuild.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 37;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
@@ -1455,6 +1536,38 @@ pub(super) fn resolve_cached_or_compile_veriloga(
     resolve_cached_or_compile_veriloga_with_limits(path, ResourceLimits::default())
 }
 
+/// How a `.VERILOGA` include named by a deck is compiled.
+///
+/// The one departure from the compiler's own defaults is `enable_ams`, and it
+/// is what gives a mixed module a deck route at all. With it off, code
+/// generation refuses the first digital declaration it meets, so a `.va` whose
+/// module carries both an analog block and a process could not be read by a
+/// deck; with it on, the front end emits the analog half as bytecode and hands
+/// the discrete half to the canonical plan, which is what
+/// [`MixedSignalHost`](crate::xspice::verilog::MixedSignalHost) executes.
+///
+/// Enabling it is only sound because the *builder* decides which half of the
+/// artifact each module reaches: a module whose canonical plan is empty is
+/// built as an ordinary [`VerilogADevice`](crate::device::veriloga::VerilogADevice)
+/// exactly as before, and a module whose plan is not empty is built as a mixed
+/// host that executes it. What `enable_ams` must never do is let an analog-only
+/// device route silently drop a process, and here it cannot: the same predicate
+/// that lets the digital half through the compiler selects the route that runs
+/// it.
+///
+/// For a module with no digital content the option changes nothing at all. Its
+/// entire effect inside the compiler is to skip `reject_digital_content`, which
+/// on an analog-only module is a no-op — so the `CompiledModel` and the
+/// canonical artifact a deck's analog `.va` produces are the ones it produced
+/// before.
+#[cfg(feature = "veriloga")]
+fn deck_include_compiler_options() -> rspice_veriloga::CompilerOptions {
+    rspice_veriloga::CompilerOptions {
+        enable_ams: true,
+        ..rspice_veriloga::CompilerOptions::default()
+    }
+}
+
 #[cfg(feature = "veriloga")]
 struct VerilogACompileControl<'a> {
     abort: &'a dyn AbortSignal,
@@ -1568,7 +1681,7 @@ pub(super) fn resolve_cached_or_compile_veriloga_with_limits_and_abort(
     )?;
 
     log::info!("Verilog-A cache miss, compiling '{}'", canonical.display());
-    let compiler = rspice_veriloga::VerilogACompiler::default();
+    let compiler = rspice_veriloga::VerilogACompiler::new(deck_include_compiler_options());
     let control = VerilogACompileControl { abort };
     VERILOGA_CACHE_TELEMETRY
         .compilations_started

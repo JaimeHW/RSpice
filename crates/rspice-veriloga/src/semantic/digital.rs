@@ -49,21 +49,59 @@ pub struct AnalyzedDigital {
     /// order, and every entry is already resolved against the scope it was
     /// instantiated in; see [`crate::semantic::digital_elaborate`].
     pub instances: Vec<ElaboratedDigitalInstance>,
-    /// Integer-valued parameters and localparams of *this* module, by name.
-    ///
-    /// IEEE 1364-2005 section 12.2 fixes a parameter at elaboration, so the
-    /// places a discrete-domain construct needs a constant — a replication
-    /// count, a part-select bound, a delay — may name one. The analog half
-    /// deliberately treats a parameter as a per-instance runtime value and
-    /// folds nothing, which is why this is a separate table rather than a
-    /// widening of the invariant environment.
+    /// Parameters and localparams of *this* module a discrete-domain body may
+    /// fold, by name.
     ///
     /// Only the compiled module's own. An elaborated instance's body is
     /// lowered against [`ElaboratedDigitalInstance::constants`] — the *child's*
     /// table — so a child's `{WIDTH{1'b0}}` folds with the child's `WIDTH` and
     /// never with the parent's, which would be a wrong answer wearing a right
     /// one's clothes.
-    pub constants: HashMap<SmolStr, i64>,
+    pub constants: DigitalConstants,
+}
+
+/// The elaboration-time constants a discrete-domain body may fold.
+///
+/// IEEE 1364-2005 section 12.2 fixes a parameter at elaboration, so a
+/// discrete-domain construct may name one wherever it needs a constant. The
+/// analog half deliberately treats a parameter as a per-instance runtime value
+/// and folds nothing, which is why this is a separate table rather than a
+/// widening of the invariant environment.
+///
+/// Two tables and not one, because the two are asked different questions. A
+/// replication count, a part-select bound and a delay want an integer and have
+/// no reading for `2.5`; a real expression wants the value the author wrote and
+/// has no reading for its integer part. A name can be in both — `parameter real
+/// N = 2.0;` is a legitimate bit position and a legitimate real — and answers
+/// each question in the domain that asked it.
+#[derive(Debug, Clone, Default)]
+pub struct DigitalConstants {
+    /// Parameters whose default is a whole finite number, as that number.
+    ///
+    /// A non-integer default is absent rather than rounded: every place this is
+    /// consulted wants a bit position or a repetition count, and there is no
+    /// defensible integer for `parameter GAIN = 2.5`.
+    pub integers: HashMap<SmolStr, i64>,
+    /// Parameters the author declared `parameter real`, as their default.
+    ///
+    /// Explicitly typed only. An untyped `parameter WIDTH = 8;` takes
+    /// Verilog-AMS's real default type, so admitting untyped parameters here
+    /// would make every existing bit-width parameter a real operand and change
+    /// what `q = WIDTH;` means. `parameter real K = 0.25;` says which domain it
+    /// belongs in, and this table holds exactly the parameters that said so.
+    pub reals: HashMap<SmolStr, f64>,
+}
+
+impl DigitalConstants {
+    /// The integer a name denotes, if it denotes one.
+    pub fn integer(&self, name: &str) -> Option<i64> {
+        self.integers.get(name).copied()
+    }
+
+    /// The real a name denotes, if it was declared `parameter real`.
+    pub fn real(&self, name: &str) -> Option<f64> {
+        self.reals.get(name).copied()
+    }
 }
 
 impl AnalyzedDigital {
@@ -174,6 +212,28 @@ impl DigitalSignalClass {
     pub const fn is_variable(self) -> bool {
         matches!(self, Self::Variable(_))
     }
+
+    /// Whether the name carries a real value rather than four-state bits.
+    ///
+    /// Two spellings reach it, and they differ by IEEE 1364-2005 section 6.2's
+    /// rule rather than by what they carry: a `wreal` is Verilog-AMS LRM 2.4
+    /// section 3.7's real *net*, driven by continuous assignments, and a `real`
+    /// is section 3.9's real *variable*, written procedurally. A process-local
+    /// `real` is neither — it belongs to the process and is not a signal at all.
+    pub const fn is_real(self) -> bool {
+        match self {
+            Self::Net(kind) => kind.is_real(),
+            Self::Variable(kind) => kind.is_real(),
+        }
+    }
+
+    /// How a real net combines its drivers, if it is one.
+    pub const fn wreal_resolution(self) -> Option<WrealResolution> {
+        match self {
+            Self::Net(kind) => kind.resolution(),
+            Self::Variable(_) => None,
+        }
+    }
 }
 
 /// Resolved packed bounds of a vector.
@@ -211,8 +271,16 @@ pub struct AnalyzedDigitalSignal {
     pub name: SmolStr,
     pub class: DigitalSignalClass,
     pub signedness: Signedness,
-    /// Packed range. `None` is a one-bit scalar.
+    /// Packed range. `None` is a one-bit scalar, and is the only shape a real
+    /// net has — see [`Self::width`].
     pub range: Option<VectorBounds>,
+    /// Declared width in bits.
+    ///
+    /// Zero for a `wreal`, which has no bit width at all: Verilog-AMS LRM 2.4
+    /// section 3.7 makes it a real-valued connection, not a vector of bits.
+    /// The same spelling [`ProcessLocalKind::Real`] already uses, so that "how
+    /// many bits does this carry" has one answer everywhere and `0` means the
+    /// same thing in both places.
     pub width: u32,
     /// Whether the name is also a module port.
     ///
@@ -304,7 +372,7 @@ pub struct ElaboratedDigitalInstance {
     /// so the two tables never meet. With a parameter override on a digital
     /// instance refused (section 12.2), the child's declared defaults *are* its
     /// elaborated values, and every instance of one module sees the same table.
-    pub constants: HashMap<SmolStr, i64>,
+    pub constants: DigitalConstants,
     /// The instance statement, for diagnostics.
     pub span: Span,
 }
@@ -481,7 +549,28 @@ impl SemanticAnalyzer {
         let mut seen: HashMap<SmolStr, Span> = HashMap::new();
 
         for declaration in &module.digital_nets {
-            let bounds = self.resolve_vector_range(declaration.range.as_ref(), "wire");
+            let keyword = declaration.kind.keyword();
+            // Verilog-AMS LRM 2.4 Syntax 3-8 permits a range on a `wreal`,
+            // which declares a *bus of real nets* — an unpacked array of
+            // reals, not a packed vector of bits. Nothing downstream has an
+            // array of signals, so it is refused by name rather than read as
+            // one net of some width, which is what a range on a `wire` means
+            // and is the one wrong answer available here.
+            let bounds = if declaration.kind.is_real() {
+                if let Some(range) = &declaration.range {
+                    self.record_error_at(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "a range on a `{keyword}` declares a bus of real nets, which is not \
+                             supported yet; Verilog-AMS LRM 2.4 section 3.7 makes each element a \
+                             real-valued net of its own, so declare them separately"
+                        )),
+                        range.span,
+                    );
+                }
+                None
+            } else {
+                self.resolve_vector_range(declaration.range.as_ref(), keyword)
+            };
             for item in &declaration.items {
                 self.push_digital_signal(
                     &mut signals,
@@ -494,7 +583,26 @@ impl SemanticAnalyzer {
             }
         }
         for declaration in &module.digital_variables {
-            let bounds = self.resolve_vector_range(declaration.range.as_ref(), "reg");
+            // A `real` variable has neither a packed range nor a sign: IEEE
+            // 1364-2005 section 3.9 gives it no bits to range over and no sign
+            // bit to interpret. Each is refused where the source wrote it
+            // rather than dropped, because `output real signed [3:0] v;` says
+            // three things and only one of them is a real.
+            let bounds = if declaration.kind.is_real() {
+                if let Some(range) = &declaration.range {
+                    self.record_error_at(
+                        SemanticErrorKind::UnsupportedFeature(
+                            "a packed range on a `real` has no meaning; IEEE 1364-2005 section \
+                             3.9 makes a `real` a variable with no bit width"
+                                .to_string(),
+                        ),
+                        range.span,
+                    );
+                }
+                None
+            } else {
+                self.resolve_vector_range(declaration.range.as_ref(), "reg")
+            };
             for item in &declaration.items {
                 self.push_digital_signal(
                     &mut signals,
@@ -506,8 +614,193 @@ impl SemanticAnalyzer {
                 );
             }
         }
+        self.promote_module_level_reals(module, &mut signals, &mut seen);
         self.push_implicit_port_nets(module, &mut signals, &mut seen);
         signals
+    }
+
+    /// Move a module-level `real` into the discrete domain when a process owns
+    /// it, and refuse the case the standard forbids.
+    ///
+    /// # The ownership rule is the standard's, not this compiler's
+    ///
+    /// Verilog-AMS LRM 2.4 section 7.3: "Read operations of nets and variables
+    /// in both domains are allowed from both contexts. **Write operations of
+    /// nets and variables are only allowed from the context of their domain.**"
+    /// So a variable belongs to whichever domain writes it, that domain is the
+    /// only one that may, and either domain may read it. That is a rule, not
+    /// an implementation-defined area, and it decides all three cases here.
+    ///
+    /// `real state;` at module level is the *continuous* domain's declaration —
+    /// it is the same production a Verilog-A model writes, and every one of the
+    /// shipped analog models is full of them. What makes it a discrete-domain
+    /// variable is a process writing it, so it becomes one exactly when:
+    ///
+    /// 1. some `always`, `initial` or continuous assignment **writes** it, and
+    /// 2. the analog body does **not** write it.
+    ///
+    /// Condition 1 is what makes the promotion necessary: a variable no process
+    /// writes has nothing to gain from moving, and leaving it where it was
+    /// keeps it the continuous body's own state.
+    ///
+    /// Condition 2 is section 7.3's sentence. Both halves writing one variable
+    /// is not a synchronization problem to be solved with a rule about clocks —
+    /// it is a program the standard does not admit, so it is refused by name
+    /// and cited, permanently rather than "not yet".
+    ///
+    /// This used to be a question about the *module* — any analog block at all
+    /// disqualified every module-level `real` — which refused a module whose
+    /// analog body never mentions the variable, and refused it with a message
+    /// about clocks that did not apply. The question is about the name.
+    ///
+    /// A pure-analog module is still untouched by construction: it has no
+    /// processes, so condition 1 fails for every one of its variables and
+    /// neither question can change how it compiles.
+    ///
+    /// # What is still refused, and what it is waiting for
+    ///
+    /// A variable a process writes and the **analog body reads**. Section 7.3
+    /// allows that read and section 7.3.6.5 fixes its value — "the digital
+    /// value calculated for the greatest digital time tick which is less than
+    /// or equal to the analog time when the expression is evaluated", which is
+    /// the same zero-order hold the D/A bridge already implements. What is
+    /// missing is the seam, not the semantics: the analog body is evaluated by
+    /// compiled code that has no route to the digital signal store, so the
+    /// refusal names the clause it is short of rather than the boundary in
+    /// general.
+    ///
+    /// An `output real` port does not come through here at all. It is an
+    /// explicit discrete-domain declaration — IEEE 1364-2005 section 12.3.4's
+    /// variable port form, with section 3.9's `real` as the type — so the
+    /// parser already put it in `digital_variables`, exactly as it does for
+    /// `output reg`.
+    fn promote_module_level_reals(
+        &mut self,
+        module: &Module,
+        signals: &mut Vec<AnalyzedDigitalSignal>,
+        seen: &mut HashMap<SmolStr, Span>,
+    ) {
+        let mut written: std::collections::HashSet<SmolStr> = std::collections::HashSet::new();
+        for process in &module.digital_processes {
+            collect_written_names(&process.body, &mut written);
+        }
+        for assignment in &module.continuous_assigns {
+            for (name, _) in assignment.target.written_names() {
+                written.insert(name.clone());
+            }
+        }
+        if written.is_empty() {
+            return;
+        }
+        let analog = module
+            .analog_block
+            .as_ref()
+            .or(module.analog_initial.as_ref())
+            .or(module.analog_final.as_ref());
+        // What the continuous body does with each name, over every analog
+        // block the module declares rather than only the first: `analog
+        // initial x = 0;` beside `analog V(a) <+ x;` is two blocks and one
+        // variable, and asking only one of them would answer about half a
+        // module.
+        let mut analog_writes = std::collections::HashSet::new();
+        let mut analog_reads = std::collections::HashSet::new();
+        for block in [
+            module.analog_block.as_ref(),
+            module.analog_initial.as_ref(),
+            module.analog_final.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            for statement in &block.statements {
+                collect_analog_names(statement, &mut analog_writes, &mut analog_reads);
+            }
+        }
+        // One expression form the walk could not enumerate makes every name a
+        // possible read. Erring that way promotes nothing the analog body
+        // might still be using, which is the direction that cannot produce a
+        // wrong answer — only a refusal.
+        let opaque_read = analog_reads.contains(OPAQUE_ANALOG_READ);
+
+        for declaration in &module.variables {
+            if declaration.var_type != VarType::Real {
+                continue;
+            }
+            for item in &declaration.items {
+                if !written.contains(&item.name) || seen.contains_key(&item.name) {
+                    continue;
+                }
+                // Verilog-AMS LRM 2.4 section 7.3: a variable's own domain is
+                // the only one that may write it. Two writers is a program the
+                // standard does not admit, and no scheduling rule would make
+                // it one.
+                if analog_writes.contains(&item.name) {
+                    self.record_error_at(
+                        SemanticErrorKind::InvalidExpression(format!(
+                            "`{}` is written by both the analog body and a discrete process; \
+                             Verilog-AMS LRM 2.4 section 7.3 allows a write only from the \
+                             context of the variable's own domain, so one of the two writes \
+                             has to go",
+                            item.name
+                        )),
+                        item.span,
+                    );
+                    continue;
+                }
+                // Section 7.3 allows this read and section 7.3.6.5 fixes its
+                // value, so the refusal is about the seam rather than about
+                // the program.
+                if (opaque_read || analog_reads.contains(&item.name))
+                    && let Some(block) = analog
+                {
+                    self.record_error_at(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "`{}` is written by a discrete process and read by the analog body; \
+                             Verilog-AMS LRM 2.4 section 7.3.6.5 makes that read the digital \
+                             value at the greatest tick at or before the analog time, and the \
+                             compiled analog body has no route to the digital signal store yet",
+                            item.name
+                        )),
+                        block.span,
+                    );
+                    continue;
+                }
+                if !item.dimensions.is_empty() {
+                    self.record_error_at(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "`{}` is an array of `real`, and a process writes it; an array has \
+                             no discrete-domain signal form yet",
+                            item.name
+                        )),
+                        item.span,
+                    );
+                    continue;
+                }
+                if item.init.is_some() {
+                    self.record_error_at(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "a declaration initializer on the module-level `real` `{}` that a \
+                             process writes is not supported yet; IEEE 1364-2005 section 6.2.1 \
+                             makes it equivalent to an `initial` assignment, so write one",
+                            item.name
+                        )),
+                        item.span,
+                    );
+                    continue;
+                }
+                seen.insert(item.name.clone(), item.span);
+                signals.push(AnalyzedDigitalSignal {
+                    name: item.name.clone(),
+                    class: DigitalSignalClass::Variable(DigitalVariableKind::Real),
+                    signedness: Signedness::Unsigned,
+                    range: None,
+                    // No bits, the way every real quantity says it here.
+                    width: 0,
+                    redeclares_port: false,
+                    span: item.span,
+                });
+            }
+        }
     }
 
     /// Refuse a continuous assignment that drives one of this module's own
@@ -557,18 +850,14 @@ impl SemanticAnalyzer {
         }
     }
 
-    /// The module's integer parameters and localparams, by name.
+    /// The module's foldable parameters and localparams, by name.
     ///
     /// Read out of the declarations rather than out of the analyzer's constant
     /// environments so the table names exactly what this module declares: the
     /// environments accumulate, and a table that inherited a neighbour's
     /// parameter would fold a name this module never wrote.
-    ///
-    /// A non-integer default is skipped rather than rounded. Every place this
-    /// table is consulted wants a bit position or a repetition count, and there
-    /// is no defensible integer for `parameter GAIN = 2.5`.
-    fn digital_constants(&self, module: &Module) -> HashMap<SmolStr, i64> {
-        let mut constants = HashMap::new();
+    fn digital_constants(&self, module: &Module) -> DigitalConstants {
+        let mut constants = DigitalConstants::default();
         let declarations = module.parameters.iter().chain(&module.localparams);
         for parameter in declarations {
             let Some(default) = &parameter.default else {
@@ -577,10 +866,23 @@ impl SemanticAnalyzer {
             let Some(value) = self.eval_const_parameter_default(default) else {
                 continue;
             };
-            if value.fract() != 0.0 || !value.is_finite() {
+            if !value.is_finite() {
                 continue;
             }
-            constants.insert(parameter.name.clone(), value as i64);
+            // A parameter array is a name with no scalar value at all; folding
+            // its first element under the array's own name would answer a
+            // question nobody asked.
+            if !parameter.dimensions.is_empty() {
+                continue;
+            }
+            if parameter.type_is_explicit && parameter.param_type == ParamType::Real {
+                constants.reals.insert(parameter.name.clone(), value);
+            }
+            if value.fract() == 0.0 {
+                constants
+                    .integers
+                    .insert(parameter.name.clone(), value as i64);
+            }
         }
         constants
     }
@@ -695,7 +997,12 @@ impl SemanticAnalyzer {
             class,
             signedness,
             range,
-            width: range.map_or(1, VectorBounds::width),
+            // A real net has no bits, and says so with zero.
+            width: if class.is_real() {
+                0
+            } else {
+                range.map_or(1, VectorBounds::width)
+            },
             redeclares_port,
             span: item.span,
         });
@@ -847,6 +1154,35 @@ impl SemanticAnalyzer {
                 );
                 continue;
             };
+            // IEEE 1364-2005 section 9.7.2 classifies an edge from a scalar
+            // transition, and table 5-2 does so over the four values a bit can
+            // take; an edge on a vector is an edge on its least significant
+            // bit. A `wreal` has no bits, so there is no transition to
+            // classify and no defensible reading of `posedge` on one — a
+            // threshold crossing would be an invented rule, and the value
+            // change the standard *does* define is what a bare term already
+            // asks for.
+            if term.edge.is_some()
+                && index
+                    .get(&name)
+                    .is_some_and(|position| signals[*position].class.is_real())
+            {
+                let keyword = signals[index[&name]].class.keyword();
+                self.record_error_at(
+                    SemanticErrorKind::InvalidExpression(format!(
+                        "`{}` on `{name}`, which is a `{keyword}`; IEEE 1364-2005 section 9.7.2 \
+                         classifies an edge from a bit transition and a real net has no bits, so \
+                         write `@({name})` for the value-change event Verilog-AMS LRM 2.4 \
+                         section 3.7 gives one",
+                        match term.edge {
+                            Some(EdgeKind::Posedge) => "posedge",
+                            _ => "negedge",
+                        }
+                    )),
+                    term.span,
+                );
+                continue;
+            }
             if let Some(previous) = resolved
                 .iter()
                 .find(|entry: &&AnalyzedSensitivity| entry.signal == name)
@@ -1226,6 +1562,22 @@ impl SemanticAnalyzer {
         index: &HashMap<SmolStr, usize>,
     ) {
         let (range, kind) = match self.resolve_digital_name(name, index) {
+            Resolution::Digital(position) if signals[position].class.is_real() => {
+                // Verilog-AMS LRM 2.4 section 3.7 makes a `wreal` a real-valued
+                // connection. It has no bit representation to index into, and
+                // the standard's own answer to "the bits of a real" is the
+                // explicit `$realtobits` of that same clause.
+                self.record_error_at(
+                    SemanticErrorKind::InvalidExpression(format!(
+                        "`{name}` is a `{}`, which carries a real value and has no bits to \
+                         select; Verilog-AMS LRM 2.4 section 3.7 converts one to bits with \
+                         `$realtobits`",
+                        signals[position].class.keyword()
+                    )),
+                    expression.span(),
+                );
+                return;
+            }
             Resolution::Digital(position) => (signals[position].range, None),
             Resolution::ProcessLocal(local) => {
                 if !local.kind.is_selectable() {
@@ -1404,19 +1756,15 @@ impl SemanticAnalyzer {
                     }
                 }
             }
+            // Verilog-AMS LRM 2.4 section 7.3.3: "All continuous nets can be
+            // probed from a discrete context using access functions." This is
+            // the one continuous-domain form that belongs in a process, and
+            // `check_analog_probe` decides which of its spellings this
+            // compiler can serve.
+            Expression::BranchAccess(access) => self.check_analog_probe(access, index),
             // Continuous-domain-only forms. The parser accepts them because
             // one expression grammar serves both halves of the language; they
             // are meaningless in a process, so they stop here by name.
-            Expression::BranchAccess(access) => {
-                self.record_error_at(
-                    SemanticErrorKind::InvalidExpression(
-                        "a branch access reads a continuous-domain signal and has no meaning \
-                         in a discrete-domain expression"
-                            .to_string(),
-                    ),
-                    access.span(),
-                );
-            }
             Expression::AnalogOperator(operator) => {
                 self.record_error_at(
                     SemanticErrorKind::InvalidAnalogOperator(
@@ -1453,18 +1801,194 @@ impl SemanticAnalyzer {
                 }
             }
             Expression::SystemFunction(function) => {
-                self.record_error_at(
-                    SemanticErrorKind::UnsupportedFeature(format!(
-                        "system function `{}` inside a discrete-domain expression is not \
-                         supported yet",
-                        function.name
-                    )),
-                    function.span,
-                );
+                // The two the standard leaves open. Verilog-AMS LRM 2.4 section
+                // 3.7 names them as the *only* bridge between a real net and
+                // bits — "connection to explicitly declared 64-bit wires can be
+                // done via system tasks `$realtobits` and `$bitstoreal`" — and
+                // every refusal of an implicit conversion in this compiler
+                // points the author at them, so accepting them is what makes
+                // that advice followable.
+                if matches!(function.name.as_str(), "$realtobits" | "$bitstoreal") {
+                    if function.args.len() != 1 {
+                        self.record_error_at(
+                            SemanticErrorKind::InvalidExpression(format!(
+                                "`{}` takes exactly one argument, and was given {}",
+                                function.name,
+                                function.args.len()
+                            )),
+                            function.span,
+                        );
+                    }
+                } else {
+                    self.record_error_at(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "system function `{}` inside a discrete-domain expression is not \
+                             supported yet",
+                            function.name
+                        )),
+                        function.span,
+                    );
+                }
                 for argument in &function.args {
                     self.check_digital_expression(argument, signals, index);
                 }
             }
+        }
+    }
+
+    /// Decide whether a probe of a continuous net can be served from a
+    /// discrete-domain expression.
+    ///
+    /// # What the standard allows
+    ///
+    /// Verilog-AMS LRM 2.4 section 7.3 opens the whole cross-domain question
+    /// with one sentence: "Read operations of nets and variables in both
+    /// domains are allowed from both contexts. Write operations of nets and
+    /// variables are only allowed from the context of their domain." Section
+    /// 7.3.3 spends the read half of that on probes — "All continuous nets can
+    /// be probed from a discrete context using access functions. All probes
+    /// which are legal in a continuous context of a module are also legal in
+    /// the discrete context of a module" — and its own example is the sampler
+    /// this exists for:
+    ///
+    /// ```verilog
+    /// always @(posedge clk)
+    ///     out = V(in);
+    /// ```
+    ///
+    /// So a probe in a process is not an error to be reported; the read half
+    /// of section 7.3 is the whole point of a mixed module. What is decided
+    /// here is which *spellings* of it this compiler can answer, and each
+    /// refusal names the reason rather than the clause, because the clause
+    /// permits all of them.
+    ///
+    /// # What is refused, and why each one is
+    ///
+    /// * **A flow probe** (`I(a, b)`, or any access function its discipline
+    ///   declares a flow). Section 7.3.3 makes it legal. A potential is an
+    ///   entry of the solution vector and can be read from wherever the analog
+    ///   solver last left one; a flow is not — it is the analog body's own
+    ///   accumulated contribution to a branch, produced by evaluating that
+    ///   body, and there is nothing to sample between evaluations. Reading a
+    ///   stale one would be a plausible number for a quantity nobody computed.
+    /// * **The named-branch form** (`V(<b>)`). It names an entry of the analog
+    ///   branch table, which the discrete plan does not carry — a probe names
+    ///   its nets, so the two halves need no shared numbering. The equivalent
+    ///   node form is what to write.
+    /// * **A net that is not continuous.** A discrete net has no potential to
+    ///   probe; it is read by naming it, which is what a process already does.
+    fn check_analog_probe(&mut self, access: &BranchAccess, index: &HashMap<SmolStr, usize>) {
+        let (function, positive, negative) = match access {
+            BranchAccess::Nodes {
+                access: function,
+                pos,
+                neg,
+                ..
+            } => (function, pos, neg.as_ref()),
+            BranchAccess::Branch {
+                access: function,
+                name,
+                span,
+            } => {
+                self.record_error_at(
+                    SemanticErrorKind::UnsupportedFeature(format!(
+                        "`{function}(<{name}>)` probes a declared branch from a discrete-domain \
+                         expression; Verilog-AMS LRM 2.4 section 7.3.3 allows it, but a \
+                         discrete-domain probe names its nets rather than the analog branch \
+                         table — write the equivalent node form"
+                    )),
+                    *span,
+                );
+                return;
+            }
+        };
+        if self.disciplines.resolve_access(function).is_none() && function != "I" {
+            self.record_error_at(
+                SemanticErrorKind::InvalidExpression(format!(
+                    "`{function}` is not an access function of any declared discipline"
+                )),
+                access.span(),
+            );
+            return;
+        }
+        if self.is_flow_access(function) {
+            self.record_error_at(
+                SemanticErrorKind::UnsupportedFeature(format!(
+                    "`{function}` is a flow access, and a flow has no value between analog \
+                     evaluations to sample from a discrete-domain expression; Verilog-AMS LRM \
+                     2.4 section 7.3.3 allows it, but only a potential probe is served here"
+                )),
+                access.span(),
+            );
+            return;
+        }
+        for net in std::iter::once(positive).chain(negative) {
+            self.check_probe_net(function, net, access.span(), index);
+        }
+    }
+
+    /// Refuse one operand of a discrete-domain probe that is not a continuous
+    /// net of this module.
+    fn check_probe_net(
+        &mut self,
+        function: &SmolStr,
+        net: &SmolStr,
+        span: Span,
+        index: &HashMap<SmolStr, usize>,
+    ) {
+        // A name the module declared in its discrete half is refused first and
+        // by that fact alone, without asking the discipline database. A `wire`
+        // written in a process's own half of the module is a discrete net
+        // whether or not discipline resolution ever gave it a discipline, and
+        // the author who wrote `V(clk)` needs to be told that `clk` is not a
+        // thing with a potential — not that it is undeclared.
+        if index.contains_key(net) {
+            self.record_error_at(
+                SemanticErrorKind::InvalidExpression(format!(
+                    "`{function}({net})` probes `{net}`, which is a discrete-domain net and has \
+                     no potential; a process reads one by naming it"
+                )),
+                span,
+            );
+            return;
+        }
+        // A net with no discipline of its own has not been resolved to a
+        // discrete one either, so it is read as continuous — the same default
+        // the analog half applies to an undeclared net.
+        let resolved = self.symbols.lookup(net).map(|symbol| {
+            let discrete = symbol.attrs.discipline.as_ref().is_some_and(|discipline| {
+                self.disciplines
+                    .get_discipline(discipline)
+                    .is_some_and(|discipline| {
+                        discipline.domain == crate::disciplines::Domain::Discrete
+                    })
+            });
+            (symbol.kind, discrete)
+        });
+        let Some((kind, discrete)) = resolved else {
+            self.record_error_at(
+                SemanticErrorKind::UndeclaredSymbol { name: net.clone() },
+                span,
+            );
+            return;
+        };
+        if !matches!(kind, SymbolKind::Port | SymbolKind::Node) {
+            self.record_error_at(
+                SemanticErrorKind::InvalidExpression(format!(
+                    "`{function}({net})` probes `{net}`, which is not a net"
+                )),
+                span,
+            );
+            return;
+        }
+        if discrete {
+            self.record_error_at(
+                SemanticErrorKind::InvalidExpression(format!(
+                    "`{function}({net})` probes `{net}`, which is a discrete-domain net and has \
+                     no potential; a process reads one by naming it"
+                )),
+                span,
+            );
         }
     }
 
@@ -1487,6 +2011,275 @@ impl SemanticAnalyzer {
         match self.symbols.lookup(name) {
             Some(Symbol { kind, .. }) => Resolution::Analog(*kind),
             None => Resolution::Undeclared,
+        }
+    }
+}
+
+/// The name recorded for an expression form [`collect_analog_names`] cannot
+/// look inside.
+///
+/// Not a legal Verilog identifier, so it can never collide with one the author
+/// wrote. It exists so that "the analog body reads something this walk could
+/// not enumerate" is a fact the read set carries rather than a silence.
+const OPAQUE_ANALOG_READ: &str = "$opaque";
+
+/// What the continuous body does with each name it mentions.
+///
+/// Two sets and one walk, because the ownership rule asks two questions about
+/// the same name and walking twice would be two chances for the two answers to
+/// come from different traversals. `written` is assignment *targets* only;
+/// `read` is every identifier reached from an expression, including the
+/// right-hand side of an assignment whose target is also written — `x = x + 1`
+/// both writes and reads `x`, and saying so is what makes the write rule fire
+/// on it rather than the read refusal.
+///
+/// Over-approximating in one direction on purpose, the same way
+/// [`collect_written_names`] does: a name inside a branch that never runs still
+/// counts, because whether it runs is a question about a simulation and this is
+/// a question about a declaration.
+///
+/// A `read` entry that is not a variable at all — a parameter, a net inside a
+/// branch access, a function name — is harmless: the caller only ever asks
+/// about names it has already established are module-level `real` variables a
+/// process writes.
+fn collect_analog_names(
+    statement: &AnalogStatement,
+    written: &mut std::collections::HashSet<SmolStr>,
+    read: &mut std::collections::HashSet<SmolStr>,
+) {
+    match statement {
+        AnalogStatement::Null(_) | AnalogStatement::Disable(_) => {}
+        AnalogStatement::Contribution(contribution) => {
+            collect_expression_names(&contribution.value, read);
+        }
+        AnalogStatement::IndirectContribution(contribution) => {
+            collect_expression_names(&contribution.lhs, read);
+            collect_expression_names(&contribution.rhs, read);
+        }
+        AnalogStatement::Assignment(assignment) => {
+            written.insert(assignment.target_name().clone());
+            if let LValue::ArrayAccess { index, .. } = &assignment.target {
+                collect_expression_names(index, read);
+            }
+            collect_expression_names(&assignment.value, read);
+        }
+        AnalogStatement::Conditional(conditional) => {
+            collect_expression_names(&conditional.condition, read);
+            collect_analog_names(&conditional.then_branch, written, read);
+            if let Some(branch) = &conditional.else_branch {
+                collect_analog_names(branch, written, read);
+            }
+        }
+        AnalogStatement::Case(case) => {
+            collect_expression_names(&case.expr, read);
+            for item in &case.items {
+                for value in &item.matches {
+                    collect_expression_names(value, read);
+                }
+                collect_analog_names(&item.statement, written, read);
+            }
+            if let Some(default) = &case.default {
+                collect_analog_names(default, written, read);
+            }
+        }
+        AnalogStatement::For(statement) => {
+            // The loop variable is written by the header, and its initializer
+            // and update are ordinary expressions of the same body.
+            written.insert(statement.var.clone());
+            collect_expression_names(&statement.init, read);
+            collect_expression_names(&statement.condition, read);
+            collect_analog_names(
+                &AnalogStatement::Assignment((*statement.update).clone()),
+                written,
+                read,
+            );
+            collect_analog_names(&statement.body, written, read);
+        }
+        AnalogStatement::While(statement) => {
+            collect_expression_names(&statement.condition, read);
+            collect_analog_names(&statement.body, written, read);
+        }
+        AnalogStatement::Repeat(statement) => {
+            collect_expression_names(&statement.count, read);
+            collect_analog_names(&statement.body, written, read);
+        }
+        AnalogStatement::Block(block) => {
+            for statement in &block.statements {
+                collect_analog_names(statement, written, read);
+            }
+        }
+        AnalogStatement::EventControl(event) => {
+            collect_analog_names(&event.statement, written, read);
+        }
+        AnalogStatement::Call(call) => {
+            for argument in &call.args {
+                collect_expression_names(argument, read);
+            }
+        }
+    }
+}
+
+/// Every identifier an expression reads.
+///
+/// A branch access contributes its *net* names, which is deliberate: they can
+/// never collide with a module-level `real`, so including them costs nothing
+/// and leaving them out would mean one more shape to keep in step.
+fn collect_expression_names(
+    expression: &Expression,
+    read: &mut std::collections::HashSet<SmolStr>,
+) {
+    match expression {
+        Expression::Number(_) | Expression::StringLit(_) | Expression::NullArgument(_) => {}
+        Expression::Identifier(identifier) => {
+            read.insert(identifier.name.clone());
+        }
+        Expression::ArrayAccess(access) => {
+            read.insert(access.array.clone());
+            collect_expression_names(&access.index, read);
+        }
+        Expression::BranchAccess(access) => match access {
+            BranchAccess::Nodes { pos, neg, .. } => {
+                read.insert(pos.clone());
+                if let Some(neg) = neg {
+                    read.insert(neg.clone());
+                }
+            }
+            BranchAccess::Branch { name, .. } => {
+                read.insert(name.clone());
+            }
+        },
+        Expression::Binary(binary) => {
+            collect_expression_names(&binary.left, read);
+            collect_expression_names(&binary.right, read);
+        }
+        Expression::Unary(unary) => collect_expression_names(&unary.operand, read),
+        Expression::Conditional(conditional) => {
+            collect_expression_names(&conditional.condition, read);
+            collect_expression_names(&conditional.then_expr, read);
+            collect_expression_names(&conditional.else_expr, read);
+        }
+        Expression::Call(call) => {
+            for argument in &call.args {
+                collect_expression_names(argument, read);
+            }
+        }
+        Expression::SystemFunction(function) => {
+            for argument in &function.args {
+                collect_expression_names(argument, read);
+            }
+        }
+        // Never present in a parsed tree, which is the only kind this walks.
+        // `ddt(x)` and its siblings are `Call`s until `expr_converter` rewrites
+        // them, and that runs after this. Recording the sentinel means a name
+        // reachable only through one is treated as read rather than silently
+        // missed, which is the safe direction: the write rule's failure mode is
+        // promoting a variable the analog body still uses.
+        Expression::AnalogOperator(_) => {
+            read.insert(OPAQUE_ANALOG_READ.into());
+        }
+        Expression::NoiseSource(source) => match source {
+            NoiseSource::White { power, .. } => collect_expression_names(power, read),
+            NoiseSource::Flicker {
+                power, exponent, ..
+            } => {
+                collect_expression_names(power, read);
+                collect_expression_names(exponent, read);
+            }
+            NoiseSource::Table { data, .. } => {
+                for value in data {
+                    collect_expression_names(value, read);
+                }
+            }
+        },
+        Expression::Digital(digital) => {
+            if let Some(name) = digital.base_name() {
+                read.insert(name.clone());
+            }
+            for child in digital.children() {
+                collect_expression_names(child, read);
+            }
+        }
+        Expression::ArrayLiteral(literal) => {
+            for element in &literal.elements {
+                match element {
+                    ArrayLiteralElement::Value(value) => collect_expression_names(value, read),
+                    ArrayLiteralElement::Replication(replication) => {
+                        collect_expression_names(&replication.count, read);
+                        for inner in &replication.elements {
+                            if let ArrayLiteralElement::Value(value) = inner {
+                                collect_expression_names(value, read);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Every name a process assigns to, anywhere in its body.
+///
+/// Over-approximating on purpose in one direction only: a name inside a branch
+/// that never runs still counts, because whether it runs is a question about a
+/// simulation and this is a question about a declaration. It does not
+/// over-approximate the other way — a name is here only if it is an assignment
+/// *target*, so reading one does not claim it.
+///
+/// A process-local declaration is not filtered out. A local shadows the module
+/// name for the statements under it, so a body that declares `real acc;` and
+/// writes `acc` never means the module's — but the module's `acc` is then not
+/// promoted, and stays exactly where it was. Erring toward "the process writes
+/// it" would promote a variable the process cannot reach; erring the other way,
+/// which is what would happen if this filtered, would leave a written variable
+/// behind. The match is exhaustive so a new statement form cannot slip past it.
+fn collect_written_names(
+    statement: &DigitalStatement,
+    written: &mut std::collections::HashSet<SmolStr>,
+) {
+    match statement {
+        DigitalStatement::Null(_) => {}
+        DigitalStatement::Block(block) => {
+            for statement in &block.statements {
+                collect_written_names(statement, written);
+            }
+        }
+        DigitalStatement::BlockingAssign(assign) | DigitalStatement::NonblockingAssign(assign) => {
+            for (name, _) in assign.target.written_names() {
+                written.insert(name.clone());
+            }
+        }
+        DigitalStatement::Conditional(conditional) => {
+            collect_written_names(&conditional.then_branch, written);
+            if let Some(branch) = &conditional.else_branch {
+                collect_written_names(branch, written);
+            }
+        }
+        DigitalStatement::Case(case) => {
+            for item in &case.items {
+                collect_written_names(&item.statement, written);
+            }
+            if let Some(default) = &case.default {
+                collect_written_names(default, written);
+            }
+        }
+        DigitalStatement::For(statement) => {
+            collect_written_names(
+                &DigitalStatement::BlockingAssign((*statement.init).clone()),
+                written,
+            );
+            collect_written_names(
+                &DigitalStatement::BlockingAssign((*statement.update).clone()),
+                written,
+            );
+            collect_written_names(&statement.body, written);
+        }
+        DigitalStatement::While(statement) => collect_written_names(&statement.body, written),
+        DigitalStatement::Repeat(statement) => collect_written_names(&statement.body, written),
+        DigitalStatement::Forever(statement) => collect_written_names(&statement.body, written),
+        DigitalStatement::Timing(timing) => {
+            if let Some(statement) = &timing.statement {
+                collect_written_names(statement, written);
+            }
         }
     }
 }

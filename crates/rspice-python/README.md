@@ -56,7 +56,7 @@ the rest of the repository.
 ### From Source
 
 ```bash
-python -m pip install "maturin==1.14.1"
+python -m pip install "maturin==1.15.0"
 
 cd crates/rspice-python
 maturin develop --release --locked
@@ -639,7 +639,7 @@ development install:
 
 ```bash
 cd crates/rspice-python
-python -m pip install "maturin==1.14.1" "numpy>=2.0,<3" "pytest==9.1.1"
+python -m pip install "maturin==1.15.0" "numpy>=2.0,<3" "pytest==9.1.1"
 maturin develop --release --locked
 python -m pytest tests/ -v
 ```

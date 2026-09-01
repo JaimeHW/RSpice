@@ -410,6 +410,52 @@ fn lane_liveness_with_control(
                         changed |= live.union_from(value.id, *input);
                         changed |= live.union_from(value.id, *ic);
                     }
+                    // The modulus and the offset place the fold, which is a
+                    // translation the derivative does not see, so they carry no
+                    // lanes any more than a `%`'s divisor does.
+                    CfgValueKind::IdtMod { input, ic, .. } => {
+                        changed |= live.union_from(value.id, *input);
+                        changed |= live.union_from(value.id, *ic);
+                    }
+                    // A delay that depends on an unknown moves the sample
+                    // point, so it carries lanes — unlike a transition's
+                    // timing, which the LRM makes primal-only.
+                    CfgValueKind::AbsDelay { input, delay, .. } => {
+                        changed |= live.union_from(value.id, *input);
+                        changed |= live.union_from(value.id, *delay);
+                    }
+                    CfgValueKind::AbsDelayDerivative {
+                        input_derivative,
+                        delay_derivative,
+                        ..
+                    } => {
+                        changed |= live.union_from(value.id, *input_derivative);
+                        changed |= live.union_from(value.id, *delay_derivative);
+                    }
+                    // A rate that depends on an unknown moves the clamp, so the
+                    // rates carry lanes for the reason the delay above does.
+                    CfgValueKind::Slew {
+                        input,
+                        max_rise,
+                        max_fall,
+                        ..
+                    } => {
+                        changed |= live.union_from(value.id, *input);
+                        changed |= live.union_from(value.id, *max_rise);
+                        if let Some(max_fall) = max_fall {
+                            changed |= live.union_from(value.id, *max_fall);
+                        }
+                    }
+                    CfgValueKind::SlewDerivative {
+                        input_derivative,
+                        max_rise_derivative,
+                        max_fall_derivative,
+                        ..
+                    } => {
+                        changed |= live.union_from(value.id, *input_derivative);
+                        changed |= live.union_from(value.id, *max_rise_derivative);
+                        changed |= live.union_from(value.id, *max_fall_derivative);
+                    }
                     _ => unreachable!("every differentiable value kind is covered"),
                 },
                 _ => {}
@@ -441,13 +487,30 @@ fn differentiable(kind: &CfgValueKind) -> bool {
         // correction lane, not every operand's.
         CfgValueKind::Ddt { .. }
         | CfgValueKind::Idt { .. }
+        // The wrapped integral takes the unwrapped one's rule: the fold is a
+        // translation by a whole number of periods, and a constant offset has
+        // no derivative. It is discontinuous exactly at the wrap, which is a
+        // measure-zero set the companion form does not linearise across.
+        | CfgValueKind::IdtMod { .. }
         | CfgValueKind::Transition { .. }
         | CfgValueKind::TransitionDerivative { .. }
+        | CfgValueKind::AbsDelay { .. }
+        | CfgValueKind::AbsDelayDerivative { .. }
+        | CfgValueKind::Slew { .. }
+        | CfgValueKind::SlewDerivative { .. }
         | CfgValueKind::Limit { .. } => true,
         // The previous iterate is a constant as far as this iteration's Newton
         // step is concerned; that is what makes limiting a damping and not a
         // change of equations.
         CfgValueKind::LimitPrevious { .. } => false,
+        // A crossing time is piecewise constant in the bias: between two
+        // crossings it does not move at all, and at one it jumps. The JIT
+        // answers `0.0` for its derivative and this is the same contract, held
+        // where the enum can be checked against it.
+        CfgValueKind::LastCrossing { .. } => false,
+        // Bitwise and shift results are piecewise constant on the reals, so
+        // they get a comparison's answer for a comparison's reason.
+        CfgValueKind::IntegerBitwise { .. } | CfgValueKind::IntegerBitwiseNot { .. } => false,
         // `ddx` is a first-order readback. Differentiating through it would
         // mean carrying second derivatives everywhere a model reports a
         // transconductance, for a term no solver reads.
@@ -694,7 +757,9 @@ fn ddx_direction_liveness(
                 CfgValueKind::Unary { input, .. } if differentiable(&value.kind) => {
                     changed |= needed.union_from(*input, value.id);
                 }
-                CfgValueKind::Ddt { input, .. } | CfgValueKind::Idt { input, .. } => {
+                CfgValueKind::Ddt { input, .. }
+                | CfgValueKind::Idt { input, .. }
+                | CfgValueKind::IdtMod { input, .. } => {
                     changed |= needed.union_from(*input, value.id);
                 }
                 CfgValueKind::Transition { input, .. } => {
@@ -704,6 +769,40 @@ fn ddx_direction_liveness(
                     input_derivative, ..
                 } => {
                     changed |= needed.union_from(*input_derivative, value.id);
+                }
+                CfgValueKind::AbsDelay { input, delay, .. } => {
+                    changed |= needed.union_from(*input, value.id);
+                    changed |= needed.union_from(*delay, value.id);
+                }
+                CfgValueKind::AbsDelayDerivative {
+                    input_derivative,
+                    delay_derivative,
+                    ..
+                } => {
+                    changed |= needed.union_from(*input_derivative, value.id);
+                    changed |= needed.union_from(*delay_derivative, value.id);
+                }
+                CfgValueKind::Slew {
+                    input,
+                    max_rise,
+                    max_fall,
+                    ..
+                } => {
+                    changed |= needed.union_from(*input, value.id);
+                    changed |= needed.union_from(*max_rise, value.id);
+                    if let Some(max_fall) = max_fall {
+                        changed |= needed.union_from(*max_fall, value.id);
+                    }
+                }
+                CfgValueKind::SlewDerivative {
+                    input_derivative,
+                    max_rise_derivative,
+                    max_fall_derivative,
+                    ..
+                } => {
+                    changed |= needed.union_from(*input_derivative, value.id);
+                    changed |= needed.union_from(*max_rise_derivative, value.id);
+                    changed |= needed.union_from(*max_fall_derivative, value.id);
                 }
                 CfgValueKind::Binary {
                     op: CfgBinaryOp::Mod,
@@ -1032,10 +1131,122 @@ impl<'a> ScalarDdxBuilder<'a> {
                 let scale = self.ddt_scale();
                 Some(self.push_binary(CfgBinaryOp::Mul, derivative, scale))
             }
-            CfgValueKind::Idt { input, .. } => {
+            CfgValueKind::Idt { input, .. } | CfgValueKind::IdtMod { input, .. } => {
                 let derivative = self.derivative(*input, lane)?;
                 let scale = self.idt_scale();
                 Some(self.push_binary(CfgBinaryOp::Mul, derivative, scale))
+            }
+            CfgValueKind::AbsDelay {
+                operator,
+                input,
+                delay,
+                max_delay,
+            } => {
+                let (input_derivative, delay_derivative) =
+                    self.delayed_derivatives(*input, *delay, lane)?;
+                Some(self.push(
+                    CfgValueType::Real,
+                    CfgValueKind::AbsDelayDerivative {
+                        operator: *operator,
+                        input: *input,
+                        input_derivative,
+                        delay: *delay,
+                        delay_derivative,
+                        max_delay: *max_delay,
+                        order: 1,
+                    },
+                ))
+            }
+            CfgValueKind::AbsDelayDerivative {
+                operator,
+                input,
+                input_derivative,
+                delay,
+                delay_derivative,
+                max_delay,
+                order,
+            } => {
+                let (input_derivative, delay_derivative) =
+                    self.delayed_derivatives(*input_derivative, *delay_derivative, lane)?;
+                Some(self.push(
+                    CfgValueType::Real,
+                    CfgValueKind::AbsDelayDerivative {
+                        operator: *operator,
+                        input: *input,
+                        input_derivative,
+                        delay: *delay,
+                        delay_derivative,
+                        max_delay: *max_delay,
+                        order: order.saturating_add(1),
+                    },
+                ))
+            }
+            CfgValueKind::Slew {
+                operator,
+                input,
+                max_rise,
+                max_fall,
+            } => {
+                let (max_fall, max_fall_negated) = self.slew_falling_rate(*max_rise, *max_fall);
+                let input_derivative = self.derivative(*input, lane);
+                let max_rise_derivative = self.derivative(*max_rise, lane);
+                let max_fall_derivative = if max_fall_negated {
+                    max_rise_derivative.map(|value| self.push_unary(CfgUnaryOp::Neg, value))
+                } else {
+                    self.derivative(max_fall, lane)
+                };
+                if input_derivative.is_none()
+                    && max_rise_derivative.is_none()
+                    && max_fall_derivative.is_none()
+                {
+                    return None;
+                }
+                let input_derivative = self.or_zero(input_derivative);
+                let max_rise_derivative = self.or_zero(max_rise_derivative);
+                let max_fall_derivative = self.or_zero(max_fall_derivative);
+                Some(self.push(
+                    CfgValueType::Real,
+                    CfgValueKind::SlewDerivative {
+                        operator: *operator,
+                        input: *input,
+                        input_derivative,
+                        max_rise: *max_rise,
+                        max_rise_derivative,
+                        max_fall,
+                        max_fall_derivative,
+                    },
+                ))
+            }
+            CfgValueKind::SlewDerivative {
+                operator,
+                input,
+                input_derivative,
+                max_rise,
+                max_rise_derivative,
+                max_fall,
+                max_fall_derivative,
+            } => {
+                let next_input = self.derivative(*input_derivative, lane);
+                let next_rise = self.derivative(*max_rise_derivative, lane);
+                let next_fall = self.derivative(*max_fall_derivative, lane);
+                if next_input.is_none() && next_rise.is_none() && next_fall.is_none() {
+                    return None;
+                }
+                let input_derivative = self.or_zero(next_input);
+                let max_rise_derivative = self.or_zero(next_rise);
+                let max_fall_derivative = self.or_zero(next_fall);
+                Some(self.push(
+                    CfgValueType::Real,
+                    CfgValueKind::SlewDerivative {
+                        operator: *operator,
+                        input: *input,
+                        input_derivative,
+                        max_rise: *max_rise,
+                        max_rise_derivative,
+                        max_fall: *max_fall,
+                        max_fall_derivative,
+                    },
+                ))
             }
             CfgValueKind::Transition {
                 site,
@@ -1321,6 +1532,55 @@ impl<'a> ScalarDdxBuilder<'a> {
     fn push_unary(&mut self, op: CfgUnaryOp, input: ValueId) -> ValueId {
         self.push(CfgValueType::Real, CfgValueKind::Unary { op, input })
     }
+
+    /// A derivative or an explicit zero.
+    ///
+    /// A [`CfgValueKind::AbsDelayDerivative`] or
+    /// [`CfgValueKind::SlewDerivative`] names every operand it multiplies, so a
+    /// missing lane has to become a value rather than an absence: the runtime
+    /// multiplies whatever the node points at.
+    fn or_zero(&mut self, derivative: Option<ValueId>) -> ValueId {
+        match derivative {
+            Some(value) => value,
+            None => self.constant(0.0),
+        }
+    }
+
+    /// The input and delay derivatives of one `absdelay`, or `None` when
+    /// neither operand moves with this lane.
+    fn delayed_derivatives(
+        &mut self,
+        input: ValueId,
+        delay: ValueId,
+        lane: usize,
+    ) -> Option<(ValueId, ValueId)> {
+        let input_derivative = self.derivative(input, lane);
+        let delay_derivative = self.derivative(delay, lane);
+        if input_derivative.is_none() && delay_derivative.is_none() {
+            return None;
+        }
+        let input_derivative = self.or_zero(input_derivative);
+        let delay_derivative = self.or_zero(delay_derivative);
+        Some((input_derivative, delay_derivative))
+    }
+
+    /// The falling rate a `slew` node stands for, and whether it had to be
+    /// built by negating the rising one.
+    ///
+    /// Verilog-AMS gives an omitted `max_fall` the rising rate's magnitude in
+    /// the falling direction. Materialising it here rather than leaving the
+    /// node's operand absent is what lets the derivative carry `-d(max_rise)`
+    /// as an ordinary lane instead of a special case at every consumer.
+    fn slew_falling_rate(
+        &mut self,
+        max_rise: ValueId,
+        max_fall: Option<ValueId>,
+    ) -> (ValueId, bool) {
+        match max_fall {
+            Some(max_fall) => (max_fall, false),
+            None => (self.push_unary(CfgUnaryOp::Neg, max_rise), true),
+        }
+    }
 }
 
 /// Differentiate `function` with respect to `lanes`.
@@ -1374,10 +1634,17 @@ fn differentiate_with_control_for_optional_roots(
     // through `differentiable`'s catch-all, which would report `false` and
     // leave a silent zero where a derivative should be. The check is one pass
     // over the value table and runs before anything is allocated.
+    //
+    // The *kind* is asked as well as the type, and the two do not answer the
+    // same question. Every four-state kind carries a four-state type, so the
+    // type alone caught them; a real net's read (Verilog-AMS LRM 2.4 section
+    // 3.7) carries `CfgValueType::Real`, which is exactly the type an analog
+    // quantity has, and would sail through a type-only guard to be
+    // differentiated as though a `wreal` were a node voltage.
     if let Some(value) = function
         .values
         .iter()
-        .find(|value| value.value_type.is_digital())
+        .find(|value| value.value_type.is_digital() || value.kind.is_digital())
     {
         return Err(DifferentiationError::Validation(
             CfgValidationError::DigitalValueInDerivative(value.id),
@@ -1872,6 +2139,127 @@ impl<'a> AdBuilder<'a> {
                 let scale = self.idt_scale();
                 Some(self.scale(derivative, scale))
             }
+            // The fold is a translation by a whole number of periods, so it
+            // drops out of the derivative and the companion coefficient is the
+            // unwrapped integral's. The modulus and offset place the branch;
+            // they do not scale what crosses it.
+            CfgValueKind::IdtMod { input, .. } => {
+                let derivative = self.derivatives[usize::from(*input)]?;
+                let scale = self.idt_scale();
+                Some(self.scale(derivative, scale))
+            }
+            CfgValueKind::AbsDelay {
+                operator,
+                input,
+                delay,
+                max_delay,
+            } => {
+                let (input_derivative, delay_derivative) =
+                    self.delayed_lane_derivatives(*input, *delay, target)?;
+                Some(self.push(
+                    CfgValueType::Lanes(target),
+                    CfgValueKind::AbsDelayDerivative {
+                        operator: *operator,
+                        input: *input,
+                        input_derivative,
+                        delay: *delay,
+                        delay_derivative,
+                        max_delay: *max_delay,
+                        order: 1,
+                    },
+                ))
+            }
+            CfgValueKind::AbsDelayDerivative {
+                operator,
+                input,
+                input_derivative,
+                delay,
+                delay_derivative,
+                max_delay,
+                order,
+            } => {
+                let (input_derivative, delay_derivative) =
+                    self.delayed_lane_derivatives(*input_derivative, *delay_derivative, target)?;
+                Some(self.push(
+                    CfgValueType::Lanes(target),
+                    CfgValueKind::AbsDelayDerivative {
+                        operator: *operator,
+                        input: *input,
+                        input_derivative,
+                        delay: *delay,
+                        delay_derivative,
+                        max_delay: *max_delay,
+                        order: order.saturating_add(1),
+                    },
+                ))
+            }
+            CfgValueKind::Slew {
+                operator,
+                input,
+                max_rise,
+                max_fall,
+            } => {
+                let (max_fall, negated) = self.slew_falling_rate(*max_rise, *max_fall);
+                let input_derivative = self.derivatives[usize::from(*input)];
+                let max_rise_derivative = self.derivatives[usize::from(*max_rise)];
+                let max_fall_derivative = if negated {
+                    max_rise_derivative.map(|value| self.negate_lanes(value, target))
+                } else {
+                    self.derivatives[usize::from(max_fall)]
+                };
+                if input_derivative.is_none()
+                    && max_rise_derivative.is_none()
+                    && max_fall_derivative.is_none()
+                {
+                    return None;
+                }
+                let input_derivative = self.or_zero_lanes(input_derivative, target);
+                let max_rise_derivative = self.or_zero_lanes(max_rise_derivative, target);
+                let max_fall_derivative = self.or_zero_lanes(max_fall_derivative, target);
+                Some(self.push(
+                    CfgValueType::Lanes(target),
+                    CfgValueKind::SlewDerivative {
+                        operator: *operator,
+                        input: *input,
+                        input_derivative,
+                        max_rise: *max_rise,
+                        max_rise_derivative,
+                        max_fall,
+                        max_fall_derivative,
+                    },
+                ))
+            }
+            CfgValueKind::SlewDerivative {
+                operator,
+                input,
+                input_derivative,
+                max_rise,
+                max_rise_derivative,
+                max_fall,
+                max_fall_derivative,
+            } => {
+                let next_input = self.derivatives[usize::from(*input_derivative)];
+                let next_rise = self.derivatives[usize::from(*max_rise_derivative)];
+                let next_fall = self.derivatives[usize::from(*max_fall_derivative)];
+                if next_input.is_none() && next_rise.is_none() && next_fall.is_none() {
+                    return None;
+                }
+                let input_derivative = self.or_zero_lanes(next_input, target);
+                let max_rise_derivative = self.or_zero_lanes(next_rise, target);
+                let max_fall_derivative = self.or_zero_lanes(next_fall, target);
+                Some(self.push(
+                    CfgValueType::Lanes(target),
+                    CfgValueKind::SlewDerivative {
+                        operator: *operator,
+                        input: *input,
+                        input_derivative,
+                        max_rise: *max_rise,
+                        max_rise_derivative,
+                        max_fall: *max_fall,
+                        max_fall_derivative,
+                    },
+                ))
+            }
             CfgValueKind::Transition {
                 site,
                 input,
@@ -2225,6 +2613,64 @@ impl<'a> AdBuilder<'a> {
             // keeps these out, and this arm exists so adding a unary op cannot
             // silently take the wrong branch.
             CfgUnaryOp::Not | CfgUnaryOp::Floor | CfgUnaryOp::Ceil => self.constant(0.0),
+        }
+    }
+
+    // ---- stateful-operator operands ----------------------------------------
+
+    /// A packed derivative laid out in `target`, or a zero of that shape.
+    ///
+    /// The runtime multiplies every operand an `absdelay` or `slew` derivative
+    /// names, so a lane the operand cannot reach has to be a value rather than
+    /// an absence.
+    fn or_zero_lanes(&mut self, derivative: Option<ValueId>, target: ShapeId) -> ValueId {
+        match derivative {
+            Some(value) => self.widen(value, target),
+            None => self.splat(0.0, target),
+        }
+    }
+
+    fn negate_lanes(&mut self, value: ValueId, target: ShapeId) -> ValueId {
+        let widened = self.widen(value, target);
+        let zero = self.splat(0.0, target);
+        self.push(
+            CfgValueType::Lanes(target),
+            CfgValueKind::LaneBinary {
+                op: CfgBinaryOp::Sub,
+                left: zero,
+                right: widened,
+            },
+        )
+    }
+
+    /// The input and delay derivatives of one `absdelay`, or `None` when
+    /// neither operand moves with any lane of `target`.
+    fn delayed_lane_derivatives(
+        &mut self,
+        input: ValueId,
+        delay: ValueId,
+        target: ShapeId,
+    ) -> Option<(ValueId, ValueId)> {
+        let input_derivative = self.derivatives[usize::from(input)];
+        let delay_derivative = self.derivatives[usize::from(delay)];
+        if input_derivative.is_none() && delay_derivative.is_none() {
+            return None;
+        }
+        let input_derivative = self.or_zero_lanes(input_derivative, target);
+        let delay_derivative = self.or_zero_lanes(delay_derivative, target);
+        Some((input_derivative, delay_derivative))
+    }
+
+    /// The falling rate a `slew` node stands for, and whether it was built by
+    /// negating the rising one.
+    fn slew_falling_rate(
+        &mut self,
+        max_rise: ValueId,
+        max_fall: Option<ValueId>,
+    ) -> (ValueId, bool) {
+        match max_fall {
+            Some(max_fall) => (max_fall, false),
+            None => (self.push_unary(CfgUnaryOp::Neg, max_rise), true),
         }
     }
 

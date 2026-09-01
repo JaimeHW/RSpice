@@ -753,7 +753,14 @@ impl CircuitData {
         self.xspice_evaluation_error.take()
     }
 
-    /// Fill a reusable snapshot of committed XSPICE digital node values.
+    /// Fill a reusable snapshot of committed event-driven digital node values.
+    ///
+    /// XSPICE's resolved event nodes and the boundary nets of any instantiated
+    /// mixed Verilog-AMS module go into one vector, because they answer one
+    /// question — what four-state value did this net hold at this accepted
+    /// timepoint — and because `TransientResult::record_digital_snapshot` is
+    /// the single writer of the digital trace channel. A circuit with no mixed
+    /// module appends nothing, so the snapshot is the one it always was.
     pub(crate) fn fill_xspice_digital_snapshot(
         &self,
         snapshot: &mut Vec<(NodeId, crate::xspice::DigitalValue)>,
@@ -765,6 +772,8 @@ impl CircuitData {
                 .iter()
                 .filter_map(|(&node_id, &value)| (node_id > 0).then_some((node_id, value))),
         );
+        #[cfg(feature = "veriloga")]
+        self.append_mixed_digital_snapshot(snapshot);
         snapshot.sort_unstable_by_key(|(node_id, _)| *node_id);
     }
 

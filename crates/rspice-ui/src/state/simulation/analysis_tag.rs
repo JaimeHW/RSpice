@@ -149,11 +149,11 @@ impl CanonicalAnalysisKind {
     ///
     /// Appended, never renumbered: these tags are part of the config digest,
     /// so reusing or reordering one would silently redefine every prepared
-    /// snapshot already on disk. Tags 26 and 30..=34 name kinds whose solver
-    /// is not present in this engine build; the tag still exists because the
-    /// specification is transportable and its identity must stay stable, and
-    /// [`crate::simulation::plan::AnalysisKind::execution_blocker`] is what
-    /// keeps them from being dispatched.
+    /// snapshot already on disk. Tags 20, 26 and 30..=34 name kinds whose
+    /// solver or qualified model contract is not present in this engine build;
+    /// the tag still exists because the specification is transportable and its
+    /// identity must stay stable, and [`Self::execution_blocker`] is what keeps
+    /// them from being dispatched.
     #[must_use]
     pub const fn tag(self) -> u8 {
         match self {
@@ -242,6 +242,42 @@ impl CanonicalAnalysisKind {
             | Self::DcMismatch
             | Self::Reliability => AnalysisAvailability::Preview,
             _ => AnalysisAvailability::Production,
+        }
+    }
+
+    /// Why this exact execution kind cannot be dispatched, if it cannot.
+    ///
+    /// Availability and executability answer different questions: a preview
+    /// engine may run but remain ineligible for sign-off, while a transportable
+    /// preview specification may have no solver in this binary at all. Both
+    /// facts live on the canonical tag so plan preflight, worker dispatch and
+    /// retained-result provenance cannot silently classify the same kind
+    /// differently.
+    #[must_use]
+    pub const fn execution_blocker(self) -> Option<&'static str> {
+        match self {
+            Self::Qpss => {
+                Some("the QPSS spectral-lattice solver is not available in this engine build")
+            }
+            Self::Qpac => {
+                Some("QPAC conversion-matrix execution is not available in this engine build")
+            }
+            Self::Qpnoise => {
+                Some("quasi-periodic noise execution is not available in this engine build")
+            }
+            Self::Qpxf => Some(
+                "quasi-periodic translated-transfer execution is not available in this engine build",
+            ),
+            Self::TransientNoise => Some(
+                "stochastic transient device-noise execution is not available in this engine build",
+            ),
+            Self::DcMismatch => {
+                Some("DC mismatch contribution extraction is not available in this engine build")
+            }
+            Self::Reliability => Some(
+                "reliability execution requires PDK-qualified aging models; the former hard-coded demonstration equations have been removed",
+            ),
+            _ => None,
         }
     }
 
@@ -351,5 +387,48 @@ mod tests {
                 .unwrap_or_else(|| panic!("tag {tag} must be part of the closed protocol"));
             assert_eq!(kind.result_analysis_type(), expected, "tag {tag}");
         }
+    }
+
+    #[test]
+    fn preview_metadata_partitions_exactly_into_runnable_and_blocked_kinds() {
+        let runnable = CanonicalAnalysisKind::ALL
+            .into_iter()
+            .filter(|kind| {
+                kind.availability() == AnalysisAvailability::Preview
+                    && kind.execution_blocker().is_none()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            runnable,
+            vec![
+                CanonicalAnalysisKind::Envelope,
+                CanonicalAnalysisKind::Hbsp,
+                CanonicalAnalysisKind::Hbnoise,
+                CanonicalAnalysisKind::Psp,
+            ]
+        );
+
+        let blocked = CanonicalAnalysisKind::ALL
+            .into_iter()
+            .filter(|kind| kind.execution_blocker().is_some())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            blocked,
+            vec![
+                CanonicalAnalysisKind::Reliability,
+                CanonicalAnalysisKind::Qpss,
+                CanonicalAnalysisKind::Qpac,
+                CanonicalAnalysisKind::Qpnoise,
+                CanonicalAnalysisKind::Qpxf,
+                CanonicalAnalysisKind::TransientNoise,
+                CanonicalAnalysisKind::DcMismatch,
+            ]
+        );
+        assert!(blocked.into_iter().all(|kind| {
+            kind.availability() == AnalysisAvailability::Preview
+                && kind
+                    .execution_blocker()
+                    .is_some_and(|reason| !reason.trim().is_empty())
+        }));
     }
 }

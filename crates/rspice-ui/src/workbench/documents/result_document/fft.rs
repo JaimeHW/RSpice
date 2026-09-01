@@ -232,9 +232,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                             .clicked()
                             && state.analysis.fft_state.set_window(window).is_err()
                         {
-                            state.clear_specialized_viewer_cache_authority(
-                                crate::workbench::app_state::ActiveViewer::Fft,
-                            );
+                            state.clear_fft_viewer_cache_authority();
                         }
                     }
                 });
@@ -262,9 +260,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                             .set_normalization(normalization)
                             .is_err()
                     {
-                        state.clear_specialized_viewer_cache_authority(
-                            crate::workbench::app_state::ActiveViewer::Fft,
-                        );
+                        state.clear_fft_viewer_cache_authority();
                     }
                 }
             });

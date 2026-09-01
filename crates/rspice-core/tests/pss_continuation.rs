@@ -1,6 +1,7 @@
 use rspice_core::analysis::PssConfig;
-use rspice_core::engine::{Engine, SimulationConfig};
-use rspice_core::netlist::Netlist;
+use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
+use rspice_core::netlist::{Netlist, NetlistParseOptions};
+use rspice_core::numerics::integration::IntegrationMethod;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -253,7 +254,8 @@ fn continuation_fails_closed_for_unadvanced_dynamic_state_families() {
 
     let behavioral = Netlist::parse(
         "* behavioral accepted-step expression memory is not in shooting x\n\
-         B1 out 0 V=sin(2*pi*1meg*time)\n\
+         V1 in 0 SIN(0 1 1meg)\n\
+         B1 out 0 V={SDT(V(in))}\n\
          R1 out 0 1k\n\
          C1 out 0 100p\n\
          .end\n",
@@ -268,6 +270,121 @@ fn continuation_fails_closed_for_unadvanced_dynamic_state_families() {
             .contains("behavioral-source accepted-step memory"),
         "unexpected behavioral-state diagnostic: {behavioral_error}"
     );
+
+    let solution_dependent_capacitor = Netlist::parse_with_options(
+        "* expression-valued capacitor charge is outside the shooting state\n\
+         V1 in 0 SIN(0 1 1meg)\n\
+         R1 in out 1k\n\
+         C1 out 0 C={100p*(1+0.1*V(out))}\n\
+         .end\n",
+        NetlistParseOptions {
+            expression_dialect: rspice_core::config::ExpressionDialect::Xyce,
+            ..Default::default()
+        },
+    )
+    .expect("solution-dependent capacitor deck parses");
+    let solution_dependent_error =
+        Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
+            .run_pss_with_continuation_state(&solution_dependent_capacitor, compact_pss_config())
+            .expect_err("solution-dependent capacitor history must fail before solving");
+    assert!(
+        solution_dependent_error
+            .to_string()
+            .contains("solution-dependent capacitor charge/expression history"),
+        "unexpected solution-dependent capacitor diagnostic: {solution_dependent_error}"
+    );
+
+    let thermal_resistor = Netlist::parse(
+        "* electrothermal accepted temperature is outside the shooting state\n\
+         V1 in 0 SIN(0 1 1meg)\n\
+         R1 in out RMOD L=1u A=1u\n\
+         C1 out 0 100p\n\
+         .MODEL RMOD R (LEVEL=2 RESISTIVITY=1 HEATCAPACITY=1)\n\
+         .end\n",
+    )
+    .expect("thermal resistor deck parses");
+    let thermal_error =
+        Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
+            .run_pss_with_continuation_state(&thermal_resistor, compact_pss_config())
+            .expect_err("thermal accepted temperature must fail before solving");
+    assert!(
+        thermal_error
+            .to_string()
+            .contains("thermal resistor accepted temperature state"),
+        "unexpected thermal resistor diagnostic: {thermal_error}"
+    );
+}
+
+#[test]
+fn stateless_behavioral_source_has_an_exact_pss_continuation_path() {
+    let netlist = Netlist::parse(
+        "* time-only behavioral source has no accepted expression memory\n\
+         B1 drive 0 V=sin(2*pi*1meg*time)\n\
+         R1 drive out 1k\n\
+         C1 out 0 100p\n\
+         .end\n",
+    )
+    .expect("stateless behavioral deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let (pss, state) = engine
+        .run_pss_with_continuation_state(&netlist, compact_pss_config())
+        .expect("stateless behavioral source produces an exact continuation state");
+
+    assert_eq!(pss.result.time.last().copied(), Some(state.period()));
+    let (transient, _) = engine
+        .run_tran_from_pss_state(&netlist, &state, 100.0e-9, 10.0e-9)
+        .expect("stateless behavioral source resumes from the PSS state");
+    assert_eq!(transient.time.first().copied(), Some(0.0));
+    assert_eq!(transient.time.last().copied(), Some(100.0e-9));
+}
+
+#[test]
+fn pss_continuation_checkpoint_has_bit_exact_split_run_parity() {
+    let netlist = Netlist::parse(
+        "* deterministic PSS-to-TRAN split-run fixture\n\
+         V1 in 0 1\n\
+         R1 in out 1k\n\
+         C1 out 0 100p\n\
+         .end\n",
+    )
+    .expect("split-run deck parses");
+    let simulation = SimulationConfig {
+        integration_method: IntegrationMethod::BackwardEuler,
+        transient_initial_timestep: Some(100.0e-9),
+        ..SimulationConfig::default()
+    };
+    let engine = Engine::new(simulation);
+    let (_, state) = engine
+        .run_pss_with_continuation_state(&netlist, compact_pss_config())
+        .expect("PSS continuation state");
+
+    let (uninterrupted, _) = engine
+        .run_tran_from_pss_state(&netlist, &state, 200.0e-9, 100.0e-9)
+        .expect("uninterrupted PSS continuation");
+    let (_, seam_checkpoint) = engine
+        .run_tran_from_pss_state(&netlist, &state, 100.0e-9, 100.0e-9)
+        .expect("first split segment");
+    let (resumed, _) = engine
+        .run_tran_resume(&netlist, &seam_checkpoint, 200.0e-9, 100.0e-9)
+        .expect("second split segment resumes");
+
+    let seam = uninterrupted
+        .time
+        .iter()
+        .position(|time| time.to_bits() == seam_checkpoint.time.to_bits())
+        .expect("uninterrupted trajectory contains the split seam");
+    assert_eq!(resumed.time, uninterrupted.time[seam..]);
+    assert_eq!(resumed.step_sizes.first().copied(), Some(0.0));
+    assert_eq!(
+        resumed.step_sizes[1..],
+        uninterrupted.step_sizes[seam + 1..]
+    );
+    assert_eq!(resumed.node_names, uninterrupted.node_names);
+    for (resumed_waveform, uninterrupted_waveform) in
+        resumed.voltages.iter().zip(&uninterrupted.voltages)
+    {
+        assert_eq!(resumed_waveform, &uninterrupted_waveform[seam..]);
+    }
 }
 
 #[test]

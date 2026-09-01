@@ -2729,6 +2729,7 @@ impl Engine {
             ));
         }
         Self::ensure_supported_ac_dynamic_charges(&circuit)?;
+        Self::ensure_no_mixed_signal_analysis(&circuit, "AC analysis")?;
         circuit
             .begin_veriloga_equilibrium_analysis(1)
             .map_err(SimulationError::Circuit)?;

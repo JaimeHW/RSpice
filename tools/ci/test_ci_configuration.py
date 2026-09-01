@@ -491,23 +491,104 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("cargo test --locked -p rspice-core --lib --release", nightly_workflow)
 
     def test_digital_verilog_suites_are_named_in_the_fast_tier(self) -> None:
-        """Both digital Verilog conformance targets run on every push.
+        """Every digital Verilog conformance target runs on every push.
 
         The conformance step names its test targets explicitly rather than
         using `--tests`, so a new target that nobody adds here is a suite that
-        exists and never runs. Two of them are digital: `verilog_oracles` is
-        the language corpus and `verilog_scale` is the gate-level scale suite,
-        and neither needs an external simulator installed to be worth running
-        — each checks its designs against expectations derived without one.
+        exists and never runs. Six of them are digital or mixed:
+        `verilog_oracles` is the IEEE 1364-2005 language corpus, `verilog_scale`
+        is the gate-level scale suite, `verilog_ams` is the Verilog-AMS real-net
+        corpus, `verilog_ams_semantics` derives one case per LRM clause from the
+        clause's own requirement, `verilog_rnm_agreement` holds each reference
+        block's analog and real-number representations to one another, and
+        `verilog_mixed_benchmarks` holds three mixed-signal circuits against
+        all-analog versions of themselves.
+
+        None needs an external simulator installed to be worth running. The
+        first two check their designs against expectations derived without one;
+        the rest have no oracle arm at all, because neither Icarus nor
+        Verilator implements `wreal` in a form the harness could hold to an
+        answer — so they are RSpice against the standard's text, against
+        reference models, and against itself through representations that share
+        no code below the harness.
         """
         workflow = read_text(".github/workflows/ci.yml")
         step = workflow.split("- name: Conformance suite unit tests", 1)[1].split(
             "- name:", 1
         )[0]
 
-        for target in ("--test verilog_oracles", "--test verilog_scale"):
+        for target in (
+            "--test verilog_oracles",
+            "--test verilog_scale",
+            "--test verilog_ams",
+            "--test verilog_ams_semantics",
+            "--test verilog_rnm_agreement",
+            "--test verilog_mixed_benchmarks",
+        ):
             self.assertIn(target, step)
         self.assertEqual(step.count("--test verilog_scale"), 1)
+        # `verilog_ams` is a prefix of `verilog_ams_semantics`, so count the
+        # selector with its trailing boundary rather than the bare name.
+        self.assertEqual(step.count("--test verilog_ams\n"), 1)
+        self.assertEqual(step.count("--test verilog_ams_semantics"), 1)
+        self.assertEqual(step.count("--test verilog_rnm_agreement"), 1)
+        self.assertEqual(step.count("--test verilog_mixed_benchmarks"), 1)
+
+    def test_rnm_performance_is_a_nightly_release_measurement_only(self) -> None:
+        """The wall-clock leg runs in nightly, in release, and never on push.
+
+        Two halves, and both matter. In the fast tier it would be a timing
+        assertion on a shared runner, which is a flake generator; in a debug
+        build it would be measuring a different ratio, because the analog side
+        is matrix work and the RNM side is a compiler front end and
+        `opt-level = 0` slows the two by different factors.
+
+        The fast-tier half is checked by absence of the `--test` selector
+        rather than of the bare name, because the conformance step's comment
+        names the target to say why it is not there — and a rule that forbade
+        mentioning it would push that explanation out of the file it explains.
+        Absence of the selector is what decides whether it runs, since that
+        step names its targets explicitly.
+        """
+        ci_workflow = read_text(".github/workflows/ci.yml")
+        nightly_workflow = read_text(".github/workflows/nightly.yml")
+
+        self.assertNotIn("--test verilog_rnm_performance", ci_workflow)
+
+        step = nightly_workflow.split("- name: RNM against analog wall clock", 1)[
+            1
+        ].split("- name:", 1)[0]
+        self.assertIn("--test verilog_rnm_performance", step)
+        self.assertIn("--release", step)
+        self.assertIn("--nocapture", step)
+
+    def test_mixed_performance_is_a_nightly_release_measurement_only(self) -> None:
+        """P4's runtime leg runs in nightly, in release, and never on push.
+
+        The same rule as the RNM measurement above and for the same two
+        reasons, and it is a separate test rather than a second loop inside
+        that one because the two measure different things: that one compares a
+        real-number model against simulating a block, this one compares
+        executing a circuit's digital half on an event wheel against simulating
+        the same circuit entirely in the analog domain.
+
+        Its correctness half, `verilog_mixed_benchmarks`, *is* in the fast tier
+        and is checked by the test above — which is what makes this a
+        measurement rather than a gate: a ratio between two representations
+        that disagree means nothing, so agreement is proven on every push and
+        only the timing waits for nightly.
+        """
+        ci_workflow = read_text(".github/workflows/ci.yml")
+        nightly_workflow = read_text(".github/workflows/nightly.yml")
+
+        self.assertNotIn("--test verilog_mixed_performance", ci_workflow)
+
+        step = nightly_workflow.split(
+            "- name: Mixed against all-analog wall clock", 1
+        )[1].split("- name:", 1)[0]
+        self.assertIn("--test verilog_mixed_performance", step)
+        self.assertIn("--release", step)
+        self.assertIn("--nocapture", step)
 
     def test_nightly_qualifies_shipped_models_through_native_x64(self) -> None:
         nightly_workflow = read_text(".github/workflows/nightly.yml")
@@ -851,9 +932,13 @@ class CiConfigurationTests(unittest.TestCase):
         workflow = read_text(".github/workflows/python.yml")
         pyproject = read_text("crates/rspice-python/pyproject.toml")
         constraints = read_text("crates/rspice-python/ci-constraints.txt")
+        binding_readme = read_text("crates/rspice-python/README.md")
 
         self.assertIn('requires-python = ">=3.10"', pyproject)
-        self.assertIn('requires = ["maturin==1.14.1"]', pyproject)
+        self.assertIn('requires = ["maturin==1.15.0"]', pyproject)
+        self.assertIn('MATURIN_VERSION: "1.15.0"', workflow)
+        self.assertNotIn("maturin==1.14.1", binding_readme)
+        self.assertIn("maturin==1.15.0", binding_readme)
         self.assertIn(
             'python: ["3.10", "3.11", "3.12", "3.13", "3.14", "3.14t"]',
             workflow,
@@ -894,7 +979,7 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertEqual(workflow.count("actions/attest@"), 3)
         self.assertIn("subject-path: crates/rspice-python/dist/*.whl", workflow)
         self.assertIn("subject-path: crates/rspice-python/dist/*.tar.gz", workflow)
-        self.assertIn("maturin==1.14.1", constraints)
+        self.assertIn("maturin==1.15.0", constraints)
         self.assertIn("numpy==2.2.6", constraints)
         self.assertIn("numpy==2.5.0", constraints)
 

@@ -80,6 +80,13 @@ id_type!(ShapeId);
 // the schedule.
 id_type!(DigitalSignalId);
 id_type!(DigitalProcessId);
+// `DigitalAnalogProbeId` indexes one continuous-domain potential that the
+// discrete-domain half reads, in first-appearance order. It is not a
+// `NodeId`: the analog levels and the discrete plan are lowered from the same
+// analyzed module by two independent passes, and a probe names its nets the
+// way the plan names everything else it has to hand to a host — by name —
+// rather than by an index only one of the two passes assigns.
+id_type!(DigitalAnalogProbeId);
 // `DigitalLocalId` indexes a variable declared *inside* one process, in
 // declaration order within that process. It is not a module-wide identity:
 // two processes each declaring `integer i` own an id 0 apiece, because a

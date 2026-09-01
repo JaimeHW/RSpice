@@ -1,0 +1,32 @@
+# RSPICE-VERILOG-AMS-STIMULUS 1
+#
+# All four combinations of the two drivers, so each fold is seen on a pair that
+# distinguishes it from the other three:
+#
+#   hi lo   drivers      sum   avg   min   max
+#    0  0    1.0, -4.0   -3.0  -1.5  -4.0   1.0
+#    0  1    1.0, -1.0    0.0   0.0  -1.0   1.0
+#    1  0    3.0, -4.0   -1.0  -0.5  -4.0   3.0
+#    1  1    3.0, -1.0    2.0   1.0  -1.0   3.0
+#
+# No two rows agree across all four columns and no two columns agree across all
+# four rows, so a fold that answered another fold's arithmetic would show.
+
+module wreal_resolution
+
+input hi 1
+input lo 1
+
+output summed real
+output averaged real
+output least real
+output greatest real
+output floating real
+
+step 10
+settle 5
+
+vector 0 0
+vector 0 1
+vector 1 0
+vector 1 1

@@ -699,7 +699,7 @@ impl Engine {
             if column == 0 {
                 1.0
             } else {
-                let harmonic = (column + 1) / 2;
+                let harmonic = column.div_ceil(2);
                 let frequency = signed_frequencies[config.num_harmonics + harmonic];
                 let angle = std::f64::consts::TAU * frequency * time_points[row];
                 if column % 2 == 1 {

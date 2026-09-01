@@ -3362,6 +3362,7 @@ impl Engine {
             "SP noise",
             "intrinsic XSPICE device-noise sources are not collected because ngspice MIF code models expose DEVnoise = NULL",
         );
+        Self::ensure_no_mixed_signal_analysis(&circuit, "SP noise analysis")?;
         Self::ensure_supported_dynamic_charges(&circuit, "SP noise")?;
         if !circuit.ekv3s.is_empty() {
             return Err(SimulationError::Circuit(
@@ -3882,6 +3883,7 @@ impl Engine {
             "Noise",
             "intrinsic XSPICE device-noise sources are not collected because ngspice MIF code models expose DEVnoise = NULL",
         );
+        Self::ensure_no_mixed_signal_analysis(&circuit, "noise analysis")?;
         Self::ensure_supported_dynamic_charges(&circuit, "Noise")?;
         circuit
             .begin_veriloga_equilibrium_analysis(3)

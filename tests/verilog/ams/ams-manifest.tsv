@@ -1,0 +1,38 @@
+# Verilog-AMS real-net corpus: cases RSpice is checked against a reference
+# model rather than against another simulator.
+#
+#   <corpus-relative .v path>\t<note>
+#
+# There is no oracle column here, and that is the difference from
+# `../verilog-manifest.tsv` rather than an omission.
+#
+# The sibling corpus is IEEE 1364-2005 Verilog, and its cases are compared
+# against Icarus Verilog and Verilator — two simulators written by other people
+# that both implement that standard. These cases are Verilog-AMS LRM 2.4
+# section 3.7's `wreal`, which is a different standard, and neither oracle
+# implements it in a form this harness could hold to an answer. Pointing them
+# at a case they cannot run would produce a compile failure the harness would
+# have to learn to ignore, and an ignored failure is how an oracle arm stops
+# meaning anything.
+#
+# So these cases live in their own directory with their own manifest, and the
+# Icarus and Verilator arms never see them: `discover_designs` in
+# `crates/rspice-conformance/src/suites/verilog/corpus.rs` reads files rather
+# than recursing, so a subdirectory is invisible to the corpus beside it. The
+# same reason `scale/` is a subdirectory.
+#
+# What replaces the oracle is a reference model: for each case, an independent
+# computation of the expected trace in `crates/rspice-conformance/tests/
+# verilog_ams.rs`, written from the clause rather than read off a run. That is
+# a weaker guarantee than two foreign simulators agreeing and it is stated as
+# one — but it is not weaker than nothing, because the model and the design are
+# written in different languages against the same paragraph, and the arithmetic
+# that produced each number is beside it.
+#
+# `wrealsum`, `wrealavg`, `wrealmin` and `wrealmax` are not Accellera's. See
+# `wreal_resolution.v` and `WrealResolution` for what they are and why RSpice
+# implements them under those names.
+
+wreal_forms.v	real nets end to end: a real port, real arithmetic, a DAC ladder driven by four-state conditions, a comparison to bits, and the section 3.7 value-change event
+wreal_resolution.v	the four resolved real-net spellings on identical driver pairs, and an undriven wreal reading zero per section 3.7
+real_state.v	real state across a clock edge: a module-level `real` filter written with `<=`, a process-local `real` accumulating across a suspension, a `parameter real` folded into the recurrence, an `output real` variable port, and the section 3.7 `$realtobits`/`$bitstoreal` round trip

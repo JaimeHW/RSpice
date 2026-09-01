@@ -436,6 +436,13 @@ endmodule
 /// On a discrete-discipline signal the `cross` reading is simply wrong: a
 /// digital net carries no continuous value to cross zero, so the event would
 /// never fire. Refuse it instead of stamping a detector that does nothing.
+///
+/// The construct itself is legal — Verilog-AMS LRM 2.4 section 7.3.4's
+/// `analog_event_expression` lists `posedge expression` beside the analog event
+/// functions, and its worked example declares the operand a `wire`; section
+/// 7.3.6.2 runs the guarded statement "at the time corresponding to a real
+/// promotion of the digital time". So the message names the seam that is
+/// missing rather than the construct, and cites the clauses it is short of.
 #[test]
 fn edge_events_on_discrete_signals_are_refused() {
     for keyword in ["posedge", "negedge"] {

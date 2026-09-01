@@ -2035,8 +2035,14 @@ impl CanonicalNoiseRuntimePlan {
                     | CfgValueKind::DdtScale
                     | CfgValueKind::Idt { .. }
                     | CfgValueKind::IdtScale
+                    | CfgValueKind::IdtMod { .. }
                     | CfgValueKind::Transition { .. }
                     | CfgValueKind::TransitionDerivative { .. }
+                    | CfgValueKind::AbsDelay { .. }
+                    | CfgValueKind::AbsDelayDerivative { .. }
+                    | CfgValueKind::Slew { .. }
+                    | CfgValueKind::SlewDerivative { .. }
+                    | CfgValueKind::LastCrossing { .. }
                     | CfgValueKind::Cross { .. }
                     | CfgValueKind::Above { .. }
                     | CfgValueKind::Timer { .. }
@@ -8332,6 +8338,11 @@ endmodule
             )),
             fused_program_active: vec![1; num_stamp_programs],
             fused_stamp_jacobians: vec![0.0; native_jacobian_count],
+            // None, exactly as `try_new` would decide here: this helper builds
+            // a device straight from a `CompiledModel` with no canonical IR
+            // artifact, and a grouped-noise plan is built only from one. The
+            // native tests below drive stamping and dispatch, never noise.
+            canonical_noise_plan: None,
             prev_discontinuity: false,
         };
         device.context.branch_current_values = vec![0.0; num_branch_unknowns];

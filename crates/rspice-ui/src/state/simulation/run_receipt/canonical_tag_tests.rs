@@ -110,6 +110,57 @@ fn each_tag_added_after_the_cap_constructs_validates_and_names_its_result_family
 }
 
 #[test]
+fn runnable_preview_workflows_authenticate_but_remain_explicitly_non_sign_off() {
+    let envelope = AnalysisInstanceId::new();
+    let hb = AnalysisInstanceId::new();
+    let hbsp = AnalysisInstanceId::new();
+    let hbnoise = AnalysisInstanceId::new();
+    let pss = AnalysisInstanceId::new();
+    let psp = AnalysisInstanceId::new();
+    let receipt = plan_receipt(vec![
+        task_receipt(envelope, Vec::new(), CanonicalAnalysisKind::Envelope, 0xd0),
+        task_receipt(hb, Vec::new(), CanonicalAnalysisKind::HarmonicBalance, 0xd1),
+        task_receipt(hbsp, vec![hb], CanonicalAnalysisKind::Hbsp, 0xd2),
+        task_receipt(hbnoise, vec![hb], CanonicalAnalysisKind::Hbnoise, 0xd3),
+        task_receipt(pss, Vec::new(), CanonicalAnalysisKind::Pss, 0xd4),
+        task_receipt(psp, vec![pss], CanonicalAnalysisKind::Psp, 0xd5),
+    ]);
+    let snapshot = receipt.prepared_snapshot_digest();
+    let results = receipt
+        .tasks()
+        .iter()
+        .map(|task| result_for(task, snapshot))
+        .collect::<Vec<_>>();
+    receipt
+        .validate_result_prefix(&results)
+        .expect("every runnable preview result authenticates against its exact task");
+
+    assert_eq!(
+        receipt.preview_engine_kinds(),
+        vec![
+            CanonicalAnalysisKind::Envelope,
+            CanonicalAnalysisKind::Hbsp,
+            CanonicalAnalysisKind::Hbnoise,
+            CanonicalAnalysisKind::Psp,
+        ]
+    );
+    for kind in receipt.preview_engine_kinds() {
+        assert_eq!(kind.execution_blocker(), None, "{kind:?} is runnable");
+    }
+    let blocker = receipt
+        .sign_off_blocker()
+        .expect("preview execution must remain non-sign-off");
+    assert!(blocker.contains("preview engine"), "{blocker}");
+    for kind in receipt.preview_engine_kinds() {
+        let family = kind.result_analysis_type().display_name();
+        assert!(
+            blocker.contains(family),
+            "{family} is absent from: {blocker}"
+        );
+    }
+}
+
+#[test]
 fn an_undefined_tag_is_still_refused() {
     let highest = CanonicalAnalysisKind::ALL[CanonicalAnalysisKind::ALL.len() - 1].tag();
     for tag in [highest + 1, highest + 7, u8::MAX] {

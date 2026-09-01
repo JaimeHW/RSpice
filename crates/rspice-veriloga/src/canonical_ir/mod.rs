@@ -39,8 +39,9 @@ pub mod schedule;
 pub use ad::{AdFunction, AdSeed, differentiate};
 pub use artifact::CanonicalIrArtifact;
 pub use cfg::{
-    CfgBinaryOp, CfgBlock, CfgFunction, CfgInstruction, CfgTerminator, CfgUnaryOp,
-    CfgValidationError, CfgValue, CfgValueKind, CfgValueType, CfgVariable, DigitalWait, SsaBuilder,
+    CfgBinaryOp, CfgBlock, CfgFunction, CfgInstruction, CfgIntegerBitwiseOp, CfgTerminator,
+    CfgUnaryOp, CfgValidationError, CfgValue, CfgValueKind, CfgValueType, CfgVariable, DigitalWait,
+    SsaBuilder,
 };
 pub use cfg_complex::{COMPLEX_STEP, ComplexStep};
 pub use cfg_eval::{

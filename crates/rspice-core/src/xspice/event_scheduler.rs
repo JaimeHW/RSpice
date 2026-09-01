@@ -211,6 +211,73 @@ impl TimeResolution {
         }
         Ok(ticks as u64)
     }
+
+    /// Convert analog seconds to the tick *at or before* them.
+    ///
+    /// This is the conversion a mixed-signal interleave uses, and it is a
+    /// separate method rather than a mode of [`Self::seconds_to_ticks`]
+    /// because the two answer different questions and both callers are right.
+    /// Rounding to nearest is what an event *scheduled* in seconds wants: the
+    /// tick closest to the instant asked for. Flooring is what an analog
+    /// timepoint being *delivered* to the digital world wants, and the reason
+    /// is that a `.tran` step controlled by local truncation error does not
+    /// land on the grid at all:
+    ///
+    /// * flooring is monotone, so a non-decreasing sequence of accepted analog
+    ///   times gives a non-decreasing sequence of ticks;
+    /// * it never runs the digital world past an instant the integrator has
+    ///   accepted, which rounding up to the nearest tick would;
+    /// * two analog times inside one tick collapse rather than reorder, which
+    ///   is what a declared precision means.
+    ///
+    /// The exact time is not lost by this — it is carried alongside, in the
+    /// unquantized `f64` the analog side already has, which is what keeps a
+    /// breakpoint bit-exact. See the module documentation of
+    /// [`crate::xspice::verilog`] for the ruling this implements.
+    ///
+    /// # Exactness
+    ///
+    /// The answer is defined as the largest `t` with
+    /// `ticks_to_seconds(t) <= seconds`, and it is computed against that same
+    /// product rather than against the division alone. A single division is
+    /// off by up to one ulp, which for a time that sits exactly on a tick can
+    /// land just under the integer and floor to the tick *before* it — the one
+    /// error this conversion must not make, because an event time handed back
+    /// as a breakpoint would then be delivered a tick late. Correcting against
+    /// the multiplication makes `seconds_to_floor_ticks(ticks_to_seconds(t))`
+    /// exactly `t` for every representable `t`.
+    ///
+    /// Crate-visible rather than public: the mixed interleave is the only
+    /// caller, and the rest of this type is published because a caller outside
+    /// the crate actually reaches for it. This becomes `pub` when one does.
+    ///
+    /// Gated with that caller too. `xspice::verilog` is a `veriloga` module, so
+    /// a build without the feature has no caller at all and `-D warnings` says
+    /// so; the gate is what keeps the default build's warning budget honest
+    /// rather than an `allow` that would also hide a real orphan later.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn seconds_to_floor_ticks(self, seconds: f64) -> Result<u64, SchedulerError> {
+        if !seconds.is_finite() || seconds < 0.0 {
+            return Err(SchedulerError::SecondsNotRepresentable { seconds });
+        }
+        let scale = self.seconds_per_tick();
+        let estimate = (seconds / scale).floor();
+        if !estimate.is_finite() || estimate < 0.0 || estimate > Self::MAX_EXACT_TICKS as f64 {
+            return Err(SchedulerError::SecondsNotRepresentable { seconds });
+        }
+        // The division is accurate to within one ulp of the quotient, so each
+        // correction runs at most once; they are loops rather than single
+        // steps so the postcondition holds by construction instead of by an
+        // argument about rounding.
+        let mut ticks = estimate as u64;
+        while ticks > 0 && (ticks as f64) * scale > seconds {
+            ticks -= 1;
+        }
+        while ticks < Self::MAX_EXACT_TICKS && ((ticks + 1) as f64) * scale <= seconds {
+            ticks += 1;
+        }
+        Ok(ticks)
+    }
 }
 
 /// The driver an event updates.
@@ -460,6 +527,29 @@ impl EventQueues {
         self.slot.iter().all(BTreeMap::is_empty)
     }
 
+    /// Earliest tick any event still sitting in the slot is dated at.
+    ///
+    /// The slot is keyed by sequence, not by tick, because within one tick
+    /// sequence is the whole tie-break after the region — so the tick has to
+    /// be read off the events themselves. That scan is why the empty case
+    /// returns first: an empty slot is the steady state between
+    /// [`EventScheduler::run_due_events`] calls, which is where the hot
+    /// predicates ask, and it must stay as cheap as the region-emptiness
+    /// check it already was.
+    ///
+    /// A non-empty slot is only observable from inside a due-slot run or after
+    /// one returned an oscillation, and neither is a per-evaluation path.
+    fn slot_min_tick(&self) -> Option<u64> {
+        if self.slot_is_empty() {
+            return None;
+        }
+        self.slot
+            .iter()
+            .flat_map(BTreeMap::values)
+            .map(|event| event.tick)
+            .min()
+    }
+
     /// Take the lowest-sequence active event.
     fn pop_active(&mut self) -> Option<ScheduledEvent> {
         let event = self.slot[SchedulerRegion::Active.index()]
@@ -617,11 +707,27 @@ impl EventScheduler {
     }
 
     /// Earliest tick holding an event, if any.
+    ///
+    /// Both tiers are consulted and the earlier answer wins. The slot is
+    /// asked what its events are *dated*, which is not the same question as
+    /// which slot is open: [`Self::open_due_slot`] sets `current_tick` to the
+    /// caller's bound, and `open_next_due_tick` then fills the slot from the
+    /// earliest pending tick at or before that bound. So a slot observed
+    /// part-settled holds events dated before `current_tick`, and answering
+    /// with the bound would date them late — as a breakpoint, by however far
+    /// the bound overshot.
+    ///
+    /// A slot is only observable part-settled from inside a due-slot run or
+    /// after one returned an oscillation. Every XSPICE reader asks between
+    /// runs, where a settled slot is empty in every region, so this reads the
+    /// future tier for them exactly as it always did.
     pub fn next_tick(&self) -> Option<u64> {
-        if !self.queues.slot_is_empty() {
-            return Some(self.current_tick);
+        let slot = self.queues.slot_min_tick();
+        let future = self.queues.future.keys().next().map(|(tick, _, _)| *tick);
+        match (slot, future) {
+            (Some(slot), Some(future)) => Some(slot.min(future)),
+            (slot, future) => slot.or(future),
         }
-        self.queues.future.keys().next().map(|(tick, _, _)| *tick)
     }
 
     /// Number of events not yet executed.
@@ -974,5 +1080,82 @@ impl SchedulerContext<'_> {
             return Err(SchedulerError::TickNotExactlyRepresentable { ticks: u64::MAX });
         };
         self.schedule_at(tick, region, target, value)
+    }
+}
+
+/// The kernel's conformance tests live in `tests/event_scheduler_kernel.rs`,
+/// against the published API. These are here because
+/// [`TimeResolution::seconds_to_floor_ticks`] is crate-visible and so has no
+/// published API to be tested against.
+///
+/// Gated on `veriloga` with the method itself, which is gated with its only
+/// caller: `xspice::verilog`'s mixed interleave is a `veriloga` module, so a
+/// build without the feature has neither the method nor anything to test it.
+#[cfg(all(test, feature = "veriloga"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flooring_maps_an_off_grid_analog_time_to_the_tick_at_or_before_it() {
+        let resolution = TimeResolution::new(-9).expect("1 ns");
+
+        // The case the round-to-nearest conversion gets wrong for a mixed
+        // interleave: a time three quarters of the way through a tick belongs
+        // to the tick it is inside, not to the one it is closest to. Rounding
+        // here would run the digital world a quarter of a nanosecond past an
+        // instant the integrator has accepted.
+        assert_eq!(resolution.seconds_to_ticks(2.75e-9), Ok(3));
+        assert_eq!(resolution.seconds_to_floor_ticks(2.75e-9), Ok(2));
+        assert_eq!(resolution.seconds_to_floor_ticks(2.25e-9), Ok(2));
+        assert_eq!(resolution.seconds_to_floor_ticks(0.0), Ok(0));
+        assert_eq!(resolution.seconds_to_floor_ticks(0.999e-9), Ok(0));
+
+        // Monotone: a non-decreasing sequence of analog times gives a
+        // non-decreasing sequence of ticks, which is what lets `advance_to` be
+        // driven straight from accepted timepoints.
+        let mut previous = 0u64;
+        let mut seconds = 0.0f64;
+        while seconds < 5.0e-9 {
+            let tick = resolution
+                .seconds_to_floor_ticks(seconds)
+                .expect("in range");
+            assert!(
+                tick >= previous,
+                "flooring must be monotone: {seconds:e} s gave {tick} after {previous}"
+            );
+            previous = tick;
+            seconds += 3.7e-11;
+        }
+    }
+
+    #[test]
+    fn flooring_a_tick_boundary_returns_that_tick_and_not_the_one_before() {
+        // The error a bare division would make: an event time handed back as a
+        // breakpoint, floored, must be delivered at its own tick. One ulp low
+        // and the digital slot runs a whole tick late.
+        for exponent in [-9i8, -12, -15] {
+            let resolution = TimeResolution::new(exponent).expect("declared precision");
+            for tick in [0u64, 1, 2, 3, 7, 999, 1_000, 1_001, 123_456_789] {
+                let seconds = resolution.ticks_to_seconds(tick).expect("in range");
+                assert_eq!(
+                    resolution.seconds_to_floor_ticks(seconds),
+                    Ok(tick),
+                    "exponent {exponent} tick {tick} round trip"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn flooring_refuses_what_rounding_refuses() {
+        let resolution = TimeResolution::new(-9).expect("1 ns");
+        assert!(resolution.seconds_to_floor_ticks(-1.0e-9).is_err());
+        assert!(resolution.seconds_to_floor_ticks(f64::NAN).is_err());
+        assert!(resolution.seconds_to_floor_ticks(f64::INFINITY).is_err());
+        assert!(
+            resolution
+                .seconds_to_floor_ticks(TimeResolution::MAX_EXACT_TICKS as f64 * 1.0e-9 * 2.0)
+                .is_err()
+        );
     }
 }

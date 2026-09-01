@@ -109,13 +109,31 @@
 //! manifest is checked against it in both directions, so a case that is added
 //! to one and not the other fails rather than being quietly ignored.
 
+pub mod ams;
+/// The LRM-clause-tagged semantics suite. Behind `verilog-digital` because
+/// every case runs either a mixed deck or a discrete-domain design, and both
+/// need the front end that feature links.
+#[cfg(feature = "verilog-digital")]
+pub mod ams_semantics;
 pub mod corpus;
+/// The mixed-versus-all-analog exit-gate benchmarks. Behind `verilog-digital`
+/// for the reason [`ams_semantics`] is: half of each benchmark is a mixed deck.
+#[cfg(feature = "verilog-digital")]
+pub mod mixed_benchmarks;
 pub mod oracle;
+/// The dual-representation reference blocks. Behind `verilog-digital` because
+/// the RNM half of every block is a call into the digital host, and a module
+/// that could not run one would be half a suite.
+#[cfg(feature = "verilog-digital")]
+pub mod rnm;
 pub mod run;
 pub mod scale;
 pub mod testbench;
 pub mod trace;
 
+pub use ams::{
+    AmsCase, AmsCorpus, AmsCorpusError, AmsDirection, AmsPort, AmsPortValue, AmsStimulus,
+};
 pub use corpus::{Case, CaseDirection, CasePort, Corpus, CorpusError, Stimulus};
 pub use oracle::{OracleAvailability, OracleTools, VerilogEngine};
 pub use run::{RunError, RunOutcome, run_case};
@@ -135,4 +153,14 @@ pub fn corpus_dir() -> PathBuf {
         .expect("the conformance crate sits two levels below the workspace root")
         .join("tests")
         .join("verilog")
+}
+
+/// Root of the Verilog-AMS real-net corpus.
+///
+/// A subdirectory of [`corpus_dir`], which is what keeps the two apart without
+/// either having to know about the other: [`corpus::Corpus`] discovers by
+/// reading files rather than by recursing, so these cases are invisible to the
+/// corpus beside them and the Icarus and Verilator arms never see one.
+pub fn ams_corpus_dir() -> PathBuf {
+    corpus_dir().join("ams")
 }

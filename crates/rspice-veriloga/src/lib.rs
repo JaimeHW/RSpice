@@ -83,6 +83,7 @@ pub mod ast;
 mod canonical_compat;
 pub mod canonical_ir;
 pub mod codegen;
+pub mod connect;
 pub mod disciplines;
 pub mod error;
 pub mod expr_converter;
@@ -166,6 +167,22 @@ pub use virtual_source::{
     VirtualRuntimeCompileFailure, VirtualSourceBundle, VirtualSourceDependency,
     VirtualSourceDiagnostic, VirtualSourceError, VirtualSourceFile, VirtualSourceInclude,
 };
+
+/// What one source file says about Verilog-AMS LRM 2.4 clause 7.
+#[derive(Debug, Clone, Default)]
+pub struct ConnectSpecification {
+    /// The file's `connectmodule` declarations and `connectrules` blocks,
+    /// merged into one table.
+    pub rules: connect::ConnectRuleTable,
+    /// Whether the file declares an ordinary `module` as well.
+    ///
+    /// A file that declares only connect modules is a connect library: it has
+    /// no device for a deck to instantiate, and asking a compiler for one
+    /// would fail on a file that is perfectly well formed. Section 7.5 makes a
+    /// connect module a module, but not one an instance card names — the
+    /// simulator instantiates it, per section 7.8.
+    pub declares_module: bool,
+}
 
 /// Result of compiling a Verilog-A source file from disk.
 ///
@@ -1122,6 +1139,52 @@ impl VerilogACompiler {
         )))
     }
 
+    /// Read a source file's clause 7 connect specification without compiling
+    /// any module from it.
+    ///
+    /// The engine needs a design's [`connect::ConnectRuleTable`] to decide
+    /// which connect module bridges a mixed node, and it needs it whether or
+    /// not the file also declares a device. Compiling would answer a question
+    /// nobody asked and would fail on a file that declares only connect
+    /// modules, which is exactly the shape a connect library has.
+    ///
+    /// Preprocessing runs first, so a `connectmodule` reached through an
+    /// `` `include `` is read like any other. What this deliberately does not
+    /// do is cache: the caller decides whether a file is worth reading, and
+    /// the intended filter is the cheapest one there is — a file whose text
+    /// does not contain the word `connectrules` declares no rules.
+    pub fn connect_specification_from_file(
+        &self,
+        path: &std::path::Path,
+    ) -> CompileResult<ConnectSpecification> {
+        let mut preprocessor = self.configured_preprocessor();
+        let preprocessed = preprocessor
+            .preprocess_file(path)
+            .map_err(|error| CompileError::io_error(format!("Preprocessor error: {error}")))?;
+        self.connect_specification_from_preprocessed(&preprocessed)
+    }
+
+    /// [`Self::connect_specification_from_file`] on source that is already
+    /// preprocessed.
+    ///
+    /// The table is built by semantic analysis rather than beside it, because
+    /// a `connect` statement is checked against the disciplines the *file*
+    /// declares and only the analyzer knows those.
+    pub fn connect_specification_from_preprocessed(
+        &self,
+        source: &str,
+    ) -> CompileResult<ConnectSpecification> {
+        let source_map = SourceMap::new();
+        let source_id = source_map.add_source("<connect rules>", source);
+        let tokens = Lexer::new(source, source_id).collect_tokens()?;
+        let source_file = Parser::new(&tokens).parse()?;
+        let analyzed = SemanticAnalyzer::new().analyze(&source_file)?;
+        Ok(ConnectSpecification {
+            declares_module: !analyzed.modules.is_empty(),
+            rules: analyzed.connect_rules,
+        })
+    }
+
     /// Compile a source file from disk with preprocessing and dependency metadata.
     ///
     /// The file must contain exactly one module; multi-module files
@@ -1345,8 +1408,20 @@ impl VerilogACompiler {
         let source_digest = canonical_ir::StableDigest::from_text(&preprocessed).as_hex();
         measurements.checkpoint(PipelinePhase::BytecodeGeneration)?;
         let phase_started = web_time::Instant::now();
-        let model = CodeGenerator::new()
-            .generate_analyzed_module_with_source_digest(&executable, source_digest)?;
+        // The same `enable_ams` branch the in-memory runtime entry takes. It
+        // used to be missing here, so a caller that opted in to mixed
+        // compilation got it for a source string and not for a file — and the
+        // engine's `.VERILOGA` cache reads files. Both entries produce a
+        // `RuntimeCompileReport`-shaped pair whose canonical half carries the
+        // discrete plan, so both have to lower the analog half the same way or
+        // the option means two different things depending on where the source
+        // came from.
+        let generator = CodeGenerator::new();
+        let model = if self.options.enable_ams {
+            generator.generate_mixed_analog_half_with_source_digest(&executable, source_digest)?
+        } else {
+            generator.generate_analyzed_module_with_source_digest(&executable, source_digest)?
+        };
         measurements.record(PipelinePhase::BytecodeGeneration, phase_started.elapsed())?;
         let canonical_ir = self.build_canonical_ir_artifact_from_module(
             &source_package,

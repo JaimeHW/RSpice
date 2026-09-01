@@ -66,12 +66,38 @@ impl<'a> Parser<'a> {
                 items.push(Item::DefaultTransition(
                     self.parse_default_transition_directive()?,
                 ));
+            } else if self.check_identifier_text("__rspice_default_discipline") {
+                if !attributes.is_empty() {
+                    return Err(self.error(ParseErrorKind::UnexpectedToken(
+                        "attributes before `default_discipline`".to_string(),
+                    )));
+                }
+                items.push(Item::DefaultDiscipline(
+                    self.parse_default_discipline_directive()?,
+                ));
             } else if self.check(TokenKind::Module) || self.check(TokenKind::Macromodule) {
                 let mut module = self.parse_module()?;
                 let mut combined_attributes = attributes;
                 combined_attributes.append(&mut module.attributes);
                 module.attributes = combined_attributes;
                 items.push(Item::Module(module));
+            } else if self.check(TokenKind::Connectmodule) {
+                // Verilog-AMS LRM 2.4 Syntax 7-4 makes `connectmodule` a third
+                // `module_keyword`, so the body and the `endmodule` terminator
+                // are a module's. Nothing here is specific to the connect
+                // module beyond which `Item` it lands in.
+                let mut module = self.parse_module()?;
+                let mut combined_attributes = attributes;
+                combined_attributes.append(&mut module.attributes);
+                module.attributes = combined_attributes;
+                items.push(Item::ConnectModule(module));
+            } else if self.check(TokenKind::Connectrules) {
+                if !attributes.is_empty() {
+                    return Err(self.error(ParseErrorKind::UnexpectedToken(
+                        "attributes before `connectrules`".to_string(),
+                    )));
+                }
+                items.push(Item::ConnectRules(self.parse_connect_rules()?));
             } else if self.check(TokenKind::Discipline) {
                 items.push(Item::Discipline(self.parse_discipline()?));
             } else if self.check(TokenKind::Nature) {
@@ -113,6 +139,211 @@ impl<'a> Parser<'a> {
             value,
             span: start.extend(self.previous_span()),
         })
+    }
+
+    fn parse_default_discipline_directive(
+        &mut self,
+    ) -> Result<DefaultDisciplineDirective, ParseError> {
+        let start = self.current_span();
+        self.advance();
+        self.expect(TokenKind::LParen)?;
+        let discipline = if self.check(TokenKind::RParen) {
+            None
+        } else {
+            Some(self.expect_discipline_name("default discipline")?)
+        };
+        self.expect(TokenKind::RParen)?;
+        self.expect(TokenKind::Semicolon)?;
+        Ok(DefaultDisciplineDirective {
+            discipline,
+            span: start.extend(self.previous_span()),
+        })
+    }
+
+    /// Parse a `connectrules` … `endconnectrules` block.
+    ///
+    /// Verilog-AMS LRM 2.4 Syntax 7-5 and grammar A.1.8.
+    fn parse_connect_rules(&mut self) -> Result<ConnectRulesDecl, ParseError> {
+        let start = self.current_span();
+        self.advance(); // `connectrules`
+        let name = self.expect_identifier("connectrules name")?;
+        self.expect(TokenKind::Semicolon)?;
+
+        let mut items = Vec::new();
+        while !self.check(TokenKind::Endconnectrules) && !self.at_end() {
+            if !self.check(TokenKind::Connect) {
+                return Err(self.error(ParseErrorKind::UnexpectedToken(format!(
+                    "{:?} in a connectrules block, which holds `connect` statements only",
+                    self.current().kind
+                ))));
+            }
+            items.push(if self.connect_statement_is_resolution() {
+                ConnectRulesItem::Resolution(self.parse_connect_resolution()?)
+            } else {
+                ConnectRulesItem::Insertion(self.parse_connect_insertion()?)
+            });
+        }
+        self.expect(TokenKind::Endconnectrules)?;
+
+        Ok(ConnectRulesDecl {
+            name: name.into(),
+            items,
+            span: start.extend(self.previous_span()),
+        })
+    }
+
+    /// Which of Syntax 7-5's two `connectrules_item` forms the statement under
+    /// the cursor is.
+    ///
+    /// Both open with `connect` followed by an identifier, so the forms cannot
+    /// be told apart from a single token of lookahead — `connect d2a merged …`
+    /// and `connect cmos3, cmos4 resolveto …` agree for two tokens. The
+    /// keyword that distinguishes them is `resolveto`, and it always precedes
+    /// the statement's `;`, so scanning to the first of the two settles it
+    /// without backtracking.
+    fn connect_statement_is_resolution(&self) -> bool {
+        let mut pos = self.pos;
+        while let Some(token) = self.tokens.get(pos) {
+            match token.kind {
+                TokenKind::Resolveto => return true,
+                TokenKind::Semicolon | TokenKind::Eof => return false,
+                _ => pos += 1,
+            }
+        }
+        false
+    }
+
+    /// Syntax 7-6's `connect_insertion`.
+    fn parse_connect_insertion(&mut self) -> Result<ConnectInsertion, ParseError> {
+        let start = self.current_span();
+        self.advance(); // `connect`
+        let connect_module = self.expect_identifier("connect module name")?;
+
+        let mode = match self.current().kind {
+            TokenKind::Merged => {
+                self.advance();
+                Some(ConnectMode::Merged)
+            }
+            TokenKind::Split => {
+                self.advance();
+                Some(ConnectMode::Split)
+            }
+            _ => None,
+        };
+
+        // Section 7.7.3's parameter passing attribute, which is spelled as an
+        // instance's `parameter_value_assignment` and parses as one.
+        let parameters = if self.match_token(TokenKind::Hash) {
+            self.parse_instance_parameter_overrides()?
+        } else {
+            Vec::new()
+        };
+
+        let port_overrides = if self.check(TokenKind::Semicolon) {
+            None
+        } else {
+            let first = self.parse_connect_port_override()?;
+            self.expect(TokenKind::Comma)?;
+            let second = self.parse_connect_port_override()?;
+            if first.direction.is_some() != second.direction.is_some() {
+                return Err(self.error(ParseErrorKind::UnsupportedConstruct {
+                    context: "connect port overrides".to_string(),
+                    found: "one directed and one undirected discipline; Verilog-AMS LRM 2.4 \
+                            Syntax 7-6 admits either two bare disciplines or two directed ones, \
+                            never a mixture"
+                        .to_string(),
+                }));
+            }
+            Some(ConnectPortOverrides { first, second })
+        };
+        self.expect(TokenKind::Semicolon)?;
+
+        Ok(ConnectInsertion {
+            connect_module: connect_module.into(),
+            mode,
+            parameters,
+            port_overrides,
+            span: start.extend(self.previous_span()),
+        })
+    }
+
+    fn parse_connect_port_override(&mut self) -> Result<ConnectPortOverride, ParseError> {
+        let start = self.current_span();
+        let direction = match self.current().kind {
+            TokenKind::Input => {
+                self.advance();
+                Some(PortDirection::Input)
+            }
+            TokenKind::Output => {
+                self.advance();
+                Some(PortDirection::Output)
+            }
+            TokenKind::Inout => {
+                self.advance();
+                Some(PortDirection::Inout)
+            }
+            _ => None,
+        };
+        let discipline = self.expect_discipline_name("connect port discipline")?;
+        Ok(ConnectPortOverride {
+            direction,
+            discipline,
+            span: start.extend(self.previous_span()),
+        })
+    }
+
+    /// Syntax 7-7's `connect_resolution`.
+    fn parse_connect_resolution(&mut self) -> Result<ConnectResolution, ParseError> {
+        let start = self.current_span();
+        self.advance(); // `connect`
+
+        let mut disciplines = vec![self.expect_discipline_name("resolved discipline")?];
+        while !self.check(TokenKind::Resolveto) {
+            // A.1.8 separates the list with commas. Figures 7-2 through 7-5
+            // write the same lists with spaces, so the separator is accepted as
+            // optional rather than reading the standard's own examples as
+            // errors.
+            self.match_token(TokenKind::Comma);
+            if self.check(TokenKind::Resolveto) {
+                break;
+            }
+            disciplines.push(self.expect_discipline_name("resolved discipline")?);
+        }
+        self.expect(TokenKind::Resolveto)?;
+
+        let target = if self.match_token(TokenKind::Exclude) {
+            ConnectResolveTarget::Exclude
+        } else {
+            ConnectResolveTarget::Discipline(self.expect_discipline_name("resolution target")?)
+        };
+        self.expect(TokenKind::Semicolon)?;
+
+        Ok(ConnectResolution {
+            disciplines,
+            target,
+            span: start.extend(self.previous_span()),
+        })
+    }
+
+    /// A discipline name in a connect statement.
+    ///
+    /// `electrical`, `voltage`, and `current` have token kinds of their own
+    /// because a net declaration begins with them, so a bare
+    /// `expect_identifier` would refuse the one discipline every connect rule
+    /// in practice names.
+    fn expect_discipline_name(&mut self, context: &str) -> Result<SmolStr, ParseError> {
+        match self.current().kind {
+            TokenKind::Electrical | TokenKind::Voltage | TokenKind::Current => {
+                let text = self
+                    .current()
+                    .text
+                    .clone()
+                    .unwrap_or_else(|| format!("{:?}", self.current().kind).to_lowercase());
+                self.advance();
+                Ok(text.into())
+            }
+            _ => Ok(self.expect_identifier(context)?.into()),
+        }
     }
 
     /// Parse a module definition
@@ -188,6 +419,21 @@ impl<'a> Parser<'a> {
                         TokenKind::Reg => {
                             self.advance();
                             Some(PortNetType::Reg)
+                        }
+                        // Verilog-AMS LRM 2.4 section 6.5.2 puts `wreal`
+                        // exactly where a 1364 net type goes.
+                        TokenKind::Wreal => {
+                            let resolution = self.wreal_resolution();
+                            self.advance();
+                            Some(PortNetType::Wreal(resolution))
+                        }
+                        // And a *variable* type where 1364 section 12.3.4 puts
+                        // `reg`. `output real vout;` is that form with section
+                        // 3.9's `real`, which is the only port a process may
+                        // procedurally assign a real to.
+                        TokenKind::Real => {
+                            self.advance();
+                            Some(PortNetType::Real)
                         }
                         _ => None,
                     };
@@ -370,7 +616,7 @@ impl<'a> Parser<'a> {
             // The discrete half of Verilog-AMS. These keywords were refused by
             // name until the digital grammar existed; each one that gained a
             // production moved here.
-            TokenKind::Wire => {
+            TokenKind::Wire | TokenKind::Wreal => {
                 let net = self.parse_digital_net_decl()?;
                 module.digital_nets.push(net);
             }
@@ -736,6 +982,20 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Some(PortNetType::Reg)
             }
+            // Verilog-AMS LRM 2.4 section 6.5.2's port grammar reads
+            // `[discipline_identifier] [net_type | wreal]`, so a real-valued
+            // port declares its type here like any other.
+            TokenKind::Wreal => {
+                let resolution = self.wreal_resolution();
+                self.advance();
+                Some(PortNetType::Wreal(resolution))
+            }
+            // The variable half of the same grammar rule, as IEEE 1364-2005
+            // section 12.3.4 already reads `output reg q;`.
+            TokenKind::Real => {
+                self.advance();
+                Some(PortNetType::Real)
+            }
             _ => None,
         };
 
@@ -804,8 +1064,30 @@ impl<'a> Parser<'a> {
                 items,
                 span: declaration.span,
             }),
+            // `input wreal in;` stands for `input in; wreal in;` the same way
+            // `output reg q;` stands for its pair, so it expands into the
+            // declaration the rest of the compiler already reads.
+            PortNetType::Wreal(resolution) => module.digital_nets.push(DigitalNetDecl {
+                kind: DigitalNetKind::Wreal(resolution),
+                signedness: Signedness::Unsigned,
+                range: declaration.range.clone(),
+                items,
+                span: declaration.span,
+            }),
             PortNetType::Reg => module.digital_variables.push(DigitalVariableDecl {
                 kind: DigitalVariableKind::Reg,
+                signedness: declaration.signedness,
+                range: declaration.range.clone(),
+                items,
+                span: declaration.span,
+            }),
+            // `output real vout;` stands for `output vout; real vout;` with the
+            // second declaration being the discrete domain's. The range and the
+            // `signed` marker ride along rather than being dropped: a real has
+            // neither, and the analyzer refuses each by name where it can say
+            // which one was written.
+            PortNetType::Real => module.digital_variables.push(DigitalVariableDecl {
+                kind: DigitalVariableKind::Real,
                 signedness: declaration.signedness,
                 range: declaration.range.clone(),
                 items,
@@ -2894,6 +3176,7 @@ impl<'a> Parser<'a> {
                 | TokenKind::Specify
                 | TokenKind::Task
                 | TokenKind::Wire
+                | TokenKind::Wreal
         )
     }
 
@@ -2908,6 +3191,10 @@ impl<'a> Parser<'a> {
         match kind {
             TokenKind::Reg => Some("reg"),
             TokenKind::Always => Some("always"),
+            // `wreal` and its resolved spellings were `AmsDigital` refusals
+            // before section 3.7 had a production, so none of them has ever
+            // been usable as a name either.
+            TokenKind::Wreal => Some("wreal"),
             _ => None,
         }
     }
@@ -2970,9 +3257,22 @@ impl<'a> Parser<'a> {
         )
     }
 
+    /// Drop a directive the preprocessor left behind, operand and all.
+    ///
+    /// Only directives that stage does not know reach the parser, and it is
+    /// line-oriented about them: everything after the name on a directive's own
+    /// line is that directive's operand. The lexer records that extent as the
+    /// directive token's span (see `lexer::Lexer::scan_directive`), so the
+    /// operand is exactly the run of following tokens that start inside it.
+    /// Advancing once instead would leave the operand in the stream —
+    /// `` `default_nettype wire `` would drop the directive and then try to
+    /// parse `wire` as a top-level item.
     fn skip_directive(&mut self) -> Result<(), ParseError> {
-        self.advance(); // Skip directive token
-        // Skip until newline (handled by lexer in practice)
+        let directive = self.current_span();
+        self.advance();
+        while !self.at_end() && self.current_span().start < directive.end {
+            self.advance();
+        }
         Ok(())
     }
 
@@ -3014,6 +3314,42 @@ mod tests {
             .collect_tokens()
             .expect("lex failed");
         Parser::new(&tokens).parse().expect_err("parse succeeded")
+    }
+
+    /// An unknown directive's operand must leave with the directive. Before
+    /// the span-widening rule the `wire` of `` `default_nettype wire `` reached
+    /// the top-level item loop on its own and failed there.
+    #[test]
+    fn an_unknown_directive_takes_its_operand_with_it() {
+        let file = parse(
+            "`default_nettype wire\n\
+             module a(p);\n\
+             inout p;\n\
+             electrical p;\n\
+             endmodule\n",
+        );
+        assert_eq!(file.items.len(), 1);
+        assert!(matches!(file.items.first(), Some(Item::Module(_))));
+    }
+
+    /// The operand belongs to the directive only when the directive opens the
+    /// line. A backtick inside a line is a macro invocation the preprocessor
+    /// could not expand, and what follows it on that line is code — dropping it
+    /// would delete the author's source rather than a directive's argument.
+    #[test]
+    fn a_directive_inside_a_line_keeps_the_rest_of_the_line() {
+        let tokens = Lexer::new("x = `UNDEFINED + 1;", SourceId::new(0))
+            .collect_tokens()
+            .expect("lex failed");
+        let directive = tokens
+            .iter()
+            .find(|token| token.kind == TokenKind::Directive)
+            .expect("a directive token");
+        assert_eq!(directive.text.as_deref(), Some("`UNDEFINED"));
+        assert!(
+            tokens.iter().any(|token| token.kind == TokenKind::Plus),
+            "the code after a mid-line directive stays in the stream"
+        );
     }
 
     #[test]

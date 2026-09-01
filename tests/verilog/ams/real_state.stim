@@ -1,0 +1,47 @@
+# RSPICE-VERILOG-AMS-STIMULUS 1
+#
+# The sample clock is a column, not a harness convenience: this corpus has no
+# `clock` line, and a driven column is better here anyway, because the reference
+# model reads the same vectors and therefore sees exactly the edges the design
+# sees rather than a schedule it has to reconstruct.
+#
+# Two vectors per sample -- `clk` low, then `clk` high with `vin` unchanged --
+# so the rising edge lands between them and `vin` is already settled when it
+# arrives. `clk` starts low, so the first vector's x-to-0 transition is a
+# falling edge and wakes nothing; a first vector of `1` would be an x-to-1
+# posedge and would sample an input that had never been applied.
+#
+# The input walks a step, two smaller levels, a step of the other sign, a hold
+# at zero long enough for the pole to be visible in the decay, and a second
+# step. Eight samples: enough that a filter which merely followed its input, or
+# one whose state reset each edge, parts from the reference within the first
+# three.
+
+module real_state
+
+input clk 1
+input vin real
+
+output vout real
+output vsum real
+output vround real
+
+step 10
+settle 5
+
+vector 0 1.0
+vector 1 1.0
+vector 0 0.5
+vector 1 0.5
+vector 0 -0.25
+vector 1 -0.25
+vector 0 2.0
+vector 1 2.0
+vector 0 0.0
+vector 1 0.0
+vector 0 0.0
+vector 1 0.0
+vector 0 1.0
+vector 1 1.0
+vector 0 1.0
+vector 1 1.0

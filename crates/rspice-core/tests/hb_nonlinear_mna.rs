@@ -229,21 +229,8 @@ fn nonlinear_hb_matrix_budget_counts_branch_spectrum_unknowns() {
 
 #[test]
 fn nonlinear_hb_fails_closed_before_solving_unrepresented_periodic_families() {
-    let cases = [
-        (
-            "\
-* coupled inductors require a mutual branch block
-iin 0 a dc 0
-l1 a 0 1u
-l2 b 0 1u
-r2 b 0 50
-k12 l1 l2 0.9
-.end
-",
-            "coupled-inductor",
-        ),
-        (
-            "\
+    let cases = [(
+        "\
 * solution-dependent capacitance requires periodic charge linearization
 iin 0 out dc 0
 vctrl ctrl 0 dc 0.5
@@ -251,9 +238,8 @@ c1 out 0 C={1p*(1+V(ctrl))}
 r1 out 0 1k
 .end
 ",
-            "solution-dependent capacitor",
-        ),
-    ];
+        "solution-dependent capacitor",
+    )];
 
     for (deck, expected_family) in cases {
         let netlist = Netlist::parse(deck).expect("unsupported HB deck still parses");

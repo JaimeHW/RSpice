@@ -225,6 +225,10 @@ impl Engine {
             if circuit.has_xspice_devices() {
                 circuit.stamp_xspice_transient_trial(matrix, &mut rhs, time, 0.0, &solution);
             }
+            #[cfg(feature = "veriloga")]
+            if circuit.has_mixed_signal_hosts() {
+                circuit.stamp_mixed_operating_point(matrix, &mut rhs, &solution, time)?;
+            }
 
             let Ok(()) = matrix.solve_into(&rhs, &mut proposal) else {
                 break;

@@ -165,6 +165,67 @@ endmodule
     assert_eq!(operators, 3);
 }
 
+/// Every stateful analog operator is Newton class even when nothing it reads
+/// is.
+///
+/// Written with model-scope operands on purpose. The classifier raises a value
+/// to the volatility of everything it reads, so an operator over a
+/// bias-dependent argument comes out Newton whatever `leaf_class` says about
+/// it — which is why the hole this pins against was invisible: `transition` and
+/// its derivative had no arm at all, and the catch-all answers `Model`. A ramp
+/// between two parameters would then have been computed once per model card and
+/// cached forever, which is a waveform frozen at its first sample.
+///
+/// `transition` is not in this fixture because it cannot be reached from source
+/// through this lowering at all — see `leaf_class`'s own unit test, which calls
+/// the classifier directly and does cover it.
+#[test]
+fn stateful_operators_are_newton_class_even_over_static_operands() {
+    let artifact = artifact(
+        r#"
+module static_operand_state(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real level = 1.0;
+    parameter real tr = 1.0e-9;
+    real delayed, wrapped, limited, crossed;
+    analog begin
+        delayed = absdelay(level, tr);
+        wrapped = idtmod(level, 0.0, 1.0, 0.0);
+        limited = slew(level, 1.0e6);
+        crossed = last_crossing(level - 0.5, 1);
+        I(p, n) <+ 1.0e-3 * (delayed + wrapped + limited + crossed) * V(p, n);
+    end
+endmodule
+"#,
+    );
+    let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir)
+        .expect("static-operand stateful CFG lowering");
+    let schedule = schedule_cfg(&cfg.function);
+    let mut operators = 0;
+    for value in &cfg.function.values {
+        if matches!(
+            value.kind,
+            CfgValueKind::AbsDelay { .. }
+                | CfgValueKind::IdtMod { .. }
+                | CfgValueKind::Slew { .. }
+                | CfgValueKind::LastCrossing { .. }
+        ) {
+            operators += 1;
+            assert_eq!(
+                schedule.class(value.id),
+                InvalidationClass::Newton,
+                "{:?} owns accepted history and cannot be cached at a coarser class",
+                value.kind
+            );
+        }
+    }
+    assert_eq!(
+        operators, 4,
+        "the fixture must reach every stateful operator it names"
+    );
+}
+
 #[test]
 fn source_parameter_scope_separates_model_card_and_instance_geometry_work() {
     let source = r#"
@@ -461,6 +522,10 @@ fn inputs(staged: &[f64]) -> CfgEvalInputs<f64> {
     CfgEvalInputs {
         parameters: vec![1.0e-6, 0.4, 300.15, 250.0, 1.0e-14, 2.0],
         parameter_given: vec![false; 6],
+        // Connected, like every fixture's terminals here — at the CFG level
+        // `$port_connected` folds to a constant one — and sized past the widest
+        // of them, the way the fixed vectors around it are.
+        port_connected: vec![true; 4],
         event_state: Vec::new(),
         event_controls: HashMap::new(),
         node_potentials: vec![0.41, 0.28, 0.15, 0.07],

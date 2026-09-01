@@ -35,12 +35,12 @@ use std::collections::{HashMap, HashSet};
 use crate::disciplines::is_standard_flow_access;
 
 use super::cfg::{
-    CfgBinaryOp, CfgDdxAxis, CfgFunction, CfgTerminator, CfgUnaryOp, CfgValueKind, CfgValueType,
-    CfgVariable, SsaBuilder,
+    CfgBinaryOp, CfgDdxAxis, CfgFunction, CfgIntegerBitwiseOp, CfgTerminator, CfgUnaryOp,
+    CfgValueKind, CfgValueType, CfgVariable, SsaBuilder,
 };
 use super::hir::{
-    HirAnalogOperator, HirContribution, HirContributionKind, HirExprKind, HirExpression,
-    HirLaplaceKind, HirLimiterArgument, HirModel, HirRegion, HirZiKind,
+    HirAnalogOperator, HirContribution, HirContributionKind, HirCrossDirection, HirExprKind,
+    HirExpression, HirLaplaceKind, HirLimiterArgument, HirModel, HirRegion, HirZiKind,
 };
 use super::mir::{MirEquationKind, MirModel};
 use super::noise::{contains_noise, is_noise_call, string_literal};
@@ -1682,6 +1682,34 @@ impl<'a> CfgLowerer<'a> {
                 self.named_branch_access(access, name, span)
             }
             HirExprKind::SystemFunction { name, args } => self.system_function(name, args, span),
+            // The call spelling of a dynamic operator, which the arm below
+            // covers for the operator spelling.
+            //
+            // `absdelay(x, d)` reaches the HIR as an `AnalogOperator` or as a
+            // `Call` depending on how it was written, and this mode has to
+            // treat the two the same: it substitutes the operator's zero primal
+            // and records the noise site, which is what makes
+            // `noise_metadata_from_hir` able to slice a model whose routing
+            // operator the residual CFG need not implement. Keying the guard on
+            // the spelling let the call form through — invisibly, while the
+            // call form of these operators was refused outright.
+            HirExprKind::Call { name, .. }
+                if self.noise_metadata_only
+                    && is_dynamic_operator_call(name)
+                    && contains_noise(self.hir, expression.id) =>
+            {
+                if self.metadata_assignment_value
+                    && !noise_substitution_is_zero(self.hir, expression.id)
+                {
+                    self.unsupported(
+                        span,
+                        "a noise-bearing dynamic operator assignment whose deterministic primal can reach later noise metadata"
+                            .to_string(),
+                    );
+                }
+                self.metadata_noise_expr(expression.id);
+                self.real_constant(0.0)
+            }
             HirExprKind::Call { name, args } => self.call(expression.id, name, args, span),
             HirExprKind::AnalogOperator { .. }
                 if self.noise_metadata_only && contains_noise(self.hir, expression.id) =>
@@ -1859,6 +1887,15 @@ impl<'a> CfgLowerer<'a> {
         right: ExprId,
         span: SourceSpanRef,
     ) -> ValueId {
+        if let Some(op) = integer_bitwise_op(op.as_str()) {
+            let left = self.expr(left);
+            let right = self.expr(right);
+            return self.builder.push(
+                self.block,
+                CfgValueType::Real,
+                CfgValueKind::IntegerBitwise { op, left, right },
+            );
+        }
         let Some(op) = binary_op(op.as_str()) else {
             self.unsupported(span, format!("binary operator '{op}'"));
             return self.real_constant(0.0);
@@ -1878,6 +1915,14 @@ impl<'a> CfgLowerer<'a> {
             "Not" => {
                 let input = self.expr(operand);
                 self.unary_typed(CfgUnaryOp::Not, input, CfgValueType::Boolean)
+            }
+            "BitNot" => {
+                let input = self.expr(operand);
+                self.builder.push(
+                    self.block,
+                    CfgValueType::Real,
+                    CfgValueKind::IntegerBitwiseNot { input },
+                )
             }
             _ => {
                 self.unsupported(span, format!("unary operator '{op}'"));
@@ -2341,16 +2386,36 @@ impl<'a> CfgLowerer<'a> {
             self.unsupported(span, "$simparam with a non-literal name".to_string());
             return self.real_constant(0.0);
         };
-        if let Some(fallback) = args.get(1) {
-            return self.expr(*fallback);
+        if self.noise_metadata_only {
+            if let Some(fallback) = args.get(1) {
+                return self.expr(*fallback);
+            }
+            let value = match value.as_str() {
+                "gmin" => 1.0e-12,
+                "tnom" => 300.15,
+                "simulatorVersion" => 1.0,
+                _ => 0.0,
+            };
+            return self.real_constant(value);
         }
-        let value = match value.as_str() {
-            "gmin" => 1.0e-12,
-            "tnom" => 300.15,
-            "simulatorVersion" => 1.0,
-            _ => 0.0,
+
+        // Ordinary generated devices receive simulator-owned values (most
+        // importantly the gmin continuation value) on every Newton call. Keep
+        // the source fallback in the CFG, but do not replace the runtime leaf
+        // with it. Metadata-only noise evaluation has no such runtime input,
+        // so the closed defaults above are deliberately confined to that mode.
+        let fallback = match args.get(1) {
+            Some(fallback) => self.expr(*fallback),
+            None => self.real_constant(0.0),
         };
-        self.real_constant(value)
+        self.builder.push(
+            self.block,
+            CfgValueType::Real,
+            CfgValueKind::SimParam {
+                name: SmolStr::new(value.to_ascii_lowercase()),
+                fallback,
+            },
+        )
     }
 
     fn parameter_argument(&self, expr: ExprId) -> Option<ParamId> {
@@ -2389,12 +2454,69 @@ impl<'a> CfgLowerer<'a> {
             // exact stateless passthrough, so the CFG can lower it directly.
             ("slew", 1) => self.expr(args[0]),
             ("slew", 2 | 3) => {
-                self.unsupported(
-                    span,
-                    "rate-limited slew operator; generated Rust cannot degrade it to a passthrough"
-                        .to_string(),
-                );
-                self.real_constant(0.0)
+                let input = self.expr(args[0]);
+                let max_rise = self.expr(args[1]);
+                let max_fall = args.get(2).map(|value| self.expr(*value));
+                self.builder.push(
+                    self.block,
+                    CfgValueType::Real,
+                    CfgValueKind::Slew {
+                        operator: expression,
+                        input,
+                        max_rise,
+                        max_fall,
+                    },
+                )
+            }
+            // Keyed by the call, like `ddt` and `idt` above: the transport
+            // buffer, the wrapped total and the detector are per-instance slots
+            // named by the operator, and keying one by its argument would name
+            // a slot no backend allocated.
+            ("absdelay", 2 | 3) => {
+                let input = self.expr(args[0]);
+                let delay = self.expr(args[1]);
+                let max_delay = args.get(2).map(|value| self.expr(*value));
+                self.builder.push(
+                    self.block,
+                    CfgValueType::Real,
+                    CfgValueKind::AbsDelay {
+                        operator: expression,
+                        input,
+                        delay,
+                        max_delay,
+                    },
+                )
+            }
+            ("idtmod", 1 | 2) => self.idt(expression, args[0], args.get(1).copied()),
+            ("idtmod", 3 | 4) => {
+                let input = self.expr(args[0]);
+                let ic = self.expr(args[1]);
+                let modulus = self.expr(args[2]);
+                let offset = self.optional_argument(args, 3, 0.0);
+                self.builder.push(
+                    self.block,
+                    CfgValueType::Real,
+                    CfgValueKind::IdtMod {
+                        operator: expression,
+                        input,
+                        ic,
+                        modulus,
+                        offset,
+                    },
+                )
+            }
+            ("last_crossing", 1 | 2) => {
+                let input = self.expr(args[0]);
+                let direction = self.optional_argument(args, 1, 0.0);
+                self.builder.push(
+                    self.block,
+                    CfgValueType::Real,
+                    CfgValueKind::LastCrossing {
+                        operator: expression,
+                        input,
+                        direction,
+                    },
+                )
             }
             // Keyed by the *call*, not by its argument. The other `ddt` path —
             // `HirAnalogOperator::Ddt`, below — always did, and so does the
@@ -2671,22 +2793,7 @@ impl<'a> CfgLowerer<'a> {
                     self.unsupported(span, "idt with an assert or abstol argument".to_string());
                     return self.real_constant(0.0);
                 }
-                let input = self.expr(*expr);
-                // Absent means zero, which is what the LRM says an unstated
-                // initial condition is.
-                let ic = match ic {
-                    Some(ic) => self.expr(*ic),
-                    None => self.real_constant(0.0),
-                };
-                self.builder.push(
-                    self.block,
-                    CfgValueType::Real,
-                    CfgValueKind::Idt {
-                        operator: expression.id,
-                        input,
-                        ic,
-                    },
-                )
+                self.idt(expression.id, *expr, *ic)
             }
             HirAnalogOperator::Transition {
                 site,
@@ -2758,18 +2865,111 @@ impl<'a> CfgLowerer<'a> {
                     },
                 )
             }
+            HirAnalogOperator::IdtMod {
+                expr,
+                ic,
+                modulus,
+                offset,
+                abstol,
+            } => {
+                // A modulus is what makes this `idtmod` rather than `idt`; the
+                // front end accepts the two-argument spelling as an alias for
+                // the unwrapped integral, and lowering that as a fold with no
+                // period would divide by zero.
+                if abstol.is_some() {
+                    self.unsupported(span, "idtmod with an abstol argument".to_string());
+                    return self.real_constant(0.0);
+                }
+                let Some(modulus) = modulus else {
+                    if offset.is_some() {
+                        self.unsupported(span, "idtmod with an offset and no modulus".to_string());
+                        return self.real_constant(0.0);
+                    }
+                    return self.idt(expression.id, *expr, *ic);
+                };
+                let input = self.expr(*expr);
+                let ic = self.optional_expr(*ic, 0.0);
+                let modulus = self.expr(*modulus);
+                let offset = self.optional_expr(*offset, 0.0);
+                self.builder.push(
+                    self.block,
+                    CfgValueType::Real,
+                    CfgValueKind::IdtMod {
+                        operator: expression.id,
+                        input,
+                        ic,
+                        modulus,
+                        offset,
+                    },
+                )
+            }
+            HirAnalogOperator::Absdelay {
+                expr,
+                delay,
+                max_delay,
+            } => {
+                let input = self.expr(*expr);
+                let delay = self.expr(*delay);
+                let max_delay = max_delay.map(|value| self.expr(value));
+                self.builder.push(
+                    self.block,
+                    CfgValueType::Real,
+                    CfgValueKind::AbsDelay {
+                        operator: expression.id,
+                        input,
+                        delay,
+                        max_delay,
+                    },
+                )
+            }
+            HirAnalogOperator::LastCrossing { expr, edge } => {
+                let input = self.expr(*expr);
+                let direction = self.real_constant(cross_direction_code(*edge));
+                self.builder.push(
+                    self.block,
+                    CfgValueType::Real,
+                    CfgValueKind::LastCrossing {
+                        operator: expression.id,
+                        input,
+                        direction,
+                    },
+                )
+            }
             HirAnalogOperator::Slew {
                 expr,
                 max_rise: None,
                 max_fall: None,
             } => self.expr(*expr),
-            HirAnalogOperator::Slew { .. } => {
-                self.unsupported(
-                    span,
-                    "rate-limited slew operator; generated Rust cannot degrade it to a passthrough"
-                        .to_string(),
-                );
-                self.real_constant(0.0)
+            HirAnalogOperator::Slew {
+                expr,
+                max_rise,
+                max_fall,
+            } => {
+                // A falling rate with no rising one is not a form the operator
+                // has: the LRM's optional arguments are positional, so an
+                // authored `max_fall` implies an authored `max_rise`, and a
+                // node built the other way would name a rate the runtime never
+                // reads.
+                let Some(max_rise) = max_rise else {
+                    self.unsupported(
+                        span,
+                        "slew with a falling rate and no rising rate".to_string(),
+                    );
+                    return self.real_constant(0.0);
+                };
+                let input = self.expr(*expr);
+                let max_rise = self.expr(*max_rise);
+                let max_fall = max_fall.map(|value| self.expr(value));
+                self.builder.push(
+                    self.block,
+                    CfgValueType::Real,
+                    CfgValueKind::Slew {
+                        operator: expression.id,
+                        input,
+                        max_rise,
+                        max_fall,
+                    },
+                )
             }
             HirAnalogOperator::Limit {
                 proposed,
@@ -2815,10 +3015,35 @@ impl<'a> CfgLowerer<'a> {
                     ),
                 }
             }
-            other => {
-                self.unsupported(span, format!("{} operator", analog_operator_label(other)));
-                self.real_constant(0.0)
-            }
+        }
+    }
+
+    /// `idt(x, ic)`, keyed by the call.
+    ///
+    /// Shared by the operator spelling and by `idtmod` written without a
+    /// modulus, which the LRM makes the same integral: keying both here is what
+    /// keeps the two source forms on one state slot instead of two.
+    fn idt(&mut self, operator: ExprId, expr: ExprId, ic: Option<ExprId>) -> ValueId {
+        let input = self.expr(expr);
+        // Absent means zero, which is what the LRM says an unstated initial
+        // condition is.
+        let ic = self.optional_expr(ic, 0.0);
+        self.builder.push(
+            self.block,
+            CfgValueType::Real,
+            CfgValueKind::Idt {
+                operator,
+                input,
+                ic,
+            },
+        )
+    }
+
+    /// An optional operand, or the constant the LRM gives an omitted one.
+    fn optional_expr(&mut self, expr: Option<ExprId>, absent: f64) -> ValueId {
+        match expr {
+            Some(expr) => self.expr(expr),
+            None => self.real_constant(absent),
         }
     }
 
@@ -2952,6 +3177,47 @@ fn binary_op(op: &str) -> Option<CfgBinaryOp> {
     })
 }
 
+/// Whether a call spells one of the dynamic operators whose noise-metadata
+/// treatment is the operator spelling's.
+///
+/// Deliberately only the operators this level newly represents. `ddt`, `idt`,
+/// `cross`, `above` and `timer` have always lowered from their call spelling,
+/// so their metadata behaviour is settled and is not this list's to change —
+/// see the report's found-broken note on the remaining spelling asymmetry.
+fn is_dynamic_operator_call(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "absdelay" | "slew" | "idtmod" | "last_crossing"
+    )
+}
+
+/// The runtime encoding of a crossing direction: `+1` rising, `-1` falling,
+/// `0` either.
+///
+/// The same numbers `cross`'s runtime `direction` operand carries, so that a
+/// `last_crossing` written with an edge keyword and one written with a literal
+/// reach the detector the same way.
+fn cross_direction_code(edge: Option<HirCrossDirection>) -> f64 {
+    match edge {
+        Some(HirCrossDirection::Rising) => 1.0,
+        Some(HirCrossDirection::Falling) => -1.0,
+        Some(HirCrossDirection::Both) | None => 0.0,
+    }
+}
+
+/// The analog `integer` operators, kept out of [`binary_op`] because their
+/// result type is not a real function of two reals.
+fn integer_bitwise_op(op: &str) -> Option<CfgIntegerBitwiseOp> {
+    Some(match op {
+        "BitAnd" => CfgIntegerBitwiseOp::And,
+        "BitOr" => CfgIntegerBitwiseOp::Or,
+        "BitXor" => CfgIntegerBitwiseOp::Xor,
+        "Shl" => CfgIntegerBitwiseOp::Shl,
+        "Shr" => CfgIntegerBitwiseOp::Shr,
+        _ => return None,
+    })
+}
+
 fn unary_intrinsic(name: &str) -> Option<CfgUnaryOp> {
     Some(match name {
         "exp" => CfgUnaryOp::Exp,
@@ -2998,22 +3264,5 @@ fn kind_label(kind: &HirExprKind) -> &'static str {
         HirExprKind::Laplace { .. } => "laplace",
         HirExprKind::Zi { .. } => "z-transform",
         HirExprKind::NoiseSource { .. } => "noise source",
-    }
-}
-
-fn analog_operator_label(op: &HirAnalogOperator) -> &'static str {
-    match op {
-        HirAnalogOperator::Limit { .. } => "$limit",
-        HirAnalogOperator::LimiterArgument { .. } => "limiter argument",
-        HirAnalogOperator::Ddt { .. } => "ddt",
-        HirAnalogOperator::Idt { .. } => "idt",
-        HirAnalogOperator::IdtMod { .. } => "idtmod",
-        HirAnalogOperator::Ddx { .. } => "ddx",
-        HirAnalogOperator::Limexp { .. } => "limexp",
-        HirAnalogOperator::Absdelay { .. } => "absdelay",
-        HirAnalogOperator::Transition { .. } => "transition",
-        HirAnalogOperator::TransitionDerivative { .. } => "transition_derivative",
-        HirAnalogOperator::Slew { .. } => "slew",
-        HirAnalogOperator::LastCrossing { .. } => "last_crossing",
     }
 }

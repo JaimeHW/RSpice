@@ -3124,7 +3124,12 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 }
                 self.push(NativeOp::Const(0.0))
             }
-            "table" => self.push(NativeOp::Const(0.0)),
+            // Both table spellings. `noise_table_log` used to lower to the
+            // same `Table` kind as `noise_table`; the grouped-noise landing
+            // split it out as `TableLog` and taught every other reader the new
+            // spelling, so a large-signal residual that still only knows
+            // `table` refuses a model it compiled the day before.
+            "table" | "tablelog" => self.push(NativeOp::Const(0.0)),
             _ => Err(self.unsupported(format!("noise source {source}"))),
         }
     }
@@ -10724,6 +10729,7 @@ mod tests {
         let analyzed = AnalyzedModule {
             name: module_name.into(),
             default_transition: 1.0e-9,
+            default_discipline: None,
             noise_process_count: 0,
             ports: vec![
                 AnalyzedPort {

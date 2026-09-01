@@ -695,18 +695,70 @@ fn part_selects_resolve_and_are_bounds_checked() {
 }
 
 /// The two halves of the language share one expression grammar, so a
-/// continuous-domain form reaches a process's parser. It has no meaning there
-/// and stops by name.
+/// continuous-domain form reaches a process's parser. Most of them have no
+/// meaning there and stop by name.
+///
+/// A branch access is the exception and is tested separately below: Verilog-AMS
+/// LRM 2.4 section 7.3.3 makes probing a continuous net from a discrete context
+/// legal, and it is the one continuous-domain form a process is *supposed* to
+/// contain.
 #[test]
 fn continuous_domain_expressions_are_refused_inside_a_process() {
     let message = analyze_error(&digital_module(
         "    wire clk;\n\
          \x20   reg q;\n\
-         \x20   always @(posedge clk) q <= V(p, n);",
+         \x20   always @(posedge clk) q <= (ddt(V(p, n)) > 0.0);",
     ));
     assert!(
-        message.contains("branch access") && message.contains("discrete-domain expression"),
-        "expected a branch-access diagnostic, got {message:?}"
+        message.contains("call to `ddt` inside a discrete-domain expression"),
+        "expected an analog-operator diagnostic, got {message:?}"
+    );
+}
+
+/// Verilog-AMS LRM 2.4 section 7.3.3: "All continuous nets can be probed from
+/// a discrete context using access functions."
+///
+/// The clause's own example is `always @(posedge clk) out = V(in);`, so this is
+/// not a tolerated oddity — it is the construct that makes a module's two
+/// halves one design rather than two that happen to share a file. Section 7.3
+/// fixes the direction: reads cross, writes do not.
+#[test]
+fn a_process_may_probe_a_continuous_net() {
+    let analyzed = analyze(&digital_module(
+        "    wire clk;\n\
+         \x20   reg hi;\n\
+         \x20   always @(posedge clk) hi <= (V(p, n) > 0.5);",
+    ));
+    assert_eq!(only_module(&analyzed).digital.processes.len(), 1);
+}
+
+/// What section 7.3.3 permits and this compiler cannot serve, each named for
+/// the reason rather than for the clause — the clause allows all three.
+#[test]
+fn the_probe_forms_this_boundary_cannot_serve_are_refused_by_name() {
+    // A flow. There is no value between analog evaluations to sample: a branch
+    // flow is the analog body's own accumulated contribution, not an entry of
+    // the solution vector.
+    let message = analyze_error(&digital_module(
+        "    wire clk;\n\
+         \x20   reg hi;\n\
+         \x20   always @(posedge clk) hi <= (I(p, n) > 0.5);",
+    ));
+    assert!(
+        message.contains("`I` is a flow access")
+            && message.contains("no value between analog evaluations"),
+        "expected a flow-probe diagnostic, got {message:?}"
+    );
+
+    // A discrete net has no potential to probe at all.
+    let message = analyze_error(&digital_module(
+        "    wire clk;\n\
+         \x20   reg hi;\n\
+         \x20   always @(posedge clk) hi <= (V(clk) > 0.5);",
+    ));
+    assert!(
+        message.contains("which is a discrete-domain net and has no potential"),
+        "expected a discrete-net diagnostic, got {message:?}"
     );
 }
 
@@ -1034,7 +1086,7 @@ fn the_backend_refusal_names_the_first_digital_construct() {
     for (section, keyword) in [
         ("    reg q;\n     always @(p) q <= 1'b1;", "reg"),
         ("    wire y;\n     assign y = 1'b1;", "wire"),
-        ("    always @(p) gain = 1.0;\n     reg q;", "always"),
+        ("    always @(p) q = 1'b1;\n     reg q;", "always"),
     ] {
         let error = compile_error(&digital_module(section), None);
         let message = error.to_string();
@@ -1977,4 +2029,189 @@ fn a_gate_drive_strength_is_refused_by_name() {
          endmodule\n",
     );
     assert!(error.contains("strength"), "{error}");
+}
+
+// ===========================================================================
+// Who owns a module-level `real`
+// ===========================================================================
+//
+// The rule is stated in full in the `digital_lower` module documentation.
+// These pin its three answers, because the interesting one — the refusal — is
+// the only thing standing between a mixed-signal module and two owners for one
+// variable.
+
+/// A `real` a process writes, in a module with no analog block, moves.
+///
+/// This is the whole point of the rule: `state` becomes a discrete-domain
+/// variable of the plan, which is what lets the canonical filter idiom hold its
+/// state across a clock edge.
+#[test]
+fn a_module_level_real_a_process_writes_becomes_a_digital_variable() {
+    let plan = VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir(
+            "module f(clk, vin, vout);\n\
+             \x20   input clk;\n\
+             \x20   input wreal vin;\n\
+             \x20   output wreal vout;\n\
+             \x20   real state;\n\
+             \x20   always @(posedge clk) state <= state + (vin - state) * 0.25;\n\
+             \x20   assign vout = state;\n\
+             endmodule\n",
+        )
+        .expect("a module with no analog block may own a real in the discrete domain")
+        .digital;
+    let state = plan
+        .signals
+        .iter()
+        .find(|signal| signal.name == "state")
+        .expect("`state` is a discrete-domain signal now");
+    assert!(state.kind.is_real(), "it carries a real");
+    assert_eq!(state.width, 0, "and therefore no bits");
+    assert!(
+        state.procedurally_assignable,
+        "it is a variable, so section 6.2 lets a process write it"
+    );
+    assert_eq!(
+        plan.drivers_of(state.id).count(),
+        0,
+        "a variable has no drivers; the write goes straight into the store"
+    );
+}
+
+/// The same `real`, in a module whose analog body *reads* it, is refused —
+/// and refused for what is missing rather than for the boundary.
+///
+/// Verilog-AMS LRM 2.4 section 7.3 allows the read: `gain` is written by the
+/// discrete domain and only by it, and reads cross both ways. Section 7.3.6.5
+/// even fixes the value — "the digital value calculated for the greatest
+/// digital time tick which is less than or equal to the analog time when the
+/// expression is evaluated". What the compiler is short of is the route from
+/// the compiled analog body to the digital signal store, so that is what the
+/// message says.
+#[test]
+fn a_module_level_real_the_analog_body_reads_is_refused_by_name() {
+    // `digital_module`'s analog block is `I(p, n) <+ gain * V(p, n)`, so this
+    // fixture is precisely the read case.
+    let error = analyze_error(&digital_module(
+        "    wire clk;\n\
+     \x20   always @(posedge clk) gain = gain + 1.0;",
+    ));
+    assert!(
+        error.contains("`gain`")
+            && error.contains("read by the analog body")
+            && error.contains("section 7.3.6.5"),
+        "the refusal must name the variable and the clause, got {error:?}"
+    );
+}
+
+/// A `real` **both** halves write is a different refusal, and a permanent one.
+///
+/// Section 7.3: "Write operations of nets and variables are only allowed from
+/// the context of their domain." No scheduling rule makes two writers legal, so
+/// the message cites the sentence rather than promising a later wave.
+#[test]
+fn a_module_level_real_written_by_both_domains_is_refused_by_name() {
+    let error = analyze_error(
+        "module dut(p, n);\n\
+     \x20   inout p, n;\n\
+     \x20   electrical p, n;\n\
+     \x20   real gain;\n\
+     \x20   wire clk;\n\
+     \x20   always @(posedge clk) gain = gain + 1.0;\n\
+     \x20   analog begin\n\
+     \x20       gain = 2.0;\n\
+     \x20       I(p, n) <+ V(p, n);\n\
+     \x20   end\n\
+     endmodule\n",
+    );
+    assert!(
+        error.contains("`gain` is written by both the analog body and a discrete process")
+            && error.contains("section 7.3"),
+        "the refusal must name the variable and the clause, got {error:?}"
+    );
+}
+
+/// And an analog body that never mentions the variable does not refuse at all.
+///
+/// This is the refusal that went away. The rule used to be about the *module* —
+/// any analog block disqualified every module-level `real` a process wrote —
+/// so a module whose two halves are simply independent was refused, with a
+/// message about clocks that did not describe it.
+#[test]
+fn an_analog_body_that_ignores_the_variable_leaves_the_promotion_alone() {
+    let analyzed = analyze(
+        "module dut(p, n);\n\
+     \x20   inout p, n;\n\
+     \x20   electrical p, n;\n\
+     \x20   real acc;\n\
+     \x20   wire clk;\n\
+     \x20   always @(posedge clk) acc = acc + 1.0;\n\
+     \x20   analog I(p, n) <+ V(p, n) / 1000.0;\n\
+     endmodule\n",
+    );
+    assert!(
+        only_module(&analyzed)
+            .digital
+            .signals
+            .iter()
+            .any(|signal| signal.name == "acc"),
+        "the process's `real` moved into the discrete domain"
+    );
+}
+
+/// A `real` no process writes is not touched at all.
+///
+/// The half of the rule that keeps every shipped analog model compiling exactly
+/// as it did: reading one from a process is still the old refusal, and the
+/// variable stays the continuous body's.
+#[test]
+fn a_module_level_real_no_process_writes_stays_in_the_analog_domain() {
+    let error = VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir(&digital_module(
+            "    wire clk;\n\
+         \x20   reg q;\n\
+         \x20   always @(posedge clk) q = (gain > 1.0);",
+        ))
+        .expect_err("reading an analog variable from a process is still refused")
+        .to_string();
+    assert!(
+        error.contains("real expression has no conversion") || error.contains("`gain`"),
+        "the read is refused rather than silently rehoused, got {error:?}"
+    );
+}
+
+/// `input real` is refused: only an output port may be a variable.
+#[test]
+fn an_input_real_port_is_refused() {
+    let error = VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir_module(
+            "module child(vin);\n\
+             \x20   input real vin;\n\
+             endmodule\n\
+             module top(vin);\n\
+             \x20   input wreal vin;\n\
+             \x20   child u1(vin);\n\
+             endmodule\n",
+            Some("top"),
+        )
+        .expect_err("an input port cannot be a variable")
+        .to_string();
+    assert!(
+        error.contains("only an output port be a variable"),
+        "expected section 12.3.3's rule, got {error:?}"
+    );
+}
+
+/// A packed range on a `real` is refused rather than read as a width.
+#[test]
+fn a_range_on_a_real_port_is_refused() {
+    let error = analyze_error(
+        "module f(vout);\n\
+         \x20   output real [3:0] vout;\n\
+         endmodule\n",
+    );
+    assert!(
+        error.contains("no bit width"),
+        "expected section 3.9's rule, got {error:?}"
+    );
 }

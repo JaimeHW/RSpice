@@ -1544,7 +1544,6 @@ fn budgeted_lines(source: &str) -> usize {
 /// is the state this file wants; only the ones above it were doing nothing.
 const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("hardcopy/contract.rs", 2_540),
-    ("io/project_io/tests/migration.rs", 2_702),
     ("results/report_document.rs", 2_551),
     ("simulation/controller/prepared_run.rs", 2_900),
     ("simulation/execution/snapshot.rs", 3_047),
@@ -1561,7 +1560,6 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("workbench/documents/result_document/waves.rs", 4_229),
     ("workbench/documents/visualization_studio.rs", 4_695),
     ("workbench/documents/visualization_studio/dock.rs", 3_520),
-    ("workbench/hardcopy_adapters/sources.rs", 2_546),
     ("workbench/surfaces/pdk_technology_admin.rs", 5_115),
     ("workbench/surfaces/report_authoring.rs", 4_294),
 ];

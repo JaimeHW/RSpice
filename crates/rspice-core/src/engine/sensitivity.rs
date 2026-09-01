@@ -198,6 +198,7 @@ impl Engine {
             "Sensitivity",
             "linearized sensitivity reports native element/source derivatives and does not use ngspice MIF DEVsen* hooks",
         );
+        Self::ensure_no_mixed_signal_analysis(&circuit, "sensitivity analysis")?;
         Self::validate_sensitivity_node("output", output_pos, circuit.num_nodes())?;
         if let Some(output_neg) = output_neg {
             Self::validate_sensitivity_node("reference", output_neg, circuit.num_nodes())?;

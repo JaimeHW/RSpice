@@ -31,47 +31,47 @@ const STUDIO_BASELINES: [StudioBaseline; 9] = [
     StudioBaseline {
         name: "studio-analyses",
         page: SimulationPage::Analyses,
-        fingerprint: "293b4c4af45a6af9eaf800ae3ef775c220c66d02c5cc906bbc814dd7c7823ecd",
+        fingerprint: "d3650b2b5bf6aa72255e33dc4f12c269e6c4cf8a83d6964af82058027f50efe3",
     },
     StudioBaseline {
         name: "studio-excitations",
         page: SimulationPage::Excitations,
-        fingerprint: "130884c32e9441b618358c0623b563c794d257aea2a20f86fda029157b613c97",
+        fingerprint: "a48cf31175a86aa3d9da7fe5ce3bdc4bb4548e6afa9b9afc130888441a06f2b0",
     },
     StudioBaseline {
         name: "studio-variables",
         page: SimulationPage::Variables,
-        fingerprint: "a5a43bf7609649d230c12ab5e78afd498cad27c01e19e7932d6283382dee2e05",
+        fingerprint: "c69bf5637c5bb4e391d6042437ce40e2b05795796ff724209ea1c64928b3d402",
     },
     StudioBaseline {
         name: "studio-outputs",
         page: SimulationPage::Outputs,
-        fingerprint: "9026ed061e491ad77a57adfa8a6745df39302029c3bcc025fd3aa9c94b989de0",
+        fingerprint: "cb43fff9cca564e2e74db143bfe8e15473a161160bd0c0426315a62be31a5ba5",
     },
     StudioBaseline {
         name: "studio-specifications",
         page: SimulationPage::Specifications,
-        fingerprint: "aa3e73e6c11b9f29249ffffb891ea536a4684489b6613f40b074a4b6148d899a",
+        fingerprint: "76810be5292a1bca41182d257d6c7e38767e8322e1df7c765d37f9f570bf345d",
     },
     StudioBaseline {
         name: "studio-run-set",
         page: SimulationPage::RunSet,
-        fingerprint: "f5ffe09b9eb517a4e1db9f2bdc5bcc16898049f40adf92f99a33bb8c38045f04",
+        fingerprint: "186c9e18b0496f77b20d85aa4a83889cfffa970a872759abc3599329c651844f",
     },
     StudioBaseline {
         name: "studio-models",
         page: SimulationPage::Models,
-        fingerprint: "e54b9c7a27a6816e439df19a25f5500143844c9fc06cc9e60824fa74435b3119",
+        fingerprint: "f814bc46a630fa97908d11984584df3ee4512d682f22aef58bf084cb0ddb10cd",
     },
     StudioBaseline {
         name: "studio-solver",
         page: SimulationPage::Solver,
-        fingerprint: "081f972432fdad09bed457b0f59efcd4a0d9eb32911cd006d26d2967cfefb3e5",
+        fingerprint: "d6dd18752a0e9cee344bad5d3724cc95ef6e81fdab12373506bc3d8942c89739",
     },
     StudioBaseline {
         name: "studio-save",
         page: SimulationPage::Save,
-        fingerprint: "cb780291a143be66782c050dd7ab6099a2211aef946bf8537ab4ea112478f424",
+        fingerprint: "6a2546126be4eb935b94c8f74473c3ec862e930fe22f2688a01ad870453b6362",
     },
 ];
 
@@ -147,15 +147,20 @@ fn every_studio_page_matches_its_reviewed_visual_baseline() {
 #[test]
 #[ignore = "prints source-ready visual fingerprints after explicit review"]
 fn print_studio_visual_fingerprints_for_review() {
+    use std::io::Write as _;
+
+    let mut stdout = std::io::stdout().lock();
     for baseline in STUDIO_BASELINES {
         let canvas = raster(baseline.page, APPROVED_PAGE_WIDTH, |_| {});
-        eprintln!(
+        writeln!(
+            stdout,
             "{} {}x{} {}",
             baseline.name,
             canvas.width(),
             regression_height(&canvas),
             canvas.regression_fingerprint(regression_height(&canvas))
-        );
+        )
+        .expect("write visual fingerprint");
     }
 }
 

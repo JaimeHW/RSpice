@@ -33,6 +33,34 @@
 //! net drives four of its bits and contributes `z` to the other four, so two
 //! partial drivers of one net compose rather than fight.
 //!
+//! # The other resolution
+//!
+//! A real net (Verilog-AMS LRM 2.4 section 3.7) resolves here too, beside
+//! table 4-1 and for the same reason: which value a net takes from several
+//! drivers is a rule over the whole net, and the whole net is what this owns.
+//! What it resolves *with* is the compiler's, recorded on the signal as
+//! [`DigitalRealResolution`] — the net-type keyword its author wrote.
+//!
+//! The rules differ from table 4-1's in one structural way, and it is worth
+//! naming. Table 4-1 has an identity (`z`), so a `wire`'s fold starts from
+//! all-`z` and a driver that has not run contributes nothing. A real fold has
+//! no such value: section 3.7 says "if no driver is connected to a `wreal`
+//! net, its value shall be zero (0.0)" and "unlike other digital nets which
+//! have an initial value of `z`, `wreal` nets shall have an initial value of
+//! zero". Zero is not an identity for `min`, for `max`, or for the average, so
+//! the fold is over the contributions that exist rather than seeded with one —
+//! and a net with no contributions at all answers `0.0` by that clause
+//! directly, not by folding an empty set.
+//!
+//! A driver that has not run yet contributes `0.0`, which is the same clause
+//! read the other way: a `wreal` "shall not store its value", so before a
+//! driver has produced one there is nothing but the initial value to have.
+//!
+//! `wreal` itself never reaches the fold with more than one contribution:
+//! section 6.5.3 permits one driver of a real-valued net, and the front end
+//! refuses a second before a plan is built. The four resolved spellings are the
+//! ones with something to combine.
+//!
 //! # What is *not* resolved
 //!
 //! A `reg`. IEEE 1364-2005 section 4.2.2 makes a variable a store with exactly
@@ -52,14 +80,14 @@
 //! `@*` process from re-triggering itself forever.
 
 use rspice_veriloga::canonical_ir::digital::{
-    CanonicalDigitalPlan, DigitalDriverId, DigitalSchedulingRegion, DigitalSignal,
-    DigitalWriteSelect,
+    CanonicalDigitalPlan, DigitalDriverId, DigitalRealResolution, DigitalSchedulingRegion,
+    DigitalSignal, DigitalSignalKind, DigitalWriteSelect,
 };
 use rspice_veriloga::canonical_ir::digital_eval::{
-    DigitalDeferredUpdate, DigitalDrive, DigitalEnvironment,
+    DigitalDeferredUpdate, DigitalDrive, DigitalEnvironment, DigitalRealDrive,
 };
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
-use rspice_veriloga::canonical_ir::ids::DigitalSignalId;
+use rspice_veriloga::canonical_ir::ids::{DigitalAnalogProbeId, DigitalSignalId};
 use rspice_veriloga::four_state::FourStateBit;
 
 /// IEEE 1364-2005 table 4-1: the value one `wire` bit takes from two drivers.
@@ -112,11 +140,28 @@ pub(crate) const fn resolve_bit(left: FourStateBit, right: FourStateBit) -> Four
 /// Carries the previous value because edge classification is a property of the
 /// transition rather than of the new value, and because a level-sensitive term
 /// asks whether anything moved at all.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SignalTransition {
     pub(crate) signal: DigitalSignalId,
-    pub(crate) previous: FourStateValue,
-    pub(crate) next: FourStateValue,
+    pub(crate) values: TransitionValues,
+}
+
+/// What a signal held before and after one change.
+///
+/// One transition type for both value domains rather than two queues, because
+/// the *ordering* is what a queue is for: a four-state net and a real net that
+/// both move in one delta must be delivered in the order they moved, and two
+/// queues would have to be merged by a rule nothing states.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum TransitionValues {
+    FourState {
+        previous: FourStateValue,
+        next: FourStateValue,
+    },
+    /// Verilog-AMS LRM 2.4 section 3.7's real net. Both values ride along for
+    /// the same reason the four-state pair does — a term asks whether anything
+    /// moved — even though a real has no edge to classify from them.
+    Real { previous: f64, next: f64 },
 }
 
 /// Why a store operation was refused.
@@ -142,6 +187,20 @@ pub(crate) enum StoreError {
         declared: u32,
         offered: u32,
     },
+    /// A four-state stimulus offered to a real net.
+    ///
+    /// Verilog-AMS LRM 2.4 section 3.7 converts between bits and a real with
+    /// the explicit `$realtobits`/`$bitstoreal`; a stimulus harness that meant
+    /// to drive a real should say a real.
+    RealPortDrivenWithBits {
+        signal: DigitalSignalId,
+        name: String,
+    },
+    /// A real stimulus offered to a four-state net, the same mistake reversed.
+    FourStatePortDrivenWithAReal {
+        signal: DigitalSignalId,
+        name: String,
+    },
 }
 
 impl std::fmt::Display for StoreError {
@@ -166,6 +225,14 @@ impl std::fmt::Display for StoreError {
                 f,
                 "`{name}` is declared {declared} bit(s) wide but was offered a {offered}-bit value"
             ),
+            Self::RealPortDrivenWithBits { name, .. } => write!(
+                f,
+                "`{name}` is a real net and was offered a four-state value; Verilog-AMS LRM 2.4                  section 3.7 makes it carry a real, so drive it with one"
+            ),
+            Self::FourStatePortDrivenWithAReal { name, .. } => write!(
+                f,
+                "`{name}` is a four-state net and was offered a real value; drive it with a                  four-state spelling"
+            ),
         }
     }
 }
@@ -182,20 +249,43 @@ struct DriverSpan {
 /// One driver's contribution, kept exactly as the driver evaluated it.
 #[derive(Debug, Clone)]
 struct Contribution {
-    /// Which bits of the net this driver covers, from the plan.
+    /// Which bits of the net this driver covers, from the plan. Always
+    /// [`DigitalWriteSelect::Whole`] for a real net, which has no bits to
+    /// cover part of.
     select: DigitalWriteSelect,
+    value: ContributionValue,
+}
+
+/// What one driver last produced, in the domain its net carries.
+#[derive(Debug, Clone)]
+enum ContributionValue {
     /// The driver's most recent output, at the select's width, or `None` while
     /// the driver has not run. Both read as `z` on every bit the driver
     /// covers; the distinction is kept because a `None` is evidence about the
     /// schedule and a stored `z` is evidence about the design.
-    value: Option<FourStateValue>,
+    FourState(Option<FourStateValue>),
+    /// The same for a real net, where `None` and a stored `0.0` likewise read
+    /// alike — Verilog-AMS LRM 2.4 section 3.7 makes an undriven real net zero
+    /// — and are kept apart for the same reason.
+    Real(Option<f64>),
 }
 
 /// The signal store and driver resolution for one compiled digital plan.
 #[derive(Clone)]
 pub(crate) struct DigitalSignalStore {
-    /// Current value of every signal, at its declared width.
+    /// Current value of every four-state signal, at its declared width.
+    ///
+    /// A real net has a slot here too, of width zero, and it is never read:
+    /// one array per signal id means a signal's value has exactly one place to
+    /// live, and paying a zero-width value for a real net is cheaper than a
+    /// second index from signal id to real slot that could disagree with this
+    /// one.
     values: Vec<FourStateValue>,
+    /// Current value of every real net (Verilog-AMS LRM 2.4 section 3.7), in
+    /// the same signal space and read only for a signal the plan calls real.
+    reals: Vec<f64>,
+    /// What each signal carries, cached from the plan.
+    kinds: Vec<DigitalSignalKind>,
     /// Declared width per signal, cached so a hot path does not walk the plan.
     widths: Vec<u32>,
     /// Whether each signal is a variable (`reg`) rather than a net.
@@ -209,6 +299,19 @@ pub(crate) struct DigitalSignalStore {
     deferred: Vec<DigitalDeferredUpdate>,
     /// Value changes since the host last drained, oldest first.
     transitions: Vec<SignalTransition>,
+    /// The continuous-domain potential each of the plan's probes reads
+    /// (Verilog-AMS LRM 2.4 section 7.3.3), in probe id order.
+    ///
+    /// `None` until an analog solution has been sampled into it, which is what
+    /// makes a design run without one refuse by name rather than compute
+    /// against a fabricated 0 V. Empty for every plan with no probe, which is
+    /// every plan a purely digital run produces — so the vector costs a design
+    /// without cross-domain reads nothing and cannot be written by one.
+    ///
+    /// Written only by [`Self::sample_analog_potentials`], which is the
+    /// mixed-signal host's; a process can only read it, which is section 7.3's
+    /// rule that writes stay in their own domain, enforced by the type.
+    analog_potentials: Vec<Option<f64>>,
 }
 
 impl DigitalSignalStore {
@@ -222,10 +325,12 @@ impl DigitalSignalStore {
     pub(crate) fn new(plan: &CanonicalDigitalPlan) -> Self {
         let count = plan.signals.len();
         let mut widths = Vec::with_capacity(count);
+        let mut kinds = Vec::with_capacity(count);
         let mut variables = Vec::with_capacity(count);
         let mut values = Vec::with_capacity(count);
         for signal in &plan.signals {
             widths.push(signal.width);
+            kinds.push(signal.kind);
             variables.push(signal.procedurally_assignable);
             values.push(FourStateValue::splat(
                 signal.width,
@@ -236,6 +341,12 @@ impl DigitalSignalStore {
                 },
             ));
         }
+        // Verilog-AMS LRM 2.4 section 3.7 states this as the net's own initial
+        // value and not as a consequence of having no drivers: "unlike other
+        // digital nets which have an initial value of `z`, wreal nets shall
+        // have an initial value of zero". So it is written here, where the
+        // four-state initial values are, rather than left to the fold.
+        let reals = vec![0.0; count];
 
         // Grouped by net so resolution reads one contiguous slice, and sized
         // from the plan so a driver that has never run still occupies its slot.
@@ -244,10 +355,17 @@ impl DigitalSignalStore {
         for index in 0..count {
             let signal = DigitalSignalId::from(index);
             let start = contributions.len();
+            let real = plan
+                .signal(signal)
+                .is_some_and(|signal| signal.kind.is_real());
             for driver in plan.drivers_of(signal) {
                 contributions.push(Contribution {
                     select: driver.target.select.clone(),
-                    value: None,
+                    value: if real {
+                        ContributionValue::Real(None)
+                    } else {
+                        ContributionValue::FourState(None)
+                    },
                 });
             }
             spans.push(DriverSpan {
@@ -258,12 +376,42 @@ impl DigitalSignalStore {
 
         Self {
             values,
+            reals,
+            kinds,
             widths,
             variables,
             contributions,
             spans,
             deferred: Vec::new(),
             transitions: Vec::new(),
+            analog_potentials: vec![None; plan.analog_probes.len()],
+        }
+    }
+
+    /// Publish one converged analog solution's probe values into the store.
+    ///
+    /// The only writer of the continuous half, and the one place Verilog-AMS
+    /// LRM 2.4 section 7.3.6.3's timing question is answered: whatever the
+    /// caller samples here is what every process reads until the next call,
+    /// so the caller is choosing "the analog value calculated for the time
+    /// corresponding to a real promotion of the digital time".
+    ///
+    /// A slice of a different length than the plan declared probes is a caller
+    /// that built the store from one plan and the samples from another, so it
+    /// writes nothing rather than a prefix — a partially refreshed bank would
+    /// let a process read one net at this timepoint and another at the last.
+    pub(crate) fn sample_analog_potentials(&mut self, values: &[f64]) {
+        if values.len() != self.analog_potentials.len() {
+            debug_assert!(
+                false,
+                "analog probe sample has {} values for {} declared probes",
+                values.len(),
+                self.analog_potentials.len()
+            );
+            return;
+        }
+        for (slot, value) in self.analog_potentials.iter_mut().zip(values) {
+            *slot = Some(*value);
         }
     }
 
@@ -285,12 +433,35 @@ impl DigitalSignalStore {
         value: FourStateValue,
         plan: &CanonicalDigitalPlan,
     ) -> Result<(), StoreError> {
+        self.check_force(signal, &value, plan)?;
+        self.publish(signal, value);
+        Ok(())
+    }
+
+    /// Whether [`Self::force`] would be accepted, without writing anything.
+    ///
+    /// Every reason `force` refuses is a property of the design and the value
+    /// offered, not of anything the write does, so the whole refusal can be
+    /// asked in advance. That is what lets a caller publishing a *bank* of
+    /// co-timed drives establish that all of them are acceptable before any of
+    /// them lands, instead of snapshotting the running host so a later refusal
+    /// can be undone. The rule is stated here once and `force` asks it, so the
+    /// predicate and the write can never disagree about what is allowed.
+    pub(crate) fn check_force(
+        &self,
+        signal: DigitalSignalId,
+        value: &FourStateValue,
+        plan: &CanonicalDigitalPlan,
+    ) -> Result<(), StoreError> {
         let index = usize::from(signal);
         let declared = *self
             .widths
             .get(index)
             .ok_or(StoreError::UndeclaredSignal(signal))?;
         let name = signal_name(plan, signal);
+        if self.is_real(signal) {
+            return Err(StoreError::RealPortDrivenWithBits { signal, name });
+        }
         if value.width() != declared {
             return Err(StoreError::WidthMismatch {
                 signal,
@@ -307,7 +478,38 @@ impl DigitalSignalStore {
                 drivers,
             });
         }
-        self.publish(signal, value);
+        Ok(())
+    }
+
+    /// Write a real net from outside the design.
+    ///
+    /// The real twin of [`Self::force`], and refused on the same ground: a net
+    /// the design already drives would need the stimulus resolved against the
+    /// design's contribution rather than overwritten, and there is no driver
+    /// identity for a stimulus to occupy.
+    pub(crate) fn force_real(
+        &mut self,
+        signal: DigitalSignalId,
+        value: f64,
+        plan: &CanonicalDigitalPlan,
+    ) -> Result<(), StoreError> {
+        let index = usize::from(signal);
+        if index >= self.reals.len() {
+            return Err(StoreError::UndeclaredSignal(signal));
+        }
+        let name = signal_name(plan, signal);
+        if !self.is_real(signal) {
+            return Err(StoreError::FourStatePortDrivenWithAReal { signal, name });
+        }
+        let drivers = self.spans[index].count;
+        if drivers > 0 {
+            return Err(StoreError::ExternallyDrivenNetHasDrivers {
+                signal,
+                name,
+                drivers,
+            });
+        }
+        self.publish_real(signal, value);
         Ok(())
     }
 
@@ -342,6 +544,18 @@ impl DigitalSignalStore {
         std::mem::take(&mut self.transitions)
     }
 
+    /// The value a real net holds right now.
+    pub(crate) fn real_value(&self, signal: DigitalSignalId) -> Option<f64> {
+        self.reals.get(usize::from(signal)).copied()
+    }
+
+    /// Whether the plan calls this signal real.
+    pub(crate) fn is_real(&self, signal: DigitalSignalId) -> bool {
+        self.kinds
+            .get(usize::from(signal))
+            .is_some_and(|kind| kind.is_real())
+    }
+
     /// Store a value and record the transition if it is one.
     fn publish(&mut self, signal: DigitalSignalId, value: FourStateValue) {
         let index = usize::from(signal);
@@ -351,8 +565,31 @@ impl DigitalSignalStore {
         let previous = std::mem::replace(&mut self.values[index], value.clone());
         self.transitions.push(SignalTransition {
             signal,
-            previous,
-            next: value,
+            values: TransitionValues::FourState {
+                previous,
+                next: value,
+            },
+        });
+    }
+
+    /// Store a real value and record the transition if it is one.
+    ///
+    /// The change test is `!=` and nothing else. Verilog-AMS LRM 2.4 section
+    /// 3.7's event on a real net is a change of value; a tolerance here would
+    /// decide that some changes do not count, which is a rule the standard does
+    /// not have and which no author could see being applied.
+    fn publish_real(&mut self, signal: DigitalSignalId, value: f64) {
+        let index = usize::from(signal);
+        if self.reals[index] == value {
+            return;
+        }
+        let previous = std::mem::replace(&mut self.reals[index], value);
+        self.transitions.push(SignalTransition {
+            signal,
+            values: TransitionValues::Real {
+                previous,
+                next: value,
+            },
         });
     }
 
@@ -368,7 +605,7 @@ impl DigitalSignalStore {
         let span = self.spans[index];
         let mut resolved = FourStateValue::splat(width, FourStateBit::HighImpedance);
         for contribution in &self.contributions[span.start..span.start + span.count] {
-            let Some(value) = &contribution.value else {
+            let ContributionValue::FourState(Some(value)) = &contribution.value else {
                 continue;
             };
             let low = match contribution.select {
@@ -389,6 +626,65 @@ impl DigitalSignalStore {
             }
         }
         resolved
+    }
+
+    /// Combine every contribution to one real net into its resolved value.
+    ///
+    /// Verilog-AMS LRM 2.4 section 3.7 for the empty and single cases, and the
+    /// net's own declared resolution for the rest. Written as a fold over the
+    /// contributions that exist rather than one seeded with an identity,
+    /// because none of these four has one: `0.0` is an identity for `sum` and
+    /// for nothing else, and seeding `min` with it would clamp every net that
+    /// ought to answer a positive number.
+    ///
+    /// `Single` reaching here with more than one contribution cannot happen —
+    /// section 6.5.3 permits one driver and the front end refuses a second —
+    /// but it is still given the honest answer for what it has rather than a
+    /// `debug_assert`: the first driver's contribution, which is what one
+    /// driver means.
+    fn resolve_real(&self, signal: DigitalSignalId) -> f64 {
+        let index = usize::from(signal);
+        let span = self.spans[index];
+        let mut contributions = self.contributions[span.start..span.start + span.count]
+            .iter()
+            .map(|contribution| match contribution.value {
+                // A driver that has not run has produced nothing, and section
+                // 3.7 makes the value of a real net with nothing driving it
+                // zero. Both readings of "not driving" agree on 0.0, which is
+                // why the fold does not have to distinguish them.
+                ContributionValue::Real(value) => value.unwrap_or(0.0),
+                ContributionValue::FourState(_) => 0.0,
+            })
+            .peekable();
+
+        // Section 3.7: "If no driver is connected to a wreal net, its value
+        // shall be zero (0.0)." Answered from the clause rather than by folding
+        // an empty sequence, so that the three resolutions with no identity do
+        // not each need an answer for a case the standard already gives one.
+        if contributions.peek().is_none() {
+            return 0.0;
+        }
+
+        let resolution = match self.kinds[index] {
+            DigitalSignalKind::Real(resolution) => resolution,
+            DigitalSignalKind::FourState => return 0.0,
+        };
+        match resolution {
+            DigitalRealResolution::Single => contributions.next().unwrap_or(0.0),
+            DigitalRealResolution::Sum => contributions.sum(),
+            DigitalRealResolution::Average => {
+                let values: Vec<f64> = contributions.collect();
+                // Divided by the number of drivers the net *has*, not by the
+                // number that have run: a driver is a permanent property of the
+                // design (IEEE 1364-2005 section 6.1), so an average that
+                // changed denominator as the schedule progressed would report a
+                // different number for the same circuit depending on when it
+                // was asked.
+                values.iter().sum::<f64>() / values.len() as f64
+            }
+            DigitalRealResolution::Minimum => contributions.fold(f64::INFINITY, f64::min),
+            DigitalRealResolution::Maximum => contributions.fold(f64::NEG_INFINITY, f64::max),
+        }
     }
 
     /// The contribution slot of one driver, if the plan declared it.
@@ -445,9 +741,56 @@ impl DigitalEnvironment for DigitalSignalStore {
             debug_assert!(false, "drive from a driver the plan does not declare");
             return;
         };
-        self.contributions[slot].value = Some(drive.value);
+        self.contributions[slot].value = ContributionValue::FourState(Some(drive.value));
         let resolved = self.resolve(drive.driver.signal);
         self.publish(drive.driver.signal, resolved);
+    }
+
+    fn write_real_signal(&mut self, signal: DigitalSignalId, value: f64) {
+        // The real twin of `write_signal`, and it shares that method's reading
+        // of a write that should not have reached here: a procedural write to a
+        // `wreal` is IEEE 1364-2005 section 6.2's refusal and the front end
+        // makes it, so a store that sees one is out of step with its plan.
+        debug_assert!(
+            self.variables
+                .get(usize::from(signal))
+                .copied()
+                .unwrap_or(true),
+            "procedural write to a real net; the front end should have refused it"
+        );
+        if usize::from(signal) >= self.reals.len() {
+            return;
+        }
+        // Published rather than folded. A variable has no contribution slot,
+        // because it has no drivers to combine — which is exactly why this is
+        // not `drive_real_signal`.
+        self.publish_real(signal, value);
+    }
+
+    fn read_real_signal(&self, signal: DigitalSignalId) -> Option<f64> {
+        self.reals.get(usize::from(signal)).copied()
+    }
+
+    fn read_analog_potential(&self, probe: DigitalAnalogProbeId) -> Option<f64> {
+        // Two different `None`s collapse to one on purpose: a probe the store
+        // was not built for, and a probe no solution has been sampled into
+        // yet. Both mean the same thing to a process — there is no analog
+        // value to read — and the interpreter's refusal names the probe, which
+        // is what tells the two apart in a diagnostic.
+        self.analog_potentials
+            .get(usize::from(probe))
+            .copied()
+            .flatten()
+    }
+
+    fn drive_real_signal(&mut self, drive: DigitalRealDrive) {
+        let Some(slot) = self.contribution_slot(drive.driver) else {
+            debug_assert!(false, "drive from a driver the plan does not declare");
+            return;
+        };
+        self.contributions[slot].value = ContributionValue::Real(Some(drive.value));
+        let resolved = self.resolve_real(drive.driver.signal);
+        self.publish_real(drive.driver.signal, resolved);
     }
 }
 
@@ -471,10 +814,26 @@ mod tests {
         DigitalSignal {
             id: DigitalSignalId::from(index),
             name: name.into(),
+            kind: DigitalSignalKind::FourState,
             width,
             bounds: (width > 1).then_some((i64::from(width) - 1, 0)),
             signed: false,
             procedurally_assignable: reg,
+            span: span(),
+        }
+    }
+
+    /// A real net with the resolution its net-type keyword named. Width zero,
+    /// because Verilog-AMS LRM 2.4 section 3.7 gives one no bits.
+    fn real_signal(index: usize, name: &str, resolution: DigitalRealResolution) -> DigitalSignal {
+        DigitalSignal {
+            id: DigitalSignalId::from(index),
+            name: name.into(),
+            kind: DigitalSignalKind::Real(resolution),
+            width: 0,
+            bounds: None,
+            signed: false,
+            procedurally_assignable: false,
             span: span(),
         }
     }
@@ -554,6 +913,7 @@ mod tests {
             signals: vec![signal(0, "q", 4, true), signal(1, "w", 4, false)],
             processes: Vec::new(),
             drivers: Vec::new(),
+            analog_probes: Vec::new(),
         };
         let store = DigitalSignalStore::new(&plan);
         assert_eq!(
@@ -581,6 +941,7 @@ mod tests {
             signals: vec![signal(0, "y", 1, false)],
             processes: Vec::new(),
             drivers: vec![driver(0, 0, DigitalWriteSelect::Whole)],
+            analog_probes: Vec::new(),
         };
         let mut store = DigitalSignalStore::new(&plan);
         assert_eq!(
@@ -624,6 +985,7 @@ mod tests {
                 driver(0, 0, DigitalWriteSelect::Whole),
                 driver(0, 1, DigitalWriteSelect::Whole),
             ],
+            analog_probes: Vec::new(),
         };
         let mut store = DigitalSignalStore::new(&plan);
         let mut drive = |index: u32, spelling: &str| {
@@ -662,6 +1024,7 @@ mod tests {
                 driver(0, 0, DigitalWriteSelect::Part { msb: 3, lsb: 0 }),
                 driver(0, 1, DigitalWriteSelect::Part { msb: 7, lsb: 4 }),
             ],
+            analog_probes: Vec::new(),
         };
         let mut store = DigitalSignalStore::new(&plan);
         store.drive_signal(DigitalDrive {
@@ -698,6 +1061,7 @@ mod tests {
             signals: vec![signal(0, "q", 2, true)],
             processes: Vec::new(),
             drivers: Vec::new(),
+            analog_probes: Vec::new(),
         };
         let mut store = DigitalSignalStore::new(&plan);
         store.write_signal(DigitalSignalId::from(0usize), value("01"));
@@ -712,6 +1076,7 @@ mod tests {
             signals: vec![signal(0, "y", 1, false), signal(1, "a", 1, false)],
             processes: Vec::new(),
             drivers: vec![driver(0, 0, DigitalWriteSelect::Whole)],
+            analog_probes: Vec::new(),
         };
         let mut store = DigitalSignalStore::new(&plan);
         let error = store
@@ -733,11 +1098,161 @@ mod tests {
             signals: vec![signal(0, "a", 4, false)],
             processes: Vec::new(),
             drivers: Vec::new(),
+            analog_probes: Vec::new(),
         };
         let mut store = DigitalSignalStore::new(&plan);
         let error = store
             .force(DigitalSignalId::from(0usize), value("01"), &plan)
             .expect_err("two bits is not four");
         assert!(matches!(error, StoreError::WidthMismatch { .. }));
+    }
+
+    // ------------------------------------------------------------------
+    // Real nets (Verilog-AMS LRM 2.4 section 3.7)
+    // ------------------------------------------------------------------
+
+    fn real_plan(resolution: DigitalRealResolution, drivers: u32) -> CanonicalDigitalPlan {
+        CanonicalDigitalPlan {
+            signals: vec![real_signal(0, "bus", resolution)],
+            processes: Vec::new(),
+            drivers: (0..drivers)
+                .map(|index| driver(0, index, DigitalWriteSelect::Whole))
+                .collect(),
+            analog_probes: Vec::new(),
+        }
+    }
+
+    fn drive_real(store: &mut DigitalSignalStore, index: u32, value: f64) -> f64 {
+        store.drive_real_signal(DigitalRealDrive {
+            driver: DigitalDriverId {
+                signal: DigitalSignalId::from(0usize),
+                index,
+            },
+            value,
+        });
+        store
+            .real_value(DigitalSignalId::from(0usize))
+            .expect("declared")
+    }
+
+    /// "If no driver is connected to a wreal net, its value shall be zero
+    /// (0.0). Unlike other digital nets which have an initial value of `z`,
+    /// wreal nets shall have an initial value of zero." — section 3.7, which
+    /// is the whole of the undriven ruling and needs no fold to reach.
+    #[test]
+    fn an_undriven_real_net_is_zero_and_not_high_impedance() {
+        let plan = real_plan(DigitalRealResolution::Single, 0);
+        let store = DigitalSignalStore::new(&plan);
+        assert_eq!(store.real_value(DigitalSignalId::from(0usize)), Some(0.0));
+
+        // And so is a net whose one driver has not run yet, for the same
+        // clause: a wreal "shall not store its value".
+        let plan = real_plan(DigitalRealResolution::Single, 1);
+        let store = DigitalSignalStore::new(&plan);
+        assert_eq!(store.real_value(DigitalSignalId::from(0usize)), Some(0.0));
+    }
+
+    /// A net with one driver is that driver's value, before and after every
+    /// resolution has anything to combine.
+    #[test]
+    fn a_single_driver_real_net_resolves_to_that_driver() {
+        for resolution in [
+            DigitalRealResolution::Single,
+            DigitalRealResolution::Sum,
+            DigitalRealResolution::Average,
+            DigitalRealResolution::Minimum,
+            DigitalRealResolution::Maximum,
+        ] {
+            let plan = real_plan(resolution, 1);
+            let mut store = DigitalSignalStore::new(&plan);
+            assert_eq!(drive_real(&mut store, 0, -2.5), -2.5, "{resolution:?}");
+        }
+    }
+
+    /// Each resolved spelling, pinned against the arithmetic its keyword names.
+    ///
+    /// Two drivers holding 3.0 and -1.0: their sum is 2.0, their average 1.0,
+    /// their least -1.0 and their greatest 3.0. Written out rather than derived
+    /// from a shared helper, so a fold that changed would have to be changed
+    /// here too.
+    #[test]
+    fn each_resolution_combines_its_drivers_as_its_keyword_says() {
+        for (resolution, expected) in [
+            (DigitalRealResolution::Sum, 2.0),
+            (DigitalRealResolution::Average, 1.0),
+            (DigitalRealResolution::Minimum, -1.0),
+            (DigitalRealResolution::Maximum, 3.0),
+        ] {
+            let plan = real_plan(resolution, 2);
+            let mut store = DigitalSignalStore::new(&plan);
+            drive_real(&mut store, 0, 3.0);
+            assert_eq!(drive_real(&mut store, 1, -1.0), expected, "{resolution:?}");
+        }
+    }
+
+    /// A driver that has not run contributes the section 3.7 initial value, so
+    /// `wrealmin` over one driver at 3.0 and one that has never evaluated is
+    /// `0.0` and not `3.0`. Stated as a test because it is the case where "no
+    /// identity to seed with" has a visible consequence.
+    #[test]
+    fn a_driver_that_has_not_run_contributes_the_initial_value() {
+        let plan = real_plan(DigitalRealResolution::Minimum, 2);
+        let mut store = DigitalSignalStore::new(&plan);
+        assert_eq!(drive_real(&mut store, 0, 3.0), 0.0);
+
+        let plan = real_plan(DigitalRealResolution::Average, 2);
+        let mut store = DigitalSignalStore::new(&plan);
+        assert_eq!(
+            drive_real(&mut store, 0, 4.0),
+            2.0,
+            "divided by two, not one"
+        );
+    }
+
+    /// A rewrite of the value a real net already holds is not an event, the
+    /// same rule the four-state side has — and the test is exact, so a change
+    /// of one unit in the last place *is* one.
+    #[test]
+    fn a_real_transition_is_recorded_on_an_exact_change() {
+        let plan = real_plan(DigitalRealResolution::Single, 1);
+        let mut store = DigitalSignalStore::new(&plan);
+        drive_real(&mut store, 0, 1.0);
+        assert_eq!(store.take_transitions().len(), 1);
+        drive_real(&mut store, 0, 1.0);
+        assert!(store.take_transitions().is_empty());
+        drive_real(&mut store, 0, 1.0 + f64::EPSILON);
+        assert_eq!(store.take_transitions().len(), 1, "no tolerance is applied");
+    }
+
+    /// The two domains do not substitute for one another at the stimulus
+    /// boundary either.
+    #[test]
+    fn a_stimulus_in_the_wrong_domain_is_refused() {
+        let plan = CanonicalDigitalPlan {
+            signals: vec![
+                real_signal(0, "level", DigitalRealResolution::Single),
+                signal(1, "a", 1, false),
+            ],
+            processes: Vec::new(),
+            drivers: Vec::new(),
+            analog_probes: Vec::new(),
+        };
+        let mut store = DigitalSignalStore::new(&plan);
+        assert!(matches!(
+            store
+                .force(DigitalSignalId::from(0usize), value("1"), &plan)
+                .expect_err("`level` carries a real"),
+            StoreError::RealPortDrivenWithBits { .. }
+        ));
+        assert!(matches!(
+            store
+                .force_real(DigitalSignalId::from(1usize), 1.0, &plan)
+                .expect_err("`a` carries bits"),
+            StoreError::FourStatePortDrivenWithAReal { .. }
+        ));
+        store
+            .force_real(DigitalSignalId::from(0usize), 1.5, &plan)
+            .expect("an undriven real net is the stimulus generator's to write");
+        assert_eq!(store.real_value(DigitalSignalId::from(0usize)), Some(1.5));
     }
 }

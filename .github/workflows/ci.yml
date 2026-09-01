@@ -170,10 +170,62 @@ jobs:
         # dominating. That is measured rather than assumed, and if it grows
         # past a minute the multiplier is the case to move to nightly, not the
         # suite.
+        #
+        # `verilog_ams` is the Verilog-AMS real-net corpus, and it belongs here
+        # unconditionally rather than for the reason the other two do: it has
+        # no oracle arm to be absent. Neither Icarus nor Verilator implements
+        # `wreal` in a form this harness could hold to an answer, so the whole
+        # suite is RSpice against reference models written from the clause, and
+        # installing a simulator would not change what it runs. Two cases and
+        # twelve vectors — it is milliseconds.
+        #
+        # `verilog_rnm_agreement` is the same corpus's second answer to having
+        # no oracle: five reference blocks, each authored twice — once as a
+        # SPICE deck simulated by the transient engine, once as a `wreal` design
+        # run on the digital host — held to a bound derived from the block's own
+        # physics. Those five are small decks, a few hundred accepted transient
+        # points each, and under a second in this debug build.
+        #
+        # It also carries one production-scale block, a 7-bit flash converter:
+        # 257 nodes, 127 nonlinear devices, five thousand accepted points, about
+        # nine seconds of this debug build. That is a tenth of what
+        # `verilog_scale` costs in the same step and it is here for the reason
+        # the small ones are — it is a correctness gate, and it is specifically
+        # the precondition of the wall-clock measurement below, since a ratio
+        # between two representations that disagree is not a speedup. If it
+        # grows past a minute it is the case to move to nightly, not the suite.
+        #
+        # Its sibling target `verilog_rnm_performance` is deliberately *not*
+        # named here — it is a wall-clock measurement, which belongs in nightly
+        # and in release.
+        #
+        # `verilog_ams_semantics` is the LRM-clause-tagged semantics suite:
+        # eleven cases over nine clauses, each deriving its expected answer from
+        # the clause it cites rather than from a recorded run. Half of them are
+        # discrete-domain designs and half are mixed decks; none simulates for
+        # longer than a microsecond, so the whole target is a fifth of a second.
+        #
+        # `verilog_mixed_benchmarks` is P4's exit gate: three mixed-signal
+        # circuits — a successive-approximation converter, a phase-locked loop
+        # and a sigma-delta modulator — each simulated once with its digital
+        # half on the event wheel and once with every part of it analog, held to
+        # bounds derived from each circuit's own physics. About eight seconds in
+        # this debug build, dominated by the modulator's two thousand clock
+        # periods. It belongs here rather than in nightly for the reason
+        # `verilog_rnm_agreement`'s flash converter does: it is a correctness
+        # gate, and it is specifically the precondition of the wall-clock
+        # measurement below, since a ratio between two representations that
+        # disagree is not a speedup. If it grows past a minute the modulator is
+        # the case to move, not the suite.
+        #
+        # Its own sibling `verilog_mixed_performance` is likewise *not* named
+        # here, for the reason `verilog_rnm_performance` is not.
         run: >-
           cargo test --locked -p rspice-conformance --lib
           --test ngspice_oracle_audit --test y_device_policy
-          --test verilog_oracles --test verilog_scale
+          --test verilog_oracles --test verilog_scale --test verilog_ams
+          --test verilog_ams_semantics
+          --test verilog_rnm_agreement --test verilog_mixed_benchmarks
       - name: Oracle-free corpora (routine tier)
         # The execution corpora are cheap here only because the expensive
         # decks opt out: every ISCAS85 deck is marked `!extended` and is

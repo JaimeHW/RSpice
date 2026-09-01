@@ -144,6 +144,7 @@ pub fn run_rspice_ui_worker_request(
     rspice_ui::run_rspice_ui_worker_request(value)
 }
 
+#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen(js_name = prepareRspiceUiWasmJitRequest)]
 pub fn prepare_rspice_ui_wasm_jit_request(
     value: wasm_bindgen::JsValue,
@@ -151,11 +152,13 @@ pub fn prepare_rspice_ui_wasm_jit_request(
     rspice_ui::prepare_rspice_ui_wasm_jit_request(value)
 }
 
+#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen(js_name = installRspiceUiWasmJitDispatcher)]
 pub fn install_rspice_ui_wasm_jit_dispatcher(dispatcher: js_sys::Function) {
     rspice_ui::install_rspice_ui_wasm_jit_dispatcher(dispatcher);
 }
 
+#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen(js_name = runPreparedRspiceUiWasmJitRequest)]
 pub fn run_prepared_rspice_ui_wasm_jit_request(
     dispatch_token: u32,
@@ -163,6 +166,7 @@ pub fn run_prepared_rspice_ui_wasm_jit_request(
     rspice_ui::run_prepared_rspice_ui_wasm_jit_request(dispatch_token)
 }
 
+#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen(js_name = cancelPreparedRspiceUiWasmJitRequest)]
 pub fn cancel_prepared_rspice_ui_wasm_jit_request(
     dispatch_token: u32,

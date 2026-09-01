@@ -1099,7 +1099,7 @@ fn emit_noise_statements(
                 {
                     return Err(unsupported(
                         artifact,
-                        &format!(
+                        format!(
                             "initial-step guarded noise dependency '{}' at {}..{} is not instance-static and requires persisted generated state",
                             assignment.target_name, assignment.span.start, assignment.span.end
                         ),

@@ -27,6 +27,9 @@ pub enum Item {
     /// preprocessor retains it as a typed top-level item so
     /// declaration-order scope is not lost before semantic analysis.
     DefaultTransition(DefaultTransitionDirective),
+    /// Global Verilog-AMS default-discipline compiler directive, retained the
+    /// same way and for the same reason.
+    DefaultDiscipline(DefaultDisciplineDirective),
     /// Module definition
     Module(Module),
     /// Discipline definition
@@ -35,14 +38,122 @@ pub enum Item {
     Nature(NatureDef),
     /// Connectmodule definition (Verilog-AMS)
     ConnectModule(Module),
+    /// Connect specification block (Verilog-AMS LRM 2.4 section 7.7).
+    ConnectRules(ConnectRulesDecl),
     /// Paramset definition
     ParamSet(ParamSetDef),
+}
+
+/// One `connectrules` … `endconnectrules` block.
+///
+/// Verilog-AMS LRM 2.4 Syntax 7-5 (`connectrules_declaration`, from A.1.8).
+/// The block is a *specification*: it names which of the declared connect
+/// modules the elaborator may auto-insert, and how otherwise-compatible
+/// disciplines resolve against one another. It declares no behaviour of its
+/// own.
+#[derive(Debug, Clone)]
+pub struct ConnectRulesDecl {
+    /// The `connectrules_identifier` the block is named by.
+    pub name: SmolStr,
+    /// Items in source order, which is the order section 7.7.2.1's
+    /// "first match wins" rule reads them in.
+    pub items: Vec<ConnectRulesItem>,
+    pub span: Span,
+}
+
+/// Syntax 7-5's `connectrules_item`.
+#[derive(Debug, Clone)]
+pub enum ConnectRulesItem {
+    /// Syntax 7-6's `connect_insertion`.
+    Insertion(ConnectInsertion),
+    /// Syntax 7-7's `connect_resolution`.
+    Resolution(ConnectResolution),
+}
+
+/// `connect <cm> [merged|split] [#(...)] [<port overrides>] ;`
+///
+/// Verilog-AMS LRM 2.4 Syntax 7-6.
+#[derive(Debug, Clone)]
+pub struct ConnectInsertion {
+    /// The `connectmodule_identifier` this statement designates.
+    pub connect_module: SmolStr,
+    /// `None` is section 7.8.3's default, which is [`ConnectMode::Merged`].
+    /// Retained as written so a reader of the AST can tell a default from a
+    /// spelled-out `merged`.
+    pub mode: Option<ConnectMode>,
+    /// Section 7.7.3's parameter passing attribute.
+    pub parameters: Vec<ParameterOverride>,
+    /// Section 7.7.1's `connect_port_overrides`, when written.
+    pub port_overrides: Option<ConnectPortOverrides>,
+    pub span: Span,
+}
+
+/// Syntax 7-6's `connect_mode`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectMode {
+    /// One connect module for all the ports a rule applies to (section 7.8.3.1).
+    Merged,
+    /// One connect module per port (section 7.8.3.2).
+    Split,
+}
+
+/// Syntax 7-6's `connect_port_overrides`.
+///
+/// The grammar admits the bare `discipline , discipline` form as well as the
+/// three directed forms; both are held here, with `direction: None` for the
+/// bare form so the connect module's own port directions stand.
+#[derive(Debug, Clone)]
+pub struct ConnectPortOverrides {
+    pub first: ConnectPortOverride,
+    pub second: ConnectPortOverride,
+}
+
+/// One side of a [`ConnectPortOverrides`].
+#[derive(Debug, Clone)]
+pub struct ConnectPortOverride {
+    /// `None` is the undirected form.
+    pub direction: Option<PortDirection>,
+    pub discipline: SmolStr,
+    pub span: Span,
+}
+
+/// `connect <d> {, <d>} resolveto <d>|exclude ;`
+///
+/// Verilog-AMS LRM 2.4 Syntax 7-7.
+#[derive(Debug, Clone)]
+pub struct ConnectResolution {
+    /// The `discipline_list` before `resolveto`.
+    pub disciplines: Vec<SmolStr>,
+    pub target: ConnectResolveTarget,
+    pub span: Span,
+}
+
+/// Syntax 7-7's `discipline_identifier_or_exclude`.
+#[derive(Debug, Clone)]
+pub enum ConnectResolveTarget {
+    /// The discipline the list resolves to. Section 7.7.2.1: it "need not be
+    /// one of the disciplines specified in the discipline list".
+    Discipline(SmolStr),
+    /// `exclude`: the listed disciplines are declared incompatible, and
+    /// finding them on one net is an error.
+    Exclude,
 }
 
 /// One global default-transition directive.
 #[derive(Debug, Clone)]
 pub struct DefaultTransitionDirective {
     pub value: Expression,
+    pub span: Span,
+}
+
+/// One `` `default_discipline `` directive (Verilog-AMS LRM 2.4 section 10.2).
+#[derive(Debug, Clone)]
+pub struct DefaultDisciplineDirective {
+    /// `None` is the reset form: "if this directive is used without a
+    /// discipline name, discipline resolution will not use a default
+    /// discipline for nets declared after this directive is encountered in
+    /// the text stream".
+    pub discipline: Option<SmolStr>,
     pub span: Span,
 }
 
@@ -288,6 +399,24 @@ pub enum PortNetType {
     Wire,
     /// `output reg [3:0] q;`
     Reg,
+    /// `input wreal in;` — Verilog-AMS LRM 2.4 section 6.5.3's real-valued
+    /// port, whose syntax (section 6.5.2) admits `wreal` wherever a net type
+    /// may be written.
+    Wreal(WrealResolution),
+    /// `output real vout;` — a real-valued *variable* port.
+    ///
+    /// The other half of Verilog-AMS LRM 2.4 section 6.5.2's port grammar: a
+    /// port may carry a net type, of which `wreal` is one, or a variable type,
+    /// of which `real` is one. IEEE 1364-2005 section 12.3.4 already reads the
+    /// variable form for `output reg q;` — a port declaration carrying its own
+    /// type, standing for the two-declaration form — and this is exactly that
+    /// form with section 3.9's `real` as the type.
+    ///
+    /// The difference from [`Self::Wreal`] is the difference between a net and
+    /// a variable, and it is the whole point of admitting it: section 6.2 lets
+    /// a procedural assignment write a variable and not a net, so `output real`
+    /// is the port a process can write and `output wreal` is not.
+    Real,
 }
 
 /// Port direction
@@ -1578,17 +1707,103 @@ pub struct DigitalDeclItem {
     pub span: Span,
 }
 
-/// Net type keyword. Only `wire` has a production in this wave; the remaining
-/// IEEE 1364 net types are still refused by name at the keyword.
+/// How a net with more than one driver combines their contributions.
+///
+/// Verilog-AMS LRM 2.4 section 6.5.3 says of a real-valued net that "there can
+/// be a maximum of one driver of a real-valued net", and section 3.7 gives no
+/// resolution function for one — the LRM has none to give. So [`Self::Single`]
+/// is the standard's own reading and the only one a `wreal` declaration
+/// selects: a second driver on such a net is refused rather than combined.
+///
+/// The other four spellings are **not** Accellera's. `wrealsum`, `wrealavg`,
+/// `wrealmin` and `wrealmax` are the de facto real-number-modelling extension
+/// that Cadence AMS Designer introduced and that RNM libraries are written
+/// against; RSpice implements them under those names, opt-in at the
+/// declaration, so that a design which asks for a resolution gets the one it
+/// named and a design which does not gets the LRM's refusal. Nothing here is
+/// reached by writing `wreal`.
+///
+/// The spelling mechanism is the **net type keyword**, and only that. The
+/// alternative — selecting a resolution through a discipline attribute — is
+/// refused by name at the declaration, because a design that could say the same
+/// thing two ways can say two different things in one place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WrealResolution {
+    /// `wreal`: one driver, per LRM 2.4 section 6.5.3.
+    Single,
+    /// `wrealsum`: the sum of every driver's contribution.
+    Sum,
+    /// `wrealavg`: the sum divided by the number of drivers the net has.
+    Average,
+    /// `wrealmin`: the least contribution.
+    Minimum,
+    /// `wrealmax`: the greatest contribution.
+    Maximum,
+}
+
+impl WrealResolution {
+    /// The net-type keyword that selects this resolution.
+    pub const fn keyword(self) -> &'static str {
+        match self {
+            Self::Single => "wreal",
+            Self::Sum => "wrealsum",
+            Self::Average => "wrealavg",
+            Self::Minimum => "wrealmin",
+            Self::Maximum => "wrealmax",
+        }
+    }
+
+    /// The resolution a net-type keyword names, if it names one.
+    pub fn from_keyword(keyword: &str) -> Option<Self> {
+        Some(match keyword {
+            "wreal" => Self::Single,
+            "wrealsum" => Self::Sum,
+            "wrealavg" => Self::Average,
+            "wrealmin" => Self::Minimum,
+            "wrealmax" => Self::Maximum,
+            _ => return None,
+        })
+    }
+
+    /// Whether more than one driver on such a net is well formed.
+    ///
+    /// False for `wreal` alone: LRM 2.4 section 6.5.3 permits one driver, and
+    /// combining two would be inventing a rule the standard declined to state.
+    pub const fn admits_multiple_drivers(self) -> bool {
+        !matches!(self, Self::Single)
+    }
+}
+
+/// Net type keyword.
+///
+/// `wire` is IEEE 1364-2005's; [`Self::Wreal`] is Verilog-AMS LRM 2.4 section
+/// 3.7's real net. The remaining IEEE 1364 net types are still refused by name
+/// at the keyword.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DigitalNetKind {
     Wire,
+    /// A real-valued net: `wreal`, and the four resolved spellings.
+    Wreal(WrealResolution),
 }
 
 impl DigitalNetKind {
     pub const fn keyword(self) -> &'static str {
         match self {
             Self::Wire => "wire",
+            Self::Wreal(resolution) => resolution.keyword(),
+        }
+    }
+
+    /// Whether the net carries a real value rather than four-state bits.
+    pub const fn is_real(self) -> bool {
+        matches!(self, Self::Wreal(_))
+    }
+
+    /// How the net combines its drivers, for a real net.
+    pub const fn resolution(self) -> Option<WrealResolution> {
+        match self {
+            Self::Wire => None,
+            Self::Wreal(resolution) => Some(resolution),
         }
     }
 }
@@ -1611,13 +1826,33 @@ pub struct DigitalNetDecl {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DigitalVariableKind {
     Reg,
+    /// `real`, as a variable of the *discrete* domain.
+    ///
+    /// The same keyword the continuous domain declares its variables with, and
+    /// deliberately the same keyword: IEEE 1364-2005 section 3.9 defines one
+    /// `real` variable type, and Verilog-AMS does not fork it. What differs is
+    /// which half of the language owns the storage, which is a question about
+    /// the module rather than about the declaration — see the ownership rule in
+    /// [`crate::canonical_ir::digital_lower`].
+    ///
+    /// A declaration reaches this kind two ways: an `output real` port, where
+    /// the discrete domain is what the port grammar was asking for, and a
+    /// module-level `real` promoted out of the continuous domain because a
+    /// process writes it and nothing analog can.
+    Real,
 }
 
 impl DigitalVariableKind {
     pub const fn keyword(self) -> &'static str {
         match self {
             Self::Reg => "reg",
+            Self::Real => "real",
         }
+    }
+
+    /// Whether the variable carries a real rather than four-state bits.
+    pub const fn is_real(self) -> bool {
+        matches!(self, Self::Real)
     }
 }
 

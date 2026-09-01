@@ -184,12 +184,81 @@ use rspice_core::analysis::harmonic_balance::{
 /// `pub(crate)`, as is the time-unit ruling, which the refusal prints rather
 /// than a caller reading.
 ///
+/// The coherent-noise program briefly added five public statements to
+/// `src/device/veriloga_builtins.rs`, but nothing outside `rspice-core` names
+/// any of them — every caller is `src/engine/noise.rs`:
+///
+/// `BuiltinEvaluatedNoiseInjection` and `BuiltinEvaluatedNoiseProcess` are the
+/// per-process result the generated coherent ABI hands back;
+/// `has_grouped_noise_processes` is the capability probe that tells a catalog
+/// generated before that ABI apart from one generated after it;
+/// `grouped_noise_process_catalog` names the processes for the noise report;
+/// and `evaluate_noise_processes_at_frequency` is the evaluation itself.
+///
+/// Those five APIs are now `pub(crate)`, so the ratchet is back at its prior
+/// 4,279-item ceiling rather than retaining accidental headroom.
+///
 /// The FFT result contract adds +5 deliberate frontend-facing types:
 /// `XyceFftMode` retains the authored compatibility selection, while
 /// `TransientFftBin`, `TransientFftHarmonic`, `TransientFftMetrics`, and
 /// `TransientFftResult` expose calibrated spectra and optional `FFTOUT`
 /// figures without requiring a frontend to parse an engine text report.
-const MAX_PUBLIC_ITEMS: usize = 4284;
+///
+/// 2026-08-31, +23 arrears (4,284 → 4,307): two landings raised the count
+/// without touching this ceiling — deterministic TEAM resistance noise
+/// (`db03d39eb`) and the transactional mixed Verilog transient host
+/// (`9549ed6cb`). Neither set has been triaged for narrowing; whether each
+/// item is genuinely frontend-facing or a `pub(crate)` candidate is the
+/// visibility-narrowing pass's question, not this ratchet's. Recorded here so
+/// the next raise cannot mistake the arrears for headroom.
+///
+/// 2026-08-31, -10 (4,307 → 4,297): the narrowing pass the +30 above asked for,
+/// run over the ten statements `b97258608` added under `src/library/`. All ten
+/// are now `pub(crate)`: the ingestion ceilings
+/// `DEFAULT_MAX_LIBRARY_SOURCE_FILES` and
+/// `DEFAULT_MAX_VERILOGA_DISCOVERY_FILES`; the `LibParser` builders
+/// `with_resource_limits` and `with_max_source_files` and its
+/// `parse_file_with_abort`; the `LibraryManager` loaders
+/// `load_external_lib_with_limits` and
+/// `load_external_lib_with_limits_and_abort`; and the discovery limit type
+/// `VerilogADiscoveryLimits` with `discover_veriloga_models_with_limits` and
+/// `discover_veriloga_models_with_limits_and_abort`.
+///
+/// Every one is an explicit-limit or cancellation overload, and the only
+/// callers are `LibraryManager` and this crate's own tests. The entry points a
+/// frontend actually names — `LibParser::new`, `parse_file`, `parse_string`,
+/// `LibraryManager::load_external_lib`, `discover_veriloga_models` — stay
+/// public and still apply those bounds from `ResourceLimits::default()`, so
+/// the ingestion that commit bounded remains bounded on the public path.
+///
+/// Three of the ten turned out to have no shipping caller at all once they
+/// stopped being API, which `-D warnings` then said out loud.
+/// `load_external_lib_with_limits` had no caller in any configuration and an
+/// abort-taking twin one line below it, so it is deleted rather than narrowed;
+/// `with_max_source_files` and `discover_veriloga_models_with_limits` are
+/// `#[cfg(test)]`, being how the tests drive one ingestion limit at a time to
+/// its edge. All three still count as -1 each: a deleted `pub fn` and a
+/// cfg-gated `pub(crate) fn` are both gone from this number.
+///
+/// Established by compiling the CLI, the GUI, the Python and WASM bindings and
+/// the conformance suite against the narrowed items, which is the check this
+/// question needs: a bare-name grep cannot answer it, because a grouped
+/// `pub use` lets a frontend name an item through a path the declaration's own
+/// name never appears in. The two grouped re-exports in `src/library.rs` drop
+/// those names but keep their statements, so the whole -10 is declarations.
+///
+/// 2026-09-01, +3 deliberate (4,297 → 4,300): the compile-once digital run
+/// API. `CompiledDigitalDesign`, `CompiledDigitalDesign::compile` and
+/// `CompiledDigitalDesign::run` split `run_digital_verilog` into its two
+/// halves, and every one of the three is on the path a caller with many
+/// stimuli and one design must take — the conformance suite's RNM performance
+/// measurement is that caller, and without them the only way to run a design
+/// twice is to compile it twice. `run_digital_verilog` is retained unchanged
+/// as their composition, so nothing already public moved or grew. The
+/// module-name accessor that would have made a fourth was *not* added: no
+/// frontend reads it, `Debug` prints the name, and the refusal that cites it
+/// carries it.
+const MAX_PUBLIC_ITEMS: usize = 4300;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

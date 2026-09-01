@@ -11,16 +11,27 @@
 use std::collections::HashSet;
 use std::process::ExitCode;
 
-use rspice_core::xspice::CodeModelRegistry;
+use rspice_core::xspice::{
+    CodeModel, CodeModelRegistry, ParamType, PortDirection, PortSpec, PortType,
+};
 
-/// Number of built-in interfaces a shipped registry exposes.
+/// Number of built-in interfaces at the catalog-audit baseline.
 ///
-/// The registry has no external artifact to diff against, so this is the
-/// stand-in: a model that disappears because its registration was dropped in a
-/// refactor fails here rather than at the first deck that names it. Update it
-/// in the same commit that adds or removes a `register` call, and say which
-/// model moved.
-const EXPECTED_BUILTIN_MODEL_COUNT: usize = 113;
+/// The registry had 113 interfaces when this audit was introduced. New models
+/// belong in [`BUILTIN_ADDITIONS_SINCE_BASELINE`] with an identity-specific
+/// descriptor check; keeping the baseline separate prevents a bare count bump
+/// from silently blessing an unrelated registration.
+const BUILTIN_MODEL_BASELINE_COUNT: usize = 113;
+
+/// Intentional additions since the 113-model audit baseline.
+///
+/// These are not merely names used to adjust the expected count. Each entry is
+/// matched below and its executable port/parameter contract is pinned by
+/// [`validate_added_builtin_contract`].
+const BUILTIN_ADDITIONS_SINCE_BASELINE: &[&str] = &["pspice_d_stim", "v_to_real"];
+
+const EXPECTED_BUILTIN_MODEL_COUNT: usize =
+    BUILTIN_MODEL_BASELINE_COUNT + BUILTIN_ADDITIONS_SINCE_BASELINE.len();
 
 fn main() -> ExitCode {
     let validate_only = match parse_arguments() {
@@ -105,6 +116,16 @@ fn validate_registry(registry: &CodeModelRegistry, model_names: &[&str]) -> Vec<
             "registry exposes {} built-in models; a shipped registry must expose exactly {EXPECTED_BUILTIN_MODEL_COUNT}",
             model_names.len()
         ));
+    }
+
+    for model_name in BUILTIN_ADDITIONS_SINCE_BASELINE {
+        let Some(model) = registry.get(model_name) else {
+            errors.push(format!(
+                "intentional post-baseline interface '{model_name}' is not registered"
+            ));
+            continue;
+        };
+        validate_added_builtin_contract(model.as_ref(), &mut errors);
     }
 
     let mut seen_names = HashSet::new();
@@ -222,4 +243,205 @@ fn validate_registry(registry: &CodeModelRegistry, model_names: &[&str]) -> Vec<
     }
 
     errors
+}
+
+fn validate_added_builtin_contract(model: &dyn CodeModel, errors: &mut Vec<String>) {
+    match model.name() {
+        "pspice_d_stim" => {
+            expect_description(model, "PSpice STIM digital stimulus", errors);
+            expect_ports(
+                model,
+                &[ExpectedPort {
+                    name: "out",
+                    direction: PortDirection::Out,
+                    default_type: PortType::Digital,
+                    allowed_types: &[PortType::Digital],
+                    is_vector: true,
+                    null_allowed: false,
+                    vector_min_len: None,
+                    vector_max_len: None,
+                }],
+                errors,
+            );
+            expect_parameters(model, &[("stim_program", ParamType::String)], errors);
+            if let [parameter] = model.parameters()
+                && (parameter.string_default.as_deref() != Some("")
+                    || parameter.required
+                    || parameter.min.is_some()
+                    || parameter.max.is_some())
+            {
+                errors.push(
+                    "interface 'pspice_d_stim' parameter 'stim_program' must remain an optional, unbounded string with an empty default"
+                        .to_owned(),
+                );
+            }
+        }
+        "v_to_real" => {
+            expect_description(
+                model,
+                "Analog input sampled into a real-valued event",
+                errors,
+            );
+            expect_ports(
+                model,
+                &[
+                    ExpectedPort {
+                        name: "in",
+                        direction: PortDirection::In,
+                        default_type: PortType::Voltage,
+                        allowed_types: &[
+                            PortType::Voltage,
+                            PortType::DifferentialVoltage,
+                            PortType::Current,
+                            PortType::DifferentialCurrent,
+                            PortType::VoltageName,
+                        ],
+                        is_vector: false,
+                        null_allowed: false,
+                        vector_min_len: None,
+                        vector_max_len: None,
+                    },
+                    ExpectedPort {
+                        name: "out",
+                        direction: PortDirection::Out,
+                        default_type: PortType::Real,
+                        allowed_types: &[PortType::Real],
+                        is_vector: false,
+                        null_allowed: false,
+                        vector_min_len: None,
+                        vector_max_len: None,
+                    },
+                ],
+                errors,
+            );
+            expect_parameters(model, &[("gain", ParamType::Real)], errors);
+            if let [parameter] = model.parameters()
+                && (parameter.default != 1.0
+                    || parameter.required
+                    || parameter.min.is_some()
+                    || parameter.max.is_some())
+            {
+                errors.push(
+                    "interface 'v_to_real' parameter 'gain' must remain an optional, unbounded real with default 1"
+                        .to_owned(),
+                );
+            }
+        }
+        name => errors.push(format!(
+            "post-baseline interface '{name}' has no identity-specific catalog contract"
+        )),
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ExpectedPort {
+    name: &'static str,
+    direction: PortDirection,
+    default_type: PortType,
+    allowed_types: &'static [PortType],
+    is_vector: bool,
+    null_allowed: bool,
+    vector_min_len: Option<usize>,
+    vector_max_len: Option<usize>,
+}
+
+fn expect_description(model: &dyn CodeModel, expected: &str, errors: &mut Vec<String>) {
+    if model.description() != expected {
+        errors.push(format!(
+            "interface '{}' description changed: expected '{expected}', found '{}'",
+            model.name(),
+            model.description()
+        ));
+    }
+}
+
+fn expect_ports(model: &dyn CodeModel, expected: &[ExpectedPort], errors: &mut Vec<String>) {
+    let actual = model.ports();
+    if actual.len() != expected.len() {
+        errors.push(format!(
+            "interface '{}' port contract changed: expected {} ports, found {}",
+            model.name(),
+            expected.len(),
+            actual.len()
+        ));
+        return;
+    }
+
+    for (actual, expected) in actual.iter().zip(expected) {
+        if !port_matches(actual, *expected) {
+            errors.push(format!(
+                "interface '{}' port '{}' no longer matches its post-baseline descriptor contract",
+                model.name(),
+                expected.name
+            ));
+        }
+    }
+}
+
+fn port_matches(actual: &PortSpec, expected: ExpectedPort) -> bool {
+    actual.name == expected.name
+        && actual.direction == expected.direction
+        && actual.default_type == expected.default_type
+        && actual.allowed_types == expected.allowed_types
+        && actual.is_vector == expected.is_vector
+        && actual.null_allowed == expected.null_allowed
+        && actual.vector_min_len == expected.vector_min_len
+        && actual.vector_max_len == expected.vector_max_len
+}
+
+fn expect_parameters(
+    model: &dyn CodeModel,
+    expected: &[(&str, ParamType)],
+    errors: &mut Vec<String>,
+) {
+    let actual = model.parameters();
+    if actual.len() != expected.len() {
+        errors.push(format!(
+            "interface '{}' parameter contract changed: expected {} parameters, found {}",
+            model.name(),
+            expected.len(),
+            actual.len()
+        ));
+        return;
+    }
+
+    for (actual, (expected_name, expected_type)) in actual.iter().zip(expected) {
+        if actual.name != *expected_name || actual.param_type != *expected_type {
+            errors.push(format!(
+                "interface '{}' parameter '{}' no longer matches its post-baseline descriptor contract",
+                model.name(),
+                expected_name
+            ));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn post_baseline_models_have_exact_catalog_contracts() {
+        let registry = CodeModelRegistry::with_builtins();
+        let mut errors = Vec::new();
+
+        for model_name in BUILTIN_ADDITIONS_SINCE_BASELINE {
+            let model = registry
+                .get(model_name)
+                .unwrap_or_else(|| panic!("post-baseline model '{model_name}' must resolve"));
+            validate_added_builtin_contract(model.as_ref(), &mut errors);
+        }
+
+        assert!(errors.is_empty(), "{}", errors.join("\n"));
+    }
+
+    #[test]
+    fn complete_builtin_registry_passes_the_release_audit() {
+        let registry = CodeModelRegistry::with_builtins();
+        let mut model_names = registry.model_names();
+        model_names.sort_unstable();
+
+        let errors = validate_registry(&registry, &model_names);
+        assert!(errors.is_empty(), "{}", errors.join("\n"));
+    }
 }

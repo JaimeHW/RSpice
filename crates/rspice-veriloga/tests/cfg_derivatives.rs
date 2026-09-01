@@ -124,6 +124,16 @@ fn corpus_tolerance(module: &str) -> f64 {
 const NO_CORRECTION_LANE: &str =
     "a difference oracle has no unknown to perturb for the limiter correction lane";
 
+/// The same argument for the noise-process lanes, and for the same reason: a
+/// syntactic noise process is not a solver unknown either. The interpreter these
+/// oracles run on evaluates every `CfgValueKind::NoiseProcess` leaf as zero — it
+/// is the fluctuation about the operating point, not part of it — so there is no
+/// input to displace and no difference to take. The lanes these oracles build
+/// hold node potentials and branch unknowns only, which is why reaching this is a
+/// bug in the lane list rather than a limitation.
+const NO_NOISE_LANE: &str =
+    "a difference oracle has no unknown to perturb for a noise-process lane";
+
 #[test]
 fn every_jacobian_entry_matches_a_richardson_difference() {
     for (name, source) in fixtures() {
@@ -187,6 +197,7 @@ fn difference(function: &CfgFunction, bias: &BiasPoint, seed: AdSeed, residual: 
         // Branch unknowns are currents; perturbing them by a volt-sized step
         // would leave the model's operating point entirely.
         AdSeed::BranchUnknownFlow(_) => COARSE_STEP * 1.0e-3,
+        AdSeed::NoiseProcess(_) => unreachable!("{NO_NOISE_LANE}"),
         AdSeed::LimiterCorrection => unreachable!("{NO_CORRECTION_LANE}"),
     };
     let coarse = central(function, bias, seed, residual, step);
@@ -219,6 +230,7 @@ fn at(
         AdSeed::BranchUnknownFlow(unknown) => {
             perturbed.branch_unknown_flows[usize::from(unknown)] += delta;
         }
+        AdSeed::NoiseProcess(_) => unreachable!("{NO_NOISE_LANE}"),
         AdSeed::LimiterCorrection => unreachable!("{NO_CORRECTION_LANE}"),
     }
     evaluate_cfg(function, &inputs(&perturbed))
@@ -230,6 +242,12 @@ fn at(
 #[derive(Clone)]
 struct BiasPoint {
     parameters: Vec<f64>,
+    /// One flag per declared port, all connected. That is the CFG level's own
+    /// convention — `$port_connected` folds to a constant one there, because a
+    /// device instantiated from this level always gets exactly the terminals its
+    /// descriptor declares — so a shorter vector would read as *unconnected* and
+    /// state something the fixtures do not mean.
+    port_connected: Vec<bool>,
     node_potentials: Vec<f64>,
     branch_flows: Vec<f64>,
     branch_unknown_flows: Vec<f64>,
@@ -245,6 +263,7 @@ fn bias_point(artifact: &CanonicalIrArtifact) -> BiasPoint {
             .iter()
             .map(|parameter| parameter.default.unwrap_or(0.0))
             .collect(),
+        port_connected: vec![true; artifact.hir.ports.len()],
         // Asymmetric, and away from zero: a symmetric point hides sign errors
         // and the origin hides everything that is odd about a diode.
         node_potentials: (0..artifact.mir.nodes.len())
@@ -263,6 +282,7 @@ fn inputs(bias: &BiasPoint) -> CfgEvalInputs<f64> {
     CfgEvalInputs {
         parameters: bias.parameters.clone(),
         parameter_given: vec![false; bias.parameters.len()],
+        port_connected: bias.port_connected.clone(),
         event_state: Vec::new(),
         event_controls: HashMap::new(),
         node_potentials: bias.node_potentials.clone(),
@@ -449,6 +469,71 @@ module planar(p, n);
 endmodule
 "#,
         ),
+        // The stateful operators, at the only bias where an oracle without
+        // history can check them: equilibrium.
+        //
+        // This is a real check rather than a formality. `absdelay` and `slew`
+        // reproduce their input exactly when nothing is moving, so the rule has
+        // to produce the input's own derivative and the oracle measures whether
+        // it did — a rule that dropped the input, or scaled it by a timing
+        // operand, fails here. `idtmod` has to take the *unwrapped* integral's
+        // companion rule, which at `idt_scale = 0` means contributing nothing
+        // rather than contributing the modulus. And the whole point of a
+        // difference oracle over the interpreter is that both sides walk the
+        // same nodes: if one of these had no interpreter arm, this fixture
+        // would not run at all.
+        (
+            "stateful operators at equilibrium",
+            r#"
+module stateful(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real g = 1.0e-3;
+    parameter real td = 1.0e-9;
+    analog begin
+        I(p, n) <+ g * absdelay(V(p, n) * V(p, n), td)
+                 + g * slew(2.0 * V(p, n), 1.0e6, -2.0e6)
+                 + g * idtmod(V(p, n), 0.0, 1.0, -0.5);
+    end
+endmodule
+"#,
+        ),
+        // A delay that depends on the bias, which is the one dynamic operator
+        // whose *timing* operand is not primal-only: the derivative node carries
+        // `d(delay)` as well as `d(input)`, and at equilibrium that term
+        // multiplies a `dx/dt` of zero. Checking it here is what proves the
+        // extra operand does not leak into the answer.
+        (
+            "bias-dependent transport delay",
+            r#"
+module delayed(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real g = 1.0e-3;
+    analog I(p, n) <+ g * absdelay(V(p, n), 1.0e-9 * (1.0 + 0.1 * V(p, n)), 1.0e-6);
+endmodule
+"#,
+        ),
+        // The piecewise-constant family, whose Jacobian rows must be structural
+        // zeros rather than a difference of two nearby evaluations. Both oracles
+        // read the operators' real parts only, so a rule that invented a slope
+        // here would disagree immediately.
+        (
+            "piecewise-constant analog integer and crossing operators",
+            r#"
+module piecewise(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer mask = 12;
+    parameter real g = 1.0e-3;
+    integer bits;
+    analog begin
+        bits = (mask & 6) | (mask ^ 5) | (mask << 1) | (mask >> 1) | (~mask);
+        I(p, n) <+ g * V(p, n) + 1.0e-9 * bits + 1.0e-9 * last_crossing(V(p, n) - 0.5, 1);
+    end
+endmodule
+"#,
+        ),
     ]
 }
 
@@ -519,6 +604,7 @@ fn complex_step(function: &CfgFunction, bias: &BiasPoint, seed: AdSeed, residual
             inputs.branch_unknown_flows[index] =
                 ComplexStep::seed(bias.branch_unknown_flows[index]);
         }
+        AdSeed::NoiseProcess(_) => unreachable!("{NO_NOISE_LANE}"),
         AdSeed::LimiterCorrection => unreachable!("{NO_CORRECTION_LANE}"),
     }
     evaluate_cfg(function, &inputs)
@@ -533,6 +619,7 @@ fn complex_inputs(bias: &BiasPoint) -> CfgEvalInputs<ComplexStep> {
     CfgEvalInputs {
         parameters: lift(&bias.parameters),
         parameter_given: vec![false; bias.parameters.len()],
+        port_connected: bias.port_connected.clone(),
         event_state: Vec::new(),
         event_controls: HashMap::new(),
         node_potentials: lift(&bias.node_potentials),
@@ -1068,6 +1155,8 @@ fn random_bias_point(artifact: &CanonicalIrArtifact, state: &mut u64) -> BiasPoi
             .iter()
             .map(|parameter| draw_parameter(parameter, state))
             .collect(),
+        // Not drawn: connection state is structural, not a bias coordinate.
+        port_connected: vec![true; artifact.hir.ports.len()],
         node_potentials: (0..artifact.mir.nodes.len())
             .map(|_| -0.55 + next_unit(state) * 1.4)
             .collect(),

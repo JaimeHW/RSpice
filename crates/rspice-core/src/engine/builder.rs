@@ -64,6 +64,11 @@ use veriloga_cache::{
     normalize_model_key, resolve_cached_or_compile_veriloga_with_limits_and_abort,
 };
 
+#[cfg(feature = "veriloga")]
+mod connect_modules;
+#[cfg(feature = "veriloga")]
+mod mixed_modules;
+
 mod model_policy;
 use model_policy::*;
 mod advanced_mos;
@@ -1407,6 +1412,7 @@ enum XspiceAutoBridgeKind {
     Dac,
     Bidi,
     RealToV,
+    VToReal,
 }
 
 #[derive(Debug, Clone)]
@@ -1415,6 +1421,17 @@ struct PlannedXspiceAutoBridge {
     kind: XspiceAutoBridgeKind,
     vcc: crate::Value,
     family: Option<String>,
+    /// The Verilog-AMS connect module selected for this boundary, when the
+    /// design has a `connectrules` block that reaches it.
+    ///
+    /// This is the extension `plan_xspice_auto_bridges` documented and
+    /// deliberately did not carry until something produced it: one field
+    /// naming the selected module, read by materialization, rather than a
+    /// second pass that decides boundaries again. `None` is a design with no
+    /// connect rules, which is every design that had none before this field
+    /// existed — and materialization takes exactly the path it took then.
+    #[cfg(feature = "veriloga")]
+    connect_module: Option<connect_modules::PlannedConnectModule>,
 }
 
 #[derive(Debug, Clone)]
@@ -1442,6 +1459,25 @@ struct XspiceAutoBridgeUsage {
     digital_inout: bool,
 }
 
+/// Which directions of real-valued event traffic a node carries.
+///
+/// The real-valued analogue of [`XspiceAutoBridgeUsage`], and separate from it
+/// because the two node worlds meet the matrix through different models: a
+/// digital node needs a threshold and a supply, a real one needs neither.
+///
+/// A node that carries a real event *output* is driven by a model, so the
+/// bridge it needs is `real_to_v` — carry that event into the matrix. A node
+/// that carries only a real event *input* has no driver at all, so the bridge
+/// it needs is the observer `v_to_real` — sample the matrix into the event.
+/// Output wins when a node has both, because a driven event needs no observer
+/// and observing one would publish a second value onto a net that already has
+/// one.
+#[derive(Debug, Default, Clone, Copy)]
+struct XspiceRealBridgeUsage {
+    real_input: bool,
+    real_output: bool,
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 struct XspiceExplicitDigitalBridgeCoverage {
     adc: bool,
@@ -1455,7 +1491,7 @@ impl XspiceExplicitDigitalBridgeCoverage {
             XspiceAutoBridgeKind::Adc => self.adc = true,
             XspiceAutoBridgeKind::Dac => self.dac = true,
             XspiceAutoBridgeKind::Bidi => self.bidi = true,
-            XspiceAutoBridgeKind::RealToV => {}
+            XspiceAutoBridgeKind::RealToV | XspiceAutoBridgeKind::VToReal => {}
         }
     }
 
@@ -1717,22 +1753,33 @@ fn xspice_instance_hierarchy_depth(name: &str) -> usize {
     name.bytes().filter(|byte| *byte == b'.').count()
 }
 
-fn register_real_output_connection_nodes(
-    nodes: &mut BTreeSet<usize>,
+fn register_real_connection_nodes(
+    nodes: &mut BTreeMap<usize, XspiceRealBridgeUsage>,
     connection: &crate::xspice::PortConnection,
     direction: crate::xspice::PortDirection,
 ) {
-    use crate::xspice::PortConnection;
+    use crate::xspice::{PortConnection, PortDirection};
 
-    if !direction_outputs_events(direction) {
+    let outputs = direction_outputs_events(direction);
+    let inputs = matches!(direction, PortDirection::In | PortDirection::InOut);
+    if !outputs && !inputs {
         return;
     }
 
+    let mut register = |node: usize| {
+        if node == 0 {
+            return;
+        }
+        let usage = nodes.entry(node).or_default();
+        usage.real_output |= outputs;
+        usage.real_input |= inputs;
+    };
+
     match connection {
-        PortConnection::Real(node) => insert_non_ground_node(nodes, *node),
+        PortConnection::Real(node) => register(*node),
         PortConnection::RealVector(vector) => {
             for node in vector {
-                insert_non_ground_node(nodes, *node);
+                register(*node);
             }
         }
         _ => {}
@@ -1773,6 +1820,40 @@ fn explicit_digital_bridge_kind_for_port(
     }
 }
 
+/// The one bridge planner.
+///
+/// Every route that puts a converter between the matrix and an event world
+/// comes through here: the three digital bridges, and the two real-event ones
+/// added by the `Real` arm below. A second planner beside it would mean two
+/// answers to "is this node a boundary", and the only way to keep them
+/// agreeing would be to keep them identical.
+///
+/// # Where a Verilog-AMS connect module joins
+///
+/// Verilog-AMS LRM 2.4 clause 7 decides three things about a mixed-discipline
+/// net — which connect module bridges it, where the instance goes, and which
+/// of its ports binds to which side. Those decisions are the front end's, in
+/// `rspice_veriloga::connect`, because they are about *disciplines*, and a
+/// discipline is a language construct nothing in this crate represents: this
+/// planner reads XSPICE port types, which say analog-or-event and nothing
+/// about which analog.
+///
+/// What a connect module changes is *which model* bridges a node, not whether
+/// the node is a boundary or where the boundary is. So the extension this
+/// planner takes is one more field on [`PlannedXspiceAutoBridge`] naming the
+/// selected module, read by materialization — not a second pass that decides
+/// boundaries again. That field is
+/// [`PlannedXspiceAutoBridge::connect_module`], and its producer is
+/// [`connect_modules::select_for_boundary`], which runs *after* this planner
+/// and over its answers: this decides where the boundaries are, clause 7
+/// decides what goes on them.
+///
+/// A Verilog-AMS hierarchy elaborated into [`CircuitData`] nodes is still
+/// missing, and it is still what a general connect-module route needs — the
+/// hierarchical placement of section 7.8.4's rule 2, and `split` mode's
+/// per-port instances, both live there. What a flat deck presents instead is
+/// the smallest signal clause 7 describes, one node and one instance port, and
+/// [`connect_modules`] builds exactly that rather than approximating it.
 fn plan_xspice_auto_bridges(
     circuit: &CircuitData,
     flat_elements: &[Element],
@@ -1782,7 +1863,7 @@ fn plan_xspice_auto_bridges(
     let mut analog_nodes = BTreeSet::new();
     let mut digital_nodes = BTreeMap::new();
     let mut digital_node_families = BTreeMap::new();
-    let mut real_output_nodes = BTreeSet::new();
+    let mut real_nodes: BTreeMap<usize, XspiceRealBridgeUsage> = BTreeMap::new();
     let mut explicit_digital_bridge_coverage = BTreeMap::new();
     let mut explicit_real_bridge_nodes = BTreeSet::new();
 
@@ -1823,11 +1904,7 @@ fn plan_xspice_auto_bridges(
                     xspice_instance_hierarchy_depth(&instance.name),
                 );
             } else if port.default_type == crate::xspice::PortType::Real {
-                register_real_output_connection_nodes(
-                    &mut real_output_nodes,
-                    connection,
-                    port.direction,
-                );
+                register_real_connection_nodes(&mut real_nodes, connection, port.direction);
             }
         }
     }
@@ -1855,23 +1932,48 @@ fn plan_xspice_auto_bridges(
                         .get(&node)
                         .map(|candidate: &XspiceAutoBridgeFamilyCandidate| candidate.family.clone())
                         .or_else(|| metadata.and_then(|metadata| metadata.family.clone())),
+                    #[cfg(feature = "veriloga")]
+                    connect_module: None,
                 })
         })
         .collect();
 
-    planned.extend(
-        real_output_nodes
-            .into_iter()
-            .filter(|node| {
-                analog_nodes.contains(node) && !explicit_real_bridge_nodes.contains(node)
-            })
-            .map(|node| PlannedXspiceAutoBridge {
-                node,
-                kind: XspiceAutoBridgeKind::RealToV,
-                vcc: 0.0,
-                family: None,
-            }),
-    );
+    planned.extend(real_nodes.into_iter().filter_map(|(node, usage)| {
+        if !analog_nodes.contains(&node) {
+            return None;
+        }
+        let kind = if usage.real_output {
+            // An explicit `real_to_v`/`r_to_v` already reading this event net
+            // is the bridge, so a second one is not planned. That suppression
+            // is the driver direction's alone: an explicit reader is not a
+            // *producer*, so it says nothing about whether the observer below
+            // is needed.
+            if explicit_real_bridge_nodes.contains(&node) {
+                return None;
+            }
+            XspiceAutoBridgeKind::RealToV
+        } else if usage.real_input {
+            // Nothing drives this real event net and an analog node carries
+            // the same name, so the value the reader wants is the node's. An
+            // explicit `v_to_real` publishing here would have set
+            // `real_output` above, which is why no separate coverage set is
+            // needed to keep the two from both firing.
+            XspiceAutoBridgeKind::VToReal
+        } else {
+            return None;
+        };
+        Some(PlannedXspiceAutoBridge {
+            node,
+            kind,
+            vcc: 0.0,
+            family: None,
+            // Real-valued event traffic is not a discipline boundary: a
+            // `wreal` carries a real number, not a discipline's potential and
+            // flow, so clause 7 has nothing to say about it.
+            #[cfg(feature = "veriloga")]
+            connect_module: None,
+        })
+    }));
 
     planned
 }
@@ -2144,6 +2246,7 @@ fn xspice_auto_bridge_kind_label(kind: XspiceAutoBridgeKind) -> &'static str {
         XspiceAutoBridgeKind::Dac => "digital-to-analog",
         XspiceAutoBridgeKind::Bidi => "bidirectional digital/analog",
         XspiceAutoBridgeKind::RealToV => "real-to-voltage",
+        XspiceAutoBridgeKind::VToReal => "voltage-to-real",
     }
 }
 
@@ -2167,6 +2270,9 @@ fn xspice_auto_bridge_generated_card(
         XspiceAutoBridgeKind::RealToV => {
             format!("{instance_name} {node_label} null {node_label} r_to_v")
         }
+        XspiceAutoBridgeKind::VToReal => {
+            format!("{instance_name} {node_label} {node_label} v_to_real")
+        }
     }
 }
 
@@ -2189,13 +2295,17 @@ fn reject_disabled_xspice_auto_bridge(
 fn xspice_auto_bridge_template_type_name(kind: XspiceAutoBridgeKind) -> &'static str {
     match kind {
         XspiceAutoBridgeKind::Adc | XspiceAutoBridgeKind::Dac | XspiceAutoBridgeKind::Bidi => "d",
-        XspiceAutoBridgeKind::RealToV => "real",
+        XspiceAutoBridgeKind::RealToV | XspiceAutoBridgeKind::VToReal => "real",
     }
 }
 
 fn xspice_auto_bridge_template_direction(kind: XspiceAutoBridgeKind) -> &'static str {
     match kind {
-        XspiceAutoBridgeKind::Adc => "in",
+        // The direction names the *node's* side of the bridge, which is what a
+        // deck author overriding the template has in hand. `adc_bridge` reads an
+        // analog node, so does the observer; `dac_bridge` and `real_to_v` drive
+        // one.
+        XspiceAutoBridgeKind::Adc | XspiceAutoBridgeKind::VToReal => "in",
         XspiceAutoBridgeKind::Dac | XspiceAutoBridgeKind::RealToV => "out",
         XspiceAutoBridgeKind::Bidi => "inout",
     }
@@ -3432,6 +3542,20 @@ fn add_planned_xspice_auto_bridges(
             continue;
         };
 
+        // A template and a connect module are two answers to "what bridges
+        // this node", and taking either silently would make the deck's other
+        // request disappear.
+        #[cfg(feature = "veriloga")]
+        if let Some(selected) = bridge.connect_module.as_ref() {
+            let node_label = xspice_auto_bridge_node_label(node_names.as_deref(), bridge.node);
+            return Err(SimulationError::Circuit(format!(
+                "node '{node_label}' selects connect module '{}' and also matches auto-bridge \
+                 template '{}'; a node takes one bridge, so remove the template override or \
+                 the connect rule",
+                selected.name, template.key
+            )));
+        }
+
         let max_nodes = template.max_nodes.unwrap_or(bridges.len()).max(1);
         let mut group = Vec::with_capacity(max_nodes.min(bridges.len() - index));
         consumed[index] = true;
@@ -3581,6 +3705,32 @@ fn add_planned_xspice_auto_bridge(
             Vec::new(),
             Some(XspiceAutoBridgeOutputBranch::Scalar { port_idx: 1 }),
         ),
+        XspiceAutoBridgeKind::VToReal => (
+            "v_to_real",
+            format!("__rspice_auto_v_to_real_{}", bridge.node),
+            vec![
+                PortConnection::Analog(bridge.node),
+                PortConnection::Real(bridge.node),
+            ],
+            Vec::new(),
+            // No output branch: the observer's output is an event, not a
+            // matrix contribution, so there is no current for a branch to
+            // carry.
+            None,
+        ),
+    };
+
+    // A selected connect module replaces the parameters this bridge would have
+    // stamped, not the model it stamps them on: delegation is the whole reason
+    // a connect module runs here at all. With no section 7.7.3 override the
+    // numbers are the same ones, derived the same way from the same supply,
+    // which is why a deck that names a connect module gets the bridge it would
+    // have got without one.
+    #[cfg(feature = "veriloga")]
+    let numeric_params = if let Some(selected) = bridge.connect_module.as_ref() {
+        connect_modules::delegated_parameters(selected, bridge.kind, vcc)?
+    } else {
+        numeric_params
     };
 
     let code_model = circuit.xspice_registry.get(model_name).ok_or_else(|| {
@@ -4775,6 +4925,159 @@ rload mix 0 1k
     }
 
     #[test]
+    fn real_input_on_an_analog_node_gets_a_generated_observer() {
+        let netlist = Netlist::parse(
+            "\
+* a real event reader sitting on a node the matrix also owns
+vin mix 0 dc 1.5
+rload mix 0 1k
+again mix robs rg
+.model rg real_gain
+.end
+",
+        )
+        .expect("deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(xspice_model_count(&circuit, "real_gain"), 1);
+        assert_eq!(
+            xspice_model_count(&circuit, "v_to_real"),
+            1,
+            "nothing drives the real event on 'mix' and the matrix owns the node, so the reader needs the observer"
+        );
+        assert_eq!(
+            xspice_model_count(&circuit, "real_to_v"),
+            0,
+            "the observer direction must not also plan the driver"
+        );
+
+        let observer = single_xspice_instance(&circuit, "v_to_real");
+        let mix = circuit
+            .get_node_by_name("mix")
+            .expect("the deck's mixed node is allocated");
+        assert!(matches!(
+            observer.connection_at(0),
+            Some(crate::xspice::PortConnection::Analog(node)) if *node == mix
+        ));
+        assert!(matches!(
+            observer.connection_at(1),
+            Some(crate::xspice::PortConnection::Real(node)) if *node == mix
+        ));
+    }
+
+    #[test]
+    fn a_real_event_net_with_no_analog_node_gets_no_observer() {
+        let netlist = Netlist::parse(
+            "\
+* the corpus shape: a real event chain the matrix never touches
+avec [dclk] rmid d2r
+again rmid rout rg
+.model d2r d_to_real
+.model rg real_gain
+.end
+",
+        )
+        .expect("deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(
+            xspice_model_count(&circuit, "v_to_real"),
+            0,
+            "an event-only net has no analog value to observe"
+        );
+    }
+
+    #[test]
+    fn a_driven_real_event_net_keeps_its_driver_and_gains_no_observer() {
+        let netlist = Netlist::parse(
+            "\
+* a real event both produced onto and read from one analog node
+rload mix 0 1k
+avec [dclk] mix d2r
+again mix rout rg
+.model d2r d_to_real
+.model rg real_gain
+.end
+",
+        )
+        .expect("deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(
+            xspice_model_count(&circuit, "real_to_v"),
+            1,
+            "the driven event still reaches the matrix through the existing driver bridge"
+        );
+        assert_eq!(
+            xspice_model_count(&circuit, "v_to_real"),
+            0,
+            "a driven real net must not also be observed; the two would race on one value"
+        );
+    }
+
+    #[test]
+    fn an_authored_observer_suppresses_the_generated_one() {
+        let netlist = Netlist::parse(
+            "\
+* an author's own observer publishing onto the node a reader reads
+vsrc src 0 dc 2
+rsrc src 0 1k
+rload mix 0 1k
+aobs src mix obs
+again mix rout rg
+.model obs v_to_real
+.model rg real_gain
+.end
+",
+        )
+        .expect("deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(
+            xspice_model_count(&circuit, "v_to_real"),
+            1,
+            "the authored observer is the only one; real event drivers sum, so a second would double the value"
+        );
+    }
+
+    #[test]
+    fn disabled_auto_bridging_names_the_observer_direction() {
+        let netlist = Netlist::parse(
+            "\
+* auto bridging off, with a node that would need an observer
+.options auto_bridge=0
+vin mix 0 dc 1.5
+rload mix 0 1k
+again mix robs rg
+.model rg real_gain
+.end
+",
+        )
+        .expect("deck parses");
+
+        let error = Engine::default()
+            .build_circuit(&netlist)
+            .expect_err("disabled auto bridging refuses the mixed node");
+        let message = error.to_string();
+        assert!(
+            message.contains("voltage-to-real"),
+            "the refusal must name the bridge the node needs, got: {message}"
+        );
+    }
+
+    #[test]
     fn auto_bridge_uses_deepest_xspice_subckt_vcc() {
         let netlist = Netlist::parse(
             "\
@@ -5773,10 +6076,29 @@ impl Engine {
         // storage while applying each instance's independent XO value.
         let mut xyce_pem_models: HashMap<String, crate::device::XycePemMemristor> = HashMap::new();
 
+        // The design's clause 7 connect specification, read from the same
+        // `.veriloga` files as the models so that each is opened once.
+        #[cfg(feature = "veriloga")]
+        let mut design_connect_rules = connect_modules::DesignConnectRules::default();
+
         // Load and cache Verilog-A models referenced by .VERILOGA directives.
         #[cfg(feature = "veriloga")]
         {
             for include in &netlist.veriloga_includes {
+                if connect_modules::DesignConnectRules::may_declare(&include.file_path) {
+                    let specification = design_connect_rules.read(&include.file_path)?;
+                    if !specification.declares_module {
+                        // A file that declares only connect modules is a
+                        // connect library. It contributes rules and no device,
+                        // and asking the compiler for a model would fail on a
+                        // file that is perfectly well formed.
+                        log::info!(
+                            "Read connect rules from '{}', which declares no device module",
+                            include.file_path.display()
+                        );
+                        continue;
+                    }
+                }
                 let entry = resolve_cached_or_compile_veriloga_with_limits_and_abort(
                     &include.file_path,
                     self.config.resource_limits,
@@ -8149,6 +8471,25 @@ impl Engine {
                     {
                         if let Some(entry) = veriloga_models.get(&normalize_model_key(subckt_name))
                         {
+                            // A module whose canonical artifact carries a
+                            // discrete plan is elaborated as a mixed instance:
+                            // same cache entry, same compile, different half of
+                            // the artifact executed. Asking first is what keeps
+                            // the analog route from building a device out of the
+                            // continuous equations alone and dropping the
+                            // processes the author wrote.
+                            if mixed_modules::try_build_mixed_signal_instance(
+                                &mut circuit,
+                                netlist,
+                                element,
+                                subckt_name,
+                                params,
+                                entry,
+                                &design_connect_rules,
+                            )? {
+                                continue;
+                            }
+
                             let model = &entry.model;
                             if element.nodes.len() > model.num_terminals {
                                 return Err(SimulationError::Circuit(format!(
@@ -9225,12 +9566,22 @@ impl Engine {
         let default_auto_bridge_vcc = xspice_auto_bridge_vcc(netlist);
         let scoped_auto_bridge_metadata =
             xspice_auto_bridge_scoped_metadata(&circuit, &flattened.xspice_auto_bridge_node_hints);
-        let auto_bridges = plan_xspice_auto_bridges(
+        #[cfg_attr(not(feature = "veriloga"), allow(unused_mut))]
+        let mut auto_bridges = plan_xspice_auto_bridges(
             &circuit,
             &flat_elements,
             &scoped_auto_bridge_metadata,
             default_auto_bridge_vcc,
         );
+        // Clause 7 runs over the boundaries the one planner found, never
+        // instead of it. A design with no `connectrules` block leaves every
+        // planned bridge exactly as it was planned.
+        #[cfg(feature = "veriloga")]
+        connect_modules::attach_to_planned_bridges(
+            &circuit,
+            &design_connect_rules,
+            &mut auto_bridges,
+        )?;
         if !auto_bridges.is_empty() {
             if netlist.options.auto_bridge.unwrap_or(true) {
                 add_planned_xspice_auto_bridges(

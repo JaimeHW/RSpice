@@ -17,11 +17,12 @@ use rspice_veriloga::canonical_ir::digital::{
 };
 use rspice_veriloga::canonical_ir::digital_eval::{
     DigitalDeferredUpdate, DigitalDrive, DigitalEnvironment, DigitalEvalError,
-    DigitalProcessOutcome, DigitalResumeState, DigitalSuspension, DigitalWaitRequest,
-    any_term_is_satisfied, apply_deferred, classify_edge, resume, start,
+    DigitalProcessOutcome, DigitalRealDrive, DigitalResumeState, DigitalScalar, DigitalSuspension,
+    DigitalUpdate, DigitalWaitRequest, any_term_is_satisfied, apply_deferred, classify_edge,
+    resume, start,
 };
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
-use rspice_veriloga::canonical_ir::ids::DigitalSignalId;
+use rspice_veriloga::canonical_ir::ids::{DigitalAnalogProbeId, DigitalSignalId};
 use rspice_veriloga::four_state::FourStateBit;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::collections::BTreeMap;
@@ -61,12 +62,26 @@ fn parse_value(spelling: &str) -> FourStateValue {
 /// event kernel's own.
 struct Store {
     values: Vec<FourStateValue>,
+    /// The value of every real net, in the same signal space. A four-state
+    /// signal's slot is never read; keeping one table per signal id rather than
+    /// a map means a signal has exactly one place its value can be.
+    reals: Vec<f64>,
     deferred: Vec<DigitalDeferredUpdate>,
     /// The latest contribution of each driver, which is what a resolver
     /// combines. Kept per driver rather than written into the net, because a
     /// net with two drivers has two contributions and storing one over the
     /// other is the bug the driver identity exists to prevent.
     driven: BTreeMap<DigitalDriverId, DigitalDrive>,
+    /// The same, for a real net's drivers.
+    driven_reals: BTreeMap<DigitalDriverId, DigitalRealDrive>,
+    /// The continuous-domain potential each of the plan's probes reads
+    /// (Verilog-AMS LRM 2.4 section 7.3.3), in probe id order.
+    ///
+    /// `None` until a test samples one in, so that a fixture which forgets to
+    /// supply an analog solution is refused by the interpreter rather than
+    /// passing against a fabricated zero — the same discipline the real store
+    /// applies.
+    analog: Vec<Option<f64>>,
 }
 
 impl DigitalEnvironment for Store {
@@ -85,6 +100,22 @@ impl DigitalEnvironment for Store {
     fn drive_signal(&mut self, drive: DigitalDrive) {
         self.driven.insert(drive.driver, drive);
     }
+
+    fn write_real_signal(&mut self, signal: DigitalSignalId, value: f64) {
+        self.reals[usize::from(signal)] = value;
+    }
+
+    fn read_real_signal(&self, signal: DigitalSignalId) -> Option<f64> {
+        self.reals.get(usize::from(signal)).copied()
+    }
+
+    fn drive_real_signal(&mut self, drive: DigitalRealDrive) {
+        self.driven_reals.insert(drive.driver, drive);
+    }
+
+    fn read_analog_potential(&self, probe: DigitalAnalogProbeId) -> Option<f64> {
+        self.analog.get(usize::from(probe)).copied().flatten()
+    }
 }
 
 struct Harness {
@@ -94,8 +125,22 @@ struct Harness {
 
 impl Harness {
     fn new(section: &str) -> Self {
+        Self::from_source(&digital_module(section))
+    }
+
+    /// A fixture written as a whole module, with no analog block in it.
+    ///
+    /// The ownership rule for a module-level `real` (see the `digital_lower`
+    /// module documentation) moves one into the discrete domain only in a
+    /// module that declares no analog block, so a fixture about real *state*
+    /// cannot be built with [`digital_module`], which declares one.
+    fn rnm(source: &str) -> Self {
+        Self::from_source(source)
+    }
+
+    fn from_source(source: &str) -> Self {
         let plan = VerilogACompiler::new(CompilerOptions::default())
-            .compile_canonical_ir(&digital_module(section))
+            .compile_canonical_ir(source)
             .expect("fixture must lower to canonical IR")
             .digital;
         // IEEE 1364-2005 section 4.2.2: a `reg` that nothing has written holds
@@ -106,14 +151,39 @@ impl Harness {
             .iter()
             .map(|signal| FourStateValue::splat(signal.width, FourStateBit::Unknown))
             .collect();
+        // Verilog-AMS LRM 2.4 section 3.7: a `wreal` starts at zero, not at
+        // `z`, and that is stated as the *net's* initial value rather than as
+        // an absence of drivers.
+        let reals = vec![0.0; plan.signals.len()];
+        let analog = vec![None; plan.analog_probes.len()];
         Self {
             plan,
             store: Store {
                 values,
+                reals,
                 deferred: Vec::new(),
                 driven: BTreeMap::new(),
+                driven_reals: BTreeMap::new(),
+                analog,
             },
         }
+    }
+
+    /// The id of the probe a spelling names, as
+    /// [`DigitalAnalogProbe::spelling`] renders it.
+    fn probe(&self, spelling: &str) -> DigitalAnalogProbeId {
+        self.plan
+            .analog_probes
+            .iter()
+            .find(|probe| probe.spelling() == spelling)
+            .unwrap_or_else(|| panic!("no analog probe spelled {spelling}"))
+            .id
+    }
+
+    /// Publish one analog solution's value for a probe.
+    fn set_analog(&mut self, spelling: &str, value: f64) {
+        let id = self.probe(spelling);
+        self.store.analog[usize::from(id)] = Some(value);
     }
 
     fn signal(&self, name: &str) -> DigitalSignalId {
@@ -203,7 +273,7 @@ impl Harness {
                 &mut self.store,
                 &DigitalDeferredUpdate {
                     target: drive.target.clone(),
-                    value: drive.value.clone(),
+                    value: DigitalUpdate::FourState(drive.value.clone()),
                     region: DigitalSchedulingRegion::Active,
                 },
             )
@@ -213,6 +283,38 @@ impl Harness {
 
     fn drive_count(&self) -> usize {
         self.store.driven.len()
+    }
+
+    /// Force a real net from outside, as a stimulus generator would.
+    fn set_real(&mut self, name: &str, value: f64) {
+        let id = self.signal(name);
+        assert!(
+            self.plan.signal(id).expect("declared").kind.is_real(),
+            "`{name}` is not a real net"
+        );
+        self.store.reals[usize::from(id)] = value;
+    }
+
+    fn get_real(&self, name: &str) -> f64 {
+        self.store.reals[usize::from(self.signal(name))]
+    }
+
+    /// Settle the single-driver real nets every driver contributed to.
+    ///
+    /// The same stand-in `resolve_drivers` is, and refusing for the same
+    /// reason: Verilog-AMS LRM 2.4 section 6.5.3 gives a `wreal` one driver,
+    /// and combining several is the kernel's fold rather than this harness's.
+    fn resolve_real_drivers(&mut self) {
+        let drives: Vec<DigitalRealDrive> = self.store.driven_reals.values().cloned().collect();
+        for drive in drives {
+            let count = self.plan.drivers_of(drive.driver.signal).count();
+            assert_eq!(
+                count, 1,
+                "multi-driver resolution belongs to the kernel; signal {:?} has {count} drivers",
+                drive.driver.signal
+            );
+            self.store.reals[usize::from(drive.driver.signal)] = drive.value;
+        }
     }
 }
 
@@ -1819,6 +1921,195 @@ fn case_inequality_is_the_exact_complement() {
 }
 
 // ===========================================================================
+// Real nets (Verilog-AMS LRM 2.4 section 3.7)
+// ===========================================================================
+
+/// A continuous assignment drives a real net with a real expression, and the
+/// value arrives as a real rather than as bits.
+///
+/// Section 3.7's own example is `assign wrstim = stim;`, a real driven onto a
+/// `wreal` by an ordinary continuous assignment.
+#[test]
+fn a_continuous_assignment_drives_a_real_net() {
+    let mut harness = Harness::new(
+        "    wreal vin, vout;\n\
+     \x20   assign vout = vin * 0.5 + 1.0;",
+    );
+    harness.set_real("vin", 3.0);
+    expect_suspended(harness.run());
+    harness.resolve_real_drivers();
+    assert_eq!(harness.get_real("vout"), 2.5);
+
+    harness.set_real("vin", -1.0);
+    expect_suspended(harness.run());
+    harness.resolve_real_drivers();
+    assert_eq!(harness.get_real("vout"), 0.5);
+}
+
+/// A process reads a `wreal` into a process-local `real`, compares it, and
+/// drives four-state bits from the answer — the shape of section 6.5.3's own
+/// `a2d` example, without a bit of conversion between the domains anywhere.
+#[test]
+fn a_process_reads_a_real_net_into_a_real_local() {
+    let mut harness = Harness::new(
+        "    wreal vin;\n\
+     \x20   reg [1:0] code;\n\
+     \x20   always @(vin) begin : convert\n\
+     \x20       real residue;\n\
+     \x20       residue = vin;\n\
+     \x20       if (residue > 0.5) code = 2'b11;\n\
+     \x20       else if (residue > 0.0) code = 2'b01;\n\
+     \x20       else code = 2'b00;\n\
+     \x20   end",
+    );
+    // An `always @(vin)` suspends at its top before running anything, so the
+    // first pass only reaches the wait; every reading after that is a
+    // resumption, which is what a value change on `vin` would cause.
+    let mut state = expect_suspended(harness.start(0)).into_parts().1;
+    for (input, expected) in [(0.75, "11"), (0.25, "01"), (-1.0, "00"), (0.5, "01")] {
+        harness.set_real("vin", input);
+        state = expect_suspended(harness.resume(0, &state)).into_parts().1;
+        assert_eq!(harness.get("code"), expected, "for {input}");
+    }
+}
+
+/// A bare real is a branch condition, IEEE 1364-2005 section 9.4's "nonzero
+/// known value" — and the test is exact, so `-0.0` is false and `1e-300` is
+/// true.
+#[test]
+fn a_real_is_a_condition_by_being_nonzero() {
+    let mut harness = Harness::new(
+        "    wreal level;\n\
+     \x20   reg live;\n\
+     \x20   always @(level) if (level) live = 1'b1; else live = 1'b0;",
+    );
+    let mut state = expect_suspended(harness.start(0)).into_parts().1;
+    for (input, expected) in [(0.0, "0"), (-0.0, "0"), (1e-300, "1"), (-2.5, "1")] {
+        harness.set_real("level", input);
+        state = expect_suspended(harness.resume(0, &state)).into_parts().1;
+        assert_eq!(harness.get("live"), expected, "for {input}");
+    }
+}
+
+/// A `wreal` is a net, so IEEE 1364-2005 section 6.2's rule applies to it
+/// unchanged: only a continuous driver writes one.
+#[test]
+fn a_procedural_assignment_to_a_real_net_is_refused() {
+    let error = VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir(&digital_module(
+            "    wreal vout;\n\
+         \x20   initial vout = 1.0;",
+        ))
+        .expect_err("a net is not procedurally assignable");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("`wreal`") && rendered.contains("section 6.2"),
+        "expected the section 6.2 refusal, got: {rendered}"
+    );
+}
+
+/// Section 6.5.3 permits one driver of a real-valued net, and the LRM defines
+/// no resolution for two — so a second is refused, and the refusal says which
+/// spellings do combine.
+#[test]
+fn a_second_driver_on_a_plain_wreal_is_refused() {
+    let error = VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir(&digital_module(
+            "    wreal a, b, bus;\n\
+         \x20   assign bus = a;\n\
+         \x20   assign bus = b;",
+        ))
+        .expect_err("section 6.5.3 permits one driver");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("section 6.5.3") && rendered.contains("wrealsum"),
+        "expected the arity refusal, got: {rendered}"
+    );
+}
+
+/// The resolved spellings admit what `wreal` refuses, and the plan records
+/// which resolution was named — the fold itself is the kernel's.
+#[test]
+fn a_resolved_real_net_admits_several_drivers() {
+    for keyword in ["wrealsum", "wrealavg", "wrealmin", "wrealmax"] {
+        let plan = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(&digital_module(&format!(
+                "    wreal a, b;\n\
+             \x20   {keyword} bus;\n\
+             \x20   assign bus = a;\n\
+             \x20   assign bus = b;"
+            )))
+            .unwrap_or_else(|error| panic!("`{keyword}` must lower: {error}"))
+            .digital;
+        let bus = plan
+            .signals
+            .iter()
+            .find(|signal| signal.name == "bus")
+            .expect("declared");
+        assert_eq!(bus.width, 0, "a real net has no bits");
+        assert_eq!(
+            bus.kind
+                .resolution()
+                .expect("a real net names a resolution")
+                .keyword(),
+            keyword
+        );
+        assert_eq!(plan.drivers_of(bus.id).count(), 2);
+    }
+}
+
+/// `posedge` on a real has no transition to classify, and a range on one
+/// declares an array of nets nothing downstream has. Both refuse by name.
+#[test]
+fn the_real_net_refusals_name_themselves() {
+    let cases = [
+        (
+            "    wreal level;\n\
+         \x20   reg q;\n\
+         \x20   always @(posedge level) q = 1'b1;",
+            "section 9.7.2",
+        ),
+        (
+            "    wreal [3:0] bus;\n\
+         \x20   reg q;\n\
+         \x20   initial q = 1'b0;",
+            "bus of real nets",
+        ),
+        (
+            "    wreal level;\n\
+         \x20   reg q;\n\
+         \x20   initial q = level[0];",
+            "no bits to select",
+        ),
+        // Verilog-AMS LRM 2.4 table 4-2 makes `%` legal on real operands and
+        // this wave does not implement it; the refusal says which of the two
+        // kinds of missing it is.
+        (
+            "    wreal a, b, out;\n\
+         \x20   assign out = a % b;",
+            "table 4-2 but is not implemented yet",
+        ),
+        // `?:` *is* implemented, and its arms are still one domain each.
+        (
+            "    wreal a, out;\n\
+         \x20   reg sel;\n\
+         \x20   assign out = sel ? a : 2;",
+            "a four-state operand in a real expression has no conversion",
+        ),
+    ];
+    for (section, expected) in cases {
+        let error = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(&digital_module(section))
+            .expect_err("the construct must be refused");
+        let rendered = error.to_string();
+        assert!(
+            rendered.contains(expected),
+            "expected `{expected}` to be named in: {rendered}"
+        );
+    }
+}
+
+// ===========================================================================
 // What still refuses
 // ===========================================================================
 
@@ -1832,10 +2123,27 @@ fn the_remaining_process_refusals_name_themselves() {
              \x20   initial for (i = 0; i < 4; i = i + 1) q[i] = 1'b0;",
             "module-level",
         ),
+        // A process-local `real` lowers now — Verilog-AMS LRM 2.4 section
+        // 6.5.3's own example reads a `wreal` into one. A `string` still does
+        // not, and stands in its place.
         (
             "    reg q;\n\
-             \x20   initial begin : work real r; r = 1.0; q = 1'b0; end",
-            "process-local `real`",
+             \x20   initial begin : work string s; q = 1'b0; end",
+            "process-local `string`",
+        ),
+        // What a real *cannot* do is meet a four-state value inside one
+        // operator. Section 3.7 converts between the two with an explicit
+        // `$realtobits`/`$bitstoreal`, and there is no implicit conversion to
+        // invent for an `x`.
+        (
+            "    reg [3:0] q;\n\
+             \x20   initial begin : work real r; r = 1.0; q = r; end",
+            "a real value has no four-state form here",
+        ),
+        (
+            "    reg q;\n\
+             \x20   initial begin : work real r; r = 1.0 + q; q = 1'b0; end",
+            "a four-state operand in a real expression has no conversion",
         ),
         (
             "    reg q;\n\
@@ -2355,6 +2663,315 @@ fn an_unsigned_operand_poisons_the_whole_expression() {
 }
 
 // ===========================================================================
+// Real state (IEEE 1364-2005 section 3.9)
+// ===========================================================================
+//
+// What a real-number model is built out of, and what could not be written
+// before: a real value that is still there on the next clock edge. Every test
+// here runs the state through at least one suspension, because a real that
+// survives no suspension is a real expression rather than real state.
+
+/// A process-local `real` accumulator, across a suspension.
+///
+/// The critical path, and the one nothing else covers: a process-local is an
+/// SSA variable of the process function, so it does not live in the signal
+/// store and nothing outside can hold it while the process is asleep. It
+/// crosses the `Wait` as a resume argument or it does not cross at all — and
+/// the interpreter starts a resumption with an empty value table, so a
+/// lowering that assumed a register kept it would read nothing here.
+///
+/// The accumulator is read *and* written on each pass, which is what makes the
+/// carry load-bearing: a lowering that re-initialised the local on resumption
+/// would leave `acc` at section 3.9's `0.0` every time and the sum would be the
+/// last addend rather than the total.
+///
+/// The suspension is inside a `forever` rather than at the top of the process,
+/// so the declaration runs once and every later edge is a resumption into the
+/// loop. An `always` whose body *is* the declaration re-enters the declarative
+/// region on each restart and re-initialises the local, which is section
+/// 9.8.1's automatic reading and what this lowering froze — a different
+/// question from whether a suspension preserves it.
+#[test]
+fn a_process_local_real_survives_a_suspension() {
+    let mut harness = Harness::rnm(
+        "module dut(clk, step, total);\n\
+         \x20   input clk;\n\
+         \x20   input wreal step;\n\
+         \x20   output wreal total;\n\
+         \x20   always begin : accumulate\n\
+         \x20     real acc;\n\
+         \x20     forever begin\n\
+         \x20       @(posedge clk);\n\
+         \x20       acc = acc + step;\n\
+         \x20     end\n\
+         \x20   end\n\
+         endmodule\n",
+    );
+
+    const ADDENDS: [f64; 4] = [1.5, 0.25, -0.75, 4.0];
+    harness.set("clk", "0");
+    let mut state = expect_suspended(harness.start(0)).resume_state().clone();
+    for (index, addend) in ADDENDS.iter().enumerate() {
+        harness.set_real("step", *addend);
+        // One resumption per rising edge. Falling edges do not satisfy a
+        // `posedge` term, so a kernel would not resume there and neither does
+        // this — resuming anyway would run the body twice per cycle.
+        harness.set("clk", "1");
+        state = expect_suspended(harness.resume(0, &state))
+            .resume_state()
+            .clone();
+        harness.set("clk", "0");
+        let expected: f64 = ADDENDS[..=index].iter().sum();
+        // The resume state is the only place the accumulator can be, so
+        // reading it out of the state is reading exactly the claim.
+        assert!(
+            state
+                .arguments()
+                .iter()
+                .any(|value| matches!(value, DigitalScalar::Real(held) if *held == expected)),
+            "after {} edge(s) the carried accumulator should be {expected}, and the state \
+             carries {:?}",
+            index + 1,
+            state.arguments()
+        );
+    }
+}
+
+/// A process-local `real` starts at zero; a four-state local starts at `x`.
+///
+/// Two clauses, and they disagree on purpose. IEEE 1364-2005 section 3.9 gives
+/// a `real` variable an initial value of zero; section 4.2.2 gives an
+/// unwritten `reg` or `integer` all-`x`. A `real` has no `x` to start at, so
+/// the second rule cannot be stretched to cover it and the lowering needs a
+/// separate answer — which is what this pins, by declaring one of each in one
+/// declarative region and reading both out of the state the suspension carries
+/// before anything writes either.
+#[test]
+fn an_unwritten_real_local_is_zero_and_a_four_state_one_is_unknown() {
+    let mut harness = Harness::rnm(
+        "module dut(clk);\n\
+         \x20   input clk;\n\
+         \x20   always begin : sample\n\
+         \x20     real seen;\n\
+         \x20     integer count;\n\
+         \x20     @(posedge clk);\n\
+         \x20     seen = seen + 1.0;\n\
+         \x20     count = count + 1;\n\
+         \x20   end\n\
+         endmodule\n",
+    );
+    harness.set("clk", "0");
+    let state = expect_suspended(harness.start(0)).resume_state().clone();
+    let carried = state.arguments();
+    assert_eq!(
+        carried.len(),
+        2,
+        "both locals cross the suspension, got {carried:?}"
+    );
+    assert_eq!(
+        carried[0],
+        DigitalScalar::Real(0.0),
+        "section 3.9: an unwritten `real` is zero"
+    );
+    let DigitalScalar::FourState(count) = &carried[1] else {
+        panic!("the `integer` local must cross as a four-state value, got {carried:?}");
+    };
+    assert_eq!(
+        count.spelling(),
+        "x".repeat(32),
+        "section 4.2.2: an unwritten `integer` is all-`x`"
+    );
+}
+
+/// A module-level `real` written by a process, across a clock edge.
+///
+/// The canonical real-number-model idiom: a one-pole low-pass whose state is
+/// the whole model. Written with `<=`, so the update is deferred to the
+/// nonblocking region and the state a pass reads is the one the previous pass
+/// left — which is what makes the recurrence the recurrence.
+///
+/// The expected values are the same recurrence evaluated in Rust, in the same
+/// order and the same `f64` arithmetic, so agreement is exact rather than
+/// within a tolerance.
+#[test]
+fn a_module_level_real_holds_state_across_a_clock_edge() {
+    const K: f64 = 0.25;
+    let mut harness = Harness::rnm(
+        "module dut(clk, vin, vout);\n\
+         \x20   parameter real K = 0.25;\n\
+         \x20   input clk;\n\
+         \x20   input wreal vin;\n\
+         \x20   output wreal vout;\n\
+         \x20   real state;\n\
+         \x20   always @(posedge clk) state <= state + (vin - state) * K;\n\
+         \x20   assign vout = state;\n\
+         endmodule\n",
+    );
+
+    harness.set("clk", "0");
+    // Process 0 is the `always`; process 1 is the continuous assignment, which
+    // this test does not drive — `state` is read out of the store directly, so
+    // what is being checked is the variable and not the net it feeds.
+    let mut state = expect_suspended(harness.start(0)).resume_state().clone();
+    let mut reference = 0.0f64;
+    for step in 0..8 {
+        let input = if step < 4 { 1.0 } else { 0.0 };
+        harness.set_real("vin", input);
+        harness.set("clk", "1");
+        state = expect_suspended(harness.resume(0, &state))
+            .resume_state()
+            .clone();
+        assert_eq!(
+            harness.get_real("state"),
+            reference,
+            "the nonblocking update has not landed yet, so the state is still the old one"
+        );
+        harness.flush_nonblocking();
+        reference += (input - reference) * K;
+        assert_eq!(
+            harness.get_real("state"),
+            reference,
+            "step {step} of the recurrence"
+        );
+        harness.set("clk", "0");
+        state = expect_suspended(harness.resume(0, &state))
+            .resume_state()
+            .clone();
+    }
+    assert!(
+        reference > 0.0,
+        "the fixture must actually accumulate, or it proves nothing"
+    );
+}
+
+/// A blocking write to a real variable takes effect where it is written.
+///
+/// The other half of section 6.2's pair, and it goes straight into the store
+/// rather than through a driver: a variable has no drivers, so the contribution
+/// table stays empty and nothing is resolved.
+#[test]
+fn a_blocking_write_to_a_real_variable_lands_immediately() {
+    let mut harness = Harness::rnm(
+        "module dut(clk, vin, vout);\n\
+         \x20   input clk;\n\
+         \x20   input wreal vin;\n\
+         \x20   output real vout;\n\
+         \x20   always @(posedge clk) vout = vin * 2.0;\n\
+         endmodule\n",
+    );
+    harness.set("clk", "0");
+    let state = expect_suspended(harness.run()).resume_state().clone();
+    harness.set_real("vin", 1.25);
+    harness.set("clk", "1");
+    expect_suspended(harness.resume(0, &state));
+    assert_eq!(harness.get_real("vout"), 2.5);
+    assert_eq!(
+        harness.deferred_count(),
+        0,
+        "a blocking assignment defers nothing"
+    );
+    assert_eq!(
+        harness.drive_count(),
+        0,
+        "a procedural write is not a driver contribution"
+    );
+}
+
+/// `$realtobits` and `$bitstoreal` round-trip a real exactly.
+///
+/// Verilog-AMS LRM 2.4 section 3.7's own bridge. Exactness is the claim: the
+/// conversion is the value's IEEE 754 storage rather than a rounding, so a
+/// value with a long mantissa comes back bit for bit.
+#[test]
+fn a_real_round_trips_through_its_bit_pattern() {
+    let mut harness = Harness::rnm(
+        "module dut(clk, vin, vout);\n\
+         \x20   input clk;\n\
+         \x20   input wreal vin;\n\
+         \x20   output real vout;\n\
+         \x20   reg [63:0] pattern;\n\
+         \x20   always @(posedge clk) begin\n\
+         \x20     pattern = $realtobits(vin);\n\
+         \x20     vout = $bitstoreal(pattern);\n\
+         \x20   end\n\
+         endmodule\n",
+    );
+    harness.set("clk", "0");
+    let mut state = expect_suspended(harness.run()).resume_state().clone();
+    for value in [0.1f64, -1.0 / 3.0, 1.7976931348623157e308, 0.0] {
+        harness.set_real("vin", value);
+        harness.set("clk", "1");
+        state = expect_suspended(harness.resume(0, &state))
+            .resume_state()
+            .clone();
+        assert_eq!(harness.get_real("vout"), value, "round trip of {value}");
+        assert_eq!(
+            harness.get("pattern"),
+            format!("{:064b}", value.to_bits()),
+            "the pattern is the IEEE 754 storage of {value}"
+        );
+        harness.set("clk", "0");
+        state = expect_suspended(harness.resume(0, &state))
+            .resume_state()
+            .clone();
+    }
+}
+
+/// `$bitstoreal` of a pattern with an unknown bit refuses at runtime.
+///
+/// Neither standard rules on this, and the ruling is stated on
+/// [`DigitalEvalError::UnknownBitsToReal`]: the conversion is defined over an
+/// IEEE 754 bit pattern and an `x` is the absence of a bit, so there is no real
+/// to produce and none is invented. A `reg` nothing has written holds `x`
+/// (section 4.2.2), which is how the case arises without contriving it.
+#[test]
+fn bitstoreal_refuses_an_unknown_bit() {
+    let plan = VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir(
+            "module dut(clk, vout);\n\
+             \x20   input clk;\n\
+             \x20   output real vout;\n\
+             \x20   reg [63:0] pattern;\n\
+             \x20   always @(posedge clk) vout = $bitstoreal(pattern);\n\
+             endmodule\n",
+        )
+        .expect("fixture must lower to canonical IR")
+        .digital;
+    let mut store = Store {
+        values: plan
+            .signals
+            .iter()
+            .map(|signal| FourStateValue::splat(signal.width, FourStateBit::Unknown))
+            .collect(),
+        reals: vec![0.0; plan.signals.len()],
+        deferred: Vec::new(),
+        driven: BTreeMap::new(),
+        driven_reals: BTreeMap::new(),
+        analog: vec![None; plan.analog_probes.len()],
+    };
+    let clk = plan
+        .signals
+        .iter()
+        .find(|signal| signal.name == "clk")
+        .expect("declared")
+        .id;
+    store.values[usize::from(clk)] = parse_value("0");
+    let outcome = start(&plan, &plan.processes[0], &mut store).expect("the process must suspend");
+    let state = expect_suspended(outcome).resume_state().clone();
+    store.values[usize::from(clk)] = parse_value("1");
+    let error = resume(&plan, &plan.processes[0], &state, &mut store)
+        .expect_err("an unknown pattern has no real");
+    assert!(
+        matches!(error, DigitalEvalError::UnknownBitsToReal(_)),
+        "expected the unknown-bits refusal, got {error:?}"
+    );
+    assert!(
+        error.to_string().contains("IEEE 754 bit pattern"),
+        "the diagnostic must say why there is no answer, got {error}"
+    );
+}
+
+// ===========================================================================
 // Elaborated hierarchy (IEEE 1364-2005 sections 12.1.2 and 12.3)
 // ===========================================================================
 //
@@ -2383,12 +3000,17 @@ impl Design {
             .map(|signal| FourStateValue::splat(signal.width, FourStateBit::Unknown))
             .collect();
         let waits = vec![None; plan.processes.len()];
+        let reals = vec![0.0; plan.signals.len()];
+        let analog = vec![None; plan.analog_probes.len()];
         Self {
             plan,
             store: Store {
                 values,
+                reals,
                 deferred: Vec::new(),
                 driven: BTreeMap::new(),
+                driven_reals: BTreeMap::new(),
+                analog,
             },
             waits,
         }
@@ -2410,6 +3032,15 @@ impl Design {
 
     fn get(&self, name: &str) -> String {
         self.store.values[usize::from(self.signal(name))].spelling()
+    }
+
+    fn set_real(&mut self, name: &str, value: f64) {
+        let id = self.signal(name);
+        self.store.reals[usize::from(id)] = value;
+    }
+
+    fn get_real(&self, name: &str) -> f64 {
+        self.store.reals[usize::from(self.signal(name))]
     }
 
     /// Run every process from its entry, which is what a kernel does once at
@@ -2449,11 +3080,24 @@ impl Design {
                 &mut self.store,
                 &DigitalDeferredUpdate {
                     target: drive.target.clone(),
-                    value: drive.value.clone(),
+                    value: DigitalUpdate::FourState(drive.value.clone()),
                     region: DigitalSchedulingRegion::Active,
                 },
             )
             .expect("a drive must apply");
+        }
+        // The real half of the same stand-in, held to the same one-driver rule
+        // for the same reason (Verilog-AMS LRM 2.4 section 6.5.3).
+        let real_drives: Vec<DigitalRealDrive> =
+            self.store.driven_reals.values().cloned().collect();
+        for drive in real_drives {
+            let count = self.plan.drivers_of(drive.driver.signal).count();
+            assert_eq!(
+                count, 1,
+                "multi-driver resolution belongs to the kernel; signal {:?} has {count} drivers",
+                drive.driver.signal
+            );
+            self.store.reals[usize::from(drive.driver.signal)] = drive.value;
         }
     }
 
@@ -2465,7 +3109,7 @@ impl Design {
     /// lowering defect, not a test that needs more passes.
     fn settle(&mut self) {
         for _ in 0..16 {
-            let before = self.store.values.clone();
+            let before = (self.store.values.clone(), self.store.reals.clone());
             for index in 0..self.plan.processes.len() {
                 if self.plan.processes[index].kind != DigitalProcessKind::ContinuousAssign {
                     continue;
@@ -2483,7 +3127,7 @@ impl Design {
                 self.record(index, outcome);
             }
             self.resolve_drivers();
-            if self.store.values == before {
+            if (self.store.values.clone(), self.store.reals.clone()) == before {
                 return;
             }
         }
@@ -2761,5 +3405,168 @@ fn two_instances_driving_one_net_contribute_separately() {
         contributions,
         vec!["1".to_string(), "0".to_string()],
         "each instance published what it computed, and neither overwrote the other"
+    );
+}
+
+/// A child's `output real` port drives a parent `wreal` net.
+///
+/// The `output reg` idiom of IEEE 1364-2005 section 12.3.9.2, with section
+/// 3.9's `real` as the variable type: the port cannot be *joined* with the net
+/// it connects to, because a variable and a net are different things, so it
+/// keeps its own signal and the connection becomes an ordinary driver on the
+/// outer net. That is the same elaboration a four-state variable port gets —
+/// nothing is special-cased for reals — and this is what says the
+/// generalisation holds end to end: the child's process writes its own port,
+/// the synthesized driver publishes it, and the parent's net carries it.
+#[test]
+fn a_child_output_real_port_drives_a_parent_real_net() {
+    let source = "module scaler(clk, vin, vout);\n\
+                  \x20   input clk;\n\
+                  \x20   input wreal vin;\n\
+                  \x20   output real vout;\n\
+                  \x20   always @(posedge clk) vout = vin * 3.0;\n\
+                  endmodule\n\
+                  module top(clk, src, sink);\n\
+                  \x20   input clk;\n\
+                  \x20   input wreal src;\n\
+                  \x20   output wreal sink;\n\
+                  \x20   scaler u1(clk, src, sink);\n\
+                  endmodule\n";
+    let mut design = Design::new(source, "top");
+
+    let port = design.signal("u1.vout");
+    let sink = design.signal("sink");
+    assert_ne!(port, sink, "a variable port cannot be joined with a net");
+    assert!(
+        design.plan.signal(port).expect("declared").kind.is_real(),
+        "the child's port carries a real"
+    );
+    assert!(
+        design
+            .plan
+            .signal(port)
+            .expect("declared")
+            .procedurally_assignable,
+        "`output real` is a variable, so a process may write it"
+    );
+    assert_eq!(
+        design.plan.drivers_of(sink).count(),
+        1,
+        "the connection is exactly one driver of the outer net"
+    );
+
+    design.set("clk", "0");
+    design.set_real("src", 1.5);
+    design.start_all();
+    design.transition("clk", "1");
+    assert_eq!(
+        design.get_real("u1.vout"),
+        4.5,
+        "the port holds what it wrote"
+    );
+    assert_eq!(
+        design.get_real("sink"),
+        4.5,
+        "and the driver carried it to the parent's net"
+    );
+}
+
+// ===========================================================================
+// Cross-domain reads: Verilog-AMS LRM 2.4 section 7.3
+// ===========================================================================
+
+/// Section 7.3.3, and its own worked example: "All continuous nets can be
+/// probed from a discrete context using access functions." The clause's
+/// `always @(posedge clk) out = V(in);` is the shape below, and the point of
+/// running it is that the probe is *executed* — it reaches the environment,
+/// which is the only thing that knows what the analog solver has settled.
+///
+/// Section 7.3's opening paragraph is what makes the direction one-way: "Read
+/// operations of nets and variables in both domains are allowed from both
+/// contexts. Write operations of nets and variables are only allowed from the
+/// context of their domain." So there is a probe and no contribution, here or
+/// anywhere in a process.
+#[test]
+fn a_process_samples_a_continuous_net_when_it_wakes() {
+    let mut harness = Harness::new(
+        "    wire clk;\n\
+         \x20   reg hi;\n\
+         \x20   always @(posedge clk) hi <= (V(p, n) > 0.5);",
+    );
+
+    assert_eq!(
+        harness
+            .plan
+            .analog_probes
+            .iter()
+            .map(|probe| probe.spelling())
+            .collect::<Vec<_>>(),
+        vec!["V(p, n)".to_string()],
+        "the probe is registered on the plan, by the author's own net names"
+    );
+
+    harness.set("clk", "0");
+    harness.set_analog("V(p, n)", 0.25);
+    let DigitalProcessOutcome::Suspended(suspension) = harness.start(0) else {
+        panic!("the process must suspend on its event control");
+    };
+    let state = suspension.resume_state().clone();
+
+    // Below the threshold at the first edge.
+    harness.set("clk", "1");
+    let outcome = harness.resume(0, &state);
+    harness.flush_nonblocking();
+    assert_eq!(harness.get("hi"), "0", "0.25 V is not above 0.5 V");
+    let DigitalProcessOutcome::Suspended(suspension) = outcome else {
+        panic!("the process must suspend again");
+    };
+    let state = suspension.resume_state().clone();
+
+    // The probe is a leaf pinned to its block, so the second edge reads the
+    // solution that exists *then* rather than the one the first edge read.
+    // That is the whole reason it is not common-subexpressioned.
+    harness.set("clk", "0");
+    harness.set_analog("V(p, n)", 0.75);
+    harness.set("clk", "1");
+    harness.resume(0, &state);
+    harness.flush_nonblocking();
+    assert_eq!(
+        harness.get("hi"),
+        "1",
+        "the second sample is the second solution, not the first"
+    );
+}
+
+/// A probe the environment has no analog solution for is refused, not read as
+/// zero volts.
+///
+/// The distinction matters because an unbound net and a grounded one are
+/// different circuits: a process that computed against a fabricated 0 V would
+/// produce a plausible waveform for a design nobody described, which is the
+/// same failure `$bitstoreal` on an `x` refuses rather than guessing at.
+#[test]
+fn a_probe_with_no_analog_solution_is_refused_by_name() {
+    let mut harness = Harness::new(
+        "    wire clk;\n\
+         \x20   reg hi;\n\
+         \x20   always @(posedge clk) hi <= (V(p, n) > 0.5);",
+    );
+    harness.set("clk", "0");
+    let DigitalProcessOutcome::Suspended(suspension) = harness.start(0) else {
+        panic!("the process must suspend on its event control");
+    };
+    let state = suspension.resume_state().clone();
+    harness.set("clk", "1");
+
+    let error = resume(
+        &harness.plan,
+        &harness.plan.processes[0],
+        &state,
+        &mut harness.store,
+    )
+    .expect_err("an unsampled probe must refuse");
+    assert!(
+        matches!(error, DigitalEvalError::AnalogProbeUnavailable(_)),
+        "unexpected error: {error}"
     );
 }

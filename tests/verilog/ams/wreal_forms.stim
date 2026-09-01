@@ -1,0 +1,32 @@
+# RSPICE-VERILOG-AMS-STIMULUS 1
+#
+# `vin` repeats a value twice at three points, so `moves` distinguishes "woken
+# on a change" from "woken every vector". The last pair differs from the one
+# before it by one unit in the last place, which is a change of value and
+# therefore an event -- Verilog-AMS LRM 2.4 section 3.7's event has no
+# tolerance in it.
+#
+# `code` walks the DAC ladder through a zero, each single weight, and two
+# combinations, so every rung is exercised alone and in company.
+
+module wreal_forms
+
+input vin real
+input code 4
+
+output vout real
+output vscaled real
+output over 1
+output moves 4
+
+step 10
+settle 5
+
+vector 0.0 0000
+vector 0.0 0001
+vector 1.0 0010
+vector 1.0 0100
+vector 3.5 1000
+vector 3.5 0101
+vector 8.0 1010
+vector 8.000000000000002 1111

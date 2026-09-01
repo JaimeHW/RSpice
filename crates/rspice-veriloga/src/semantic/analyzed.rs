@@ -15,6 +15,16 @@ pub struct AnalyzedFile {
     pub modules: HashMap<SmolStr, AnalyzedModule>,
     /// Non-fatal findings raised while analyzing this file, in source order.
     pub warnings: Vec<SemanticWarning>,
+    /// The file's `connectmodule` declarations and `connectrules` blocks,
+    /// validated against one another and against the discipline database.
+    ///
+    /// Empty for the overwhelming majority of files, which declare neither.
+    /// It is built here rather than at the point of use because the checks it
+    /// performs — that a `connect` statement names a declared connect module,
+    /// that the module bridges one continuous and one discrete discipline,
+    /// that an overriding discipline is compatible with the one it overrides —
+    /// are the author's to see at compile time.
+    pub connect_rules: crate::connect::ConnectRuleTable,
 }
 
 /// One non-fatal finding raised by semantic analysis.
@@ -39,6 +49,14 @@ pub struct SemanticWarning {
 pub struct AnalyzedModule {
     pub name: SmolStr,
     pub default_transition: f64,
+    /// The `` `default_discipline `` in effect where this module was declared
+    /// (Verilog-AMS LRM 2.4 section 10.2), which is the default Annex F.2.1
+    /// step 4b applies to a discrete net of this module that resolution leaves
+    /// with no discipline of its own.
+    ///
+    /// `None` is both "no directive was written" and section 10.2's reset
+    /// form, which have the same effect.
+    pub default_discipline: Option<SmolStr>,
     /// Number of semantic noise processes allocated in this module. Process
     /// IDs are dense from zero and are remapped per instance during hierarchy
     /// elaboration so repeated children never alias one another.

@@ -82,6 +82,22 @@ pub(crate) struct XspiceSettleCounts {
     pub(crate) event_values_deep_copies: u64,
     /// Deep copies of the event scheduler taken by `SharedXspiceEventQueue`.
     pub(crate) event_queue_deep_copies: u64,
+    /// Deep copies of a mixed Verilog-AMS module's analog device, digital host
+    /// or bridge table taken by the trial rollback cells in
+    /// `xspice::verilog::mixed`.
+    ///
+    /// Counted here rather than in a counter of its own because the structure
+    /// is the same structure and the failure is the same failure — a rollback
+    /// capture that stopped being a reference-count bump. It has no ceiling in
+    /// `engine::xspice_settle_ratchet`, whose deck holds no mixed module and
+    /// would ratchet a constant zero; `mixed_trial_copy_ratchet` reads it off
+    /// a scripted sequence of trials instead.
+    ///
+    /// Gated with its writer: the mixed interleave lives under
+    /// `xspice::verilog`, which is a `veriloga` module, so a build without that
+    /// feature has nothing that can move this number and `-D warnings` says so.
+    #[cfg(feature = "veriloga")]
+    pub(crate) mixed_trial_deep_copies: u64,
 }
 
 #[cfg(test)]
@@ -110,6 +126,8 @@ struct Counters {
     instance_deep_copies: Cell<u64>,
     event_values_deep_copies: Cell<u64>,
     event_queue_deep_copies: Cell<u64>,
+    #[cfg(feature = "veriloga")]
+    mixed_trial_deep_copies: Cell<u64>,
 }
 
 thread_local! {
@@ -119,6 +137,8 @@ thread_local! {
             instance_deep_copies: Cell::new(0),
             event_values_deep_copies: Cell::new(0),
             event_queue_deep_copies: Cell::new(0),
+            #[cfg(feature = "veriloga")]
+            mixed_trial_deep_copies: Cell::new(0),
         }
     };
 }
@@ -157,6 +177,13 @@ pub(crate) fn note_event_queue_deep_copy() {
     COUNTERS.with(|counters| bump(&counters.event_queue_deep_copies));
 }
 
+/// Record that a mixed Verilog-AMS trial cell was deep-copied.
+#[cfg(feature = "veriloga")]
+#[inline]
+pub(crate) fn note_mixed_trial_deep_copy() {
+    COUNTERS.with(|counters| bump(&counters.mixed_trial_deep_copies));
+}
+
 /// Zero this thread's counters.
 ///
 /// A ratchet measures a delta, so it resets before the run it is measuring.
@@ -171,6 +198,8 @@ pub(crate) fn reset() {
         counters.instance_deep_copies.set(0);
         counters.event_values_deep_copies.set(0);
         counters.event_queue_deep_copies.set(0);
+        #[cfg(feature = "veriloga")]
+        counters.mixed_trial_deep_copies.set(0);
     });
 }
 
@@ -182,6 +211,8 @@ pub(crate) fn counts() -> XspiceSettleCounts {
         instance_deep_copies: counters.instance_deep_copies.get(),
         event_values_deep_copies: counters.event_values_deep_copies.get(),
         event_queue_deep_copies: counters.event_queue_deep_copies.get(),
+        #[cfg(feature = "veriloga")]
+        mixed_trial_deep_copies: counters.mixed_trial_deep_copies.get(),
     })
 }
 

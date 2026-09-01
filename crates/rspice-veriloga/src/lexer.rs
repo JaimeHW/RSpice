@@ -74,6 +74,21 @@ pub enum TokenKind {
     Endmodule,
     Connectmodule,
 
+    // === Keywords - Connect rules (Verilog-AMS section 7.7) ===
+    /// `connectrules`, opening a connect specification block.
+    Connectrules,
+    /// `endconnectrules`.
+    Endconnectrules,
+    /// `connect`, opening either form of connect specification statement.
+    Connect,
+    /// `resolveto`, which makes a `connect` statement the resolution form
+    /// rather than the auto-insertion form.
+    Resolveto,
+    /// `merged`, one of the two `connect_mode` spellings.
+    Merged,
+    /// `split`, the other.
+    Split,
+
     // === Keywords - Ports ===
     Input,
     Output,
@@ -105,6 +120,15 @@ pub enum TokenKind {
     Wire,
     /// `reg`: the IEEE 1364-2005 procedural variable type.
     Reg,
+    /// A real-net type keyword: `wreal`, or one of the four resolved
+    /// spellings.
+    ///
+    /// One kind for all five, because the grammar after them is identical —
+    /// Verilog-AMS LRM 2.4 Syntax 3-8 — and which one was written is read back
+    /// from the token's `text`. Splitting them into five kinds would put the
+    /// same production in five places and give a reader five chances to find
+    /// them disagreeing.
+    Wreal,
     Ground,
     Electrical, // Common discipline
     Voltage,    // Common discipline
@@ -303,6 +327,17 @@ impl TokenKind {
             "endmodule" => TokenKind::Endmodule,
             "connectmodule" => TokenKind::Connectmodule,
 
+            // Connect rules. All six are reserved words in Verilog-AMS LRM 2.4
+            // Annex B, and Annex C.16 lists them among the keywords Verilog-A
+            // does not use — which is why none of them was reserved before the
+            // grammar that needs them existed.
+            "connectrules" => TokenKind::Connectrules,
+            "endconnectrules" => TokenKind::Endconnectrules,
+            "connect" => TokenKind::Connect,
+            "resolveto" => TokenKind::Resolveto,
+            "merged" => TokenKind::Merged,
+            "split" => TokenKind::Split,
+
             // Ports
             "input" => TokenKind::Input,
             "output" => TokenKind::Output,
@@ -333,6 +368,12 @@ impl TokenKind {
             // Nets
             "wire" => TokenKind::Wire,
             "reg" => TokenKind::Reg,
+            // Verilog-AMS LRM 2.4 section 3.7's real net, and the four
+            // resolved spellings RSpice implements beside it as a named
+            // extension. `wreal4state` is deliberately absent: it stays an
+            // `AmsDigital` refusal below, because a four-state real net is a
+            // different type and not a resolution of this one.
+            "wreal" | "wrealsum" | "wrealavg" | "wrealmin" | "wrealmax" => TokenKind::Wreal,
             "signed" => TokenKind::Signed,
             "unsigned" => TokenKind::Unsigned,
             "ground" => TokenKind::Ground,
@@ -433,7 +474,11 @@ impl TokenKind {
             "wait" => TokenKind::AmsDigital,
             "wand" => TokenKind::AmsDigital,
             "wor" => TokenKind::AmsDigital,
-            "wreal" => TokenKind::AmsDigital,
+            // A four-state real net: a real value that can also be `x` or `z`.
+            // Not a resolution of `wreal` but a different type, with no
+            // Accellera definition to implement, so it is refused by name
+            // rather than treated as one of the resolved spellings.
+            "wreal4state" => TokenKind::AmsDigital,
 
             _ => return None,
         })
@@ -447,6 +492,12 @@ impl TokenKind {
                 | TokenKind::Macromodule
                 | TokenKind::Endmodule
                 | TokenKind::Connectmodule
+                | TokenKind::Connectrules
+                | TokenKind::Endconnectrules
+                | TokenKind::Connect
+                | TokenKind::Resolveto
+                | TokenKind::Merged
+                | TokenKind::Split
                 | TokenKind::Input
                 | TokenKind::Output
                 | TokenKind::Inout
@@ -1110,8 +1161,38 @@ impl<'a> Lexer<'a> {
         }
 
         let text = &self.source[start..self.pos];
-        let span = Span::new(self.source_id, start as u32, self.pos as u32);
+        let name_end = self.pos;
+        // A directive that opens its line owns the rest of that line, which is
+        // the preprocessor's own rule: it treats a line whose first non-blank
+        // character is a backtick as a directive line and hands everything
+        // after the name to the directive as its operand (`Preprocessor::run`'s
+        // `trimmed.starts_with('`')` test, and `split_directive`). Only the
+        // directives that stage does not know reach here, so the span is
+        // widened rather than the operand being consumed: the operand's tokens
+        // stay in the stream and `parser::Parser::skip_directive` drops exactly
+        // the ones this span covers. Widening only — a backtick *inside* a line
+        // is a macro invocation the preprocessor could not expand, and the code
+        // after it on that line is code.
+        let end = if self.directive_opens_its_line(start) {
+            self.source[name_end..]
+                .find('\n')
+                .map_or(self.source.len(), |offset| name_end + offset)
+        } else {
+            name_end
+        };
+        let span = Span::new(self.source_id, start as u32, end as u32);
         Ok(Token::with_text(TokenKind::Directive, span, text))
+    }
+
+    /// Whether the backtick at `start` is the first non-blank character on its
+    /// line.
+    fn directive_opens_its_line(&self, start: usize) -> bool {
+        let line_start = self.source[..start]
+            .rfind('\n')
+            .map_or(0, |offset| offset + 1);
+        self.source[line_start..start]
+            .chars()
+            .all(|ch| ch == ' ' || ch == '\t' || ch == '\r')
     }
 }
 

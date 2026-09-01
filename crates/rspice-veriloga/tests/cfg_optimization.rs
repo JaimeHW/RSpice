@@ -249,6 +249,10 @@ fn inputs(artifact: &CanonicalIrArtifact) -> CfgEvalInputs<f64> {
     CfgEvalInputs {
         parameters,
         parameter_given,
+        // Every declared port connected, which is what the CFG level itself
+        // says: `$port_connected` folds to a constant one there. A shorter
+        // vector would read as unconnected.
+        port_connected: vec![true; artifact.hir.ports.len()],
         event_state: Vec::new(),
         event_controls: HashMap::new(),
         node_potentials: (0..artifact.mir.nodes.len())

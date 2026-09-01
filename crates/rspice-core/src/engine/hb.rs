@@ -1034,6 +1034,7 @@ impl Engine {
 
         // Build circuit using SoA architecture
         let circuit = engine.build_circuit_with_abort(netlist, abort)?;
+        Self::ensure_no_mixed_signal_analysis(&circuit, "harmonic-balance analysis")?;
         if producer_identity != HbOperatingPointIdentity::capture(netlist, &engine.config, &config)?
         {
             return Err(SimulationError::Circuit(
@@ -1732,34 +1733,84 @@ mod tests {
         .with_collocation_points(13);
         let engine = Engine::new(SimulationConfig::default());
         let mut transient_seed = HbSolverState::new(1, config.num_harmonics);
+        transient_seed
+            .try_prepare_mna_branches(1, config.num_harmonics)
+            .expect("one ideal-source branch fits the qualified seed");
         engine
             .hb_seed_transient_assisted(
                 &transient_netlist,
                 &config,
                 &mut transient_seed,
                 &["in".to_string()],
-                &[],
+                &["V1".to_string()],
                 &NoAbort,
             )
             .expect("TAHB=1 transforms the accepted first-tone trajectory");
-        assert!(transient_seed.x[0][2].norm() > 0.45);
+        // Independent closed-form oracle. The ideal source fixes
+        // v(in)=sin(2*pi*2 kHz*t), whose one-sided Fourier coefficient on the
+        // 1 kHz common grid is -j/2 at k=2. KCL through the 1 kohm resistor
+        // fixes the source current to -v(in)/1 kohm, hence +j/2000 at k=2.
+        // This pins both retained coordinate families without asking another
+        // simulator or another RSpice analysis for the expected values.
+        let expected_voltage = Complex64::new(0.0, -0.5);
+        let expected_source_current = Complex64::new(0.0, 0.5e-3);
+        // The initializer deliberately samples the accepted transient through
+        // piecewise-linear interpolation. For a sine, the interpolation error
+        // is bounded by max(|v''|)*h^2/8. A normalized DFT coefficient cannot
+        // exceed the largest sample error, so this is an analytic bound on
+        // both the wanted coefficient error and leakage into every other bin.
+        let angular_frequency = std::f64::consts::TAU * 2.0e3;
+        let maximum_step = 0.5e-3 / (13 * 4) as Value;
+        let interpolation_bound = angular_frequency.powi(2) * maximum_step.powi(2) / 8.0;
+        let voltage_tolerance = interpolation_bound + 1.0e-10;
+        let current_tolerance = interpolation_bound / 1.0e3 + 1.0e-12;
+        assert!(
+            (transient_seed.x[0][2] - expected_voltage).norm() < voltage_tolerance,
+            "TAHB=1 node spectrum differs from the sine oracle: expected {expected_voltage:?}, got {:?}",
+            transient_seed.x[0][2]
+        );
+        assert!(
+            (transient_seed.mna_branch_currents[0][2] - expected_source_current).norm()
+                < current_tolerance,
+            "TAHB=1 branch spectrum differs from the KCL oracle: expected {expected_source_current:?}, got {:?}",
+            transient_seed.mna_branch_currents[0][2]
+        );
         assert!(
             transient_seed.x[0][1].norm() < 1.0e-6,
             "first-tone trajectory leaked onto the common-grid fundamental: {:?}",
             transient_seed.x[0]
         );
+        for (harmonic, coefficient) in transient_seed.x[0].iter().enumerate() {
+            if harmonic != 2 {
+                assert!(
+                    coefficient.norm() < voltage_tolerance,
+                    "TAHB=1 node seed has non-oracle harmonic {harmonic}: {coefficient:?}"
+                );
+            }
+        }
+        for (harmonic, coefficient) in transient_seed.mna_branch_currents[0].iter().enumerate() {
+            if harmonic != 2 {
+                assert!(
+                    coefficient.norm() < current_tolerance,
+                    "TAHB=1 branch seed has non-oracle harmonic {harmonic}: {coefficient:?}"
+                );
+            }
+        }
 
         let dc_netlist = Netlist::parse(
             "DC trajectory seed\nV1 out 0 1.25\nR1 out 0 1k\n.options hbint tahb=2\n.hb 1k\n.end\n",
         )
         .expect("TAHB=2 deck parses");
         let mut dc_seed = HbSolverState::new(1, 3);
+        dc_seed
+            .try_prepare_mna_branches(1, 3)
+            .expect("one ideal-source branch fits the qualified seed");
         engine
             .hb_seed_dc_operating_point(
                 &dc_netlist,
                 &mut dc_seed,
                 &["out".to_string()],
-                &[],
+                &["V1".to_string()],
                 &NoAbort,
             )
             .expect("TAHB=2 repeats the converged DC point");
@@ -1767,6 +1818,18 @@ mod tests {
         assert_eq!(dc_seed.x[0][0].im, 0.0);
         assert!(
             dc_seed.x[0][1..]
+                .iter()
+                .all(|value| *value == Complex64::new(0.0, 0.0))
+        );
+        // KCL independently fixes i(V1)=-1.25 V / 1 kohm=-1.25 mA. A
+        // constant trajectory has no non-DC coefficients.
+        assert!(
+            (dc_seed.mna_branch_currents[0][0] - Complex64::new(-1.25e-3, 0.0)).norm() < 1.0e-12,
+            "TAHB=2 branch spectrum differs from the DC KCL oracle: {:?}",
+            dc_seed.mna_branch_currents[0][0]
+        );
+        assert!(
+            dc_seed.mna_branch_currents[0][1..]
                 .iter()
                 .all(|value| *value == Complex64::new(0.0, 0.0))
         );

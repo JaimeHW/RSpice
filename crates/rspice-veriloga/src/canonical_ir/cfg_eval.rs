@@ -287,6 +287,20 @@ pub enum CfgEvalError {
     DigitalConstructInAnalogEvaluation {
         what: &'static str,
     },
+    /// An analog bitwise or shift operand is not a representable `integer`.
+    ///
+    /// Reported rather than substituted. Verilog-AMS defines these operators
+    /// over signed 32-bit values, and an operand that is infinite or past
+    /// `i32::MAX` names no such value — clamping it would answer the question
+    /// with a number the standard does not license.
+    ///
+    /// The reason is a fixed string rather than the runtime's own error type:
+    /// `crate::integer_runtime` is a private module, and widening it to carry
+    /// one variant of a public error would put its whole vocabulary on this
+    /// crate's surface.
+    IntegerOperand {
+        reason: &'static str,
+    },
 }
 
 impl std::fmt::Display for CfgEvalError {
@@ -306,6 +320,9 @@ impl std::fmt::Display for CfgEvalError {
                 "{what} is a discrete-domain construct and cannot be evaluated \
                  as part of an analog body"
             ),
+            Self::IntegerOperand { reason } => {
+                write!(f, "an analog integer operator operand is {reason}")
+            }
         }
     }
 }
@@ -522,6 +539,50 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                 self.read(fall)?;
                 self.read_lanes(input_derivative)?
             }
+            // The same equilibrium argument as the transition above: a
+            // transport delay whose input is not moving reproduces it exactly,
+            // so its packed Jacobian action is the input's own. The delay's own
+            // derivative multiplies `dx/dt`, which is zero at equilibrium — it
+            // is read, because the graph defines it, and contributes nothing.
+            //
+            // Every derivative operand is packed here and scalar in
+            // [`Self::compute`]: which one a node carries follows from its own
+            // value type, exactly as it does for a transition.
+            CfgValueKind::AbsDelayDerivative {
+                input,
+                input_derivative,
+                delay,
+                delay_derivative,
+                max_delay,
+                ..
+            } => {
+                self.read(input)?;
+                self.read(delay)?;
+                self.read_lanes(delay_derivative)?;
+                if let Some(max_delay) = max_delay {
+                    self.read(max_delay)?;
+                }
+                self.read_lanes(input_derivative)?
+            }
+            // A rate limiter that has nothing to limit is the identity, so its
+            // direct coefficient is one and the rate derivatives multiply a
+            // clamp that is not active.
+            CfgValueKind::SlewDerivative {
+                input,
+                input_derivative,
+                max_rise,
+                max_rise_derivative,
+                max_fall,
+                max_fall_derivative,
+                ..
+            } => {
+                self.read(input)?;
+                self.read(max_rise)?;
+                self.read_lanes(max_rise_derivative)?;
+                self.read(max_fall)?;
+                self.read_lanes(max_fall_derivative)?;
+                self.read_lanes(input_derivative)?
+            }
             // A merge that no predecessor supplied is a bug in the graph, not a
             // derivative of zero.
             _ => return Err(CfgEvalError::UndefinedValue(id)),
@@ -613,6 +674,106 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                 self.inputs.idt
             }
             CfgValueKind::IdtScale => self.inputs.idt_scale,
+            // The wrapped integral takes the same static treatment as `idt`:
+            // the running total is supplied, and every operand is still
+            // evaluated because any of them may carry a side condition. The
+            // fold is not applied to the supplied total — the interpreter owns
+            // no history to fold, and inventing a branch here would make the
+            // reference disagree with itself between two evaluations at the
+            // same bias.
+            CfgValueKind::IdtMod {
+                input,
+                ic,
+                modulus,
+                offset,
+                ..
+            } => {
+                self.read(input)?;
+                self.read(ic)?;
+                self.read(modulus)?;
+                self.read(offset)?;
+                self.inputs.idt
+            }
+            // At equilibrium a transport delay is an exact passthrough: a
+            // signal that is not moving is its own history. This is the same
+            // static reading `Transition` takes below, and it is what makes the
+            // difference oracles' `d/dv` come out as the input's own.
+            CfgValueKind::AbsDelay {
+                input,
+                delay,
+                max_delay,
+                ..
+            } => {
+                let value = self.read(input)?;
+                self.read(delay)?;
+                if let Some(max_delay) = max_delay {
+                    self.read(max_delay)?;
+                }
+                value
+            }
+            CfgValueKind::AbsDelayDerivative {
+                input,
+                input_derivative,
+                delay,
+                delay_derivative,
+                max_delay,
+                ..
+            } => {
+                self.read(input)?;
+                self.read(delay)?;
+                self.read(delay_derivative)?;
+                if let Some(max_delay) = max_delay {
+                    self.read(max_delay)?;
+                }
+                self.read(input_derivative)?
+            }
+            // Nothing to rate-limit in steady state, so the limiter is the
+            // identity and its exact local coefficient is one.
+            CfgValueKind::Slew {
+                input,
+                max_rise,
+                max_fall,
+                ..
+            } => {
+                let value = self.read(input)?;
+                self.read(max_rise)?;
+                if let Some(max_fall) = max_fall {
+                    self.read(max_fall)?;
+                }
+                value
+            }
+            CfgValueKind::SlewDerivative {
+                input,
+                input_derivative,
+                max_rise,
+                max_rise_derivative,
+                max_fall,
+                max_fall_derivative,
+                ..
+            } => {
+                self.read(input)?;
+                self.read(max_rise)?;
+                self.read(max_rise_derivative)?;
+                self.read(max_fall)?;
+                self.read(max_fall_derivative)?;
+                self.read(input_derivative)?
+            }
+            // A time, not a level, so the supplied-site default is the LRM's
+            // "no crossing yet" answer rather than the zero the event levels
+            // take.
+            CfgValueKind::LastCrossing {
+                operator,
+                input,
+                direction,
+            } => {
+                self.read(input)?;
+                self.read(direction)?;
+                self.inputs
+                    .event_controls
+                    .get(&operator)
+                    .copied()
+                    .unwrap_or_else(|| S::from_f64(-1.0))
+            }
             CfgValueKind::Transition {
                 input,
                 delay,
@@ -734,6 +895,29 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                 let right = self.read(right)?;
                 apply_binary(op, left, right)
             }
+            // Evaluated on the real part alone, which is what makes it the same
+            // function for every scalar this interpreter is instantiated with.
+            // A dual or complex-step operand carries an infinitesimal that this
+            // operator discards, and discarding it is the answer: the result is
+            // piecewise constant, so its derivative is zero, which is exactly
+            // what the rule pass produces for it.
+            CfgValueKind::IntegerBitwise { op, left, right } => {
+                let left = self.read(left)?.real();
+                let right = self.read(right)?.real();
+                let result = crate::integer_runtime::integer_binary(
+                    integer_bitwise_operation(op),
+                    left,
+                    right,
+                )
+                .map_err(integer_operand_error)?;
+                S::from_f64(result)
+            }
+            CfgValueKind::IntegerBitwiseNot { input } => {
+                let input = self.read(input)?.real();
+                let value = crate::integer_runtime::real_to_integer(input)
+                    .map_err(integer_operand_error)?;
+                S::from_f64(f64::from(!value))
+            }
             CfgValueKind::LaneExtract { input, lane } => {
                 let position = self
                     .function
@@ -756,6 +940,13 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             CfgValueKind::FourStateConstant(_)
             | CfgValueKind::IntegerConstant(_)
             | CfgValueKind::DigitalSignalRead { .. }
+            | CfgValueKind::DigitalRealSignalRead { .. }
+            | CfgValueKind::DigitalAnalogPotential { .. }
+            | CfgValueKind::DigitalRealArithmetic { .. }
+            | CfgValueKind::DigitalRealCompare { .. }
+            | CfgValueKind::DigitalRealSelect { .. }
+            | CfgValueKind::DigitalRealToBits { .. }
+            | CfgValueKind::DigitalBitsToReal { .. }
             | CfgValueKind::DigitalBitwise { .. }
             | CfgValueKind::DigitalBitwiseNot { .. }
             | CfgValueKind::DigitalLogical { .. }
@@ -783,6 +974,39 @@ impl<S: CfgScalar> Evaluator<'_, S> {
 enum Carried<S> {
     Scalar(S),
     Lanes(Vec<S>),
+}
+
+fn integer_bitwise_operation(
+    op: super::cfg::CfgIntegerBitwiseOp,
+) -> crate::integer_runtime::IntegerBinaryOperation {
+    use super::cfg::CfgIntegerBitwiseOp;
+    use crate::integer_runtime::IntegerBinaryOperation;
+    match op {
+        CfgIntegerBitwiseOp::And => IntegerBinaryOperation::BitAnd,
+        CfgIntegerBitwiseOp::Or => IntegerBinaryOperation::BitOr,
+        CfgIntegerBitwiseOp::Xor => IntegerBinaryOperation::BitXor,
+        CfgIntegerBitwiseOp::Shl => IntegerBinaryOperation::Shl,
+        CfgIntegerBitwiseOp::Shr => IntegerBinaryOperation::Shr,
+    }
+}
+
+fn integer_operand_error(error: crate::integer_runtime::IntegerRuntimeError) -> CfgEvalError {
+    use crate::integer_runtime::IntegerRuntimeError;
+    CfgEvalError::IntegerOperand {
+        reason: match error {
+            IntegerRuntimeError::NonFiniteOperand { .. } => "not finite",
+            IntegerRuntimeError::OperandOutOfRange { .. } => {
+                "outside the signed 32-bit integer range"
+            }
+            // Unreachable through a bitwise or shift operator, which divides
+            // nothing and raises nothing. Named rather than left to a
+            // catch-all, so that widening the operator set has to answer for
+            // them.
+            IntegerRuntimeError::DivisionByZero
+            | IntegerRuntimeError::ModulusByZero
+            | IntegerRuntimeError::NegativeExponent { .. } => "not a valid integer operand",
+        },
+    }
 }
 
 pub(super) fn apply_unary<S: CfgScalar>(op: CfgUnaryOp, input: S) -> S {

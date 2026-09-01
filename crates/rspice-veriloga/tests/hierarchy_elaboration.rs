@@ -12,19 +12,12 @@ fn compile_selected(source: &str, module: &str) -> DeviceFixture {
     let model = compiler
         .compile_module(source, Some(module))
         .expect("selected hierarchy must compile to bytecode");
-    #[cfg(feature = "native")]
-    {
-        let canonical_ir = compiler
-            .compile_canonical_ir_module(source, Some(module))
-            .expect("selected hierarchy must compile to canonical IR");
-        DeviceFixture {
-            model,
-            canonical_ir,
-        }
-    }
-    #[cfg(not(feature = "native"))]
-    {
-        DeviceFixture { model }
+    let canonical_ir = compiler
+        .compile_canonical_ir_module(source, Some(module))
+        .expect("selected hierarchy must compile to canonical IR");
+    DeviceFixture {
+        model,
+        canonical_ir,
     }
 }
 

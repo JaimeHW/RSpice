@@ -57,6 +57,42 @@ jobs:
           cargo test --locked -p rspice-conformance --lib
           --test ngspice_oracle_audit --test verilog_oracles --release
           -- --nocapture
+      - name: RNM against analog wall clock (release)
+        # The performance leg of the dual-representation suite: what a
+        # real-number model of a reference block costs against simulating the
+        # block. Here rather than in CI for two reasons. It is a wall-clock
+        # measurement, which flaps on a loaded per-push runner; and it is only
+        # meaningful in release, because the two sides are dominated by
+        # different work — matrix solves on one, a Verilog front end on the
+        # other — that `opt-level = 0` slows by different factors, so a debug
+        # measurement is a different ratio rather than a slower one.
+        #
+        # --nocapture because the table is the deliverable. The assertion is
+        # only that the RNM is the cheaper of the two; P3's 100x exit gate is
+        # printed against the measurement rather than asserted, since a
+        # wall-clock ratio asserted in CI is a test that fails when the runner
+        # is busy.
+        run: >-
+          cargo test --locked -p rspice-conformance --release
+          --test verilog_rnm_performance -- --nocapture
+      - name: Mixed against all-analog wall clock (release)
+        # P4's runtime measurement: what executing a circuit's digital half on
+        # the Verilog-AMS event wheel costs against simulating the same circuit
+        # entirely in the analog domain. Here rather than in CI for exactly the
+        # reasons the step above is, and in release for the same one: the two
+        # sides are dominated by different work and `opt-level = 0` slows them
+        # by different factors.
+        #
+        # Nothing about the ratio is asserted, and that is deliberate. There is
+        # no honest a-priori claim that the interleave is faster on an arbitrary
+        # circuit — it is faster exactly when the digital half would otherwise
+        # cost the matrix more than the interleave costs in trial machinery.
+        # What the step asserts is that both representations still agree, since
+        # a ratio between two answers that differ measures nothing; the table
+        # says which circuits win and by how much.
+        run: >-
+          cargo test --locked -p rspice-conformance --release
+          --test verilog_mixed_performance -- --nocapture
       - name: GF180MCU device corpus (release)
         # A released Apache-2.0 foundry PDK: BSIM4 through the vendor's own
         # subcircuit wrappers and corner libraries, across four temperatures.

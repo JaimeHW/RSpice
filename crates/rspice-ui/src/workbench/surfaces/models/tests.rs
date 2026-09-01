@@ -23,49 +23,49 @@ const MODELS_BASELINES: [ModelsBaseline; 8] = [
         name: "models-00-models-project",
         page: ModelsPage::Models,
         scope: ModelsCatalogScope::Project,
-        fingerprint: "061265cf15ba42fc1ac7e390c4a4f87057deb1a92b6e3deb0e7b40ca7176f02b",
+        fingerprint: "0dbcbdd27d86984624adf6198aa58e6f3097f5847af20b07789beaafa2236191",
     },
     ModelsBaseline {
         name: "models-01-symbols-cdf",
         page: ModelsPage::Symbols,
         scope: ModelsCatalogScope::Project,
-        fingerprint: "1622088abf454d2baf1b52f7845f59d1fe0818d890712b3785c9dfe8922268ad",
+        fingerprint: "e0248c56bfc6e07bbd9b1a2d6dfdb2224f17fabf47274d6e7e758dc4b6e22414",
     },
     ModelsBaseline {
         name: "models-02-corners-sections",
         page: ModelsPage::Corners,
         scope: ModelsCatalogScope::Project,
-        fingerprint: "c6c5fa1aafaf3b96222d1aa4dd6fd0563183d33f8f0e79cfaefe5a15b4adb945",
+        fingerprint: "640ee0c89978947c287636b1d3dd8b6d706812cc7c5515f9f5b5d6e7530169a0",
     },
     ModelsBaseline {
         name: "models-03-bins-geometry",
         page: ModelsPage::Bins,
         scope: ModelsCatalogScope::Project,
-        fingerprint: "c0d9d3b2a0ad5ab07ff5e16a22183a79cfb1a39da15dbedb24ccc135a0328219",
+        fingerprint: "aca4ee0ea39cefa3345742e7ceb8d3f0d0fc7521bb5c4293150705ed573ba18c",
     },
     ModelsBaseline {
         name: "models-04-include-graph",
         page: ModelsPage::Include,
         scope: ModelsCatalogScope::Project,
-        fingerprint: "aaf28f7c71b58cc70d1944da5db6469f8e933e7ea81a5db80f575a7eb4094cd7",
+        fingerprint: "2b5c346588550c7b9a8ca874ed9bdf462eb35edf0d96f122d3031a4e7dcef01a",
     },
     ModelsBaseline {
         name: "models-05-qualification",
         page: ModelsPage::Qualification,
         scope: ModelsCatalogScope::Project,
-        fingerprint: "dc345e81745ac3aaa3d6c96add70fb5668f9057b7b5c4abf6c73e08966753294",
+        fingerprint: "668c0c4e4e159ac19de48eba57c36dc382adcdabea0e715d723fe47e52ccdd07",
     },
     ModelsBaseline {
         name: "models-00b-rspice-library",
         page: ModelsPage::Models,
         scope: ModelsCatalogScope::RSpiceLibrary,
-        fingerprint: "fc1cea77ac0ac7733f04b153896cc185615cb3461469109da31c16af50cad821",
+        fingerprint: "fd50eb465c0d217055af521507605522d24056ab32ab2e83d8003ec76577b0b0",
     },
     ModelsBaseline {
         name: "models-00c-installed-packs",
         page: ModelsPage::Models,
         scope: ModelsCatalogScope::InstalledPacks,
-        fingerprint: "841dc7c52cad1f011b45318b40db5fa6d56bc4a250688ee1c7056e7df9fbb127",
+        fingerprint: "fe3bdad35009aef7e328388880c5bc27ea9c9f8ad9eb3b68d178335502deb9c5",
     },
 ];
 
@@ -160,16 +160,21 @@ fn every_models_workspace_page_matches_its_reviewed_visual_baseline() {
 #[test]
 #[ignore = "prints source-ready visual fingerprints after explicit review"]
 fn print_models_visual_fingerprints_for_review() {
+    use std::io::Write as _;
+
+    let mut stdout = std::io::stdout().lock();
     for baseline in MODELS_BASELINES {
         let canvas = models_canvas(baseline.page, baseline.scope);
         let height = models_regression_height(&canvas);
-        eprintln!(
+        writeln!(
+            stdout,
             "{} {}x{} {}",
             baseline.name,
             canvas.width(),
             height,
             canvas.regression_fingerprint(height)
-        );
+        )
+        .expect("write visual fingerprint");
     }
 }
 

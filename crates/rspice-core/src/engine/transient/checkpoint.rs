@@ -5521,6 +5521,28 @@ impl TransientCheckpoint {
                     .to_string(),
             );
         }
+        // The same refusal `exact_integration_runtime_resume_blockers` states,
+        // made here as well and for the reason the coupled transmission line's
+        // is made here: the blocker set is validated against the *rebuilt*
+        // runtime, and a resume can reach the first trial before that
+        // comparison. A mixed module with a self-scheduled activation does —
+        // the rebuilt wheel still holds the event its `initial` block placed at
+        // time zero, so the first trial at the resume time trips
+        // `MissedDigitalBreakpoint` and the user is told the stepper skipped a
+        // breakpoint rather than that the checkpoint never carried the module's
+        // digital state. A time-zero checkpoint is exempt for the reason it is
+        // exempt there: nothing has advanced, so rebuilding reconstructs it.
+        #[cfg(feature = "veriloga")]
+        if circuit.has_mixed_signal_hosts() && self.time > 0.0 {
+            return Err(
+                "transient checkpoint does not contain mixed Verilog-AMS accepted digital state: \
+                 the module's event queue, process resumption points, registers and boundary \
+                 values are a running digital design rather than a numeric store, and resuming \
+                 without them restarts the design at time zero beside an analog solution that \
+                 continues. Re-run the transient from t=0"
+                    .to_string(),
+            );
+        }
         if self.tline_states.len() != circuit.tlines.len() {
             return Err(format!(
                 "checkpoint transmission-line shape mismatch: captured {}, circuit has {}",
@@ -5664,8 +5686,7 @@ impl TransientCheckpoint {
                 .solution_dependent_capacitor_states
                 .iter()
                 .zip(&circuit.capacitors.value_expressions)
-                .enumerate()
-                .any(|(_, (state, expression))| state.is_some() != expression.is_some())
+                .any(|(state, expression)| state.is_some() != expression.is_some())
         {
             return Err(
                 "checkpoint solution-dependent capacitor state presence does not match the target circuit"

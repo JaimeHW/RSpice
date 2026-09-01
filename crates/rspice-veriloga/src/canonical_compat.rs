@@ -98,10 +98,13 @@ fn validate_parameters(model: &CompiledModel, mir: &MirModel) -> Result<(), Stri
                 canonical.name, compiled.name
             ));
         }
+        // A constant compiled default has to have a canonical default that is
+        // bit-equal to it. Both halves of the negation are reportable: the
+        // canonical side may carry no default at all, or carry a different one.
         if compiled.default_program.is_none()
-            && !canonical
+            && canonical
                 .default
-                .is_some_and(|default| default.to_bits() == compiled.default.to_bits())
+                .is_none_or(|default| default.to_bits() != compiled.default.to_bits())
         {
             return Err(format!(
                 "canonical parameter '{}' default {:?} does not match compiled default {}",

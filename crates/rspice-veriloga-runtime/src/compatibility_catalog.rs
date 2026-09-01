@@ -3,9 +3,9 @@
 ///
 /// Every target field and wire alias is exact. `semantic_identity_override_artifact`
 /// is normally absent: generic semantic identities are derived directly from
-/// the canonical source. Its one retained value permits an intentionally
-/// stable historical semantic identity only for the exact generated artifact
-/// named by that digest; matching source text alone is insufficient.
+/// the canonical source. The field remains part of the authenticated schema so
+/// a future, explicitly audited historical semantic identity can be restricted
+/// to one exact generated artifact; matching source text alone is insufficient.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GeneratedVerilogACompatibilityCatalogEntry {
     pub module_name: &'static str,
@@ -493,10 +493,10 @@ pub const GENERATED_VERILOGA_COMPATIBILITY_CATALOG:
         "vbic13",
         "vbic13",
         "9aa27a36b6c1eb4e70f914f5fa012694cb0eaa26fd21bb11ca0c01618d3a764d",
-        "1c950f1c0ae955382f550740b2be24f583b4978276cf67107be777a13273559e",
+        "9c528aafec6d9403932892317789a60e6692b93f179edc406dfc62e647f4f5a6",
         "a310a4667c8b0feeacbf83cbbe035eb95ed4f22f3178bfe2aa8dc59330367ebe",
         &["9312813f56a56e981aabbc14ea83608659ac81ac770358376a7a8c95c6dd34be"],
-        Some("35bca408d409e2d3a45f6d24babd1d07b54cf49a7d8a316879f3304ed1ded8de"),
+        None,
         Some("4408ff7da797cc591148f3e1e447035800ee3b794426762068d4785a9d3a8488"),
         Some("e169ac7dc9c1e7c7aa1a89ae67f7a49d30a0c08adaae0b897e4b4caa8efc3286"),
     ),

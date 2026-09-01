@@ -1785,6 +1785,26 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         // caching it at a coarser class would integrate a step the solver did
         // not take.
         | CfgValueKind::Idt { .. }
+        // `idtmod` for the same reason, and one more: the wrap translates the
+        // history onto the candidate's branch, so a cached value from a
+        // different branch would be off by a whole period rather than by a
+        // step.
+        | CfgValueKind::IdtMod { .. }
+        // Every remaining stateful operator is here because its value is a
+        // function of accepted history and of the current time, not only of the
+        // operands the propagation pass can see. The catch-all below would
+        // classify one whose operands happen to be model-scope — `transition(1,
+        // 0, tr, tf)`, `slew(vdd, sr)` with a model parameter — as `Model` and
+        // compute it once per model card, freezing a waveform that is supposed
+        // to be ramping. `transition` and its derivative fell through exactly
+        // that way until this arm existed.
+        | CfgValueKind::Transition { .. }
+        | CfgValueKind::TransitionDerivative { .. }
+        | CfgValueKind::AbsDelay { .. }
+        | CfgValueKind::AbsDelayDerivative { .. }
+        | CfgValueKind::Slew { .. }
+        | CfgValueKind::SlewDerivative { .. }
+        | CfgValueKind::LastCrossing { .. }
         | CfgValueKind::Cross { .. }
         | CfgValueKind::Above { .. }
         | CfgValueKind::Timer { .. }
@@ -1836,6 +1856,19 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         CfgValueKind::FourStateConstant(_)
         | CfgValueKind::IntegerConstant(_)
         | CfgValueKind::DigitalSignalRead { .. }
+        | CfgValueKind::DigitalRealSignalRead { .. }
+        // A probe of a continuous net is `Newton` for a stronger reason than
+        // the rest of this list: it reads the analog solution, which changes
+        // on every Newton iteration of every trial. Any coarser class would be
+        // a cached sample of a moving quantity — which is exactly the defect
+        // Verilog-AMS LRM 2.4 section 7.3.6.3 rules out by fixing *which*
+        // analog value a discrete read sees.
+        | CfgValueKind::DigitalAnalogPotential { .. }
+        | CfgValueKind::DigitalRealArithmetic { .. }
+        | CfgValueKind::DigitalRealCompare { .. }
+        | CfgValueKind::DigitalRealSelect { .. }
+        | CfgValueKind::DigitalRealToBits { .. }
+        | CfgValueKind::DigitalBitsToReal { .. }
         | CfgValueKind::DigitalBitwise { .. }
         | CfgValueKind::DigitalBitwiseNot { .. }
         | CfgValueKind::DigitalLogical { .. }
@@ -2214,7 +2247,8 @@ mod digital_leaf_class {
         DigitalSchedulingRegion, DigitalWriteSelect, DigitalWriteTarget,
     };
     use crate::canonical_ir::digital_value::{
-        ArithmeticOp, BitwiseOp, FourStateValue, LogicalOp, RelationalOp, ShiftOp,
+        ArithmeticOp, BitwiseOp, FourStateValue, LogicalOp, RealArithmeticOp, RealCompareOp,
+        RelationalOp, ShiftOp,
     };
     use crate::canonical_ir::{DigitalSignalId, ValueId};
 
@@ -2236,6 +2270,26 @@ mod digital_leaf_class {
             CfgValueKind::DigitalSignalRead {
                 signal: DigitalSignalId::from(0usize),
             },
+            CfgValueKind::DigitalRealSignalRead {
+                signal: DigitalSignalId::from(0usize),
+            },
+            CfgValueKind::DigitalRealArithmetic {
+                op: RealArithmeticOp::Add,
+                left: value,
+                right: value,
+            },
+            CfgValueKind::DigitalRealCompare {
+                op: RealCompareOp::Lt,
+                left: value,
+                right: value,
+            },
+            CfgValueKind::DigitalRealSelect {
+                condition: value,
+                then_value: value,
+                else_value: value,
+            },
+            CfgValueKind::DigitalRealToBits { input: value },
+            CfgValueKind::DigitalBitsToReal { input: value },
             CfgValueKind::DigitalBitwise {
                 op: BitwiseOp::And,
                 left: value,
@@ -2342,5 +2396,113 @@ mod digital_leaf_class {
             InvalidationClass::Model
         );
         assert!(!node.is_digital());
+    }
+
+    /// Every kind that owns accepted history is classified directly, not by the
+    /// catch-all.
+    ///
+    /// Called on the kinds themselves rather than through a lowered model,
+    /// because the classification that matters is the one before propagation
+    /// raises anything: an operator whose operands are all bias-dependent comes
+    /// out `Newton` no matter what this function says, so a model-level test
+    /// cannot see the hole. `transition` and `TransitionDerivative` are here
+    /// for a second reason — no Verilog-A source reaches them through
+    /// `cfg_lower` today, so this is the only place their classification can be
+    /// checked at all.
+    #[test]
+    fn every_history_owning_kind_is_classified_rather_than_defaulted() {
+        let value = ValueId::from(0usize);
+        let operator = crate::canonical_ir::ExprId::from(0usize);
+        let site = crate::ir::TransitionSiteId {
+            source: 0,
+            start: 0,
+            end: 0,
+            ordinal: 0,
+        };
+        let kinds = [
+            CfgValueKind::Transition {
+                site,
+                input: value,
+                delay: value,
+                rise: value,
+                fall: value,
+            },
+            CfgValueKind::TransitionDerivative {
+                site,
+                input: value,
+                input_derivative: value,
+                delay: value,
+                rise: value,
+                fall: value,
+            },
+            CfgValueKind::IdtMod {
+                operator,
+                input: value,
+                ic: value,
+                modulus: value,
+                offset: value,
+            },
+            CfgValueKind::AbsDelay {
+                operator,
+                input: value,
+                delay: value,
+                max_delay: None,
+            },
+            CfgValueKind::AbsDelayDerivative {
+                operator,
+                input: value,
+                input_derivative: value,
+                delay: value,
+                delay_derivative: value,
+                max_delay: None,
+                order: 1,
+            },
+            CfgValueKind::Slew {
+                operator,
+                input: value,
+                max_rise: value,
+                max_fall: None,
+            },
+            CfgValueKind::SlewDerivative {
+                operator,
+                input: value,
+                input_derivative: value,
+                max_rise: value,
+                max_rise_derivative: value,
+                max_fall: value,
+                max_fall_derivative: value,
+            },
+            CfgValueKind::LastCrossing {
+                operator,
+                input: value,
+                direction: value,
+            },
+        ];
+        for kind in kinds {
+            assert_eq!(
+                leaf_class(&kind, &[]),
+                InvalidationClass::Newton,
+                "{kind:?} owns accepted history and must not fall through to Model"
+            );
+            assert!(!kind.is_digital(), "{kind:?}");
+        }
+    }
+
+    /// The analog integer operators are ordinary pure arithmetic: their class is
+    /// whatever their operands' is, which is what the catch-all already answers.
+    #[test]
+    fn analog_integer_operators_take_their_operands_class() {
+        let value = ValueId::from(0usize);
+        for kind in [
+            CfgValueKind::IntegerBitwise {
+                op: crate::canonical_ir::CfgIntegerBitwiseOp::And,
+                left: value,
+                right: value,
+            },
+            CfgValueKind::IntegerBitwiseNot { input: value },
+        ] {
+            assert_eq!(leaf_class(&kind, &[]), InvalidationClass::Model, "{kind:?}");
+            assert!(!kind.is_digital(), "{kind:?}");
+        }
     }
 }

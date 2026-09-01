@@ -105,7 +105,7 @@
 
 use super::cfg::CfgFunction;
 use super::diagnostic::SourceSpanRef;
-use super::ids::{DigitalProcessId, DigitalSignalId};
+use super::ids::{DigitalAnalogProbeId, DigitalProcessId, DigitalSignalId};
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
@@ -189,12 +189,89 @@ pub enum DigitalSensitivityOrigin {
     Implicit,
 }
 
+/// How a real net combines the contributions of its drivers.
+///
+/// Restated here rather than reused from the syntax tree, for the reason
+/// [`DigitalEdge`] is: the canonical IR is serialized and must not inherit a
+/// parser type's layout.
+///
+/// [`Self::Single`] is Verilog-AMS LRM 2.4 section 6.5.3 — "there can be a
+/// maximum of one driver of a real-valued net" — and is what a plain `wreal`
+/// selects. The other four are the real-number-modelling extension the LRM does
+/// not define, opted into by writing `wrealsum`, `wrealavg`, `wrealmin` or
+/// `wrealmax` on the declaration.
+///
+/// The fold itself is the *kernel's*, exactly as IEEE 1364-2005 table 4-1's is:
+/// which value a net takes from several drivers is a simulation rule over the
+/// whole net, and the compiler's job is to say which rule, not to apply it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum DigitalRealResolution {
+    /// One driver, and a second is refused.
+    #[default]
+    Single,
+    Sum,
+    Average,
+    Minimum,
+    Maximum,
+}
+
+impl DigitalRealResolution {
+    /// The net-type keyword that selects this resolution.
+    pub const fn keyword(self) -> &'static str {
+        match self {
+            Self::Single => "wreal",
+            Self::Sum => "wrealsum",
+            Self::Average => "wrealavg",
+            Self::Minimum => "wrealmin",
+            Self::Maximum => "wrealmax",
+        }
+    }
+}
+
+/// What kind of value a signal carries.
+///
+/// A separate axis from `width` and from
+/// [`DigitalSignal::procedurally_assignable`], because it is a separate
+/// question: `reg`/`wire` decides *who may write it*, the width decides *how
+/// many bits*, and this decides *what a bit even is*. A real net has no bits at
+/// all (Verilog-AMS LRM 2.4 section 3.7), which is why the two cannot be folded
+/// into one enum without one of them lying.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum DigitalSignalKind {
+    /// IEEE 1364-2005's four-state value, at the declared width.
+    #[default]
+    FourState,
+    /// Verilog-AMS LRM 2.4 section 3.7's real-valued net, with the resolution
+    /// its net-type keyword named.
+    Real(DigitalRealResolution),
+}
+
+impl DigitalSignalKind {
+    pub const fn is_real(self) -> bool {
+        matches!(self, Self::Real(_))
+    }
+
+    pub const fn resolution(self) -> Option<DigitalRealResolution> {
+        match self {
+            Self::FourState => None,
+            Self::Real(resolution) => Some(resolution),
+        }
+    }
+}
+
 /// A declared discrete-domain net or variable.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DigitalSignal {
     pub id: DigitalSignalId,
     pub name: SmolStr,
-    /// Declared width in bits. A scalar is one.
+    /// What the signal carries.
+    ///
+    /// Defaulted on the wire format so that a plan serialized before real nets
+    /// existed still decodes as the four-state design it was.
+    #[serde(default, skip_serializing_if = "is_four_state")]
+    pub kind: DigitalSignalKind,
+    /// Declared width in bits. A scalar is one, and a real net is zero — it has
+    /// no bits, and says so the same way a process-local `real` does.
     pub width: u32,
     /// Left and right bounds exactly as written, `None` for a scalar. Retained
     /// because IEEE 1364-2005 section 4.2.1 makes `[7:0]` and `[0:7]` different
@@ -204,6 +281,64 @@ pub struct DigitalSignal {
     /// Whether a procedural assignment may drive it (`reg` can, `wire` cannot).
     pub procedurally_assignable: bool,
     pub span: SourceSpanRef,
+}
+
+/// Whether a signal kind is the default, for the wire format.
+fn is_four_state(kind: &DigitalSignalKind) -> bool {
+    matches!(kind, DigitalSignalKind::FourState)
+}
+
+/// One continuous-domain potential the discrete-domain half reads.
+///
+/// Verilog-AMS LRM 2.4 section 7.3.3: "All continuous nets can be probed from
+/// a discrete context using access functions. All probes which are legal in a
+/// continuous context of a module are also legal in the discrete context of a
+/// module." Section 7.3's opening paragraph is what makes that a *read* and
+/// only a read — "Read operations of nets and variables in both domains are
+/// allowed from both contexts. Write operations of nets and variables are only
+/// allowed from the context of their domain" — so nothing here can be
+/// contributed to.
+///
+/// # Why the nets are named rather than numbered
+///
+/// The analog levels are lowered from the analyzed module by `hir`/`mir`,
+/// which allocate a [`NodeId`](super::ids::NodeId) per continuous net, and the
+/// discrete plan is lowered from the same module by `digital_lower`, which
+/// never sees that allocation. A probe carrying a `NodeId` would make one pass
+/// depend on the other's numbering; a probe carrying the author's own net name
+/// is resolvable by whichever side has the mapping — which is the host, the
+/// same way it already resolves a bridge's signal by name.
+///
+/// # What the reader owes
+///
+/// A value, at the time section 7.3.6.3 fixes: "the analog value calculated
+/// for the time corresponding to a real promotion of the digital time at which
+/// the expression is evaluated". The plan cannot enforce that; it can only
+/// make the probe a *leaf*, so that two reads on either side of a suspension
+/// are two calls and may differ, exactly as two reads of a signal are.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DigitalAnalogProbe {
+    pub id: DigitalAnalogProbeId,
+    /// The access function as written — `V` for an electrical potential, and
+    /// whichever name the net's discipline gives its potential otherwise.
+    /// Carried so a host can report the probe the way the author wrote it.
+    pub access: SmolStr,
+    /// The positive net's name, exactly as the author declared it.
+    pub positive: SmolStr,
+    /// The negative net's name. `None` is the single-ended form `V(a)`, whose
+    /// reference is the global ground rather than a second declared net.
+    pub negative: Option<SmolStr>,
+    pub span: SourceSpanRef,
+}
+
+impl DigitalAnalogProbe {
+    /// The probe as the author wrote it, for a diagnostic.
+    pub fn spelling(&self) -> String {
+        match &self.negative {
+            Some(negative) => format!("{}({}, {})", self.access, self.positive, negative),
+            None => format!("{}({})", self.access, self.positive),
+        }
+    }
 }
 
 /// Which bits of a signal an assignment drives.
@@ -354,11 +489,27 @@ pub struct CanonicalDigitalPlan {
     /// Every continuous driver in the module, in declaration order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub drivers: Vec<DigitalDriver>,
+    /// Every continuous-domain potential a process reads, in first-appearance
+    /// order (Verilog-AMS LRM 2.4 section 7.3.3).
+    ///
+    /// Empty for a design with no cross-domain read, which is every design
+    /// that existed before this table did, so an artifact serialized without
+    /// it decodes unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub analog_probes: Vec<DigitalAnalogProbe>,
 }
 
 impl CanonicalDigitalPlan {
     pub fn is_empty(&self) -> bool {
-        self.signals.is_empty() && self.processes.is_empty() && self.drivers.is_empty()
+        self.signals.is_empty()
+            && self.processes.is_empty()
+            && self.drivers.is_empty()
+            && self.analog_probes.is_empty()
+    }
+
+    /// The probe an id names.
+    pub fn analog_probe(&self, id: DigitalAnalogProbeId) -> Option<&DigitalAnalogProbe> {
+        self.analog_probes.get(usize::from(id))
     }
 
     /// Every driver of one net, in declaration order.

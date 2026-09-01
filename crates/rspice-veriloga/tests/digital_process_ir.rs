@@ -1471,10 +1471,13 @@ fn unlowered_constructs_refuse_by_name() {
              \x20   initial begin : work i = 0; q = 4'b0000; end",
             "module-level",
         ),
+        // A process-local `real` lowers now — Verilog-AMS LRM 2.4 section 3.7
+        // brought real values into the discrete domain and section 6.5.3's own
+        // example reads a `wreal` into one. A `string` still does not.
         (
             "    reg q;\n\
-             \x20   initial begin : work real r; r = 1.0; q = 1'b0; end",
-            "process-local `real`",
+             \x20   initial begin : work string s; q = 1'b0; end",
+            "process-local `string`",
         ),
         (
             "    reg [3:0] q;\n\
@@ -2132,4 +2135,91 @@ fn a_module_with_no_instances_lowers_unchanged() {
     assert_eq!(signal_names(&plan), vec!["a", "b", "y"]);
     assert_eq!(plan.processes.len(), 1);
     assert_eq!(plan.drivers.len(), 1);
+}
+
+// ===========================================================================
+// Reals crossing into and out of the discrete domain
+// ===========================================================================
+
+/// A `parameter real` folds to a literal and leaves no runtime machinery.
+///
+/// IEEE 1364-2005 section 12.2 fixes a parameter at elaboration, so the graph
+/// should contain the number and nothing that reads a parameter — the same
+/// folding a replication count already gets, in the other value domain. A node
+/// that read the parameter at runtime would be an analog value in a process
+/// function, which the interpreter refuses; a graph with one and no test would
+/// simply fail later and further away.
+#[test]
+fn a_real_parameter_is_folded_into_the_expression() {
+    let plan = plan(
+        "    parameter real GAIN = 0.25;\n\
+     \x20   wreal vin, vout;\n\
+     \x20   assign vout = vin * GAIN;",
+    );
+    let process = &plan.processes[0];
+    let kinds = kinds(process);
+    assert!(
+        kinds
+            .iter()
+            .any(|kind| matches!(kind, CfgValueKind::RealConstant(value) if *value == 0.25)),
+        "the parameter became its value, got {kinds:?}"
+    );
+    assert!(
+        !kinds
+            .iter()
+            .any(|kind| matches!(kind, CfgValueKind::Parameter(_))),
+        "and nothing reads it at runtime, got {kinds:?}"
+    );
+}
+
+/// `$realtobits` produces sixty-four bits whatever context it sits in.
+///
+/// The width is the double-precision format's, not the expression's. A
+/// context-determined width would give a narrower target a different pattern
+/// and still call it the conversion; the assignment truncates afterwards, which
+/// is section 5.2.1's rule about the *assignment* rather than about the call.
+#[test]
+fn realtobits_is_sixty_four_bits_and_bitstoreal_takes_sixty_four() {
+    let plan = plan(
+        "    wreal vin, vout;\n\
+     \x20   reg [63:0] pattern;\n\
+     \x20   wire clk;\n\
+     \x20   always @(posedge clk) pattern = $realtobits(vin);\n\
+     \x20   assign vout = $bitstoreal(pattern);",
+    );
+    let to_bits = &plan.processes[0];
+    let node = to_bits
+        .function
+        .values
+        .iter()
+        .find(|value| matches!(value.kind, CfgValueKind::DigitalRealToBits { .. }))
+        .expect("the conversion is a node of its own");
+    assert_eq!(node.value_type, CfgValueType::FourState { width: 64 });
+
+    let from_bits = plan
+        .processes
+        .iter()
+        .find(|process| {
+            process
+                .function
+                .values
+                .iter()
+                .any(|value| matches!(value.kind, CfgValueKind::DigitalBitsToReal { .. }))
+        })
+        .expect("the driver converts the other way");
+    let node = from_bits
+        .function
+        .values
+        .iter()
+        .find(|value| matches!(value.kind, CfgValueKind::DigitalBitsToReal { .. }))
+        .expect("just found");
+    assert_eq!(node.value_type, CfgValueType::Real);
+    let CfgValueKind::DigitalBitsToReal { input } = node.kind else {
+        unreachable!("just matched")
+    };
+    assert_eq!(
+        from_bits.function.values[usize::from(input)].value_type,
+        CfgValueType::FourState { width: 64 },
+        "the operand is the sixty-four-bit pattern the format names"
+    );
 }

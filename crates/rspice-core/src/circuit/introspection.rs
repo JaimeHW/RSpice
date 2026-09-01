@@ -1033,6 +1033,13 @@ impl CircuitData {
         let count = passive + sources + junction + switches + distributed + magnetic + compiled;
         #[cfg(feature = "veriloga")]
         let count = count + self.veriloga_devices.len();
+        // A mixed Verilog-AMS module is one authored X-card, exactly as an
+        // analog Verilog-A instance is, and it is in no other collection: the
+        // route that builds one is the branch the device route does not take.
+        // Its A/D and D/A bridges are part of the host rather than instances of
+        // their own, so counting the hosts counts the cards.
+        #[cfg(feature = "veriloga")]
+        let count = count + self.mixed_signal_hosts.len();
         #[cfg(feature = "veriloga-builtins-base")]
         let count = count + self.generated_veriloga_devices.len();
         count

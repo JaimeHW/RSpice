@@ -601,6 +601,7 @@ fn output_directive_name(kind: rspice_core::netlist::OutputDirectiveKind) -> &'s
         OutputDirectiveKind::Plot => "plot",
         OutputDirectiveKind::Measure => "measure",
         OutputDirectiveKind::Four => "four",
+        OutputDirectiveKind::Fft => "fft",
     }
 }
 
@@ -1074,6 +1075,23 @@ pub fn run_transient_analysis_js(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn output_directive_names_cover_the_browser_diagnostic_contract() {
+        use rspice_core::netlist::OutputDirectiveKind;
+
+        for (kind, expected) in [
+            (OutputDirectiveKind::Save, "save"),
+            (OutputDirectiveKind::Probe, "probe"),
+            (OutputDirectiveKind::Print, "print"),
+            (OutputDirectiveKind::Plot, "plot"),
+            (OutputDirectiveKind::Measure, "measure"),
+            (OutputDirectiveKind::Four, "four"),
+            (OutputDirectiveKind::Fft, "fft"),
+        ] {
+            assert_eq!(output_directive_name(kind), expected);
+        }
+    }
 
     #[test]
     fn summary_includes_nonfatal_parser_diagnostics() {

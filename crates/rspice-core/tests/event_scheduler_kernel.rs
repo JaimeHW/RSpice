@@ -1145,3 +1145,83 @@ fn several_thousand_events_drain_in_total_order() {
     };
     assert_eq!(slots, distinct_ticks);
 }
+
+//=============================================================================
+// What the next tick reports about a part-settled slot
+//=============================================================================
+
+#[test]
+fn the_next_tick_dates_a_part_settled_slot_by_its_events_not_by_the_bound() {
+    // Drive the slot the way a mixed interleave does: name a bound well past
+    // the earliest pending tick, and stop the settle inside it. The events the
+    // kernel opened into the slot are dated at tick 2; reporting the bound
+    // would date them at 40, which as a breakpoint is 38 ns late.
+    let limits = SchedulerLimits {
+        max_delta_cycles_per_tick: 0,
+        ..SchedulerLimits::default()
+    };
+    let mut scheduler = EventScheduler::new(TimeResolution::new(-9).expect("1 ns"), limits);
+    scheduler
+        .schedule_at(
+            2,
+            SchedulerRegion::Active,
+            target("a", "out", 1, 0),
+            digital(1),
+        )
+        .expect("schedule");
+    scheduler
+        .schedule_at(
+            2,
+            SchedulerRegion::NonBlockingAssign,
+            target("b", "out", 2, 0),
+            digital(1),
+        )
+        .expect("schedule");
+
+    let error = scheduler
+        .run_due_events(40, |_, _| {})
+        .expect_err("the delta-cycle ceiling stops the slot part-settled");
+    assert!(matches!(error, SchedulerError::Oscillation(_)));
+
+    assert_eq!(
+        scheduler.next_tick(),
+        Some(2),
+        "an event still in the slot is dated where it was scheduled, not at the bound"
+    );
+}
+
+#[test]
+fn the_next_tick_is_unchanged_for_a_settled_slot() {
+    // The XSPICE estate's reading: every predicate asks between runs, and a
+    // slot that settled is empty in every region, so the answer comes from the
+    // future tier exactly as it always did.
+    let mut scheduler = scheduler();
+    assert_eq!(scheduler.next_tick(), None);
+    scheduler
+        .schedule_at(
+            4,
+            SchedulerRegion::Active,
+            target("a", "out", 1, 0),
+            digital(1),
+        )
+        .expect("schedule");
+    scheduler
+        .schedule_at(
+            9,
+            SchedulerRegion::Active,
+            target("b", "out", 2, 0),
+            digital(0),
+        )
+        .expect("schedule");
+    assert_eq!(scheduler.next_tick(), Some(4));
+
+    scheduler.run_due_events(4, |_, _| {}).expect("settles");
+    assert_eq!(
+        scheduler.next_tick(),
+        Some(9),
+        "the settled slot is empty, so the future tier answers"
+    );
+
+    scheduler.run_due_events(20, |_, _| {}).expect("settles");
+    assert_eq!(scheduler.next_tick(), None);
+}

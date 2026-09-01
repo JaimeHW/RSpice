@@ -1869,7 +1869,23 @@ impl Engine {
         if !circuit.xyce_core_groups.is_empty() {
             blockers.push("shared Xyce Core hysteretic magnetic history");
         }
-        if !circuit.behavioral_sources.is_empty() {
+        if circuit.capacitors.has_solution_dependent_values() {
+            blockers.push("solution-dependent capacitor charge/expression history");
+        }
+        if circuit.resistors.thermal.iter().any(Option::is_some) {
+            blockers.push("thermal resistor accepted temperature state");
+        }
+        if circuit
+            .behavioral_sources
+            .voltage_sources
+            .iter()
+            .any(|source| source.program.sdt_count != 0)
+            || circuit
+                .behavioral_sources
+                .current_sources
+                .iter()
+                .any(|source| source.program.sdt_count != 0)
+        {
             blockers.push("behavioral-source accepted-step memory");
         }
         #[cfg(feature = "veriloga")]
@@ -2001,6 +2017,7 @@ impl Engine {
         // Build and prepare circuit
         let mut circuit = self.build_circuit_with_abort(netlist, abort)?;
         Self::freeze_pss_independent_sources(&mut circuit, frozen_sources)?;
+        Self::ensure_no_mixed_signal_analysis(&circuit, "PSS analysis")?;
         Self::ensure_supported_xyce_memristor_small_signal(&circuit, "PSS")?;
         if require_exact_continuation_state {
             Self::ensure_pss_continuation_state_supported(&circuit)?;
@@ -2323,6 +2340,9 @@ impl Engine {
             };
             circuit.capacitors.v_prev[cap_idx] = v_dc;
             circuit.capacitors.v_prev_prev[cap_idx] = v_dc;
+            circuit.capacitors.v_prev_prev_prev[cap_idx] = v_dc;
+            circuit.capacitors.i_prev[cap_idx] = 0.0;
+            circuit.capacitors.i_eq[cap_idx] = 0.0;
         }
 
         // Initialize inductor currents
@@ -2388,7 +2408,9 @@ impl Engine {
         for (i, v) in state.iter().take(n_caps).enumerate() {
             circuit.capacitors.v_prev[i] = *v;
             circuit.capacitors.v_prev_prev[i] = *v;
+            circuit.capacitors.v_prev_prev_prev[i] = *v;
             circuit.capacitors.i_prev[i] = 0.0;
+            circuit.capacitors.i_eq[i] = 0.0;
         }
 
         // Set inductor currents
@@ -2560,9 +2582,11 @@ impl Engine {
         );
         let start = vec![0.0; circuit.matrix_size()];
 
-        match self.pss_newton_solve(circuit, matrix, &coeff, dt_freeze, dt_freeze, &start, abort)? {
+        match self.pss_newton_trial(circuit, matrix, &coeff, dt_freeze, dt_freeze, &start, abort)? {
             Some(solution) => Ok(solution),
-            None => Ok(start),
+            None => Err(SimulationError::ConvergenceFailed(
+                self.config.max_iterations,
+            )),
         }
     }
 
@@ -3050,9 +3074,12 @@ impl Engine {
     ///
     /// Stamps the linear network, time-varying sources, reactive companions
     /// for the given integration coefficients, and nonlinear devices, then
-    /// iterates to convergence. Reads — never writes — the companion history,
-    /// so callers control when the trajectory actually advances. Returns
-    /// `None` when Newton fails to converge at this step size.
+    /// iterates to convergence. Reads — never writes — accepted companion
+    /// history, but nonlinear devices and expression evaluators may retain
+    /// trial-local caches while assembling the Jacobian. Callers must use
+    /// [`Self::pss_newton_trial`] when a rejected or cancelled solve can return
+    /// control to a live circuit. Returns `None` when Newton fails to converge
+    /// at this step size.
     fn pss_newton_solve(
         &self,
         circuit: &mut CircuitData,
@@ -3102,6 +3129,37 @@ impl Engine {
         }
 
         Ok(None)
+    }
+
+    /// Run one PSS Newton trial transactionally.
+    ///
+    /// A successful solve leaves its converged nonlinear/evaluator state in
+    /// place for accepted-step commit. Every non-converged or exceptional
+    /// outcome restores the exact pre-trial state so an adaptive retry,
+    /// cancellation, or initialization failure cannot leak rejected state.
+    #[allow(clippy::too_many_arguments)]
+    fn pss_newton_trial(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        coeff: &CompanionCoefficients,
+        t_next: Value,
+        dt: Value,
+        start: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<Vec<Value>>, SimulationError> {
+        let accepted_state = circuit.transient_trial_state_snapshot();
+        match self.pss_newton_solve(circuit, matrix, coeff, t_next, dt, start, abort) {
+            Ok(Some(solution)) => Ok(Some(solution)),
+            Ok(None) => {
+                circuit.restore_nonlinear_state(accepted_state);
+                Ok(None)
+            }
+            Err(error) => {
+                circuit.restore_nonlinear_state(accepted_state);
+                Err(error)
+            }
+        }
     }
 
     /// Stamp the full companion-linearized system at one time point:
@@ -3338,7 +3396,7 @@ impl Engine {
             let coeff = accepted_step_history.coefficients_for_trial(current_method, dt);
 
             let Some(new_solution) =
-                self.pss_newton_solve(circuit, matrix, &coeff, t_next, dt, &solution, abort)?
+                self.pss_newton_trial(circuit, matrix, &coeff, t_next, dt, &solution, abort)?
             else {
                 if fixed_grid {
                     // The grid is the contract: a Newton failure on it is a
@@ -3365,21 +3423,24 @@ impl Engine {
                 let v_new = if np == 0 { 0.0 } else { new_solution[np - 1] }
                     - if nn == 0 { 0.0 } else { new_solution[nn - 1] };
 
+                let i_eq = coeff.capacitor_ieq(
+                    circuit.capacitors.capacitances[cap_idx],
+                    dt,
+                    circuit.capacitors.v_prev[cap_idx],
+                    circuit.capacitors.v_prev_prev[cap_idx],
+                    circuit.capacitors.i_prev[cap_idx],
+                );
                 circuit.capacitors.i_prev[cap_idx] =
                     if let Some(branch_ordinal) = circuit.capacitors.ic_branch_indices[cap_idx] {
                         new_solution[num_nodes + branch_ordinal - 1]
                     } else {
                         let capacitance = circuit.capacitors.capacitances[cap_idx];
                         let geq = coeff.capacitor_geq(capacitance, dt);
-                        let ieq = coeff.capacitor_ieq(
-                            capacitance,
-                            dt,
-                            circuit.capacitors.v_prev[cap_idx],
-                            circuit.capacitors.v_prev_prev[cap_idx],
-                            circuit.capacitors.i_prev[cap_idx],
-                        );
-                        geq * v_new - ieq
+                        geq * v_new - i_eq
                     };
+                circuit.capacitors.i_eq[cap_idx] = i_eq;
+                circuit.capacitors.v_prev_prev_prev[cap_idx] =
+                    circuit.capacitors.v_prev_prev[cap_idx];
                 circuit.capacitors.v_prev_prev[cap_idx] = circuit.capacitors.v_prev[cap_idx];
                 circuit.capacitors.v_prev[cap_idx] = v_new;
             }
@@ -3678,6 +3739,151 @@ mod tests {
             backward_euler.coeff_v_n_minus_1
         );
         assert!(!coefficients.needs_two_history);
+    }
+
+    #[test]
+    fn pss_reactive_state_reset_initializes_complete_capacitor_history() {
+        let engine = Engine::new(SimulationConfig::default());
+        let mut circuit = CircuitData::new();
+        circuit.capacitors.add("C1".to_string(), 1, 0, 1.0e-9);
+        circuit.capacitors.v_prev = vec![11.0];
+        circuit.capacitors.v_prev_prev = vec![12.0];
+        circuit.capacitors.v_prev_prev_prev = vec![13.0];
+        circuit.capacitors.i_prev = vec![14.0];
+        circuit.capacitors.i_eq = vec![15.0];
+
+        engine.pss_initialize_reactive_state(&mut circuit, &[2.5]);
+        assert_eq!(circuit.capacitors.v_prev, vec![2.5]);
+        assert_eq!(circuit.capacitors.v_prev_prev, vec![2.5]);
+        assert_eq!(circuit.capacitors.v_prev_prev_prev, vec![2.5]);
+        assert_eq!(circuit.capacitors.i_prev, vec![0.0]);
+        assert_eq!(circuit.capacitors.i_eq, vec![0.0]);
+
+        engine.pss_set_reactive_state(&mut circuit, &[-0.75]);
+        assert_eq!(circuit.capacitors.v_prev, vec![-0.75]);
+        assert_eq!(circuit.capacitors.v_prev_prev, vec![-0.75]);
+        assert_eq!(circuit.capacitors.v_prev_prev_prev, vec![-0.75]);
+        assert_eq!(circuit.capacitors.i_prev, vec![0.0]);
+        assert_eq!(circuit.capacitors.i_eq, vec![0.0]);
+    }
+
+    #[test]
+    fn pss_accepted_step_rotates_complete_capacitor_history() {
+        let netlist = Netlist::parse(
+            "complete PSS capacitor history\n\
+             V1 out 0 1\n\
+             R1 out 0 1k\n\
+             C1 out 0 100p\n\
+             .end\n",
+        )
+        .expect("history fixture parses");
+        let engine = Engine::new(SimulationConfig::default());
+        let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
+        circuit.link_indices(&matrix);
+        circuit.capacitors.v_prev[0] = 3.0;
+        circuit.capacitors.v_prev_prev[0] = 2.0;
+        circuit.capacitors.v_prev_prev_prev[0] = 1.0;
+        circuit.capacitors.i_prev[0] = 0.0;
+        circuit.capacitors.i_eq[0] = -1.0;
+
+        engine
+            .pss_run_tran_internal(
+                &mut circuit,
+                &mut matrix,
+                vec![0.0; 2],
+                1.0e-9,
+                1.0e-9,
+                true,
+                None,
+                Some(IntegrationMethod::BackwardEuler),
+                &NoAbort,
+            )
+            .expect("one fixed PSS step converges");
+
+        assert!(
+            (circuit.capacitors.v_prev[0] - 1.0).abs() <= 8.0 * Value::EPSILON,
+            "fixed-grid solve should retain the ideal-source voltage"
+        );
+        assert_eq!(
+            circuit.capacitors.v_prev_prev[0].to_bits(),
+            3.0_f64.to_bits()
+        );
+        assert_eq!(
+            circuit.capacitors.v_prev_prev_prev[0].to_bits(),
+            2.0_f64.to_bits()
+        );
+        assert!(circuit.capacitors.i_eq[0].is_finite());
+        assert_ne!(circuit.capacitors.i_eq[0].to_bits(), (-1.0_f64).to_bits());
+    }
+
+    #[test]
+    fn pss_cancelled_newton_trial_restores_behavioral_evaluator_state() {
+        let netlist = Netlist::parse(
+            "cancelled PSS trial rollback\n\
+             B1 out 0 V=1\n\
+             R1 out 0 1k\n\
+             C1 out 0 100p\n\
+             .end\n",
+        )
+        .expect("rollback fixture parses");
+        let engine = Engine::new(SimulationConfig::default());
+        let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
+        circuit.link_indices(&matrix);
+        let period = 1.0;
+        let freeze_time = period * 1.0e-9;
+        assert_eq!(
+            circuit.behavioral_sources.voltage_sources[0].cached_exact_constraint_at(freeze_time),
+            None
+        );
+
+        let abort = crate::abort_signal::CountingAbort::new(1);
+        let error = engine
+            .pss_initial_node_solution(&mut circuit, &mut matrix, period, &abort)
+            .expect_err("the second Newton iteration is cancelled");
+        assert!(matches!(error, SimulationError::Aborted));
+        assert_eq!(
+            circuit.behavioral_sources.voltage_sources[0].cached_exact_constraint_at(freeze_time),
+            None,
+            "the artificial consistency solve must not leak its rejected expression cache"
+        );
+    }
+
+    #[test]
+    fn pss_initial_consistency_solve_fails_closed_on_nonconvergence() {
+        let netlist = Netlist::parse(
+            "nonconverged PSS initialization\n\
+             B1 out 0 V=1\n\
+             R1 out 0 1k\n\
+             C1 out 0 1p\n\
+             .end\n",
+        )
+        .expect("nonconvergence fixture parses");
+        let builder = Engine::new(SimulationConfig::default());
+        let mut circuit = builder.build_circuit(&netlist).expect("circuit builds");
+        let mut matrix = builder.build_matrix(&circuit).expect("matrix builds");
+        circuit.link_indices(&matrix);
+        let engine = Engine::new(SimulationConfig {
+            max_iterations: 1,
+            ..SimulationConfig::default()
+        });
+        let period = 1.0e-6;
+        let freeze_time = period * 1.0e-9;
+        assert_eq!(
+            circuit.behavioral_sources.voltage_sources[0].cached_exact_constraint_at(freeze_time),
+            None
+        );
+
+        let error = engine
+            .pss_initial_node_solution(&mut circuit, &mut matrix, period, &NoAbort)
+            .expect_err("a nonconverged frozen-state solve cannot fabricate an all-zero seed");
+        assert!(matches!(error, SimulationError::ConvergenceFailed(1)));
+        assert_eq!(
+            circuit.behavioral_sources.voltage_sources[0].cached_exact_constraint_at(freeze_time),
+            None,
+            "the nonconverged trial must restore its expression cache"
+        );
     }
 
     #[test]
