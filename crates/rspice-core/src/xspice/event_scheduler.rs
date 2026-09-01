@@ -250,6 +250,12 @@ impl TimeResolution {
     /// Crate-visible rather than public: the mixed interleave is the only
     /// caller, and the rest of this type is published because a caller outside
     /// the crate actually reaches for it. This becomes `pub` when one does.
+    ///
+    /// Gated with that caller too. `xspice::verilog` is a `veriloga` module, so
+    /// a build without the feature has no caller at all and `-D warnings` says
+    /// so; the gate is what keeps the default build's warning budget honest
+    /// rather than an `allow` that would also hide a real orphan later.
+    #[cfg(feature = "veriloga")]
     pub(crate) fn seconds_to_floor_ticks(self, seconds: f64) -> Result<u64, SchedulerError> {
         if !seconds.is_finite() || seconds < 0.0 {
             return Err(SchedulerError::SecondsNotRepresentable { seconds });
@@ -1081,7 +1087,11 @@ impl SchedulerContext<'_> {
 /// against the published API. These are here because
 /// [`TimeResolution::seconds_to_floor_ticks`] is crate-visible and so has no
 /// published API to be tested against.
-#[cfg(test)]
+///
+/// Gated on `veriloga` with the method itself, which is gated with its only
+/// caller: `xspice::verilog`'s mixed interleave is a `veriloga` module, so a
+/// build without the feature has neither the method nor anything to test it.
+#[cfg(all(test, feature = "veriloga"))]
 mod tests {
     use super::*;
 

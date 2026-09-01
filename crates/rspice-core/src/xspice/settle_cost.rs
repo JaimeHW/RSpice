@@ -92,6 +92,11 @@ pub(crate) struct XspiceSettleCounts {
     /// `engine::xspice_settle_ratchet`, whose deck holds no mixed module and
     /// would ratchet a constant zero; `mixed_trial_copy_ratchet` reads it off
     /// a scripted sequence of trials instead.
+    ///
+    /// Gated with its writer: the mixed interleave lives under
+    /// `xspice::verilog`, which is a `veriloga` module, so a build without that
+    /// feature has nothing that can move this number and `-D warnings` says so.
+    #[cfg(feature = "veriloga")]
     pub(crate) mixed_trial_deep_copies: u64,
 }
 
@@ -121,6 +126,7 @@ struct Counters {
     instance_deep_copies: Cell<u64>,
     event_values_deep_copies: Cell<u64>,
     event_queue_deep_copies: Cell<u64>,
+    #[cfg(feature = "veriloga")]
     mixed_trial_deep_copies: Cell<u64>,
 }
 
@@ -131,6 +137,7 @@ thread_local! {
             instance_deep_copies: Cell::new(0),
             event_values_deep_copies: Cell::new(0),
             event_queue_deep_copies: Cell::new(0),
+            #[cfg(feature = "veriloga")]
             mixed_trial_deep_copies: Cell::new(0),
         }
     };
@@ -191,6 +198,7 @@ pub(crate) fn reset() {
         counters.instance_deep_copies.set(0);
         counters.event_values_deep_copies.set(0);
         counters.event_queue_deep_copies.set(0);
+        #[cfg(feature = "veriloga")]
         counters.mixed_trial_deep_copies.set(0);
     });
 }
@@ -203,6 +211,7 @@ pub(crate) fn counts() -> XspiceSettleCounts {
         instance_deep_copies: counters.instance_deep_copies.get(),
         event_values_deep_copies: counters.event_values_deep_copies.get(),
         event_queue_deep_copies: counters.event_queue_deep_copies.get(),
+        #[cfg(feature = "veriloga")]
         mixed_trial_deep_copies: counters.mixed_trial_deep_copies.get(),
     })
 }
