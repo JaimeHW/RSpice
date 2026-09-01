@@ -615,6 +615,49 @@ mod tests {
         .op\n\
         .end\n";
 
+    const SUPPORTED_VIEWPORTS: [(&str, Vec2); 3] = [
+        ("1440x900", Vec2::new(1440.0, 900.0)),
+        ("820x1180", Vec2::new(820.0, 1180.0)),
+        ("390x844", Vec2::new(390.0, 844.0)),
+    ];
+    const PENDING_FINGERPRINT: &str =
+        "0000000000000000000000000000000000000000000000000000000000000000";
+
+    #[derive(Clone, Copy)]
+    struct NetlistFirstBaseline {
+        name: &'static str,
+        size: Vec2,
+        truncated: bool,
+        fingerprint: &'static str,
+    }
+
+    const NETLIST_FIRST_BASELINES: [NetlistFirstBaseline; 4] = [
+        NetlistFirstBaseline {
+            name: "design-netlist-first-1440x900",
+            size: Vec2::new(1440.0, 900.0),
+            truncated: false,
+            fingerprint: PENDING_FINGERPRINT,
+        },
+        NetlistFirstBaseline {
+            name: "design-netlist-first-820x1180",
+            size: Vec2::new(820.0, 1180.0),
+            truncated: false,
+            fingerprint: PENDING_FINGERPRINT,
+        },
+        NetlistFirstBaseline {
+            name: "design-netlist-first-390x844",
+            size: Vec2::new(390.0, 844.0),
+            truncated: false,
+            fingerprint: PENDING_FINGERPRINT,
+        },
+        NetlistFirstBaseline {
+            name: "design-netlist-first-1440x900-truncated",
+            size: Vec2::new(1440.0, 900.0),
+            truncated: true,
+            fingerprint: PENDING_FINGERPRINT,
+        },
+    ];
+
     fn netlist_first_app() -> RSpiceApp {
         let mut app = RSpiceApp::test_instance();
         assert!(
@@ -627,6 +670,103 @@ mod tests {
         );
         assert!(app.state.is_netlist_first_without_schematic());
         app
+    }
+
+    fn truncated_netlist_first_app() -> RSpiceApp {
+        let mut deck = String::from("Long resistor ladder bench\n");
+        for element in 0..400 {
+            deck.push_str(&format!("R{element} n{element} 0 1k\n"));
+        }
+        deck.push_str(".op\n.end\n");
+        let mut app = RSpiceApp::test_instance();
+        assert!(
+            crate::workbench::workflows::netlist_workflow::apply_imported_netlist(
+                &mut app.state,
+                deck,
+                None,
+                "ladder.sp",
+            )
+        );
+        assert!(app.state.is_netlist_first_without_schematic());
+        app
+    }
+
+    fn netlist_first_canvas(size: Vec2, truncated: bool) -> crate::ui::raster::Canvas {
+        let mut app = if truncated {
+            truncated_netlist_first_app()
+        } else {
+            netlist_first_app()
+        };
+        crate::ui::raster::render(size, |ui, _| show(ui, &mut app))
+    }
+
+    fn regression_height(canvas: &crate::ui::raster::Canvas) -> usize {
+        canvas.content_height().max(1)
+    }
+
+    #[test]
+    fn netlist_first_visual_baselines_cover_supported_viewports_and_truncation_and_are_unique() {
+        assert_eq!(NETLIST_FIRST_BASELINES.len(), SUPPORTED_VIEWPORTS.len() + 1);
+        assert_eq!(
+            NETLIST_FIRST_BASELINES[..SUPPORTED_VIEWPORTS.len()]
+                .iter()
+                .map(|baseline| baseline.size)
+                .collect::<Vec<_>>(),
+            SUPPORTED_VIEWPORTS.map(|(_, size)| size),
+            "the baseline table must cover every supported netlist-first viewport"
+        );
+        assert!(
+            NETLIST_FIRST_BASELINES[..SUPPORTED_VIEWPORTS.len()]
+                .iter()
+                .all(|baseline| !baseline.truncated)
+        );
+        let truncated = NETLIST_FIRST_BASELINES
+            .last()
+            .expect("truncated netlist-first baseline");
+        assert!(truncated.truncated);
+        assert_eq!(truncated.size, SUPPORTED_VIEWPORTS[0].1);
+        let names = NETLIST_FIRST_BASELINES
+            .iter()
+            .map(|baseline| baseline.name)
+            .collect::<std::collections::HashSet<_>>();
+        let fingerprints = NETLIST_FIRST_BASELINES
+            .iter()
+            .map(|baseline| baseline.fingerprint)
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(names.len(), NETLIST_FIRST_BASELINES.len());
+        assert_eq!(
+            fingerprints.len(),
+            NETLIST_FIRST_BASELINES.len(),
+            "every supported viewport/state must have an independently reviewed fingerprint"
+        );
+    }
+
+    #[test]
+    fn supported_netlist_first_landings_match_their_reviewed_visual_baselines() {
+        for baseline in NETLIST_FIRST_BASELINES {
+            let canvas = netlist_first_canvas(baseline.size, baseline.truncated);
+            canvas.assert_regression(
+                baseline.name,
+                regression_height(&canvas),
+                baseline.fingerprint,
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "prints source-ready visual fingerprints after explicit review"]
+    fn print_netlist_first_visual_fingerprints_for_review() {
+        for baseline in NETLIST_FIRST_BASELINES {
+            let canvas = netlist_first_canvas(baseline.size, baseline.truncated);
+            let height = regression_height(&canvas);
+            eprintln!(
+                "{} {}x{} {}",
+                baseline.name,
+                canvas.width(),
+                height,
+                canvas.regression_fingerprint(height)
+            );
+        }
     }
 
     #[test]
@@ -744,21 +884,7 @@ mod tests {
 
     #[test]
     fn a_long_deck_truncates_behind_a_footer_that_counts_what_was_left_out() {
-        let mut deck = String::from("Long resistor ladder bench\n");
-        for element in 0..400 {
-            deck.push_str(&format!("R{element} n{element} 0 1k\n"));
-        }
-        deck.push_str(".op\n.end\n");
-        let mut app = RSpiceApp::test_instance();
-        assert!(
-            crate::workbench::workflows::netlist_workflow::apply_imported_netlist(
-                &mut app.state,
-                deck,
-                None,
-                "ladder.sp",
-            )
-        );
-        assert!(app.state.is_netlist_first_without_schematic());
+        let mut app = truncated_netlist_first_app();
 
         let text = painted_text(vec2(1440.0, 900.0), |ui| show(ui, &mut app)).join("\n");
         assert!(
@@ -773,13 +899,10 @@ mod tests {
 
     #[test]
     fn the_page_paints_the_full_landing_at_all_supported_viewports() {
-        for (size, minimum_content_height) in [
-            (vec2(1440.0, 900.0), 500),
-            (vec2(820.0, 1180.0), 780),
-            (vec2(390.0, 844.0), 740),
-        ] {
-            let mut app = netlist_first_app();
-            let canvas = crate::ui::raster::render(size, |ui, _| show(ui, &mut app));
+        for ((_, size), minimum_content_height) in
+            SUPPORTED_VIEWPORTS.into_iter().zip([500, 780, 740])
+        {
+            let canvas = netlist_first_canvas(size, false);
             let content_height = canvas.content_height();
             assert!(
                 content_height >= minimum_content_height,
@@ -827,14 +950,10 @@ mod tests {
         let stderr = std::io::stderr();
         let mut report_output = stderr.lock();
 
-        for size in [vec2(1440.0, 900.0), vec2(820.0, 1180.0), vec2(390.0, 844.0)] {
-            let mut app = netlist_first_app();
-            let canvas = crate::ui::raster::render(size, |ui, _| show(ui, &mut app));
-            let height = canvas.content_height().max(1);
-            let path = directory.join(format!(
-                "design-netlist-first-{}x{}.png",
-                size.x as usize, size.y as usize
-            ));
+        for baseline in NETLIST_FIRST_BASELINES {
+            let canvas = netlist_first_canvas(baseline.size, baseline.truncated);
+            let height = regression_height(&canvas);
+            let path = directory.join(format!("{}.png", baseline.name));
             std::fs::write(&path, canvas.png(height)).expect("write the render");
             writeln!(
                 report_output,
@@ -845,27 +964,5 @@ mod tests {
             )
             .ok();
         }
-
-        // The truncated state most real decks land in.
-        let mut deck = String::from("Long resistor ladder bench\n");
-        for element in 0..400 {
-            deck.push_str(&format!("R{element} n{element} 0 1k\n"));
-        }
-        deck.push_str(".op\n.end\n");
-        let mut app = RSpiceApp::test_instance();
-        assert!(
-            crate::workbench::workflows::netlist_workflow::apply_imported_netlist(
-                &mut app.state,
-                deck,
-                None,
-                "ladder.sp",
-            )
-        );
-        let size = vec2(1440.0, 900.0);
-        let canvas = crate::ui::raster::render(size, |ui, _| show(ui, &mut app));
-        let path = directory.join("design-netlist-first-1440x900-truncated.png");
-        std::fs::write(&path, canvas.png(canvas.content_height().max(1)))
-            .expect("write the render");
-        writeln!(report_output, "{}", path.display()).ok();
     }
 }

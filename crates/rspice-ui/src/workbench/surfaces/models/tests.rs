@@ -7,7 +7,85 @@
 use egui::Rect;
 
 use super::*;
-use crate::workbench::state::ModelsPage;
+use crate::workbench::state::{ModelsCatalogScope, ModelsPage};
+
+const MODELS_RASTER_SIZE: egui::Vec2 = egui::Vec2::new(1_180.0, 900.0);
+const PENDING_FINGERPRINT: &str =
+    "0000000000000000000000000000000000000000000000000000000000000000";
+
+#[derive(Clone, Copy)]
+struct ModelsBaseline {
+    name: &'static str,
+    page: ModelsPage,
+    scope: ModelsCatalogScope,
+    fingerprint: &'static str,
+}
+
+const MODELS_BASELINES: [ModelsBaseline; 8] = [
+    ModelsBaseline {
+        name: "models-00-models-project",
+        page: ModelsPage::Models,
+        scope: ModelsCatalogScope::Project,
+        fingerprint: PENDING_FINGERPRINT,
+    },
+    ModelsBaseline {
+        name: "models-01-symbols-cdf",
+        page: ModelsPage::Symbols,
+        scope: ModelsCatalogScope::Project,
+        fingerprint: PENDING_FINGERPRINT,
+    },
+    ModelsBaseline {
+        name: "models-02-corners-sections",
+        page: ModelsPage::Corners,
+        scope: ModelsCatalogScope::Project,
+        fingerprint: PENDING_FINGERPRINT,
+    },
+    ModelsBaseline {
+        name: "models-03-bins-geometry",
+        page: ModelsPage::Bins,
+        scope: ModelsCatalogScope::Project,
+        fingerprint: PENDING_FINGERPRINT,
+    },
+    ModelsBaseline {
+        name: "models-04-include-graph",
+        page: ModelsPage::Include,
+        scope: ModelsCatalogScope::Project,
+        fingerprint: PENDING_FINGERPRINT,
+    },
+    ModelsBaseline {
+        name: "models-05-qualification",
+        page: ModelsPage::Qualification,
+        scope: ModelsCatalogScope::Project,
+        fingerprint: PENDING_FINGERPRINT,
+    },
+    ModelsBaseline {
+        name: "models-00b-rspice-library",
+        page: ModelsPage::Models,
+        scope: ModelsCatalogScope::RSpiceLibrary,
+        fingerprint: PENDING_FINGERPRINT,
+    },
+    ModelsBaseline {
+        name: "models-00c-installed-packs",
+        page: ModelsPage::Models,
+        scope: ModelsCatalogScope::InstalledPacks,
+        fingerprint: PENDING_FINGERPRINT,
+    },
+];
+
+fn models_canvas(page: ModelsPage, scope: ModelsCatalogScope) -> crate::ui::raster::Canvas {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.models_page = page;
+    app.state.workbench.models_view.catalog_scope = scope;
+    crate::ui::raster::render(MODELS_RASTER_SIZE, |ui, background| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE.fill(background))
+            .show(ui, |ui| show(ui, &mut app));
+    })
+}
+
+fn models_regression_height(canvas: &crate::ui::raster::Canvas) -> usize {
+    canvas.content_height().max(200)
+}
 
 #[test]
 fn model_tabs_match_the_mockup_taxonomy() {
@@ -22,6 +100,80 @@ fn model_tabs_match_the_mockup_taxonomy() {
             "Qualification",
         ]
     );
+}
+
+#[test]
+fn models_visual_baselines_cover_every_page_and_catalog_scope_once_and_are_unique() {
+    assert_eq!(MODELS_BASELINES.len(), ModelsPage::ALL.len() + 2);
+    assert_eq!(
+        MODELS_BASELINES[..ModelsPage::ALL.len()]
+            .iter()
+            .map(|baseline| baseline.page)
+            .collect::<Vec<_>>(),
+        ModelsPage::ALL,
+        "the visual baseline table must cover every Models workspace page"
+    );
+    assert!(
+        MODELS_BASELINES[..ModelsPage::ALL.len()]
+            .iter()
+            .all(|baseline| baseline.scope == ModelsCatalogScope::Project)
+    );
+    assert_eq!(
+        MODELS_BASELINES[ModelsPage::ALL.len()..]
+            .iter()
+            .map(|baseline| (baseline.page, baseline.scope))
+            .collect::<Vec<_>>(),
+        [
+            (ModelsPage::Models, ModelsCatalogScope::RSpiceLibrary),
+            (ModelsPage::Models, ModelsCatalogScope::InstalledPacks),
+        ]
+    );
+    let names = MODELS_BASELINES
+        .iter()
+        .map(|baseline| baseline.name)
+        .collect::<std::collections::HashSet<_>>();
+    let fingerprints = MODELS_BASELINES
+        .iter()
+        .map(|baseline| baseline.fingerprint)
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(
+        names.len(),
+        MODELS_BASELINES.len(),
+        "duplicate Models baseline name"
+    );
+    assert_eq!(
+        fingerprints.len(),
+        MODELS_BASELINES.len(),
+        "Models states must have independently reviewed fingerprints"
+    );
+}
+
+#[test]
+fn every_models_workspace_page_matches_its_reviewed_visual_baseline() {
+    for baseline in MODELS_BASELINES {
+        let canvas = models_canvas(baseline.page, baseline.scope);
+        canvas.assert_regression(
+            baseline.name,
+            models_regression_height(&canvas),
+            baseline.fingerprint,
+        );
+    }
+}
+
+#[test]
+#[ignore = "prints source-ready visual fingerprints after explicit review"]
+fn print_models_visual_fingerprints_for_review() {
+    for baseline in MODELS_BASELINES {
+        let canvas = models_canvas(baseline.page, baseline.scope);
+        let height = models_regression_height(&canvas);
+        eprintln!(
+            "{} {}x{} {}",
+            baseline.name,
+            canvas.width(),
+            height,
+            canvas.regression_fingerprint(height)
+        );
+    }
 }
 
 /// Every page's actions stay inside its own title band.
@@ -570,7 +722,6 @@ fn no_models_page_ends_in_unpainted_canvas() {
 #[test]
 #[ignore = "writes PNGs for a human to look at; run with --ignored"]
 fn render_every_page_for_review() {
-    use crate::workbench::state::ModelsCatalogScope;
     use std::io::Write as _;
 
     let directory = std::env::var("RSPICE_RASTER_DIR")
@@ -579,43 +730,13 @@ fn render_every_page_for_review() {
     let stderr = std::io::stderr();
     let mut report = stderr.lock();
 
-    let mut render = |slug: &str, page: ModelsPage, scope: ModelsCatalogScope| {
-        let mut app = RSpiceApp::test_instance();
-        app.state.workbench.models_page = page;
-        app.state.workbench.models_view.catalog_scope = scope;
-        let canvas = crate::ui::raster::render(egui::vec2(1_180.0, 900.0), |ui, background| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE.fill(background))
-                .show(ui, |ui| show(ui, &mut app));
-        });
-        let path = directory.join(format!("models-{slug}.png"));
-        let height = canvas.content_height().max(200);
+    for baseline in MODELS_BASELINES {
+        let canvas = models_canvas(baseline.page, baseline.scope);
+        let path = directory.join(format!("{}.png", baseline.name));
+        let height = models_regression_height(&canvas);
         std::fs::write(&path, canvas.png(height)).expect("write png");
         writeln!(report, "wrote {}", path.display()).ok();
-    };
-    for (index, page) in ModelsPage::ALL.into_iter().enumerate() {
-        let slug = page
-            .label()
-            .to_ascii_lowercase()
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-            .collect::<String>();
-        render(
-            &format!("{index:02}-{slug}"),
-            page,
-            ModelsCatalogScope::Project,
-        );
     }
-    render(
-        "00b-rspice-library",
-        ModelsPage::Models,
-        ModelsCatalogScope::RSpiceLibrary,
-    );
-    render(
-        "00b-installed-packs",
-        ModelsPage::Models,
-        ModelsCatalogScope::InstalledPacks,
-    );
 }
 
 /// The Models page's detail panes are one row of equal columns that reaches the
