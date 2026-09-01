@@ -774,7 +774,7 @@ class TestPeriodicResults:
         assert kind == "capacitor"
         assert len(voltages) == len(currents) == 6
         assert dc_exact is True
-        assert limitations == ["nonlinear_voltage_sources_use_norton_equivalent"]
+        assert limitations == [], "the exact MNA source branch needs no continuation waiver"
 
         assert round_trip(original).is_valid == original.is_valid
 
