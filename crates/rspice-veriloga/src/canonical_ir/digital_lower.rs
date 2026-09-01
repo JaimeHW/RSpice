@@ -98,13 +98,6 @@
 //! - A process-local `reg` whose bounds are not literal, and an array of any
 //!   kind inside a process.
 //! - `**`, a non-constant delay, and a non-constant select bound.
-//! - Anything carrying the `signed` marker: a net, variable or port declared
-//!   `signed`, and a literal written with the `s` base marker. IEEE 1364-2005
-//!   section 5.4.2's signed semantics are not implemented, and this front end
-//!   computes on unsigned values throughout — so lowering a `signed`
-//!   declaration would produce a device that sign-extends nothing, compares
-//!   unsigned, and shifts in zeros, which is a wrong answer rather than a
-//!   missing one.
 //!
 //! Refused before this pass, and still refused: tasks and functions,
 //! `fork`/`join`, `wait`, `disable`, and `force`/`release` — the parser stops
