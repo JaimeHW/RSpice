@@ -135,6 +135,10 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<results::PyTransientResult>()?;
     m.add_class::<results::PyCompressedTransientResult>()?;
     m.add_class::<results::PyTransientCheckpoint>()?;
+    m.add_class::<results::PyTransientFftBin>()?;
+    m.add_class::<results::PyTransientFftHarmonic>()?;
+    m.add_class::<results::PyTransientFftMetrics>()?;
+    m.add_class::<results::PyTransientFftResult>()?;
     m.add_class::<results::PyAcResult>()?;
     m.add_class::<results::PyDistortionResult>()?;
     m.add_class::<results::PyDcSweepResult>()?;
@@ -224,6 +228,10 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "TransientResult",
             "CompressedTransientResult",
             "TransientCheckpoint",
+            "FftBin",
+            "FftHarmonic",
+            "FftMetrics",
+            "FftResult",
             "AcResult",
             "DistortionResult",
             "DcSweepResult",

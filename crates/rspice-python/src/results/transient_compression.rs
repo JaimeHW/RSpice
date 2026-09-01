@@ -71,6 +71,29 @@ impl PyCompressedTransientResult {
         self.inner.compression_ratio
     }
 
+    /// Typed `.FFT` products computed before waveform decimation.
+    #[getter]
+    fn fft_results(&self) -> Vec<PyTransientFftResult> {
+        self.inner
+            .fft_results
+            .iter()
+            .map(PyTransientFftResult::from)
+            .collect()
+    }
+
+    fn fft(&self, index: usize) -> PyResult<PyTransientFftResult> {
+        self.inner
+            .fft_results
+            .get(index)
+            .map(PyTransientFftResult::from)
+            .ok_or_else(|| {
+                crate::errors::index_error(format!(
+                    "FFT result index {index} out of range (0..{})",
+                    self.inner.fft_results.len()
+                ))
+            })
+    }
+
     fn voltage_waveform<'py>(
         &self,
         py: Python<'py>,
@@ -147,6 +170,7 @@ impl PyCompressedTransientResult {
     /// Device store traces have no accessor on this class, so they are not
     /// carried; every quantity a caller can read back is.
     #[staticmethod]
+    #[pyo3(signature = (time, voltages, num_nodes, node_names, compression_ratio, input_points, fft_state=None))]
     fn _unpickle(
         time: Vec<f64>,
         voltages: Vec<Vec<f64>>,
@@ -154,17 +178,18 @@ impl PyCompressedTransientResult {
         node_names: Vec<String>,
         compression_ratio: f64,
         input_points: usize,
-    ) -> Self {
-        Self::new(rspice_core::engine::TransientResultCompressed {
+        fft_state: Option<TransientFftPersistenceState>,
+    ) -> PyResult<Self> {
+        Ok(Self::new(rspice_core::engine::TransientResultCompressed {
             time,
             voltages,
             num_nodes,
             node_names,
             store_traces: Vec::new(),
-            fft_results: Vec::new(),
+            fft_results: rebuild_transient_fft_results(fft_state)?,
             compression_ratio,
             input_points,
-        })
+        }))
     }
 
     #[allow(clippy::type_complexity)]
@@ -173,7 +198,15 @@ impl PyCompressedTransientResult {
         py: Python<'py>,
     ) -> PyResult<(
         Bound<'py, PyAny>,
-        (Vec<f64>, Vec<Vec<f64>>, usize, Vec<String>, f64, usize),
+        (
+            Vec<f64>,
+            Vec<Vec<f64>>,
+            usize,
+            Vec<String>,
+            f64,
+            usize,
+            TransientFftPersistenceState,
+        ),
     )> {
         Ok((
             unpickler::<Self>(py)?,
@@ -184,6 +217,7 @@ impl PyCompressedTransientResult {
                 self.inner.node_names.clone(),
                 self.inner.compression_ratio,
                 self.inner.input_points,
+                transient_fft_persistence_state(&self.inner.fft_results)?,
             ),
         ))
     }

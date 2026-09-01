@@ -402,6 +402,30 @@ impl PyTransientResult {
         Ok(values.to_pyarray(py))
     }
 
+    /// Typed source-authored `.FFT` products in netlist order.
+    #[getter]
+    fn fft_results(&self) -> Vec<PyTransientFftResult> {
+        self.inner
+            .fft_results
+            .iter()
+            .map(PyTransientFftResult::from)
+            .collect()
+    }
+
+    /// Return one source-authored `.FFT` product by netlist order.
+    fn fft(&self, index: usize) -> PyResult<PyTransientFftResult> {
+        self.inner
+            .fft_results
+            .get(index)
+            .map(PyTransientFftResult::from)
+            .ok_or_else(|| {
+                crate::errors::index_error(format!(
+                    "FFT result index {index} out of range (0..{})",
+                    self.inner.fft_results.len()
+                ))
+            })
+    }
+
     /// Get voltage at a specific node and time index
     ///
     /// Args:
@@ -653,6 +677,7 @@ impl PyTransientResult {
     /// can read back is.
     #[staticmethod]
     #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (time, step_sizes, voltages, branch_currents, num_nodes, names, device_op_traces, store_traces, fft_state=None))]
     fn _unpickle(
         time: Vec<f64>,
         step_sizes: Vec<f64>,
@@ -662,9 +687,10 @@ impl PyTransientResult {
         names: (Vec<String>, Vec<String>),
         device_op_traces: Vec<(String, String, Vec<f64>)>,
         store_traces: Vec<(String, Vec<f64>)>,
-    ) -> Self {
+        fft_state: Option<TransientFftPersistenceState>,
+    ) -> PyResult<Self> {
         let (node_names, branch_names) = names;
-        Self::new(TransientResult {
+        Ok(Self::new(TransientResult {
             time,
             step_sizes,
             voltages,
@@ -688,8 +714,8 @@ impl PyTransientResult {
                 .into_iter()
                 .map(|(name, values)| rspice_core::engine::TransientStoreTrace { name, values })
                 .collect(),
-            fft_results: Vec::new(),
-        })
+            fft_results: rebuild_transient_fft_results(fft_state)?,
+        }))
     }
 
     #[allow(clippy::type_complexity)]
@@ -707,6 +733,7 @@ impl PyTransientResult {
             (Vec<String>, Vec<String>),
             Vec<(String, String, Vec<f64>)>,
             Vec<(String, Vec<f64>)>,
+            TransientFftPersistenceState,
         ),
     )> {
         Ok((
@@ -737,6 +764,7 @@ impl PyTransientResult {
                     .iter()
                     .map(|trace| (trace.name.clone(), trace.values.clone()))
                     .collect(),
+                transient_fft_persistence_state(&self.inner.fft_results)?,
             ),
         ))
     }

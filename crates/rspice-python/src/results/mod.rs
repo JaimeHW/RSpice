@@ -8,6 +8,7 @@
 //! | [`dc`]                   | `SimulationResult`, `DcSweepResult`, `DeviceOperatingPoint`     |
 //! | [`transient`]            | `TransientResult`                                               |
 //! | [`transient_compression`]| `CompressedTransientResult`, `TransientCheckpoint`              |
+//! | [`fft`]                  | `FftResult`, `FftBin`, `FftMetrics`, `FftHarmonic`               |
 //! | [`fourier`]              | `FourierResult`, `Harmonic`                                     |
 //! | [`ac`]                   | `AcResult`, `ComplexValue`                                      |
 //! | [`distortion`]           | `DistortionResult`                                              |
@@ -50,6 +51,7 @@ mod access;
 mod dc;
 mod distortion;
 mod export_bridge;
+mod fft;
 mod fourier;
 mod hb;
 mod monte_carlo;
@@ -74,6 +76,9 @@ pub(crate) use ac::{PyAcResult, PyComplexValue};
 pub(crate) use access::{NodeIdentifier, is_ground_name};
 pub(crate) use dc::{PyDcSweepResult, PyDeviceOperatingPoint, PySimulationResult};
 pub(crate) use distortion::PyDistortionResult;
+pub(crate) use fft::{
+    PyTransientFftBin, PyTransientFftHarmonic, PyTransientFftMetrics, PyTransientFftResult,
+};
 pub(crate) use fourier::{PyFourierResult, PyHarmonic};
 pub(crate) use hb::PyHbResult;
 pub(crate) use monte_carlo::{PyMonteCarloResult, PyVariableStatistics};

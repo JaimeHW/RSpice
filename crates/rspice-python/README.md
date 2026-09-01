@@ -365,6 +365,15 @@ tran.signal("V(out)"), tran.signal("V(outp,outn)"), tran.signal("I(V1)")
 tran.fourier("outp", 1e3, reference="outn")    # differential .FOUR
 tran.fourier_current("V1", 1e3)                # branch-current .FOUR
 
+# When the netlist contains .FFT, each directive executes with the transient
+# and retains source/configuration metadata and calibrated complex bins.
+fft = tran.fft(0)                               # same objects as tran.fft_results
+fft.source, fft.window, fft.format, fft.mode
+fft.frequencies, fft.complex_bins               # float64 and complex128 arrays
+# .OPTIONS FFT FFTOUT=1 additionally populates fft.metrics.
+if fft.metrics is not None:
+    print(fft.metrics.thd_ratio, fft.metrics.largest_harmonics)
+
 # Long-run transient storage and continuation
 compressed = engine.run_tran_compressed(netlist, stop_time=1.0,
                                         abs_tol=1e-6, rel_tol=1e-3)
@@ -525,6 +534,10 @@ quantity — and each quantity derived from one, such as `PssResult.thd_percent`
 or `HbResult.is_valid` — is unchanged across a round trip. Internal traces with
 no accessor on the class holding them are not carried: `CompressedTransientResult`
 device store traces and `PacResult` branch currents fall in that group.
+Transient FFT state is explicitly versioned and is identical in full and
+compressed transient pickles. Legacy transient pickles from bindings that
+discarded FFT products are rejected because they cannot prove whether an empty
+FFT list is genuine; rerun and repickle those analyses with the current schema.
 
 ## Error Handling
 
