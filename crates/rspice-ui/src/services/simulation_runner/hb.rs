@@ -8,14 +8,13 @@
 
 use super::error::{ensure_not_aborted, poll_periodically};
 use super::{
-    ServiceRunError, ServiceRunResult, build_engine_config, build_multi_tone_hb_layout_with_abort,
-    parse_runner_netlist_with_abort,
+    ServiceRunError, ServiceRunResult, build_multi_tone_hb_layout_with_abort,
+    build_resolved_periodic_engine, parse_runner_netlist_with_abort,
 };
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 #[cfg(test)]
 use rspice_core::abort_signal::NoAbort;
-use rspice_core::engine::Engine;
 use std::collections::HashSet;
 use std::path::Path;
 /// Harmonic Balance analysis data
@@ -208,7 +207,11 @@ pub fn run_hb_analysis_with_source_path_and_abort(
 
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
 
-    let engine = Engine::new(build_engine_config(&netlist, None));
+    let engine = build_resolved_periodic_engine(
+        &netlist,
+        config.reltol,
+        "HB resolved engine configuration is invalid",
+    )?;
     // Run actual HB analysis
     let hb_result = engine
         .run_hb_with_abort(&netlist, hb_config, abort)

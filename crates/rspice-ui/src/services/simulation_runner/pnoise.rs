@@ -6,8 +6,9 @@
 
 use super::error::{ensure_not_aborted, poll_periodically};
 use super::{
-    ServiceRunError, ServiceRunResult, build_engine_config, generate_freq_points_with_abort,
-    infer_primary_output_node_with_abort, infer_primary_source_name_with_abort, is_ground_like,
+    ServiceRunError, ServiceRunResult, build_engine_config, build_resolved_periodic_engine,
+    generate_freq_points_with_abort, infer_primary_output_node_with_abort,
+    infer_primary_source_name_with_abort, is_ground_like,
     netlist_has_independent_source_named_with_abort, parse_runner_netlist_with_abort,
     run_pss_analysis_with_source_path_and_abort,
 };
@@ -252,9 +253,11 @@ fn run_pnoise_analysis_impl(
         }
     }
 
-    let mut sim_config = build_engine_config(&netlist, None);
-    sim_config.tolerance = config.pss_tolerance;
-    let engine = Engine::new(sim_config);
+    let engine = build_resolved_periodic_engine(
+        &netlist,
+        config.pss_tolerance,
+        "PNOISE resolved producer configuration is invalid",
+    )?;
 
     let frequencies = generate_freq_points_with_abort(
         config.start_freq,
