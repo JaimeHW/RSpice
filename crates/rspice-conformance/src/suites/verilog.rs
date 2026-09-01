@@ -110,6 +110,11 @@
 //! to one and not the other fails rather than being quietly ignored.
 
 pub mod ams;
+/// The LRM-clause-tagged semantics suite. Behind `verilog-digital` because
+/// every case runs either a mixed deck or a discrete-domain design, and both
+/// need the front end that feature links.
+#[cfg(feature = "verilog-digital")]
+pub mod ams_semantics;
 pub mod corpus;
 pub mod oracle;
 /// The dual-representation reference blocks. Behind `verilog-digital` because

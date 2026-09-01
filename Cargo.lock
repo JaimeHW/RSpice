@@ -5284,6 +5284,7 @@ dependencies = [
  "log",
  "num-complex",
  "rspice-core",
+ "rspice-veriloga",
  "rustix 1.1.4",
  "serde",
  "serde_json",
