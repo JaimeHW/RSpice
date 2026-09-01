@@ -634,7 +634,7 @@ fn xyce_team_transient_state_trajectory_is_independent_of_nodal_gmin() {
 }
 
 #[test]
-fn xyce_team_memristor_stochastic_requests_fail_closed_exactly() {
+fn xyce_team_memristor_malformed_stochastic_selector_fails_closed_exactly() {
     let deck = "TEAM stochastic policy\n\
                 V1 in 0 0\n\
                 .model mrm1 memristor level=2 resnoise=1e-16\n\
@@ -644,11 +644,11 @@ fn xyce_team_memristor_stochastic_requests_fail_closed_exactly() {
     let netlist = Netlist::parse_validated(deck).expect("TEAM stochastic deck validates");
     let message = Engine::new(SimulationConfig::default())
         .run_dc_op(&netlist)
-        .expect_err("every nonzero stochastic request must fail closed")
+        .expect_err("a non-boolean stochastic selector must fail closed")
         .to_string();
     assert!(
-        message.contains("RESNOISE") && message.contains("unsupported"),
-        "error must identify the unsupported stochastic contract: {message}"
+        message.contains("RESNOISE") && message.contains("0 or 1"),
+        "error must identify the malformed stochastic selector: {message}"
     );
 }
 

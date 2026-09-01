@@ -394,6 +394,9 @@ pub(crate) struct XyceMemristorBinding {
     pub node_neg: NodeId,
     pub node_x: NodeId,
     pub device: crate::device::XyceMemristor,
+    /// Present only for TEAM. The value is trial-mutated before Newton and is
+    /// therefore covered by the circuit's ordinary nonlinear rollback image.
+    pub resistance_noise: Option<crate::device::XyceTeamResistanceNoiseRuntime>,
     /// Last defined Xyce `N(...:R)` store value. The upstream device updates
     /// this only when incremental conductance is nonzero, so it is persistent
     /// analysis state rather than a stateless derived quantity.

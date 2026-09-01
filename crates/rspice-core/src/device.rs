@@ -68,8 +68,12 @@ pub(crate) use memristor_pem::{
     parse_xyce_7_10_legacy_two_column_table_bounded,
 };
 pub use memristor_team::{
-    XYCE_TEAM_MEMRISTOR_LEVEL, XyceTeamEvaluationMode, XyceTeamInstanceParams, XyceTeamMemristor,
-    XyceTeamMemristorCache, XyceTeamMemristorError, XyceTeamModelParams, XyceTeamStateDrive,
+    XYCE_TEAM_MEMRISTOR_LEVEL, XYCE_TEAM_RESISTANCE_NOISE_STATE_VERSION, XyceTeamEvaluationMode,
+    XyceTeamInstanceParams, XyceTeamMemristor, XyceTeamMemristorCache, XyceTeamMemristorError,
+    XyceTeamModelParams, XyceTeamResistanceNoiseParams, XyceTeamStateDrive,
+};
+pub(crate) use memristor_team::{
+    XyceTeamResistanceNoiseCheckpoint, XyceTeamResistanceNoiseRuntime,
 };
 pub use sources::{CurrentSource, VoltageSource};
 pub use switch::{CurrentSwitch, GenericSwitch, SwitchState, VoltageSwitch};
@@ -120,6 +124,17 @@ impl XyceMemristor {
         x: Value,
         operating_point: bool,
     ) -> Result<XyceMemristorCache, String> {
+        self.evaluate_with_resistance_factor(v_pos, v_neg, x, operating_point, 1.0)
+    }
+
+    pub(crate) fn evaluate_with_resistance_factor(
+        &self,
+        v_pos: Value,
+        v_neg: Value,
+        x: Value,
+        operating_point: bool,
+        resistance_factor: Value,
+    ) -> Result<XyceMemristorCache, String> {
         match self {
             Self::Team(device) => {
                 // TEAM's steady-state row is degenerate unless both threshold
@@ -132,7 +147,13 @@ impl XyceMemristor {
                     XyceTeamEvaluationMode::Dynamic
                 };
                 let cache = device
-                    .evaluate_with_mode(v_pos, v_neg, x, mode)
+                    .evaluate_with_mode_and_resistance_factor(
+                        v_pos,
+                        v_neg,
+                        x,
+                        mode,
+                        resistance_factor,
+                    )
                     .map_err(|error| error.to_string())?;
                 Ok(XyceMemristorCache {
                     current: cache.current,
@@ -142,6 +163,7 @@ impl XyceMemristor {
                 })
             }
             Self::Pem(device) => {
+                debug_assert_eq!(resistance_factor, 1.0);
                 let mode = if operating_point {
                     XycePemEvaluationMode::DcOperatingPoint
                 } else {
@@ -169,15 +191,22 @@ impl XyceMemristor {
         }
     }
 
-    pub(crate) fn current_output(
+    pub(crate) fn current_output_with_resistance_factor(
         &self,
         v_pos: Value,
         v_neg: Value,
         x: Value,
+        resistance_factor: Value,
     ) -> Result<Value, String> {
         match self {
             Self::Team(device) => device
-                .evaluate(v_pos, v_neg, x)
+                .evaluate_with_mode_and_resistance_factor(
+                    v_pos,
+                    v_neg,
+                    x,
+                    XyceTeamEvaluationMode::Dynamic,
+                    resistance_factor,
+                )
                 .map(|cache| cache.current)
                 .map_err(|error| error.to_string()),
             Self::Pem(device) => device
@@ -187,15 +216,16 @@ impl XyceMemristor {
         }
     }
 
-    pub(crate) fn resistance_output(
+    pub(crate) fn resistance_output_with_factor(
         &self,
         v_pos: Value,
         v_neg: Value,
         x: Value,
+        resistance_factor: Value,
     ) -> Result<Option<Value>, String> {
         match self {
             Self::Team(device) => device
-                .resistance(x)
+                .resistance_with_factor(x, resistance_factor)
                 .map(|(resistance, _)| Some(resistance))
                 .map_err(|error| error.to_string()),
             Self::Pem(device) => device
