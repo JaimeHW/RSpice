@@ -45,6 +45,7 @@ struct ExactHbOperator<'a> {
     c_spectra: &'a [PeriodicSpectrum],
     mna_branches: &'a [ExactMnaBranch],
     mna_static_entries: &'a [(usize, usize, Value)],
+    mna_inductance_entries: &'a [(usize, usize, Value)],
 }
 
 #[cfg(test)]
@@ -70,6 +71,7 @@ mod exact_matrix_free_tests {
             c_spectra,
             mna_branches: &[],
             mna_static_entries: &[],
+            mna_inductance_entries: &[],
         }
     }
 
@@ -338,6 +340,116 @@ mod exact_matrix_free_tests {
             assert_close(actual[row], value);
         }
         assert_eq!(actual[operator.im_idx(3, 1)].im, 0.0);
+    }
+
+    #[test]
+    fn matrix_free_operator_applies_mutual_inductance_to_cross_branch_currents() {
+        let branches = vec![
+            ExactMnaBranch::Inductor {
+                branch_ordinal: 1,
+                node_pos: 1,
+                node_neg: 0,
+                inductance: 100.0e-6,
+            },
+            ExactMnaBranch::Inductor {
+                branch_ordinal: 2,
+                node_pos: 2,
+                node_neg: 0,
+                inductance: 25.0e-6,
+            },
+        ];
+        let mutual = 40.0e-6;
+        let mutual_entries = [(2, 3, mutual), (3, 2, mutual)];
+        let uncoupled = ExactHbOperator {
+            mna_branches: &branches,
+            ..fixture(&[], &[], &[], &[])
+        };
+        let coupled = ExactHbOperator {
+            mna_branches: &branches,
+            mna_inductance_entries: &mutual_entries,
+            ..fixture(&[], &[], &[], &[])
+        };
+        coupled.validate().expect("mutual operator is valid");
+        let size = coupled.entity_count() * coupled.real_width;
+        let input = (0..size)
+            .map(|index| Complex64::new(0.02 * index as Value - 0.1, 0.0))
+            .collect::<Vec<_>>();
+        let actual = coupled.apply(&input);
+        let baseline = uncoupled.apply(&input);
+        let coefficient = |entity: usize, harmonic: usize| {
+            Complex64::new(
+                input[coupled.re_idx(entity, harmonic)].re,
+                if harmonic == 0 {
+                    0.0
+                } else {
+                    input[coupled.im_idx(entity, harmonic)].re
+                },
+            )
+        };
+        for harmonic in 0..coupled.num_components {
+            let jw_m = Complex64::new(0.0, harmonic as Value * coupled.omega0 * mutual);
+            for (row_entity, column_entity) in [(2, 3), (3, 2)] {
+                let expected = jw_m * coefficient(column_entity, harmonic);
+                assert_close(
+                    actual[coupled.re_idx(row_entity, harmonic)]
+                        - baseline[coupled.re_idx(row_entity, harmonic)],
+                    Complex64::new(expected.re, 0.0),
+                );
+                if harmonic > 0 {
+                    assert_close(
+                        actual[coupled.im_idx(row_entity, harmonic)]
+                            - baseline[coupled.im_idx(row_entity, harmonic)],
+                        Complex64::new(expected.im, 0.0),
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn nonlinear_residual_and_dense_jacobian_include_mutual_inductance() {
+        let fundamental = 1.0e6;
+        let mut solver = HbSolver::new(HbConfig::new(fundamental).with_harmonics(2), 2);
+        solver
+            .try_add_periodic_inductor_branch(1, 0, 100.0e-6, 1, "L1")
+            .expect("first winding registers");
+        solver
+            .try_add_periodic_inductor_branch(2, 0, 25.0e-6, 2, "L2")
+            .expect("second winding registers");
+        let mutual = 40.0e-6;
+        solver
+            .try_add_exact_mna_inductance_entry(2, 3, mutual, "K1")
+            .expect("forward mutual entry registers");
+        solver
+            .try_add_exact_mna_inductance_entry(3, 2, mutual, "K1")
+            .expect("reverse mutual entry registers");
+        let mut state = HbSolverState::new(2, 2);
+        state
+            .try_prepare_mna_branches(2, 2)
+            .expect("branch spectra allocate");
+        state.mna_branch_currents[0][2] = Complex64::new(0.3, -0.2);
+        state.mna_branch_currents[1][2] = Complex64::new(-0.1, 0.4);
+        solver
+            .add_exact_mna_residual(&mut state, 1.0)
+            .expect("exact residual evaluates");
+        let jw = Complex64::new(0.0, 2.0 * 2.0 * PI * fundamental);
+        assert_close(
+            state.mna_branch_residual[0][2],
+            jw * (100.0e-6 * state.mna_branch_currents[0][2]
+                + mutual * state.mna_branch_currents[1][2]),
+        );
+        assert_close(
+            state.mna_branch_residual[1][2],
+            jw * (mutual * state.mna_branch_currents[0][2]
+                + 25.0e-6 * state.mna_branch_currents[1][2]),
+        );
+
+        let jacobian = solver
+            .build_full_jacobian(&state)
+            .expect("dense exact Jacobian evaluates");
+        let h = 3;
+        assert_close(jacobian[(2 * h) + 2][(3 * h) + 2], jw * mutual);
+        assert_close(jacobian[(3 * h) + 2][(2 * h) + 2], jw * mutual);
     }
 
     #[test]
@@ -717,6 +829,32 @@ impl ExactHbOperator<'_> {
                 "exact HB controlled-source operator entry ({row}, {column}, {value}) is malformed for {unknowns} unknowns"
             )));
         }
+        if let Some(&(row, column, inductance)) =
+            self.mna_inductance_entries
+                .iter()
+                .find(|(row, column, inductance)| {
+                    *row < self.num_nodes
+                        || *column < self.num_nodes
+                        || *row >= unknowns
+                        || *column >= unknowns
+                        || *row == *column
+                        || !inductance.is_finite()
+                })
+        {
+            return Err(HbError::InvalidCircuit(format!(
+                "exact HB mutual-inductance operator entry ({row}, {column}, {inductance}) is malformed for {unknowns} unknowns"
+            )));
+        }
+        for (entry, &(_, _, inductance)) in self.mna_inductance_entries.iter().enumerate() {
+            for harmonic in 1..self.num_components {
+                let impedance = self.omega0 * harmonic as Value * inductance;
+                if !impedance.is_finite() || (inductance != 0.0 && impedance == 0.0) {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "exact HB mutual-inductance operator entry #{entry} has non-representable impedance at harmonic {harmonic}"
+                    )));
+                }
+            }
+        }
         Ok(())
     }
 
@@ -902,6 +1040,9 @@ impl ExactHbOperator<'_> {
                     Complex64::new(-value, 0.0),
                     &mut visitor,
                 );
+            }
+            for &(row, column, inductance) in self.mna_inductance_entries {
+                self.visit_linear_term(row, k, column, k, jw * inductance, &mut visitor);
             }
         }
 
@@ -1689,6 +1830,16 @@ impl HbSolver {
                 }
             }
         }
+        for &(row, column, inductance) in &self.exact_mna_inductance_entries {
+            let branch = row - self.num_nodes;
+            let control_branch = column - self.num_nodes;
+            for harmonic in 0..harmonic_count {
+                let contribution = Complex64::new(0.0, harmonic as Value * omega0 * inductance)
+                    * state.mna_branch_currents[control_branch][harmonic];
+                state.mna_branch_residual[branch][harmonic] += contribution;
+                state.mna_branch_residual_scale[branch][harmonic] += contribution.norm();
+            }
+        }
         state.compute_residual_norm();
         Ok(())
     }
@@ -2057,6 +2208,9 @@ impl HbSolver {
             for &(row, column, value) in &self.exact_mna_static_entries {
                 jac[row * h + k][column * h + k] -= value;
             }
+            for &(row, column, inductance) in &self.exact_mna_inductance_entries {
+                jac[row * h + k][column * h + k] += Complex64::new(0.0, omega_k * inductance);
+            }
         }
 
         // --- Nonlinear part: requires FFT-based evaluation ---
@@ -2355,6 +2509,7 @@ impl HbSolver {
                 c_spectra: &c_spectra,
                 mna_branches: self.exact_mna_branches(),
                 mna_static_entries: &self.exact_mna_static_entries,
+                mna_inductance_entries: &self.exact_mna_inductance_entries,
             };
             operator.validate()?;
             let preconditioner = ExactHbPreconditioner::build(&operator);

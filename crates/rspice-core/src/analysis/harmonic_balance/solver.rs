@@ -848,6 +848,14 @@ pub struct HbSolver {
     /// nodal conductances or branch incidence terms.
     exact_mna_static_entries: Vec<(usize, usize, Value)>,
 
+    /// Frequency-dependent inductance entries in the augmented branch MNA
+    /// operator. Indices use the same zero-based combined node/branch layout
+    /// as `exact_mna_static_entries`. A value `M` stamps `-j*omega*M` in the
+    /// direct HB/PAC operator and `+j*omega*M` in the residual/Jacobian
+    /// convention. Coupled-inductor and transformer mutual terms live here;
+    /// self-inductance remains owned by each exact branch descriptor.
+    exact_mna_inductance_entries: Vec<(usize, usize, Value)>,
+
     /// Node names
     node_names: Vec<String>,
 

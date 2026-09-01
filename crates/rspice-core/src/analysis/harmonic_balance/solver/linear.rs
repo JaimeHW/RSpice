@@ -42,6 +42,7 @@ impl HbSolver {
             periodic_mna_branches: Vec::new(),
             periodic_mna_branch_names: Vec::new(),
             exact_mna_static_entries: Vec::new(),
+            exact_mna_inductance_entries: Vec::new(),
             node_names: (0..num_nodes).map(|i| format!("n{}", i)).collect(),
             source_spectra: vec![vec![Complex64::new(0.0, 0.0); num_harmonics + 1]; num_nodes],
             nonlinear_devices: Vec::new(),
@@ -70,6 +71,7 @@ impl HbSolver {
             periodic_mna_branches: Vec::new(),
             periodic_mna_branch_names: Vec::new(),
             exact_mna_static_entries: Vec::new(),
+            exact_mna_inductance_entries: Vec::new(),
             node_names: Vec::new(),
             source_spectra: Vec::new(),
             nonlinear_devices: Vec::new(),
@@ -548,6 +550,46 @@ impl HbSolver {
         Ok(())
     }
 
+    /// Add one mutual-inductance coefficient to the exact augmented MNA
+    /// operator. Both coordinates must be canonical branch-current slots.
+    pub(crate) fn try_add_exact_mna_inductance_entry(
+        &mut self,
+        row: usize,
+        column: usize,
+        inductance: Value,
+        context: &str,
+    ) -> Result<(), HbError> {
+        let unknowns = self
+            .num_nodes
+            .checked_add(self.periodic_mna_branches.len())
+            .ok_or_else(|| {
+                HbError::InvalidCircuit(
+                    "periodic mutual-inductance MNA dimension exceeds this platform".to_string(),
+                )
+            })?;
+        if row < self.num_nodes
+            || column < self.num_nodes
+            || row >= unknowns
+            || column >= unknowns
+            || row == column
+            || !inductance.is_finite()
+        {
+            return Err(HbError::InvalidCircuit(format!(
+                "periodic mutual-inductance {context} stamp ({row}, {column}, {inductance}) is malformed for {unknowns} unknowns"
+            )));
+        }
+        self.exact_mna_inductance_entries
+            .try_reserve(1)
+            .map_err(|error| {
+                HbError::InvalidCircuit(format!(
+                    "periodic mutual-inductance {context} stamp allocation failed: {error}"
+                ))
+            })?;
+        self.exact_mna_inductance_entries
+            .push((row, column, inductance));
+        Ok(())
+    }
+
     /// Fallibly copy the canonical periodic MNA names for retained results.
     pub(crate) fn try_periodic_mna_branch_names(&self) -> Result<Vec<String>, HbError> {
         if self.periodic_mna_branches.len() != self.periodic_mna_branch_names.len() {
@@ -973,6 +1015,30 @@ impl HbSolver {
                 )));
             }
         }
+        for (entry, &(row, column, inductance)) in
+            self.exact_mna_inductance_entries.iter().enumerate()
+        {
+            if row < self.num_nodes
+                || column < self.num_nodes
+                || row >= unknowns
+                || column >= unknowns
+                || row == column
+                || !inductance.is_finite()
+            {
+                return Err(HbError::InvalidCircuit(format!(
+                    "exact linear MNA mutual-inductance entry #{entry} ({row}, {column}, {inductance}) is malformed for {unknowns} unknowns"
+                )));
+            }
+            for harmonic in 1..=self.num_harmonics {
+                let impedance =
+                    2.0 * PI * self.config.fundamental_freq * harmonic as Value * inductance;
+                if !impedance.is_finite() || (inductance != 0.0 && impedance == 0.0) {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "exact linear MNA mutual-inductance entry #{entry} has non-representable impedance at harmonic {harmonic}"
+                    )));
+                }
+            }
+        }
         Ok(())
     }
 
@@ -1319,6 +1385,16 @@ impl HbSolver {
                     }
                 }
             }
+            for &(row, column, inductance) in &self.exact_mna_inductance_entries {
+                let branch = row - self.num_nodes;
+                let control_branch = column - self.num_nodes;
+                for k in 0..h {
+                    let contribution = Complex64::new(0.0, (k as Value) * omega0 * inductance)
+                        * branch_currents[control_branch][k];
+                    state.mna_branch_residual[branch][k] += contribution;
+                    state.mna_branch_residual_scale[branch][k] += contribution.norm();
+                }
+            }
         }
         state.compute_residual_norm();
         if !state.residual_norm.is_finite()
@@ -1435,6 +1511,9 @@ impl HbSolver {
                 }
                 for &(row, column, value) in &self.exact_mna_static_entries {
                     y_matrix[row][column] += value;
+                }
+                for &(row, column, inductance) in &self.exact_mna_inductance_entries {
+                    y_matrix[row][column] -= Complex64::new(0.0, omega_k * inductance);
                 }
             } else {
                 for branch in &self.voltage_source_branches {
