@@ -52,6 +52,8 @@
 //! opposite ports. The normative sentence is followed here and the figures are
 //! not.
 
+pub mod library;
+
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use smol_str::SmolStr;
