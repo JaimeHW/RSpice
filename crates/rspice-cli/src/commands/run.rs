@@ -1186,6 +1186,65 @@ fn step_commands(netlist: &Netlist) -> Vec<rspice_core::netlist::StepCommand> {
         .collect()
 }
 
+/// Normalize `.TEMP` into configuration or a Cartesian temperature axis.
+///
+/// The parser already folds a single-valued card into `options.temp`; keeping
+/// the analysis card would also launch an unrelated operating-point sweep.
+/// A multi-valued card is instead one `StepTarget::Temp` dimension wrapping
+/// every authored physical analysis. The normalized step is appended after
+/// authored STEP dimensions so the shared planner's declared axis ordering is
+/// deterministic regardless of where the `.TEMP` card appeared in the deck.
+fn normalize_temperature_axis(netlist: &Netlist) -> Result<Option<Netlist>, CliError> {
+    let temperature_cards = netlist
+        .analyses
+        .iter()
+        .filter_map(|analysis| match analysis {
+            AnalysisCommand::Temp { temperatures } => Some(temperatures),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let Some(temperatures) = temperature_cards.first() else {
+        return Ok(None);
+    };
+    if temperature_cards.len() != 1 {
+        return Err(CliError::InvalidArgument {
+            message: format!(
+                "deck contains {} .TEMP cards; one run cannot have multiple temperature axes",
+                temperature_cards.len()
+            ),
+            suggestion: Some("combine the values into one .TEMP card".to_string()),
+        });
+    }
+
+    let mut normalized = netlist.clone();
+    normalized
+        .analyses
+        .retain(|analysis| !matches!(analysis, AnalysisCommand::Temp { .. }));
+    if temperatures.len() > 1 {
+        if normalized.analyses.iter().any(|analysis| {
+            matches!(
+                analysis,
+                AnalysisCommand::Step(command)
+                    if command.target == rspice_core::netlist::StepTarget::Temp
+            )
+        }) {
+            return Err(CliError::InvalidArgument {
+                message: ".TEMP and .STEP TEMP both define the temperature run axis".to_string(),
+                suggestion: Some("keep exactly one temperature sweep form".to_string()),
+            });
+        }
+        normalized
+            .analyses
+            .push(AnalysisCommand::Step(rspice_core::netlist::StepCommand {
+                target: rspice_core::netlist::StepTarget::Temp,
+                name: "TEMP".to_string(),
+                param_name: None,
+                sweep: rspice_core::netlist::StepSweep::List((*temperatures).clone()),
+            }));
+    }
+    Ok(Some(normalized))
+}
+
 fn step_analysis_signature(netlist: &Netlist) -> Result<Vec<&'static str>, CliError> {
     let mut signature = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -1319,9 +1378,12 @@ fn preflight_step_coordinates(
                 map_step_core_error(error, args.timeout, format!(".STEP {coordinate} preflight"))
             })?;
         let (_, mut stepped) = materialized.into_parts();
-        stepped
-            .analyses
-            .retain(|analysis| !matches!(analysis, AnalysisCommand::Step(_)));
+        stepped.analyses.retain(|analysis| {
+            !matches!(
+                analysis,
+                AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. }
+            )
+        });
         let signature = step_analysis_signature(&stepped)?;
         if signature != base_signature {
             return Err(CliError::InvalidArgument {
@@ -1574,6 +1636,8 @@ fn run_deck(
     quiet: bool,
     run_label: Option<&str>,
 ) -> Result<DeckOutcome, CliError> {
+    let temperature_normalized = normalize_temperature_axis(netlist)?;
+    let netlist = temperature_normalized.as_ref().unwrap_or(netlist);
     let steps = step_commands(netlist);
     if steps.is_empty() {
         let (report, outputs) =
@@ -1647,9 +1711,12 @@ fn run_deck(
             }
         };
         let (values, mut stepped) = materialized.into_parts();
-        stepped
-            .analyses
-            .retain(|analysis| !matches!(analysis, AnalysisCommand::Step(_)));
+        stepped.analyses.retain(|analysis| {
+            !matches!(
+                analysis,
+                AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. }
+            )
+        });
         let materialized_signature = step_analysis_signature(&stepped)?;
         if materialized_signature != coordinate_signatures[run_index] {
             return Err(CliError::InternalError {

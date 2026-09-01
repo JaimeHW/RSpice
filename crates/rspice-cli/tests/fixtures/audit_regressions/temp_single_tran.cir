@@ -1,0 +1,7 @@
+Single temperature configures authored transient without an extra OP analysis
+V1 out 0 1
+R1 out 0 1k
+.TEMP 40
+.TRAN 0.1u 0.3u
+.SAVE V(out)
+.END
