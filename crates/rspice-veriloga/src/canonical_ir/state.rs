@@ -72,10 +72,12 @@
 //! [`crate::native::expr`] still reads its slot *numbers* from the program it
 //! is lowering, and takes only the identity and the order from this module.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
+use super::cfg::{CfgFunction, CfgStateSite};
 use super::hir::{HirAnalogOperator, HirExprKind, HirExpression, HirModel, HirStatement};
 use super::ids::ExprId;
+use crate::ir::TransitionSiteId;
 
 /// Which runtime array a site's record lives in.
 ///
@@ -714,6 +716,279 @@ impl LayoutBuilder {
             sites: self.sites,
             by_operator: self.by_operator,
         }
+    }
+}
+
+/// Why a CFG could not be given state records from the layout.
+///
+/// Every variant names the operator it is about. A CFG-sourced backend that met
+/// one of these and carried on would allocate a record for an operator that is
+/// not the one the runtime resumes, which is the failure this whole module
+/// exists to make impossible — so they are refusals, never fallbacks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CfgStateAllocationError {
+    /// A CFG operator whose body expression has no executed counterpart.
+    ///
+    /// The correspondence covers assignment values and indices, contribution
+    /// values, `if` and loop conditions. It does not cover a `case` arm's
+    /// condition, whose two forms are different expressions rather than two
+    /// copies of one. A state operator written there reaches here.
+    Unmapped {
+        operator: ExprId,
+        kind: CanonicalStateOperator,
+    },
+    /// The executed expression the correspondence names owns no record, or owns
+    /// one of another kind.
+    ///
+    /// Unreachable through the compiler's own pipeline — the congruence check
+    /// on each run refuses a pairing whose kinds disagree — and here because a
+    /// deserialized artifact can carry a correspondence this build did not make.
+    Mispaired {
+        operator: ExprId,
+        executed: ExprId,
+        kind: CanonicalStateOperator,
+        found: Option<CanonicalStateOperator>,
+    },
+    /// A `transition` filter, which this allocation cannot name.
+    ///
+    /// `transition` is the one operator the CFG names by its own
+    /// [`TransitionSiteId`] rather than by the expression that owns it, and the
+    /// two lowerings mint different ordinals for one source site because the
+    /// preorder counter runs across both copies. The correspondence is a map
+    /// over expressions and does not carry that pairing.
+    ///
+    /// It costs nothing today and is a refusal rather than a gap on purpose.
+    /// `transition` reaches the canonical IR as `HirExprKind::Call`, never as
+    /// the typed `HirAnalogOperator::Transition` — the parser produces no such
+    /// node and the semantic analyzer's arms for one are unreachable through
+    /// the compiler's own pipeline — so [`super::cfg_lower`] refuses it by name
+    /// and no CFG carries this kind. When the CFG level gains `transition`, the
+    /// pairing has to be added deliberately, and this refusal is what makes
+    /// that a compile error in a model rather than a wrong slot.
+    UnsupportedTransition { site: TransitionSiteId },
+    /// Two CFG operators resolved onto one executed record.
+    ///
+    /// Two distinct operators sharing a record would integrate one's history
+    /// into the other's. Refused rather than reported per operator, because the
+    /// pair is the finding.
+    Aliased {
+        first: ExprId,
+        second: ExprId,
+        executed: ExprId,
+    },
+}
+
+impl std::fmt::Display for CfgStateAllocationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unmapped { operator, kind } => write!(
+                formatter,
+                "canonical {} at expression {operator} has no executed counterpart, so its state record cannot be named",
+                kind.name()
+            ),
+            Self::Mispaired {
+                operator,
+                executed,
+                kind,
+                found,
+            } => write!(
+                formatter,
+                "canonical {} at expression {operator} pairs with executed expression {executed}, which owns {}",
+                kind.name(),
+                match found {
+                    Some(found) => format!("a {} record", found.name()),
+                    None => "no state record".to_string(),
+                }
+            ),
+            Self::UnsupportedTransition { site } => write!(
+                formatter,
+                "transition site {}:{}..{}#{} is named by site identity rather than by expression, and the two lowerings mint different ordinals for one source site, so its filter record cannot be named from the executed correspondence",
+                site.source, site.start, site.end, site.ordinal
+            ),
+            Self::Aliased {
+                first,
+                second,
+                executed,
+            } => write!(
+                formatter,
+                "canonical expressions {first} and {second} both resolve to executed expression {executed}, which owns one record"
+            ),
+        }
+    }
+}
+
+/// Runtime state records addressed by the names a CFG carries.
+///
+/// [`CanonicalStateLayout`] numbers the *executed* copy of a module, because
+/// that is the copy whose records the runtime allocates and the checkpoint
+/// serializes. A CFG carries *body*-copy names. This is the composition of the
+/// two: resolve each CFG name through
+/// [`super::hir::HirExecutedCorrespondence`], then read the layout.
+///
+/// ## Why this is not simply "the layout"
+///
+/// Three numberings exist in the tree and all three are correct for their
+/// runtime:
+///
+/// 1. The **bytecode generator** allocates a fresh slot per *emission*, module
+///    global, in executed-root order. A module with noise in an assignment is
+///    emitted twice, so one canonical `ddt` owns two slots.
+/// 2. [`CanonicalStateLayout`] allocates per *site*, per family, in the same
+///    order. This is the VM and JIT runtime's shape: `ddt`, `idt`, `idtmod` and
+///    `$limit` all draw from one `state_values_prev` array.
+/// 3. The **generated-Rust backend** allocates per site in *CFG value* order,
+///    with a separate counter per operator, because
+///    `GeneratedVerilogAPersistentState` gives `ddt`, `idt` and the limiter
+///    anchor their own arrays.
+///
+/// (2) and (3) are different shapes, not different orders of one shape, so this
+/// type serves (2) — the runtime the JIT feeds — and the generated bundle keeps
+/// (3). Making one layout serve both would change the generated runtime's
+/// struct and renumber a shipped checkpoint, which is a decision about the
+/// generated device contract rather than about this map.
+///
+/// ## Checkpoint compatibility
+///
+/// Compatible with (1) by construction wherever the two spaces coincide, and
+/// *not* compatible where they do not — a module with noise in an assignment
+/// carrying an integration operator. Nothing here silently reconciles them:
+/// [`Self::agrees_with_emission_allocation`] answers whether a given module is
+/// one of the coinciding ones, so a caller decides rather than assumes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CfgStateAllocation {
+    layout: CanonicalStateLayout,
+    /// Body-copy operator expression to the executed site it names.
+    by_operator: HashMap<ExprId, CanonicalStateSite>,
+}
+
+impl CfgStateAllocation {
+    /// Give every state-bearing value in `function` the record the layout
+    /// numbers for it, or refuse by name.
+    ///
+    /// Every refusal is collected rather than the first returned: a model that
+    /// cannot be allocated should say everything that is wrong with it in one
+    /// run, the same contract [`super::cfg_lower::CfgModel::from_hir`] keeps.
+    pub fn build(
+        hir: &HirModel,
+        function: &CfgFunction,
+    ) -> Result<Self, Vec<CfgStateAllocationError>> {
+        let layout = CanonicalStateLayout::from_hir(hir);
+        let correspondence = &hir.executed_correspondence;
+
+        let mut by_operator: HashMap<ExprId, CanonicalStateSite> = HashMap::new();
+        let mut executed_owners: HashMap<ExprId, ExprId> = HashMap::new();
+        let mut refused_transitions: HashSet<TransitionSiteId> = HashSet::new();
+        let mut errors = Vec::new();
+
+        for value in &function.values {
+            match value.kind.state_site() {
+                Some(CfgStateSite::Operator(operator, kind)) => {
+                    if by_operator.contains_key(&operator) {
+                        continue;
+                    }
+                    let Some(executed) = correspondence.executed(operator) else {
+                        errors.push(CfgStateAllocationError::Unmapped { operator, kind });
+                        continue;
+                    };
+                    let Some(site) = layout.site(executed) else {
+                        errors.push(CfgStateAllocationError::Mispaired {
+                            operator,
+                            executed,
+                            kind,
+                            found: None,
+                        });
+                        continue;
+                    };
+                    // `cross` and `above` are one family but two operators, and
+                    // the layout records the spelling it saw; comparing families
+                    // rather than operators is what keeps a `cross` reading a
+                    // detector from being called a mispairing.
+                    if site.kind.family() != kind.family() {
+                        errors.push(CfgStateAllocationError::Mispaired {
+                            operator,
+                            executed,
+                            kind,
+                            found: Some(site.kind),
+                        });
+                        continue;
+                    }
+                    if let Some(first) = executed_owners.insert(executed, operator) {
+                        errors.push(CfgStateAllocationError::Aliased {
+                            first,
+                            second: operator,
+                            executed,
+                        });
+                        continue;
+                    }
+                    by_operator.insert(operator, *site);
+                }
+                Some(CfgStateSite::Transition(site)) => {
+                    if refused_transitions.insert(site) {
+                        errors.push(CfgStateAllocationError::UnsupportedTransition { site });
+                    }
+                }
+                None => {}
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(Self {
+                layout,
+                by_operator,
+            })
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// The record one CFG operator expression owns.
+    pub fn site(&self, operator: ExprId) -> Option<&CanonicalStateSite> {
+        self.by_operator.get(&operator)
+    }
+
+    /// The dense slot one CFG operator expression owns within its family.
+    pub fn slot(&self, operator: ExprId) -> Option<u32> {
+        self.by_operator.get(&operator).map(|site| site.slot)
+    }
+
+    /// How many records the module's runtime has to reserve for one family.
+    ///
+    /// From the layout, not from what the CFG happened to reference: a family's
+    /// array is sized by the module, and an operator whose value was folded away
+    /// still owns its slot in the checkpoint.
+    pub fn family_len(&self, family: CanonicalStateFamily) -> usize {
+        self.layout.family_len(family)
+    }
+
+    /// The layout this allocation reads.
+    pub fn layout(&self) -> &CanonicalStateLayout {
+        &self.layout
+    }
+
+    /// Whether this module's per-site numbering is also the bytecode
+    /// generator's per-emission numbering, so a checkpoint written by one
+    /// runtime means the same thing to the other.
+    ///
+    /// A *sufficient* condition, deliberately, and stated as one: true when no
+    /// assignment in the module owns any state record at all. The replay that
+    /// separates the two spaces is `DeviceIR::noise_assignments`, a clone of
+    /// `assignments` carrying noise shadows, and the generator allocates a fresh
+    /// slot at each emission — so a module whose assignments own nothing has
+    /// nothing to double-allocate, whatever its contributions do. A module that
+    /// answers `false` may still coincide; it is not asserted to differ, only
+    /// not proven to agree, which is the reading a caller resuming a foreign
+    /// checkpoint needs. A caller that allocates its own state does not need to
+    /// ask at all.
+    pub fn agrees_with_emission_allocation(&self, hir: &HirModel) -> bool {
+        let mut roots = Vec::new();
+        for statement in &hir.statements {
+            collect_statement_roots(statement, &mut roots);
+        }
+        let mut owns_state = false;
+        for root in roots {
+            let _ = visit_state_sites(&hir.expressions, root, &mut |_, _| owns_state = true);
+        }
+        !owns_state
     }
 }
 

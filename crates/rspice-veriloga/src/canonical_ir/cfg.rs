@@ -65,6 +65,7 @@ use super::digital::{
 };
 use super::digital_value;
 use super::ids::DigitalAnalogProbeId;
+use super::state::CanonicalStateOperator;
 use super::{
     BlockId, BranchId, BranchUnknownId, ContributionId, DigitalLocalId, DigitalSignalId, ExprId,
     NodeId, ParamId, ShapeId, ValueId, VariableId,
@@ -1135,6 +1136,69 @@ impl CfgValueKind {
         }
     }
 
+    /// Which state-bearing operator this value reads, and how it names the
+    /// record.
+    ///
+    /// The one definition of "this kind owns runtime state", so a new stateful
+    /// kind becomes visible to the allocator by being added here rather than by
+    /// being remembered in a second list. It must agree with
+    /// [`super::schedule`]'s Newton arm — a kind that owns accepted history and
+    /// is cached at a coarser scope computes a waveform once and freezes it —
+    /// and `cfg_state_sites_and_newton_leaves_agree` pins that they do.
+    ///
+    /// The two answers are different *kinds* of name, and that is the shipped
+    /// state of the IR rather than an inconsistency: every operator but
+    /// `transition` is keyed by the canonical expression that owns it, while
+    /// `transition` is keyed by its own [`TransitionSiteId`]. Both are body-copy
+    /// names, and both need [`super::hir::HirExecutedCorrespondence`] to reach
+    /// the executed copy the runtime allocates in.
+    pub fn state_site(&self) -> Option<CfgStateSite> {
+        let site = match self {
+            Self::Ddt { operator, .. } => {
+                CfgStateSite::Operator(*operator, CanonicalStateOperator::Ddt)
+            }
+            Self::Idt { operator, .. } => {
+                CfgStateSite::Operator(*operator, CanonicalStateOperator::Idt)
+            }
+            Self::IdtMod { operator, .. } => {
+                CfgStateSite::Operator(*operator, CanonicalStateOperator::IdtMod)
+            }
+            Self::AbsDelay { operator, .. } | Self::AbsDelayDerivative { operator, .. } => {
+                CfgStateSite::Operator(*operator, CanonicalStateOperator::Absdelay)
+            }
+            Self::Slew { operator, .. } | Self::SlewDerivative { operator, .. } => {
+                CfgStateSite::Operator(*operator, CanonicalStateOperator::Slew)
+            }
+            // `cross` and `last_crossing` share a detector, which is why the
+            // layout gives them one family; `above` draws from the same array.
+            Self::LastCrossing { operator, .. } | Self::Cross { operator, .. } => {
+                CfgStateSite::Operator(*operator, CanonicalStateOperator::Cross)
+            }
+            Self::Above { operator, .. } => {
+                CfgStateSite::Operator(*operator, CanonicalStateOperator::Above)
+            }
+            Self::Laplace { operator, .. } | Self::LaplaceDerivative { operator, .. } => {
+                CfgStateSite::Operator(*operator, CanonicalStateOperator::Laplace)
+            }
+            Self::Zi { operator, .. } | Self::ZiDerivative { operator, .. } => {
+                CfgStateSite::Operator(*operator, CanonicalStateOperator::Zi)
+            }
+            Self::Timer { operator, .. } => {
+                CfgStateSite::Operator(*operator, CanonicalStateOperator::Timer)
+            }
+            // `LimitPrevious` reads the same anchor its `Limit` writes and
+            // carries the same operator id, so it resolves to one record.
+            Self::Limit { operator, .. } | Self::LimitPrevious { operator, .. } => {
+                CfgStateSite::Operator(*operator, CanonicalStateOperator::Limit)
+            }
+            Self::Transition { site, .. } | Self::TransitionDerivative { site, .. } => {
+                CfgStateSite::Transition(*site)
+            }
+            _ => return None,
+        };
+        Some(site)
+    }
+
     /// Values this one reads.
     ///
     /// Every pass that rewrites or walks the graph needs this, and having one
@@ -1705,6 +1769,17 @@ pub enum CfgTerminator {
     /// Placeholder while a block is under construction. Never present in a
     /// finished function; [`CfgFunction::validate`] rejects it.
     Unset,
+}
+
+/// How one CFG value names the runtime record it reads.
+///
+/// Two spellings because the IR has two: see [`CfgValueKind::state_site`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CfgStateSite {
+    /// Keyed by the canonical expression that owns the record.
+    Operator(ExprId, CanonicalStateOperator),
+    /// Keyed by the `transition` site's own identity.
+    Transition(TransitionSiteId),
 }
 
 /// What a suspended process is waiting for.

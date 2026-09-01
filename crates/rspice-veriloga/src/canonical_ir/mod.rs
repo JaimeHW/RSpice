@@ -43,8 +43,8 @@ pub use ad::{AdFunction, AdSeed, differentiate};
 pub use artifact::CanonicalIrArtifact;
 pub use cfg::{
     CfgBinaryOp, CfgBlock, CfgFunction, CfgInstruction, CfgIntegerBitwiseOp, CfgLaplaceTransfer,
-    CfgTerminator, CfgUnaryOp, CfgValidationError, CfgValue, CfgValueKind, CfgValueType,
-    CfgVariable, CfgZiPolynomial, DigitalWait, SsaBuilder,
+    CfgStateSite, CfgTerminator, CfgUnaryOp, CfgValidationError, CfgValue, CfgValueKind,
+    CfgValueType, CfgVariable, CfgZiPolynomial, DigitalWait, SsaBuilder,
 };
 pub use cfg_complex::{COMPLEX_STEP, ComplexStep};
 pub use cfg_eval::{
@@ -94,4 +94,5 @@ pub use schedule::{
 };
 pub use state::{
     CanonicalStateFamily, CanonicalStateLayout, CanonicalStateOperator, CanonicalStateSite,
+    CfgStateAllocation, CfgStateAllocationError,
 };
