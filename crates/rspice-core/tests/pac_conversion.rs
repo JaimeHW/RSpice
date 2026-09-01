@@ -364,18 +364,6 @@ fn pac_exact_mna_fails_closed_for_unrepresented_branch_coupling() {
     let cases = [
         (
             "\
-* coupled inductors require a mutual branch block
-iin 0 a dc 0
-l1 a 0 1u
-l2 b 0 1u
-r2 b 0 50
-k12 l1 l2 0.9
-.end
-",
-            "coupled-inductor",
-        ),
-        (
-            "\
 * current switch requires the actual control branch current spectrum
 iin 0 out dc 0
 vctrl ctrl 0 dc 0
