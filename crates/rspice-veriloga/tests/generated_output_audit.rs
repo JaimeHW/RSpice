@@ -400,6 +400,52 @@ fn generated_veriloga_noise_is_one_pass_and_allocation_free() {
     );
 }
 
+#[test]
+fn generated_veriloga_noise_imports_every_runtime_math_helper_it_calls() {
+    const HELPERS: [&str; 3] = [
+        "rspice_limexp",
+        "rspice_limited_exp",
+        "rspice_limited_exp_derivative",
+    ];
+
+    let generated_root = generated_veriloga_root();
+    let mut noise_files = 0usize;
+    let mut failures = Vec::new();
+    scan_generated_rust(&generated_root, &mut |path, source| {
+        if path.file_name().is_none_or(|name| name != "noise.rs") {
+            return;
+        }
+        noise_files += 1;
+        let body_start = source
+            .find("pub static NOISE_SOURCES")
+            .expect("generated noise file must declare its descriptor table");
+        let (imports, body) = source.split_at(body_start);
+        for helper in HELPERS {
+            if body.contains(&format!("{helper}("))
+                && !imports.lines().any(|line| {
+                    line.starts_with("use rspice_veriloga_runtime::")
+                        && line_mentions_identifier(line, helper)
+                })
+            {
+                failures.push(format!(
+                    "{} calls `{helper}` without importing it",
+                    display_path(path)
+                ));
+            }
+        }
+    });
+
+    assert!(
+        noise_files > 0,
+        "generated bundle has no noise translation units"
+    );
+    assert!(
+        failures.is_empty(),
+        "generated Verilog-A noise must import every free runtime math helper it calls:\n{}",
+        failures.join("\n")
+    );
+}
+
 /// Noise is a slice of the body, not a re-derivation of it.
 ///
 /// This replaces a test that required a fixed `w` workspace reset in one

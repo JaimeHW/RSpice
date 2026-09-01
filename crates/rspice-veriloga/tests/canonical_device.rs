@@ -3074,6 +3074,39 @@ module shared_noise_preprocessing(p, n);
 endmodule
 "#,
         ),
+        // A coherent noise injection that reads `ddx` is emitted by the
+        // grouped-process extension, independently of the source-wise noise
+        // slice. The recognized bounded-exponential idiom then leaves its
+        // derivative helper only in that extension, where the enclosing
+        // `noise.rs` still needs to import it.
+        (
+            "limited exponential derivative in noise",
+            r#"
+module limited_exp_derivative_noise(p, n);
+    inout p, n;
+    electrical p, n;
+    real slope, process;
+    analog function real bounded_exp;
+        input x;
+        begin
+            if (x > 80.0) begin
+                bounded_exp = 5.540622384e34 * (1.0 + x - 80.0);
+            end else if (x < -80.0) begin
+                bounded_exp = 1.804851387e-35;
+            end else begin
+                bounded_exp = exp(x);
+            end
+        end
+    endfunction
+    analog begin
+        slope = ddx(bounded_exp(V(p, n)), V(p, n));
+        process = white_noise(1.0, "bounded-exp-slope");
+        I(p, n) <+ bounded_exp(V(p, n));
+        I(p, n) <+ slope * process;
+    end
+endmodule
+"#,
+        ),
         (
             "guarded flicker and table noise",
             r#"
