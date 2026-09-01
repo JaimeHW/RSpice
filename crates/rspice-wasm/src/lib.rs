@@ -7,8 +7,12 @@
 use rspice_core::{
     Engine, Netlist, ResourceKind, ResourceLimitError, ResourceLimits, SimulationConfig,
 };
+use rspice_core::{
+    engine::{TransientFftHarmonic, TransientFftMetrics, TransientFftResult, TransientResult},
+    netlist::{FftFormat, FftOutput, FftWindow, XyceFftMode},
+};
 use serde::{Deserialize, Serialize};
-use wasm_bindgen::prelude::*;
+use wasm_bindgen::{JsCast, prelude::*};
 
 type WasmResult<T> = Result<T, String>;
 type DetailedWasmResult<T> = Result<T, Box<WasmError>>;
@@ -314,6 +318,81 @@ pub struct TransientSnapshot {
     pub time: Vec<f64>,
     pub node_names: Vec<String>,
     pub voltages: Vec<Vec<f64>>,
+    /// Source-authored transient FFT results in declaration order.
+    pub fft_results: Vec<TransientFftSnapshot>,
+}
+
+/// Columnar FFT bins. The JavaScript export materializes every field as a
+/// typed array while the Rust API retains ordinary owned vectors.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TransientFftBinsSnapshot {
+    pub indices: Vec<usize>,
+    pub frequencies: Vec<f64>,
+    pub real: Vec<f64>,
+    pub imaginary: Vec<f64>,
+    pub magnitudes: Vec<f64>,
+    pub phase_degrees: Vec<f64>,
+}
+
+/// Columnar magnitude-ranked harmonic report. Ordering is the exact ordering
+/// produced by the core (descending magnitude, then source bin).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TransientFftHarmonicsSnapshot {
+    pub ranks: Vec<usize>,
+    pub bins: Vec<usize>,
+    pub frequencies: Vec<f64>,
+    pub magnitudes: Vec<f64>,
+    pub magnitudes_db: Vec<f64>,
+    pub phase_degrees: Vec<f64>,
+}
+
+/// Optional Xyce-compatible FFT figures emitted when `FFTOUT=1`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TransientFftMetricsSnapshot {
+    pub fundamental_magnitude: f64,
+    pub thd_ratio: f64,
+    pub thd_db: f64,
+    pub sndr_db: f64,
+    pub enob_bits: f64,
+    pub snr_db: f64,
+    pub sfdr_db: f64,
+    pub sfdr_spur_bin: Option<usize>,
+    pub sfdr_spur_frequency: Option<f64>,
+    pub largest_harmonics: TransientFftHarmonicsSnapshot,
+}
+
+/// Complete browser representation of one core `TransientFftResult`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TransientFftSnapshot {
+    /// `probe` or `expression`, allowing consumers to interpret `source_text`
+    /// without parsing it heuristically.
+    pub source_kind: String,
+    /// Canonical probe spelling or the expression body retained by the parser.
+    pub source_text: String,
+    /// Display spelling of the authored source; expression bodies include
+    /// their braces here.
+    pub authored_output: String,
+    /// Resolved scalar result-column spelling.
+    pub output_name: String,
+    pub physical_type: String,
+    pub start_time: f64,
+    pub stop_time: f64,
+    pub sample_interval: f64,
+    pub point_count: usize,
+    pub accurate_sampling: bool,
+    pub format: String,
+    pub mode: String,
+    pub window: String,
+    pub window_name: String,
+    pub alpha: f64,
+    pub coherent_gain: f64,
+    pub frequency_resolution: f64,
+    pub fundamental_bin: usize,
+    pub minimum_metric_bin: usize,
+    pub maximum_metric_bin: usize,
+    pub bins: TransientFftBinsSnapshot,
+    /// `null` in JavaScript when `FFTOUT` was not requested.
+    pub metrics: Option<TransientFftMetricsSnapshot>,
 }
 
 /// Browser-facing parser-to-solver readiness result.
@@ -663,6 +742,98 @@ fn serialize_to_js<T: Serialize>(value: &T) -> Result<JsValue, JsValue> {
         .map_err(|err| JsValue::from_str(&format!("serialization failed: {err}")))
 }
 
+fn js_property(object: &JsValue, name: &str) -> Result<JsValue, JsValue> {
+    js_sys::Reflect::get(object, &JsValue::from_str(name)).map_err(|_| {
+        JsValue::from_str(&format!(
+            "serialization failed: transient FFT property `{name}` is unavailable"
+        ))
+    })
+}
+
+fn set_float64_array(object: &JsValue, name: &str, values: &[f64]) -> Result<(), JsValue> {
+    let values = js_sys::Float64Array::from(values);
+    js_sys::Reflect::set(object, &JsValue::from_str(name), values.as_ref())
+        .map(|_| ())
+        .map_err(|_| {
+            JsValue::from_str(&format!(
+                "serialization failed: cannot publish transient FFT typed array `{name}`"
+            ))
+        })
+}
+
+fn set_uint32_array(object: &JsValue, name: &str, values: &[usize]) -> Result<(), JsValue> {
+    let values = values
+        .iter()
+        .copied()
+        .map(u32::try_from)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| {
+            JsValue::from_str(&format!(
+                "serialization failed: transient FFT index `{name}` exceeds Uint32Array"
+            ))
+        })?;
+    let values = js_sys::Uint32Array::from(values.as_slice());
+    js_sys::Reflect::set(object, &JsValue::from_str(name), values.as_ref())
+        .map(|_| ())
+        .map_err(|_| {
+            JsValue::from_str(&format!(
+                "serialization failed: cannot publish transient FFT typed array `{name}`"
+            ))
+        })
+}
+
+fn publish_fft_bins_as_typed_arrays(
+    object: &JsValue,
+    bins: &TransientFftBinsSnapshot,
+) -> Result<(), JsValue> {
+    set_uint32_array(object, "indices", &bins.indices)?;
+    set_float64_array(object, "frequencies", &bins.frequencies)?;
+    set_float64_array(object, "real", &bins.real)?;
+    set_float64_array(object, "imaginary", &bins.imaginary)?;
+    set_float64_array(object, "magnitudes", &bins.magnitudes)?;
+    set_float64_array(object, "phase_degrees", &bins.phase_degrees)
+}
+
+fn publish_fft_harmonics_as_typed_arrays(
+    object: &JsValue,
+    harmonics: &TransientFftHarmonicsSnapshot,
+) -> Result<(), JsValue> {
+    set_uint32_array(object, "ranks", &harmonics.ranks)?;
+    set_uint32_array(object, "bins", &harmonics.bins)?;
+    set_float64_array(object, "frequencies", &harmonics.frequencies)?;
+    set_float64_array(object, "magnitudes", &harmonics.magnitudes)?;
+    set_float64_array(object, "magnitudes_db", &harmonics.magnitudes_db)?;
+    set_float64_array(object, "phase_degrees", &harmonics.phase_degrees)
+}
+
+/// Serialize transient FFT numeric columns as compact, interoperable
+/// JavaScript typed arrays. Optional FFT fields are deliberately encoded as
+/// `null`, not omitted or `undefined`, so consumers can distinguish absence
+/// explicitly.
+fn serialize_transient_to_js(snapshot: &TransientSnapshot) -> Result<JsValue, JsValue> {
+    let serializer = serde_wasm_bindgen::Serializer::new().serialize_missing_as_null(true);
+    let serialized = snapshot
+        .serialize(&serializer)
+        .map_err(|error| JsValue::from_str(&format!("serialization failed: {error}")))?;
+    let fft_results = js_property(&serialized, "fft_results")?
+        .dyn_into::<js_sys::Array>()
+        .map_err(|_| JsValue::from_str("serialization failed: `fft_results` is not an array"))?;
+
+    for (index, fft) in snapshot.fft_results.iter().enumerate() {
+        let js_fft = fft_results.get(index as u32);
+        let js_bins = js_property(&js_fft, "bins")?;
+        publish_fft_bins_as_typed_arrays(&js_bins, &fft.bins)?;
+
+        if let Some(metrics) = &fft.metrics {
+            let js_metrics = js_property(&js_fft, "metrics")?;
+            let js_harmonics = js_property(&js_metrics, "largest_harmonics")?;
+            publish_fft_harmonics_as_typed_arrays(&js_harmonics, &metrics.largest_harmonics)?;
+        }
+    }
+
+    Ok(serialized)
+}
+
 fn wasm_error_to_js(error: WasmError) -> JsValue {
     let js_error = js_sys::Error::new(&error.message);
     js_error.set_name("RSpiceError");
@@ -813,6 +984,131 @@ fn complex_series_from_slice(values: &[rspice_core::Complex64]) -> ComplexSeries
     ComplexSeries {
         real: values.iter().map(|value| value.re).collect(),
         imag: values.iter().map(|value| value.im).collect(),
+    }
+}
+
+fn fft_output_identity(output: &FftOutput) -> (&'static str, &str, String) {
+    match output {
+        FftOutput::Probe(probe) => ("probe", probe, probe.clone()),
+        FftOutput::Expression(expression) => {
+            ("expression", expression, format!("{{{expression}}}"))
+        }
+    }
+}
+
+const fn fft_format_name(format: FftFormat) -> &'static str {
+    match format {
+        FftFormat::Normalized => "normalized",
+        FftFormat::Unnormalized => "unnormalized",
+    }
+}
+
+const fn fft_mode_name(mode: XyceFftMode) -> &'static str {
+    match mode {
+        XyceFftMode::HspiceCompatible => "hspice_compatible",
+        XyceFftMode::SpectreCompatible => "spectre_compatible",
+    }
+}
+
+const fn fft_window_name(window: FftWindow) -> &'static str {
+    match window {
+        FftWindow::Rectangular => "rectangular",
+        FftWindow::Bartlett => "bartlett",
+        FftWindow::BartlettHann => "bartlett_hann",
+        FftWindow::Hamming => "hamming",
+        FftWindow::Hann => "hann",
+        FftWindow::Blackman67Db => "blackman_67db",
+        FftWindow::Blackman => "blackman",
+        FftWindow::BlackmanHarris => "blackman_harris",
+        FftWindow::Nuttall => "nuttall",
+        FftWindow::HalfCycleSine => "half_cycle_sine",
+        FftWindow::HalfCycleSine3 => "half_cycle_sine_3",
+        FftWindow::HalfCycleSine6 => "half_cycle_sine_6",
+        FftWindow::Cosine2 => "cosine_2",
+        FftWindow::Cosine4 => "cosine_4",
+    }
+}
+
+fn fft_harmonics_snapshot(harmonics: &[TransientFftHarmonic]) -> TransientFftHarmonicsSnapshot {
+    TransientFftHarmonicsSnapshot {
+        ranks: harmonics.iter().map(|harmonic| harmonic.rank).collect(),
+        bins: harmonics.iter().map(|harmonic| harmonic.bin).collect(),
+        frequencies: harmonics
+            .iter()
+            .map(|harmonic| harmonic.frequency)
+            .collect(),
+        magnitudes: harmonics
+            .iter()
+            .map(|harmonic| harmonic.magnitude)
+            .collect(),
+        magnitudes_db: harmonics
+            .iter()
+            .map(|harmonic| harmonic.magnitude_db)
+            .collect(),
+        phase_degrees: harmonics
+            .iter()
+            .map(|harmonic| harmonic.phase_degrees)
+            .collect(),
+    }
+}
+
+fn fft_metrics_snapshot(metrics: &TransientFftMetrics) -> TransientFftMetricsSnapshot {
+    TransientFftMetricsSnapshot {
+        fundamental_magnitude: metrics.fundamental_magnitude,
+        thd_ratio: metrics.thd_ratio,
+        thd_db: metrics.thd_db,
+        sndr_db: metrics.sndr_db,
+        enob_bits: metrics.enob_bits,
+        snr_db: metrics.snr_db,
+        sfdr_db: metrics.sfdr_db,
+        sfdr_spur_bin: metrics.sfdr_spur_bin,
+        sfdr_spur_frequency: metrics.sfdr_spur_frequency,
+        largest_harmonics: fft_harmonics_snapshot(&metrics.largest_harmonics),
+    }
+}
+
+fn fft_snapshot(result: &TransientFftResult) -> TransientFftSnapshot {
+    let (source_kind, source_text, authored_output) = fft_output_identity(&result.output);
+    TransientFftSnapshot {
+        source_kind: source_kind.to_string(),
+        source_text: source_text.to_string(),
+        authored_output,
+        output_name: result.output_name.clone(),
+        physical_type: result.physical_type.to_string(),
+        start_time: result.start_time,
+        stop_time: result.stop_time,
+        sample_interval: result.sample_interval,
+        point_count: result.point_count,
+        accurate_sampling: result.accurate_sampling,
+        format: fft_format_name(result.format).to_string(),
+        mode: fft_mode_name(result.mode).to_string(),
+        window: fft_window_name(result.window).to_string(),
+        window_name: result.window_name.clone(),
+        alpha: result.alpha,
+        coherent_gain: result.coherent_gain,
+        frequency_resolution: result.frequency_resolution,
+        fundamental_bin: result.fundamental_bin,
+        minimum_metric_bin: result.minimum_metric_bin,
+        maximum_metric_bin: result.maximum_metric_bin,
+        bins: TransientFftBinsSnapshot {
+            indices: result.bins.iter().map(|bin| bin.index).collect(),
+            frequencies: result.bins.iter().map(|bin| bin.frequency).collect(),
+            real: result.bins.iter().map(|bin| bin.real).collect(),
+            imaginary: result.bins.iter().map(|bin| bin.imaginary).collect(),
+            magnitudes: result.bins.iter().map(|bin| bin.magnitude).collect(),
+            phase_degrees: result.bins.iter().map(|bin| bin.phase_degrees).collect(),
+        },
+        metrics: result.metrics.as_ref().map(fft_metrics_snapshot),
+    }
+}
+
+fn transient_snapshot(result: TransientResult) -> TransientSnapshot {
+    let fft_results = result.fft_results.iter().map(fft_snapshot).collect();
+    TransientSnapshot {
+        time: result.time,
+        node_names: result.node_names,
+        voltages: result.voltages,
+        fft_results,
     }
 }
 
@@ -984,11 +1280,7 @@ pub fn run_transient_analysis_with_options_detailed(
         .run_tran(&netlist, tstop, max_step)
         .map_err(|error| Box::new(WasmError::from_simulation_error(error)))?;
 
-    Ok(TransientSnapshot {
-        time: result.time,
-        node_names: result.node_names,
-        voltages: result.voltages,
-    })
+    Ok(transient_snapshot(result))
 }
 
 /// Backward-compatible string-error transient API.
@@ -1069,7 +1361,7 @@ pub fn run_transient_analysis_js(
     let options = execution_options_from_js(options).map_err(|error| wasm_error_to_js(*error))?;
     let result = run_transient_analysis_with_options_detailed(source, tstop, max_step, &options)
         .map_err(|error| wasm_error_to_js(*error))?;
-    serialize_to_js(&result)
+    serialize_transient_to_js(&result)
 }
 
 #[cfg(test)]
@@ -1357,5 +1649,298 @@ mod tests {
             assert_eq!(error.kind, "invalid_argument");
             assert_eq!(error.category, "input_validation");
         }
+    }
+
+    const FFT_PARITY_DECK: &str = "browser transient FFT parity\n\
+        V1 out 0 SIN(0 1 1k)\n\
+        R1 out 0 1k\n\
+        .options fft fft_mode=1 fft_accurate=0 fftout=1\n\
+        .tran 1u 1m\n\
+        .fft v(out) np=128 format=unorm window=hann freq=1k fmin=1k fmax=10k\n\
+        .fft {2*v(out)} np=64 format=norm window=rect\n\
+        .end\n";
+
+    fn fft_parity_fixture() -> (TransientResult, TransientSnapshot) {
+        let netlist = Netlist::parse(FFT_PARITY_DECK).expect("FFT parity deck parses in core");
+        let core = Engine::new(SimulationConfig::default())
+            .run_tran(&netlist, 1.0e-3, 1.0e-6)
+            .expect("FFT parity deck executes in core");
+        let wasm = run_transient_analysis_detailed(FFT_PARITY_DECK, 1.0e-3, 1.0e-6)
+            .expect("FFT parity deck executes through browser adapter");
+        (core, wasm)
+    }
+
+    fn assert_harmonic_parity(core: &[TransientFftHarmonic], wasm: &TransientFftHarmonicsSnapshot) {
+        assert_eq!(
+            wasm.ranks,
+            core.iter()
+                .map(|harmonic| harmonic.rank)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            wasm.bins,
+            core.iter().map(|harmonic| harmonic.bin).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            wasm.frequencies,
+            core.iter()
+                .map(|harmonic| harmonic.frequency)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            wasm.magnitudes,
+            core.iter()
+                .map(|harmonic| harmonic.magnitude)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            wasm.magnitudes_db,
+            core.iter()
+                .map(|harmonic| harmonic.magnitude_db)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            wasm.phase_degrees,
+            core.iter()
+                .map(|harmonic| harmonic.phase_degrees)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    fn assert_fft_parity(core: &TransientFftResult, wasm: &TransientFftSnapshot) {
+        match &core.output {
+            FftOutput::Probe(probe) => {
+                assert_eq!(wasm.source_kind, "probe");
+                assert_eq!(&wasm.source_text, probe);
+                assert_eq!(&wasm.authored_output, probe);
+            }
+            FftOutput::Expression(expression) => {
+                assert_eq!(wasm.source_kind, "expression");
+                assert_eq!(&wasm.source_text, expression);
+                assert_eq!(wasm.authored_output, format!("{{{expression}}}"));
+            }
+        }
+        assert_eq!(wasm.output_name, core.output_name);
+        assert_eq!(wasm.physical_type, core.physical_type);
+        assert_eq!(wasm.start_time, core.start_time);
+        assert_eq!(wasm.stop_time, core.stop_time);
+        assert_eq!(wasm.sample_interval, core.sample_interval);
+        assert_eq!(wasm.point_count, core.point_count);
+        assert_eq!(wasm.accurate_sampling, core.accurate_sampling);
+        assert_eq!(wasm.format, fft_format_name(core.format));
+        assert_eq!(wasm.mode, fft_mode_name(core.mode));
+        assert_eq!(wasm.window, fft_window_name(core.window));
+        assert_eq!(wasm.window_name, core.window_name);
+        assert_eq!(wasm.alpha, core.alpha);
+        assert_eq!(wasm.coherent_gain, core.coherent_gain);
+        assert_eq!(wasm.frequency_resolution, core.frequency_resolution);
+        assert_eq!(wasm.fundamental_bin, core.fundamental_bin);
+        assert_eq!(wasm.minimum_metric_bin, core.minimum_metric_bin);
+        assert_eq!(wasm.maximum_metric_bin, core.maximum_metric_bin);
+        assert_eq!(
+            wasm.bins.indices,
+            core.bins.iter().map(|bin| bin.index).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            wasm.bins.frequencies,
+            core.bins
+                .iter()
+                .map(|bin| bin.frequency)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            wasm.bins.real,
+            core.bins.iter().map(|bin| bin.real).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            wasm.bins.imaginary,
+            core.bins
+                .iter()
+                .map(|bin| bin.imaginary)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            wasm.bins.magnitudes,
+            core.bins
+                .iter()
+                .map(|bin| bin.magnitude)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            wasm.bins.phase_degrees,
+            core.bins
+                .iter()
+                .map(|bin| bin.phase_degrees)
+                .collect::<Vec<_>>()
+        );
+
+        match (&core.metrics, &wasm.metrics) {
+            (Some(core), Some(wasm)) => {
+                assert_eq!(wasm.fundamental_magnitude, core.fundamental_magnitude);
+                assert_eq!(wasm.thd_ratio, core.thd_ratio);
+                assert_eq!(wasm.thd_db, core.thd_db);
+                assert_eq!(wasm.sndr_db, core.sndr_db);
+                assert_eq!(wasm.enob_bits, core.enob_bits);
+                assert_eq!(wasm.snr_db, core.snr_db);
+                assert_eq!(wasm.sfdr_db, core.sfdr_db);
+                assert_eq!(wasm.sfdr_spur_bin, core.sfdr_spur_bin);
+                assert_eq!(wasm.sfdr_spur_frequency, core.sfdr_spur_frequency);
+                assert_harmonic_parity(&core.largest_harmonics, &wasm.largest_harmonics);
+            }
+            (None, None) => {}
+            _ => panic!("browser FFT metrics optionality differs from core"),
+        }
+    }
+
+    fn assert_object_fields(value: &serde_json::Value, expected: &[&str]) {
+        let object = value.as_object().expect("contract value must be an object");
+        let mut actual = object.keys().map(String::as_str).collect::<Vec<_>>();
+        actual.sort_unstable();
+        let mut expected = expected.to_vec();
+        expected.sort_unstable();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn transient_fft_adapter_preserves_core_values_and_source_order() {
+        let (core, wasm) = fft_parity_fixture();
+        assert_eq!(wasm.fft_results.len(), core.fft_results.len());
+        for (core, wasm) in core.fft_results.iter().zip(&wasm.fft_results) {
+            assert_fft_parity(core, wasm);
+        }
+        assert_eq!(wasm.fft_results[0].output_name, "V(OUT)");
+        assert_eq!(wasm.fft_results[1].output_name, "{2*v(out)}");
+    }
+
+    #[test]
+    fn transient_fft_dto_round_trips_and_inventory_covers_every_field() {
+        const TRANSIENT_FIELDS: &[&str] = &["time", "node_names", "voltages", "fft_results"];
+        const FFT_FIELDS: &[&str] = &[
+            "source_kind",
+            "source_text",
+            "authored_output",
+            "output_name",
+            "physical_type",
+            "start_time",
+            "stop_time",
+            "sample_interval",
+            "point_count",
+            "accurate_sampling",
+            "format",
+            "mode",
+            "window",
+            "window_name",
+            "alpha",
+            "coherent_gain",
+            "frequency_resolution",
+            "fundamental_bin",
+            "minimum_metric_bin",
+            "maximum_metric_bin",
+            "bins",
+            "metrics",
+        ];
+        const BIN_FIELDS: &[&str] = &[
+            "indices",
+            "frequencies",
+            "real",
+            "imaginary",
+            "magnitudes",
+            "phase_degrees",
+        ];
+        const METRIC_FIELDS: &[&str] = &[
+            "fundamental_magnitude",
+            "thd_ratio",
+            "thd_db",
+            "sndr_db",
+            "enob_bits",
+            "snr_db",
+            "sfdr_db",
+            "sfdr_spur_bin",
+            "sfdr_spur_frequency",
+            "largest_harmonics",
+        ];
+        const HARMONIC_FIELDS: &[&str] = &[
+            "ranks",
+            "bins",
+            "frequencies",
+            "magnitudes",
+            "magnitudes_db",
+            "phase_degrees",
+        ];
+
+        let (_, snapshot) = fft_parity_fixture();
+        let encoded = serde_json::to_value(&snapshot).expect("serialize transient FFT DTO");
+        assert_object_fields(&encoded, TRANSIENT_FIELDS);
+        let first = &encoded["fft_results"][0];
+        assert_object_fields(first, FFT_FIELDS);
+        assert_object_fields(&first["bins"], BIN_FIELDS);
+        assert_object_fields(&first["metrics"], METRIC_FIELDS);
+        assert_object_fields(&first["metrics"]["largest_harmonics"], HARMONIC_FIELDS);
+
+        let decoded: TransientSnapshot =
+            serde_json::from_value(encoded).expect("deserialize transient FFT DTO");
+        assert_eq!(decoded, snapshot);
+
+        let mut without_metrics = snapshot;
+        without_metrics.fft_results[0].metrics = None;
+        let encoded = serde_json::to_value(without_metrics).expect("serialize absent metrics");
+        assert!(encoded["fft_results"][0]["metrics"].is_null());
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    fn transient_fft_js_contract_uses_typed_numeric_columns_and_explicit_null() {
+        let (_, mut snapshot) = fft_parity_fixture();
+        snapshot.fft_results[1].metrics = None;
+        let serialized = serialize_transient_to_js(&snapshot).expect("serialize browser FFT DTO");
+        let fft_results = js_property(&serialized, "fft_results")
+            .expect("FFT result collection exists")
+            .dyn_into::<js_sys::Array>()
+            .expect("FFT result collection is an array");
+        let first = fft_results.get(0);
+        let bins = js_property(&first, "bins").expect("FFT bin object exists");
+        assert!(
+            js_property(&bins, "indices")
+                .expect("FFT indices exist")
+                .is_instance_of::<js_sys::Uint32Array>()
+        );
+        for field in [
+            "frequencies",
+            "real",
+            "imaginary",
+            "magnitudes",
+            "phase_degrees",
+        ] {
+            assert!(
+                js_property(&bins, field)
+                    .expect("FFT numeric column exists")
+                    .is_instance_of::<js_sys::Float64Array>()
+            );
+        }
+
+        let metrics = js_property(&first, "metrics").expect("FFT metrics property exists");
+        let harmonics =
+            js_property(&metrics, "largest_harmonics").expect("FFT ranked harmonic object exists");
+        assert!(
+            js_property(&harmonics, "ranks")
+                .expect("FFT harmonic ranks exist")
+                .is_instance_of::<js_sys::Uint32Array>()
+        );
+        assert!(
+            js_property(&harmonics, "magnitudes")
+                .expect("FFT harmonic magnitudes exist")
+                .is_instance_of::<js_sys::Float64Array>()
+        );
+
+        let second = fft_results.get(1);
+        assert!(
+            js_property(&second, "metrics")
+                .expect("FFT metrics property exists")
+                .is_null()
+        );
+
+        let decoded: TransientSnapshot = serde_wasm_bindgen::from_value(serialized)
+            .expect("typed-array FFT contract round-trips to its Rust DTO");
+        assert_eq!(decoded, snapshot);
     }
 }

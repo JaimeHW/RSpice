@@ -25,7 +25,22 @@ by throwing an `RSpiceError` with stable structured fields.
 | `summarizeNetlist(source[, options])` | netlist text and optional execution options | `{title, element_count, analysis_count, model_count, subcircuit_count, parameter_count}` |
 | `runDcOperatingPoint(source[, options])` | netlist text and optional execution options | `{node_names, node_voltages, branch_names, branch_currents}` |
 | `runAcAnalysis(source, frequencies[, options])` | netlist text, `Float64Array`/array of Hz values (non-empty, finite, and non-negative), and optional options | array of `{frequency, node_names, branch_names, voltages: {real, imag}, currents: {real, imag}}`, one entry per frequency |
-| `runTransientAnalysis(source, tstop, max_step[, options])` | netlist text, positive finite stop/max-step values, and optional options | `{time, node_names, voltages}` where `voltages` is one `f64` array per node |
+| `runTransientAnalysis(source, tstop, max_step[, options])` | netlist text, positive finite stop/max-step values, and optional options | `{time, node_names, voltages, fft_results}`; `fft_results` preserves source order and is empty when the deck has no active `.FFT` |
+
+Each transient FFT entry exposes the complete authored and resolved identity
+(`source_kind`, `source_text`, `authored_output`, `output_name`,
+`physical_type`), sampling/calibration metadata (`start_time`, `stop_time`,
+`sample_interval`, `point_count`, `accurate_sampling`, `coherent_gain`,
+`frequency_resolution`), mode selection (`format`, `mode`, `window`,
+`window_name`, `alpha`), and metric-bin selection (`fundamental_bin`,
+`minimum_metric_bin`, `maximum_metric_bin`). Its `bins` object contains aligned
+`indices`, `frequencies`, `real`, `imaginary`, `magnitudes`, and
+`phase_degrees` typed arrays. `metrics` is explicitly `null` unless `FFTOUT=1`;
+when present it contains `fundamental_magnitude`, `thd_ratio`, `thd_db`,
+`sndr_db`, `enob_bits`, `snr_db`, `sfdr_db`, the optional
+`sfdr_spur_bin`/`sfdr_spur_frequency`, and aligned typed arrays under
+`largest_harmonics` for `ranks`, `bins`, `frequencies`, `magnitudes`,
+`magnitudes_db`, and `phase_degrees`.
 
 The optional object is additive and existing calls need no changes:
 
@@ -65,7 +80,8 @@ builds as both `cdylib` and `rlib`. Their `*_detailed` variants return
 There are no submodules — `src/lib.rs` contains:
 
 - Snapshot types: `NetlistSummary`, `DcOperatingPoint`, `ComplexSeries`
-  (parallel real/imag vectors), `AcPointSnapshot`, `TransientSnapshot`
+  (parallel real/imag vectors), `AcPointSnapshot`, `TransientSnapshot`, and
+  the complete `TransientFftSnapshot`/bins/metrics/harmonics DTO family
 - Browser-safe resource defaults, typed per-call options, and input validation
 - Structured error conversion with stable machine-readable resource details
 - The `#[wasm_bindgen]` export shims
@@ -115,7 +131,11 @@ wasm threads.
 
 `cargo test -p rspice-wasm` runs native unit and integration tests for browser
 defaults, option decoding, fail-closed field handling, structured error
-contracts, and the four analysis adapters. CI also builds the real
+contracts, and the four analysis adapters. The transient FFT tests compare
+every DTO field and source-order position with `rspice-core`, round-trip the
+serializable records, and ratchet the documented field inventory. A wasm32
+test additionally asserts that bin and ranked-harmonic columns are JavaScript
+typed arrays and absent metrics are `null`. CI also builds the real
 `wasm32-unknown-unknown` artifact. The static browser contract is guarded by
 `tools/ci/test_wasm_playground.py`, which verifies that the canonical
 playground routes engine calls through `engine-worker.js`, that AC controls are
