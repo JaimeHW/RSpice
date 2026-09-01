@@ -275,7 +275,10 @@ use rspice_core::analysis::harmonic_balance::{
 // differential-startup references and conflicts, per-record continuous
 // FAILVALUE verdicts/coordinates, and imported SPEF inductor count. Solver,
 // parser, graph-reduction, and import-construction helpers remain internal.
-const MAX_PUBLIC_ITEMS: usize = 4435;
+// ResultSchemaMismatchError is part of the cross-surface typed failure
+// contract, so its type, constructor, and SimulationError constructor are
+// intentionally public.
+const MAX_PUBLIC_ITEMS: usize = 4438;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

@@ -1254,7 +1254,7 @@ pub fn evaluate_dc_equation_measurements(
     netlist: &Netlist,
     sweep: &[(Value, SimulationResult)],
 ) -> Result<Vec<EquationMeasureTrace>, String> {
-    let Some(series) = DcSweepSeries::from_sweep(sweep) else {
+    let Some(series) = DcSweepSeries::from_sweep(sweep).map_err(|error| error.to_string())? else {
         return Ok(Vec::new());
     };
     let alias_projection =
@@ -2317,7 +2317,7 @@ pub fn evaluate_ac_equation_measurements(
     netlist: &Netlist,
     sweep: &[AcResult],
 ) -> Result<Vec<EquationMeasureTrace>, String> {
-    let Some(series) = AcSweepSeries::from_sweep(sweep) else {
+    let Some(series) = AcSweepSeries::from_sweep(sweep).map_err(|error| error.to_string())? else {
         return Ok(Vec::new());
     };
     let alias_projection =
@@ -2339,7 +2339,8 @@ pub fn evaluate_noise_equation_measurements(
     netlist: &Netlist,
     sweep: &[crate::analysis::NoiseResult],
 ) -> Result<Vec<EquationMeasureTrace>, String> {
-    let Some(series) = NoiseSweepSeries::from_sweep(sweep)? else {
+    let Some(series) = NoiseSweepSeries::from_sweep(sweep).map_err(|error| error.to_string())?
+    else {
         return Ok(Vec::new());
     };
     let alias_projection =
@@ -4236,6 +4237,158 @@ fn lookup_equation_signal_canonical_optional(
         .and_then(|values| values.get(row).copied()))
 }
 
+fn dc_sweep_coordinate(row: usize, value: Value) -> String {
+    format!("sweep point {row} ({value:.16e})")
+}
+
+fn frequency_sweep_coordinate(row: usize, frequency: Value) -> String {
+    format!("frequency point {row} ({frequency:.16e} Hz)")
+}
+
+fn result_schema_mismatch(
+    analysis: &str,
+    coordinate: String,
+    signal_family: &str,
+    expected_names: &[String],
+    actual_names: &[String],
+    expected_value_count: usize,
+    actual_value_count: usize,
+) -> SimulationError {
+    SimulationError::result_schema_mismatch(
+        analysis,
+        Some(coordinate),
+        signal_family,
+        expected_names.to_vec(),
+        actual_names.to_vec(),
+        expected_value_count,
+        actual_value_count,
+    )
+}
+
+fn validate_named_result_schema(
+    analysis: &str,
+    coordinate: String,
+    signal_family: &str,
+    expected_names: &[String],
+    actual_names: &[String],
+    actual_value_count: usize,
+) -> Result<(), SimulationError> {
+    let expected_value_count = expected_names.len();
+    if actual_names == expected_names && actual_value_count == expected_value_count {
+        return Ok(());
+    }
+    Err(result_schema_mismatch(
+        analysis,
+        coordinate,
+        signal_family,
+        expected_names,
+        actual_names,
+        expected_value_count,
+        actual_value_count,
+    ))
+}
+
+fn validate_dc_sweep_schema(
+    sweep: &[(Value, SimulationResult)],
+    first: &SimulationResult,
+    abort: &dyn AbortSignal,
+) -> Result<(), SimulationError> {
+    for (row, (value, result)) in sweep.iter().enumerate() {
+        if row.is_multiple_of(64) && abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        let coordinate = dc_sweep_coordinate(row, *value);
+        validate_named_result_schema(
+            "DC",
+            coordinate.clone(),
+            "node voltages",
+            &first.node_names,
+            &result.node_names,
+            result.node_voltages.len(),
+        )?;
+        validate_named_result_schema(
+            "DC",
+            coordinate,
+            "branch currents",
+            &first.branch_names,
+            &result.branch_names,
+            result.branch_currents.len(),
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_ac_sweep_schema(
+    sweep: &[AcResult],
+    first: &AcResult,
+    abort: &dyn AbortSignal,
+) -> Result<(), SimulationError> {
+    for (row, point) in sweep.iter().enumerate() {
+        if row.is_multiple_of(64) && abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        let coordinate = frequency_sweep_coordinate(row, point.frequency);
+        validate_named_result_schema(
+            "AC",
+            coordinate.clone(),
+            "node voltages",
+            &first.node_names,
+            &point.node_names,
+            point.voltages.len(),
+        )?;
+        validate_named_result_schema(
+            "AC",
+            coordinate,
+            "branch currents",
+            &first.branch_names,
+            &point.branch_names,
+            point.currents.len(),
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_noise_sweep_schema(
+    sweep: &[crate::analysis::NoiseResult],
+    first: &crate::analysis::NoiseResult,
+) -> Result<(), SimulationError> {
+    for (row, point) in sweep.iter().enumerate() {
+        let coordinate = frequency_sweep_coordinate(row, point.frequency);
+        validate_named_result_schema(
+            "NOISE",
+            coordinate.clone(),
+            "node voltages",
+            &first.node_names,
+            &point.node_names,
+            point.voltages.len(),
+        )?;
+        validate_named_result_schema(
+            "NOISE",
+            coordinate,
+            "branch currents",
+            &first.branch_names,
+            &point.branch_names,
+            point.currents.len(),
+        )?;
+    }
+    Ok(())
+}
+
+fn noise_identity_name(identity: &crate::analysis::NoiseSourceIdentity) -> String {
+    match &identity.mechanism {
+        Some(mechanism) => format!("{}:{mechanism}", identity.device),
+        None => identity.device.clone(),
+    }
+}
+
+fn noise_catalog_names(point: &crate::analysis::NoiseResult) -> Vec<String> {
+    point
+        .contribution_catalog
+        .iter()
+        .map(noise_identity_name)
+        .collect()
+}
+
 /// Owned per-signal series extracted from a DC sweep, from which a
 /// measurement signal table can be borrowed.
 pub struct DcSweepSeries {
@@ -4248,15 +4401,13 @@ pub struct DcSweepSeries {
 
 impl DcSweepSeries {
     /// Collect node-voltage and branch-current series across the sweep.
-    /// Returns `None` for an empty sweep.
-    pub fn from_sweep(sweep: &[(Value, SimulationResult)]) -> Option<Self> {
-        match Self::from_sweep_with_abort(sweep, &NoAbort) {
-            Ok(series) => series,
-            Err(SimulationError::Aborted) => {
-                unreachable!("NoAbort cannot cancel DC measurement projection")
-            }
-            Err(error) => unreachable!("DC measurement projection is infallible: {error}"),
-        }
+    /// Returns `Ok(None)` for an empty sweep. Every accepted point must retain
+    /// the same named result schema; malformed or topology-dependent rows fail
+    /// explicitly instead of being padded with plausible zero values.
+    pub fn from_sweep(
+        sweep: &[(Value, SimulationResult)],
+    ) -> Result<Option<Self>, SimulationError> {
+        Self::from_sweep_with_abort(sweep, &NoAbort)
     }
 
     fn from_sweep_with_abort(
@@ -4269,6 +4420,7 @@ impl DcSweepSeries {
         let Some((_, first)) = sweep.first() else {
             return Ok(None);
         };
+        validate_dc_sweep_schema(sweep, first, abort)?;
         let mut axis = Vec::with_capacity(sweep.len());
         for (index, (value, _)) in sweep.iter().enumerate() {
             if index.is_multiple_of(64) && abort.is_aborted() {
@@ -4287,7 +4439,18 @@ impl DcSweepSeries {
                 if row.is_multiple_of(64) && abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
-                series.push(result.node_voltages.get(node).copied().unwrap_or(0.0));
+                let value = result.node_voltages.get(node).copied().ok_or_else(|| {
+                    result_schema_mismatch(
+                        "DC",
+                        dc_sweep_coordinate(row, sweep[row].0),
+                        "node voltages",
+                        &first.node_names,
+                        &result.node_names,
+                        first.node_voltages.len(),
+                        result.node_voltages.len(),
+                    )
+                })?;
+                series.push(value);
             }
             let fallback = node.to_string();
             let raw = first
@@ -4314,7 +4477,18 @@ impl DcSweepSeries {
                 if row.is_multiple_of(64) && abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
-                series.push(result.branch_currents.get(branch).copied().unwrap_or(0.0));
+                let value = result.branch_currents.get(branch).copied().ok_or_else(|| {
+                    result_schema_mismatch(
+                        "DC",
+                        dc_sweep_coordinate(row, sweep[row].0),
+                        "branch currents",
+                        &first.branch_names,
+                        &result.branch_names,
+                        first.branch_currents.len(),
+                        result.branch_currents.len(),
+                    )
+                })?;
+                series.push(value);
             }
             storage.push((name.clone(), 'I', series));
         }
@@ -4504,16 +4678,10 @@ pub struct AcSweepSeries {
 }
 
 impl AcSweepSeries {
-    /// Collect the derived real series across the sweep. Returns `None`
-    /// for an empty sweep.
-    pub fn from_sweep(sweep: &[AcResult]) -> Option<Self> {
-        match Self::from_sweep_with_abort(sweep, &NoAbort) {
-            Ok(series) => series,
-            Err(SimulationError::Aborted) => {
-                unreachable!("NoAbort cannot cancel AC measurement projection")
-            }
-            Err(error) => unreachable!("AC measurement projection is infallible: {error}"),
-        }
+    /// Collect the derived real series across the sweep. Returns `Ok(None)`
+    /// for an empty sweep and a typed schema error for malformed rows.
+    pub fn from_sweep(sweep: &[AcResult]) -> Result<Option<Self>, SimulationError> {
+        Self::from_sweep_with_abort(sweep, &NoAbort)
     }
 
     fn from_sweep_with_abort(
@@ -4526,6 +4694,7 @@ impl AcSweepSeries {
         let Some(first) = sweep.first() else {
             return Ok(None);
         };
+        validate_ac_sweep_schema(sweep, first, abort)?;
         let mut axis = Vec::with_capacity(sweep.len());
         for (index, point) in sweep.iter().enumerate() {
             if index.is_multiple_of(64) && abort.is_aborted() {
@@ -4547,8 +4716,21 @@ impl AcSweepSeries {
             };
             let values = sweep
                 .iter()
-                .map(|point| point.voltages.get(index).copied().unwrap_or_default())
-                .collect::<Vec<_>>();
+                .enumerate()
+                .map(|(row, point)| {
+                    point.voltages.get(index).copied().ok_or_else(|| {
+                        result_schema_mismatch(
+                            "AC",
+                            frequency_sweep_coordinate(row, point.frequency),
+                            "node voltages",
+                            &first.node_names,
+                            &point.node_names,
+                            first.voltages.len(),
+                            point.voltages.len(),
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
             projections.push_with_abort('V', &raw, &values, abort)?;
         }
         for (index, name) in first.branch_names.iter().enumerate() {
@@ -4560,8 +4742,21 @@ impl AcSweepSeries {
             }
             let values: Vec<crate::Complex64> = sweep
                 .iter()
-                .map(|point| point.currents.get(index).copied().unwrap_or_default())
-                .collect();
+                .enumerate()
+                .map(|(row, point)| {
+                    point.currents.get(index).copied().ok_or_else(|| {
+                        result_schema_mismatch(
+                            "AC",
+                            frequency_sweep_coordinate(row, point.frequency),
+                            "branch currents",
+                            &first.branch_names,
+                            &point.branch_names,
+                            first.currents.len(),
+                            point.currents.len(),
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
             projections.push_with_abort('I', name, &values, abort)?;
         }
 
@@ -4609,10 +4804,13 @@ impl NoiseSweepSeries {
     /// Collect spectral-density series across the sweep. Returns `Ok(None)`
     /// for an empty sweep and fails explicitly if the device contribution
     /// catalog changes between accepted frequency points.
-    pub fn from_sweep(sweep: &[crate::analysis::NoiseResult]) -> Result<Option<Self>, String> {
+    pub fn from_sweep(
+        sweep: &[crate::analysis::NoiseResult],
+    ) -> Result<Option<Self>, SimulationError> {
         let Some(first) = sweep.first() else {
             return Ok(None);
         };
+        validate_noise_sweep_schema(sweep, first)?;
         let catalog_key = |identity: &crate::analysis::NoiseSourceIdentity| {
             (
                 identity.device.to_ascii_uppercase(),
@@ -4632,12 +4830,19 @@ impl NoiseSweepSeries {
             catalog
         };
         let expected_catalog = sorted_catalog(first);
-        for point in sweep.iter().skip(1) {
+        for (row, point) in sweep.iter().enumerate().skip(1) {
             let actual_catalog = sorted_catalog(point);
             if actual_catalog != expected_catalog {
-                return Err(format!(
-                    "noise contribution catalog changed at frequency {}",
-                    point.frequency
+                let expected_names = noise_catalog_names(first);
+                let actual_names = noise_catalog_names(point);
+                return Err(result_schema_mismatch(
+                    "NOISE",
+                    frequency_sweep_coordinate(row, point.frequency),
+                    "noise contribution catalog",
+                    &expected_names,
+                    &actual_names,
+                    expected_names.len(),
+                    actual_names.len(),
                 ));
             }
         }
@@ -4654,8 +4859,21 @@ impl NoiseSweepSeries {
                 &raw,
                 sweep
                     .iter()
-                    .map(|point| point.voltages.get(index).copied().unwrap_or_default())
-                    .collect(),
+                    .enumerate()
+                    .map(|(row, point)| {
+                        point.voltages.get(index).copied().ok_or_else(|| {
+                            result_schema_mismatch(
+                                "NOISE",
+                                frequency_sweep_coordinate(row, point.frequency),
+                                "node voltages",
+                                &first.node_names,
+                                &point.node_names,
+                                first.voltages.len(),
+                                point.voltages.len(),
+                            )
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
             );
         }
         for (index, name) in first.branch_names.iter().enumerate() {
@@ -4667,8 +4885,21 @@ impl NoiseSweepSeries {
                 name,
                 sweep
                     .iter()
-                    .map(|point| point.currents.get(index).copied().unwrap_or_default())
-                    .collect(),
+                    .enumerate()
+                    .map(|(row, point)| {
+                        point.currents.get(index).copied().ok_or_else(|| {
+                            result_schema_mismatch(
+                                "NOISE",
+                                frequency_sweep_coordinate(row, point.frequency),
+                                "branch currents",
+                                &first.branch_names,
+                                &point.branch_names,
+                                first.currents.len(),
+                                point.currents.len(),
+                            )
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
             );
         }
         let mut contribution_probes = Vec::new();
@@ -4706,11 +4937,22 @@ impl NoiseSweepSeries {
                 };
                 let values = sweep
                     .iter()
-                    .map(|point| {
-                        point.contribution(&probe).map_err(|error| {
-                            format!(
-                                "failed to resolve noise contribution '{name}' at frequency {}: {error}",
-                                point.frequency
+                    .enumerate()
+                    .map(|(row, point)| {
+                        point.contribution(&probe).map_err(|_| {
+                            let actual_names = point
+                                .contributions
+                                .iter()
+                                .map(|contribution| noise_identity_name(&contribution.identity))
+                                .collect::<Vec<_>>();
+                            result_schema_mismatch(
+                                "NOISE",
+                                frequency_sweep_coordinate(row, point.frequency),
+                                "noise contributions",
+                                &noise_catalog_names(point),
+                                &actual_names,
+                                point.contribution_catalog.len(),
+                                point.contributions.len(),
                             )
                         })
                     })
@@ -4784,7 +5026,10 @@ pub fn evaluate_noise_measurements(
         Err(SimulationError::Aborted) => {
             unreachable!("NoAbort cannot cancel noise measurement projection")
         }
-        Err(error) => unreachable!("noise measurement projection failed unexpectedly: {error}"),
+        Err(error) => {
+            let statements = measurements_for_analysis(netlist, "NOISE");
+            failed_measurements(&statements, &error.to_string())
+        }
     }
 }
 
@@ -4809,9 +5054,7 @@ pub fn evaluate_noise_measurements_with_abort(
                 "noise sweep produced no points",
             ));
         }
-        Err(error) => {
-            return Ok(failed_measurements(&statements, &error));
-        }
+        Err(error) => return Err(error),
     };
     if abort.is_aborted() {
         return Err(SimulationError::Aborted);
@@ -4906,15 +5149,7 @@ pub fn evaluate_noise_continuous_measurements(
                 .collect();
         }
         Err(error) => {
-            return statements
-                .iter()
-                .map(|statement| ContinuousMeasureResult {
-                    name: statement.name.clone(),
-                    records: Vec::new(),
-                    failure: Some(error.clone()),
-                    failure_metadata: None,
-                })
-                .collect();
+            return failed_continuous_measurements(&statements, &error.to_string());
         }
     };
     let alias_projection = match InterfaceNodeAliasProjection::new(
@@ -5771,16 +6006,22 @@ pub fn evaluate_dc_continuous_measurements_with_parameter_contexts(
         .map(normalize_dc_measurement_window)
         .collect::<Vec<_>>();
     let statements = normalized_statements.iter().collect::<Vec<_>>();
-    let Some(series) = DcSweepSeries::from_sweep(sweep) else {
-        return statements
-            .iter()
-            .map(|statement| ContinuousMeasureResult {
-                name: statement.name.clone(),
-                records: Vec::new(),
-                failure: Some("DC sweep produced no points".to_string()),
-                failure_metadata: None,
-            })
-            .collect();
+    let series = match DcSweepSeries::from_sweep(sweep) {
+        Ok(Some(series)) => series,
+        Err(error) => {
+            return failed_continuous_measurements(&statements, &error.to_string());
+        }
+        Ok(None) => {
+            return statements
+                .iter()
+                .map(|statement| ContinuousMeasureResult {
+                    name: statement.name.clone(),
+                    records: Vec::new(),
+                    failure: Some("DC sweep produced no points".to_string()),
+                    failure_metadata: None,
+                })
+                .collect();
+        }
     };
     let alias_projection = match InterfaceNodeAliasProjection::new(
         netlist,
@@ -5848,7 +6089,10 @@ pub fn evaluate_dc_measurements(
         Err(SimulationError::Aborted) => {
             unreachable!("NoAbort cannot cancel DC measurement projection")
         }
-        Err(error) => unreachable!("DC measurement projection failed unexpectedly: {error}"),
+        Err(error) => {
+            let statements = measurements_for_analysis(netlist, "DC");
+            failed_measurements(&statements, &error.to_string())
+        }
     }
 }
 
@@ -5879,7 +6123,10 @@ pub fn evaluate_dc_measurements_with_parameter_contexts(
         Err(SimulationError::Aborted) => {
             unreachable!("NoAbort cannot cancel DC measurement projection")
         }
-        Err(error) => unreachable!("DC measurement projection failed unexpectedly: {error}"),
+        Err(error) => {
+            let statements = measurements_for_analysis(netlist, "DC");
+            failed_measurements(&statements, &error.to_string())
+        }
     }
 }
 
@@ -6108,16 +6355,22 @@ pub fn evaluate_ac_continuous_measurements(
     if statements.is_empty() {
         return Vec::new();
     }
-    let Some(series) = AcSweepSeries::from_sweep(sweep) else {
-        return statements
-            .iter()
-            .map(|statement| ContinuousMeasureResult {
-                name: statement.name.clone(),
-                records: Vec::new(),
-                failure: Some("AC sweep produced no points".to_string()),
-                failure_metadata: None,
-            })
-            .collect();
+    let series = match AcSweepSeries::from_sweep(sweep) {
+        Ok(Some(series)) => series,
+        Err(error) => {
+            return failed_continuous_measurements(&statements, &error.to_string());
+        }
+        Ok(None) => {
+            return statements
+                .iter()
+                .map(|statement| ContinuousMeasureResult {
+                    name: statement.name.clone(),
+                    records: Vec::new(),
+                    failure: Some("AC sweep produced no points".to_string()),
+                    failure_metadata: None,
+                })
+                .collect();
+        }
     };
     let alias_projection = match InterfaceNodeAliasProjection::new(
         netlist,
@@ -6148,7 +6401,10 @@ pub fn evaluate_ac_measurements(netlist: &Netlist, sweep: &[AcResult]) -> Vec<Me
         Err(SimulationError::Aborted) => {
             unreachable!("NoAbort cannot cancel AC measurement projection")
         }
-        Err(error) => unreachable!("AC measurement projection failed unexpectedly: {error}"),
+        Err(error) => {
+            let statements = measurements_for_analysis(netlist, "AC");
+            failed_measurements(&statements, &error.to_string())
+        }
     }
 }
 
@@ -8804,7 +9060,9 @@ mod tests {
             point(10.0, crate::Complex64::new(0.0, -1.0)),
         ];
 
-        let series = AcSweepSeries::from_sweep(&sweep).expect("non-empty sweep");
+        let series = AcSweepSeries::from_sweep(&sweep)
+            .expect("AC result schema is valid")
+            .expect("non-empty sweep");
         assert_eq!(series.axis(), &[1.0, 10.0]);
         let signals = series.signal_map();
         assert_eq!(signals["V(out)"], &[1.0, 1.0][..], "magnitude");
@@ -8813,6 +9071,63 @@ mod tests {
         assert_eq!(signals["VI(out)"], &[0.0, -1.0][..], "imaginary part");
         assert_eq!(signals["VP(out)"][1], -90.0, "phase in degrees");
         assert!(signals.contains_key("FREQUENCY"));
+    }
+
+    #[test]
+    fn ac_series_rejects_missing_branch_values_instead_of_zero_filling() {
+        let point = |frequency, current| AcResult {
+            frequency,
+            node_names: vec!["out".to_string()],
+            branch_names: vec!["V1".to_string()],
+            voltages: vec![crate::Complex64::new(1.0, 0.0)],
+            currents: vec![current],
+        };
+        let first = point(1.0, crate::Complex64::new(2.0, 0.0));
+        let mut malformed = point(2.0, crate::Complex64::new(3.0, 0.0));
+        malformed.currents.clear();
+
+        let error = AcSweepSeries::from_sweep(&[first, malformed])
+            .err()
+            .expect("a missing branch value must be a schema error");
+        assert_eq!(
+            error.descriptor().code,
+            crate::engine::SimulationErrorCode::ResultSchemaMismatch
+        );
+        let SimulationError::ResultSchemaMismatch(detail) = error else {
+            panic!("typed result-schema detail was lost");
+        };
+        assert_eq!(detail.analysis, "AC");
+        assert_eq!(detail.signal_family, "branch currents");
+        assert_eq!(detail.expected_value_count, 1);
+        assert_eq!(detail.actual_value_count, 0);
+        assert_eq!(
+            detail.coordinate.as_deref(),
+            Some("frequency point 1 (2.0000000000000000e0 Hz)")
+        );
+    }
+
+    #[test]
+    fn ac_series_rejects_changed_signal_names_with_the_same_shape() {
+        let first = AcResult {
+            frequency: 1.0,
+            node_names: vec!["out".to_string()],
+            branch_names: Vec::new(),
+            voltages: vec![crate::Complex64::new(1.0, 0.0)],
+            currents: Vec::new(),
+        };
+        let mut changed = first.clone();
+        changed.frequency = 2.0;
+        changed.node_names[0] = "other".to_string();
+
+        let error = AcSweepSeries::from_sweep(&[first, changed])
+            .err()
+            .expect("a renamed signal must be a schema error");
+        let SimulationError::ResultSchemaMismatch(detail) = error else {
+            panic!("typed result-schema detail was lost");
+        };
+        assert_eq!(detail.signal_family, "node voltages");
+        assert_eq!(detail.expected_names, ["out"]);
+        assert_eq!(detail.actual_names, ["other"]);
     }
 
     #[test]
@@ -9570,6 +9885,36 @@ mod tests {
     }
 
     #[test]
+    fn noise_series_rejects_missing_node_values_instead_of_zero_filling() {
+        let first = noise_point(
+            10.0,
+            crate::Complex64::new(1.0, 0.0),
+            crate::Complex64::new(2.0, 0.0),
+        );
+        let mut malformed = noise_point(
+            20.0,
+            crate::Complex64::new(3.0, 0.0),
+            crate::Complex64::new(4.0, 0.0),
+        );
+        malformed.voltages.clear();
+
+        let error = NoiseSweepSeries::from_sweep(&[first, malformed])
+            .err()
+            .expect("a missing node value must be a schema error");
+        assert_eq!(
+            error.descriptor().code,
+            crate::engine::SimulationErrorCode::ResultSchemaMismatch
+        );
+        let SimulationError::ResultSchemaMismatch(detail) = error else {
+            panic!("typed result-schema detail was lost");
+        };
+        assert_eq!(detail.analysis, "NOISE");
+        assert_eq!(detail.signal_family, "node voltages");
+        assert_eq!(detail.expected_value_count, 1);
+        assert_eq!(detail.actual_value_count, 0);
+    }
+
+    #[test]
     fn noise_series_exposes_dno_dni_device_and_mechanism_contributions() {
         let sweep = vec![
             noise_point_with_contributions(10.0, 1.0),
@@ -9657,7 +10002,15 @@ mod tests {
             NoiseSweepSeries::from_sweep(&[noise_point_with_contributions(10.0, 1.0), changed])
                 .err()
                 .expect("catalog mismatch must fail closed");
-        assert!(error.contains("catalog changed at frequency 20"), "{error}");
+        let SimulationError::ResultSchemaMismatch(detail) = error else {
+            panic!("catalog mismatch must retain typed schema detail");
+        };
+        assert_eq!(detail.analysis, "NOISE");
+        assert_eq!(detail.signal_family, "noise contribution catalog");
+        assert_eq!(
+            detail.coordinate.as_deref(),
+            Some("frequency point 1 (2.0000000000000000e1 Hz)")
+        );
     }
 
     #[test]
@@ -9727,11 +10080,60 @@ mod tests {
         point.node_names = vec!["0".to_string(), "out".to_string()];
         let sweep = vec![(0.0, point.clone()), (5.0, point)];
 
-        let series = DcSweepSeries::from_sweep(&sweep).expect("non-empty sweep");
+        let series = DcSweepSeries::from_sweep(&sweep)
+            .expect("DC result schema is valid")
+            .expect("non-empty sweep");
         assert_eq!(series.axis(), &[0.0, 5.0]);
         let signals = series.signal_map();
         assert!(signals.contains_key("TIME"));
         assert_eq!(signals["V(out)"], &[2.5, 2.5][..]);
+    }
+
+    #[test]
+    fn dc_series_rejects_missing_node_values_instead_of_zero_filling() {
+        let mut first = SimulationResult::new(1, 0);
+        first.node_names = vec!["0".to_string(), "out".to_string()];
+        first.node_voltages = vec![0.0, 1.0];
+        let mut malformed = first.clone();
+        malformed.node_voltages.pop();
+
+        let error = DcSweepSeries::from_sweep(&[(0.0, first), (1.0, malformed)])
+            .err()
+            .expect("a missing node value must be a schema error");
+        assert_eq!(
+            error.descriptor().code,
+            crate::engine::SimulationErrorCode::ResultSchemaMismatch
+        );
+        let SimulationError::ResultSchemaMismatch(detail) = error else {
+            panic!("typed result-schema detail was lost");
+        };
+        assert_eq!(detail.analysis, "DC");
+        assert_eq!(detail.signal_family, "node voltages");
+        assert_eq!(detail.expected_value_count, 2);
+        assert_eq!(detail.actual_value_count, 1);
+        assert_eq!(
+            detail.coordinate.as_deref(),
+            Some("sweep point 1 (1.0000000000000000e0)")
+        );
+    }
+
+    #[test]
+    fn dc_series_rejects_changed_branch_schema_with_the_same_shape() {
+        let mut first = SimulationResult::new(0, 1);
+        first.branch_names = vec!["V1".to_string()];
+        first.branch_currents = vec![1.0];
+        let mut changed = first.clone();
+        changed.branch_names[0] = "V2".to_string();
+
+        let error = DcSweepSeries::from_sweep(&[(0.0, first), (1.0, changed)])
+            .err()
+            .expect("a renamed branch must be a schema error");
+        let SimulationError::ResultSchemaMismatch(detail) = error else {
+            panic!("typed result-schema detail was lost");
+        };
+        assert_eq!(detail.signal_family, "branch currents");
+        assert_eq!(detail.expected_names, ["V1"]);
+        assert_eq!(detail.actual_names, ["V2"]);
     }
 
     #[test]

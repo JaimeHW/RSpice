@@ -100,8 +100,8 @@ pub use dc::{
     DcSweepPointResult, bounded_dc_sweep_points, canonical_device_parameter_sweep_source,
 };
 pub use error::{
-    RequestedSignalUnavailableError, SimulationError, SimulationErrorCategory, SimulationErrorCode,
-    SimulationErrorDescriptor,
+    RequestedSignalUnavailableError, ResultSchemaMismatchError, SimulationError,
+    SimulationErrorCategory, SimulationErrorCode, SimulationErrorDescriptor,
 };
 pub use hb::{
     HbAnalysisResult, HbEnvelopeContinuationState, HbEnvelopeStateGuarantee, HbOperatingPoint,

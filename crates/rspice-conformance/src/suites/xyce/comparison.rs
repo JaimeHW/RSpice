@@ -4647,7 +4647,8 @@ impl XyceTestRunner {
         }
 
         let data_columns = Self::reference_ac_data_columns(reference, print, data_column_offset)?;
-        let series = rspice_core::analysis::NoiseSweepSeries::from_sweep(results)?
+        let series = rspice_core::analysis::NoiseSweepSeries::from_sweep(results)
+            .map_err(|error| error.to_string())?
             .ok_or_else(|| "NOISE simulation produced no points".to_string())?;
         let signals = series.signal_map();
         let equation_traces =

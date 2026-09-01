@@ -27,6 +27,9 @@ pub enum SimulationErrorCode {
     /// An authored output symbol is valid, but the selected analysis result
     /// cannot supply it.
     RequestedSignalUnavailable,
+    /// An analysis result's signal names and numeric payload disagree with
+    /// the schema promised by that result type.
+    ResultSchemaMismatch,
     /// An iterative analysis exhausted its convergence strategy.
     ConvergenceError,
     /// The caller cancelled the operation.
@@ -44,6 +47,7 @@ impl SimulationErrorCode {
             Self::SolverError => "solver_error",
             Self::NetlistError => "netlist_error",
             Self::RequestedSignalUnavailable => "requested_signal_unavailable",
+            Self::ResultSchemaMismatch => "result_schema_mismatch",
             Self::ConvergenceError => "convergence_error",
             Self::Aborted => "aborted",
         }
@@ -150,6 +154,69 @@ impl std::fmt::Display for RequestedSignalUnavailableError {
 
 impl std::error::Error for RequestedSignalUnavailableError {}
 
+/// An internally produced analysis result whose signal registry and numeric
+/// payload do not satisfy the result type's public schema.
+///
+/// Names are retained in their original order because ordering is part of the
+/// result contract. The optional coordinate identifies the particular sweep,
+/// frequency, time, or other analysis point at which the mismatch occurred.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResultSchemaMismatchError {
+    pub analysis: String,
+    pub coordinate: Option<String>,
+    pub signal_family: String,
+    pub expected_names: Vec<String>,
+    pub actual_names: Vec<String>,
+    pub expected_value_count: usize,
+    pub actual_value_count: usize,
+}
+
+impl ResultSchemaMismatchError {
+    pub fn new(
+        analysis: impl Into<String>,
+        coordinate: Option<String>,
+        signal_family: impl Into<String>,
+        expected_names: Vec<String>,
+        actual_names: Vec<String>,
+        expected_value_count: usize,
+        actual_value_count: usize,
+    ) -> Self {
+        Self {
+            analysis: analysis.into(),
+            coordinate,
+            signal_family: signal_family.into(),
+            expected_names,
+            actual_names,
+            expected_value_count,
+            actual_value_count,
+        }
+    }
+}
+
+impl std::fmt::Display for ResultSchemaMismatchError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "result schema mismatch for {} analysis",
+            self.analysis
+        )?;
+        if let Some(coordinate) = &self.coordinate {
+            write!(formatter, " at {coordinate}")?;
+        }
+        write!(
+            formatter,
+            " in {}: expected names {:?} with {} value(s), got names {:?} with {} value(s)",
+            self.signal_family,
+            self.expected_names,
+            self.expected_value_count,
+            self.actual_names,
+            self.actual_value_count
+        )
+    }
+}
+
+impl std::error::Error for ResultSchemaMismatchError {}
+
 /// Simulation errors
 #[derive(Debug, Error)]
 pub enum SimulationError {
@@ -174,11 +241,20 @@ pub enum SimulationError {
     #[error(transparent)]
     RequestedSignalUnavailable(#[from] RequestedSignalUnavailableError),
 
+    #[error(transparent)]
+    ResultSchemaMismatch(Box<ResultSchemaMismatchError>),
+
     #[error("Convergence failed after {0} iterations")]
     ConvergenceFailed(usize),
 
     #[error("Simulation aborted by user")]
     Aborted,
+}
+
+impl From<ResultSchemaMismatchError> for SimulationError {
+    fn from(error: ResultSchemaMismatchError) -> Self {
+        Self::ResultSchemaMismatch(Box::new(error))
+    }
 }
 
 impl From<crate::circuit::CircuitError> for SimulationError {
@@ -248,6 +324,11 @@ impl SimulationError {
                 SimulationErrorCategory::Output,
                 false,
             ),
+            Self::ResultSchemaMismatch(_) => (
+                SimulationErrorCode::ResultSchemaMismatch,
+                SimulationErrorCategory::Output,
+                false,
+            ),
             Self::ConvergenceFailed(_) => (
                 SimulationErrorCode::ConvergenceError,
                 SimulationErrorCategory::Convergence,
@@ -285,6 +366,29 @@ impl SimulationError {
         coordinate: Option<String>,
     ) -> Self {
         RequestedSignalUnavailableError::new(signal, analysis, coordinate).into()
+    }
+
+    /// Construct a typed result-schema error while retaining both ordered
+    /// signal registries and their associated payload cardinalities.
+    pub fn result_schema_mismatch(
+        analysis: impl Into<String>,
+        coordinate: Option<String>,
+        signal_family: impl Into<String>,
+        expected_names: Vec<String>,
+        actual_names: Vec<String>,
+        expected_value_count: usize,
+        actual_value_count: usize,
+    ) -> Self {
+        ResultSchemaMismatchError::new(
+            analysis,
+            coordinate,
+            signal_family,
+            expected_names,
+            actual_names,
+            expected_value_count,
+            actual_value_count,
+        )
+        .into()
     }
 }
 
