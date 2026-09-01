@@ -7,17 +7,17 @@
 use super::assignment::NativeAssignment;
 use super::current_dependencies::JitCurrentDependencies as NativeCurrentDependencies;
 use super::expr::{
-    BranchUnknownRuntimeMapping, CanonicalDerivativeAxis, CanonicalStateOperator, EntryKind,
+    BranchUnknownRuntimeMapping, CanonicalDerivativeAxis, CanonicalStateSiteScan, EntryKind,
     NativeIdentifierIndex, NativeLoweringLimits, NativeOp, NativeProgram, PriorCurrentProbe,
-    canonical_state_slots_for_expression, canonical_table_lookup_slots_for_equation,
-    constant_dynamic_variable_slot, native_op_stack_effect,
+    canonical_table_lookup_slots_for_equation, constant_dynamic_variable_slot,
+    native_op_stack_effect, pair_canonical_state_slots,
 };
 use super::model_plan::NativeModelPlan;
 use super::{JitError, JitResult};
 use crate::canonical_ir::{
-    CanonicalIrArtifact, EquationId, ExprId, HirAnalogOperator, HirAssignment, HirExprKind,
-    HirExprRef, HirExpression, HirLaplaceKind, HirLoop, HirModel, HirStatement, HirZiKind,
-    MirEquationKind, MirModel, NodeId, SourceSpanRef,
+    CanonicalIrArtifact, CanonicalStateOperator, EquationId, ExprId, HirAnalogOperator,
+    HirAssignment, HirExprKind, HirExprRef, HirExpression, HirLaplaceKind, HirLoop, HirModel,
+    HirStatement, HirZiKind, MirEquationKind, MirModel, NodeId, SourceSpanRef,
 };
 use crate::codegen::{
     AssignmentStep, BytecodeProgram, ColumnAxis, CompiledModel, CompiledNoiseSource, Instruction,
@@ -3674,22 +3674,6 @@ struct CanonicalExpressionStateSlots {
 }
 
 impl CanonicalExpressionStateSlots {
-    const OPERATORS: [CanonicalStateOperator; 13] = [
-        CanonicalStateOperator::Ddt,
-        CanonicalStateOperator::Idt,
-        CanonicalStateOperator::IdtMod,
-        CanonicalStateOperator::Transition,
-        CanonicalStateOperator::Slew,
-        CanonicalStateOperator::Absdelay,
-        CanonicalStateOperator::Laplace,
-        CanonicalStateOperator::Zi,
-        CanonicalStateOperator::Cross,
-        CanonicalStateOperator::Above,
-        CanonicalStateOperator::Timer,
-        CanonicalStateOperator::Limit,
-        CanonicalStateOperator::TableLookup,
-    ];
-
     fn for_equation(
         model: &CompiledModel,
         mir: &MirModel,
@@ -3713,17 +3697,23 @@ impl CanonicalExpressionStateSlots {
         bytecode_program: &BytecodeProgram,
     ) -> JitResult<Self> {
         if !bytecode_program.instructions.iter().any(|instruction| {
-            Self::OPERATORS
+            CanonicalStateOperator::ALL
                 .iter()
                 .any(|operator| operator.bytecode_slot(instruction).is_some())
         }) {
             return Ok(Self::default());
         }
+        // One traversal, thirteen answers. Every canonical expression owns at
+        // most one state record, so the scan classifies each node once and
+        // files it under the family it belongs to; asking thirteen separate
+        // questions of the same tree was work proportional to the number of
+        // families rather than to the number of sites.
+        let scan = CanonicalStateSiteScan::for_expression(&model.name, mir, expr_id)?;
         let collect = |operator| {
-            canonical_state_slots_for_expression(
+            pair_canonical_state_slots(
                 model.name.clone(),
-                mir,
                 expr_id,
+                &scan,
                 bytecode_program,
                 operator,
             )
