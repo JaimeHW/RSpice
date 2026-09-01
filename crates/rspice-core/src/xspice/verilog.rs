@@ -340,10 +340,7 @@ struct ResolvedPort {
 }
 
 /// Resolve one stimulus port and check that the two agree about its domain.
-fn resolve_port(
-    host: &DigitalHost,
-    port: &DigitalPort,
-) -> Result<ResolvedPort, DigitalRunError> {
+fn resolve_port(host: &DigitalHost, port: &DigitalPort) -> Result<ResolvedPort, DigitalRunError> {
     let signal = host.signal(&port.name)?;
     let real = host.is_real(signal);
     if real != (port.width == 0) {
