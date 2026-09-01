@@ -894,9 +894,13 @@ class CiConfigurationTests(unittest.TestCase):
         workflow = read_text(".github/workflows/python.yml")
         pyproject = read_text("crates/rspice-python/pyproject.toml")
         constraints = read_text("crates/rspice-python/ci-constraints.txt")
+        binding_readme = read_text("crates/rspice-python/README.md")
 
         self.assertIn('requires-python = ">=3.10"', pyproject)
         self.assertIn('requires = ["maturin==1.15.0"]', pyproject)
+        self.assertIn('MATURIN_VERSION: "1.15.0"', workflow)
+        self.assertNotIn("maturin==1.14.1", binding_readme)
+        self.assertIn("maturin==1.15.0", binding_readme)
         self.assertIn(
             'python: ["3.10", "3.11", "3.12", "3.13", "3.14", "3.14t"]',
             workflow,
