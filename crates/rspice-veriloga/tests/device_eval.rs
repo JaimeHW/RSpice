@@ -717,7 +717,7 @@ endmodule
 }
 
 #[test]
-fn try_noise_sources_reports_runtime_array_index_errors() {
+fn grouped_noise_rejects_runtime_array_metadata_before_evaluation() {
     let model = compile(
         r#"
 `include "disciplines.vams"
@@ -736,15 +736,15 @@ endmodule
 "#,
     );
 
-    let mut device = model.device("X1", &[1, 0]);
-    let err = device
-        .try_set_analysis_type(3)
-        .and_then(|()| device.try_noise_sources(&[1.0]).map(|_| ()))
-        .expect_err("checked noise setup/evaluation must report runtime array bounds errors");
+    let err = model
+        .try_device("X1", &[1, 0])
+        .expect_err("runtime-indexed grouped-noise metadata must fail closed");
     let text = err.to_string();
     assert!(
-        text.contains("Array index 5") || text.contains("[1:4]"),
-        "diagnostic should identify the runtime array bounds error, got: {text}"
+        text.contains("canonical grouped-noise CFG lowering failed")
+            && text.contains("run-time array index")
+            && text.contains("array access expression"),
+        "diagnostic should identify every unsupported runtime-indexed metadata operation, got: {text}"
     );
 }
 
