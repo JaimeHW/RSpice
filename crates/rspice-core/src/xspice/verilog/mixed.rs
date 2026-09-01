@@ -485,7 +485,21 @@ impl MixedSignalHost {
 
         let rollback = self.state.clone();
         let prepare = (|| {
-            self.state.digital.make_mut().advance_to(tick)?;
+            // Ask before taking the mutable view. `advance_to` on a tick with
+            // nothing due is a no-op, but taking the view is not: it copies the
+            // whole digital host out of the rollback image that was just
+            // captured. Most timepoints of an LTE-controlled transient have no
+            // digital event due, and this is the predicate that lets them cost
+            // nothing — the same shape as the XSPICE drain's
+            // `has_event_at_or_before`.
+            if self
+                .state
+                .digital
+                .next_tick()
+                .is_some_and(|next| next <= tick)
+            {
+                self.state.digital.make_mut().advance_to(tick)?;
+            }
             let analog = self.state.analog.make_mut();
             analog.try_set_analysis_type(2).map_err(analog_error)?;
             analog
@@ -1395,19 +1409,23 @@ endmodule
     /// write through a handle the image still shares.
     #[test]
     fn mixed_trial_copy_ratchet() {
-        // A ceiling, not a target. Measured at exactly two copies per
-        // timepoint: `begin_trial` unshares the analog cell to set the time,
-        // and unshares the digital cell to advance it, and each of those is
-        // the *first* write after the capture, so it is the one that pays.
-        // Everything after them in the same trial — the advance applied on
-        // acceptance, every A/D publication, every Newton stamp — writes
-        // through a cell the image no longer shares and costs nothing, and the
-        // bridge tables are never written during a trial at all. Reverting to
-        // a whole-state deep copy puts a copy of everything at every
-        // `begin_trial` and another inside every publish, so the count moves
-        // by a multiple rather than by a margin.
+        // A ceiling, not a target. Measured at 41 over these 40 timepoints:
+        // one copy of the analog cell per trial, because `begin_trial` always
+        // writes the device's time and that write is the first after the
+        // capture, plus exactly one copy of the digital host — for the single
+        // trial that had an event due. Everything after the first write in a
+        // trial (the advance applied on acceptance, every A/D publication,
+        // every Newton stamp) goes through a cell the image no longer shares
+        // and costs nothing, and the bridge tables are never written during a
+        // trial at all.
+        //
+        // The digital figure is the one to watch: it is small because
+        // `begin_trial` asks whether anything is due before taking the
+        // mutable view. Drop that predicate and it becomes one per timepoint;
+        // revert the cells to a whole-state deep copy and the count moves by a
+        // multiple rather than by a margin.
         const TIMEPOINTS: u64 = 40;
-        const MAX_COPIES: u64 = 2 * TIMEPOINTS + 4;
+        const MAX_COPIES: u64 = TIMEPOINTS + 8;
 
         let mut host = host();
         settle_cost::reset();
