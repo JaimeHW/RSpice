@@ -9089,10 +9089,7 @@ mod tests {
         let error = AcSweepSeries::from_sweep(&[first, malformed])
             .err()
             .expect("a missing branch value must be a schema error");
-        assert_eq!(
-            error.descriptor().code,
-            crate::engine::SimulationErrorCode::ResultSchemaMismatch
-        );
+        assert_eq!(error.descriptor().code.as_str(), "result_schema_mismatch");
         let SimulationError::ResultSchemaMismatch(detail) = error else {
             panic!("typed result-schema detail was lost");
         };
@@ -9901,10 +9898,7 @@ mod tests {
         let error = NoiseSweepSeries::from_sweep(&[first, malformed])
             .err()
             .expect("a missing node value must be a schema error");
-        assert_eq!(
-            error.descriptor().code,
-            crate::engine::SimulationErrorCode::ResultSchemaMismatch
-        );
+        assert_eq!(error.descriptor().code.as_str(), "result_schema_mismatch");
         let SimulationError::ResultSchemaMismatch(detail) = error else {
             panic!("typed result-schema detail was lost");
         };
@@ -10100,10 +10094,7 @@ mod tests {
         let error = DcSweepSeries::from_sweep(&[(0.0, first), (1.0, malformed)])
             .err()
             .expect("a missing node value must be a schema error");
-        assert_eq!(
-            error.descriptor().code,
-            crate::engine::SimulationErrorCode::ResultSchemaMismatch
-        );
+        assert_eq!(error.descriptor().code.as_str(), "result_schema_mismatch");
         let SimulationError::ResultSchemaMismatch(detail) = error else {
             panic!("typed result-schema detail was lost");
         };
