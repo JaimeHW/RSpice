@@ -14,7 +14,7 @@ const RELEASE_TAG: &str = "Release-7.10.0";
 const GENERATED_MODEL: &str = "vbic13";
 const GENERATED_SOURCE_DIGEST: &str = "aa00e2e747501388";
 const GENERATED_CHECKPOINT_IDENTITY: &str =
-    "1c950f1c0ae955382f550740b2be24f583b4978276cf67107be777a13273559e";
+    "9c528aafec6d9403932892317789a60e6692b93f179edc406dfc62e647f4f5a6";
 
 const OWNER_NAME: &str = "vbic_3T_et_cf.cir";
 const CONTROL_NAME: &str = "vbic_3T_et_cf_m2.cir";
