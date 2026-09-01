@@ -1785,6 +1785,26 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         // caching it at a coarser class would integrate a step the solver did
         // not take.
         | CfgValueKind::Idt { .. }
+        // `idtmod` for the same reason, and one more: the wrap translates the
+        // history onto the candidate's branch, so a cached value from a
+        // different branch would be off by a whole period rather than by a
+        // step.
+        | CfgValueKind::IdtMod { .. }
+        // Every remaining stateful operator is here because its value is a
+        // function of accepted history and of the current time, not only of the
+        // operands the propagation pass can see. The catch-all below would
+        // classify one whose operands happen to be model-scope — `transition(1,
+        // 0, tr, tf)`, `slew(vdd, sr)` with a model parameter — as `Model` and
+        // compute it once per model card, freezing a waveform that is supposed
+        // to be ramping. `transition` and its derivative fell through exactly
+        // that way until this arm existed.
+        | CfgValueKind::Transition { .. }
+        | CfgValueKind::TransitionDerivative { .. }
+        | CfgValueKind::AbsDelay { .. }
+        | CfgValueKind::AbsDelayDerivative { .. }
+        | CfgValueKind::Slew { .. }
+        | CfgValueKind::SlewDerivative { .. }
+        | CfgValueKind::LastCrossing { .. }
         | CfgValueKind::Cross { .. }
         | CfgValueKind::Above { .. }
         | CfgValueKind::Timer { .. }

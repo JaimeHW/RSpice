@@ -164,6 +164,30 @@ pub enum CfgDdxAxis {
     },
 }
 
+/// Bitwise and shift operators on the Verilog-AMS `integer` type.
+///
+/// Not folded into [`CfgBinaryOp`], and not into
+/// [`digital_value::BitwiseOp`] either. `CfgBinaryOp` is arithmetic on the
+/// reals and total; these are defined only where both operands round to a
+/// representable signed 32-bit value, so an infinity or a magnitude past
+/// `i32::MAX` is a runtime error rather than a number — which is a different
+/// signature, not a different case of the same one. The four-state operators
+/// are elementwise over `aval`/`bval` planes of a declared width and answer
+/// `x` where these raise.
+///
+/// The conversion is the one `crate::integer_runtime` defines: round to
+/// nearest with exact halves away from zero, then signed 32-bit two's
+/// complement, with both shifts filling with zero per Verilog-AMS 2023 section
+/// 4.2.11.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum CfgIntegerBitwiseOp {
+    And,
+    Or,
+    Xor,
+    Shl,
+    Shr,
+}
+
 /// What an SSA value is.
 ///
 /// Deliberately without a `Select`: a conditional is a [`CfgTerminator::Branch`]
@@ -229,6 +253,141 @@ pub enum CfgValueKind {
     /// reason [`Self::DdtScale`] exists: a second `idt` would claim a second
     /// slot for a quantity with no history of its own.
     IdtScale,
+    /// `idtmod(x, ic, modulus, offset)` — the time integral of `x` folded into
+    /// the half-open interval `[offset, offset + modulus)`.
+    ///
+    /// A separate kind from [`Self::Idt`] rather than a flag on it. The wrap is
+    /// not post-processing of an integral: the runtime translates the *history*
+    /// onto the wrapped candidate's branch before integrating, which is why the
+    /// VM keeps a distinct older-history lane for it (`state_older_candidate`
+    /// documents exactly that). A consumer that read an `Idt` and applied a
+    /// modulo afterwards would drift by a whole period every time the branch
+    /// changed between steps.
+    ///
+    /// Keyed by the operator, like [`Self::Idt`]: the running total is a
+    /// per-instance slot named by the call.
+    ///
+    /// ## State (W-B inventory)
+    ///
+    /// One integration slot per operator, in the same family `ddt`/`idt` draw
+    /// from: `state_values_prev`, `state_values_older`,
+    /// `state_derivatives_prev` and `state_initialized`, one `f64`/`bool` each,
+    /// keyed by the dense slot the backend assigns to this `operator`.
+    IdtMod {
+        operator: ExprId,
+        input: ValueId,
+        ic: ValueId,
+        modulus: ValueId,
+        offset: ValueId,
+    },
+    /// `absdelay(x, delay, max_delay)` — transport delay.
+    ///
+    /// `max_delay` stays optional rather than defaulting to zero: absent, the
+    /// LRM lets the buffer grow to whatever the delay asks for, and zero is a
+    /// bound, not the absence of one. Collapsing the two would silently truncate
+    /// a model that omitted the argument.
+    ///
+    /// ## State (W-B inventory)
+    ///
+    /// One transport buffer per operator: a `(time, value)` sample deque whose
+    /// length is bounded by `max_delay` where one is given and by the observed
+    /// delay where none is, plus the buffer's configuration and one speculative
+    /// Newton candidate. Accepted samples are checkpointed; the candidate never
+    /// is.
+    AbsDelay {
+        operator: ExprId,
+        input: ValueId,
+        delay: ValueId,
+        max_delay: Option<ValueId>,
+    },
+    /// Exact local Jacobian action of one `absdelay` candidate.
+    ///
+    /// Both the input and the delay are differentiated, because a delay that
+    /// depends on an unknown moves the sample point and the interpolation
+    /// through it: this is the one dynamic operator whose *timing* operand is
+    /// not primal-only.
+    ///
+    /// `order` is carried rather than inferred, mirroring the flat node's
+    /// `derivative_order`. The runtime implements order one; a second
+    /// differentiation produces order two here so that a consumer refuses it
+    /// explicitly instead of emitting a Hessian that is silently zero.
+    ///
+    /// Shares [`Self::AbsDelay`]'s buffer — it reads the same history and
+    /// allocates none of its own.
+    AbsDelayDerivative {
+        operator: ExprId,
+        input: ValueId,
+        input_derivative: ValueId,
+        delay: ValueId,
+        delay_derivative: ValueId,
+        max_delay: Option<ValueId>,
+        order: u8,
+    },
+    /// `slew(x, max_rise, max_fall)` — rate limiting.
+    ///
+    /// Only the rate-limited form reaches this kind. `slew(x)` with both rates
+    /// omitted is an exact stateless passthrough by the LRM and stays lowered as
+    /// its operand, which is what keeps a model that writes it free of a state
+    /// slot it does not need.
+    ///
+    /// `max_rise` is therefore required and `max_fall` is not: the LRM's second
+    /// argument is what makes this a limiter at all, and a falling rate without
+    /// a rising one is not a form the operator has. An omitted `max_fall` is the
+    /// rising rate's magnitude applied downwards.
+    ///
+    /// ## State (W-B inventory)
+    ///
+    /// One filter per operator holding the committed output and its time, plus
+    /// one speculative candidate and its validity flag. Two `f64`s and a `bool`
+    /// per lane; the committed lane is checkpointed, the candidate is not.
+    Slew {
+        operator: ExprId,
+        input: ValueId,
+        max_rise: ValueId,
+        max_fall: Option<ValueId>,
+    },
+    /// Exact local Jacobian action of one `slew` candidate.
+    ///
+    /// The rates are differentiated as well as the input: a rate that depends on
+    /// an unknown moves the clamp, and the runtime's local coefficient is a
+    /// function of all three. An omitted `max_fall` is the negation of
+    /// `max_rise` — materialised by the lowering rather than left implicit, so
+    /// that the node carries the values the runtime multiplies.
+    ///
+    /// Shares [`Self::Slew`]'s filter and allocates none of its own.
+    SlewDerivative {
+        operator: ExprId,
+        input: ValueId,
+        input_derivative: ValueId,
+        max_rise: ValueId,
+        max_rise_derivative: ValueId,
+        max_fall: ValueId,
+        max_fall_derivative: ValueId,
+    },
+    /// `last_crossing(x, direction)` — the interpolated time of the most recent
+    /// zero crossing, or a negative time before there has been one.
+    ///
+    /// `direction` is a value rather than a compile-time edge, matching
+    /// [`Self::Cross`] and the JIT's own lowering: the same runtime encoding
+    /// (`+1` rising, `-1` falling, `0` either) and the same freedom for a model
+    /// to compute it. The operator spelling's edge keyword lowers to the
+    /// corresponding constant, so the two source forms produce one node.
+    ///
+    /// Its value is a *time*, not an event level, which is why this is not a
+    /// case of `Cross`: an omitted answer here is "no crossing yet" and reads
+    /// as a negative time, where an omitted event level reads as false.
+    ///
+    /// ## State (W-B inventory)
+    ///
+    /// One detector per operator, drawn from the same family `cross` uses:
+    /// committed `(value, time)` history, one speculative candidate, a validity
+    /// flag, and a speculative refinement time the stepper reads. The committed
+    /// lane is checkpointed; neither the candidate nor the refinement time is.
+    LastCrossing {
+        operator: ExprId,
+        input: ValueId,
+        direction: ValueId,
+    },
     /// Transactional piecewise-linear transition candidate.
     Transition {
         site: TransitionSiteId,
@@ -316,6 +475,30 @@ pub enum CfgValueKind {
         op: CfgBinaryOp,
         left: ValueId,
         right: ValueId,
+    },
+    /// `&`, `|`, `^`, `<<` or `>>` on two analog `integer` operands.
+    ///
+    /// Its result is [`CfgValueType::Real`] because the analog half carries
+    /// `integer` in an `f64` — that ABI is frozen and the discrete domain's
+    /// [`CfgValueType::Integer`] is a different type for a different half of the
+    /// language. What this node adds is the *operation*: the rounding, the
+    /// 32-bit wrap and the zero fill all happen inside it rather than in
+    /// whatever the consumer's host language does to a double.
+    ///
+    /// Piecewise constant, so its derivative is structurally zero — the same
+    /// answer a comparison gets, and for the same reason.
+    IntegerBitwise {
+        op: CfgIntegerBitwiseOp,
+        left: ValueId,
+        right: ValueId,
+    },
+    /// `~x` on one analog `integer` operand.
+    ///
+    /// Its own kind rather than an [`CfgIntegerBitwiseOp`] with a dummy operand,
+    /// for the reason [`Self::Unary`] is not [`Self::Binary`]: an arity that has
+    /// to be checked is an arity that can be got wrong.
+    IntegerBitwiseNot {
+        input: ValueId,
     },
 
     // ---- Packed derivative lanes -------------------------------------------
@@ -693,6 +876,12 @@ impl CfgValueKind {
             | Self::DdtScale
             | Self::Idt { .. }
             | Self::IdtScale
+            | Self::IdtMod { .. }
+            | Self::AbsDelay { .. }
+            | Self::AbsDelayDerivative { .. }
+            | Self::Slew { .. }
+            | Self::SlewDerivative { .. }
+            | Self::LastCrossing { .. }
             | Self::Cross { .. }
             | Self::Above { .. }
             | Self::Timer { .. }
@@ -703,6 +892,8 @@ impl CfgValueKind {
             | Self::LimitPrevious { .. }
             | Self::Unary { .. }
             | Self::Binary { .. }
+            | Self::IntegerBitwise { .. }
+            | Self::IntegerBitwiseNot { .. }
             | Self::LaneSplat(_)
             | Self::LaneWiden { .. }
             | Self::LaneBinary { .. }
@@ -750,15 +941,76 @@ impl CfgValueKind {
             | Self::Ddx { value: input, .. }
             | Self::LaneWiden { input }
             | Self::LaneExtract { input, .. }
+            | Self::IntegerBitwiseNot { input }
             | Self::LimitPrevious {
                 proposed: input, ..
             } => vec![*input],
+            Self::LastCrossing {
+                input, direction, ..
+            } => vec![*input, *direction],
             Self::SimParam { fallback, .. } => vec![*fallback],
-            Self::Binary { left, right, .. } | Self::LaneBinary { left, right, .. } => {
+            Self::Binary { left, right, .. }
+            | Self::IntegerBitwise { left, right, .. }
+            | Self::LaneBinary { left, right, .. } => {
                 vec![*left, *right]
             }
             Self::LaneScalar { input, scalar, .. } => vec![*input, *scalar],
             Self::Idt { input, ic, .. } => vec![*input, *ic],
+            Self::IdtMod {
+                input,
+                ic,
+                modulus,
+                offset,
+                ..
+            } => vec![*input, *ic, *modulus, *offset],
+            Self::AbsDelay {
+                input,
+                delay,
+                max_delay,
+                ..
+            } => {
+                let mut operands = vec![*input, *delay];
+                operands.extend(*max_delay);
+                operands
+            }
+            Self::AbsDelayDerivative {
+                input,
+                input_derivative,
+                delay,
+                delay_derivative,
+                max_delay,
+                ..
+            } => {
+                let mut operands = vec![*input, *input_derivative, *delay, *delay_derivative];
+                operands.extend(*max_delay);
+                operands
+            }
+            Self::Slew {
+                input,
+                max_rise,
+                max_fall,
+                ..
+            } => {
+                let mut operands = vec![*input, *max_rise];
+                operands.extend(*max_fall);
+                operands
+            }
+            Self::SlewDerivative {
+                input,
+                input_derivative,
+                max_rise,
+                max_rise_derivative,
+                max_fall,
+                max_fall_derivative,
+                ..
+            } => vec![
+                *input,
+                *input_derivative,
+                *max_rise,
+                *max_rise_derivative,
+                *max_fall,
+                *max_fall_derivative,
+            ],
             Self::Transition {
                 input,
                 delay,
@@ -844,11 +1096,20 @@ impl CfgValueKind {
             | Self::Ddx { value: input, .. }
             | Self::LaneWiden { input }
             | Self::LaneExtract { input, .. }
+            | Self::IntegerBitwiseNot { input }
             | Self::LimitPrevious {
                 proposed: input, ..
             } => *input = map(*input),
+            Self::LastCrossing {
+                input, direction, ..
+            } => {
+                *input = map(*input);
+                *direction = map(*direction);
+            }
             Self::SimParam { fallback, .. } => *fallback = map(*fallback),
-            Self::Binary { left, right, .. } | Self::LaneBinary { left, right, .. } => {
+            Self::Binary { left, right, .. }
+            | Self::IntegerBitwise { left, right, .. }
+            | Self::LaneBinary { left, right, .. } => {
                 *left = map(*left);
                 *right = map(*right);
             }
@@ -859,6 +1120,74 @@ impl CfgValueKind {
             Self::Idt { input, ic, .. } => {
                 *input = map(*input);
                 *ic = map(*ic);
+            }
+            Self::IdtMod {
+                input,
+                ic,
+                modulus,
+                offset,
+                ..
+            } => {
+                *input = map(*input);
+                *ic = map(*ic);
+                *modulus = map(*modulus);
+                *offset = map(*offset);
+            }
+            Self::AbsDelay {
+                input,
+                delay,
+                max_delay,
+                ..
+            } => {
+                *input = map(*input);
+                *delay = map(*delay);
+                if let Some(max_delay) = max_delay {
+                    *max_delay = map(*max_delay);
+                }
+            }
+            Self::AbsDelayDerivative {
+                input,
+                input_derivative,
+                delay,
+                delay_derivative,
+                max_delay,
+                ..
+            } => {
+                *input = map(*input);
+                *input_derivative = map(*input_derivative);
+                *delay = map(*delay);
+                *delay_derivative = map(*delay_derivative);
+                if let Some(max_delay) = max_delay {
+                    *max_delay = map(*max_delay);
+                }
+            }
+            Self::Slew {
+                input,
+                max_rise,
+                max_fall,
+                ..
+            } => {
+                *input = map(*input);
+                *max_rise = map(*max_rise);
+                if let Some(max_fall) = max_fall {
+                    *max_fall = map(*max_fall);
+                }
+            }
+            Self::SlewDerivative {
+                input,
+                input_derivative,
+                max_rise,
+                max_rise_derivative,
+                max_fall,
+                max_fall_derivative,
+                ..
+            } => {
+                *input = map(*input);
+                *input_derivative = map(*input_derivative);
+                *max_rise = map(*max_rise);
+                *max_rise_derivative = map(*max_rise_derivative);
+                *max_fall = map(*max_fall);
+                *max_fall_derivative = map(*max_fall_derivative);
             }
             Self::Transition {
                 input,

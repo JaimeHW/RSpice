@@ -150,6 +150,28 @@ pub enum EmitError {
     /// Stateful transition runtime is provided by the VM/native/WASM paths;
     /// direct generated Rust must reject it before emission.
     UnsupportedTransition(ValueId),
+    /// A stateful analog operator whose accepted history this backend does not
+    /// own, named by the operator the source wrote.
+    ///
+    /// The canonical level represents `idtmod`, `absdelay`, `slew` and
+    /// `last_crossing`; running one needs the history queues and the
+    /// speculative-candidate discipline that the VM, the native JIT and the
+    /// WebAssembly JIT keep. `ModelPlan::build` refuses a module carrying one
+    /// before it reaches here, exactly as it does for a transition; this is the
+    /// backstop that makes silently emitting a stateless approximation
+    /// impossible rather than merely unlikely.
+    UnsupportedStatefulOperator {
+        value: ValueId,
+        operator: &'static str,
+    },
+    /// An analog bitwise or shift operator.
+    ///
+    /// Representable at the canonical level and not emittable here: the
+    /// operands are `f64`s carrying `integer`s, and Verilog-AMS defines the
+    /// rounding, the 32-bit wrap and the out-of-range refusal that turn them
+    /// into one. Rust's `as` casts do none of those, so an emitted `&` would be
+    /// a different function wearing the same spelling.
+    UnsupportedIntegerOperator(ValueId),
 }
 
 impl std::fmt::Display for EmitError {
@@ -171,6 +193,14 @@ impl std::fmt::Display for EmitError {
             Self::UnsupportedTransition(value) => write!(
                 f,
                 "{value} is a stateful transition unsupported by the direct generated-Rust runtime"
+            ),
+            Self::UnsupportedStatefulOperator { value, operator } => write!(
+                f,
+                "{value} is a stateful {operator} unsupported by the direct generated-Rust runtime"
+            ),
+            Self::UnsupportedIntegerOperator(value) => write!(
+                f,
+                "{value} is an analog integer operator unsupported by the direct generated-Rust runtime"
             ),
         }
     }
@@ -1688,6 +1718,33 @@ impl Emitter<'_> {
             CfgValueKind::Ddx { .. } => return Err(EmitError::UnresolvedDdx(value)),
             CfgValueKind::Transition { .. } | CfgValueKind::TransitionDerivative { .. } => {
                 return Err(EmitError::UnsupportedTransition(value));
+            }
+            CfgValueKind::IdtMod { .. } => {
+                return Err(EmitError::UnsupportedStatefulOperator {
+                    value,
+                    operator: "idtmod",
+                });
+            }
+            CfgValueKind::AbsDelay { .. } | CfgValueKind::AbsDelayDerivative { .. } => {
+                return Err(EmitError::UnsupportedStatefulOperator {
+                    value,
+                    operator: "absdelay",
+                });
+            }
+            CfgValueKind::Slew { .. } | CfgValueKind::SlewDerivative { .. } => {
+                return Err(EmitError::UnsupportedStatefulOperator {
+                    value,
+                    operator: "slew",
+                });
+            }
+            CfgValueKind::LastCrossing { .. } => {
+                return Err(EmitError::UnsupportedStatefulOperator {
+                    value,
+                    operator: "last_crossing",
+                });
+            }
+            CfgValueKind::IntegerBitwise { .. } | CfgValueKind::IntegerBitwiseNot { .. } => {
+                return Err(EmitError::UnsupportedIntegerOperator(value));
             }
             CfgValueKind::Unary { op, input } => self.unary_expression(*op, *input),
             CfgValueKind::Binary { op, left, right } => self.binary_expression(*op, *left, *right),

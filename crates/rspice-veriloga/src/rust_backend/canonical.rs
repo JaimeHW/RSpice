@@ -436,6 +436,28 @@ fn kernel_region_metrics(
                 write!(out, "idt:{}", operator_indices[operator])
             }
             CfgValueKind::IdtScale => write!(out, "idt-scale"),
+            CfgValueKind::IdtMod { operator, .. } => {
+                write!(out, "idtmod:{}", operator_indices[operator])
+            }
+            CfgValueKind::AbsDelay { operator, .. } => {
+                write!(out, "absdelay:{}", operator_indices[operator])
+            }
+            CfgValueKind::AbsDelayDerivative {
+                operator, order, ..
+            } => write!(
+                out,
+                "absdelay-derivative:{}:{order}",
+                operator_indices[operator]
+            ),
+            CfgValueKind::Slew { operator, .. } => {
+                write!(out, "slew:{}", operator_indices[operator])
+            }
+            CfgValueKind::SlewDerivative { operator, .. } => {
+                write!(out, "slew-derivative:{}", operator_indices[operator])
+            }
+            CfgValueKind::LastCrossing { operator, .. } => {
+                write!(out, "last-crossing:{}", operator_indices[operator])
+            }
             CfgValueKind::Transition { site, .. } => write!(
                 out,
                 "transition:{}:{}:{}:{}",
@@ -474,6 +496,8 @@ fn kernel_region_metrics(
             }
             CfgValueKind::Unary { op, .. } => write!(out, "unary:{op:?}"),
             CfgValueKind::Binary { op, .. } => write!(out, "binary:{op:?}"),
+            CfgValueKind::IntegerBitwise { op, .. } => write!(out, "integer-bitwise:{op:?}"),
+            CfgValueKind::IntegerBitwiseNot { .. } => write!(out, "integer-bitwise-not"),
             CfgValueKind::LaneSplat(value) => {
                 write!(out, "lane-splat:{:016x}", value.to_bits())
             }
@@ -4682,6 +4706,47 @@ fn reject_unsupported_kinds(
                 return Err(unsupported(
                     artifact,
                     "stateful transition in the direct generated-Rust backend; use the VM, native JIT, or WebAssembly JIT runtime so accepted queue and interruption history are preserved",
+                ));
+            }
+            // The canonical level represents these; this backend does not run
+            // them. Each owns accepted history — a wrapped running total, a
+            // transport queue, a rate-limiter state, a crossing detector — that
+            // the VM, the native JIT and the WebAssembly JIT keep and this one
+            // has no place for. Refusing sends the model to a runtime that
+            // does, which is the same answer a transition already gets and for
+            // the same reason.
+            CfgValueKind::IdtMod { .. } => {
+                return Err(unsupported(
+                    artifact,
+                    "stateful idtmod in the direct generated-Rust backend; use the VM, native JIT, or WebAssembly JIT runtime so the wrapped running total is preserved",
+                ));
+            }
+            CfgValueKind::AbsDelay { .. } | CfgValueKind::AbsDelayDerivative { .. } => {
+                return Err(unsupported(
+                    artifact,
+                    "stateful absdelay in the direct generated-Rust backend; use the VM, native JIT, or WebAssembly JIT runtime so the transport history is preserved",
+                ));
+            }
+            CfgValueKind::Slew { .. } | CfgValueKind::SlewDerivative { .. } => {
+                return Err(unsupported(
+                    artifact,
+                    "rate-limited slew in the direct generated-Rust backend; use the VM, native JIT, or WebAssembly JIT runtime so the accepted filter state is preserved",
+                ));
+            }
+            CfgValueKind::LastCrossing { .. } => {
+                return Err(unsupported(
+                    artifact,
+                    "last_crossing in the direct generated-Rust backend; use the VM, native JIT, or WebAssembly JIT runtime so the crossing detector's accepted history is preserved",
+                ));
+            }
+            // Representable and deliberately not emitted here. Verilog-AMS
+            // defines these over signed 32-bit values with a specified rounding
+            // and an out-of-range refusal; Rust's `as` casts implement none of
+            // that, so an emitted `&` would silently be a different function.
+            CfgValueKind::IntegerBitwise { .. } | CfgValueKind::IntegerBitwiseNot { .. } => {
+                return Err(unsupported(
+                    artifact,
+                    "an analog integer bitwise or shift operator in the direct generated-Rust backend; use the VM, native JIT, or WebAssembly JIT runtime, which share the checked integer conversion",
                 ));
             }
             _ => {}
