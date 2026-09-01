@@ -1,0 +1,7 @@
+* Missing device parameter must retain the authored symbol in its error
+V1 in 0 0.6
+D1 in 0 DMODEL
+.MODEL DMODEL D(IS=1e-12 N=1)
+.SAVE @D1[NotAParameter]
+.OP
+.END

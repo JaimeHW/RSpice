@@ -48,6 +48,44 @@ pub(crate) struct ComplexSignal {
     pub(crate) imag: Vec<Value>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DeviceParamRequest {
+    device: String,
+    param: String,
+    authored_symbol: String,
+}
+
+fn requested_device_params(saves: &SaveSet) -> Vec<DeviceParamRequest> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut requests = Vec::new();
+    for signal in &saves.signals {
+        let SaveSignal::DeviceParam { device, param } = signal else {
+            continue;
+        };
+        let identity = (device.to_ascii_lowercase(), param.to_ascii_lowercase());
+        if seen.insert(identity) {
+            requests.push(DeviceParamRequest {
+                device: device.clone(),
+                param: param.clone(),
+                authored_symbol: format!("@{device}[{param}]"),
+            });
+        }
+    }
+    requests
+}
+
+fn requested_signal_unavailable(
+    request: &DeviceParamRequest,
+    analysis: &str,
+    coordinate: Option<String>,
+) -> rspice_core::SimulationError {
+    rspice_core::SimulationError::requested_signal_unavailable(
+        request.authored_symbol.clone(),
+        analysis,
+        coordinate,
+    )
+}
+
 fn unwrap_signal_name(name: &str, prefix: char) -> Option<&str> {
     let trimmed = name.trim();
     let mut chars = trimmed.chars();
@@ -105,6 +143,60 @@ pub(crate) fn apply_save_set(signals: Vec<ScalarSignal>, saves: &SaveSet) -> Vec
         .collect()
 }
 
+fn authored_save_symbol(signal: &SaveSignal) -> Option<String> {
+    match signal {
+        SaveSignal::All => None,
+        SaveSignal::Voltage(node) => Some(format!("V({node})")),
+        SaveSignal::VoltageDiff(positive, negative) => Some(format!("V({positive},{negative})")),
+        SaveSignal::Current(device) => Some(format!("I({device})")),
+        SaveSignal::DeviceParam { device, param } => Some(format!("@{device}[{param}]")),
+        SaveSignal::Raw(raw) => Some(raw.clone()),
+    }
+}
+
+fn single_save_set(signal: &SaveSignal) -> SaveSet {
+    SaveSet {
+        signals: vec![signal.clone()],
+    }
+}
+
+/// Apply scalar output selection and prove that every independently authored
+/// request resolved to at least one data column.
+pub(crate) fn apply_save_set_checked(
+    signals: Vec<ScalarSignal>,
+    saves: &SaveSet,
+    analysis: &str,
+) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
+    if saves.keeps_everything()
+        && saves
+            .signals
+            .iter()
+            .all(|signal| matches!(signal, SaveSignal::All))
+    {
+        return Ok(signals);
+    }
+
+    let expanded = with_differential_voltage_signals(signals, saves);
+    for saved in &saves.signals {
+        let Some(authored) = authored_save_symbol(saved) else {
+            continue;
+        };
+        let selection = single_save_set(saved);
+        if !expanded
+            .iter()
+            .any(|signal| signal_is_selected(signal, &selection))
+        {
+            return Err(rspice_core::SimulationError::requested_signal_unavailable(
+                authored, analysis, None,
+            ));
+        }
+    }
+    Ok(expanded
+        .into_iter()
+        .filter(|signal| signal_is_selected(signal, saves))
+        .collect())
+}
+
 fn signal_is_selected(signal: &ScalarSignal, saves: &SaveSet) -> bool {
     saves.selects(&signal.display_name)
         || (signal.kind == SignalKind::Digital && saves.selects_raw_name(&signal.raw_name))
@@ -122,6 +214,51 @@ pub(crate) fn apply_save_set_complex(
         .into_iter()
         .filter(|signal| complex_signal_is_selected(signal, saves))
         .collect()
+}
+
+/// Restrict a complex result while refusing device probes the result did not
+/// materialize.
+///
+/// AC-family result types currently carry node voltages and branch currents.
+/// Callers must use this checked entry point so an authored
+/// `.SAVE @device[param]` cannot turn into a successful frequency-only file.
+/// The presence check deliberately accepts a future complex device-observable
+/// signal with the exact qualified display name, so extending a core result
+/// registry will automatically enable projection rather than require another
+/// frontend special case.
+pub(crate) fn apply_save_set_complex_checked(
+    signals: Vec<ComplexSignal>,
+    saves: &SaveSet,
+    analysis: &str,
+) -> Result<Vec<ComplexSignal>, rspice_core::SimulationError> {
+    if saves.keeps_everything()
+        && saves
+            .signals
+            .iter()
+            .all(|signal| matches!(signal, SaveSignal::All))
+    {
+        return Ok(signals);
+    }
+
+    let expanded = with_differential_complex_signals(signals, saves);
+    for saved in &saves.signals {
+        let Some(authored) = authored_save_symbol(saved) else {
+            continue;
+        };
+        let selection = single_save_set(saved);
+        if !expanded
+            .iter()
+            .any(|signal| complex_signal_is_selected(signal, &selection))
+        {
+            return Err(rspice_core::SimulationError::requested_signal_unavailable(
+                authored, analysis, None,
+            ));
+        }
+    }
+    Ok(expanded
+        .into_iter()
+        .filter(|signal| complex_signal_is_selected(signal, saves))
+        .collect())
 }
 
 fn complex_signal_is_selected(signal: &ComplexSignal, saves: &SaveSet) -> bool {
@@ -450,6 +587,93 @@ pub(crate) fn dc_operating_point_signals(result: &SimulationResult) -> Vec<Scala
     signals
 }
 
+fn device_param_signal(request: &DeviceParamRequest, values: Vec<Value>) -> ScalarSignal {
+    ScalarSignal {
+        display_name: request.authored_symbol.clone(),
+        raw_name: request.authored_symbol.clone(),
+        kind: SignalKind::Scalar,
+        values,
+    }
+}
+
+fn dc_device_param_value(result: &SimulationResult, request: &DeviceParamRequest) -> Option<Value> {
+    [
+        request.authored_symbol.clone(),
+        format!("{}:{}", request.device, request.param),
+        format!("N({}:{})", request.device, request.param),
+    ]
+    .into_iter()
+    .find_map(|candidate| result.try_dc_observable_named(&candidate))
+}
+
+fn dc_operating_point_device_param_signals(
+    result: &SimulationResult,
+    saves: &SaveSet,
+) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
+    requested_device_params(saves)
+        .into_iter()
+        .map(|request| {
+            let value = dc_device_param_value(result, &request).ok_or_else(|| {
+                requested_signal_unavailable(&request, "DC OP", Some("operating point".to_string()))
+            })?;
+            Ok(device_param_signal(&request, vec![value]))
+        })
+        .collect()
+}
+
+fn dc_sweep_device_param_signals(
+    results: &[(Value, SimulationResult)],
+    saves: &SaveSet,
+) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
+    requested_device_params(saves)
+        .into_iter()
+        .map(|request| {
+            let mut values = Vec::with_capacity(results.len());
+            if results.is_empty() {
+                return Err(requested_signal_unavailable(
+                    &request,
+                    "DC",
+                    Some("empty sweep result".to_string()),
+                ));
+            }
+            for (point_index, (scale, result)) in results.iter().enumerate() {
+                let coordinate = format!(
+                    "sweep point {} ({scale:.16e})",
+                    point_index.saturating_add(1)
+                );
+                let value = dc_device_param_value(result, &request).ok_or_else(|| {
+                    requested_signal_unavailable(&request, "DC", Some(coordinate))
+                })?;
+                values.push(value);
+            }
+            Ok(device_param_signal(&request, values))
+        })
+        .collect()
+}
+
+fn transient_device_param_signals(
+    result: &TransientResult,
+    saves: &SaveSet,
+) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
+    requested_device_params(saves)
+        .into_iter()
+        .map(|request| {
+            let values = result
+                .try_device_op_waveform_named(&request.device, &request.param)
+                .ok_or_else(|| requested_signal_unavailable(&request, "TRAN", None))?;
+            if values.len() != result.time.len() {
+                return Err(rspice_core::SimulationError::Circuit(format!(
+                    "TRAN result schema is malformed for requested signal '{}': {} values for {} time points",
+                    request.authored_symbol,
+                    values.len(),
+                    result.time.len()
+                )));
+            }
+            Ok(device_param_signal(&request, values.to_vec()))
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct SignalIdentity {
     kind: SignalKind,
@@ -528,6 +752,15 @@ pub(crate) fn checked_dc_operating_point_signals(
     result: &SimulationResult,
 ) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
     dc_point_signals(result, "operating point")
+}
+
+pub(crate) fn dc_operating_point_export_signals(
+    result: &SimulationResult,
+    saves: &SaveSet,
+) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
+    let mut signals = checked_dc_operating_point_signals(result)?;
+    signals.extend(dc_operating_point_device_param_signals(result, saves)?);
+    apply_save_set_checked(signals, saves, "DC OP")
 }
 
 fn dc_point_signals(
@@ -696,7 +929,9 @@ pub(crate) fn dc_export_signals(
                 )
             })
     {
-        return Ok(apply_save_set(dc_sweep_signals(results)?, &netlist.saves));
+        let mut signals = dc_sweep_signals(results)?;
+        signals.extend(dc_sweep_device_param_signals(results, &netlist.saves)?);
+        return apply_save_set_checked(signals, &netlist.saves, "DC");
     }
     rspice_core::analysis::evaluate_dc_output_requests_with_abort(netlist, results, limits, abort)
         .map(projected_output_signals)
@@ -720,7 +955,9 @@ pub(crate) fn transient_export_signals(
                 )
             })
     {
-        return Ok(apply_save_set(transient_signals(result), &netlist.saves));
+        let mut signals = transient_signals(result);
+        signals.extend(transient_device_param_signals(result, &netlist.saves)?);
+        return apply_save_set_checked(signals, &netlist.saves, "TRAN");
     }
     rspice_core::analysis::evaluate_tran_output_requests_with_abort(netlist, result, limits, abort)
         .map(projected_output_signals)
@@ -913,6 +1150,91 @@ mod tests {
             .find(|signal| signal.display_name.eq_ignore_ascii_case(name))
             .unwrap_or_else(|| panic!("missing complex signal {name}"));
         (&signal.real, &signal.imag)
+    }
+
+    fn device_save(device: &str, param: &str) -> SaveSet {
+        SaveSet {
+            signals: vec![SaveSignal::DeviceParam {
+                device: device.to_string(),
+                param: param.to_string(),
+            }],
+        }
+    }
+
+    #[test]
+    fn dc_device_save_materializes_authored_qualified_name() {
+        let mut result = dc_result(&[("out", 1.0)], &[]);
+        result.dc_observables.push(("D1:ID".to_string(), 2.5e-3));
+        let saves = device_save("D1", "Id");
+
+        let op =
+            dc_operating_point_export_signals(&result, &saves).expect("DC observable is available");
+        assert_eq!(op.len(), 1);
+        assert_eq!(op[0].display_name, "@D1[Id]");
+        assert_eq!(op[0].values, [2.5e-3]);
+
+        let mut netlist = rspice_core::Netlist::parse(
+            "device projection test\nV1 out 0 1\nR1 out 0 1k\n.DC V1 0 1 1\n.END\n",
+        )
+        .expect("test netlist parses");
+        netlist.saves = saves;
+        let sweep = dc_export_signals(
+            &netlist,
+            &[(0.0, result.clone()), (1.0, result)],
+            rspice_core::ResourceLimits::default(),
+            &rspice_core::NoAbort,
+        )
+        .expect("DC sweep observable is available");
+        assert_eq!(sweep.len(), 1);
+        assert_eq!(sweep[0].display_name, "@D1[Id]");
+        assert_eq!(sweep[0].values, [2.5e-3, 2.5e-3]);
+    }
+
+    #[test]
+    fn checked_complex_save_returns_typed_authored_symbol_error() {
+        let error = apply_save_set_complex_checked(Vec::new(), &device_save("Mdriver", "Id"), "AC")
+            .expect_err("AC result has no device-observable registry");
+        assert_eq!(
+            error.descriptor().code,
+            rspice_core::SimulationErrorCode::RequestedSignalUnavailable
+        );
+        let rspice_core::SimulationError::RequestedSignalUnavailable(detail) = error else {
+            panic!("missing typed unavailable-signal error");
+        };
+        assert_eq!(detail.signal, "@Mdriver[Id]");
+        assert_eq!(detail.analysis, "AC");
+
+        let missing_voltage = SaveSet {
+            signals: vec![SaveSignal::Voltage("MissingNode".to_string())],
+        };
+        let error = apply_save_set_complex_checked(Vec::new(), &missing_voltage, "AC")
+            .expect_err("missing AC voltage cannot become a frequency-only result");
+        let rspice_core::SimulationError::RequestedSignalUnavailable(detail) = error else {
+            panic!("missing typed unavailable-voltage error");
+        };
+        assert_eq!(detail.signal, "V(MissingNode)");
+    }
+
+    #[test]
+    fn checked_scalar_save_validates_each_request_and_supports_wildcards() {
+        let signals = vec![voltage_signal("out".to_string(), vec![1.0])];
+        let wildcard = SaveSet {
+            signals: vec![SaveSignal::Voltage("o*".to_string())],
+        };
+        let projected = apply_save_set_checked(signals.clone(), &wildcard, "DC OP")
+            .expect("wildcard resolves one voltage");
+        assert_eq!(projected.len(), 1);
+        assert_eq!(projected[0].display_name, "V(out)");
+
+        let missing = SaveSet {
+            signals: vec![SaveSignal::Current("AuthoredCase".to_string())],
+        };
+        let error = apply_save_set_checked(signals, &missing, "DC OP")
+            .expect_err("missing current must not produce an empty result");
+        let rspice_core::SimulationError::RequestedSignalUnavailable(detail) = error else {
+            panic!("missing typed unavailable-current error");
+        };
+        assert_eq!(detail.signal, "I(AuthoredCase)");
     }
 
     #[test]

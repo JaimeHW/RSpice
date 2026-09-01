@@ -531,6 +531,23 @@ impl Engine {
             result.push_dc_observable(format!("{}:RBSB", device.name), device.core.model.rbsb);
             result.push_dc_observable(format!("{}:RBPS", device.name), device.core.model.rbps);
         }
+
+        // Publish every value in the canonical device operating-point report
+        // through the same registry used by `.PRINT DC @device[param]` and
+        // frontend `.SAVE` projection.  Keeping this on SimulationResult is
+        // essential for sweeps: each row can own a different accepted device
+        // state, and reconstructing a value later from the source netlist
+        // would silently report the wrong coordinate.  Several device
+        // families already publish selected static values above; avoid a
+        // duplicate registry entry when their canonical spelling overlaps.
+        for entry in circuit.device_op_report().entries {
+            for (parameter, value) in entry.params {
+                let name = format!("{}:{parameter}", entry.name);
+                if result.try_dc_observable_named(&name).is_none() {
+                    result.push_dc_observable(name, value);
+                }
+            }
+        }
         Ok(())
     }
 

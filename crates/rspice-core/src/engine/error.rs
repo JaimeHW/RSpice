@@ -24,6 +24,9 @@ pub enum SimulationErrorCode {
     SolverError,
     /// A netlist-dependent simulation operation failed.
     NetlistError,
+    /// An authored output symbol is valid, but the selected analysis result
+    /// cannot supply it.
+    RequestedSignalUnavailable,
     /// An iterative analysis exhausted its convergence strategy.
     ConvergenceError,
     /// The caller cancelled the operation.
@@ -40,6 +43,7 @@ impl SimulationErrorCode {
             Self::BehavioralReferenceError => "behavioral_reference_error",
             Self::SolverError => "solver_error",
             Self::NetlistError => "netlist_error",
+            Self::RequestedSignalUnavailable => "requested_signal_unavailable",
             Self::ConvergenceError => "convergence_error",
             Self::Aborted => "aborted",
         }
@@ -61,6 +65,7 @@ pub enum SimulationErrorCategory {
     Simulation,
     Solver,
     Netlist,
+    Output,
     Convergence,
     Cancellation,
 }
@@ -74,6 +79,7 @@ impl SimulationErrorCategory {
             Self::Simulation => "simulation",
             Self::Solver => "solver",
             Self::Netlist => "netlist",
+            Self::Output => "output",
             Self::Convergence => "convergence",
             Self::Cancellation => "cancellation",
         }
@@ -101,6 +107,49 @@ pub struct SimulationErrorDescriptor {
     pub iterations: Option<usize>,
     pub resource_limit: Option<ResourceLimitError>,
 }
+
+/// A well-formed authored output symbol that is absent from one analysis
+/// result.
+///
+/// The original spelling is retained verbatim so frontends never have to
+/// reverse a canonicalized registry name to identify the failing request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestedSignalUnavailableError {
+    pub signal: String,
+    pub analysis: String,
+    pub coordinate: Option<String>,
+}
+
+impl RequestedSignalUnavailableError {
+    pub fn new(
+        signal: impl Into<String>,
+        analysis: impl Into<String>,
+        coordinate: Option<String>,
+    ) -> Self {
+        Self {
+            signal: signal.into(),
+            analysis: analysis.into(),
+            coordinate,
+        }
+    }
+}
+
+impl std::fmt::Display for RequestedSignalUnavailableError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "requested signal '{}' is unavailable for {} analysis",
+            self.signal, self.analysis
+        )?;
+        if let Some(coordinate) = &self.coordinate {
+            write!(formatter, " at {coordinate}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for RequestedSignalUnavailableError {}
+
 /// Simulation errors
 #[derive(Debug, Error)]
 pub enum SimulationError {
@@ -121,6 +170,9 @@ pub enum SimulationError {
 
     #[error("Netlist error: {0}")]
     Netlist(String),
+
+    #[error(transparent)]
+    RequestedSignalUnavailable(#[from] RequestedSignalUnavailableError),
 
     #[error("Convergence failed after {0} iterations")]
     ConvergenceFailed(usize),
@@ -191,6 +243,11 @@ impl SimulationError {
                 SimulationErrorCategory::Netlist,
                 false,
             ),
+            Self::RequestedSignalUnavailable(_) => (
+                SimulationErrorCode::RequestedSignalUnavailable,
+                SimulationErrorCategory::Output,
+                false,
+            ),
             Self::ConvergenceFailed(_) => (
                 SimulationErrorCode::ConvergenceError,
                 SimulationErrorCategory::Convergence,
@@ -218,5 +275,45 @@ impl SimulationError {
                 _ => None,
             },
         }
+    }
+
+    /// Construct a typed missing-output error while retaining the authored
+    /// signal spelling and optional analysis coordinate.
+    pub fn requested_signal_unavailable(
+        signal: impl Into<String>,
+        analysis: impl Into<String>,
+        coordinate: Option<String>,
+    ) -> Self {
+        RequestedSignalUnavailableError::new(signal, analysis, coordinate).into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unavailable_signal_descriptor_and_message_preserve_authored_symbol() {
+        let error = SimulationError::requested_signal_unavailable(
+            "@Mdriver[Id]",
+            "DC",
+            Some("sweep point 3 (7.0000000000000000e-1)".to_string()),
+        );
+        assert_eq!(
+            error.to_string(),
+            "requested signal '@Mdriver[Id]' is unavailable for DC analysis at sweep point 3 (7.0000000000000000e-1)"
+        );
+        let descriptor = error.descriptor();
+        assert_eq!(
+            descriptor.code,
+            SimulationErrorCode::RequestedSignalUnavailable
+        );
+        assert_eq!(descriptor.category, SimulationErrorCategory::Output);
+        assert!(!descriptor.retryable);
+        let SimulationError::RequestedSignalUnavailable(detail) = error else {
+            panic!("typed unavailable-signal variant was lost");
+        };
+        assert_eq!(detail.signal, "@Mdriver[Id]");
+        assert_eq!(detail.analysis, "DC");
     }
 }

@@ -1,0 +1,6 @@
+* AC cannot yet materialize device operating-point observables
+V1 in 0 AC 1
+R1 in 0 1k
+.SAVE @R1[r]
+.AC LIN 2 1 2
+.END

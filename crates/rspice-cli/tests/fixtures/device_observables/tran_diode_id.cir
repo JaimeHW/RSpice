@@ -1,0 +1,7 @@
+* TRAN device-observable export
+V1 in 0 0.5
+D1 in 0 DMODEL
+.MODEL DMODEL D(IS=1e-12 N=1)
+.SAVE @D1[Id]
+.TRAN 1u 3u
+.END

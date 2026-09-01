@@ -1031,7 +1031,14 @@ pub(super) fn parse_save_command(
 
         match &stream.peek().kind {
             TokenKind::Ident(raw) => {
-                let mut raw = raw.clone();
+                // TokenKind is canonicalized for case-insensitive grammar,
+                // while lexeme retains the authored spelling needed by
+                // output columns and typed missing-signal diagnostics.
+                let mut raw = if stream.peek().lexeme.is_empty() {
+                    raw.clone()
+                } else {
+                    stream.peek().lexeme.clone()
+                };
                 let upper = raw.to_ascii_uppercase();
 
                 if first_token
@@ -1225,7 +1232,11 @@ pub(super) fn parse_save_command(
                 // @dev[param]: device then bracketed parameter name.
                 let (device, mut end) = match &stream.peek().kind {
                     TokenKind::Ident(s) => {
-                        let device = s.clone();
+                        let device = if stream.peek().lexeme.is_empty() {
+                            s.clone()
+                        } else {
+                            stream.peek().lexeme.clone()
+                        };
                         let end = stream.advance().span.end;
                         (device, end)
                     }
@@ -1239,7 +1250,11 @@ pub(super) fn parse_save_command(
                 let signal = if stream.consume(&TokenKind::LBracket) {
                     let param = match &stream.peek().kind {
                         TokenKind::Ident(s) => {
-                            let param = s.clone();
+                            let param = if stream.peek().lexeme.is_empty() {
+                                s.clone()
+                            } else {
+                                stream.peek().lexeme.clone()
+                            };
                             stream.advance();
                             param
                         }
@@ -1409,13 +1424,22 @@ pub fn parse_save_probe(raw: &str) -> Option<super::SaveSignal> {
     if trimmed.is_empty() {
         return None;
     }
-    let lower = trimmed.to_ascii_lowercase();
-
-    if lower == "all" {
+    if trimmed.eq_ignore_ascii_case("all") {
         return Some(SaveSignal::All);
     }
 
-    if let Some(inner) = lower.strip_prefix("v(").and_then(|s| s.strip_suffix(')')) {
+    let wrapped = |operator: char| {
+        let mut chars = trimmed.chars();
+        let first = chars.next()?;
+        if !first.eq_ignore_ascii_case(&operator) {
+            return None;
+        }
+        let rest = &trimmed[first.len_utf8()..];
+        rest.strip_prefix('(')
+            .and_then(|value| value.strip_suffix(')'))
+    };
+
+    if let Some(inner) = wrapped('v') {
         let inner = inner.trim();
         if inner.is_empty() {
             return None;
@@ -1426,7 +1450,7 @@ pub fn parse_save_probe(raw: &str) -> Option<super::SaveSignal> {
         });
     }
 
-    if let Some(inner) = lower.strip_prefix("i(").and_then(|s| s.strip_suffix(')')) {
+    if let Some(inner) = wrapped('i') {
         let inner = inner.trim();
         if inner.is_empty() {
             return None;
@@ -1434,7 +1458,7 @@ pub fn parse_save_probe(raw: &str) -> Option<super::SaveSignal> {
         return Some(SaveSignal::Current(inner.to_string()));
     }
 
-    if let Some(inner) = lower.strip_prefix("n(").and_then(|s| s.strip_suffix(')')) {
+    if let Some(inner) = wrapped('n') {
         if let Some((device, param)) = inner.split_once(':') {
             let device = device.trim();
             let param = param.trim();
@@ -1448,7 +1472,7 @@ pub fn parse_save_probe(raw: &str) -> Option<super::SaveSignal> {
         return None;
     }
 
-    if let Some(rest) = lower.strip_prefix('@') {
+    if let Some(rest) = trimmed.strip_prefix('@') {
         if let Some((device, param)) = rest
             .split_once('[')
             .and_then(|(d, p)| p.strip_suffix(']').map(|p| (d, p)))
@@ -1461,7 +1485,7 @@ pub fn parse_save_probe(raw: &str) -> Option<super::SaveSignal> {
         return Some(SaveSignal::Raw(rest.trim().to_string()));
     }
 
-    Some(SaveSignal::Raw(lower))
+    Some(SaveSignal::Raw(trimmed.to_string()))
 }
 
 pub(super) fn parse_options_command(

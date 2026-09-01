@@ -9,7 +9,8 @@ use super::RunContext;
 use super::shared::{NodeResolver, map_hdf5_output_error};
 use crate::cli::{CliError, OutputFormat};
 use crate::commands::run_signals::{
-    SignalKind, checked_dc_operating_point_signals, dc_export_signals, transient_export_signals,
+    SignalKind, checked_dc_operating_point_signals, dc_export_signals,
+    dc_operating_point_export_signals, transient_export_signals,
 };
 use crate::hdf5::{Hdf5SimulationData, Hdf5WaveformSection, write_hdf5};
 use std::borrow::Cow;
@@ -42,6 +43,9 @@ pub(super) fn run_dc_op(ctx: &RunContext<'_>) -> Result<(), CliError> {
         Ok((result, op_report)) => {
             let operating_point_signals = checked_dc_operating_point_signals(&result)
                 .map_err(|error| map_output_projection_error(ctx, error, "DC OP"))?;
+            let exported_operating_point_signals =
+                dc_operating_point_export_signals(&result, &ctx.netlist.saves)
+                    .map_err(|error| map_output_projection_error(ctx, error, "DC OP"))?;
             super::shared::ensure_finite_series(
                 ctx.args.allow_nonfinite,
                 "DC OP",
@@ -68,6 +72,13 @@ pub(super) fn run_dc_op(ctx: &RunContext<'_>) -> Result<(), CliError> {
                                 (name, std::slice::from_ref(current))
                             }),
                     ),
+            )?;
+            super::shared::ensure_finite_series(
+                ctx.args.allow_nonfinite,
+                "DC OP output projection",
+                exported_operating_point_signals
+                    .iter()
+                    .map(|signal| (signal.display_name.as_str(), signal.values.as_slice())),
             )?;
 
             if !ctx.quiet {
@@ -97,12 +108,7 @@ pub(super) fn run_dc_op(ctx: &RunContext<'_>) -> Result<(), CliError> {
             }
 
             if let Some(ref output_path) = ctx.output_path_for("op") {
-                write_dc_op_output(
-                    output_path,
-                    &operating_point_signals,
-                    ctx.format,
-                    &ctx.netlist.saves,
-                )?;
+                write_dc_op_output(output_path, &exported_operating_point_signals, ctx.format)?;
                 if !ctx.quiet {
                     println!("Results exported to: {}", output_path.display());
                 }
@@ -193,21 +199,17 @@ fn print_device_op_report(report: &rspice_core::circuit::DeviceOpReport, verbose
 
 fn write_dc_op_output(
     path: &Path,
-    operating_point_signals: &[crate::commands::run_signals::ScalarSignal],
+    signals: &[crate::commands::run_signals::ScalarSignal],
     format: OutputFormat,
-    saves: &rspice_core::netlist::SaveSet,
 ) -> Result<(), CliError> {
     use std::io::Write;
-
-    let signals =
-        crate::commands::run_signals::apply_save_set(operating_point_signals.to_vec(), saves);
 
     if matches!(format, OutputFormat::Hdf5) {
         let mut data = Hdf5SimulationData::new();
         data.title = "DC Operating Point".to_string();
 
         let mut operating_point = Hdf5WaveformSection::new("point", vec![0.0]);
-        for signal in &signals {
+        for signal in signals {
             operating_point.add_typed_signal(
                 signal.display_name.clone(),
                 signal.kind.raw_variable_type(),
@@ -228,7 +230,7 @@ fn write_dc_op_output(
     match format {
         OutputFormat::Json => {
             let mut vars = serde_json::Map::new();
-            for signal in &signals {
+            for signal in signals {
                 vars.insert(
                     signal.display_name.clone(),
                     serde_json::json!(signal.values[0]),
@@ -250,7 +252,7 @@ fn write_dc_op_output(
                 path: path.to_path_buf(),
                 source: e,
             })?;
-            for signal in &signals {
+            for signal in signals {
                 writeln!(
                     file,
                     "{},{:.17e}",
@@ -268,7 +270,7 @@ fn write_dc_op_output(
                 path: path.to_path_buf(),
                 source: e,
             })?;
-            for signal in &signals {
+            for signal in signals {
                 writeln!(file, "{}\t{:.17e}", signal.display_name, signal.values[0]).map_err(
                     |e| CliError::OutputError {
                         path: path.to_path_buf(),
@@ -325,7 +327,7 @@ fn write_dc_op_output(
                 path: path.to_path_buf(),
                 source: e,
             })?;
-            for signal in &signals {
+            for signal in signals {
                 writeln!(file, "\t{:.17e}", signal.values[0]).map_err(|e| {
                     CliError::OutputError {
                         path: path.to_path_buf(),
@@ -395,15 +397,20 @@ pub(super) fn run_dc_sweep(
                 rspice_core::analysis::evaluate_dc_measurements(ctx.netlist, &results),
             );
 
+            // Resolve the authored output contract even when the caller did
+            // not request a file. A valid `.SAVE @device[param]` is part of
+            // deck execution semantics; an unavailable probe must not become
+            // a silent successful run merely because `-o` was omitted.
+            let signals = dc_export_signals(
+                ctx.netlist,
+                &results,
+                ctx.engine.config().resource_limits,
+                &crate::abort::ProcessAbort,
+            )
+            .map_err(|error| map_output_projection_error(ctx, error, "DC"))?;
+
             if let Some(ref output_path) = ctx.output_path_for("dc") {
                 let sweep_vals: Vec<f64> = results.iter().map(|(v, _)| *v).collect();
-                let signals = dc_export_signals(
-                    ctx.netlist,
-                    &results,
-                    ctx.engine.config().resource_limits,
-                    &crate::abort::ProcessAbort,
-                )
-                .map_err(|error| map_output_projection_error(ctx, error, "DC"))?;
                 super::shared::ensure_finite_series(
                     ctx.args.allow_nonfinite,
                     "DC Sweep output projection",
@@ -666,6 +673,16 @@ pub(super) fn run_transient(
                 rspice_core::analysis::evaluate_tran_measurements(ctx.netlist, &result),
             );
 
+            // Perform checked SAVE/PRINT materialization independently of
+            // file publication, matching OP and DC behavior.
+            let mut signals = transient_export_signals(
+                ctx.netlist,
+                &result,
+                ctx.engine.config().resource_limits,
+                &crate::abort::ProcessAbort,
+            )
+            .map_err(|error| map_output_projection_error(ctx, error, "Transient"))?;
+
             if let Some(ref output_path) = ctx.output_path_for("tran") {
                 let output_start = result
                     .time
@@ -682,13 +699,6 @@ pub(super) fn run_transient(
                     )
                     .map_err(|message| CliError::simulation_error_in(message, "Transient"))?;
                 let output_time = projection.times().to_vec();
-                let mut signals = transient_export_signals(
-                    ctx.netlist,
-                    &result,
-                    ctx.engine.config().resource_limits,
-                    &crate::abort::ProcessAbort,
-                )
-                .map_err(|error| map_output_projection_error(ctx, error, "Transient"))?;
                 for signal in &mut signals {
                     signal.values = projection
                         .project(&signal.values)
