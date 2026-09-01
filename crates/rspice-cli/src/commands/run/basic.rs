@@ -393,10 +393,16 @@ pub(super) fn run_dc_sweep(
                 println!("DC Sweep: {} points computed", results.len());
             }
 
-            ctx.record_measurements(
-                "DC",
-                rspice_core::analysis::evaluate_dc_measurements(ctx.netlist, &results),
-            );
+            let measurements = rspice_core::analysis::evaluate_dc_measurements_with_abort(
+                ctx.netlist,
+                &results,
+                &crate::abort::ProcessAbort,
+            )
+            .map_err(|source| CliError::CoreSimulationError {
+                source,
+                analysis: Some("DC measurement projection".to_string()),
+            })?;
+            ctx.record_measurements("DC", measurements);
 
             // Resolve the authored output contract even when the caller did
             // not request a file. A valid `.SAVE @device[param]` is part of
@@ -559,14 +565,18 @@ pub(super) fn run_transient(
         let progress_abort = crate::abort::ProgressAbort::new(&pb);
         let run = if let Some(ref resume_path) = ctx.args.resume {
             let checkpoint_limit = ctx.engine.config().resource_limits.max_external_data_bytes;
-            let checkpoint = rspice_core::engine::TransientCheckpoint::load_with_limit(
+            let checkpoint = rspice_core::engine::TransientCheckpoint::load_with_limit_and_abort(
                 resume_path,
                 checkpoint_limit,
                 checkpoint_limit,
+                &progress_abort,
             )
-            .map_err(|e| CliError::SimulationError {
-                message: format!("cannot resume from {}: {e}", resume_path.display()),
-                analysis: Some("Transient".to_string()),
+            .map_err(|source| CliError::CoreSimulationError {
+                source,
+                analysis: Some(format!(
+                    "Transient checkpoint load ({})",
+                    resume_path.display()
+                )),
             })?;
             if checkpoint.startup_mode() != Some(startup_mode) {
                 return Err(CliError::SimulationError {
@@ -647,13 +657,13 @@ pub(super) fn run_transient(
                 };
                 if let Some(ref checkpoint_path) = ctx.args.checkpoint {
                     checkpoint
-                        .save(checkpoint_path)
-                        .map_err(|e| CliError::SimulationError {
-                            message: format!(
-                                "cannot save checkpoint to {}: {e}",
+                        .save_with_abort(checkpoint_path, &progress_abort)
+                        .map_err(|source| CliError::CoreSimulationError {
+                            source,
+                            analysis: Some(format!(
+                                "Transient checkpoint save ({})",
                                 checkpoint_path.display()
-                            ),
-                            analysis: Some("Transient".to_string()),
+                            )),
                         })?;
                     if !ctx.quiet {
                         println!(
@@ -750,10 +760,16 @@ pub(super) fn run_transient(
                 );
             }
 
-            ctx.record_measurements(
-                "TRAN",
-                rspice_core::analysis::evaluate_tran_measurements(ctx.netlist, &result),
-            );
+            let measurements = rspice_core::analysis::evaluate_tran_measurements_with_abort(
+                ctx.netlist,
+                &result,
+                &crate::abort::ProcessAbort,
+            )
+            .map_err(|source| CliError::CoreSimulationError {
+                source,
+                analysis: Some("Transient measurement projection".to_string()),
+            })?;
+            ctx.record_measurements("TRAN", measurements);
 
             // Perform checked SAVE/PRINT materialization independently of
             // file publication, matching OP and DC behavior.
@@ -925,12 +941,13 @@ fn run_authored_restart(
                 let path = safe_restart_write_path(&parent, &name)?;
                 scheduled
                     .checkpoint
-                    .save_with_encoding(&path, plan.encoding())
-                    .map_err(|error| {
-                        restart_cli_error(format!(
-                            "cannot save .OPTIONS RESTART checkpoint {}: {error}",
+                    .save_with_encoding_and_abort(&path, plan.encoding(), &abort)
+                    .map_err(|source| CliError::CoreSimulationError {
+                        source,
+                        analysis: Some(format!(
+                            ".OPTIONS RESTART checkpoint save ({})",
                             path.display()
-                        ))
+                        )),
                     })?;
                 if !ctx.quiet {
                     println!(
@@ -951,16 +968,18 @@ fn run_authored_restart(
             let parent = restart_namespace_parent(&ctx.args.input)?;
             let path = safe_restart_read_path(&parent, file)?;
             let checkpoint_limit = ctx.engine.config().resource_limits.max_external_data_bytes;
-            let checkpoint = rspice_core::engine::TransientCheckpoint::load_with_limit(
+            let checkpoint = rspice_core::engine::TransientCheckpoint::load_with_limit_and_abort(
                 &path,
                 checkpoint_limit,
                 checkpoint_limit,
+                &abort,
             )
-            .map_err(|error| {
-                restart_cli_error(format!(
-                    "cannot load .OPTIONS RESTART checkpoint {}: {error}",
+            .map_err(|source| CliError::CoreSimulationError {
+                source,
+                analysis: Some(format!(
+                    ".OPTIONS RESTART checkpoint load ({})",
                     path.display()
-                ))
+                )),
             })?;
             ctx.engine
                 .run_tran_restart_resume_with_abort(

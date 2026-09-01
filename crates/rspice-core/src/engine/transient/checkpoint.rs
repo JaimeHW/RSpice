@@ -35,6 +35,7 @@
 //! envelope with declared lengths and a BLAKE3 integrity seal.
 
 use crate::Value;
+use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::circuit::{
     AcceptedNativeNonlinearCheckpointStates, CircuitData, SolutionDependentCapacitorState,
 };
@@ -78,8 +79,36 @@ use std::io::Read;
 use super::damped_status::XyceDampedAcceptedBoundaryCheckpoint;
 use super::{
     AcceptedJunctionTransientHistoryCheckpoint, BjtTransientHistory, DiodeTransientHistory, Engine,
-    TransientStartupMode, VbicPredictorLinearBranchState,
+    SimulationError, TransientStartupMode, VbicPredictorLinearBranchState,
 };
+
+const CHECKPOINT_ABORT_POLL_INTERVAL: usize = 64;
+const CHECKPOINT_IO_CHUNK_BYTES: usize = 64 * 1024;
+
+#[inline]
+fn check_checkpoint_abort(abort: &dyn AbortSignal) -> Result<(), SimulationError> {
+    if abort.is_aborted() {
+        Err(SimulationError::Aborted)
+    } else {
+        Ok(())
+    }
+}
+
+#[inline]
+fn poll_checkpoint_abort(abort: &dyn AbortSignal, index: usize) -> Result<(), SimulationError> {
+    if index.is_multiple_of(CHECKPOINT_ABORT_POLL_INTERVAL) {
+        check_checkpoint_abort(abort)?;
+    }
+    Ok(())
+}
+
+fn checkpoint_operation_result<T>(
+    result: Result<T, String>,
+    abort: &dyn AbortSignal,
+) -> Result<T, SimulationError> {
+    check_checkpoint_abort(abort)?;
+    result.map_err(SimulationError::Circuit)
+}
 
 /// Format version written to and required from checkpoint files.
 ///
@@ -1206,6 +1235,8 @@ fn read_xyce_team_resistance_noise_states(
 struct CheckpointLines<'a> {
     inner: std::str::Lines<'a>,
     remaining: usize,
+    abort: Option<&'a dyn AbortSignal>,
+    consumed: usize,
 }
 
 impl<'a> CheckpointLines<'a> {
@@ -1213,7 +1244,31 @@ impl<'a> CheckpointLines<'a> {
         Self {
             inner: text.lines(),
             remaining: text.lines().count(),
+            abort: None,
+            consumed: 0,
         }
+    }
+
+    fn new_with_abort(text: &'a str, abort: &'a dyn AbortSignal) -> Result<Self, SimulationError> {
+        let mut remaining = 0usize;
+        for (index, chunk) in text
+            .as_bytes()
+            .chunks(CHECKPOINT_IO_CHUNK_BYTES)
+            .enumerate()
+        {
+            poll_checkpoint_abort(abort, index * CHECKPOINT_ABORT_POLL_INTERVAL)?;
+            remaining =
+                remaining.saturating_add(chunk.iter().filter(|byte| **byte == b'\n').count());
+        }
+        if !text.is_empty() && !text.ends_with('\n') {
+            remaining = remaining.saturating_add(1);
+        }
+        Ok(Self {
+            inner: text.lines(),
+            remaining,
+            abort: Some(abort),
+            consumed: 0,
+        })
     }
 
     fn remaining(&self) -> usize {
@@ -1225,8 +1280,14 @@ impl<'a> Iterator for CheckpointLines<'a> {
     type Item = &'a str;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.consumed.is_multiple_of(CHECKPOINT_ABORT_POLL_INTERVAL)
+            && self.abort.is_some_and(AbortSignal::is_aborted)
+        {
+            return None;
+        }
         let line = self.inner.next()?;
         self.remaining -= 1;
+        self.consumed += 1;
         Some(line)
     }
 }
@@ -1351,20 +1412,34 @@ fn collect_checkpoint_fields<'a>(
     Ok(fields)
 }
 
-fn write_value_vector(out: &mut String, name: &str, values: &[Value]) {
+fn write_value_vector(
+    out: &mut String,
+    name: &str,
+    values: &[Value],
+    abort: &dyn AbortSignal,
+) -> Result<(), SimulationError> {
     out.push_str(&format!("{name} {}\n", values.len()));
-    for value in values {
+    for (index, value) in values.iter().enumerate() {
+        poll_checkpoint_abort(abort, index)?;
         out.push_str(&value.to_string());
         out.push('\n');
     }
+    Ok(())
 }
 
-fn write_i64_vector(out: &mut String, name: &str, values: &[i64]) {
+fn write_i64_vector(
+    out: &mut String,
+    name: &str,
+    values: &[i64],
+    abort: &dyn AbortSignal,
+) -> Result<(), SimulationError> {
     out.push_str(&format!("{name} {}\n", values.len()));
-    for value in values {
+    for (index, value) in values.iter().enumerate() {
+        poll_checkpoint_abort(abort, index)?;
         out.push_str(&value.to_string());
         out.push('\n');
     }
+    Ok(())
 }
 
 fn read_value_vector(
@@ -1437,12 +1512,14 @@ fn read_value_section(
 fn write_solution_dependent_capacitor_states(
     out: &mut String,
     states: &[Option<SolutionDependentCapacitorState>],
-) {
+    abort: &dyn AbortSignal,
+) -> Result<(), SimulationError> {
     out.push_str(&format!(
         "solution_dependent_capacitor_states {}\n",
         states.len()
     ));
-    for state in states {
+    for (state_index, state) in states.iter().enumerate() {
+        poll_checkpoint_abort(abort, state_index)?;
         let Some(state) = state else {
             out.push_str("solution_dependent_capacitor_state 0\n");
             continue;
@@ -1455,13 +1532,16 @@ fn write_solution_dependent_capacitor_states(
             state.dcdx_prev.len(),
             state.dqdx_prev.len(),
         ));
-        for (column, derivative) in &state.dcdx_prev {
+        for (index, (column, derivative)) in state.dcdx_prev.iter().enumerate() {
+            poll_checkpoint_abort(abort, index)?;
             out.push_str(&format!("capacitor_dcdx {column} {derivative}\n"));
         }
-        for (column, derivative) in &state.dqdx_prev {
+        for (index, (column, derivative)) in state.dqdx_prev.iter().enumerate() {
+            poll_checkpoint_abort(abort, index)?;
             out.push_str(&format!("capacitor_dqdx {column} {derivative}\n"));
         }
     }
+    Ok(())
 }
 
 fn read_solution_dependent_capacitor_states(
@@ -3713,15 +3793,21 @@ fn parse_lte_reference_tag(tag: &str) -> Result<TransientLteReference, String> {
     }
 }
 
-fn write_runtime_blockers(out: &mut String, blockers: &[String]) {
+fn write_runtime_blockers(
+    out: &mut String,
+    blockers: &[String],
+    abort: &dyn AbortSignal,
+) -> Result<(), SimulationError> {
     out.push_str(&format!(
         "accepted_integration_runtime_blockers {}\n",
         blockers.len()
     ));
-    for blocker in blockers {
+    for (index, blocker) in blockers.iter().enumerate() {
+        poll_checkpoint_abort(abort, index)?;
         out.push_str(blocker);
         out.push('\n');
     }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3749,7 +3835,12 @@ fn write_runtime_policy(
     }
 }
 
-fn write_accepted_integration_runtime(out: &mut String, runtime: &AcceptedIntegrationRuntime) {
+fn write_accepted_integration_runtime(
+    out: &mut String,
+    runtime: &AcceptedIntegrationRuntime,
+    abort: &dyn AbortSignal,
+) -> Result<(), SimulationError> {
+    check_checkpoint_abort(abort)?;
     match runtime {
         AcceptedIntegrationRuntime::UnavailableLegacy => {
             out.push_str("accepted_integration_runtime unavailable-legacy\n");
@@ -3759,7 +3850,7 @@ fn write_accepted_integration_runtime(out: &mut String, runtime: &AcceptedIntegr
                 "accepted_integration_runtime restart-normalized {}\n",
                 runtime.version
             ));
-            write_runtime_blockers(out, &runtime.resume_blockers);
+            write_runtime_blockers(out, &runtime.resume_blockers, abort)?;
             write_runtime_policy(
                 out,
                 runtime.lte_warmup_skips,
@@ -3776,7 +3867,7 @@ fn write_accepted_integration_runtime(out: &mut String, runtime: &AcceptedIntegr
                 "accepted_integration_runtime exact {}\n",
                 runtime.version
             ));
-            write_runtime_blockers(out, &runtime.resume_blockers);
+            write_runtime_blockers(out, &runtime.resume_blockers, abort)?;
             write_runtime_policy(
                 out,
                 runtime.lte_warmup_skips,
@@ -3805,32 +3896,42 @@ fn write_accepted_integration_runtime(out: &mut String, runtime: &AcceptedIntegr
                 lte.xyce_attempt_prev_dt,
                 lte.xyce_attempt_prev_prev_dt,
             ));
-            write_value_vector(out, "accepted_integration_lte_prev", &lte.prev_solution);
+            write_value_vector(
+                out,
+                "accepted_integration_lte_prev",
+                &lte.prev_solution,
+                abort,
+            )?;
             write_value_vector(
                 out,
                 "accepted_integration_lte_prev_prev",
                 &lte.prev_prev_solution,
-            );
+                abort,
+            )?;
             write_value_vector(
                 out,
                 "accepted_integration_lte_prev_prev_prev",
                 &lte.prev_prev_prev_solution,
-            );
+                abort,
+            )?;
             write_value_vector(
                 out,
                 "accepted_integration_lte_accepted_reference",
                 &lte.accepted_reference_solution,
-            );
+                abort,
+            )?;
             write_value_vector(
                 out,
                 "accepted_integration_lte_signal_local",
                 &lte.signal_local_reference,
-            );
+                abort,
+            )?;
             write_value_vector(
                 out,
                 "accepted_integration_lte_order_two_difference",
                 &lte.xyce_order_two_difference,
-            );
+                abort,
+            )?;
             match &runtime.trapgear {
                 None => out.push_str("accepted_integration_trapgear none\n"),
                 Some(trapgear) => {
@@ -3842,6 +3943,7 @@ fn write_accepted_integration_runtime(out: &mut String, runtime: &AcceptedIntegr
                         u8::from(trapgear.at_breakpoint),
                     ));
                     for index in 0..trapgear.prev_values.len() {
+                        poll_checkpoint_abort(abort, index)?;
                         out.push_str(&format!(
                             "accepted_integration_trapgear_lane {} {} {} {}\n",
                             trapgear.prev_values[index],
@@ -3856,7 +3958,7 @@ fn write_accepted_integration_runtime(out: &mut String, runtime: &AcceptedIntegr
                 "accepted_integration_next_trap_order {}\n",
                 runtime.next_trap_order
             ));
-            for (name, values) in [
+            for (index, (name, values)) in [
                 (
                     "accepted_integration_xyce_static",
                     runtime.xyce_static_residual.as_deref(),
@@ -3869,15 +3971,20 @@ fn write_accepted_integration_runtime(out: &mut String, runtime: &AcceptedIntegr
                     "accepted_integration_direct_static",
                     runtime.direct_dae_static_residual.as_deref(),
                 ),
-            ] {
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                poll_checkpoint_abort(abort, index)?;
                 out.push_str(&format!(
                     "{name}_available {}\n",
                     u8::from(values.is_some())
                 ));
-                write_value_vector(out, name, values.unwrap_or(&[]));
+                write_value_vector(out, name, values.unwrap_or(&[]), abort)?;
             }
         }
     }
+    Ok(())
 }
 
 fn read_fixed_runtime_values(
@@ -6415,6 +6522,16 @@ impl TransientCheckpoint {
 
     /// Serialize to the versioned text format.
     pub fn to_text(&self) -> String {
+        match self.to_text_with_abort(&NoAbort) {
+            Ok(text) => text,
+            Err(SimulationError::Aborted) => unreachable!("NoAbort cannot cancel serialization"),
+            Err(error) => unreachable!("checkpoint text serialization is infallible: {error}"),
+        }
+    }
+
+    /// Serialize to the versioned text format with cooperative cancellation.
+    pub fn to_text_with_abort(&self, abort: &dyn AbortSignal) -> Result<String, SimulationError> {
+        check_checkpoint_abort(abort)?;
         let mut out = String::new();
         out.push_str(&format!("RSPICE-CHECKPOINT {FORMAT_VERSION}\n"));
         out.push_str(&format!("fingerprint {:#018x}\n", self.netlist_fingerprint));
@@ -6467,7 +6584,8 @@ impl TransientCheckpoint {
             "pending_tline_arrivals {}",
             self.pending_tline_arrivals.len()
         ));
-        for arrival in &self.pending_tline_arrivals {
+        for (index, arrival) in self.pending_tline_arrivals.iter().enumerate() {
+            poll_checkpoint_abort(abort, index)?;
             out.push(' ');
             out.push_str(&arrival.to_string());
         }
@@ -6477,17 +6595,20 @@ impl TransientCheckpoint {
             self.dynamic_tline_breakpoints_added
         ));
 
-        let section = |out: &mut String, name: &str, rows: &[&[Value]]| {
-            let len = rows.first().map_or(0, |r| r.len());
-            out.push_str(&format!("{name} {len}\n"));
-            for i in 0..len {
-                let line: Vec<String> = rows.iter().map(|r| r[i].to_string()).collect();
-                out.push_str(&line.join(" "));
-                out.push('\n');
-            }
-        };
+        let section =
+            |out: &mut String, name: &str, rows: &[&[Value]]| -> Result<(), SimulationError> {
+                let len = rows.first().map_or(0, |r| r.len());
+                out.push_str(&format!("{name} {len}\n"));
+                for i in 0..len {
+                    poll_checkpoint_abort(abort, i)?;
+                    let line: Vec<String> = rows.iter().map(|r| r[i].to_string()).collect();
+                    out.push_str(&line.join(" "));
+                    out.push('\n');
+                }
+                Ok(())
+            };
 
-        section(&mut out, "solution", &[&self.solution]);
+        section(&mut out, "solution", &[&self.solution])?;
         let lte_mode = match self.lte_reference_mode {
             None => "none".to_string(),
             Some(TransientLteReference::PredictorLocal) => "predictor-local".to_string(),
@@ -6501,13 +6622,15 @@ impl TransientCheckpoint {
             &mut out,
             "lte_signal_global",
             &[self.lte_signal_global_reference],
-        );
+            abort,
+        )?;
         write_value_vector(
             &mut out,
             "lte_signal_local",
             &self.lte_signal_local_reference,
-        );
-        write_accepted_integration_runtime(&mut out, &self.accepted_integration_runtime);
+            abort,
+        )?;
+        write_accepted_integration_runtime(&mut out, &self.accepted_integration_runtime, abort)?;
         section(
             &mut out,
             "capacitors",
@@ -6518,7 +6641,7 @@ impl TransientCheckpoint {
                 &self.cap_i_prev,
                 &self.cap_i_eq,
             ],
-        );
+        )?;
         out.push_str(&format!(
             "solution_dependent_capacitor_state_available {}\n",
             u8::from(self.solution_dependent_capacitor_state_available)
@@ -6527,11 +6650,13 @@ impl TransientCheckpoint {
             &mut out,
             "cap_effective_capacitances",
             &self.cap_effective_capacitances,
-        );
+            abort,
+        )?;
         write_solution_dependent_capacitor_states(
             &mut out,
             &self.solution_dependent_capacitor_states,
-        );
+            abort,
+        )?;
         out.push_str(&format!(
             "inductor_flux_history_available {}\n",
             u8::from(self.inductor_flux_history_available)
@@ -6546,24 +6671,26 @@ impl TransientCheckpoint {
                     &self.ind_i_prev_prev_prev,
                     &self.ind_v_prev,
                 ],
-            );
+            )?;
         } else {
             section(
                 &mut out,
                 "inductors",
                 &[&self.ind_i_prev, &self.ind_i_prev_prev, &self.ind_v_prev],
-            );
+            )?;
         }
         write_value_vector(
             &mut out,
             "xyce_memristor_resistance_stores",
             &self.xyce_memristor_resistance_stores,
-        );
+            abort,
+        )?;
         out.push_str(&format!(
             "xyce_team_resistance_noise_states {}\n",
             self.xyce_team_resistance_noise_states.len()
         ));
-        for state in &self.xyce_team_resistance_noise_states {
+        for (index, state) in self.xyce_team_resistance_noise_states.iter().enumerate() {
+            poll_checkpoint_abort(abort, index)?;
             out.push_str(&format!(
                 "xyce_team_resistance_noise_state {} {} {:016x} {} {:016x} {} {} {} {} {}\n",
                 state.version,
@@ -6582,7 +6709,8 @@ impl TransientCheckpoint {
             "generic_switch_stores {}\n",
             self.generic_switch_stores.len()
         ));
-        for store in &self.generic_switch_stores {
+        for (index, store) in self.generic_switch_stores.iter().enumerate() {
+            poll_checkpoint_abort(abort, index)?;
             out.push_str(&format!(
                 "{} {} {} {}\n",
                 store[0], store[1], store[2], store[3]
@@ -6596,7 +6724,13 @@ impl TransientCheckpoint {
             "accepted_nonlinear_blockers {}\n",
             self.accepted_nonlinear_states.resume_blockers.len()
         ));
-        for blocker in &self.accepted_nonlinear_states.resume_blockers {
+        for (index, blocker) in self
+            .accepted_nonlinear_states
+            .resume_blockers
+            .iter()
+            .enumerate()
+        {
+            poll_checkpoint_abort(abort, index)?;
             out.push_str(blocker);
             out.push('\n');
         }
@@ -6604,7 +6738,8 @@ impl TransientCheckpoint {
             "accepted_diode_nonlinear_states {}\n",
             self.accepted_nonlinear_states.diodes.len()
         ));
-        for checkpoint in &self.accepted_nonlinear_states.diodes {
+        for (index, checkpoint) in self.accepted_nonlinear_states.diodes.iter().enumerate() {
+            poll_checkpoint_abort(abort, index)?;
             let state = checkpoint.state;
             out.push_str(&format!(
                 "accepted_diode_nonlinear_state {} {} {} {} {} {} {} {} {} {} {} {} {} {}\n",
@@ -6628,7 +6763,8 @@ impl TransientCheckpoint {
             "accepted_bjt_nonlinear_states {}\n",
             self.accepted_nonlinear_states.bjts.len()
         ));
-        for checkpoint in &self.accepted_nonlinear_states.bjts {
+        for (index, checkpoint) in self.accepted_nonlinear_states.bjts.iter().enumerate() {
+            poll_checkpoint_abort(abort, index)?;
             out.push_str(&format!(
                 "accepted_bjt_nonlinear_state {} {} {} {} {} {}\n",
                 checkpoint.instance_name,
@@ -6642,7 +6778,8 @@ impl TransientCheckpoint {
                 &mut out,
                 "accepted_bjt_state_values",
                 &checkpoint.state_values,
-            );
+                abort,
+            )?;
         }
         let junction = &self.accepted_junction_history;
         out.push_str(&format!(
@@ -6653,7 +6790,8 @@ impl TransientCheckpoint {
             "accepted_junction_history_blockers {}\n",
             junction.resume_blockers.len()
         ));
-        for blocker in &junction.resume_blockers {
+        for (index, blocker) in junction.resume_blockers.iter().enumerate() {
+            poll_checkpoint_abort(abort, index)?;
             out.push_str(blocker);
             out.push('\n');
         }
@@ -6668,6 +6806,7 @@ impl TransientCheckpoint {
             }
         };
         for index in 0..junction.bjt_names.len() {
+            poll_checkpoint_abort(abort, index)?;
             let history = &junction.bjt_history;
             out.push_str("accepted_bjt_transient_history ");
             out.push_str(&junction.bjt_names[index]);
@@ -6749,6 +6888,7 @@ impl TransientCheckpoint {
             junction.diode_names.len()
         ));
         for index in 0..junction.diode_names.len() {
+            poll_checkpoint_abort(abort, index)?;
             let history = &junction.diode_history;
             out.push_str("accepted_diode_transient_history ");
             out.push_str(&junction.diode_names[index]);
@@ -6779,12 +6919,14 @@ impl TransientCheckpoint {
             "tline_blockers {}\n",
             self.tline_resume_blockers.len()
         ));
-        for blocker in &self.tline_resume_blockers {
+        for (index, blocker) in self.tline_resume_blockers.iter().enumerate() {
+            poll_checkpoint_abort(abort, index)?;
             out.push_str(blocker);
             out.push('\n');
         }
         out.push_str(&format!("tline_states {}\n", self.tline_states.len()));
-        for state in &self.tline_states {
+        for (state_index, state) in self.tline_states.iter().enumerate() {
+            poll_checkpoint_abort(abort, state_index)?;
             out.push_str(&format!(
                 "tline_state {} {} {} {} {} {} {} {} {} {}\n",
                 state.name,
@@ -6804,19 +6946,22 @@ impl TransientCheckpoint {
                     sample[0], sample[1], sample[2], sample[3], sample[4]
                 ));
             }
-            for sample in &state.state_history {
+            for (index, sample) in state.state_history.iter().enumerate() {
+                poll_checkpoint_abort(abort, index)?;
                 out.push_str(&format!(
                     "tline_sample {} {} {} {} {}\n",
                     sample[0], sample[1], sample[2], sample[3], sample[4]
                 ));
             }
-            for sample in &state.forward_history {
+            for (index, sample) in state.forward_history.iter().enumerate() {
+                poll_checkpoint_abort(abort, index)?;
                 out.push_str(&format!(
                     "tline_forward {} {} {}\n",
                     sample[0], sample[1], sample[2]
                 ));
             }
-            for sample in &state.backward_history {
+            for (index, sample) in state.backward_history.iter().enumerate() {
+                poll_checkpoint_abort(abort, index)?;
                 out.push_str(&format!(
                     "tline_backward {} {} {}\n",
                     sample[0], sample[1], sample[2]
@@ -6824,7 +6969,8 @@ impl TransientCheckpoint {
             }
         }
         out.push_str(&format!("xspice {}\n", self.xspice_instances.len()));
-        for instance in &self.xspice_instances {
+        for (index, instance) in self.xspice_instances.iter().enumerate() {
+            poll_checkpoint_abort(abort, index)?;
             out.push_str(instance);
             out.push('\n');
         }
@@ -6832,7 +6978,8 @@ impl TransientCheckpoint {
             "xspice_blockers {}\n",
             self.xspice_resume_blockers.len()
         ));
-        for blocker in &self.xspice_resume_blockers {
+        for (index, blocker) in self.xspice_resume_blockers.iter().enumerate() {
+            poll_checkpoint_abort(abort, index)?;
             out.push_str(blocker);
             out.push('\n');
         }
@@ -6840,7 +6987,8 @@ impl TransientCheckpoint {
             "xspice_states {}\n",
             self.xspice_instance_states.len()
         ));
-        for instance in &self.xspice_instance_states {
+        for (index, instance) in self.xspice_instance_states.iter().enumerate() {
+            poll_checkpoint_abort(abort, index)?;
             out.push_str(&format!(
                 "xspice_state {} {}\n",
                 instance.name, instance.model
@@ -6849,10 +6997,11 @@ impl TransientCheckpoint {
                 &mut out,
                 "context_time",
                 &[instance.context.time, instance.context.time_prev],
-            );
-            write_value_vector(&mut out, "state", &instance.context.state);
-            write_value_vector(&mut out, "state_prev", &instance.context.state_prev);
-            write_i64_vector(&mut out, "int_state", &instance.context.int_state);
+                abort,
+            )?;
+            write_value_vector(&mut out, "state", &instance.context.state, abort)?;
+            write_value_vector(&mut out, "state_prev", &instance.context.state_prev, abort)?;
+            write_i64_vector(&mut out, "int_state", &instance.context.int_state, abort)?;
         }
         out.push_str(&format!(
             "generated_veriloga_state_available {}\n",
@@ -6862,7 +7011,9 @@ impl TransientCheckpoint {
             "generated_veriloga_states {}\n",
             self.generated_veriloga_instance_states.len()
         ));
-        for instance in &self.generated_veriloga_instance_states {
+        for (instance_index, instance) in self.generated_veriloga_instance_states.iter().enumerate()
+        {
+            poll_checkpoint_abort(abort, instance_index)?;
             out.push_str(&format!(
                 "generated_veriloga_state {} {} {} {} {} {} {}\n",
                 instance.instance_name,
@@ -6876,6 +7027,7 @@ impl TransientCheckpoint {
             let state = &instance.state;
             out.push_str(&format!("ddt_state {}\n", state.ddt_previous.len()));
             for index in 0..state.ddt_previous.len() {
+                poll_checkpoint_abort(abort, index)?;
                 out.push_str(&format!(
                     "{} {} {} {}\n",
                     state.ddt_previous[index],
@@ -6886,6 +7038,7 @@ impl TransientCheckpoint {
             }
             out.push_str(&format!("idt_state {}\n", state.idt_previous.len()));
             for index in 0..state.idt_previous.len() {
+                poll_checkpoint_abort(abort, index)?;
                 out.push_str(&format!(
                     "{} {} {} {}\n",
                     state.idt_previous[index],
@@ -6896,14 +7049,20 @@ impl TransientCheckpoint {
             }
             out.push_str(&format!("limiter_state {}\n", state.limiter_anchor.len()));
             for index in 0..state.limiter_anchor.len() {
+                poll_checkpoint_abort(abort, index)?;
                 out.push_str(&format!(
                     "{} {}\n",
                     state.limiter_anchor[index],
                     u8::from(state.limiter_initialized[index])
                 ));
             }
-            write_value_vector(&mut out, "event_state", &state.event_variables);
-            write_value_vector(&mut out, "terminal_currents", &instance.terminal_currents);
+            write_value_vector(&mut out, "event_state", &state.event_variables, abort)?;
+            write_value_vector(
+                &mut out,
+                "terminal_currents",
+                &instance.terminal_currents,
+                abort,
+            )?;
         }
         out.push_str(&format!(
             "runtime_veriloga_state_available {}\n",
@@ -6915,7 +7074,10 @@ impl TransientCheckpoint {
                 "runtime_veriloga_states {}\n",
                 self.runtime_veriloga_instance_states.len()
             ));
-            for instance in &self.runtime_veriloga_instance_states {
+            for (instance_index, instance) in
+                self.runtime_veriloga_instance_states.iter().enumerate()
+            {
+                poll_checkpoint_abort(abort, instance_index)?;
                 let source = if instance.source_digest.is_empty() {
                     "-"
                 } else {
@@ -6931,14 +7093,16 @@ impl TransientCheckpoint {
                 ));
                 let words = instance.to_words();
                 out.push_str(&format!("runtime_veriloga_words {}\n", words.len()));
-                for word in words {
+                for (index, word) in words.into_iter().enumerate() {
+                    poll_checkpoint_abort(abort, index)?;
                     out.push_str(&format!("{word:016x}\n"));
                 }
             }
         }
         #[cfg(not(feature = "veriloga"))]
         out.push_str("runtime_veriloga_states 0\n");
-        out
+        check_checkpoint_abort(abort)?;
+        Ok(out)
     }
 
     /// Parse the versioned text format using the production resource policy.
@@ -6966,12 +7130,38 @@ impl TransientCheckpoint {
         Self::parse_text_with_budget(text, &mut budget)
     }
 
+    /// Parse canonical checkpoint text with a caller-owned resource ceiling
+    /// and cooperative cancellation.
+    pub fn from_text_with_limit_and_abort(
+        text: &str,
+        max_unpacked_bytes: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, SimulationError> {
+        check_checkpoint_abort(abort)?;
+        if text.len() > max_unpacked_bytes {
+            return Err(SimulationError::Circuit(format!(
+                "unpacked checkpoint length {} exceeds the configured limit of {max_unpacked_bytes} bytes",
+                text.len()
+            )));
+        }
+        let mut budget = CheckpointParseBudget::new(max_unpacked_bytes);
+        let mut lines = CheckpointLines::new_with_abort(text, abort)?;
+        let result = Self::parse_text_lines(&mut lines, &mut budget);
+        checkpoint_operation_result(result, abort)
+    }
+
     fn parse_text_with_budget(
         text: &str,
         budget: &mut CheckpointParseBudget,
     ) -> Result<Self, String> {
         let mut lines = CheckpointLines::new(text);
+        Self::parse_text_lines(&mut lines, budget)
+    }
 
+    fn parse_text_lines(
+        lines: &mut CheckpointLines<'_>,
+        budget: &mut CheckpointParseBudget,
+    ) -> Result<Self, String> {
         let header = lines.next().ok_or("empty checkpoint file")?;
         let version: u32 = header
             .strip_prefix("RSPICE-CHECKPOINT ")
@@ -7281,7 +7471,7 @@ impl TransientCheckpoint {
             0
         };
 
-        let mut solution_cols = read_value_section(&mut lines, "solution", 1, budget)?;
+        let mut solution_cols = read_value_section(lines, "solution", 1, budget)?;
         if solution_cols[0].iter().any(|value| !value.is_finite()) {
             return Err("checkpoint solution values must be finite".to_string());
         }
@@ -7307,14 +7497,14 @@ impl TransientCheckpoint {
                         return Err(format!("malformed LTE reference mode line: '{mode_line}'"));
                     }
                 };
-                let global = read_value_vector(&mut lines, "lte_signal_global", budget)?;
+                let global = read_value_vector(lines, "lte_signal_global", budget)?;
                 if global.len() != 1 || !global[0].is_finite() || global[0] < 0.0 {
                     return Err(
                         "'lte_signal_global' must contain one finite non-negative value"
                             .to_string(),
                     );
                 }
-                let local = read_value_vector(&mut lines, "lte_signal_local", budget)?;
+                let local = read_value_vector(lines, "lte_signal_local", budget)?;
                 if local.iter().any(|value| !value.is_finite() || *value < 0.0) {
                     return Err(
                         "'lte_signal_local' values must be finite and non-negative".to_string()
@@ -7325,7 +7515,7 @@ impl TransientCheckpoint {
                 (None, 0.0, Vec::new())
             };
         let accepted_integration_runtime = if version >= EXACT_INTEGRATION_RUNTIME_FORMAT_VERSION {
-            read_accepted_integration_runtime(&mut lines, &solution_cols[0], time, budget)?
+            read_accepted_integration_runtime(lines, &solution_cols[0], time, budget)?
         } else if integration_continuation == IntegrationContinuation::SyntheticOrigin
             && time.to_bits() == 0.0_f64.to_bits()
         {
@@ -7345,7 +7535,7 @@ impl TransientCheckpoint {
         } else {
             AcceptedIntegrationRuntime::UnavailableLegacy
         };
-        let cap_cols = read_value_section(&mut lines, "capacitors", 5, budget)?;
+        let cap_cols = read_value_section(lines, "capacitors", 5, budget)?;
         let (
             solution_dependent_capacitor_state_available,
             cap_effective_capacitances,
@@ -7374,9 +7564,9 @@ impl TransientCheckpoint {
                     "solution-dependent capacitor state availability line has extra field '{extra}'"
                 ));
             }
-            let effective = read_value_vector(&mut lines, "cap_effective_capacitances", budget)?;
+            let effective = read_value_vector(lines, "cap_effective_capacitances", budget)?;
             let states = read_solution_dependent_capacitor_states(
-                &mut lines,
+                lines,
                 if available {
                     cap_cols.first().map_or(0, Vec::len)
                 } else {
@@ -7420,7 +7610,7 @@ impl TransientCheckpoint {
         } else {
             3
         };
-        let mut ind_cols = read_value_section(&mut lines, "inductors", ind_columns, budget)?;
+        let mut ind_cols = read_value_section(lines, "inductors", ind_columns, budget)?;
         if !inductor_flux_history_available {
             // Files that predate the flux history carry three columns; keep
             // the missing history empty so resume fails closed instead of
@@ -7437,18 +7627,18 @@ impl TransientCheckpoint {
             ind_cols = expanded;
         }
         let xyce_memristor_resistance_stores = if version >= 10 {
-            read_value_vector(&mut lines, "xyce_memristor_resistance_stores", budget)?
+            read_value_vector(lines, "xyce_memristor_resistance_stores", budget)?
         } else {
             Vec::new()
         };
         let xyce_team_resistance_noise_states =
             if version >= XYCE_TEAM_RESISTANCE_NOISE_FORMAT_VERSION {
-                read_xyce_team_resistance_noise_states(&mut lines, budget)?
+                read_xyce_team_resistance_noise_states(lines, budget)?
             } else {
                 Vec::new()
             };
         let generic_switch_stores = if version >= 11 {
-            let columns = read_value_section(&mut lines, "generic_switch_stores", 4, budget)?;
+            let columns = read_value_section(lines, "generic_switch_stores", 4, budget)?;
             let count = columns.first().map_or(0, Vec::len);
             let mut stores = allocate_checkpoint_capacity(count, "generic_switch_stores", budget)?;
             for index in 0..count {
@@ -7492,19 +7682,19 @@ impl TransientCheckpoint {
                 available,
                 AcceptedNativeNonlinearCheckpointStates {
                     resume_blockers: read_canonical_nonempty_line_vector(
-                        &mut lines,
+                        lines,
                         "accepted_nonlinear_blockers",
                         budget,
                     )?,
-                    diodes: read_accepted_diode_nonlinear_states(&mut lines, budget)?,
-                    bjts: read_accepted_bjt_nonlinear_states(&mut lines, budget)?,
+                    diodes: read_accepted_diode_nonlinear_states(lines, budget)?,
+                    bjts: read_accepted_bjt_nonlinear_states(lines, budget)?,
                 },
             )
         } else {
             (false, AcceptedNativeNonlinearCheckpointStates::default())
         };
         let accepted_junction_history = if version >= ACCEPTED_JUNCTION_HISTORY_FORMAT_VERSION {
-            read_accepted_junction_transient_history(&mut lines, budget)?
+            read_accepted_junction_transient_history(lines, budget)?
         } else {
             AcceptedJunctionTransientHistoryCheckpoint::default()
         };
@@ -7533,19 +7723,19 @@ impl TransientCheckpoint {
             }
             (
                 available,
-                read_nonempty_line_vector(&mut lines, "tline_blockers", budget)?,
-                read_tline_states(&mut lines, budget)?,
+                read_nonempty_line_vector(lines, "tline_blockers", budget)?,
+                read_tline_states(lines, budget)?,
             )
         } else {
             (false, Vec::new(), Vec::new())
         };
         let xspice_instances = if version >= 2 {
-            read_nonempty_line_vector(&mut lines, "xspice", budget)?
+            read_nonempty_line_vector(lines, "xspice", budget)?
         } else {
             Vec::new()
         };
         let mut xspice_resume_blockers = if version >= 3 {
-            read_nonempty_line_vector(&mut lines, "xspice_blockers", budget)?
+            read_nonempty_line_vector(lines, "xspice_blockers", budget)?
         } else {
             Vec::new()
         };
@@ -7567,7 +7757,7 @@ impl TransientCheckpoint {
             xspice_resume_blockers = blockers;
         }
         let xspice_instance_states = if version >= 4 {
-            read_xspice_instance_states(&mut lines, version, budget)?
+            read_xspice_instance_states(lines, version, budget)?
         } else {
             Vec::new()
         };
@@ -7595,7 +7785,7 @@ impl TransientCheckpoint {
                         "generated Verilog-A availability line has extra field '{extra}'"
                     ));
                 }
-                let states = read_generated_veriloga_states(&mut lines, version, budget)?;
+                let states = read_generated_veriloga_states(lines, version, budget)?;
                 if version >= GENERATED_EVENT_STATE_FORMAT_VERSION {
                     (available, states)
                 } else {
@@ -7640,7 +7830,7 @@ impl TransientCheckpoint {
         let (runtime_veriloga_state_available, runtime_veriloga_instance_states) =
             if version >= RUNTIME_VERILOGA_FORMAT_VERSION {
                 let (states, discarded_legacy_rows) =
-                    read_runtime_veriloga_states(&mut lines, version, budget)?;
+                    read_runtime_veriloga_states(lines, version, budget)?;
                 (
                     parsed_runtime_veriloga_state_available && !discarded_legacy_rows,
                     states,
@@ -7730,6 +7920,24 @@ impl TransientCheckpoint {
         }
     }
 
+    /// Serialize this checkpoint in the selected portable representation
+    /// with cooperative cancellation.
+    pub fn to_bytes_with_abort(
+        &self,
+        encoding: TransientCheckpointEncoding,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<u8>, SimulationError> {
+        check_checkpoint_abort(abort)?;
+        checkpoint_operation_result(self.validate_numeric_state(), abort)?;
+        let canonical = self.to_text_with_abort(abort)?.into_bytes();
+        match encoding {
+            TransientCheckpointEncoding::Unpacked => Ok(canonical),
+            TransientCheckpointEncoding::Packed => {
+                encode_packed_checkpoint_with_abort(&canonical, abort)
+            }
+        }
+    }
+
     /// Parse an unpacked or packed checkpoint, selected by its authenticated header.
     ///
     /// The default limit matches the production resource-policy default. Use
@@ -7752,6 +7960,21 @@ impl TransientCheckpoint {
             TransientCheckpointEncoding::Unpacked
         };
         Self::from_bytes_with_encoding(bytes, encoding, max_unpacked_bytes)
+    }
+
+    /// Parse an unpacked or packed checkpoint with cooperative cancellation.
+    pub fn from_bytes_with_limit_and_abort(
+        bytes: &[u8],
+        max_unpacked_bytes: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, SimulationError> {
+        check_checkpoint_abort(abort)?;
+        if bytes.starts_with(PACKED_MAGIC) {
+            let canonical = decode_packed_checkpoint_with_abort(bytes, max_unpacked_bytes, abort)?;
+            parse_canonical_checkpoint_with_abort(&canonical, max_unpacked_bytes, abort)
+        } else {
+            parse_canonical_checkpoint_with_abort(bytes, max_unpacked_bytes, abort)
+        }
     }
 
     /// Parse a checkpoint using an explicitly required representation.
@@ -7798,6 +8021,15 @@ impl TransientCheckpoint {
         self.save_with_encoding(path, TransientCheckpointEncoding::Unpacked)
     }
 
+    /// Atomically write canonical unpacked text with cooperative cancellation.
+    pub fn save_with_abort(
+        &self,
+        path: &std::path::Path,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        self.save_with_encoding_and_abort(path, TransientCheckpointEncoding::Unpacked, abort)
+    }
+
     /// Atomically write the checkpoint in the selected representation.
     pub fn save_with_encoding(
         &self,
@@ -7810,12 +8042,46 @@ impl TransientCheckpoint {
             .map_err(|e| format!("cannot write checkpoint '{}': {e}", path.display()))
     }
 
+    /// Atomically write the checkpoint while honoring cancellation before
+    /// the destination namespace is replaced.
+    pub fn save_with_encoding_and_abort(
+        &self,
+        path: &std::path::Path,
+        encoding: TransientCheckpointEncoding,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        check_checkpoint_abort(abort)?;
+        checkpoint_operation_result(self.validate_persistence_preflight(), abort)?;
+        let bytes = self.to_bytes_with_abort(encoding, abort)?;
+        atomic_write_checkpoint_with_abort(path, &bytes, abort).map_err(|error| match error {
+            AbortableCheckpointIoError::Aborted => SimulationError::Aborted,
+            AbortableCheckpointIoError::Io(error) => SimulationError::Circuit(format!(
+                "cannot write checkpoint '{}': {error}",
+                path.display()
+            )),
+        })
+    }
+
     /// Read and auto-detect a checkpoint using the production default byte budget.
     pub fn load(path: &std::path::Path) -> Result<Self, String> {
         Self::load_with_limit(
             path,
             DEFAULT_MAX_CHECKPOINT_BYTES,
             DEFAULT_MAX_CHECKPOINT_BYTES,
+        )
+    }
+
+    /// Read and auto-detect a checkpoint with the production resource policy
+    /// and cooperative cancellation.
+    pub fn load_with_abort(
+        path: &std::path::Path,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, SimulationError> {
+        Self::load_with_limit_and_abort(
+            path,
+            DEFAULT_MAX_CHECKPOINT_BYTES,
+            DEFAULT_MAX_CHECKPOINT_BYTES,
+            abort,
         )
     }
 
@@ -7831,6 +8097,21 @@ impl TransientCheckpoint {
         let bytes = read_checkpoint_file_limited(path, max_encoded_bytes)?;
         Self::from_bytes_with_limit(&bytes, max_unpacked_bytes)
     }
+
+    /// Read, auto-detect, and parse a checkpoint with cooperative cancellation.
+    pub fn load_with_limit_and_abort(
+        path: &std::path::Path,
+        max_encoded_bytes: usize,
+        max_unpacked_bytes: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, SimulationError> {
+        let bytes = read_checkpoint_file_limited_with_abort(path, max_encoded_bytes, abort)
+            .map_err(|error| match error {
+                AbortableCheckpointIoError::Aborted => SimulationError::Aborted,
+                AbortableCheckpointIoError::Io(error) => SimulationError::Circuit(error),
+            })?;
+        Self::from_bytes_with_limit_and_abort(&bytes, max_unpacked_bytes, abort)
+    }
 }
 
 fn parse_canonical_checkpoint(
@@ -7840,6 +8121,18 @@ fn parse_canonical_checkpoint(
     let text = std::str::from_utf8(canonical)
         .map_err(|error| format!("checkpoint is not valid UTF-8 text: {error}"))?;
     TransientCheckpoint::from_text_with_limit(text, max_unpacked_bytes)
+}
+
+fn parse_canonical_checkpoint_with_abort(
+    canonical: &[u8],
+    max_unpacked_bytes: usize,
+    abort: &dyn AbortSignal,
+) -> Result<TransientCheckpoint, SimulationError> {
+    check_checkpoint_abort(abort)?;
+    let text = std::str::from_utf8(canonical).map_err(|error| {
+        SimulationError::Circuit(format!("checkpoint is not valid UTF-8 text: {error}"))
+    })?;
+    TransientCheckpoint::from_text_with_limit_and_abort(text, max_unpacked_bytes, abort)
 }
 
 fn encode_packed_checkpoint(canonical: &[u8]) -> Result<Vec<u8>, String> {
@@ -7863,6 +8156,67 @@ fn encode_packed_checkpoint(canonical: &[u8]) -> Result<Vec<u8>, String> {
     packed.extend_from_slice(blake3::hash(canonical).as_bytes());
     packed.extend_from_slice(&compressed);
     debug_assert_eq!(packed.len(), total_len);
+    Ok(packed)
+}
+
+fn encode_packed_checkpoint_with_abort(
+    canonical: &[u8],
+    abort: &dyn AbortSignal,
+) -> Result<Vec<u8>, SimulationError> {
+    use std::io::Write as _;
+
+    check_checkpoint_abort(abort)?;
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::new(6));
+    for (index, chunk) in canonical.chunks(CHECKPOINT_IO_CHUNK_BYTES).enumerate() {
+        check_checkpoint_abort(abort)?;
+        encoder.write_all(chunk).map_err(|error| {
+            SimulationError::Circuit(format!("cannot compress checkpoint: {error}"))
+        })?;
+        abort.observe_progress(
+            (index.saturating_add(1) * CHECKPOINT_IO_CHUNK_BYTES).min(canonical.len()) as f64
+                / canonical.len().max(1) as f64,
+        );
+    }
+    check_checkpoint_abort(abort)?;
+    let compressed = encoder.finish().map_err(|error| {
+        SimulationError::Circuit(format!("cannot finish checkpoint compression: {error}"))
+    })?;
+    check_checkpoint_abort(abort)?;
+
+    let canonical_len = u64::try_from(canonical.len()).map_err(|_| {
+        SimulationError::Circuit(
+            "checkpoint text length cannot be represented in the packed format".to_string(),
+        )
+    })?;
+    let compressed_len = u64::try_from(compressed.len()).map_err(|_| {
+        SimulationError::Circuit(
+            "compressed checkpoint length cannot be represented in the packed format".to_string(),
+        )
+    })?;
+    let total_len = PACKED_HEADER_BYTES
+        .checked_add(compressed.len())
+        .ok_or_else(|| SimulationError::Circuit("packed checkpoint length overflow".to_string()))?;
+    let mut packed = Vec::new();
+    packed.try_reserve_exact(total_len).map_err(|error| {
+        SimulationError::Circuit(format!(
+            "cannot allocate {total_len} bytes for packed checkpoint: {error}"
+        ))
+    })?;
+
+    let mut hasher = blake3::Hasher::new();
+    for chunk in canonical.chunks(CHECKPOINT_IO_CHUNK_BYTES) {
+        check_checkpoint_abort(abort)?;
+        hasher.update(chunk);
+    }
+    packed.extend_from_slice(PACKED_MAGIC);
+    packed.extend_from_slice(&PACKED_ENVELOPE_VERSION.to_le_bytes());
+    packed.extend_from_slice(&PACKED_COMPRESSION_ZLIB.to_le_bytes());
+    packed.extend_from_slice(&canonical_len.to_le_bytes());
+    packed.extend_from_slice(&compressed_len.to_le_bytes());
+    packed.extend_from_slice(hasher.finalize().as_bytes());
+    packed.extend_from_slice(&compressed);
+    debug_assert_eq!(packed.len(), total_len);
+    check_checkpoint_abort(abort)?;
     Ok(packed)
 }
 
@@ -7971,6 +8325,144 @@ fn decode_packed_checkpoint(packed: &[u8], max_unpacked_bytes: usize) -> Result<
     Ok(canonical)
 }
 
+fn decode_packed_checkpoint_with_abort(
+    packed: &[u8],
+    max_unpacked_bytes: usize,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<u8>, SimulationError> {
+    use std::io::Read as _;
+
+    check_checkpoint_abort(abort)?;
+    let detail = |message: String| SimulationError::Circuit(message);
+    if packed.len() < PACKED_HEADER_BYTES {
+        return Err(detail(format!(
+            "truncated packed checkpoint header: expected {PACKED_HEADER_BYTES} bytes, found {}",
+            packed.len()
+        )));
+    }
+    if &packed[..PACKED_MAGIC.len()] != PACKED_MAGIC {
+        return Err(detail(
+            "packed checkpoint magic is missing or corrupt".to_string(),
+        ));
+    }
+
+    let mut offset = PACKED_MAGIC.len();
+    let version = read_packed_u32(packed, &mut offset).map_err(detail)?;
+    if version != PACKED_ENVELOPE_VERSION {
+        return Err(detail(format!(
+            "unsupported packed checkpoint envelope version {version}; expected {PACKED_ENVELOPE_VERSION}"
+        )));
+    }
+    let compression = read_packed_u32(packed, &mut offset).map_err(detail)?;
+    if compression != PACKED_COMPRESSION_ZLIB {
+        return Err(detail(format!(
+            "unsupported packed checkpoint compression method {compression}"
+        )));
+    }
+    let declared_unpacked = usize::try_from(read_packed_u64(packed, &mut offset).map_err(detail)?)
+        .map_err(|_| {
+            detail("packed checkpoint unpacked length exceeds this platform".to_string())
+        })?;
+    let declared_compressed =
+        usize::try_from(read_packed_u64(packed, &mut offset).map_err(detail)?).map_err(|_| {
+            detail("packed checkpoint payload length exceeds this platform".to_string())
+        })?;
+    if declared_unpacked == 0 {
+        return Err(detail(
+            "packed checkpoint declares an empty canonical payload".to_string(),
+        ));
+    }
+    if declared_unpacked > max_unpacked_bytes {
+        return Err(detail(format!(
+            "packed checkpoint declares {declared_unpacked} unpacked bytes, exceeding the configured limit of {max_unpacked_bytes} bytes"
+        )));
+    }
+
+    let digest_end = offset
+        .checked_add(32)
+        .ok_or_else(|| detail("packed checkpoint header length overflow".to_string()))?;
+    let expected_digest: [u8; 32] = packed
+        .get(offset..digest_end)
+        .ok_or_else(|| detail("truncated packed checkpoint integrity seal".to_string()))?
+        .try_into()
+        .map_err(|_| detail("truncated packed checkpoint integrity seal".to_string()))?;
+    let expected_total = PACKED_HEADER_BYTES
+        .checked_add(declared_compressed)
+        .ok_or_else(|| detail("packed checkpoint payload length overflow".to_string()))?;
+    match packed.len().cmp(&expected_total) {
+        std::cmp::Ordering::Less => {
+            return Err(detail(format!(
+                "truncated packed checkpoint payload: declared {declared_compressed} bytes, found {}",
+                packed.len() - PACKED_HEADER_BYTES
+            )));
+        }
+        std::cmp::Ordering::Greater => {
+            return Err(detail(format!(
+                "packed checkpoint has {} trailing bytes after its declared payload",
+                packed.len() - expected_total
+            )));
+        }
+        std::cmp::Ordering::Equal => {}
+    }
+    let payload = &packed[PACKED_HEADER_BYTES..];
+
+    let mut canonical = Vec::new();
+    canonical
+        .try_reserve_exact(declared_unpacked)
+        .map_err(|error| {
+            detail(format!(
+                "cannot allocate {declared_unpacked} bytes for unpacked checkpoint: {error}"
+            ))
+        })?;
+    let mut decoder = flate2::read::ZlibDecoder::new(payload);
+    let mut buffer = [0_u8; CHECKPOINT_IO_CHUNK_BYTES];
+    loop {
+        check_checkpoint_abort(abort)?;
+        let count = decoder.read(&mut buffer).map_err(|error| {
+            detail(format!(
+                "packed checkpoint payload is not a complete valid zlib stream: {error}"
+            ))
+        })?;
+        if count == 0 {
+            break;
+        }
+        let next_len = canonical
+            .len()
+            .checked_add(count)
+            .ok_or_else(|| detail("checkpoint decoded length overflow".to_string()))?;
+        if next_len > declared_unpacked {
+            return Err(detail(format!(
+                "packed checkpoint unpacked length exceeds declared {declared_unpacked} bytes"
+            )));
+        }
+        canonical.extend_from_slice(&buffer[..count]);
+    }
+    check_checkpoint_abort(abort)?;
+    if decoder.total_in() != payload.len() as u64 {
+        return Err(detail(format!(
+            "packed checkpoint compressed stream has {} trailing bytes",
+            payload.len().saturating_sub(decoder.total_in() as usize)
+        )));
+    }
+    if canonical.len() != declared_unpacked {
+        return Err(detail(format!(
+            "packed checkpoint unpacked length mismatch: declared {declared_unpacked}, decoded {}",
+            canonical.len()
+        )));
+    }
+    let mut hasher = blake3::Hasher::new();
+    for chunk in canonical.chunks(CHECKPOINT_IO_CHUNK_BYTES) {
+        check_checkpoint_abort(abort)?;
+        hasher.update(chunk);
+    }
+    if hasher.finalize().as_bytes() != &expected_digest {
+        return Err(detail(
+            "packed checkpoint BLAKE3 integrity check failed".to_string(),
+        ));
+    }
+    Ok(canonical)
+}
+
 fn read_packed_u32(bytes: &[u8], offset: &mut usize) -> Result<u32, String> {
     let end = offset
         .checked_add(4)
@@ -8039,6 +8531,84 @@ fn read_checkpoint_file_limited(
             "checkpoint '{}' grew beyond the configured encoded limit of {max_encoded_bytes} bytes while it was read",
             path.display()
         ));
+    }
+    Ok(bytes)
+}
+
+enum AbortableCheckpointIoError {
+    Aborted,
+    Io(String),
+}
+
+fn read_checkpoint_file_limited_with_abort(
+    path: &std::path::Path,
+    max_encoded_bytes: usize,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<u8>, AbortableCheckpointIoError> {
+    use std::io::Read as _;
+
+    if abort.is_aborted() {
+        return Err(AbortableCheckpointIoError::Aborted);
+    }
+    let file = std::fs::File::open(path).map_err(|error| {
+        AbortableCheckpointIoError::Io(format!(
+            "cannot read checkpoint '{}': {error}",
+            path.display()
+        ))
+    })?;
+    let metadata_len = usize::try_from(
+        file.metadata()
+            .map_err(|error| {
+                AbortableCheckpointIoError::Io(format!(
+                    "cannot inspect checkpoint '{}': {error}",
+                    path.display()
+                ))
+            })?
+            .len(),
+    )
+    .unwrap_or(usize::MAX);
+    if metadata_len > max_encoded_bytes {
+        return Err(AbortableCheckpointIoError::Io(format!(
+            "checkpoint '{}' is {metadata_len} bytes, exceeding the configured encoded limit of {max_encoded_bytes} bytes",
+            path.display()
+        )));
+    }
+
+    let read_limit = u64::try_from(max_encoded_bytes)
+        .unwrap_or(u64::MAX)
+        .saturating_add(1);
+    let mut reader = file.take(read_limit);
+    let mut bytes = Vec::new();
+    bytes.try_reserve_exact(metadata_len).map_err(|error| {
+        AbortableCheckpointIoError::Io(format!(
+            "cannot allocate {metadata_len} bytes to read checkpoint '{}': {error}",
+            path.display()
+        ))
+    })?;
+    let mut buffer = [0_u8; CHECKPOINT_IO_CHUNK_BYTES];
+    loop {
+        if abort.is_aborted() {
+            return Err(AbortableCheckpointIoError::Aborted);
+        }
+        let count = reader.read(&mut buffer).map_err(|error| {
+            AbortableCheckpointIoError::Io(format!(
+                "cannot read checkpoint '{}': {error}",
+                path.display()
+            ))
+        })?;
+        if count == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&buffer[..count]);
+        if bytes.len() > max_encoded_bytes {
+            return Err(AbortableCheckpointIoError::Io(format!(
+                "checkpoint '{}' grew beyond the configured encoded limit of {max_encoded_bytes} bytes while it was read",
+                path.display()
+            )));
+        }
+    }
+    if abort.is_aborted() {
+        return Err(AbortableCheckpointIoError::Aborted);
     }
     Ok(bytes)
 }
@@ -8120,6 +8690,85 @@ fn atomic_write_checkpoint(path: &std::path::Path, bytes: &[u8]) -> std::io::Res
     // opened through the destination.
     reject_checkpoint_destination(path)?;
     replace_checkpoint_atomically(&temporary_path, path)?;
+    guard.armed = false;
+    Ok(())
+}
+
+fn atomic_write_checkpoint_with_abort(
+    path: &std::path::Path,
+    bytes: &[u8],
+    abort: &dyn AbortSignal,
+) -> Result<(), AbortableCheckpointIoError> {
+    use std::io::Write as _;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_ABORTABLE_TEMPORARY: AtomicU64 = AtomicU64::new(0);
+
+    if abort.is_aborted() {
+        return Err(AbortableCheckpointIoError::Aborted);
+    }
+    reject_checkpoint_destination(path)
+        .map_err(|error| AbortableCheckpointIoError::Io(error.to_string()))?;
+    let parent = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let file_name = path.file_name().ok_or_else(|| {
+        AbortableCheckpointIoError::Io("checkpoint path has no file name".to_string())
+    })?;
+
+    let mut opened = None;
+    for _ in 0..128 {
+        if abort.is_aborted() {
+            return Err(AbortableCheckpointIoError::Aborted);
+        }
+        let sequence = NEXT_ABORTABLE_TEMPORARY.fetch_add(1, Ordering::Relaxed);
+        let mut temporary_name = file_name.to_os_string();
+        temporary_name.push(format!(
+            ".rspice-checkpoint.tmp.{}.{sequence}",
+            std::process::id()
+        ));
+        let temporary_path = parent.join(temporary_name);
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary_path)
+        {
+            Ok(file) => {
+                opened = Some((temporary_path, file));
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(AbortableCheckpointIoError::Io(error.to_string())),
+        }
+    }
+    let (temporary_path, mut file) = opened.ok_or_else(|| {
+        AbortableCheckpointIoError::Io(
+            "could not allocate a unique checkpoint temporary file".to_string(),
+        )
+    })?;
+    let mut guard = TemporaryCheckpoint {
+        path: temporary_path.clone(),
+        armed: true,
+    };
+
+    for chunk in bytes.chunks(CHECKPOINT_IO_CHUNK_BYTES) {
+        if abort.is_aborted() {
+            return Err(AbortableCheckpointIoError::Aborted);
+        }
+        file.write_all(chunk)
+            .map_err(|error| AbortableCheckpointIoError::Io(error.to_string()))?;
+    }
+    file.flush()
+        .map_err(|error| AbortableCheckpointIoError::Io(error.to_string()))?;
+    file.sync_all()
+        .map_err(|error| AbortableCheckpointIoError::Io(error.to_string()))?;
+    drop(file);
+
+    if abort.is_aborted() {
+        return Err(AbortableCheckpointIoError::Aborted);
+    }
+    reject_checkpoint_destination(path)
+        .map_err(|error| AbortableCheckpointIoError::Io(error.to_string()))?;
+    replace_checkpoint_atomically(&temporary_path, path)
+        .map_err(|error| AbortableCheckpointIoError::Io(error.to_string()))?;
     guard.armed = false;
     Ok(())
 }
@@ -12611,5 +13260,76 @@ mod tests {
             netlist_checkpoint_identity(&second),
             "effective numeric startup values remain semantic checkpoint state"
         );
+    }
+
+    #[test]
+    fn checkpoint_encode_and_decode_abort_with_bounded_polling() {
+        let checkpoint = sample();
+        let encode_abort = crate::abort_signal::CountingAbort::new(3);
+        let encode_error = checkpoint
+            .to_bytes_with_abort(TransientCheckpointEncoding::Packed, &encode_abort)
+            .expect_err("checkpoint encoding must honor cancellation");
+        assert!(matches!(encode_error, SimulationError::Aborted));
+        assert!(
+            encode_abort.count() <= 5,
+            "encoding polled {} times after its deterministic abort threshold",
+            encode_abort.count()
+        );
+
+        let packed = checkpoint
+            .to_bytes(TransientCheckpointEncoding::Packed)
+            .expect("legacy packed encoding succeeds");
+        let decode_abort = crate::abort_signal::CountingAbort::new(2);
+        let decode_error = TransientCheckpoint::from_bytes_with_limit_and_abort(
+            &packed,
+            DEFAULT_MAX_CHECKPOINT_BYTES,
+            &decode_abort,
+        )
+        .expect_err("checkpoint decoding must honor cancellation");
+        assert!(matches!(decode_error, SimulationError::Aborted));
+        assert!(
+            decode_abort.count() <= 4,
+            "decoding polled {} times after its deterministic abort threshold",
+            decode_abort.count()
+        );
+    }
+
+    #[test]
+    fn cancelled_checkpoint_io_never_replaces_the_destination() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
+        let directory = std::env::temp_dir().join(format!(
+            "rspice-checkpoint-abort-{}-{}",
+            std::process::id(),
+            NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir(&directory).expect("create checkpoint abort directory");
+        let path = directory.join("state.chk");
+        std::fs::write(&path, b"existing checkpoint sentinel").expect("write checkpoint sentinel");
+
+        let save_abort = crate::abort_signal::CountingAbort::new(2);
+        let save_error = sample()
+            .save_with_abort(&path, &save_abort)
+            .expect_err("cancelled save must fail");
+        assert!(matches!(save_error, SimulationError::Aborted));
+        assert_eq!(
+            std::fs::read(&path).expect("read preserved checkpoint sentinel"),
+            b"existing checkpoint sentinel"
+        );
+        assert!(
+            save_abort.count() <= 4,
+            "save polled {} times after its deterministic abort threshold",
+            save_abort.count()
+        );
+
+        let load_abort = crate::abort_signal::CountingAbort::new(1);
+        let load_error = TransientCheckpoint::load_with_abort(&path, &load_abort)
+            .expect_err("cancelled load must fail before parsing invalid sentinel data");
+        assert!(matches!(load_error, SimulationError::Aborted));
+        assert!(load_abort.count() <= 3);
+
+        std::fs::remove_file(&path).expect("remove checkpoint abort fixture");
+        std::fs::remove_dir(&directory).expect("remove checkpoint abort directory");
     }
 }

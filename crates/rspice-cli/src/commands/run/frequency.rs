@@ -684,10 +684,16 @@ fn finish_ac_results(
         }
     }
 
-    ctx.record_measurements(
-        "AC",
-        rspice_core::analysis::evaluate_ac_measurements(ctx.netlist, &results),
-    );
+    let measurements = rspice_core::analysis::evaluate_ac_measurements_with_abort(
+        ctx.netlist,
+        &results,
+        &crate::abort::ProcessAbort,
+    )
+    .map_err(|source| CliError::CoreSimulationError {
+        source,
+        analysis: Some("AC measurement projection".to_string()),
+    })?;
+    ctx.record_measurements("AC", measurements);
 
     if !ctx.quiet {
         println!("AC Analysis: {} frequency points", results.len());
@@ -1024,10 +1030,16 @@ fn finish_noise(
                 }
             }
 
-            ctx.record_measurements(
-                "NOISE",
-                rspice_core::analysis::evaluate_noise_measurements(ctx.netlist, &results),
-            );
+            let measurements = rspice_core::analysis::evaluate_noise_measurements_with_abort(
+                ctx.netlist,
+                &results,
+                &crate::abort::ProcessAbort,
+            )
+            .map_err(|source| CliError::CoreSimulationError {
+                source,
+                analysis: Some("Noise measurement projection".to_string()),
+            })?;
+            ctx.record_measurements("NOISE", measurements);
 
             if !ctx.quiet {
                 println!("Noise Analysis: {} frequency points", results.len());

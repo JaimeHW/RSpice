@@ -253,10 +253,30 @@ impl InterfaceNodeAliasProjection {
     /// solution-node-first lookup. Both hierarchy separators are emitted so
     /// authored Xyce `:` paths address RSpice's canonical `.` flattening.
     fn augment<'a>(&'a self, signals: &mut HashMap<String, &'a [Value]>) -> Result<(), String> {
+        match self.augment_with_abort(signals, &NoAbort) {
+            Ok(()) => Ok(()),
+            Err(InterfaceNodeAliasProjectionError::Detail(detail)) => Err(detail),
+            Err(InterfaceNodeAliasProjectionError::Aborted) => {
+                unreachable!("NoAbort cannot cancel interface-alias augmentation")
+            }
+        }
+    }
+
+    fn augment_with_abort<'a>(
+        &'a self,
+        signals: &mut HashMap<String, &'a [Value]>,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), InterfaceNodeAliasProjectionError> {
+        if abort.is_aborted() {
+            return Err(InterfaceNodeAliasProjectionError::Aborted);
+        }
         let physical_signals = CanonicalMeasureSignalIndex::new(signals);
 
         if let Some(accessors) = self.requested_accessors.get("0") {
-            for (accessor, authored_nodes) in accessors {
+            for (index, (accessor, authored_nodes)) in accessors.iter().enumerate() {
+                if index.is_multiple_of(64) && abort.is_aborted() {
+                    return Err(InterfaceNodeAliasProjectionError::Aborted);
+                }
                 if let Some(waveform) = self.ground_waveform(accessor) {
                     insert_interface_alias_spellings(
                         signals,
@@ -278,19 +298,30 @@ impl InterfaceNodeAliasProjection {
             }
         }
 
-        for (alias, target) in self.aliases.iter() {
+        for (alias_index, (alias, target)) in self.aliases.iter().enumerate() {
+            if alias_index.is_multiple_of(64) && abort.is_aborted() {
+                return Err(InterfaceNodeAliasProjectionError::Aborted);
+            }
             let Some(accessors) = self.requested_accessors.get(alias) else {
                 continue;
             };
-            for (accessor, authored_aliases) in accessors {
+            for (accessor_index, (accessor, authored_aliases)) in accessors.iter().enumerate() {
+                if accessor_index.is_multiple_of(64) && abort.is_aborted() {
+                    return Err(InterfaceNodeAliasProjectionError::Aborted);
+                }
                 let alias_probe = format!("{accessor}({alias})");
                 let target_waveform = if target == "0" {
                     self.ground_waveform(accessor)
                 } else {
                     let target_probe = format!("{accessor}({target})");
-                    physical_signals.get(&target_probe)?
+                    physical_signals
+                        .get(&target_probe)
+                        .map_err(InterfaceNodeAliasProjectionError::Detail)?
                 };
-                let waveform = physical_signals.get(&alias_probe)?.or(target_waveform);
+                let waveform = physical_signals
+                    .get(&alias_probe)
+                    .map_err(InterfaceNodeAliasProjectionError::Detail)?
+                    .or(target_waveform);
                 if let Some(waveform) = waveform {
                     insert_interface_alias_spellings(
                         signals,
@@ -308,9 +339,14 @@ impl InterfaceNodeAliasProjection {
                     let target_waveform = if target == "0" {
                         self.ground_zero.as_deref()
                     } else {
-                        physical_signals.get(target)?
+                        physical_signals
+                            .get(target)
+                            .map_err(InterfaceNodeAliasProjectionError::Detail)?
                     };
-                    let waveform = physical_signals.get(alias)?.or(target_waveform);
+                    let waveform = physical_signals
+                        .get(alias)
+                        .map_err(InterfaceNodeAliasProjectionError::Detail)?
+                        .or(target_waveform);
                     if let Some(waveform) = waveform {
                         insert_interface_alias_spellings(
                             signals,
@@ -323,7 +359,11 @@ impl InterfaceNodeAliasProjection {
                 }
             }
         }
-        Ok(())
+        if abort.is_aborted() {
+            Err(InterfaceNodeAliasProjectionError::Aborted)
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -2370,13 +2410,47 @@ fn evaluate_equation_measurements(
     implicit_default: Value,
     dc_sweep_ascending: Option<bool>,
 ) -> Result<Vec<EquationMeasureTrace>, String> {
+    match evaluate_equation_measurements_with_abort(
+        netlist,
+        analysis,
+        axis,
+        signals,
+        implicit_default,
+        dc_sweep_ascending,
+        &NoAbort,
+    ) {
+        Ok(traces) => Ok(traces),
+        Err(EquationMeasurementEvaluationError::Detail(detail)) => Err(detail),
+        Err(EquationMeasurementEvaluationError::Aborted) => {
+            unreachable!("NoAbort cannot cancel equation measurement evaluation")
+        }
+    }
+}
+
+enum EquationMeasurementEvaluationError {
+    Aborted,
+    Detail(String),
+}
+
+fn evaluate_equation_measurements_with_abort(
+    netlist: &Netlist,
+    analysis: &str,
+    axis: &[Value],
+    signals: &HashMap<String, &[Value]>,
+    implicit_default: Value,
+    dc_sweep_ascending: Option<bool>,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<EquationMeasureTrace>, EquationMeasurementEvaluationError> {
+    if abort.is_aborted() {
+        return Err(EquationMeasurementEvaluationError::Aborted);
+    }
     let mut programs = netlist
         .measurements
         .iter()
         .filter(|statement| statement.analysis.eq_ignore_ascii_case(analysis))
         .map(|statement| {
             let equation = matches!(statement.measure_type, MeasureType::Equation { .. });
-            Ok(LiveMeasureProgram {
+            Ok::<_, String>(LiveMeasureProgram {
                 statement,
                 canonical_name: statement.name.to_ascii_uppercase(),
                 state: Some(compile_live_measure_state(
@@ -2400,7 +2474,8 @@ fn evaluate_equation_measurements(
                 failure: None,
             })
         })
-        .collect::<Result<Vec<_>, String>>()?;
+        .collect::<Result<Vec<_>, String>>()
+        .map_err(EquationMeasurementEvaluationError::Detail)?;
 
     if programs.is_empty() {
         return Ok(Vec::new());
@@ -2420,7 +2495,10 @@ fn evaluate_equation_measurements(
         .flatten()
         .cloned()
         .collect::<HashSet<_>>();
-    for program in &mut programs {
+    for (index, program) in programs.iter_mut().enumerate() {
+        if index.is_multiple_of(64) && abort.is_aborted() {
+            return Err(EquationMeasurementEvaluationError::Aborted);
+        }
         program.store_trace =
             matches!(program.statement.measure_type, MeasureType::Equation { .. })
                 || referenced_measure_names.contains(&program.canonical_name);
@@ -2442,7 +2520,10 @@ fn evaluate_equation_measurements(
         .iter()
         .map(|program| matches!(program.state, Some(LiveMeasureState::FileError { .. })))
         .collect::<Vec<_>>();
-    for (program, dependencies) in programs.iter_mut().zip(&all_dependencies) {
+    for (index, (program, dependencies)) in programs.iter_mut().zip(&all_dependencies).enumerate() {
+        if index.is_multiple_of(64) && abort.is_aborted() {
+            return Err(EquationMeasurementEvaluationError::Aborted);
+        }
         program.has_file_error_dependency = dependencies.iter().any(|dependency| {
             program_indices
                 .get(dependency)
@@ -2457,6 +2538,9 @@ fn evaluate_equation_measurements(
         Vec::new()
     };
     for (row, &axis_value) in axis.iter().enumerate() {
+        if row.is_multiple_of(64) && abort.is_aborted() {
+            return Err(EquationMeasurementEvaluationError::Aborted);
+        }
         let starts_segment = segment_starts.binary_search(&row).is_ok();
         for program_index in 0..programs.len() {
             if !programs[program_index].store_trace
@@ -2503,10 +2587,10 @@ fn evaluate_equation_measurements(
                 }
                 Ok(None) => {}
                 Err(error) if is_equation => {
-                    return Err(format!(
+                    return Err(EquationMeasurementEvaluationError::Detail(format!(
                         "continuous measure '{}' evaluation failed at row {row}: {error}",
                         program.statement.name
-                    ));
+                    )));
                 }
                 Err(error) => program.failure = Some(error),
             }
@@ -2520,6 +2604,9 @@ fn evaluate_equation_measurements(
         }
     }
 
+    if abort.is_aborted() {
+        return Err(EquationMeasurementEvaluationError::Aborted);
+    }
     Ok(programs
         .into_iter()
         .filter(|program| program.store_trace)
@@ -4163,15 +4250,45 @@ impl DcSweepSeries {
     /// Collect node-voltage and branch-current series across the sweep.
     /// Returns `None` for an empty sweep.
     pub fn from_sweep(sweep: &[(Value, SimulationResult)]) -> Option<Self> {
-        let (_, first) = sweep.first()?;
-        let axis: Vec<Value> = sweep.iter().map(|(v, _)| *v).collect();
+        match Self::from_sweep_with_abort(sweep, &NoAbort) {
+            Ok(series) => series,
+            Err(SimulationError::Aborted) => {
+                unreachable!("NoAbort cannot cancel DC measurement projection")
+            }
+            Err(error) => unreachable!("DC measurement projection is infallible: {error}"),
+        }
+    }
+
+    fn from_sweep_with_abort(
+        sweep: &[(Value, SimulationResult)],
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<Self>, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        let Some((_, first)) = sweep.first() else {
+            return Ok(None);
+        };
+        let mut axis = Vec::with_capacity(sweep.len());
+        for (index, (value, _)) in sweep.iter().enumerate() {
+            if index.is_multiple_of(64) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            axis.push(*value);
+        }
 
         let mut storage: Vec<(String, char, Vec<Value>)> = Vec::new();
         for node in 1..first.node_voltages.len() {
-            let series: Vec<Value> = sweep
-                .iter()
-                .map(|(_, r)| r.node_voltages.get(node).copied().unwrap_or(0.0))
-                .collect();
+            if node.is_multiple_of(64) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let mut series = Vec::with_capacity(sweep.len());
+            for (row, (_, result)) in sweep.iter().enumerate() {
+                if row.is_multiple_of(64) && abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                series.push(result.node_voltages.get(node).copied().unwrap_or(0.0));
+            }
             let fallback = node.to_string();
             let raw = first
                 .node_names
@@ -4186,13 +4303,19 @@ impl DcSweepSeries {
             storage.push((raw, 'V', series));
         }
         for (branch, name) in first.branch_names.iter().enumerate() {
+            if branch.is_multiple_of(64) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             if name.is_empty() {
                 continue;
             }
-            let series: Vec<Value> = sweep
-                .iter()
-                .map(|(_, r)| r.branch_currents.get(branch).copied().unwrap_or(0.0))
-                .collect();
+            let mut series = Vec::with_capacity(sweep.len());
+            for (row, (_, result)) in sweep.iter().enumerate() {
+                if row.is_multiple_of(64) && abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                series.push(result.branch_currents.get(branch).copied().unwrap_or(0.0));
+            }
             storage.push((name.clone(), 'I', series));
         }
 
@@ -4202,8 +4325,14 @@ impl DcSweepSeries {
         // case-insensitive union before requiring a complete waveform so a
         // name first introduced after row zero is not silently omitted.
         let mut observable_names = Vec::<String>::new();
-        for (_, result) in sweep {
-            for (name, _) in &result.dc_observables {
+        for (row, (_, result)) in sweep.iter().enumerate() {
+            if row.is_multiple_of(64) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            for (index, (name, _)) in result.dc_observables.iter().enumerate() {
+                if index.is_multiple_of(64) && abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
                 if !observable_names
                     .iter()
                     .any(|candidate| candidate.eq_ignore_ascii_case(name))
@@ -4212,22 +4341,33 @@ impl DcSweepSeries {
                 }
             }
         }
-        let observables = observable_names
-            .into_iter()
-            .filter_map(|name| {
-                let values = sweep
-                    .iter()
-                    .map(|(_, result)| result.try_dc_observable_named(&name))
-                    .collect::<Option<Vec<_>>>()?;
-                Some((name, values))
-            })
-            .collect();
+        let mut observables = Vec::new();
+        for (index, name) in observable_names.into_iter().enumerate() {
+            if index.is_multiple_of(64) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let mut values = Vec::with_capacity(sweep.len());
+            let mut complete = true;
+            for (row, (_, result)) in sweep.iter().enumerate() {
+                if row.is_multiple_of(64) && abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                let Some(value) = result.try_dc_observable_named(&name) else {
+                    complete = false;
+                    break;
+                };
+                values.push(value);
+            }
+            if complete {
+                observables.push((name, values));
+            }
+        }
 
-        Some(Self {
+        Ok(Some(Self {
             axis,
             storage,
             observables,
-        })
+        }))
     }
 
     /// The swept values, used as the measurement abscissa.
@@ -4266,11 +4406,41 @@ struct ComplexProjectionSeries {
 
 impl ComplexProjectionSeries {
     fn push(&mut self, prefix: char, raw: &str, values: Vec<crate::Complex64>) {
-        let magnitude: Vec<Value> = values.iter().map(|c| c.norm()).collect();
-        let db: Vec<Value> = magnitude.iter().map(|m| 20.0 * m.log10()).collect();
-        let phase_deg: Vec<Value> = values.iter().map(|c| c.arg().to_degrees()).collect();
-        let real: Vec<Value> = values.iter().map(|c| c.re).collect();
-        let imag: Vec<Value> = values.iter().map(|c| c.im).collect();
+        match self.push_with_abort(prefix, raw, &values, &NoAbort) {
+            Ok(()) => {}
+            Err(SimulationError::Aborted) => {
+                unreachable!("NoAbort cannot cancel complex measurement projection")
+            }
+            Err(error) => unreachable!("complex measurement projection is infallible: {error}"),
+        }
+    }
+
+    fn push_with_abort(
+        &mut self,
+        prefix: char,
+        raw: &str,
+        values: &[crate::Complex64],
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        let mut magnitude = Vec::with_capacity(values.len());
+        let mut db = Vec::with_capacity(values.len());
+        let mut phase_deg = Vec::with_capacity(values.len());
+        let mut real = Vec::with_capacity(values.len());
+        let mut imag = Vec::with_capacity(values.len());
+        for (index, value) in values.iter().enumerate() {
+            if index.is_multiple_of(64) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let norm = value.norm();
+            magnitude.push(norm);
+            db.push(20.0 * norm.log10());
+            phase_deg.push(value.arg().to_degrees());
+            real.push(value.re);
+            imag.push(value.im);
+        }
 
         self.storage
             .push((format!("{prefix}({raw})"), magnitude.clone()));
@@ -4279,6 +4449,11 @@ impl ComplexProjectionSeries {
         self.storage.push((format!("{prefix}P({raw})"), phase_deg));
         self.storage.push((format!("{prefix}R({raw})"), real));
         self.storage.push((format!("{prefix}I({raw})"), imag));
+        if abort.is_aborted() {
+            Err(SimulationError::Aborted)
+        } else {
+            Ok(())
+        }
     }
 
     fn insert_all<'a>(&'a self, signals: &mut HashMap<String, &'a [Value]>) {
@@ -4332,24 +4507,54 @@ impl AcSweepSeries {
     /// Collect the derived real series across the sweep. Returns `None`
     /// for an empty sweep.
     pub fn from_sweep(sweep: &[AcResult]) -> Option<Self> {
-        let first = sweep.first()?;
-        let axis: Vec<Value> = sweep.iter().map(|point| point.frequency).collect();
+        match Self::from_sweep_with_abort(sweep, &NoAbort) {
+            Ok(series) => series,
+            Err(SimulationError::Aborted) => {
+                unreachable!("NoAbort cannot cancel AC measurement projection")
+            }
+            Err(error) => unreachable!("AC measurement projection is infallible: {error}"),
+        }
+    }
+
+    fn from_sweep_with_abort(
+        sweep: &[AcResult],
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<Self>, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        let Some(first) = sweep.first() else {
+            return Ok(None);
+        };
+        let mut axis = Vec::with_capacity(sweep.len());
+        for (index, point) in sweep.iter().enumerate() {
+            if index.is_multiple_of(64) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            axis.push(point.frequency);
+        }
 
         let mut projections = ComplexProjectionSeries::default();
 
         for (index, name) in first.node_names.iter().enumerate() {
+            if index.is_multiple_of(64) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             let raw = if name.is_empty() {
                 (index + 1).to_string()
             } else {
                 name.clone()
             };
-            let values: Vec<crate::Complex64> = sweep
+            let values = sweep
                 .iter()
                 .map(|point| point.voltages.get(index).copied().unwrap_or_default())
-                .collect();
-            projections.push('V', &raw, values);
+                .collect::<Vec<_>>();
+            projections.push_with_abort('V', &raw, &values, abort)?;
         }
         for (index, name) in first.branch_names.iter().enumerate() {
+            if index.is_multiple_of(64) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             if name.is_empty() {
                 continue;
             }
@@ -4357,10 +4562,10 @@ impl AcSweepSeries {
                 .iter()
                 .map(|point| point.currents.get(index).copied().unwrap_or_default())
                 .collect();
-            projections.push('I', name, values);
+            projections.push_with_abort('I', name, &values, abort)?;
         }
 
-        Some(Self { axis, projections })
+        Ok(Some(Self { axis, projections }))
     }
 
     /// The sweep frequencies, used as the measurement abscissa.
@@ -4574,36 +4779,85 @@ pub fn evaluate_noise_measurements(
     netlist: &Netlist,
     sweep: &[crate::analysis::NoiseResult],
 ) -> Vec<MeasureResult> {
+    match evaluate_noise_measurements_with_abort(netlist, sweep, &NoAbort) {
+        Ok(results) => results,
+        Err(SimulationError::Aborted) => {
+            unreachable!("NoAbort cannot cancel noise measurement projection")
+        }
+        Err(error) => unreachable!("noise measurement projection failed unexpectedly: {error}"),
+    }
+}
+
+/// Evaluate scalar NOISE measurements with cooperative cancellation.
+pub fn evaluate_noise_measurements_with_abort(
+    netlist: &Netlist,
+    sweep: &[crate::analysis::NoiseResult],
+    abort: &dyn AbortSignal,
+) -> Result<Vec<MeasureResult>, SimulationError> {
+    if abort.is_aborted() {
+        return Err(SimulationError::Aborted);
+    }
     let statements = measurements_for_analysis(netlist, "NOISE");
     if statements.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let series = match NoiseSweepSeries::from_sweep(sweep) {
         Ok(Some(series)) => series,
         Ok(None) => {
-            return failed_measurements(&statements, "noise sweep produced no points");
+            return Ok(failed_measurements(
+                &statements,
+                "noise sweep produced no points",
+            ));
         }
         Err(error) => {
-            return failed_measurements(&statements, &error);
+            return Ok(failed_measurements(&statements, &error));
         }
     };
-    let alias_projection = match InterfaceNodeAliasProjection::new(
+    if abort.is_aborted() {
+        return Err(SimulationError::Aborted);
+    }
+    let alias_projection = match InterfaceNodeAliasProjection::new_with_abort(
         netlist,
         OutputAnalysisKind::Noise,
         series.axis().len(),
+        abort,
     ) {
         Ok(projection) => projection,
-        Err(error) => return failed_measurements(&statements, &error),
+        Err(InterfaceNodeAliasProjectionError::Aborted) => {
+            return Err(SimulationError::Aborted);
+        }
+        Err(InterfaceNodeAliasProjectionError::Detail(error)) => {
+            return Ok(failed_measurements(&statements, &error));
+        }
     };
     let mut signals = series.equation_signal_map();
-    if let Err(error) = alias_projection.augment(&mut signals) {
-        return failed_measurements(&statements, &error);
+    match alias_projection.augment_with_abort(&mut signals, abort) {
+        Ok(()) => {}
+        Err(InterfaceNodeAliasProjectionError::Aborted) => {
+            return Err(SimulationError::Aborted);
+        }
+        Err(InterfaceNodeAliasProjectionError::Detail(error)) => {
+            return Ok(failed_measurements(&statements, &error));
+        }
     }
     // NOISE equations participate in the accepted-point stream just like AC
     // equations. A later WHEN/FIND-WHEN statement must see the equation's
     // current value as a waveform, rather than only its final scalar result.
-    let equation_traces =
-        evaluate_equation_measurements(netlist, "NOISE", series.axis(), &signals, -1.0, None);
+    let equation_traces = match evaluate_equation_measurements_with_abort(
+        netlist,
+        "NOISE",
+        series.axis(),
+        &signals,
+        -1.0,
+        None,
+        abort,
+    ) {
+        Ok(traces) => Ok(traces),
+        Err(EquationMeasurementEvaluationError::Aborted) => {
+            return Err(SimulationError::Aborted);
+        }
+        Err(EquationMeasurementEvaluationError::Detail(error)) => Err(error),
+    };
     let mut results = match &equation_traces {
         Ok(traces) => evaluate_statements_with_equation_traces(
             &statements,
@@ -4619,7 +4873,11 @@ pub fn evaluate_noise_measurements(
         Err(_) => evaluate_statements(&statements, series.axis(), &signals, &netlist.params, false),
     };
     overlay_continuous_equation_results(&statements, &mut results, equation_traces, "NOISE");
-    results
+    if abort.is_aborted() {
+        Err(SimulationError::Aborted)
+    } else {
+        Ok(results)
+    }
 }
 
 /// Evaluate vector-valued `.MEASURE NOISE_CONT` point-event statements.
@@ -5230,8 +5488,28 @@ pub fn evaluate_tran_measurements(
     netlist: &Netlist,
     result: &TransientResult,
 ) -> Vec<MeasureResult> {
+    match evaluate_tran_measurements_with_abort(netlist, result, &NoAbort) {
+        Ok(results) => results,
+        Err(SimulationError::Aborted) => {
+            unreachable!("NoAbort cannot cancel transient measurement projection")
+        }
+        Err(error) => {
+            unreachable!("transient measurement projection failed unexpectedly: {error}")
+        }
+    }
+}
+
+/// Evaluate scalar transient measurements with cooperative cancellation.
+pub fn evaluate_tran_measurements_with_abort(
+    netlist: &Netlist,
+    result: &TransientResult,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<MeasureResult>, SimulationError> {
+    if abort.is_aborted() {
+        return Err(SimulationError::Aborted);
+    }
     let signals = transient_signal_map(result);
-    evaluate_tran_measurements_with_signals(netlist, &result.time, &signals)
+    evaluate_tran_measurements_with_signals_and_abort(netlist, &result.time, &signals, abort)
 }
 
 /// Re-evaluate the netlist's transient `.MEAS` statements over a serialized
@@ -5313,15 +5591,45 @@ fn evaluate_tran_measurements_with_signals(
     time: &[Value],
     source_signals: &HashMap<String, &[Value]>,
 ) -> Vec<MeasureResult> {
+    match evaluate_tran_measurements_with_signals_and_abort(netlist, time, source_signals, &NoAbort)
+    {
+        Ok(results) => results,
+        Err(SimulationError::Aborted) => {
+            unreachable!("NoAbort cannot cancel transient measurement projection")
+        }
+        Err(error) => {
+            unreachable!("transient measurement projection failed unexpectedly: {error}")
+        }
+    }
+}
+
+fn evaluate_tran_measurements_with_signals_and_abort(
+    netlist: &Netlist,
+    time: &[Value],
+    source_signals: &HashMap<String, &[Value]>,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<MeasureResult>, SimulationError> {
+    if abort.is_aborted() {
+        return Err(SimulationError::Aborted);
+    }
     let statements = measurements_for_analysis(netlist, "TRAN");
     if statements.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
-    let alias_projection =
-        match InterfaceNodeAliasProjection::new(netlist, OutputAnalysisKind::Tran, time.len()) {
-            Ok(projection) => projection,
-            Err(error) => return failed_measurements(&statements, &error),
-        };
+    let alias_projection = match InterfaceNodeAliasProjection::new_with_abort(
+        netlist,
+        OutputAnalysisKind::Tran,
+        time.len(),
+        abort,
+    ) {
+        Ok(projection) => projection,
+        Err(InterfaceNodeAliasProjectionError::Aborted) => {
+            return Err(SimulationError::Aborted);
+        }
+        Err(InterfaceNodeAliasProjectionError::Detail(error)) => {
+            return Ok(failed_measurements(&statements, &error));
+        }
+    };
     // Reborrow caller-owned slices into a map whose lifetime is scoped to this
     // evaluation. Alias and differential projections own local waveforms, so
     // pinning the map to the caller's longer lifetime would make inserting
@@ -5330,18 +5638,32 @@ fn evaluate_tran_measurements_with_signals(
         .iter()
         .map(|(name, waveform)| (name.clone(), &**waveform))
         .collect::<HashMap<String, &[Value]>>();
-    if let Err(error) = alias_projection.augment(&mut signals) {
-        return failed_measurements(&statements, &error);
+    match alias_projection.augment_with_abort(&mut signals, abort) {
+        Ok(()) => {}
+        Err(InterfaceNodeAliasProjectionError::Aborted) => {
+            return Err(SimulationError::Aborted);
+        }
+        Err(InterfaceNodeAliasProjectionError::Detail(error)) => {
+            return Ok(failed_measurements(&statements, &error));
+        }
     }
     let differential_signals =
         match materialize_differential_voltage_signals(&statements, time.len(), &signals) {
             Ok(signals) => signals,
-            Err(error) => return failed_measurements(&statements, &error),
+            Err(error) => return Ok(failed_measurements(&statements, &error)),
         };
     for (name, waveform) in &differential_signals {
         insert_case_variants(&mut signals, name, waveform);
     }
-    let live_traces = evaluate_equation_measurements(netlist, "TRAN", time, &signals, -1.0, None);
+    let live_traces = match evaluate_equation_measurements_with_abort(
+        netlist, "TRAN", time, &signals, -1.0, None, abort,
+    ) {
+        Ok(traces) => Ok(traces),
+        Err(EquationMeasurementEvaluationError::Aborted) => {
+            return Err(SimulationError::Aborted);
+        }
+        Err(EquationMeasurementEvaluationError::Detail(error)) => Err(error),
+    };
     let mut results = match &live_traces {
         Ok(traces) => evaluate_statements_with_equation_traces(
             &statements,
@@ -5363,7 +5685,11 @@ fn evaluate_tran_measurements_with_signals(
         ),
     };
     overlay_continuous_equation_results(&statements, &mut results, live_traces, "TRAN");
-    results
+    if abort.is_aborted() {
+        Err(SimulationError::Aborted)
+    } else {
+        Ok(results)
+    }
 }
 
 /// Evaluate vector-valued `.MEASURE TRAN_CONT` point-event statements.
@@ -5517,7 +5843,22 @@ pub fn evaluate_dc_measurements(
     netlist: &Netlist,
     sweep: &[(Value, SimulationResult)],
 ) -> Vec<MeasureResult> {
-    evaluate_dc_measurements_with_parameter_contexts(netlist, sweep, &[])
+    match evaluate_dc_measurements_with_abort(netlist, sweep, &NoAbort) {
+        Ok(results) => results,
+        Err(SimulationError::Aborted) => {
+            unreachable!("NoAbort cannot cancel DC measurement projection")
+        }
+        Err(error) => unreachable!("DC measurement projection failed unexpectedly: {error}"),
+    }
+}
+
+/// Evaluate scalar DC measurements with cooperative cancellation.
+pub fn evaluate_dc_measurements_with_abort(
+    netlist: &Netlist,
+    sweep: &[(Value, SimulationResult)],
+    abort: &dyn AbortSignal,
+) -> Result<Vec<MeasureResult>, SimulationError> {
+    evaluate_dc_measurements_with_parameter_contexts_and_abort(netlist, sweep, &[], abort)
 }
 
 /// Evaluate DC measurements with an optional parameter context for every
@@ -5528,9 +5869,34 @@ pub fn evaluate_dc_measurements_with_parameter_contexts(
     sweep: &[(Value, SimulationResult)],
     point_params: &[crate::netlist::ParamContext],
 ) -> Vec<MeasureResult> {
+    match evaluate_dc_measurements_with_parameter_contexts_and_abort(
+        netlist,
+        sweep,
+        point_params,
+        &NoAbort,
+    ) {
+        Ok(results) => results,
+        Err(SimulationError::Aborted) => {
+            unreachable!("NoAbort cannot cancel DC measurement projection")
+        }
+        Err(error) => unreachable!("DC measurement projection failed unexpectedly: {error}"),
+    }
+}
+
+/// Evaluate DC measurements with point-local parameter contexts and
+/// cooperative cancellation.
+pub fn evaluate_dc_measurements_with_parameter_contexts_and_abort(
+    netlist: &Netlist,
+    sweep: &[(Value, SimulationResult)],
+    point_params: &[crate::netlist::ParamContext],
+    abort: &dyn AbortSignal,
+) -> Result<Vec<MeasureResult>, SimulationError> {
+    if abort.is_aborted() {
+        return Err(SimulationError::Aborted);
+    }
     let statements = measurements_for_analysis(netlist, "DC");
     if statements.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let normalized_statements = statements
         .into_iter()
@@ -5538,28 +5904,43 @@ pub fn evaluate_dc_measurements_with_parameter_contexts(
         .map(normalize_dc_measurement_window)
         .collect::<Vec<_>>();
     let statements = normalized_statements.iter().collect::<Vec<_>>();
-    let Some(series) = DcSweepSeries::from_sweep(sweep) else {
-        return failed_measurements(&statements, "DC sweep produced no points");
+    let Some(series) = DcSweepSeries::from_sweep_with_abort(sweep, abort)? else {
+        return Ok(failed_measurements(
+            &statements,
+            "DC sweep produced no points",
+        ));
     };
-    let alias_projection = match InterfaceNodeAliasProjection::new(
+    let alias_projection = match InterfaceNodeAliasProjection::new_with_abort(
         netlist,
         OutputAnalysisKind::Dc,
         series.axis().len(),
+        abort,
     ) {
         Ok(projection) => projection,
-        Err(error) => return failed_measurements(&statements, &error),
+        Err(InterfaceNodeAliasProjectionError::Aborted) => {
+            return Err(SimulationError::Aborted);
+        }
+        Err(InterfaceNodeAliasProjectionError::Detail(error)) => {
+            return Ok(failed_measurements(&statements, &error));
+        }
     };
     let mut signals = series.signal_map();
-    if let Err(error) = alias_projection.augment(&mut signals) {
-        return failed_measurements(&statements, &error);
+    match alias_projection.augment_with_abort(&mut signals, abort) {
+        Ok(()) => {}
+        Err(InterfaceNodeAliasProjectionError::Aborted) => {
+            return Err(SimulationError::Aborted);
+        }
+        Err(InterfaceNodeAliasProjectionError::Detail(error)) => {
+            return Ok(failed_measurements(&statements, &error));
+        }
     }
     let parameter_series = if point_params.is_empty() {
         Vec::new()
     } else if point_params.len() != series.axis().len() {
-        return failed_measurements(
+        return Ok(failed_measurements(
             &statements,
             "DC point-parameter context count does not match sweep length",
-        );
+        ));
     } else {
         dc_parameter_context_series(point_params)
     };
@@ -5572,21 +5953,28 @@ pub fn evaluate_dc_measurements_with_parameter_contexts(
         &signals,
     ) {
         Ok(signals) => signals,
-        Err(error) => return failed_measurements(&statements, &error),
+        Err(error) => return Ok(failed_measurements(&statements, &error)),
     };
     for (name, waveform) in &differential_signals {
         insert_case_variants(&mut signals, name, waveform);
     }
     // Continuous equation measures are live waveforms, not merely final
     // scalars. Their visibility at each statement depends on netlist order.
-    let equation_traces = evaluate_equation_measurements(
+    let equation_traces = match evaluate_equation_measurements_with_abort(
         netlist,
         "DC",
         series.axis(),
         &signals,
         0.0,
         Some(dc_primary_sweep_is_ascending(netlist, series.axis())),
-    );
+        abort,
+    ) {
+        Ok(traces) => Ok(traces),
+        Err(EquationMeasurementEvaluationError::Aborted) => {
+            return Err(SimulationError::Aborted);
+        }
+        Err(EquationMeasurementEvaluationError::Detail(error)) => Err(error),
+    };
     let segment_starts = dc_primary_segment_starts(netlist, series.axis().len());
     let mut results = match &equation_traces {
         Ok(traces) => evaluate_statements_with_equation_traces(
@@ -5610,7 +5998,11 @@ pub fn evaluate_dc_measurements_with_parameter_contexts(
         ),
     };
     overlay_continuous_equation_results(&statements, &mut results, equation_traces, "DC");
-    results
+    if abort.is_aborted() {
+        Err(SimulationError::Aborted)
+    } else {
+        Ok(results)
+    }
 }
 
 fn dc_parameter_context_series(
@@ -5751,30 +6143,76 @@ pub fn evaluate_ac_continuous_measurements(
 /// select the explicit derived quantities. The frequency axis is available as
 /// `TIME`/`FREQUENCY`/`FREQ`/`HERTZ`.
 pub fn evaluate_ac_measurements(netlist: &Netlist, sweep: &[AcResult]) -> Vec<MeasureResult> {
+    match evaluate_ac_measurements_with_abort(netlist, sweep, &NoAbort) {
+        Ok(results) => results,
+        Err(SimulationError::Aborted) => {
+            unreachable!("NoAbort cannot cancel AC measurement projection")
+        }
+        Err(error) => unreachable!("AC measurement projection failed unexpectedly: {error}"),
+    }
+}
+
+/// Evaluate scalar AC measurements with cooperative cancellation.
+pub fn evaluate_ac_measurements_with_abort(
+    netlist: &Netlist,
+    sweep: &[AcResult],
+    abort: &dyn AbortSignal,
+) -> Result<Vec<MeasureResult>, SimulationError> {
+    if abort.is_aborted() {
+        return Err(SimulationError::Aborted);
+    }
     let statements = measurements_for_analysis(netlist, "AC");
     if statements.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
-    let Some(series) = AcSweepSeries::from_sweep(sweep) else {
-        return failed_measurements(&statements, "AC sweep produced no points");
+    let Some(series) = AcSweepSeries::from_sweep_with_abort(sweep, abort)? else {
+        return Ok(failed_measurements(
+            &statements,
+            "AC sweep produced no points",
+        ));
     };
-    let alias_projection = match InterfaceNodeAliasProjection::new(
+    let alias_projection = match InterfaceNodeAliasProjection::new_with_abort(
         netlist,
         OutputAnalysisKind::Ac,
         series.axis().len(),
+        abort,
     ) {
         Ok(projection) => projection,
-        Err(error) => return failed_measurements(&statements, &error),
+        Err(InterfaceNodeAliasProjectionError::Aborted) => {
+            return Err(SimulationError::Aborted);
+        }
+        Err(InterfaceNodeAliasProjectionError::Detail(error)) => {
+            return Ok(failed_measurements(&statements, &error));
+        }
     };
     let mut signals = series.equation_signal_map();
-    if let Err(error) = alias_projection.augment(&mut signals) {
-        return failed_measurements(&statements, &error);
+    match alias_projection.augment_with_abort(&mut signals, abort) {
+        Ok(()) => {}
+        Err(InterfaceNodeAliasProjectionError::Aborted) => {
+            return Err(SimulationError::Aborted);
+        }
+        Err(InterfaceNodeAliasProjectionError::Detail(error)) => {
+            return Ok(failed_measurements(&statements, &error));
+        }
     }
     // Continuous equation measures participate in the accepted-point stream.
     // A later WHEN/FIND-WHEN statement therefore observes the equation's
     // current value as a waveform, not only its final scalar result.
-    let equation_traces =
-        evaluate_equation_measurements(netlist, "AC", series.axis(), &signals, -1.0, None);
+    let equation_traces = match evaluate_equation_measurements_with_abort(
+        netlist,
+        "AC",
+        series.axis(),
+        &signals,
+        -1.0,
+        None,
+        abort,
+    ) {
+        Ok(traces) => Ok(traces),
+        Err(EquationMeasurementEvaluationError::Aborted) => {
+            return Err(SimulationError::Aborted);
+        }
+        Err(EquationMeasurementEvaluationError::Detail(error)) => Err(error),
+    };
     let mut results = match &equation_traces {
         Ok(traces) => evaluate_statements_with_equation_traces(
             &statements,
@@ -5790,7 +6228,11 @@ pub fn evaluate_ac_measurements(netlist: &Netlist, sweep: &[AcResult]) -> Vec<Me
         Err(_) => evaluate_statements(&statements, series.axis(), &signals, &netlist.params, false),
     };
     overlay_continuous_equation_results(&statements, &mut results, equation_traces, "AC");
-    results
+    if abort.is_aborted() {
+        Err(SimulationError::Aborted)
+    } else {
+        Ok(results)
+    }
 }
 
 /// Explicit not-evaluated entries for measurements whose analysis did not
@@ -5851,6 +6293,79 @@ mod tests {
         assert_eq!(
             MeasurementSignalDomain::for_analysis(OutputAnalysisKind::Hb),
             Ok(MeasurementSignalDomain::Complex)
+        );
+    }
+
+    #[test]
+    fn standard_scalar_measurement_projections_propagate_typed_abort() {
+        let netlist = Netlist::parse(
+            "measurement cancellation\n\
+             V1 out 0 0\n\
+             .TRAN 1 2\n\
+             .AC LIN 2 1 2\n\
+             .NOISE V(out) V1 LIN 2 1 2\n\
+             .MEASURE TRAN mt MAX V(out)\n\
+             .MEASURE DC md MAX V(out)\n\
+             .MEASURE AC ma MAX VM(out)\n\
+             .MEASURE NOISE mn MAX ONOISE\n\
+             .END\n",
+        )
+        .expect("measurement cancellation deck parses");
+
+        let tran_abort = crate::abort_signal::CountingAbort::new(0);
+        assert!(matches!(
+            evaluate_tran_measurements_with_abort(&netlist, &tran_result(), &tran_abort),
+            Err(SimulationError::Aborted)
+        ));
+        assert_eq!(tran_abort.count(), 1);
+
+        let dc_abort = crate::abort_signal::CountingAbort::new(0);
+        assert!(matches!(
+            evaluate_dc_measurements_with_abort(&netlist, &[], &dc_abort),
+            Err(SimulationError::Aborted)
+        ));
+        assert_eq!(dc_abort.count(), 1);
+
+        let ac_abort = crate::abort_signal::CountingAbort::new(0);
+        assert!(matches!(
+            evaluate_ac_measurements_with_abort(&netlist, &[], &ac_abort),
+            Err(SimulationError::Aborted)
+        ));
+        assert_eq!(ac_abort.count(), 1);
+
+        let noise_abort = crate::abort_signal::CountingAbort::new(0);
+        assert!(matches!(
+            evaluate_noise_measurements_with_abort(&netlist, &[], &noise_abort),
+            Err(SimulationError::Aborted)
+        ));
+        assert_eq!(noise_abort.count(), 1);
+    }
+
+    #[test]
+    fn transient_equation_projection_polls_abort_at_bounded_row_intervals() {
+        let netlist = Netlist::parse(
+            "long measurement projection\n\
+             V1 out 0 0\n\
+             .TRAN 1 4095\n\
+             .MEASURE TRAN tracked EQN {V(out)}\n\
+             .END\n",
+        )
+        .expect("long measurement projection deck parses");
+        let point_count = 4096;
+        let result = tran_waveform(
+            (0..point_count).map(|index| index as Value).collect(),
+            (0..point_count)
+                .map(|index| (index as Value).sin())
+                .collect(),
+        );
+        let abort = crate::abort_signal::CountingAbort::new(20);
+        let error = evaluate_tran_measurements_with_abort(&netlist, &result, &abort)
+            .expect_err("equation projection must honor cancellation");
+        assert!(matches!(error, SimulationError::Aborted));
+        assert!(
+            abort.count() <= 22,
+            "measurement projection polled {} times after its deterministic threshold",
+            abort.count()
         );
     }
 

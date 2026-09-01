@@ -79,6 +79,7 @@ base64 = "0.23"
 # only the verifying half.
 ed25519-dalek = { version = "2.2", default-features = false, features = ["zeroize"] }
 futures-util = "0.3"
+flate2 = "1.1"
 getrandom = "0.4"
 gloo-timers = "0.4"
 http = "1.3"

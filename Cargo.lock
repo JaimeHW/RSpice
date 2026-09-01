@@ -5298,6 +5298,7 @@ dependencies = [
  "blake3",
  "dirs",
  "faer",
+ "flate2",
  "libm",
  "log",
  "miniz_oxide 0.8.9",
