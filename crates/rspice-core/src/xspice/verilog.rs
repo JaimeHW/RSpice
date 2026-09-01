@@ -74,10 +74,24 @@
 //! published `wreal` must therefore be the only driver of the node it lands on,
 //! or the analog side sees a sum neither standard asked for, silently.
 //!
-//! The bridge halves already exist as code models — `real_to_v` (planned in by
-//! `engine::builder`'s `plan_xspice_auto_bridges`, the single planner a
-//! connect-module route extends) and `v_to_real` (sample on accepted step, no
-//! threshold, no breakpoint) — and neither needs anything from this host.
+//! The bridge halves already exist as code models — `real_to_v` and
+//! `v_to_real` (sample on accepted step, no threshold, no breakpoint), both
+//! planned in by `engine::builder`'s `plan_xspice_auto_bridges`, the single
+//! planner a connect-module route extends — and neither needs anything from
+//! this host.
+//!
+//! # Where the connect-module route stands
+//!
+//! Verilog-AMS LRM 2.4 clause 7's decisions — which discipline a net resolves
+//! to, which connect module a mixed-discipline connection needs, where the
+//! instance goes and how its ports bind — are made by
+//! [`rspice_veriloga::connect`], on a signal's net-segment hierarchy. What is
+//! missing between there and the planner named above is the *hierarchy*: this
+//! host runs a digital design and [`MixedSignalHost`] bridges a fixed
+//! boundary, and neither elaborates a Verilog-AMS module tree into
+//! `CircuitData` nodes. Until one does, a resolved connect module has no node
+//! to be planned onto, which is why the planner has no connect-module input
+//! rather than an empty one.
 //!
 //! [`DigitalHost::advance_to`]: host::DigitalHost::advance_to
 

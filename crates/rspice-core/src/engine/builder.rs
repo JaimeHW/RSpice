@@ -1804,6 +1804,32 @@ fn explicit_digital_bridge_kind_for_port(
     }
 }
 
+/// The one bridge planner.
+///
+/// Every route that puts a converter between the matrix and an event world
+/// comes through here: the three digital bridges, and the two real-event ones
+/// added by the `Real` arm below. A second planner beside it would mean two
+/// answers to "is this node a boundary", and the only way to keep them
+/// agreeing would be to keep them identical.
+///
+/// # Where a Verilog-AMS connect module joins
+///
+/// Verilog-AMS LRM 2.4 clause 7 decides three things about a mixed-discipline
+/// net — which connect module bridges it, where the instance goes, and which
+/// of its ports binds to which side. Those decisions are the front end's, in
+/// `rspice_veriloga::connect`, because they are about *disciplines*, and a
+/// discipline is a language construct nothing in this crate represents: this
+/// planner reads XSPICE port types, which say analog-or-event and nothing
+/// about which analog.
+///
+/// What a connect module changes is *which model* bridges a node, not whether
+/// the node is a boundary or where the boundary is. So the extension this
+/// planner takes when that route lands is one more field on
+/// [`PlannedXspiceAutoBridge`] naming the selected module, read by
+/// materialization — not a second pass that decides boundaries again. Nothing
+/// produces such a selection yet: it needs a Verilog-AMS hierarchy elaborated
+/// into [`CircuitData`] nodes, which has no elaborated form (see
+/// `crate::xspice::verilog`'s module documentation).
 fn plan_xspice_auto_bridges(
     circuit: &CircuitData,
     flat_elements: &[Element],
