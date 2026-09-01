@@ -1721,6 +1721,23 @@ impl Engine {
                 ctx.xyce_one_step_order2,
             );
         }
+        // The mixed Verilog-AMS boundary, on the same terms and in the same
+        // place: the module's continuous equations and its D/A levels reach the
+        // matrix, and the trial that produced them is rolled back before this
+        // returns.
+        #[cfg(feature = "veriloga")]
+        if circuit.has_mixed_signal_hosts() {
+            circuit.stamp_mixed_transient_trial(
+                matrix,
+                rhs,
+                time,
+                dt,
+                solution,
+                &companion_coeff,
+                ctx.analysis_initial_step,
+                ctx.analysis_final_step,
+            )?;
+        }
         if ctx.xyce_one_step_order2 {
             if let Some(history) = ctx.xyce_static_history {
                 debug_assert_eq!(history.len(), rhs.len());

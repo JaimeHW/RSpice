@@ -3337,6 +3337,17 @@ impl Engine {
             }
         }
         breakpoints.discard_through(resume_time);
+        // A mixed module's discrete half starts running when its host is built,
+        // so its first activation is already scheduled before the first step is
+        // taken. Seeding it here is what keeps the first step from being the
+        // one step that may sail past a digital event; every step after it is
+        // clamped by the collection at the accepted point. Gated on a mixed
+        // module being present so that a deck with only XSPICE devices takes
+        // exactly the path it always took.
+        #[cfg(feature = "veriloga")]
+        if circuit.has_mixed_signal_hosts() {
+            Self::collect_xspice_runtime_breakpoints(&mut circuit, &mut breakpoints, tstop)?;
+        }
         let configured_initial_step = self
             .config
             .transient_initial_timestep
@@ -7687,7 +7698,7 @@ impl Engine {
                             &mut circuit,
                             &mut breakpoints,
                             tstop,
-                        );
+                        )?;
                         if capture_xyce_static_history {
                             xyce_static_history_candidate =
                                 Some(self.capture_xyce_static_residual(
@@ -7715,6 +7726,22 @@ impl Engine {
                         circuit
                             .accept_all_veriloga_timestep()
                             .map_err(SimulationError::Circuit)?;
+                    }
+                    #[cfg(feature = "veriloga")]
+                    if circuit.has_mixed_signal_hosts() {
+                        circuit.accept_mixed_transient_timestep(
+                            t,
+                            dt,
+                            &new_solution,
+                            &coeff,
+                            analysis_first_step_pending,
+                            false,
+                        )?;
+                        Self::collect_xspice_runtime_breakpoints(
+                            &mut circuit,
+                            &mut breakpoints,
+                            tstop,
+                        )?;
                     }
                     pending_veriloga_event_time =
                         accepted_veriloga_event_time(&circuit, t, timestep.hard_min_dt())?;
@@ -8149,7 +8176,7 @@ impl Engine {
                     );
                 }
                 circuit.project_xspice_voltage_outputs(&mut new_solution, num_nodes);
-                Self::collect_xspice_runtime_breakpoints(&mut circuit, &mut breakpoints, tstop);
+                Self::collect_xspice_runtime_breakpoints(&mut circuit, &mut breakpoints, tstop)?;
                 if capture_xyce_static_history {
                     xyce_static_history_candidate = Some(self.capture_xyce_static_residual(
                         &mut circuit,
@@ -8179,6 +8206,18 @@ impl Engine {
             } else {
                 false
             };
+            #[cfg(feature = "veriloga")]
+            if circuit.has_mixed_signal_hosts() {
+                circuit.accept_mixed_transient_timestep(
+                    t,
+                    dt,
+                    &new_solution,
+                    &coeff,
+                    analysis_first_step_pending,
+                    false,
+                )?;
+                Self::collect_xspice_runtime_breakpoints(&mut circuit, &mut breakpoints, tstop)?;
+            }
             pending_veriloga_event_time =
                 accepted_veriloga_event_time(&circuit, t, timestep.hard_min_dt())?;
             // `$discontinuity` is an accepted boundary event. Fold it into

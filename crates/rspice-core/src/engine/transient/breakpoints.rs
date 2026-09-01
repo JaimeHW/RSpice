@@ -59,13 +59,32 @@ impl Engine {
         }
     }
 
+    /// Replace the runtime breakpoint list with what the event-driven devices
+    /// now ask for.
+    ///
+    /// A mixed Verilog-AMS module's next scheduled digital activation joins the
+    /// XSPICE event queue's here rather than through a mechanism of its own.
+    /// That is what makes D5 clause 2 true of the deck route: the stepper stops
+    /// bit-exactly on a digital event because the event is in the same list a
+    /// source edge is, so every rule about landing on breakpoints, restarting
+    /// the integration order across one, and clamping the step to reach one
+    /// already applies to it.
+    ///
+    /// A circuit with no mixed module contributes nothing extra, so the list is
+    /// the one it always was.
     pub(super) fn collect_xspice_runtime_breakpoints(
         circuit: &mut crate::circuit::CircuitData,
         breakpoints: &mut BreakpointManager,
         tstop: Value,
-    ) {
+    ) -> Result<(), crate::engine::SimulationError> {
         let mut runtime_breakpoints = Vec::new();
         if let Some(event_time) = circuit.next_xspice_event_time() {
+            if event_time.is_finite() && event_time >= 0.0 && event_time <= tstop {
+                runtime_breakpoints.push(event_time);
+            }
+        }
+        #[cfg(feature = "veriloga")]
+        if let Some(event_time) = circuit.next_mixed_event_time()? {
             if event_time.is_finite() && event_time >= 0.0 && event_time <= tstop {
                 runtime_breakpoints.push(event_time);
             }
@@ -76,6 +95,7 @@ impl Engine {
             }
         });
         breakpoints.replace_runtime_breakpoints(runtime_breakpoints);
+        Ok(())
     }
 
     #[cfg(test)]
