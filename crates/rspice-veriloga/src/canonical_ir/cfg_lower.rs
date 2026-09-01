@@ -2341,16 +2341,36 @@ impl<'a> CfgLowerer<'a> {
             self.unsupported(span, "$simparam with a non-literal name".to_string());
             return self.real_constant(0.0);
         };
-        if let Some(fallback) = args.get(1) {
-            return self.expr(*fallback);
+        if self.noise_metadata_only {
+            if let Some(fallback) = args.get(1) {
+                return self.expr(*fallback);
+            }
+            let value = match value.as_str() {
+                "gmin" => 1.0e-12,
+                "tnom" => 300.15,
+                "simulatorVersion" => 1.0,
+                _ => 0.0,
+            };
+            return self.real_constant(value);
         }
-        let value = match value.as_str() {
-            "gmin" => 1.0e-12,
-            "tnom" => 300.15,
-            "simulatorVersion" => 1.0,
-            _ => 0.0,
+
+        // Ordinary generated devices receive simulator-owned values (most
+        // importantly the gmin continuation value) on every Newton call. Keep
+        // the source fallback in the CFG, but do not replace the runtime leaf
+        // with it. Metadata-only noise evaluation has no such runtime input,
+        // so the closed defaults above are deliberately confined to that mode.
+        let fallback = match args.get(1) {
+            Some(fallback) => self.expr(*fallback),
+            None => self.real_constant(0.0),
         };
-        self.real_constant(value)
+        self.builder.push(
+            self.block,
+            CfgValueType::Real,
+            CfgValueKind::SimParam {
+                name: SmolStr::new(value.to_ascii_lowercase()),
+                fallback,
+            },
+        )
     }
 
     fn parameter_argument(&self, expr: ExprId) -> Option<ParamId> {

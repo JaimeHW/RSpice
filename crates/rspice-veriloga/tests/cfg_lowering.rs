@@ -115,6 +115,54 @@ endmodule
     ));
 }
 
+#[test]
+fn ordinary_cfg_simparams_remain_runtime_newton_inputs() {
+    let source = r#"
+module runtime_simparams(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ $simparam("GMIN", 7.0) + $simparam("unknown");
+endmodule
+"#;
+    let artifact = artifact(source);
+    let model = lower(source);
+    let simparams = model
+        .function
+        .values
+        .iter()
+        .filter_map(|value| match &value.kind {
+            CfgValueKind::SimParam { name, fallback } => {
+                Some((name.as_str(), (value.id, *fallback)))
+            }
+            _ => None,
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    let (gmin, gmin_fallback) = simparams.get("gmin").expect("gmin runtime leaf");
+    let (unknown, unknown_fallback) = simparams.get("unknown").expect("unknown runtime leaf");
+    assert!(matches!(
+        model.function.value(*gmin_fallback).kind,
+        CfgValueKind::RealConstant(7.0)
+    ));
+    assert!(matches!(
+        model.function.value(*unknown_fallback).kind,
+        CfgValueKind::RealConstant(0.0)
+    ));
+
+    let bias = bias_point(&artifact);
+    let inputs = cfg_inputs(&bias);
+    let fallback = evaluate_cfg(&model.function, &inputs).expect("fallback evaluation");
+    assert_eq!(fallback.value(*gmin), Some(7.0));
+    assert_eq!(fallback.value(*unknown), Some(0.0));
+
+    let mut inputs = inputs;
+    inputs.simparams.insert("gmin".into(), 2.5e-9);
+    inputs.simparams.insert("unknown".into(), -4.0);
+    let overridden = evaluate_cfg(&model.function, &inputs).expect("runtime override evaluation");
+    assert_eq!(overridden.value(*gmin), Some(2.5e-9));
+    assert_eq!(overridden.value(*unknown), Some(-4.0));
+}
+
 /// A variable written in one arm and read after the `if` merges once. This is
 /// the case the level being replaced answers by searching an assignment
 /// history; here the builder simply knows.

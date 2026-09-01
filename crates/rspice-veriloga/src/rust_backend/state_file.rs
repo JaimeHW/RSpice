@@ -1356,6 +1356,24 @@ fn hash_identity_field(hasher: &mut blake3::Hasher, field: &[u8]) {
 pub(super) fn finalize_checkpoint_identity(
     device: &mut GeneratedRustDevice,
 ) -> Result<(), RustBackendError> {
+    let compatibility = rspice_veriloga_runtime::generated_veriloga_compatibility_entry(
+        &device.module_name,
+        &device.source_identity,
+    )
+    .map_err(|error| {
+        RustBackendError::internal(
+            device.source_digest.clone(),
+            device.module_name.clone(),
+            error,
+        )
+    })?;
+    finalize_checkpoint_identity_with_compatibility(device, compatibility.copied())
+}
+
+fn finalize_checkpoint_identity_with_compatibility(
+    device: &mut GeneratedRustDevice,
+    compatibility: Option<rspice_veriloga_runtime::GeneratedVerilogACompatibilityCatalogEntry>,
+) -> Result<(), RustBackendError> {
     let mut artifact_hasher = blake3::Hasher::new();
     // The schema tag is the manual compatibility boundary for the checkpoint
     // artifact encoding. This digest qualifies an explicit historical alias;
@@ -1374,17 +1392,6 @@ pub(super) fn finalize_checkpoint_identity(
     }
     let artifact_identity = artifact_hasher.finalize().to_hex().to_string();
 
-    let compatibility = rspice_veriloga_runtime::generated_veriloga_compatibility_entry(
-        &device.module_name,
-        &device.source_identity,
-    )
-    .map_err(|error| {
-        RustBackendError::internal(
-            device.source_digest.clone(),
-            device.module_name.clone(),
-            error,
-        )
-    })?;
     let generic_semantic_identity = generated_model_semantic_identity(device);
     let generated_shape_identity =
         rspice_veriloga_runtime::GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes(
@@ -2935,7 +2942,8 @@ fn range_contains(range: &crate::canonical_ir::HirParamRange, value: f64) -> boo
 mod tests {
     use super::{
         CHECKPOINT_IDENTITY_PLACEHOLDER, ParameterBoundPool, compact_generated_indentation,
-        finalize_checkpoint_identity, generated_model_semantic_identity,
+        finalize_checkpoint_identity, finalize_checkpoint_identity_with_compatibility,
+        generated_model_semantic_identity,
     };
     use crate::rust_backend::{GeneratedRustDevice, GeneratedRustFile};
 
@@ -2966,17 +2974,24 @@ mod tests {
 
     #[test]
     fn retained_semantic_identity_requires_the_exact_catalog_target_artifact() {
-        let catalog = rspice_veriloga_runtime::GENERATED_VERILOGA_COMPATIBILITY_CATALOG
-            .iter()
-            .find(|entry| entry.semantic_identity_override_artifact.is_some())
-            .expect("retained semantic identity catalog entry");
-        let accepted_state_shape_identity =
-            *rspice_veriloga_runtime::GeneratedVerilogAAcceptedStateShapeIdentity::from_hex(
-                catalog.accepted_state_shape_identity,
-            )
-            .expect("catalog shape identity")
-            .as_bytes();
-        let fixture = |source_identity: String| GeneratedRustDevice {
+        const ZERO_IDENTITY: &str =
+            "0000000000000000000000000000000000000000000000000000000000000000";
+        const WRONG_ARTIFACT: &str =
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+        let catalog = rspice_veriloga_runtime::GeneratedVerilogACompatibilityCatalogEntry {
+            module_name: "fixture",
+            public_model_name: "fixture",
+            source_identity: "fixture-source",
+            target_descriptor_abi_version:
+                rspice_veriloga_runtime::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION,
+            semantic_identity: ZERO_IDENTITY,
+            accepted_state_shape_identity: ZERO_IDENTITY,
+            accepted_state_shape_identity_aliases: &[],
+            semantic_identity_override_artifact: Some(WRONG_ARTIFACT),
+            wire_v26_combined_identity_alias: None,
+            wire_ui_v1_descriptor_signature_alias: None,
+        };
+        let fixture = || GeneratedRustDevice {
             module_name: catalog.module_name.to_string(),
             public_model_name: catalog.public_model_name.to_string(),
             folder_name: "fixture".to_string(),
@@ -2987,12 +3002,12 @@ mod tests {
                 ),
             }],
             source_digest: "aa00e2e747501388".to_string(),
-            source_identity,
-            accepted_state_shape_identity,
+            source_identity: catalog.source_identity.to_string(),
+            accepted_state_shape_identity: [0; 32],
         };
 
-        let mut retained = fixture(catalog.source_identity.to_string());
-        let error = finalize_checkpoint_identity(&mut retained)
+        let mut retained = fixture();
+        let error = finalize_checkpoint_identity_with_compatibility(&mut retained, Some(catalog))
             .expect_err("a source match cannot bless an arbitrary generated artifact");
         assert!(
             error
@@ -3001,11 +3016,10 @@ mod tests {
             "unexpected error: {error}"
         );
 
-        let mut changed_source = catalog.source_identity.to_string();
-        changed_source.replace_range(..1, "0");
-        let mut uncataloged = fixture(changed_source);
+        let mut uncataloged = fixture();
         let semantic_identity = generated_model_semantic_identity(&uncataloged);
-        finalize_checkpoint_identity(&mut uncataloged).expect("uncataloged identity finalizes");
+        finalize_checkpoint_identity_with_compatibility(&mut uncataloged, None)
+            .expect("uncataloged identity finalizes");
         assert!(
             uncataloged.files[0].contents.contains(&semantic_identity),
             "uncataloged models use their stable semantic identity"
