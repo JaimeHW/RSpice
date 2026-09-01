@@ -501,7 +501,7 @@ impl DigitalHost {
         value: f64,
         tick: u64,
     ) -> Result<(), DigitalRunError> {
-        self.store.force_real(signal, value, self.plan)?;
+        self.store.force_real(signal, value, &self.plan)?;
         self.dispatch(tick)?;
         self.settle(tick)
     }
