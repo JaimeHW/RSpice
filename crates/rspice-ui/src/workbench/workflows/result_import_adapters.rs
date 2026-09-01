@@ -14,6 +14,8 @@ const MAX_ARCHIVE_EXPANDED_BYTES: u64 = MAX_RESULT_DATASET_BYTES;
 const MAX_SIGNAL_NAME_BYTES: usize = 1_024;
 const MAX_EXACT_F64_INTEGER: u64 = 1_u64 << 53;
 const MAX_RESULT_VALUES: usize = MAX_RESULT_DATASET_BYTES as usize / std::mem::size_of::<f64>();
+const MAX_FST_TOP_LEVEL_BLOCKS: usize = 1_024;
+const FST_HEADER_SECTION_BYTES: u64 = 329;
 
 #[derive(Debug)]
 struct ImportedSignal {
@@ -2139,10 +2141,1106 @@ fn logic_bits_to_f64(bits: &[u8], format: ResultImportFormat) -> Result<f64, Str
     Ok(value as f64)
 }
 
+#[derive(Debug, Clone, Copy)]
+struct FstHeaderPreflight {
+    var_count: usize,
+    max_handle: usize,
+    value_change_sections: usize,
+}
+
+#[derive(Debug)]
+struct FstGeometryPreflight {
+    widths: Vec<usize>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FstDataPreflight {
+    block_type: u8,
+    section_start: usize,
+    section_end: usize,
+    section_length: usize,
+    memory_required: usize,
+}
+
+/// Validate every allocation-relevant FST framing field before handing the
+/// bytes to `fst-reader`. That crate trusts several sizes with `Vec` capacity
+/// reservations and contains arithmetic assertions intended for trusted
+/// files, so the public import boundary cannot delegate this job to it.
+fn preflight_fst(bytes: &[u8], format: ResultImportFormat) -> Result<FstGeometryPreflight, String> {
+    if bytes.len() as u64 > MAX_RESULT_DATASET_BYTES {
+        return Err(adapter_error(format, "FST input exceeds the byte limit"));
+    }
+    let mut cursor = 0_usize;
+    let mut block_count = 0_usize;
+    let mut header = None;
+    let mut geometry = None;
+    let mut hierarchy_seen = false;
+    let mut blackout_seen = false;
+    let mut data_sections = Vec::new();
+    let mut terminated = false;
+
+    while cursor < bytes.len() {
+        block_count = block_count
+            .checked_add(1)
+            .ok_or_else(|| adapter_error(format, "FST block-count accounting overflow"))?;
+        if block_count > MAX_FST_TOP_LEVEL_BLOCKS {
+            return Err(adapter_error(
+                format,
+                "FST top-level block-count limit exceeded",
+            ));
+        }
+        let block_offset = cursor;
+        let block_type = *bytes
+            .get(cursor)
+            .ok_or_else(|| adapter_error(format, "truncated FST block type"))?;
+        cursor += 1;
+        let section_start = cursor;
+        let section_length_u64 = fst_be_u64(bytes, section_start, format, "section length")?;
+
+        if block_type == 255 && section_length_u64 == 0 {
+            cursor = section_start + 8;
+            if cursor != bytes.len() {
+                return Err(adapter_error(
+                    format,
+                    "FST contains trailing bytes after its end marker",
+                ));
+            }
+            terminated = true;
+            break;
+        }
+        if section_length_u64 < 8 {
+            return Err(adapter_error(
+                format,
+                format_args!(
+                    "FST block at byte {block_offset} declares a section shorter than its length field"
+                ),
+            ));
+        }
+        let section_length = fst_bounded_size(
+            section_length_u64,
+            format,
+            format_args!("block at byte {block_offset} section"),
+        )?;
+        let section_end = section_start
+            .checked_add(section_length)
+            .ok_or_else(|| adapter_error(format, "FST section offset overflow"))?;
+        if section_end > bytes.len() {
+            return Err(adapter_error(
+                format,
+                format_args!("truncated FST block at byte {block_offset}"),
+            ));
+        }
+
+        match block_type {
+            0 => {
+                if header.is_some() {
+                    return Err(adapter_error(format, "FST repeats its header block"));
+                }
+                if section_length_u64 != FST_HEADER_SECTION_BYTES {
+                    return Err(adapter_error(
+                        format,
+                        format_args!(
+                            "FST header length is {section_length_u64}; expected {FST_HEADER_SECTION_BYTES}"
+                        ),
+                    ));
+                }
+                let body = section_start + 8;
+                let start_time = fst_be_u64(bytes, body, format, "header start time")?;
+                let end_time = fst_be_u64(bytes, body + 8, format, "header end time")?;
+                if end_time < start_time {
+                    return Err(adapter_error(
+                        format,
+                        "FST header end time precedes its start time",
+                    ));
+                }
+                let endian_marker: [u8; 8] = bytes
+                    .get(body + 16..body + 24)
+                    .ok_or_else(|| {
+                        adapter_error(format, "truncated FST floating-point endian marker")
+                    })?
+                    .try_into()
+                    .expect("eight-byte slice");
+                if endian_marker != std::f64::consts::E.to_le_bytes()
+                    && endian_marker != std::f64::consts::E.to_be_bytes()
+                {
+                    return Err(adapter_error(
+                        format,
+                        "FST header has an invalid floating-point endian marker",
+                    ));
+                }
+                let _scope_count = fst_count(
+                    fst_be_u64(bytes, body + 32, format, "header scope count")?,
+                    MAX_RESULT_COLUMNS,
+                    format,
+                    "scope",
+                )?;
+                let var_count = fst_count(
+                    fst_be_u64(bytes, body + 40, format, "header variable count")?,
+                    MAX_RESULT_COLUMNS - 1,
+                    format,
+                    "variable",
+                )?;
+                let max_handle = fst_count(
+                    fst_be_u64(bytes, body + 48, format, "header signal count")?,
+                    MAX_RESULT_COLUMNS - 1,
+                    format,
+                    "unique signal",
+                )?;
+                let value_change_sections = fst_count(
+                    fst_be_u64(bytes, body + 56, format, "header data-block count")?,
+                    MAX_FST_TOP_LEVEL_BLOCKS,
+                    format,
+                    "data block",
+                )?;
+                if var_count == 0
+                    || max_handle == 0
+                    || max_handle > var_count
+                    || value_change_sections == 0
+                {
+                    return Err(adapter_error(
+                        format,
+                        "FST header declares inconsistent scope, variable, signal, or data-block counts",
+                    ));
+                }
+                header = Some(FstHeaderPreflight {
+                    var_count,
+                    max_handle,
+                    value_change_sections,
+                });
+            }
+            1 | 5 | 8 => {
+                if section_length < 32 {
+                    return Err(adapter_error(format, "truncated FST value-change header"));
+                }
+                let memory_required = fst_bounded_size(
+                    fst_be_u64(
+                        bytes,
+                        section_start + 24,
+                        format,
+                        "value-change allocation size",
+                    )?,
+                    format,
+                    "value-change allocation",
+                )?;
+                data_sections.push(FstDataPreflight {
+                    block_type,
+                    section_start,
+                    section_end,
+                    section_length,
+                    memory_required,
+                });
+            }
+            2 => {
+                if blackout_seen {
+                    return Err(adapter_error(format, "FST repeats its blackout block"));
+                }
+                preflight_fst_blackout(bytes, section_start, section_end, format)?;
+                blackout_seen = true;
+            }
+            3 => {
+                if geometry.is_some() {
+                    return Err(adapter_error(format, "FST repeats its geometry block"));
+                }
+                geometry = Some(preflight_fst_geometry(
+                    bytes,
+                    section_start,
+                    section_end,
+                    section_length,
+                    format,
+                )?);
+            }
+            4 | 6 | 7 => {
+                if hierarchy_seen {
+                    return Err(adapter_error(format, "FST repeats its hierarchy block"));
+                }
+                preflight_fst_hierarchy(
+                    bytes,
+                    block_type,
+                    section_start,
+                    section_end,
+                    section_length,
+                    format,
+                )?;
+                hierarchy_seen = true;
+            }
+            254 => {
+                if section_length < 16 {
+                    return Err(adapter_error(
+                        format,
+                        "truncated FST whole-file gzip wrapper",
+                    ));
+                }
+                let expanded = fst_bounded_size(
+                    fst_be_u64(
+                        bytes,
+                        section_start + 8,
+                        format,
+                        "gzip wrapper expanded size",
+                    )?,
+                    format,
+                    "gzip wrapper expanded allocation",
+                )?;
+                return Err(adapter_error(
+                    format,
+                    format_args!(
+                        "whole-file gzip-wrapped FST ({expanded} declared expanded bytes) is rejected because nested framing cannot be preflighted before fst-reader decompresses it"
+                    ),
+                ));
+            }
+            255 => {}
+            other => {
+                return Err(adapter_error(
+                    format,
+                    format_args!("unknown FST top-level block type {other}"),
+                ));
+            }
+        }
+        cursor = section_end;
+    }
+
+    if !terminated && cursor != bytes.len() {
+        return Err(adapter_error(
+            format,
+            "FST framing did not end at the input boundary",
+        ));
+    }
+    let header = header.ok_or_else(|| adapter_error(format, "FST header block is missing"))?;
+    let geometry =
+        geometry.ok_or_else(|| adapter_error(format, "FST geometry block is missing"))?;
+    if !hierarchy_seen {
+        return Err(adapter_error(format, "FST hierarchy block is missing"));
+    }
+    if geometry.widths.len() != header.max_handle {
+        return Err(adapter_error(
+            format,
+            "FST geometry signal count disagrees with its header",
+        ));
+    }
+    if data_sections.len() != header.value_change_sections {
+        return Err(adapter_error(
+            format,
+            "FST data-block count disagrees with its header",
+        ));
+    }
+    if header.var_count < geometry.widths.len() {
+        return Err(adapter_error(
+            format,
+            "FST variable count is smaller than its unique signal count",
+        ));
+    }
+    for section in data_sections {
+        preflight_fst_data_section(bytes, section, &geometry.widths, format)?;
+    }
+    Ok(geometry)
+}
+
+fn fst_be_u64(
+    bytes: &[u8],
+    offset: usize,
+    format: ResultImportFormat,
+    field: impl std::fmt::Display,
+) -> Result<u64, String> {
+    let end = offset
+        .checked_add(8)
+        .ok_or_else(|| adapter_error(format, format_args!("{field} offset overflow")))?;
+    let raw = bytes
+        .get(offset..end)
+        .ok_or_else(|| adapter_error(format, format_args!("truncated FST {field}")))?;
+    Ok(u64::from_be_bytes(
+        raw.try_into().expect("eight-byte slice"),
+    ))
+}
+
+fn fst_bounded_size(
+    value: u64,
+    format: ResultImportFormat,
+    field: impl std::fmt::Display,
+) -> Result<usize, String> {
+    if value > MAX_RESULT_DATASET_BYTES {
+        return Err(adapter_error(
+            format,
+            format_args!(
+                "FST {field} declares {value} bytes; the limit is {MAX_RESULT_DATASET_BYTES}"
+            ),
+        ));
+    }
+    usize::try_from(value)
+        .map_err(|_| adapter_error(format, format_args!("FST {field} does not fit this target")))
+}
+
+fn fst_count(
+    value: u64,
+    maximum: usize,
+    format: ResultImportFormat,
+    field: &str,
+) -> Result<usize, String> {
+    let value = usize::try_from(value)
+        .map_err(|_| adapter_error(format, format_args!("FST {field} count overflow")))?;
+    if value > maximum {
+        Err(adapter_error(
+            format,
+            format_args!("FST {field} count {value} exceeds the limit {maximum}"),
+        ))
+    } else {
+        Ok(value)
+    }
+}
+
+fn fst_uleb(
+    bytes: &[u8],
+    cursor: &mut usize,
+    limit: usize,
+    maximum_bits: u32,
+    format: ResultImportFormat,
+    field: &str,
+) -> Result<(u64, usize), String> {
+    let start = *cursor;
+    let max_bytes = maximum_bits.div_ceil(7) as usize;
+    let mut value = 0_u128;
+    for index in 0..max_bytes {
+        if *cursor >= limit {
+            return Err(adapter_error(format, format_args!("truncated FST {field}")));
+        }
+        let byte = bytes[*cursor];
+        *cursor += 1;
+        value |= u128::from(byte & 0x7f) << (7 * index);
+        if byte & 0x80 == 0 {
+            let maximum = if maximum_bits == 64 {
+                u128::from(u64::MAX)
+            } else {
+                (1_u128 << maximum_bits) - 1
+            };
+            if value > maximum {
+                return Err(adapter_error(format, format_args!("FST {field} overflow")));
+            }
+            return Ok((value as u64, *cursor - start));
+        }
+    }
+    Err(adapter_error(
+        format,
+        format_args!("FST {field} uses an overlong integer"),
+    ))
+}
+
+fn fst_sleb_i64(
+    bytes: &[u8],
+    cursor: &mut usize,
+    limit: usize,
+    format: ResultImportFormat,
+    field: &str,
+) -> Result<i64, String> {
+    let mut value = 0_i128;
+    for index in 0..10_usize {
+        if *cursor >= limit {
+            return Err(adapter_error(format, format_args!("truncated FST {field}")));
+        }
+        let byte = bytes[*cursor];
+        *cursor += 1;
+        let shift = 7 * index;
+        value |= i128::from(byte & 0x7f) << shift;
+        if byte & 0x80 == 0 {
+            if byte & 0x40 != 0 {
+                value |= (!0_i128) << (shift + 7);
+            }
+            return i64::try_from(value)
+                .map_err(|_| adapter_error(format, format_args!("FST {field} overflow")));
+        }
+    }
+    Err(adapter_error(
+        format,
+        format_args!("FST {field} uses an overlong integer"),
+    ))
+}
+
+fn preflight_fst_blackout(
+    bytes: &[u8],
+    section_start: usize,
+    section_end: usize,
+    format: ResultImportFormat,
+) -> Result<(), String> {
+    let mut cursor = section_start + 8;
+    let (count, _) = fst_uleb(
+        bytes,
+        &mut cursor,
+        section_end,
+        32,
+        format,
+        "blackout count",
+    )?;
+    let count = fst_count(count, MAX_RESULT_ROWS, format, "blackout")?;
+    let mut time = 0_u64;
+    for _ in 0..count {
+        if cursor >= section_end {
+            return Err(adapter_error(format, "truncated FST blackout entry"));
+        }
+        cursor += 1;
+        let (delta, _) = fst_uleb(
+            bytes,
+            &mut cursor,
+            section_end,
+            64,
+            format,
+            "blackout time delta",
+        )?;
+        time = time
+            .checked_add(delta)
+            .ok_or_else(|| adapter_error(format, "FST blackout time overflow"))?;
+    }
+    if cursor != section_end {
+        return Err(adapter_error(
+            format,
+            "FST blackout section has inconsistent framing",
+        ));
+    }
+    Ok(())
+}
+
+fn preflight_fst_geometry(
+    bytes: &[u8],
+    section_start: usize,
+    section_end: usize,
+    section_length: usize,
+    format: ResultImportFormat,
+) -> Result<FstGeometryPreflight, String> {
+    if section_length < 24 {
+        return Err(adapter_error(format, "truncated FST geometry block"));
+    }
+    let uncompressed = fst_bounded_size(
+        fst_be_u64(bytes, section_start + 8, format, "geometry expanded size")?,
+        format,
+        "geometry expanded allocation",
+    )?;
+    let handle_count = fst_count(
+        fst_be_u64(bytes, section_start + 16, format, "geometry signal count")?,
+        MAX_RESULT_COLUMNS - 1,
+        format,
+        "geometry signal",
+    )?;
+    if handle_count == 0 {
+        return Err(adapter_error(format, "FST geometry declares no signals"));
+    }
+    let compressed = section_length - 24;
+    if compressed > MAX_RESULT_DATASET_BYTES as usize {
+        return Err(adapter_error(
+            format,
+            "FST geometry compressed-size limit exceeded",
+        ));
+    }
+    // fst-reader's geometry inflater exposes only the resulting SignalInfo
+    // vector, after which a malicious encoded width could cause a much larger
+    // frame allocation. Without an independently preflightable payload, the
+    // safe boundary is to accept the format's permitted uncompressed geometry
+    // representation and fail closed on compressed geometry.
+    if uncompressed != compressed {
+        return Err(adapter_error(
+            format,
+            "compressed FST geometry is rejected because signal widths cannot be bounded before decompression",
+        ));
+    }
+    let mut cursor = section_start + 24;
+    let mut widths = Vec::with_capacity(handle_count);
+    for _ in 0..handle_count {
+        let (encoded, _) = fst_uleb(
+            bytes,
+            &mut cursor,
+            section_end,
+            32,
+            format,
+            "geometry signal width",
+        )?;
+        let width = if encoded == 0 {
+            8 // FST's geometry marker for an IEEE-754 real signal.
+        } else if encoded == u64::from(u32::MAX) {
+            return Err(adapter_error(
+                format,
+                "FST variable-length signal records are not supported",
+            ));
+        } else {
+            let width = usize::try_from(encoded)
+                .map_err(|_| adapter_error(format, "FST signal width overflow"))?;
+            if width > 53 {
+                return Err(adapter_error(
+                    format,
+                    format_args!(
+                        "FST digital signal width {width} exceeds the 53-bit lossless import limit"
+                    ),
+                ));
+            }
+            width
+        };
+        widths.push(width);
+    }
+    if cursor != section_end {
+        return Err(adapter_error(
+            format,
+            "FST geometry payload has inconsistent signal-count framing",
+        ));
+    }
+    Ok(FstGeometryPreflight { widths })
+}
+
+fn preflight_fst_hierarchy(
+    bytes: &[u8],
+    block_type: u8,
+    section_start: usize,
+    section_end: usize,
+    section_length: usize,
+    format: ResultImportFormat,
+) -> Result<(), String> {
+    if section_length < 16 {
+        return Err(adapter_error(format, "truncated FST hierarchy block"));
+    }
+    let expanded = fst_bounded_size(
+        fst_be_u64(bytes, section_start + 8, format, "hierarchy expanded size")?,
+        format,
+        "hierarchy expanded allocation",
+    )?;
+    let compressed = section_length - 16;
+    if expanded == 0 || compressed == 0 {
+        return Err(adapter_error(format, "FST hierarchy block is empty"));
+    }
+    if compressed > MAX_RESULT_DATASET_BYTES as usize {
+        return Err(adapter_error(
+            format,
+            "FST hierarchy compressed-size limit exceeded",
+        ));
+    }
+    if block_type == 4 {
+        let payload = bytes
+            .get(section_start + 16..section_end)
+            .ok_or_else(|| adapter_error(format, "truncated FST gzip hierarchy payload"))?;
+        if payload.len() < 10 || payload[0..2] != [0x1f, 0x8b] || payload[2] != 8 || payload[3] != 0
+        {
+            return Err(adapter_error(
+                format,
+                "FST gzip hierarchy has an unsupported or truncated header",
+            ));
+        }
+    }
+    if block_type == 7 {
+        let mut cursor = section_start + 16;
+        let (first_stage, encoded_bytes) = fst_uleb(
+            bytes,
+            &mut cursor,
+            section_end,
+            64,
+            format,
+            "LZ4-duo first-stage size",
+        )?;
+        let first_stage = fst_bounded_size(first_stage, format, "LZ4-duo first-stage allocation")?;
+        if first_stage == 0 || encoded_bytes > compressed || cursor >= section_end {
+            return Err(adapter_error(
+                format,
+                "FST LZ4-duo hierarchy has inconsistent compressed framing",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn preflight_fst_data_section(
+    bytes: &[u8],
+    section: FstDataPreflight,
+    widths: &[usize],
+    format: ResultImportFormat,
+) -> Result<(), String> {
+    let mut cursor = section.section_start + 32;
+    let (frame_expanded, _) = fst_uleb(
+        bytes,
+        &mut cursor,
+        section.section_end,
+        64,
+        format,
+        "initial-frame expanded size",
+    )?;
+    let frame_expanded =
+        fst_bounded_size(frame_expanded, format, "initial-frame expanded allocation")?;
+    let (frame_compressed, _) = fst_uleb(
+        bytes,
+        &mut cursor,
+        section.section_end,
+        64,
+        format,
+        "initial-frame compressed size",
+    )?;
+    let frame_compressed = fst_bounded_size(
+        frame_compressed,
+        format,
+        "initial-frame compressed allocation",
+    )?;
+    let (frame_handles, _) = fst_uleb(
+        bytes,
+        &mut cursor,
+        section.section_end,
+        64,
+        format,
+        "initial-frame signal count",
+    )?;
+    let frame_handles = fst_count(
+        frame_handles,
+        MAX_RESULT_COLUMNS - 1,
+        format,
+        "initial-frame signal",
+    )?;
+    if frame_handles != widths.len() {
+        return Err(adapter_error(
+            format,
+            "FST initial-frame signal count disagrees with geometry",
+        ));
+    }
+    let minimum_frame_bytes = widths.iter().try_fold(0_usize, |total, width| {
+        total
+            .checked_add(*width)
+            .ok_or_else(|| adapter_error(format, "FST initial-frame width accounting overflow"))
+    })?;
+    if minimum_frame_bytes != frame_expanded {
+        return Err(adapter_error(
+            format,
+            "FST initial-frame size disagrees with its declared signal widths",
+        ));
+    }
+    if frame_compressed == 0 {
+        return Err(adapter_error(format, "FST initial frame is empty"));
+    }
+    if frame_compressed != frame_expanded && bytes.get(cursor).copied() != Some(0x78) {
+        return Err(adapter_error(
+            format,
+            "FST compressed initial frame does not have zlib framing",
+        ));
+    }
+    cursor = cursor
+        .checked_add(frame_compressed)
+        .ok_or_else(|| adapter_error(format, "FST initial-frame offset overflow"))?;
+    if cursor > section.section_end {
+        return Err(adapter_error(format, "truncated FST initial frame"));
+    }
+
+    let (data_handles, _) = fst_uleb(
+        bytes,
+        &mut cursor,
+        section.section_end,
+        64,
+        format,
+        "value-change signal count",
+    )?;
+    let data_handles = fst_count(
+        data_handles,
+        MAX_RESULT_COLUMNS - 1,
+        format,
+        "value-change signal",
+    )?;
+    if data_handles != widths.len() {
+        return Err(adapter_error(
+            format,
+            "FST value-change signal count disagrees with geometry",
+        ));
+    }
+    let value_change_start = cursor;
+    let pack_type = *bytes
+        .get(cursor)
+        .ok_or_else(|| adapter_error(format, "truncated FST value-change packing type"))?;
+    cursor += 1;
+    let value_payload_start = cursor;
+
+    if section.section_length < 24 {
+        return Err(adapter_error(format, "truncated FST time-table metadata"));
+    }
+    let time_meta_start = section.section_end - 24;
+    let time_expanded = fst_bounded_size(
+        fst_be_u64(bytes, time_meta_start, format, "time-table expanded size")?,
+        format,
+        "time-table expanded allocation",
+    )?;
+    let time_compressed = fst_bounded_size(
+        fst_be_u64(
+            bytes,
+            time_meta_start + 8,
+            format,
+            "time-table compressed size",
+        )?,
+        format,
+        "time-table compressed allocation",
+    )?;
+    let time_count = fst_count(
+        fst_be_u64(bytes, time_meta_start + 16, format, "time-table item count")?,
+        MAX_RESULT_ROWS,
+        format,
+        "time-table item",
+    )?;
+    if time_count > time_expanded {
+        return Err(adapter_error(
+            format,
+            "FST time table declares more items than its expanded byte stream can contain",
+        ));
+    }
+    let time_data_start = time_meta_start
+        .checked_sub(time_compressed)
+        .ok_or_else(|| adapter_error(format, "FST time-table offset underflow"))?;
+    if (time_expanded == 0) != (time_compressed == 0) {
+        return Err(adapter_error(
+            format,
+            "FST time table has inconsistent empty framing",
+        ));
+    }
+    if time_compressed != 0
+        && time_compressed != time_expanded
+        && bytes.get(time_data_start).copied() != Some(0x78)
+    {
+        return Err(adapter_error(
+            format,
+            "FST compressed time table does not have zlib framing",
+        ));
+    }
+    if time_compressed == time_expanded {
+        let mut time_cursor = time_data_start;
+        let mut time = 0_u64;
+        for _ in 0..time_count {
+            let (delta, _) = fst_uleb(
+                bytes,
+                &mut time_cursor,
+                time_meta_start,
+                64,
+                format,
+                "time-table delta",
+            )?;
+            time = time
+                .checked_add(delta)
+                .ok_or_else(|| adapter_error(format, "FST time-table value overflow"))?;
+        }
+        if time_cursor != time_meta_start {
+            return Err(adapter_error(
+                format,
+                "FST uncompressed time table has inconsistent item-count framing",
+            ));
+        }
+    }
+    let chain_length_offset = time_data_start
+        .checked_sub(8)
+        .ok_or_else(|| adapter_error(format, "FST offset-table length underflow"))?;
+    if chain_length_offset < value_payload_start {
+        return Err(adapter_error(
+            format,
+            "FST time table overlaps its value-change payload",
+        ));
+    }
+    let offset_table_bytes = fst_bounded_size(
+        fst_be_u64(
+            bytes,
+            chain_length_offset,
+            format,
+            "offset-table compressed size",
+        )?,
+        format,
+        "offset-table allocation",
+    )?;
+    let offset_table_start = chain_length_offset
+        .checked_sub(offset_table_bytes)
+        .ok_or_else(|| adapter_error(format, "FST offset-table start underflow"))?;
+    if offset_table_start < value_payload_start {
+        return Err(adapter_error(
+            format,
+            "FST offset table overlaps its value-change header",
+        ));
+    }
+    let last_payload_offset = offset_table_start
+        .checked_sub(value_change_start)
+        .ok_or_else(|| adapter_error(format, "FST value-change offset underflow"))?;
+    if last_payload_offset > u32::MAX as usize {
+        return Err(adapter_error(format, "FST value-change offsets exceed u32"));
+    }
+    let ranges = preflight_fst_offset_table(
+        bytes,
+        section.block_type,
+        offset_table_start,
+        chain_length_offset,
+        widths.len(),
+        last_payload_offset,
+        format,
+    )?;
+    let mut actual_memory = 0_usize;
+    for (offset, length) in ranges {
+        let signal_start = value_change_start
+            .checked_add(offset)
+            .ok_or_else(|| adapter_error(format, "FST signal payload offset overflow"))?;
+        let signal_end = signal_start
+            .checked_add(length)
+            .ok_or_else(|| adapter_error(format, "FST signal payload length overflow"))?;
+        if signal_start < value_payload_start || signal_end > offset_table_start {
+            return Err(adapter_error(
+                format,
+                "FST signal payload points outside the value-change region",
+            ));
+        }
+        let mut signal_cursor = signal_start;
+        let (declared_expanded, marker_bytes) = fst_uleb(
+            bytes,
+            &mut signal_cursor,
+            signal_end,
+            32,
+            format,
+            "packed signal expanded size",
+        )?;
+        let compressed_bytes = match pack_type {
+            b'4' | b'F' => length
+                .checked_sub(marker_bytes)
+                .ok_or_else(|| adapter_error(format, "FST packed signal length underflow"))?,
+            _ => length,
+        };
+        if compressed_bytes > MAX_RESULT_DATASET_BYTES as usize {
+            return Err(adapter_error(
+                format,
+                "FST packed signal compressed-size limit exceeded",
+            ));
+        }
+        let expanded_bytes = if declared_expanded == 0 {
+            length
+                .checked_sub(marker_bytes)
+                .ok_or_else(|| adapter_error(format, "FST direct signal length underflow"))?
+        } else {
+            let expanded = fst_bounded_size(
+                declared_expanded,
+                format,
+                match pack_type {
+                    b'4' => "LZ4 signal expanded allocation",
+                    b'F' => "FastLZ signal expanded allocation",
+                    _ => "zlib signal expanded allocation",
+                },
+            )?;
+            if pack_type != b'4'
+                && pack_type != b'F'
+                && bytes.get(signal_cursor).copied() != Some(0x78)
+            {
+                return Err(adapter_error(
+                    format,
+                    "FST packed zlib signal does not have zlib framing",
+                ));
+            }
+            expanded
+        };
+        actual_memory = actual_memory
+            .checked_add(expanded_bytes)
+            .ok_or_else(|| adapter_error(format, "FST signal allocation accounting overflow"))?;
+        if actual_memory > MAX_RESULT_DATASET_BYTES as usize {
+            return Err(adapter_error(
+                format,
+                "FST aggregate expanded signal allocation exceeds the byte limit",
+            ));
+        }
+    }
+    if actual_memory > section.memory_required {
+        return Err(adapter_error(
+            format,
+            "FST value-change allocation is larger than its section memory declaration",
+        ));
+    }
+    Ok(())
+}
+
+fn preflight_fst_offset_table(
+    bytes: &[u8],
+    block_type: u8,
+    table_start: usize,
+    table_end: usize,
+    signal_count: usize,
+    payload_end_offset: usize,
+    format: ResultImportFormat,
+) -> Result<Vec<(usize, usize)>, String> {
+    let mut cursor = table_start;
+    let mut signal_index = 0_usize;
+    let mut offsets = Vec::with_capacity(signal_count);
+    let mut direct_signals = Vec::with_capacity(signal_count);
+    let mut current_offset = 0_usize;
+    let mut previous_alias = None;
+
+    while cursor < table_end {
+        if block_type == 8 {
+            let kind = bytes[cursor];
+            if kind & 1 == 1 {
+                let encoded = fst_sleb_i64(
+                    bytes,
+                    &mut cursor,
+                    table_end,
+                    format,
+                    "dynamic-alias offset",
+                )?;
+                let value = encoded >> 1;
+                match value.cmp(&0) {
+                    std::cmp::Ordering::Greater => {
+                        let delta = usize::try_from(value).map_err(|_| {
+                            adapter_error(format, "FST dynamic-alias offset overflow")
+                        })?;
+                        current_offset = current_offset.checked_add(delta).ok_or_else(|| {
+                            adapter_error(format, "FST dynamic-alias offset overflow")
+                        })?;
+                        offsets.push(current_offset);
+                        direct_signals.push(true);
+                        signal_index = signal_index.checked_add(1).ok_or_else(|| {
+                            adapter_error(format, "FST offset-table count overflow")
+                        })?;
+                    }
+                    std::cmp::Ordering::Less => {
+                        let alias = value
+                            .checked_neg()
+                            .and_then(|value| value.checked_sub(1))
+                            .and_then(|value| usize::try_from(value).ok())
+                            .ok_or_else(|| {
+                                adapter_error(format, "FST dynamic alias index overflow")
+                            })?;
+                        if alias >= signal_index || !direct_signals[alias] {
+                            return Err(adapter_error(
+                                format,
+                                "FST dynamic alias does not refer to an earlier direct signal",
+                            ));
+                        }
+                        previous_alias = Some(alias);
+                        direct_signals.push(false);
+                        signal_index += 1;
+                    }
+                    std::cmp::Ordering::Equal => {
+                        if previous_alias.is_none() {
+                            return Err(adapter_error(
+                                format,
+                                "FST repeated dynamic alias has no preceding alias",
+                            ));
+                        }
+                        direct_signals.push(false);
+                        signal_index += 1;
+                    }
+                }
+            } else {
+                let (encoded, _) = fst_uleb(
+                    bytes,
+                    &mut cursor,
+                    table_end,
+                    32,
+                    format,
+                    "dynamic-alias empty-signal run",
+                )?;
+                let empty = usize::try_from(encoded >> 1)
+                    .map_err(|_| adapter_error(format, "FST empty-signal count overflow"))?;
+                if empty == 0 {
+                    return Err(adapter_error(
+                        format,
+                        "FST offset table contains an empty zero-length run",
+                    ));
+                }
+                let next_signal_index = signal_index
+                    .checked_add(empty)
+                    .ok_or_else(|| adapter_error(format, "FST offset-table count overflow"))?;
+                if next_signal_index > signal_count {
+                    return Err(adapter_error(
+                        format,
+                        "FST offset table declares more signals than geometry",
+                    ));
+                }
+                direct_signals.resize(next_signal_index, false);
+                signal_index = next_signal_index;
+            }
+        } else {
+            let (raw, _) = fst_uleb(
+                bytes,
+                &mut cursor,
+                table_end,
+                32,
+                format,
+                "offset-table entry",
+            )?;
+            let raw = u32::try_from(raw)
+                .map_err(|_| adapter_error(format, "FST offset-table entry overflow"))?;
+            if raw == 0 {
+                let (alias, _) =
+                    fst_uleb(bytes, &mut cursor, table_end, 32, format, "signal alias")?;
+                let alias = usize::try_from(alias)
+                    .ok()
+                    .and_then(|alias| alias.checked_sub(1))
+                    .ok_or_else(|| adapter_error(format, "FST signal alias index underflow"))?;
+                if alias >= signal_index || !direct_signals[alias] {
+                    return Err(adapter_error(
+                        format,
+                        "FST signal alias does not refer to an earlier direct signal",
+                    ));
+                }
+                direct_signals.push(false);
+                signal_index += 1;
+            } else if raw & 1 == 1 {
+                let delta = (raw >> 1) as usize;
+                if delta == 0 {
+                    return Err(adapter_error(format, "FST signal offset does not advance"));
+                }
+                current_offset = current_offset
+                    .checked_add(delta)
+                    .ok_or_else(|| adapter_error(format, "FST signal offset overflow"))?;
+                offsets.push(current_offset);
+                direct_signals.push(true);
+                signal_index += 1;
+            } else {
+                let empty = (raw >> 1) as usize;
+                if empty == 0 {
+                    return Err(adapter_error(
+                        format,
+                        "FST offset table contains an empty zero-length run",
+                    ));
+                }
+                let next_signal_index = signal_index
+                    .checked_add(empty)
+                    .ok_or_else(|| adapter_error(format, "FST offset-table count overflow"))?;
+                if next_signal_index > signal_count {
+                    return Err(adapter_error(
+                        format,
+                        "FST offset table declares more signals than geometry",
+                    ));
+                }
+                direct_signals.resize(next_signal_index, false);
+                signal_index = next_signal_index;
+            }
+        }
+        if signal_index > signal_count {
+            return Err(adapter_error(
+                format,
+                "FST offset table declares more signals than geometry",
+            ));
+        }
+    }
+    if signal_index != signal_count {
+        return Err(adapter_error(
+            format,
+            "FST offset-table signal count disagrees with geometry",
+        ));
+    }
+    if offsets
+        .last()
+        .is_some_and(|offset| *offset >= payload_end_offset)
+    {
+        return Err(adapter_error(
+            format,
+            "FST signal offset points outside the value-change payload",
+        ));
+    }
+    let mut ranges = Vec::with_capacity(offsets.len());
+    for (index, offset) in offsets.iter().copied().enumerate() {
+        let next = offsets
+            .get(index + 1)
+            .copied()
+            .unwrap_or(payload_end_offset);
+        let length = next
+            .checked_sub(offset)
+            .ok_or_else(|| adapter_error(format, "FST signal offsets are not ordered"))?;
+        if length == 0 || length > u32::MAX as usize {
+            return Err(adapter_error(
+                format,
+                "FST signal payload length is zero or exceeds u32",
+            ));
+        }
+        ranges.push((offset, length));
+    }
+    Ok(ranges)
+}
+
 pub(super) fn parse_fst(
     bytes: &[u8],
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
+    let geometry = preflight_fst(bytes, format)?;
     let cursor = Cursor::new(bytes);
     let mut reader = fst_reader::FstReader::open(BufReader::new(cursor))
         .map_err(|error| adapter_error(format, format_args!("invalid FST container: {error}")))?;
@@ -2157,33 +3255,116 @@ pub(super) fn parse_fst(
         ));
     }
     let mut scopes = Vec::new();
+    let mut scope_identity_bytes = 0_usize;
     let mut by_handle: BTreeMap<usize, Vec<DigitalSignal>> = BTreeMap::new();
+    let mut hierarchy_entries = 0_usize;
+    let mut hierarchy_signals = 0_usize;
+    let mut hierarchy_error = None;
+    let maximum_handle = usize::try_from(header.max_handle)
+        .map_err(|_| adapter_error(format, "FST header signal count does not fit this target"))?;
     reader
-        .read_hierarchy(|entry| match entry {
-            fst_reader::FstHierarchyEntry::Scope { name, .. } => scopes.push(name),
-            fst_reader::FstHierarchyEntry::UpScope => {
-                scopes.pop();
+        .read_hierarchy(|entry| {
+            if hierarchy_error.is_some() {
+                return;
             }
-            fst_reader::FstHierarchyEntry::Var {
-                name,
-                length,
-                handle,
-                ..
-            } => {
-                let mut full_name = scopes.join(".");
-                if !full_name.is_empty() {
-                    full_name.push('.');
+            hierarchy_entries += 1;
+            if hierarchy_entries > MAX_RESULT_VALUES {
+                hierarchy_error = Some("FST hierarchy-entry limit exceeded".to_owned());
+                return;
+            }
+            match entry {
+                fst_reader::FstHierarchyEntry::Scope { name, .. } => {
+                    let separator = usize::from(!scopes.is_empty());
+                    let Some(next_identity_bytes) = scope_identity_bytes
+                        .checked_add(separator)
+                        .and_then(|length| length.checked_add(name.len()))
+                    else {
+                        hierarchy_error = Some("FST hierarchy identity length overflow".to_owned());
+                        return;
+                    };
+                    if name.is_empty() || name.len() > MAX_SIGNAL_NAME_BYTES {
+                        hierarchy_error = Some(format!(
+                            "FST scope identity exceeds {MAX_SIGNAL_NAME_BYTES} bytes or is empty"
+                        ));
+                    } else if next_identity_bytes > MAX_SIGNAL_NAME_BYTES {
+                        hierarchy_error = Some(format!(
+                            "FST scope path exceeds {MAX_SIGNAL_NAME_BYTES} bytes"
+                        ));
+                    } else if scopes.len() >= MAX_RESULT_COLUMNS {
+                        hierarchy_error = Some("FST hierarchy-depth limit exceeded".to_owned());
+                    } else {
+                        scope_identity_bytes = next_identity_bytes;
+                        scopes.push(name);
+                    }
                 }
-                full_name.push_str(&name);
-                by_handle
-                    .entry(handle.get_index())
-                    .or_default()
-                    .push(DigitalSignal {
+                fst_reader::FstHierarchyEntry::UpScope => {
+                    if let Some(name) = scopes.pop() {
+                        scope_identity_bytes = if scopes.is_empty() {
+                            0
+                        } else {
+                            scope_identity_bytes.saturating_sub(name.len() + 1)
+                        };
+                    } else {
+                        hierarchy_error =
+                            Some("FST hierarchy closes a scope that was not open".to_owned());
+                    }
+                }
+                fst_reader::FstHierarchyEntry::Var {
+                    name,
+                    length,
+                    handle,
+                    ..
+                } => {
+                    hierarchy_signals += 1;
+                    if hierarchy_signals > MAX_RESULT_COLUMNS - 1 {
+                        hierarchy_error =
+                            Some("FST hierarchy signal/alias limit exceeded".to_owned());
+                        return;
+                    }
+                    let handle = handle.get_index();
+                    if handle >= maximum_handle {
+                        hierarchy_error = Some(
+                            "FST hierarchy references an out-of-range signal handle".to_owned(),
+                        );
+                        return;
+                    }
+                    if geometry.widths[handle] != length as usize {
+                        hierarchy_error = Some(format!(
+                            "FST hierarchy width {length} for '{name}' disagrees with geometry width {}",
+                            geometry.widths[handle]
+                        ));
+                        return;
+                    }
+                    if length == 0 || length > 53 {
+                        hierarchy_error = Some(format!(
+                            "FST hierarchy signal '{name}' has unsupported width {length}"
+                        ));
+                        return;
+                    }
+                    if name.is_empty() || name.len() > MAX_SIGNAL_NAME_BYTES {
+                        hierarchy_error = Some(format!(
+                            "FST signal identity exceeds {MAX_SIGNAL_NAME_BYTES} bytes or is empty"
+                        ));
+                        return;
+                    }
+                    let mut full_name = scopes.join(".");
+                    if !full_name.is_empty() {
+                        full_name.push('.');
+                    }
+                    full_name.push_str(&name);
+                    if full_name.len() > MAX_SIGNAL_NAME_BYTES {
+                        hierarchy_error = Some(format!(
+                            "FST hierarchy signal identity exceeds {MAX_SIGNAL_NAME_BYTES} bytes"
+                        ));
+                        return;
+                    }
+                    by_handle.entry(handle).or_default().push(DigitalSignal {
                         name: full_name,
                         width: length as usize,
                     });
+                }
+                _ => {}
             }
-            _ => {}
         })
         .map_err(|error| {
             adapter_error(
@@ -2191,6 +3372,18 @@ pub(super) fn parse_fst(
                 format_args!("could not read FST hierarchy: {error}"),
             )
         })?;
+    if let Some(error) = hierarchy_error {
+        return Err(adapter_error(format, error));
+    }
+    if !scopes.is_empty() {
+        return Err(adapter_error(format, "FST hierarchy has unclosed scopes"));
+    }
+    if by_handle.len() != maximum_handle {
+        return Err(adapter_error(
+            format,
+            "FST hierarchy unique-signal count disagrees with geometry",
+        ));
+    }
     let total_signals = by_handle.values().map(Vec::len).sum::<usize>();
     if total_signals == 0 || total_signals > MAX_RESULT_COLUMNS - 1 {
         return Err(adapter_error(
@@ -2757,8 +3950,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn fst_reader_imports_a_real_generated_container_and_rejects_truncation() {
+    fn generated_fst() -> Vec<u8> {
         use fst_writer::{
             FstFileType, FstInfo, FstScopeType, FstSignalType, FstVarDirection, FstVarType,
         };
@@ -2792,20 +3984,252 @@ mod tests {
             .expect("FST signal");
         header.up_scope().expect("FST upscope");
         let mut body = header.finish().expect("FST header");
-        body.time_change(0).expect("FST t0");
-        body.signal_change(clock, b"0").expect("FST v0");
-        body.time_change(5).expect("FST t5");
-        body.signal_change(clock, b"1").expect("FST v1");
-        body.time_change(10).expect("FST t10");
-        body.signal_change(clock, b"0").expect("FST v2");
+        for tick in 0..96_u64 {
+            body.time_change(tick).expect("FST time change");
+            body.signal_change(clock, if tick & 1 == 0 { b"0" } else { b"1" })
+                .expect("FST signal change");
+        }
         body.finish().expect("FST finish");
         let bytes = std::fs::read(&path).expect("read FST fixture");
         let _ = std::fs::remove_file(&path);
+        bytes
+    }
+
+    fn fst_test_blocks(bytes: &[u8]) -> Vec<(u8, usize, usize)> {
+        let mut blocks = Vec::new();
+        let mut cursor = 0_usize;
+        while cursor < bytes.len() {
+            let block = cursor;
+            let block_type = bytes[cursor];
+            cursor += 1;
+            let length = u64::from_be_bytes(bytes[cursor..cursor + 8].try_into().unwrap());
+            if block_type == 255 && length == 0 {
+                break;
+            }
+            let end = cursor + usize::try_from(length).unwrap();
+            blocks.push((block_type, block, end));
+            cursor = end;
+        }
+        blocks
+    }
+
+    fn set_fst_u64(bytes: &mut [u8], offset: usize, value: u64) {
+        bytes[offset..offset + 8].copy_from_slice(&value.to_be_bytes());
+    }
+
+    fn fst_test_block(block_type: u8, payload: &[u8]) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(9 + payload.len());
+        bytes.push(block_type);
+        bytes.extend_from_slice(&(8_u64 + payload.len() as u64).to_be_bytes());
+        bytes.extend_from_slice(payload);
+        bytes
+    }
+
+    fn test_uleb(mut value: u64) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        loop {
+            let next = value >> 7;
+            bytes.push((value as u8 & 0x7f) | if next == 0 { 0 } else { 0x80 });
+            value = next;
+            if value == 0 {
+                break;
+            }
+        }
+        bytes
+    }
+
+    fn fst_with_packed_signal(pack_type: u8, expanded_size: u64) -> Vec<u8> {
+        let mut header = vec![0_u8; (FST_HEADER_SECTION_BYTES - 8) as usize];
+        set_fst_u64(&mut header, 32, 1); // scopes
+        set_fst_u64(&mut header, 40, 1); // variables
+        set_fst_u64(&mut header, 48, 1); // handles
+        set_fst_u64(&mut header, 56, 1); // value-change sections
+        let mut bytes = fst_test_block(0, &header);
+
+        let mut geometry = Vec::new();
+        geometry.extend_from_slice(&1_u64.to_be_bytes());
+        geometry.extend_from_slice(&1_u64.to_be_bytes());
+        geometry.push(1); // one-bit signal
+        bytes.extend(fst_test_block(3, &geometry));
+
+        let mut hierarchy = Vec::new();
+        hierarchy.extend_from_slice(&1_u64.to_be_bytes());
+        hierarchy.push(0); // declaration is enough for a preflight failure fixture
+        bytes.extend(fst_test_block(6, &hierarchy));
+
+        let signal = test_uleb(expanded_size);
+        let mut data = Vec::new();
+        data.extend_from_slice(&0_u64.to_be_bytes()); // start
+        data.extend_from_slice(&1_u64.to_be_bytes()); // end
+        data.extend_from_slice(&MAX_RESULT_DATASET_BYTES.to_be_bytes());
+        data.extend([1, 1, 1, b'0']); // direct one-byte frame, one handle
+        data.push(1); // value-change handle count
+        data.push(pack_type);
+        data.extend_from_slice(&signal);
+        data.push(3); // DynamicAlias2 first signal offset is one byte after pack type
+        data.extend_from_slice(&1_u64.to_be_bytes()); // offset-table byte count
+        data.push(1); // direct one-byte time delta stream
+        data.extend_from_slice(&1_u64.to_be_bytes());
+        data.extend_from_slice(&1_u64.to_be_bytes());
+        data.extend_from_slice(&1_u64.to_be_bytes());
+        bytes.extend(fst_test_block(8, &data));
+        bytes
+    }
+
+    #[test]
+    fn fst_reader_imports_a_real_generated_container_and_rejects_truncation() {
+        let bytes = generated_fst();
         assert!(looks_like_fst(&bytes));
+        preflight_fst(&bytes, ResultImportFormat::Fst).expect("ordinary FST preflight");
         assert_basic(
             parse_fst(&bytes, ResultImportFormat::Fst).expect("FST import"),
             ResultImportFormat::Fst,
         );
         assert!(parse_fst(&bytes[..64], ResultImportFormat::Fst).is_err());
+    }
+
+    #[test]
+    fn fst_preflight_rejects_huge_fixed_allocation_declarations() {
+        let baseline = generated_fst();
+        let blocks = fst_test_blocks(&baseline);
+        let geometry = blocks.iter().find(|block| block.0 == 3).copied().unwrap();
+        let hierarchy = blocks
+            .iter()
+            .find(|block| matches!(block.0, 4 | 6 | 7))
+            .copied()
+            .unwrap();
+        let data = blocks
+            .iter()
+            .find(|block| matches!(block.0, 1 | 5 | 8))
+            .copied()
+            .unwrap();
+        let time_compressed = usize::try_from(u64::from_be_bytes(
+            baseline[data.2 - 16..data.2 - 8].try_into().unwrap(),
+        ))
+        .unwrap();
+        let offset_table_length = data.2 - 24 - time_compressed - 8;
+        let too_large = MAX_RESULT_DATASET_BYTES + 1;
+
+        for (label, offset) in [
+            ("header signal count", 1 + 8 + 48),
+            ("geometry expanded", geometry.1 + 1 + 8),
+            ("hierarchy expanded", hierarchy.1 + 1 + 8),
+            ("data allocation", data.1 + 1 + 24),
+            ("offset-table compressed", offset_table_length),
+            ("time-table expanded", data.2 - 24),
+            ("time-table compressed", data.2 - 16),
+            ("time-table item count", data.2 - 8),
+        ] {
+            let mut bytes = baseline.clone();
+            set_fst_u64(&mut bytes, offset, too_large);
+            let error = preflight_fst(&bytes, ResultImportFormat::Fst)
+                .expect_err("oversized FST declaration must reject");
+            assert!(
+                error.contains("limit") || error.contains("count"),
+                "{label}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn fst_preflight_rejects_huge_frame_and_signal_count_varints() {
+        let baseline = generated_fst();
+        let data = fst_test_blocks(&baseline)
+            .into_iter()
+            .find(|block| matches!(block.0, 1 | 5 | 8))
+            .unwrap();
+        let oversized = test_uleb(MAX_RESULT_DATASET_BYTES + 1);
+        for (label, offset) in [
+            ("initial-frame expanded", data.1 + 33),
+            ("initial-frame compressed", data.1 + 34),
+            ("initial-frame signal count", data.1 + 35),
+            ("value-change signal count", data.1 + 37),
+        ] {
+            let mut bytes = baseline.clone();
+            bytes[offset..offset + oversized.len()].copy_from_slice(&oversized);
+            let error = preflight_fst(&bytes, ResultImportFormat::Fst)
+                .expect_err("oversized FST variable integer must reject");
+            assert!(
+                error.contains("limit") || error.contains("count"),
+                "{label}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn fst_preflight_rejects_wrappers_unknown_blocks_overflow_and_truncation() {
+        let mut invalid_header = generated_fst();
+        invalid_header[1 + 8 + 16..1 + 8 + 24].fill(0);
+        let error = preflight_fst(&invalid_header, ResultImportFormat::Fst)
+            .expect_err("invalid endian marker");
+        assert!(error.contains("endian marker"), "{error}");
+
+        let mut reversed_time = generated_fst();
+        set_fst_u64(&mut reversed_time, 1 + 8, 2);
+        set_fst_u64(&mut reversed_time, 1 + 8 + 8, 1);
+        let error = preflight_fst(&reversed_time, ResultImportFormat::Fst)
+            .expect_err("reversed header time range");
+        assert!(error.contains("precedes"), "{error}");
+
+        let wrapper = fst_test_block(254, &u64::MAX.to_be_bytes());
+        let error = preflight_fst(&wrapper, ResultImportFormat::Fst).expect_err("gzip bomb");
+        assert!(error.contains("gzip wrapper expanded"), "{error}");
+
+        let bounded_wrapper = fst_test_block(254, &16_u64.to_be_bytes());
+        let error = preflight_fst(&bounded_wrapper, ResultImportFormat::Fst)
+            .expect_err("nested gzip cannot be preflighted");
+        assert!(error.contains("nested framing"), "{error}");
+
+        let unknown = fst_test_block(9, &[]);
+        assert!(
+            preflight_fst(&unknown, ResultImportFormat::Fst)
+                .expect_err("unknown block")
+                .contains("unknown")
+        );
+
+        let mut overflow = vec![0];
+        overflow.extend_from_slice(&u64::MAX.to_be_bytes());
+        assert!(preflight_fst(&overflow, ResultImportFormat::Fst).is_err());
+        assert!(preflight_fst(&[0, 0, 0], ResultImportFormat::Fst).is_err());
+    }
+
+    #[test]
+    fn fst_preflight_rejects_compressed_geometry_and_duo_intermediate_bombs() {
+        let mut compressed_geometry = generated_fst();
+        let geometry = fst_test_blocks(&compressed_geometry)
+            .into_iter()
+            .find(|block| block.0 == 3)
+            .unwrap();
+        let declared = u64::from_be_bytes(
+            compressed_geometry[geometry.1 + 9..geometry.1 + 17]
+                .try_into()
+                .unwrap(),
+        );
+        set_fst_u64(
+            &mut compressed_geometry,
+            geometry.1 + 9,
+            declared.saturating_add(1),
+        );
+        let error = preflight_fst(&compressed_geometry, ResultImportFormat::Fst)
+            .expect_err("compressed geometry must fail closed");
+        assert!(error.contains("compressed FST geometry"), "{error}");
+
+        let mut duo = Vec::new();
+        duo.extend_from_slice(&1_u64.to_be_bytes());
+        duo.extend(test_uleb(MAX_RESULT_DATASET_BYTES + 1));
+        let duo = fst_test_block(7, &duo);
+        let error = preflight_fst(&duo, ResultImportFormat::Fst).expect_err("LZ4 duo bomb");
+        assert!(error.contains("LZ4-duo"), "{error}");
+    }
+
+    #[test]
+    fn fst_preflight_bounds_lz4_fastlz_and_zlib_signal_expansion() {
+        for (name, pack_type) in [("LZ4", b'4'), ("FastLZ", b'F'), ("zlib", b'Z')] {
+            let bytes = fst_with_packed_signal(pack_type, MAX_RESULT_DATASET_BYTES + 1);
+            let error = preflight_fst(&bytes, ResultImportFormat::Fst)
+                .expect_err("packed FST signal bomb must reject");
+            assert!(error.contains(name), "{name}: {error}");
+            assert!(error.contains("limit"), "{name}: {error}");
+        }
     }
 }
