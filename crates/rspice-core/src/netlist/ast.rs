@@ -1999,7 +1999,7 @@ pub enum FftOutput {
 /// Coefficient normalization selected by `.FFT FORMAT=`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FftFormat {
-    /// Normalize coefficients by the largest magnitude, matching Xyce's default.
+    /// Normalize coefficients by the largest magnitude (the mode-0 default).
     #[default]
     Normalized,
     /// Preserve unnormalized coefficient magnitudes.
@@ -3347,12 +3347,53 @@ impl XyceHbTimeDomainMode {
     }
 }
 
+/// Compatibility mode selected by Xyce `.OPTIONS FFT FFT_MODE`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum XyceFftMode {
+    /// `FFT_MODE=0`: HSPICE-compatible symmetric windows and normalized
+    /// magnitudes by default.
+    #[default]
+    HspiceCompatible,
+    /// `FFT_MODE=1`: Spectre-compatible periodic windows and unnormalized
+    /// magnitudes by default.
+    SpectreCompatible,
+}
+
+impl XyceFftMode {
+    /// Effective `.FFT FORMAT` when the directive does not specify one.
+    pub(crate) const fn default_format(self) -> FftFormat {
+        match self {
+            Self::HspiceCompatible => FftFormat::Normalized,
+            Self::SpectreCompatible => FftFormat::Unnormalized,
+        }
+    }
+
+    /// Whether window functions use the periodic denominator `N` rather than
+    /// the symmetric denominator `N-1`.
+    pub(crate) const fn uses_periodic_windows(self) -> bool {
+        matches!(self, Self::SpectreCompatible)
+    }
+}
+
 /// Simulation options from .OPTIONS command
 ///
 /// Controls numerical parameters for simulation accuracy and convergence.
 /// All fields are optional - unspecified values use engine defaults.
 #[derive(Debug, Clone, Default)]
 pub struct SimulationOptions {
+    /// Xyce `.OPTIONS FFT FFT_MODE=0|1` compatibility selection. Omission is
+    /// mode 0: symmetric windows and normalized magnitudes by default.
+    pub fft_mode: Option<XyceFftMode>,
+    /// Xyce `.OPTIONS FFT FFT_ACCURATE=0|1`. Omission follows Xyce's enabled
+    /// default and makes every FFT sample time a transient solver stop. Zero
+    /// uses linear interpolation over accepted transient history; an output
+    /// `INITIAL_INTERVAL` schedule also selects interpolation because Xyce
+    /// defines those modes as incompatible.
+    pub fft_accurate: Option<bool>,
+    /// Xyce `.OPTIONS FFT FFTOUT=0|1`. This requests the optional ENOB/SFDR/
+    /// SNR/SNDR/THD report (disabled when omitted). The engine retains these
+    /// figures and the ranked harmonic list in the typed spectrum result.
+    pub fft_output_metrics: Option<bool>,
     /// Xyce `.PREPROCESS REPLACEGROUND TRUE|FALSE`. When enabled, the exact
     /// case-insensitive fields `GND`, `GND!`, and `GROUND` are node-zero
     /// aliases throughout circuit elaboration and output expressions.

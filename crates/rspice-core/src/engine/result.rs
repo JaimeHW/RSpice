@@ -1,7 +1,7 @@
 //! Public time-domain result types.
 
 use crate::engine::waveform::TransientResultCompressed;
-use crate::netlist::XyceOutputIntervalSchedule;
+use crate::netlist::{FftFormat, FftOutput, FftWindow, XyceFftMode, XyceOutputIntervalSchedule};
 use crate::xspice::DigitalValue;
 use crate::{NodeId, Value};
 use std::collections::HashMap;
@@ -124,6 +124,116 @@ pub struct TransientStoreTrace {
     pub values: Vec<Value>,
 }
 
+/// One calibrated bin in a one-sided transient `.FFT` spectrum.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransientFftBin {
+    /// Zero-based DFT bin index. The final bin is the Nyquist bin.
+    pub index: usize,
+    /// Bin-center frequency in hertz.
+    pub frequency: Value,
+    /// Real component after one-sided amplitude calibration and `FORMAT`.
+    pub real: Value,
+    /// Imaginary component after one-sided amplitude calibration and `FORMAT`.
+    pub imaginary: Value,
+    /// Linear magnitude of `(real, imaginary)`.
+    pub magnitude: Value,
+    /// Phase in degrees in the range accepted by `atan2`.
+    pub phase_degrees: Value,
+}
+
+/// One entry in the magnitude-ranked harmonic list requested by `FFTOUT=1`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransientFftHarmonic {
+    /// One-based position in descending-magnitude order.
+    pub rank: usize,
+    /// DFT bin (harmonic) index.
+    pub bin: usize,
+    /// Bin-center frequency in hertz.
+    pub frequency: Value,
+    /// Magnitude in the spectrum's effective `FORMAT`.
+    pub magnitude: Value,
+    /// Magnitude in decibels, with Xyce's `1e-10` reporting floor.
+    pub magnitude_db: Value,
+    /// Phase in degrees.
+    pub phase_degrees: Value,
+}
+
+/// Xyce-compatible figures requested by `.OPTIONS FFT FFTOUT=1`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransientFftMetrics {
+    /// Magnitude of the `FREQ`-selected first harmonic.
+    pub fundamental_magnitude: Value,
+    /// Total harmonic distortion as a linear amplitude ratio.
+    pub thd_ratio: Value,
+    /// Total harmonic distortion in decibels.
+    pub thd_db: Value,
+    /// Signal-to-noise-and-distortion ratio in decibels.
+    pub sndr_db: Value,
+    /// Effective number of bits, `(SNDR - 1.76) / 6.02`.
+    pub enob_bits: Value,
+    /// Signal-to-noise ratio in decibels.
+    pub snr_db: Value,
+    /// Spurious-free dynamic range in decibels.
+    pub sfdr_db: Value,
+    /// Bin containing the largest spur, or `None` when none exists.
+    pub sfdr_spur_bin: Option<usize>,
+    /// Frequency of the largest spur, or `None` when none exists.
+    pub sfdr_spur_frequency: Option<Value>,
+    /// Up to 30 non-DC bins sorted by descending magnitude, then source bin.
+    pub largest_harmonics: Vec<TransientFftHarmonic>,
+}
+
+/// Typed result of one source-authored transient `.FFT` directive.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransientFftResult {
+    /// Authored probe or braced expression.
+    pub output: FftOutput,
+    /// Display spelling of the resolved scalar column.
+    pub output_name: String,
+    /// Physical quantity class: `voltage`, `current`, or `parameter`.
+    pub physical_type: &'static str,
+    /// Inclusive beginning of the sampled record.
+    pub start_time: Value,
+    /// Exclusive end of the sampled record.
+    pub stop_time: Value,
+    /// Uniform sample spacing `(stop_time - start_time) / point_count`.
+    pub sample_interval: Value,
+    /// Number of uniformly resampled real input points.
+    pub point_count: usize,
+    /// Whether the transient solver was forced to land on every sample time.
+    /// This is normally true and becomes false for `FFT_ACCURATE=0` or an
+    /// incompatible `.OPTIONS OUTPUT INITIAL_INTERVAL` schedule.
+    pub accurate_sampling: bool,
+    /// Effective coefficient format. `Normalized` divides every complex bin
+    /// by the largest calibrated one-sided magnitude.
+    pub format: FftFormat,
+    /// Effective Xyce FFT compatibility mode.
+    pub mode: XyceFftMode,
+    /// Effective window selection.
+    pub window: FftWindow,
+    /// Canonical source spelling retained by the parser.
+    pub window_name: String,
+    /// HSPICE-compatible `ALFA` value (retained; unsupported Gaussian/Kaiser
+    /// windows do not currently consume it).
+    pub alpha: Value,
+    /// Mean window coefficient used for coherent-gain compensation.
+    pub coherent_gain: Value,
+    /// DFT bin width in hertz, exactly `1 / (stop_time - start_time)`.
+    pub frequency_resolution: Value,
+    /// Rounded first-harmonic bin selected by `FREQ` (default 1).
+    pub fundamental_bin: usize,
+    /// Rounded lower metric bin selected by `FMIN`.
+    pub minimum_metric_bin: usize,
+    /// Rounded upper metric bin selected by `FMAX`.
+    pub maximum_metric_bin: usize,
+    /// DC through Nyquist, inclusive. `FMIN`/`FMAX` select metric bounds and
+    /// intentionally do not truncate this source spectrum.
+    pub bins: Vec<TransientFftBin>,
+    /// Additional Xyce-compatible figures and ranked bins requested by
+    /// `.OPTIONS FFT FFTOUT=1`.
+    pub metrics: Option<TransientFftMetrics>,
+}
+
 /// Result of transient analysis - time-domain waveforms
 #[derive(Debug, Clone)]
 pub struct TransientResult {
@@ -158,6 +268,8 @@ pub struct TransientResult {
     pub device_op_traces: Vec<TransientDeviceOpTrace>,
     /// Typed device store outputs captured at accepted transient points.
     pub store_traces: Vec<TransientStoreTrace>,
+    /// Source-authored `.FFT` post-processing results in netlist order.
+    pub fft_results: Vec<TransientFftResult>,
 }
 
 impl TransientResult {
@@ -665,6 +777,7 @@ impl From<TransientResultCompressed> for TransientResult {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: compressed.store_traces,
+            fft_results: compressed.fft_results,
         }
     }
 }
@@ -687,6 +800,7 @@ mod tests {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
         }
     }
 

@@ -39,6 +39,7 @@ impl From<&rspice_core::netlist::UnresolvedOutputSymbol> for PyUnresolvedOutputS
             OutputDirectiveKind::Plot => "plot",
             OutputDirectiveKind::Measure => "measure",
             OutputDirectiveKind::Four => "four",
+            OutputDirectiveKind::Fft => "fft",
         };
         let kind = match item.kind {
             OutputSymbolKind::Node => "node",

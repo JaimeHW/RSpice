@@ -4513,6 +4513,47 @@ mod tests {
     }
 
     #[test]
+    fn xyce_fft_options_are_typed_without_unknown_option_diagnostics() {
+        let netlist = Netlist::parse(
+            "typed fft options\n\
+             V1 out 0 0\n\
+             .options fft fft_mode=1 fft_accurate=0 fftout=1\n\
+             .fft v(out) np=8\n\
+             .end\n",
+        )
+        .expect("Xyce FFT option package parses");
+
+        assert_eq!(
+            netlist.options.fft_mode,
+            Some(XyceFftMode::SpectreCompatible)
+        );
+        assert_eq!(netlist.options.fft_accurate, Some(false));
+        assert_eq!(netlist.options.fft_output_metrics, Some(true));
+        assert!(
+            netlist
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code != "unknown-option")
+        );
+
+        let error = Netlist::parse("invalid fft mode\nV1 out 0 0\n.options fft fft_mode=2\n.end\n")
+            .expect_err("FFT_MODE outside 0/1 fails closed");
+        assert!(
+            error
+                .to_string()
+                .contains("FFT.FFT_MODE must be either 0 or 1")
+        );
+
+        let error = Netlist::parse("invalid fft flag\nV1 out 0 0\n.options fft fftout=2\n.end\n")
+            .expect_err("FFTOUT outside 0/1 fails closed");
+        assert!(
+            error
+                .to_string()
+                .contains("FFT.FFTOUT must be the integer 0 or 1")
+        );
+    }
+
+    #[test]
     fn malformed_fft_directives_fail_closed() {
         for (line, expected) in [
             (".fft", "requires one output"),

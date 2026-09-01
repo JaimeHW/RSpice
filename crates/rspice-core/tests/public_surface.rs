@@ -197,7 +197,13 @@ use rspice_core::analysis::harmonic_balance::{
 ///
 /// Those five APIs are now `pub(crate)`, so the ratchet is back at its prior
 /// 4,279-item ceiling rather than retaining accidental headroom.
-const MAX_PUBLIC_ITEMS: usize = 4279;
+///
+/// The FFT result contract adds +5 deliberate frontend-facing types:
+/// `XyceFftMode` retains the authored compatibility selection, while
+/// `TransientFftBin`, `TransientFftHarmonic`, `TransientFftMetrics`, and
+/// `TransientFftResult` expose calibrated spectra and optional `FFTOUT`
+/// figures without requiring a frontend to parse an engine text report.
+const MAX_PUBLIC_ITEMS: usize = 4284;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

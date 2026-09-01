@@ -467,6 +467,7 @@ fn evaluate_transient_measurements(
         real_traces: Vec::new(),
         device_op_traces,
         store_traces,
+        fft_results: result.fft_results.clone(),
     };
     let measurements = rspice_core::analysis::evaluate_tran_measurements(netlist, &visible_result);
     ensure_not_aborted(abort)?;
@@ -723,6 +724,7 @@ mod tests {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
         };
 
         let converted =
@@ -761,6 +763,7 @@ mod tests {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
         };
 
         let converted =
@@ -790,6 +793,7 @@ mod tests {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
         };
 
         let error = validate_transient_result_shape(&result)
@@ -829,6 +833,7 @@ mod tests {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
         };
 
         let converted =

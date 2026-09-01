@@ -317,6 +317,7 @@ impl XyceTestRunner {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
         })
     }
 
@@ -2397,6 +2398,9 @@ impl XyceTestRunner {
         lte_reference: Option<TransientLteReference>,
     ) -> bool {
         let rspice_core::netlist::SimulationOptions {
+            fft_mode,
+            fft_accurate,
+            fft_output_metrics,
             replace_ground: _,
             remove_unused: _,
             add_resistors: _,
@@ -2491,7 +2495,10 @@ impl XyceTestRunner {
             restart,
             scale: _,
         } = options;
-        reltol.is_none()
+        fft_mode.is_none()
+            && fft_accurate.is_none()
+            && fft_output_metrics.is_none()
+            && reltol.is_none()
             && abstol.is_none()
             && output_interval_schedule.is_none()
             && output_time_points.is_empty()
@@ -4453,6 +4460,7 @@ impl XyceTestRunner {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
         }
     }
 

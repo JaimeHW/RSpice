@@ -97,6 +97,7 @@ complete set of ways to reach it.
 | Sensitivity | `.SENS` | DC and AC |
 | Distortion | `.DISTO` | third-order Volterra; harmonic and two-tone intermodulation |
 | Fourier / THD | `.FOUR` | |
+| Typed transient spectrum | `.FFT` | uniform resampling, Xyce-compatible windows/options, calibrated DC-through-Nyquist bins, optional `FFTOUT` metrics |
 | Monte Carlo | `.MC`, `--monte-carlo` | operating-point parameter variation; gaussian, uniform, or worst-case |
 | Process corners | `--corners` | corner definitions via `--corner-lib` |
 | Harmonic balance | `.HB`, `--hb-freq` | with envelope continuation |
@@ -109,7 +110,17 @@ complete set of ways to reach it.
 | Periodic stability | IDE | Floquet multipliers from the monodromy matrix |
 | Measurements | `.MEAS` | over TRAN/DC/AC/NOISE; `GOAL`/`TOL` gates the exit status |
 
-`.FFT` parses but is rejected at run time until its post-processing lands.
+Transient `.FFT` directives produce typed spectra in source order. Probe and
+expression operands use the same hierarchy-aware resolver as other output
+cards; adaptive histories are sampled on `[START, STOP)` at `NP` uniform
+points, windowed, coherently calibrated, and returned from DC through Nyquist.
+`FFT_MODE=0|1` selects symmetric/periodic windows and the corresponding
+`NORM`/`UNORM` default. `FFT_ACCURATE=1` (the default) schedules exact solver
+stops at sample times, while `FFT_ACCURATE=0` uses linear interpolation over
+the accepted transient history; an
+authored output `INITIAL_INTERVAL` schedule also selects interpolation.
+`FFTOUT=1` adds typed ENOB, SFDR, SNR, SNDR, THD, and ranked-harmonic results;
+`FREQ`, `FMIN`, and `FMAX` select their fundamental and metric limits.
 
 ## Devices
 

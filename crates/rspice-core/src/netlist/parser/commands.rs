@@ -294,7 +294,9 @@ pub(super) fn parse_command(
             });
         }
         ".FFT" => {
-            fft_analyses.push(parse_fft_command(stream, line_num, params, diagnostics)?);
+            let analysis = parse_fft_command(stream, line_num, params, diagnostics)?;
+            output_requests.push(OutputRequest::from_fft(&analysis, origin.clone()));
+            fft_analyses.push(analysis);
         }
         ".NOISE" => {
             let noise = parse_noise_command(stream, line_num, params)?;
@@ -1547,6 +1549,46 @@ pub(super) fn parse_options_command(
             .map(|package| format!("{package}.{key_upper}"));
 
         match (option_package.as_deref(), key_upper.as_str()) {
+            (Some("FFT"), "FFT_MODE") => {
+                let value = expect_value(stream, line_num, params)?;
+                let mode = parse_usize_option("FFT.FFT_MODE", value, line_num)?;
+                options.fft_mode = Some(match mode {
+                    0 => crate::netlist::XyceFftMode::HspiceCompatible,
+                    1 => crate::netlist::XyceFftMode::SpectreCompatible,
+                    _ => {
+                        return Err(ParseError::Syntax {
+                            line: line_num,
+                            message: format!("FFT.FFT_MODE must be either 0 or 1, found {mode}"),
+                        });
+                    }
+                });
+            }
+            (Some("FFT"), "FFT_ACCURATE") => {
+                options.fft_accurate = Some(parse_fft_boolean_option(
+                    stream,
+                    line_num,
+                    params,
+                    has_equals,
+                    "FFT_ACCURATE",
+                )?);
+            }
+            (Some("FFT"), "FFTOUT") => {
+                options.fft_output_metrics = Some(parse_fft_boolean_option(
+                    stream, line_num, params, has_equals, "FFTOUT",
+                )?);
+            }
+            (Some("FFT"), _) => {
+                let warning_key = scoped_key.as_deref().unwrap_or(&key_upper);
+                ignore_unknown_option(
+                    stream,
+                    line_num,
+                    params,
+                    has_equals,
+                    warning_key,
+                    unknown_warned,
+                    diagnostics,
+                );
+            }
             (Some("MEASURE"), "MEASFAIL") => {
                 let value = expect_value(stream, line_num, params)?;
                 if !value.is_finite() {
@@ -2469,6 +2511,7 @@ pub(super) fn option_package_key_is_known(key_upper: &str) -> bool {
     matches!(
         key_upper,
         "TOPOLOGY"
+            | "FFT"
             | "MEASURE"
             | "DEVICE"
             | "XSPICE"
@@ -2897,6 +2940,39 @@ fn parse_boolean_option(
     }
 
     Ok(expect_value(stream, line_num, params)? != 0.0)
+}
+
+fn parse_fft_boolean_option(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    has_equals: bool,
+    name: &str,
+) -> Result<bool, ParseError> {
+    if !has_equals {
+        return Ok(true);
+    }
+
+    if let TokenKind::Ident(word) = &stream.peek().kind {
+        let enabled = match word.to_ascii_lowercase().as_str() {
+            "true" | "yes" | "on" => Some(true),
+            "false" | "no" | "off" => Some(false),
+            _ => None,
+        };
+        if let Some(enabled) = enabled {
+            stream.advance();
+            return Ok(enabled);
+        }
+    }
+
+    let value = expect_value(stream, line_num, params)?;
+    if !value.is_finite() || value != value.round() || !(0.0..=1.0).contains(&value) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("FFT.{name} must be the integer 0 or 1, found {value}"),
+        });
+    }
+    Ok(value == 1.0)
 }
 
 fn parse_auto_bridge_option(

@@ -419,6 +419,7 @@ fn hierarchical_team_resistance_probes_resolve_xyce_colon_aliases() {
             name: canonical_store.to_string(),
             values: vec![50.0, 100.0],
         }],
+        fft_results: Vec::new(),
     };
     let tran_value = XyceTestRunner::evaluate_atomic_tran_probe(probe, &netlist, &transient, 0.5)
         .expect("Xyce hierarchy alias resolves the canonical transient store");
@@ -4486,6 +4487,7 @@ fn uic_initial_current_source_probe_reports_zero() {
         real_traces: Vec::new(),
         device_op_traces: Vec::new(),
         store_traces: Vec::new(),
+        fft_results: Vec::new(),
     };
 
     let initial = XyceTestRunner::evaluate_tran_probe("i(i1)", &netlist, &result, 0.0)
@@ -4518,6 +4520,7 @@ fn transient_resistor_power_probe_uses_recorded_branch_current() {
         real_traces: Vec::new(),
         device_op_traces: Vec::new(),
         store_traces: Vec::new(),
+        fft_results: Vec::new(),
     };
 
     XyceTestRunner::validate_tran_probe("P(R1)", &netlist)
@@ -4550,6 +4553,7 @@ fn transient_resistor_instance_parameters_work_in_direct_expression_and_stateful
         real_traces: Vec::new(),
         device_op_traces: Vec::new(),
         store_traces: Vec::new(),
+        fft_results: Vec::new(),
     };
 
     for probe in ["R1:A", "{R1:A*2}", "{SDT(R1:A)}"] {
@@ -4595,6 +4599,7 @@ fn transient_voltage_source_power_probe_uses_recorded_branch_current() {
         real_traces: Vec::new(),
         device_op_traces: Vec::new(),
         store_traces: Vec::new(),
+        fft_results: Vec::new(),
     };
 
     XyceTestRunner::validate_tran_probe("P(V1)", &netlist)
@@ -4841,6 +4846,7 @@ fn transient_comparison_accounts_for_printed_time_quantization() {
         real_traces: Vec::new(),
         device_op_traces: Vec::new(),
         store_traces: Vec::new(),
+        fft_results: Vec::new(),
     };
     let tolerance = runner.default_comparison_tolerance("v(1)");
     let time_tolerance = XyceTestRunner::default_prn_time_quantization_tolerance(2.99999996);
@@ -4878,6 +4884,7 @@ fn transient_comparison_uses_local_samples_inside_prn_time_neighborhood() {
         real_traces: Vec::new(),
         device_op_traces: Vec::new(),
         store_traces: Vec::new(),
+        fft_results: Vec::new(),
     };
     let tolerance = runner
         .default_comparison_tolerance("v(3)")
@@ -5165,6 +5172,7 @@ fn transient_output_interval_corridor_uses_adjacent_reference_rows() {
         real_traces: Vec::new(),
         device_op_traces: Vec::new(),
         store_traces: Vec::new(),
+        fft_results: Vec::new(),
     };
     let tolerance = runner.default_comparison_tolerance("v(1)");
 
@@ -14668,6 +14676,7 @@ fn reference_grid_diagnostic_does_not_replace_the_native_integrated_rms_contract
         real_traces: Vec::new(),
         device_op_traces: Vec::new(),
         store_traces: Vec::new(),
+        fft_results: Vec::new(),
     };
     let reference = XycePrnTable {
         columns: vec![
@@ -22721,6 +22730,7 @@ R1 1 0 1
         real_traces: Vec::new(),
         device_op_traces: Vec::new(),
         store_traces: Vec::new(),
+        fft_results: Vec::new(),
     };
 
     for probe in ["TEMP", "TEMPER"] {
@@ -22885,6 +22895,7 @@ fn transient_lead_currents_use_typed_traces_expressions_and_hierarchy_aliases() 
             },
         ],
         store_traces: Vec::new(),
+        fft_results: Vec::new(),
     };
 
     for (probe, expected) in [("IB(Q1)", 0.3), ("ic(q1)", 1.5), ("IE(Q1)", -1.8)] {
