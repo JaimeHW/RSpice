@@ -3257,9 +3257,22 @@ impl<'a> Parser<'a> {
         )
     }
 
+    /// Drop a directive the preprocessor left behind, operand and all.
+    ///
+    /// Only directives that stage does not know reach the parser, and it is
+    /// line-oriented about them: everything after the name on a directive's own
+    /// line is that directive's operand. The lexer records that extent as the
+    /// directive token's span (see `lexer::Lexer::scan_directive`), so the
+    /// operand is exactly the run of following tokens that start inside it.
+    /// Advancing once instead would leave the operand in the stream —
+    /// `` `default_nettype wire `` would drop the directive and then try to
+    /// parse `wire` as a top-level item.
     fn skip_directive(&mut self) -> Result<(), ParseError> {
-        self.advance(); // Skip directive token
-        // Skip until newline (handled by lexer in practice)
+        let directive = self.current_span();
+        self.advance();
+        while !self.at_end() && self.current_span().start < directive.end {
+            self.advance();
+        }
         Ok(())
     }
 
@@ -3301,6 +3314,42 @@ mod tests {
             .collect_tokens()
             .expect("lex failed");
         Parser::new(&tokens).parse().expect_err("parse succeeded")
+    }
+
+    /// An unknown directive's operand must leave with the directive. Before
+    /// the span-widening rule the `wire` of `` `default_nettype wire `` reached
+    /// the top-level item loop on its own and failed there.
+    #[test]
+    fn an_unknown_directive_takes_its_operand_with_it() {
+        let file = parse(
+            "`default_nettype wire\n\
+             module a(p);\n\
+             inout p;\n\
+             electrical p;\n\
+             endmodule\n",
+        );
+        assert_eq!(file.items.len(), 1);
+        assert!(matches!(file.items.first(), Some(Item::Module(_))));
+    }
+
+    /// The operand belongs to the directive only when the directive opens the
+    /// line. A backtick inside a line is a macro invocation the preprocessor
+    /// could not expand, and what follows it on that line is code — dropping it
+    /// would delete the author's source rather than a directive's argument.
+    #[test]
+    fn a_directive_inside_a_line_keeps_the_rest_of_the_line() {
+        let tokens = Lexer::new("x = `UNDEFINED + 1;", SourceId::new(0))
+            .collect_tokens()
+            .expect("lex failed");
+        let directive = tokens
+            .iter()
+            .find(|token| token.kind == TokenKind::Directive)
+            .expect("a directive token");
+        assert_eq!(directive.text.as_deref(), Some("`UNDEFINED"));
+        assert!(
+            tokens.iter().any(|token| token.kind == TokenKind::Plus),
+            "the code after a mid-line directive stays in the stream"
+        );
     }
 
     #[test]

@@ -1161,8 +1161,38 @@ impl<'a> Lexer<'a> {
         }
 
         let text = &self.source[start..self.pos];
-        let span = Span::new(self.source_id, start as u32, self.pos as u32);
+        let name_end = self.pos;
+        // A directive that opens its line owns the rest of that line, which is
+        // the preprocessor's own rule: it treats a line whose first non-blank
+        // character is a backtick as a directive line and hands everything
+        // after the name to the directive as its operand (`Preprocessor::run`'s
+        // `trimmed.starts_with('`')` test, and `split_directive`). Only the
+        // directives that stage does not know reach here, so the span is
+        // widened rather than the operand being consumed: the operand's tokens
+        // stay in the stream and `parser::Parser::skip_directive` drops exactly
+        // the ones this span covers. Widening only — a backtick *inside* a line
+        // is a macro invocation the preprocessor could not expand, and the code
+        // after it on that line is code.
+        let end = if self.directive_opens_its_line(start) {
+            self.source[name_end..]
+                .find('\n')
+                .map_or(self.source.len(), |offset| name_end + offset)
+        } else {
+            name_end
+        };
+        let span = Span::new(self.source_id, start as u32, end as u32);
         Ok(Token::with_text(TokenKind::Directive, span, text))
+    }
+
+    /// Whether the backtick at `start` is the first non-blank character on its
+    /// line.
+    fn directive_opens_its_line(&self, start: usize) -> bool {
+        let line_start = self.source[..start]
+            .rfind('\n')
+            .map_or(0, |offset| offset + 1);
+        self.source[line_start..start]
+            .chars()
+            .all(|ch| ch == ' ' || ch == '\t' || ch == '\r')
     }
 }
 
