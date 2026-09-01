@@ -18,6 +18,38 @@ use super::basic::run_dc_op;
 use super::shared::generate_frequency_sweep;
 use crate::cli::CliError;
 
+fn ensure_not_cancelled(ctx: &RunContext<'_>) -> Result<(), CliError> {
+    if crate::abort::reason().is_some() {
+        Err(super::cancellation_cli_error(ctx.args.timeout))
+    } else {
+        Ok(())
+    }
+}
+
+fn map_advanced_simulation_error(
+    ctx: &RunContext<'_>,
+    analysis: &str,
+    error: rspice_core::SimulationError,
+) -> CliError {
+    if matches!(error, rspice_core::SimulationError::Aborted) {
+        super::cancellation_cli_error(ctx.args.timeout)
+    } else {
+        CliError::simulation_error_in(error.to_string(), analysis)
+    }
+}
+
+fn map_advanced_string_error(
+    ctx: &RunContext<'_>,
+    analysis: &str,
+    error: impl std::fmt::Display,
+) -> CliError {
+    if crate::abort::reason().is_some() {
+        super::cancellation_cli_error(ctx.args.timeout)
+    } else {
+        CliError::simulation_error_in(error.to_string(), analysis)
+    }
+}
+
 pub(super) fn run_hb_from_command(
     ctx: &RunContext<'_>,
     frequencies: &[f64],
@@ -76,6 +108,7 @@ pub(super) fn export_step_sweep(
     step_name: &str,
     sweep_results: &[(f64, rspice_core::solver::SimulationResult)],
 ) -> Result<(), CliError> {
+    ensure_not_cancelled(ctx)?;
     let Some(ref output_path) = ctx.output_path_for("step") else {
         return Ok(());
     };
@@ -183,15 +216,17 @@ pub(super) fn run_monte_carlo(
         pb
     };
 
-    match ctx.engine.run_monte_carlo_with_options(
+    match ctx.engine.run_monte_carlo_with_options_and_abort(
         ctx.netlist,
         num_runs,
         seed,
         distribution,
         parameter_filter,
+        &crate::abort::ProcessAbort,
     ) {
         Ok(result) => {
             pb.finish_and_clear();
+            ensure_not_cancelled(ctx)?;
 
             if result.num_failures >= num_runs {
                 return Err(CliError::simulation_error_in(
@@ -236,7 +271,7 @@ pub(super) fn run_monte_carlo(
         }
         Err(e) => {
             pb.finish_and_clear();
-            Err(CliError::simulation_error_in(e.to_string(), "Monte Carlo"))
+            Err(map_advanced_simulation_error(ctx, "Monte Carlo", e))
         }
     }
 }
@@ -250,6 +285,7 @@ fn export_monte_carlo(
     result: &rspice_core::analysis::MonteCarloResult,
     variables: &[&rspice_core::analysis::VariableStatistics],
 ) -> Result<(), CliError> {
+    ensure_not_cancelled(ctx)?;
     let Some(ref output_path) = ctx.output_path_for("mc") else {
         return Ok(());
     };
@@ -385,8 +421,12 @@ pub(super) fn run_pss(
         config.tstab = t;
     }
 
-    match ctx.engine.run_pss(ctx.netlist, config) {
+    match ctx
+        .engine
+        .run_pss_with_abort(ctx.netlist, config, &crate::abort::ProcessAbort)
+    {
         Ok(pss_result) => {
+            ensure_not_cancelled(ctx)?;
             if !ctx.quiet {
                 println!("✓ PSS converged in {} iterations", pss_result.iterations);
                 println!("  Period: {:.6e} s", pss_result.period);
@@ -407,7 +447,7 @@ pub(super) fn run_pss(
             export_pss(ctx, &pss_result.result)?;
             Ok(())
         }
-        Err(e) => Err(CliError::simulation_error_in(e.to_string(), "PSS")),
+        Err(e) => Err(map_advanced_simulation_error(ctx, "PSS", e)),
     }
 }
 
@@ -417,6 +457,7 @@ fn export_pss(
     ctx: &RunContext<'_>,
     result: &rspice_core::analysis::PssResult,
 ) -> Result<(), CliError> {
+    ensure_not_cancelled(ctx)?;
     let Some(ref output_path) = ctx.output_path_for("pss") else {
         return Ok(());
     };
@@ -517,8 +558,12 @@ fn run_hb_with_config(
     let fundamental = config.fundamental_freq;
     let harmonics = config.num_harmonics;
 
-    match ctx.engine.run_hb(ctx.netlist, config) {
+    match ctx
+        .engine
+        .run_hb_with_abort(ctx.netlist, config, &crate::abort::ProcessAbort)
+    {
         Ok(hb_result) => {
+            ensure_not_cancelled(ctx)?;
             if !ctx.quiet {
                 println!("✓ HB converged");
                 println!("  Nodes: {}", hb_result.result.num_nodes());
@@ -541,7 +586,7 @@ fn run_hb_with_config(
             export_hb(ctx, fundamental, &hb_result.result)?;
             Ok(())
         }
-        Err(e) => Err(CliError::simulation_error_in(e.to_string(), "HB")),
+        Err(e) => Err(map_advanced_simulation_error(ctx, "HB", e)),
     }
 }
 
@@ -552,6 +597,7 @@ fn export_hb(
     fundamental: f64,
     result: &rspice_core::analysis::HbResult,
 ) -> Result<(), CliError> {
+    ensure_not_cancelled(ctx)?;
     let Some(ref output_path) = ctx.output_path_for("hb") else {
         return Ok(());
     };
@@ -654,6 +700,7 @@ fn export_hb(
 }
 
 pub(super) fn run_corner_sweep(ctx: &RunContext<'_>, corners_str: &str) -> Result<(), CliError> {
+    ensure_not_cancelled(ctx)?;
     let corners: Vec<String> = corners_str
         .split(',')
         .map(|s| s.trim().to_string())
@@ -707,6 +754,7 @@ pub(super) fn run_corner_sweep(ctx: &RunContext<'_>, corners_str: &str) -> Resul
     } else {
         let mut results = Vec::with_capacity(corners.len());
         for (i, name) in corners.iter().enumerate() {
+            ensure_not_cancelled(ctx)?;
             if !ctx.quiet {
                 println!("\n[{}/{}] Corner: {}", i + 1, corners.len(), name);
             }
@@ -715,6 +763,7 @@ pub(super) fn run_corner_sweep(ctx: &RunContext<'_>, corners_str: &str) -> Resul
                 Some(lib) => match run_corner_with_lib(ctx, lib, name) {
                     Ok(status) => status,
                     Err(e) => {
+                        ensure_not_cancelled(ctx)?;
                         if !ctx.quiet {
                             eprintln!("  Corner '{}' failed: {}", name, e);
                         }
@@ -724,6 +773,7 @@ pub(super) fn run_corner_sweep(ctx: &RunContext<'_>, corners_str: &str) -> Resul
                 None => match run_corner_nominal(ctx, name) {
                     Ok(status) => status,
                     Err(e) => {
+                        ensure_not_cancelled(ctx)?;
                         if !ctx.quiet {
                             eprintln!("  Corner '{}' failed: {}", name, e);
                         }
@@ -736,6 +786,7 @@ pub(super) fn run_corner_sweep(ctx: &RunContext<'_>, corners_str: &str) -> Resul
         }
         results
     };
+    ensure_not_cancelled(ctx)?;
 
     if !ctx.quiet {
         println!("\n┌─────────────────────────────────────┐");
@@ -832,6 +883,15 @@ fn run_corner_job(
     lib: Option<&std::path::Path>,
     corner: &str,
 ) -> CornerOutcome {
+    if crate::abort::reason().is_some() {
+        return CornerOutcome {
+            simulation_passed: false,
+            measurements_passed: false,
+            error: Some(format!("corner '{corner}': cancelled")),
+            measurements: Vec::new(),
+            outputs: Vec::new(),
+        };
+    }
     let corner_source = match lib {
         Some(lib) => {
             // Inject the corner's library section right below the title so
@@ -898,11 +958,29 @@ fn run_corner_job(
         }
     } else {
         for analysis in &corner_netlist.analyses {
+            if crate::abort::reason().is_some() {
+                passed = false;
+                error.get_or_insert_with(|| "cancelled".to_string());
+                break;
+            }
             if let Err(e) = corner_ctx.run_analysis(analysis) {
                 passed = false;
                 error.get_or_insert(e.to_string());
+                if crate::abort::reason().is_some() {
+                    break;
+                }
             }
         }
+    }
+
+    if crate::abort::reason().is_some() {
+        return CornerOutcome {
+            simulation_passed: false,
+            measurements_passed: false,
+            error: error.or_else(|| Some("cancelled".to_string())),
+            measurements: Vec::new(),
+            outputs: Vec::new(),
+        };
     }
 
     corner_ctx.record_unevaluated_measurements();
@@ -961,6 +1039,7 @@ fn run_corners_parallel(
             .map(|corner| run_corner_job(&setup, lib, corner))
             .collect()
     });
+    ensure_not_cancelled(ctx)?;
 
     let mut results = Vec::with_capacity(corners.len());
     for (name, outcome) in corners.iter().zip(outcomes) {
@@ -1023,6 +1102,7 @@ fn run_corner_serial_source(
     base: &std::path::Path,
     corner: &str,
 ) -> Result<(bool, bool), CliError> {
+    ensure_not_cancelled(ctx)?;
     let parse_options = super::parse_options_for_run(ctx.args, ctx.engine.config().resource_limits);
     let corner_netlist = rspice_core::Netlist::parse_with_path_and_options_and_abort(
         source,
@@ -1062,6 +1142,7 @@ fn run_corner_serial_source(
     let mut passed = true;
     if corner_netlist.analyses.is_empty() {
         if let Err(e) = run_dc_op(&corner_ctx) {
+            ensure_not_cancelled(ctx)?;
             if !ctx.quiet {
                 eprintln!("  DC OP failed: {}", e);
             }
@@ -1069,7 +1150,9 @@ fn run_corner_serial_source(
         }
     } else {
         for analysis in &corner_netlist.analyses {
+            ensure_not_cancelled(ctx)?;
             if let Err(e) = corner_ctx.run_analysis(analysis) {
+                ensure_not_cancelled(ctx)?;
                 if !ctx.quiet {
                     eprintln!("  Analysis failed: {}", e);
                 }
@@ -1077,6 +1160,7 @@ fn run_corner_serial_source(
             }
         }
     }
+    ensure_not_cancelled(ctx)?;
 
     // Surface this corner's measurements in CI reports under tagged names.
     corner_ctx.record_unevaluated_measurements();
@@ -1166,6 +1250,7 @@ pub(super) fn run_sparam_from_command(
     stop_freq: f64,
     do_noise: bool,
 ) -> Result<(), CliError> {
+    ensure_not_cancelled(ctx)?;
     let frequencies = generate_frequency_sweep(variation, points, start_freq, stop_freq);
     if frequencies.is_empty() {
         return Err(CliError::SimulationError {
@@ -1185,6 +1270,7 @@ pub(super) fn run_sparam_from_command(
     }
 
     let data = solve_netlist_sparameters(ctx, ports, frequencies, do_noise)?;
+    ensure_not_cancelled(ctx)?;
     if !ctx.quiet
         && let Some(first) = data
             .s
@@ -1255,12 +1341,14 @@ fn solve_netlist_sparameters(
     frequencies: Vec<f64>,
     do_noise: bool,
 ) -> Result<SParameterSweepData, CliError> {
+    ensure_not_cancelled(ctx)?;
     let s = s_param::extract_s_matrix(ctx.netlist, &ports, &frequencies, |driven| {
         ctx.engine
             .run_ac_with_abort(driven, &frequencies, &crate::abort::ProcessAbort)
             .map_err(|error| error.to_string())
     })
-    .map_err(|error| CliError::simulation_error_in(error.to_string(), "S-Parameters"))?;
+    .map_err(|error| map_advanced_string_error(ctx, "S-Parameters", error))?;
+    ensure_not_cancelled(ctx)?;
 
     let noise = do_noise
         .then(|| solve_sparameter_noise(ctx, &ports, &frequencies, &s))
@@ -1280,6 +1368,7 @@ fn solve_sparameter_noise(
     frequencies: &[f64],
     s: &[Vec<Vec<rspice_core::Complex64>>],
 ) -> Result<SParameterNoiseData, CliError> {
+    ensure_not_cancelled(ctx)?;
     let temperature = ctx.engine.config().temperature;
     let source_names = ports
         .iter()
@@ -1294,7 +1383,7 @@ fn solve_sparameter_noise(
             temperature,
             &crate::abort::ProcessAbort,
         )
-        .map_err(|error| CliError::simulation_error_in(error.to_string(), "SP Port Noise"))?;
+        .map_err(|error| map_advanced_simulation_error(ctx, "SP Port Noise", error))?;
     if points.len() != frequencies.len() {
         return Err(CliError::simulation_error_in(
             format!(
@@ -1310,6 +1399,7 @@ fn solve_sparameter_noise(
     let mut current_correlation =
         vec![vec![vec![rspice_core::Complex64::ZERO; frequencies.len()]; count]; count];
     for (point_index, (expected_frequency, point)) in frequencies.iter().zip(&points).enumerate() {
+        ensure_not_cancelled(ctx)?;
         let tolerance = expected_frequency.abs().max(1.0) * f64::EPSILON * 64.0;
         if (point.frequency - expected_frequency).abs() > tolerance {
             return Err(CliError::simulation_error_in(
@@ -1347,6 +1437,7 @@ fn solve_sparameter_noise(
         let reference_impedances = ports.iter().map(|port| port.z0).collect::<Vec<_>>();
         let mut derived = Vec::with_capacity(frequencies.len());
         for point_index in 0..frequencies.len() {
+            ensure_not_cancelled(ctx)?;
             let scattering = (0..count)
                 .map(|row| {
                     (0..count)
@@ -1524,6 +1615,7 @@ fn write_touchstone_nport(
 /// inversion and no floating-port hazard. The deck supplies the bias
 /// network and sweep; its own sources must not carry AC specifications.
 pub(super) fn run_sparam(ctx: &RunContext<'_>, ports_spec: &str, z0: f64) -> Result<(), CliError> {
+    ensure_not_cancelled(ctx)?;
     if !z0.is_finite() || z0 <= 0.0 {
         return Err(CliError::InvalidArgument {
             message: format!("--sparam-z0 must be a positive impedance, got {z0}"),
@@ -1623,12 +1715,13 @@ pub(super) fn run_sparam(ctx: &RunContext<'_>, ports_spec: &str, z0: f64) -> Res
             },
         })?;
         ctx.engine
-            .run_ac(&netlist, &frequencies)
-            .map_err(|e| CliError::simulation_error_in(e.to_string(), "S-Parameters"))
+            .run_ac_with_abort(&netlist, &frequencies, &crate::abort::ProcessAbort)
+            .map_err(|error| map_advanced_simulation_error(ctx, "S-Parameters", error))
     };
 
     let drive1 = drive(0)?;
     let drive2 = drive(1)?;
+    ensure_not_cancelled(ctx)?;
 
     // Differential port voltage at one sweep point.
     let ground_policy = ctx.netlist.ground_policy();
@@ -1661,6 +1754,7 @@ pub(super) fn run_sparam(ctx: &RunContext<'_>, ports_spec: &str, z0: f64) -> Res
     let mut s12 = Vec::with_capacity(frequencies.len());
     let mut s22 = Vec::with_capacity(frequencies.len());
     for (point1, point2) in drive1.iter().zip(&drive2) {
+        ensure_not_cancelled(ctx)?;
         s11.push(port_v(point1, &port_nodes[0], &port_nodes[1])? - one);
         s21.push(port_v(point1, &port_nodes[2], &port_nodes[3])?);
         s22.push(port_v(point2, &port_nodes[2], &port_nodes[3])? - one);
@@ -1678,6 +1772,7 @@ pub(super) fn run_sparam(ctx: &RunContext<'_>, ports_spec: &str, z0: f64) -> Res
         );
     }
 
+    ensure_not_cancelled(ctx)?;
     if let Some(ref output_path) = ctx.output_path_for("sparam") {
         if output_path
             .extension()
