@@ -429,7 +429,7 @@ fn a_commented_timescale_is_not_a_directive() {
 }
 
 #[test]
-fn a_mixed_signal_module_is_refused_rather_than_run_digital_only() {
+fn the_digital_only_convenience_api_routes_mixed_modules_to_the_transient_host() {
     const MIXED: &str = "\
 module mixed(p, n, a, y);
   inout p, n;
@@ -453,11 +453,12 @@ endmodule
             vectors: vectors(&[&["0"]]),
         },
     )
-    .expect_err("mixed-signal interleave is not implemented");
+    .expect_err("the vector-only API has no analog Newton contract");
     assert!(
         matches!(error, DigitalRunError::MixedSignalModule { .. }),
         "{error:?}"
     );
+    assert!(error.to_string().contains("MixedSignalHost"), "{error}");
 }
 
 #[test]

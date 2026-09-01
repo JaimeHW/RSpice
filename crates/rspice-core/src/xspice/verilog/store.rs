@@ -271,6 +271,7 @@ enum ContributionValue {
 }
 
 /// The signal store and driver resolution for one compiled digital plan.
+#[derive(Clone)]
 pub(crate) struct DigitalSignalStore {
     /// Current value of every four-state signal, at its declared width.
     ///

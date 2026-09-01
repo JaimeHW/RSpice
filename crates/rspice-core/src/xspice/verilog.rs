@@ -21,77 +21,15 @@
 //! See [`TIME_UNIT_RULING`]. It is a constant rather than a comment because a
 //! caller comparing this against another simulator has to be able to read it.
 //!
-//! # What is out of scope, and refused rather than approximated
-//!
-//! Mixed-signal interleave. A module with an analog block *and* digital
-//! processes is refused by [`DigitalRunError::MixedSignalModule`]: running its
-//! digital half alone would produce a trace that looks right and is not, which
-//! is the one outcome a conformance oracle cannot be allowed to see.
-//!
-//! # Where a `wreal` meets an analog node
-//!
-//! Not here, and deliberately — the same shape as the note in
-//! `circuit::net_kind`, and for the same reason. This route
-//! never builds a [`CircuitData`](crate::CircuitData), so a real net it
-//! resolves has no analog node to meet. That happens when a Verilog-AMS module
-//! is instantiated as a *device*, and the boundary the instantiation will need
-//! is recorded here because the substrate half of it now exists and the
-//! translation it still needs has a right answer worth writing down before
-//! somebody guesses one.
-//!
-//! **What exists.** Both halves of the value exchange are code models in the
-//! XSPICE estate, and neither needs anything from this host:
-//!
-//! * *real event → analog.* `real_to_v` stamps a real event value as an analog
-//!   source, and `engine::builder`'s `plan_xspice_auto_bridges` inserts one
-//!   automatically wherever a real event node meets an analog one. That planner
-//!   is the single one a connect-module route extends; it is not to be
-//!   duplicated.
-//! * *analog → real event.* `v_to_real` samples an analog node into a real
-//!   event. It is the newer half and carries its own ruling: a real quantity
-//!   has no threshold, so unlike the four-state bridges there is no crossing to
-//!   interpolate and no future time to request a breakpoint at.
-//!
-//! **What is missing, and it is one adapter.** A hosted plan's `wreal` value
-//! has to become an [`EventValue::Real`](crate::xspice::EventValue) on the
-//! circuit's queue, and an analog node's sample has to become a
-//! [`DigitalHost::force_real`] into this store. Both are short. What is not
-//! short is the time translation between them, because **the two event worlds
-//! do not share a tick encoding**:
-//!
-//! * the circuit's queue keys an event by `f64::to_bits(seconds)`, which is
-//!   exact and unquantized because XSPICE event times are chosen by code models
-//!   and by the step controller rather than lying on a declared grid;
-//! * this host keys one by an integer count of the declared time unit, which
-//!   at [`TIME_UNIT_RULING`]'s 1 ns is a coarse grid indeed.
-//!
-//! No mapping between the two is exact in both directions, so the choice is
-//! which property to keep, and there is one answer that keeps the right ones:
-//! **floor an analog time to the tick at or before it, and publish an event at
-//! the unquantized analog time.** Flooring is monotone, so a non-decreasing
-//! sequence of accepted analog times gives [`DigitalHost::advance_to`] a
-//! non-decreasing sequence of ticks; it never runs the digital world past an
-//! instant the integrator has accepted, which rounding to nearest would;
-//! and two analog times inside one tick collapse rather than reorder, which is
-//! what a declared precision *means*. Publishing at the analog time rather than
-//! at the tick's seconds is what keeps D5 clause 2 — the step controller stops
-//! bit-exactly at an event time — untouched by the grid.
-//!
-//! **One hazard to check when that adapter is written.** The two sides resolve
-//! multiple drivers differently. A circuit real event node *sums* its drivers
-//! (`circuit::external_models`), while Verilog-AMS LRM 2.4 section 6.5.3 permits
-//! exactly one driver of a `wreal` and the front end refuses a second. A
-//! published `wreal` must therefore be the only driver of the node it lands on,
-//! or the analog side sees a sum neither standard asked for, silently.
-//!
-//! The adapter is not written here because it would have no producer: nothing
-//! constructs a [`DigitalHost`] against a circuit yet, and a mechanism with no
-//! caller is a mechanism nobody can tell is wrong.
-//!
-//! [`DigitalHost::force_real`]: host::DigitalHost::force_real
-//! [`DigitalHost::advance_to`]: host::DigitalHost::advance_to
+//! Mixed modules are executed through [`MixedSignalHost`], whose trial
+//! transaction aligns the digital event slot with each analog Newton solve.
+//! The boundary is explicit: scalar ADC bridges publish accepted analog
+//! samples with hysteresis, and scalar DAC bridges stamp Thevenin equivalents.
+//! Vector and bidirectional coercions remain fail-closed until their resolution
+//! semantics are represented directly.
 
 pub(crate) mod host;
+mod mixed;
 pub(crate) mod store;
 #[cfg(test)]
 mod tests;
@@ -104,6 +42,7 @@ use crate::xspice::event_scheduler::{SchedulerLimits, TimeResolution};
 
 use host::DigitalHost;
 pub use host::DigitalRunError;
+pub use mixed::{MixedSignalCheckpoint, MixedSignalError, MixedSignalHost};
 
 /// What one tick of the digital host's clock is, and why it is not read from
 /// the source.

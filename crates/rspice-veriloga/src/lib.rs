@@ -227,9 +227,12 @@ pub struct VerilogACompiler {
 /// the compiler-contract identity.
 #[derive(Debug, Clone, Default)]
 pub struct CompilerOptions {
-    /// Reserved for Verilog-AMS mixed-signal support. Gates no behavior today;
-    /// the analog subset is always accepted and digital constructs are always
-    /// rejected regardless of this flag.
+    /// Allow runtime compilation to emit the analog bytecode half of a mixed
+    /// module alongside its canonical digital plan.
+    ///
+    /// The default remains fail-closed. Enabling this is only sound for a host
+    /// that executes `RuntimeCompileReport::canonical_ir.digital` on the event
+    /// scheduler; the bytecode model alone does not execute digital behavior.
     pub enable_ams: bool,
     /// Directories searched by `` `include `` directives, in order. Consulted
     /// only by the file-system-backed entry points; the sealed in-memory paths
@@ -761,8 +764,12 @@ impl VerilogACompiler {
         let source_digest = canonical_ir::StableDigest::from_text(&preprocessed).as_hex();
         measurements.checkpoint(PipelinePhase::BytecodeGeneration)?;
         let phase_started = web_time::Instant::now();
-        let model = CodeGenerator::new()
-            .generate_analyzed_module_with_source_digest(&executable, source_digest)?;
+        let generator = CodeGenerator::new();
+        let model = if self.options.enable_ams {
+            generator.generate_mixed_analog_half_with_source_digest(&executable, source_digest)?
+        } else {
+            generator.generate_analyzed_module_with_source_digest(&executable, source_digest)?
+        };
         measurements.record(PipelinePhase::BytecodeGeneration, phase_started.elapsed())?;
         let canonical_ir = self.build_canonical_ir_artifact_from_module(
             source_package,

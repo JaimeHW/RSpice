@@ -56,7 +56,7 @@
 //! classification is a semantic rule of the standard rather than a scheduling
 //! policy, and a second copy of it here could disagree with the interpreter's.
 
-use std::fmt;
+use std::{fmt, sync::Arc};
 
 use rspice_veriloga::canonical_ir::digital::{
     CanonicalDigitalPlan, DigitalProcessKind, DigitalSchedulingRegion, DigitalSensitivityTerm,
@@ -95,9 +95,10 @@ pub enum DigitalRunError {
     },
     /// The module has an analog block as well as digital processes.
     ///
-    /// Interleaving the two domains is a separate piece of work. Running the
-    /// digital half alone would answer the question asked, plausibly and
-    /// wrongly, so this refuses instead.
+    /// The vector-only [`super::run_digital_verilog`] call has no analog node
+    /// mapping or Newton callbacks. Mixed modules execute through
+    /// [`super::MixedSignalHost`]; this variant prevents accidentally using
+    /// the digital-only convenience API for one.
     MixedSignalModule {
         /// The module that was compiled.
         module: String,
@@ -212,8 +213,8 @@ impl fmt::Display for DigitalRunError {
             Self::MixedSignalModule { module, equations } => write!(
                 f,
                 "module `{module}` has {equations} analog equation(s) as well as digital \
-                 processes; mixed-signal interleave is not implemented and running the \
-                 digital half alone would report a wrong answer as a right one"
+                 processes; run it through MixedSignalHost so its equations are stamped during \
+                 transient Newton evaluation"
             ),
             Self::TimescaleDirective { line } => write!(
                 f,
@@ -356,8 +357,9 @@ struct ProcessSlot {
 }
 
 /// A compiled digital plan, running.
-pub(crate) struct DigitalHost<'plan> {
-    plan: &'plan CanonicalDigitalPlan,
+#[derive(Clone)]
+pub(crate) struct DigitalHost {
+    plan: Arc<CanonicalDigitalPlan>,
     store: DigitalSignalStore,
     scheduler: EventScheduler,
     slots: Vec<ProcessSlot>,
@@ -371,13 +373,13 @@ pub(crate) struct DigitalHost<'plan> {
     targets: Vec<EventTarget>,
 }
 
-impl<'plan> DigitalHost<'plan> {
+impl DigitalHost {
     /// Build a host for one plan at one time resolution.
     ///
     /// Nothing runs yet: [`Self::start`] is what places every process's first
     /// activation at tick zero.
     pub(crate) fn new(
-        plan: &'plan CanonicalDigitalPlan,
+        plan: &CanonicalDigitalPlan,
         resolution: TimeResolution,
         limits: SchedulerLimits,
     ) -> Self {
@@ -393,7 +395,7 @@ impl<'plan> DigitalHost<'plan> {
             })
             .collect();
         Self {
-            plan,
+            plan: Arc::new(plan.clone()),
             store: DigitalSignalStore::new(plan),
             scheduler: EventScheduler::new(resolution, limits),
             slots: vec![
@@ -440,6 +442,12 @@ impl<'plan> DigitalHost<'plan> {
         self.store.is_real(signal)
     }
 
+    /// Earliest scheduled activation, used by the analog transient driver as
+    /// an exact breakpoint.
+    pub(crate) fn next_tick(&self) -> Option<u64> {
+        self.scheduler.next_tick()
+    }
+
     /// Queue every process's first activation at tick zero and settle it.
     ///
     /// IEEE 1364-2005 section 9.9 starts every `always` and `initial` process
@@ -462,7 +470,26 @@ impl<'plan> DigitalHost<'plan> {
         value: FourStateValue,
         tick: u64,
     ) -> Result<(), DigitalRunError> {
-        self.store.force(signal, value, self.plan)?;
+        self.force_many(&[(signal, value)], tick)
+    }
+
+    /// Publish a set of co-timed external drives as one event boundary.
+    ///
+    /// All values enter the store before sensitivity is dispatched. This is
+    /// essential for a bank of A/D bridges sampled from one converged Newton
+    /// solution: no process may observe a half-updated bridge bank.
+    pub(crate) fn force_many(
+        &mut self,
+        drives: &[(DigitalSignalId, FourStateValue)],
+        tick: u64,
+    ) -> Result<(), DigitalRunError> {
+        let rollback = self.clone();
+        for (signal, value) in drives {
+            if let Err(error) = self.store.force(*signal, value.clone(), &self.plan) {
+                *self = rollback;
+                return Err(error.into());
+            }
+        }
         self.dispatch(tick)?;
         self.settle(tick)
     }
@@ -542,12 +569,12 @@ impl<'plan> DigitalHost<'plan> {
             let due = self.store.take_deferred_in(region);
             if !due.is_empty() {
                 for update in &due {
-                    apply_deferred_update(self.plan, &mut self.store, update).map_err(|error| {
-                        DigitalRunError::Evaluation {
+                    apply_deferred_update(&self.plan, &mut self.store, update).map_err(
+                        |error| DigitalRunError::Evaluation {
                             process: format!("a {} update", region.name()),
                             error,
-                        }
-                    })?;
+                        },
+                    )?;
                 }
                 self.dispatch(tick)?;
                 promoted = true;
@@ -563,13 +590,13 @@ impl<'plan> DigitalHost<'plan> {
     /// Run one process from wherever it stopped, and record where it stops
     /// next.
     fn run_process(&mut self, index: usize, tick: u64) -> Result<(), DigitalRunError> {
-        let Some(process) = self.plan.processes.get(index) else {
+        let Some(process) = self.plan.processes.get(index).cloned() else {
             return Ok(());
         };
         let resume = self.slots[index].resume.take();
         let outcome = match &resume {
-            Some(state) => resume_process(self.plan, process, state, &mut self.store),
-            None => start_process(self.plan, process, &mut self.store),
+            Some(state) => resume_process(&self.plan, &process, state, &mut self.store),
+            None => start_process(&self.plan, &process, &mut self.store),
         }
         .map_err(|error| DigitalRunError::Evaluation {
             process: self.describe(index),
