@@ -48,39 +48,6 @@ impl NodeResolver {
             .get(&node.to_ascii_uppercase())
             .copied()
     }
-
-    pub(super) fn parse_voltage_probe(&self, spec: &str) -> Option<(usize, usize)> {
-        let (pos_spec, neg_spec) = parse_voltage_probe_spec(spec)?;
-        let pos = self.resolve_node(&pos_spec)?;
-        let neg = match neg_spec {
-            Some(ref_name) => self.resolve_node(&ref_name)?,
-            None => 0,
-        };
-        Some((pos, neg))
-    }
-}
-
-pub(super) fn parse_voltage_probe_spec(spec: &str) -> Option<(String, Option<String>)> {
-    let trimmed = spec.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    if trimmed.len() >= 3
-        && trimmed.get(..2).map(|s| s.eq_ignore_ascii_case("V(")) == Some(true)
-        && trimmed.ends_with(')')
-    {
-        let inner = &trimmed[2..trimmed.len() - 1];
-        let mut parts = inner.split(',').map(|s| s.trim()).filter(|s| !s.is_empty());
-        let pos = parts.next()?.to_string();
-        let neg = parts.next().map(|s| s.to_string());
-        if parts.next().is_some() {
-            return None;
-        }
-        return Some((pos, neg));
-    }
-
-    Some((trimmed.to_string(), None))
 }
 
 pub(super) fn validate_step_sweep(sweep: &rspice_core::netlist::StepSweep) -> Result<(), CliError> {

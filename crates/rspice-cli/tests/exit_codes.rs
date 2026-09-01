@@ -312,6 +312,7 @@ fn fourier_ground_probe_exits_zero_without_panicking() {
         "* Fourier ground probe should be a zero-valued waveform\n\
          V1 in 0 SIN(0 1 1k)\n\
          R1 in 0 1k\n\
+         .tran 10u 2m\n\
          .four 1k V(0)\n\
          .end\n",
     )

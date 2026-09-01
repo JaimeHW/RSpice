@@ -947,6 +947,9 @@ fn run_corner_job(
         measurements: std::cell::RefCell::new(Vec::new()),
         evaluated_meas: std::cell::RefCell::new(std::collections::HashSet::new()),
         outputs: std::cell::RefCell::new(Vec::new()),
+        last_transient: std::cell::RefCell::new(None),
+        next_transient_ordinal: std::cell::Cell::new(0),
+        next_fourier_ordinal: std::cell::Cell::new(0),
     };
 
     let mut passed = true;
@@ -957,7 +960,16 @@ fn run_corner_job(
             error.get_or_insert(e.to_string());
         }
     } else {
-        for analysis in &corner_netlist.analyses {
+        for analysis in corner_netlist
+            .analyses
+            .iter()
+            .filter(|analysis| {
+                !matches!(analysis, rspice_core::netlist::AnalysisCommand::Four { .. })
+            })
+            .chain(corner_netlist.analyses.iter().filter(|analysis| {
+                matches!(analysis, rspice_core::netlist::AnalysisCommand::Four { .. })
+            }))
+        {
             if crate::abort::reason().is_some() {
                 passed = false;
                 error.get_or_insert_with(|| "cancelled".to_string());
@@ -1137,6 +1149,9 @@ fn run_corner_serial_source(
         measurements: std::cell::RefCell::new(Vec::new()),
         evaluated_meas: std::cell::RefCell::new(std::collections::HashSet::new()),
         outputs: std::cell::RefCell::new(Vec::new()),
+        last_transient: std::cell::RefCell::new(None),
+        next_transient_ordinal: std::cell::Cell::new(0),
+        next_fourier_ordinal: std::cell::Cell::new(0),
     };
 
     let mut passed = true;
@@ -1149,7 +1164,16 @@ fn run_corner_serial_source(
             passed = false;
         }
     } else {
-        for analysis in &corner_netlist.analyses {
+        for analysis in corner_netlist
+            .analyses
+            .iter()
+            .filter(|analysis| {
+                !matches!(analysis, rspice_core::netlist::AnalysisCommand::Four { .. })
+            })
+            .chain(corner_netlist.analyses.iter().filter(|analysis| {
+                matches!(analysis, rspice_core::netlist::AnalysisCommand::Four { .. })
+            }))
+        {
             ensure_not_cancelled(ctx)?;
             if let Err(e) = corner_ctx.run_analysis(analysis) {
                 ensure_not_cancelled(ctx)?;

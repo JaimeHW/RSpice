@@ -6,14 +6,13 @@
 //! `--checkpoint`/`--resume` segmented path, and `--tran-stop`.
 
 use super::RunContext;
-use super::shared::{NodeResolver, map_hdf5_output_error};
+use super::shared::map_hdf5_output_error;
 use crate::cli::{CliError, OutputFormat};
 use crate::commands::run_signals::{
     SignalKind, checked_dc_operating_point_signals, dc_export_signals,
     dc_operating_point_export_signals, transient_export_signals,
 };
 use crate::hdf5::{Hdf5SimulationData, Hdf5WaveformSection, write_hdf5};
-use std::borrow::Cow;
 use std::path::{Component, Path, PathBuf};
 
 fn map_output_projection_error(
@@ -470,7 +469,7 @@ pub(super) fn run_transient(
     tstart: f64,
     max_step: Option<f64>,
     uic: bool,
-) -> Result<(), CliError> {
+) -> Result<rspice_core::engine::TransientResult, CliError> {
     // --tran-stop overrides the deck's stop time so checkpoint segments can
     // share byte-identical source (the checkpoint fingerprint covers it).
     let tstop = ctx.args.tran_stop.unwrap_or(tstop);
@@ -750,7 +749,7 @@ pub(super) fn run_transient(
                     println!("  Results exported to: {}", output_path.display());
                 }
             }
-            Ok(())
+            Ok(result)
         }
         Err(e) => Err(CliError::simulation_error_in(e.to_string(), "Transient")),
     }
@@ -1045,8 +1044,8 @@ fn map_restart_simulation_error(
 
 pub(super) fn run_fourier(
     ctx: &RunContext<'_>,
+    four_index: usize,
     fundamental: f64,
-    outputs: &[String],
     num_harmonics: usize,
 ) -> Result<(), CliError> {
     use rspice_core::analysis::{FourierAnalysis, FourierConfig};
@@ -1069,63 +1068,53 @@ pub(super) fn run_fourier(
             "Running Fourier analysis: fundamental = {} Hz, {} harmonics",
             fundamental, num_harmonics
         );
-        if ctx.verbose {
-            println!("  Output nodes: {:?}", outputs);
-        }
     }
 
-    let period = 1.0 / fundamental;
-    let analysis_periods = num_harmonics.checked_add(2).ok_or_else(|| {
-        CliError::simulation_error_in("Fourier harmonic count is too large", "Fourier")
-    })?;
-    let analysis_time = period * analysis_periods as f64;
-    let harmonic_intervals = num_harmonics.checked_mul(8).ok_or_else(|| {
-        CliError::simulation_error_in("Fourier harmonic count is too large", "Fourier")
-    })?;
-    let sample_intervals = 100usize.max(harmonic_intervals);
-    let tstep = period / sample_intervals as f64;
-    if !analysis_time.is_finite() || analysis_time <= 0.0 || !tstep.is_finite() || tstep <= 0.0 {
-        return Err(CliError::simulation_error_in(
-            "Fourier transient schedule is not finite and positive",
+    let retained = ctx.last_transient.borrow();
+    let retained = retained.as_ref().ok_or_else(|| {
+        CliError::simulation_error_in(
+            format!(
+                ".FOUR request {} requires a completed authored .TRAN analysis; it will not invent an independent transient schedule",
+                four_index + 1
+            ),
             "Fourier",
-        ));
-    }
-
-    let tran_result = ctx
-        .engine
-        .run_tran(ctx.netlist, analysis_time, tstep)
-        .map_err(|e| CliError::simulation_error_in(e.to_string(), "Fourier (transient)"))?;
+        )
+    })?;
+    let columns = rspice_core::analysis::evaluate_tran_four_output_requests_with_abort(
+        ctx.netlist,
+        &retained.result,
+        four_index,
+        ctx.engine.config().resource_limits,
+        &crate::abort::ProcessAbort,
+    )
+    .map_err(|error| map_output_projection_error(ctx, error, "Fourier"))?;
 
     let config = FourierConfig::new(fundamental).with_harmonics(num_harmonics);
     let fourier = FourierAnalysis::new(config);
-    let resolver = NodeResolver::from_netlist(ctx.engine, ctx.netlist)?;
 
-    let mut analyzed: Vec<(String, rspice_core::analysis::FourierResult)> = Vec::new();
-    for output in outputs {
-        if let Some((node_idx, reference_idx)) = resolver.parse_voltage_probe(output) {
-            let result = if reference_idx == 0 {
-                let waveform = fourier_voltage_waveform(&tran_result, output, node_idx)?;
-                fourier.analyze(&tran_result.time, waveform.as_ref())
-            } else {
-                let pos_waveform = fourier_voltage_waveform(&tran_result, output, node_idx)?;
-                let neg_waveform = fourier_voltage_waveform(&tran_result, output, reference_idx)?;
-                let diff_waveform: Vec<f64> = pos_waveform
-                    .iter()
-                    .zip(neg_waveform.iter())
-                    .map(|(vp, vn)| vp - vn)
-                    .collect();
-                fourier.analyze(&tran_result.time, &diff_waveform)
-            }
+    let mut analyzed: Vec<(String, &'static str, rspice_core::analysis::FourierResult)> =
+        Vec::new();
+    analyzed
+        .try_reserve_exact(columns.len())
+        .map_err(|_| CliError::simulation_error_in("cannot allocate Fourier results", "Fourier"))?;
+    for (output, physical_type, waveform) in columns {
+        let result = fourier
+            .analyze_with_abort(
+                &retained.result.time,
+                &waveform,
+                &crate::abort::ProcessAbort,
+            )
             .map_err(|error| {
-                CliError::simulation_error_in(
-                    format!("Fourier output `{output}` could not be analyzed: {error}"),
-                    "Fourier",
-                )
+                if matches!(error, rspice_core::analysis::FourierError::Aborted) {
+                    super::cancellation_cli_error(ctx.args.timeout)
+                } else {
+                    CliError::simulation_error_in(
+                        format!("Fourier output `{output}` could not be analyzed: {error}"),
+                        "Fourier",
+                    )
+                }
             })?;
-            analyzed.push((output.clone(), result));
-        } else if !ctx.quiet {
-            println!("Warning: Could not find node for output '{}'", output);
-        }
+        analyzed.push((output, physical_type, result));
     }
 
     if !ctx.quiet {
@@ -1133,8 +1122,8 @@ pub(super) fn run_fourier(
         println!("│                    FOURIER ANALYSIS RESULTS                    │");
         println!("├────────────────────────────────────────────────────────────────┤");
 
-        for (output, result) in &analyzed {
-            println!("│ Output: {:54} │", output);
+        for (output, physical_type, result) in &analyzed {
+            println!("│ Output: {:43} ({physical_type:8}) │", output);
             println!("│ DC component = {:<47.6e} │", result.dc_component);
             println!("├────────────────────────────────────────────────────────────────┤");
             println!("│  Harmonic    Frequency (Hz)    Magnitude    Phase (deg)        │");
@@ -1160,10 +1149,13 @@ pub(super) fn run_fourier(
         }
     }
 
-    if let Some(ref output_path) = ctx.output_path_for("four") {
+    let fourier_analysis_id = format!("four-{:03}", four_index + 1);
+    if let Some(ref output_path) = ctx.output_path_for(&fourier_analysis_id) {
         write_fourier_output(
             output_path,
             ctx.format,
+            &retained.analysis_id,
+            &fourier_analysis_id,
             fundamental,
             num_harmonics,
             &analyzed,
@@ -1176,36 +1168,15 @@ pub(super) fn run_fourier(
     Ok(())
 }
 
-fn fourier_voltage_waveform<'a>(
-    result: &'a rspice_core::engine::TransientResult,
-    output: &str,
-    node: usize,
-) -> Result<Cow<'a, [f64]>, CliError> {
-    if node == 0 {
-        return Ok(Cow::Owned(vec![0.0; result.time.len()]));
-    }
-
-    result
-        .try_voltage_waveform(node)
-        .map(Cow::Borrowed)
-        .ok_or_else(|| {
-            CliError::simulation_error_in(
-                format!(
-                    "Fourier output '{output}' is not available: node {node} is outside transient result node range 0..={}",
-                    result.num_nodes
-                ),
-                "Fourier",
-            )
-        })
-}
-
 /// Export Fourier results with full harmonic data (JSON or CSV).
 fn write_fourier_output(
     path: &Path,
     format: OutputFormat,
+    parent_analysis_id: &str,
+    fourier_analysis_id: &str,
     fundamental: f64,
     num_harmonics: usize,
-    analyzed: &[(String, rspice_core::analysis::FourierResult)],
+    analyzed: &[(String, &'static str, rspice_core::analysis::FourierResult)],
 ) -> Result<(), CliError> {
     use std::io::Write;
 
@@ -1221,11 +1192,11 @@ fn write_fourier_output(
             };
             writeln!(
                 file,
-                "output{0}harmonic{0}frequency_hz{0}magnitude{0}phase_deg{0}dc_component{0}thd_percent",
+                "parent_analysis_id{0}analysis_id{0}physical_type{0}output{0}harmonic{0}frequency_hz{0}magnitude{0}phase_deg{0}dc_component{0}thd_percent",
                 sep
             )
             .map_err(io_err)?;
-            for (output, result) in analyzed {
+            for (output, physical_type, result) in analyzed {
                 let thd_percent = result
                     .thd
                     .map(|value| format!("{value:.6}"))
@@ -1233,15 +1204,18 @@ fn write_fourier_output(
                 for harmonic in &result.harmonics {
                     writeln!(
                         file,
-                        "{1}{0}{2}{0}{3:.17e}{0}{4:.17e}{0}{5:.6}{0}{6:.17e}{0}{7}",
+                        "{1}{0}{2}{0}{3}{0}{4}{0}{5}{0}{6:.17e}{0}{7:.17e}{0}{8:.6}{0}{9:.17e}{0}{10}",
                         sep,
+                        parent_analysis_id,
+                        fourier_analysis_id,
+                        physical_type,
                         output,
                         harmonic.harmonic_number,
                         harmonic.frequency,
                         harmonic.magnitude,
                         harmonic.phase,
                         result.dc_component,
-                        thd_percent,
+                        thd_percent
                     )
                     .map_err(io_err)?;
                 }
@@ -1252,10 +1226,11 @@ fn write_fourier_output(
             // the structured default for every other requested format.
             let results: Vec<serde_json::Value> = analyzed
                 .iter()
-                .map(|(output, result)| {
+                .map(|(output, physical_type, result)| {
                     let thd_ratio = result.thd.map(|value| value / 100.0);
                     serde_json::json!({
                         "output": output,
+                        "physical_type": physical_type,
                         "dc_component": result.dc_component,
                         // Core's thd field is already a percentage.
                         "thd": thd_ratio,
@@ -1278,6 +1253,8 @@ fn write_fourier_output(
 
             let json = serde_json::json!({
                 "analysis": "fourier",
+                "analysis_id": fourier_analysis_id,
+                "parent_analysis_id": parent_analysis_id,
                 "fundamental_hz": fundamental,
                 "num_harmonics": num_harmonics,
                 "results": results,

@@ -2597,7 +2597,8 @@ fn map_fourier_measurement_error(error: FourierError) -> MeasurementError {
         | FourierError::InsufficientSampleRate { .. } => {
             MeasurementError::InsufficientData(message)
         }
-        FourierError::HarmonicCapacity { .. }
+        FourierError::Aborted
+        | FourierError::HarmonicCapacity { .. }
         | FourierError::WindowCapacity { .. }
         | FourierError::InvalidFundamentalFrequency { .. }
         | FourierError::NoHarmonics

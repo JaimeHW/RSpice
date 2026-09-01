@@ -1,0 +1,7 @@
+* Fourier must consume this authored transient and retain voltage/current probes
+V1 in 0 SIN(0 1 1k)
+R1 in mid 1k
+R2 mid 0 1k
+.FOUR 1k V(in,mid) I(V1)
+.TRAN 2u 4m
+.END

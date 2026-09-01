@@ -19,6 +19,7 @@
 //! the waveform.
 
 use crate::Value;
+use crate::abort_signal::{AbortSignal, NoAbort};
 use std::f64::consts::PI;
 
 //=============================================================================
@@ -72,6 +73,10 @@ impl FourierConfig {
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum FourierError {
+    /// Cooperative cancellation was requested while qualifying or
+    /// integrating the retained waveform.
+    #[error("Fourier analysis aborted")]
+    Aborted,
     /// The requested fundamental cannot define a physical period.
     #[error("fundamental frequency must be positive and finite, got {frequency}")]
     InvalidFundamentalFrequency { frequency: Value },
@@ -185,8 +190,21 @@ impl FourierAnalysis {
     /// A qualified Fourier result, or a typed error when the configuration,
     /// waveform evidence, or computed coefficients are invalid.
     pub fn analyze(&self, time: &[Value], values: &[Value]) -> Result<FourierResult, FourierError> {
+        self.analyze_with_abort(time, values, &NoAbort)
+    }
+
+    /// Perform Fourier analysis with cooperative cancellation.
+    pub fn analyze_with_abort(
+        &self,
+        time: &[Value],
+        values: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Result<FourierResult, FourierError> {
+        if abort.is_aborted() {
+            return Err(FourierError::Aborted);
+        }
         self.validate_configuration()?;
-        validate_waveform(time, values)?;
+        validate_waveform(time, values, abort)?;
 
         // Find analysis window (last periods of waveform)
         let window_duration = self.config.window_duration();
@@ -223,7 +241,7 @@ impl FourierAnalysis {
         // Retain an exact-period window. When its leading edge lies between
         // samples, interpolate the boundary instead of silently shortening
         // the integration interval and biasing every coefficient.
-        let (window_time, window_values) = exact_window(time, values, t_start)?;
+        let (window_time, window_values) = exact_window(time, values, t_start, abort)?;
         if window_time.len() < 3 {
             return Err(FourierError::InsufficientWindowSamples {
                 samples: window_time.len(),
@@ -270,6 +288,9 @@ impl FourierAnalysis {
         })?;
 
         for n in 0..=self.config.num_harmonics {
+            if abort.is_aborted() {
+                return Err(FourierError::Aborted);
+            }
             let freq = n as f64 * self.config.fundamental_freq;
             if !freq.is_finite() {
                 return Err(FourierError::NonFiniteHarmonicFrequency {
@@ -277,7 +298,8 @@ impl FourierAnalysis {
                     frequency: freq,
                 });
             }
-            let (mag, phase) = self.compute_harmonic(&window_time, &window_values, freq, n)?;
+            let (mag, phase) =
+                self.compute_harmonic(&window_time, &window_values, freq, n, abort)?;
 
             harmonics.push(HarmonicComponent {
                 harmonic_number: n,
@@ -291,10 +313,13 @@ impl FourierAnalysis {
         let dc = harmonics[0].magnitude;
         let fundamental = harmonics.get(1).map(|h| h.magnitude).unwrap_or(0.0);
 
-        let harmonic_norm: Value = harmonics
-            .iter()
-            .skip(2) // Skip DC and fundamental
-            .fold(0.0, |norm, harmonic| norm.hypot(harmonic.magnitude));
+        let mut harmonic_norm: Value = 0.0;
+        for (index, harmonic) in harmonics.iter().enumerate().skip(2) {
+            if index.is_multiple_of(256) && abort.is_aborted() {
+                return Err(FourierError::Aborted);
+            }
+            harmonic_norm = harmonic_norm.hypot(harmonic.magnitude);
+        }
 
         let thd = if fundamental == 0.0 {
             None
@@ -342,6 +367,7 @@ impl FourierAnalysis {
         values: &[Value],
         freq: Value,
         harmonic: usize,
+        abort: &dyn AbortSignal,
     ) -> Result<(Value, Value), FourierError> {
         let t_start = time[0];
         let t_end = time[time.len() - 1];
@@ -358,6 +384,9 @@ impl FourierAnalysis {
         if harmonic == 0 {
             let mut integral = 0.0;
             for index in 1..time.len() {
+                if index.is_multiple_of(256) && abort.is_aborted() {
+                    return Err(FourierError::Aborted);
+                }
                 let dt = time[index] - time[index - 1];
                 let normalized_dt = dt / duration;
                 let average = 0.5 * values[index - 1] + 0.5 * values[index];
@@ -383,6 +412,9 @@ impl FourierAnalysis {
         let mut cosine_integral = 0.0;
         let mut sine_integral = 0.0;
         for index in 1..time.len() {
+            if index.is_multiple_of(256) && abort.is_aborted() {
+                return Err(FourierError::Aborted);
+            }
             let dt = time[index] - time[index - 1];
             let normalized_dt = dt / duration;
             let phase0 = omega * (time[index - 1] - t_start);
@@ -415,7 +447,11 @@ impl FourierAnalysis {
     }
 }
 
-fn validate_waveform(time: &[Value], values: &[Value]) -> Result<(), FourierError> {
+fn validate_waveform(
+    time: &[Value],
+    values: &[Value],
+    abort: &dyn AbortSignal,
+) -> Result<(), FourierError> {
     if time.len() != values.len() {
         return Err(FourierError::LengthMismatch {
             time_points: time.len(),
@@ -431,6 +467,9 @@ fn validate_waveform(time: &[Value], values: &[Value]) -> Result<(), FourierErro
         });
     }
     for (index, (&sample_time, &sample_value)) in time.iter().zip(values).enumerate() {
+        if index.is_multiple_of(256) && abort.is_aborted() {
+            return Err(FourierError::Aborted);
+        }
         if !sample_time.is_finite() {
             return Err(FourierError::NonFiniteTime {
                 index,
@@ -472,7 +511,11 @@ fn exact_window(
     time: &[Value],
     values: &[Value],
     t_start: Value,
+    abort: &dyn AbortSignal,
 ) -> Result<(Vec<Value>, Vec<Value>), FourierError> {
+    if abort.is_aborted() {
+        return Err(FourierError::Aborted);
+    }
     let first_retained = time.partition_point(|&sample| sample < t_start);
     let interpolate_boundary = first_retained < time.len() && time[first_retained] != t_start;
     let retained_samples = time.len().saturating_sub(first_retained);
@@ -508,8 +551,17 @@ fn exact_window(
         window_time.push(t_start);
         window_values.push(interpolated);
     }
-    window_time.extend_from_slice(&time[first_retained..]);
-    window_values.extend_from_slice(&values[first_retained..]);
+    for (index, (&sample_time, &sample_value)) in time[first_retained..]
+        .iter()
+        .zip(&values[first_retained..])
+        .enumerate()
+    {
+        if index.is_multiple_of(256) && abort.is_aborted() {
+            return Err(FourierError::Aborted);
+        }
+        window_time.push(sample_time);
+        window_values.push(sample_value);
+    }
 
     Ok((window_time, window_values))
 }

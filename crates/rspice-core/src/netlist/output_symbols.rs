@@ -422,30 +422,46 @@ impl OutputRequest {
         origin: NetlistSourceLocation,
         authored_source: &str,
     ) -> Self {
-        let dependencies = outputs
+        let operands = outputs
             .iter()
-            .flat_map(|output| extract_output_dependencies(output))
+            .map(|output| {
+                let trimmed = output.trim();
+                let kind = match trimmed
+                    .strip_prefix('{')
+                    .and_then(|body| body.strip_suffix('}'))
+                {
+                    Some(body) => OutputOperandKind::Expression {
+                        body: body.to_string(),
+                    },
+                    None => match super::parse_save_probe(trimmed) {
+                        Some(
+                            signal @ (super::SaveSignal::Voltage(_)
+                            | super::SaveSignal::VoltageDiff(_, _)
+                            | super::SaveSignal::Current(_)
+                            | super::SaveSignal::DeviceParam { .. }),
+                        ) => OutputOperandKind::Probe(signal),
+                        _ => OutputOperandKind::Expression {
+                            body: trimmed.to_string(),
+                        },
+                    },
+                };
+                OutputOperand {
+                    authored: output.clone(),
+                    kind,
+                }
+            })
             .collect();
-        let dependencies = retain_authored_dependency_spelling(
-            dependencies,
+        let mut request = Self::from_ordered_operands(
+            OutputDirectiveKind::Four,
+            origin,
+            Some(OutputAnalysisKind::Tran),
+            operands,
+        );
+        request.dependencies = retain_authored_dependency_spelling(
+            request.dependencies,
             extract_output_dependencies(authored_source),
         );
-        Self {
-            directive: OutputDirectiveKind::Four,
-            origin,
-            analysis: None,
-            name: None,
-            print_delimiter: None,
-            print_precision: None,
-            print_width: None,
-            operands: Vec::new(),
-            operand_kinds: Vec::new(),
-            expressions: outputs
-                .iter()
-                .flat_map(|output| extract_output_expressions(output))
-                .collect(),
-            dependencies,
-        }
+        request
     }
 
     /// Build the semantic request that keeps a typed `.FFT` operand alive

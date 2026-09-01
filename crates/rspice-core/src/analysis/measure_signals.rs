@@ -1498,6 +1498,80 @@ pub fn evaluate_tran_output_requests_with_abort(
         .map_err(frontend_output_error)
 }
 
+/// Resolve and evaluate every operand on one source-authored `.FOUR` card.
+///
+/// Fourier post-processing deliberately reuses the ordered transient output
+/// resolver. Differential voltages, branch/device currents, hierarchy
+/// aliases, expressions, allocation limits, and cancellation therefore have
+/// exactly the same semantics as other transient output requests.
+pub fn evaluate_tran_four_output_requests_with_abort(
+    netlist: &Netlist,
+    result: &TransientResult,
+    four_index: usize,
+    limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<(String, &'static str, Vec<Value>)>, SimulationError> {
+    let request = netlist
+        .output_requests
+        .iter()
+        .filter(|request| request.directive == OutputDirectiveKind::Four)
+        .nth(four_index)
+        .ok_or_else(|| {
+            SimulationError::Netlist(format!(
+                ".FOUR request {} has no typed output request",
+                four_index + 1
+            ))
+        })?;
+    let requests = [request];
+    let projection = preflight_real_output_requests(
+        &requests,
+        OutputAnalysisKind::Tran,
+        result.time.len(),
+        Some((&result.node_names, result.voltages.len())),
+        netlist,
+        limits,
+        abort,
+    )
+    .map_err(frontend_output_error)?;
+    if projection.column_count == 0 {
+        return Err(SimulationError::Netlist(format!(
+            ".FOUR request {} has no output operands",
+            four_index + 1
+        )));
+    }
+    let alias_projection = InterfaceNodeAliasProjection::new_with_abort(
+        netlist,
+        OutputAnalysisKind::Tran,
+        result.time.len(),
+        abort,
+    )
+    .map_err(|error| match error {
+        InterfaceNodeAliasProjectionError::Aborted => SimulationError::Aborted,
+        InterfaceNodeAliasProjectionError::Detail(detail) => SimulationError::Netlist(format!(
+            ".FOUR request {} alias resolution failed: {detail}",
+            four_index + 1
+        )),
+    })?;
+    let mut signals = transient_signal_map(result);
+    alias_projection.augment(&mut signals).map_err(|detail| {
+        SimulationError::Netlist(format!(
+            ".FOUR request {} alias resolution failed: {detail}",
+            four_index + 1
+        ))
+    })?;
+    evaluate_real_output_requests(
+        &requests,
+        OutputAnalysisKind::Tran,
+        &result.time,
+        &signals,
+        &netlist.params,
+        &projection,
+        abort,
+    )
+    .map(frontend_output_columns)
+    .map_err(frontend_output_error)
+}
+
 /// Resolve and evaluate one typed `.FFT` operand over the accepted transient
 /// history. The source request is used rather than reparsing the probe so
 /// hierarchy aliases, lead-current accessors, expressions, user functions,

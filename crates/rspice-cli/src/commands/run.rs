@@ -73,6 +73,19 @@ struct RunContext<'a> {
     /// Result files this run resolved for export, for the `--summary`
     /// manifest.
     outputs: std::cell::RefCell<Vec<std::path::PathBuf>>,
+    /// Most recently completed authored transient. Transient post-processors
+    /// consume this exact result instead of launching an independent run.
+    last_transient: std::cell::RefCell<Option<RetainedTransient>>,
+    /// Zero-based ordinal assigned to authored transient cards as they enter
+    /// the physical-analysis dispatcher.
+    next_transient_ordinal: std::cell::Cell<u32>,
+    /// Zero-based ordinal assigned to source-authored Fourier cards.
+    next_fourier_ordinal: std::cell::Cell<u32>,
+}
+
+struct RetainedTransient {
+    analysis_id: String,
+    result: rspice_core::engine::TransientResult,
 }
 
 impl<'a> RunContext<'a> {
@@ -113,6 +126,9 @@ impl<'a> RunContext<'a> {
             measurements: std::cell::RefCell::new(Vec::new()),
             evaluated_meas: std::cell::RefCell::new(std::collections::HashSet::new()),
             outputs: std::cell::RefCell::new(Vec::new()),
+            last_transient: std::cell::RefCell::new(None),
+            next_transient_ordinal: std::cell::Cell::new(0),
+            next_fourier_ordinal: std::cell::Cell::new(0),
         })
     }
 
@@ -239,7 +255,27 @@ impl<'a> RunContext<'a> {
                 start,
                 max_step,
                 uic,
-            } => basic::run_transient(self, *stop, *step, start.unwrap_or(0.0), *max_step, *uic)?,
+            } => {
+                let ordinal = self.next_transient_ordinal.get();
+                let next = ordinal
+                    .checked_add(1)
+                    .ok_or_else(|| CliError::InternalError {
+                        message: "authored transient ordinal overflowed u32".to_string(),
+                    })?;
+                self.next_transient_ordinal.set(next);
+                let result = basic::run_transient(
+                    self,
+                    *stop,
+                    *step,
+                    start.unwrap_or(0.0),
+                    *max_step,
+                    *uic,
+                )?;
+                self.last_transient.replace(Some(RetainedTransient {
+                    analysis_id: format!("tran-{:03}", u64::from(ordinal) + 1),
+                    result,
+                }));
+            }
             AnalysisCommand::Ac {
                 variation,
                 points,
@@ -365,9 +401,18 @@ impl<'a> RunContext<'a> {
             }
             AnalysisCommand::Four {
                 fundamental,
-                outputs,
+                outputs: _,
                 num_harmonics,
-            } => basic::run_fourier(self, *fundamental, outputs, *num_harmonics)?,
+            } => {
+                let ordinal = self.next_fourier_ordinal.get();
+                let next = ordinal
+                    .checked_add(1)
+                    .ok_or_else(|| CliError::InternalError {
+                        message: "authored Fourier ordinal overflowed u32".to_string(),
+                    })?;
+                self.next_fourier_ordinal.set(next);
+                basic::run_fourier(self, ordinal as usize, *fundamental, *num_harmonics)?;
+            }
             AnalysisCommand::Temp { temperatures } => basic::run_temp(self, temperatures)?,
             AnalysisCommand::MonteCarlo(mc_cmd) => {
                 advanced::run_monte_carlo_from_command(self, mc_cmd)?
@@ -1832,6 +1877,7 @@ fn run_concrete_deck(
     let mut ran_analysis = false;
     let mut simulation_error: Option<String> = None;
     let mut simulation_error_details: Option<crate::cli::ErrorDetails> = None;
+    let mut transient_postprocessors = Vec::new();
 
     for (idx, analysis) in netlist.analyses.iter().enumerate() {
         if verbose {
@@ -1844,6 +1890,13 @@ fn run_concrete_deck(
         }
 
         ran_analysis = true;
+        if matches!(analysis, AnalysisCommand::Four { .. }) {
+            // A Fourier card is source-order independent in SPICE decks. Run
+            // all physical analyses first so it consumes the final authored
+            // transient even when the card precedes `.TRAN`.
+            transient_postprocessors.push(analysis);
+            continue;
+        }
         if let Err(e) = ctx.run_analysis(analysis) {
             if is_run_setup_or_output_error(&e) {
                 return Err(e);
@@ -1851,6 +1904,19 @@ fn run_concrete_deck(
             simulation_error_details = Some(e.details());
             simulation_error = Some(simulation_error_message(&e));
             break;
+        }
+    }
+
+    if simulation_error.is_none() {
+        for analysis in transient_postprocessors {
+            if let Err(e) = ctx.run_analysis(analysis) {
+                if is_run_setup_or_output_error(&e) {
+                    return Err(e);
+                }
+                simulation_error_details = Some(e.details());
+                simulation_error = Some(simulation_error_message(&e));
+                break;
+            }
         }
     }
 

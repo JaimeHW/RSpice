@@ -124,9 +124,10 @@ pub use {
         evaluate_dc_measurements_with_parameter_contexts, evaluate_dc_output_requests_with_abort,
         evaluate_noise_continuous_measurements, evaluate_noise_equation_measurements,
         evaluate_noise_measurements, evaluate_tran_continuous_measurements,
-        evaluate_tran_equation_measurements, evaluate_tran_measurements,
-        evaluate_tran_output_requests_with_abort, evaluate_tran_remeasurements,
-        measurements_for_analysis, transient_signal_map, unevaluated_measurements,
+        evaluate_tran_equation_measurements, evaluate_tran_four_output_requests_with_abort,
+        evaluate_tran_measurements, evaluate_tran_output_requests_with_abort,
+        evaluate_tran_remeasurements, measurements_for_analysis, transient_signal_map,
+        unevaluated_measurements,
     },
 };
 
