@@ -206,6 +206,127 @@ impl PyMeasurement {
     }
 }
 
+/// One typed axis assignment in a materialized deck run.
+#[pyclass(name = "RunAxisAssignment", module = "rspice", from_py_object)]
+#[derive(Debug, Clone)]
+pub struct PyRunAxisAssignment {
+    #[pyo3(get)]
+    pub kind: String,
+    #[pyo3(get)]
+    pub name: String,
+    #[pyo3(get)]
+    pub value: Option<f64>,
+    #[pyo3(get)]
+    pub value_index: usize,
+}
+
+impl PyRunAxisAssignment {
+    pub(crate) fn from_core(assignment: &rspice_core::execution::AxisAssignment) -> Self {
+        let kind = match assignment.kind() {
+            rspice_core::execution::AxisKind::Alter => "alter",
+            rspice_core::execution::AxisKind::Data => "data",
+            rspice_core::execution::AxisKind::Step => "step",
+            rspice_core::execution::AxisKind::Temperature => "temperature",
+            _ => "unknown",
+        };
+        let value = match assignment.value() {
+            rspice_core::execution::RunAxisValue::Numeric(value) => Some(*value),
+            _ => None,
+        };
+        Self {
+            kind: kind.to_string(),
+            name: assignment.name().to_string(),
+            value,
+            value_index: assignment.value_index(),
+        }
+    }
+}
+
+#[pymethods]
+impl PyRunAxisAssignment {
+    #[staticmethod]
+    fn _unpickle(kind: String, name: String, value: Option<f64>, value_index: usize) -> Self {
+        Self {
+            kind,
+            name,
+            value,
+            value_index,
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(Bound<'py, PyAny>, (String, String, Option<f64>, usize))> {
+        Ok((
+            unpickler::<Self>(py)?,
+            (
+                self.kind.clone(),
+                self.name.clone(),
+                self.value,
+                self.value_index,
+            ),
+        ))
+    }
+}
+
+/// Stable, typed coordinate attached to an executed analysis record.
+#[pyclass(name = "RunCoordinate", module = "rspice", from_py_object)]
+#[derive(Debug, Clone)]
+pub struct PyRunCoordinate {
+    #[pyo3(get)]
+    pub id: String,
+    #[pyo3(get)]
+    pub ordinal: usize,
+    #[pyo3(get)]
+    pub assignments: Vec<PyRunAxisAssignment>,
+}
+
+impl PyRunCoordinate {
+    pub(crate) fn from_core(coordinate: &rspice_core::execution::RunCoordinate) -> Self {
+        Self {
+            id: coordinate.stable_tag(),
+            ordinal: coordinate.ordinal(),
+            assignments: coordinate
+                .assignments()
+                .iter()
+                .map(PyRunAxisAssignment::from_core)
+                .collect(),
+        }
+    }
+
+    pub(crate) fn temperature_celsius(&self) -> Option<f64> {
+        self.assignments
+            .iter()
+            .find(|assignment| assignment.kind == "temperature")
+            .and_then(|assignment| assignment.value)
+    }
+}
+
+#[pymethods]
+impl PyRunCoordinate {
+    #[staticmethod]
+    fn _unpickle(id: String, ordinal: usize, assignments: Vec<PyRunAxisAssignment>) -> Self {
+        Self {
+            id,
+            ordinal,
+            assignments,
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(Bound<'py, PyAny>, (String, usize, Vec<PyRunAxisAssignment>))> {
+        Ok((
+            unpickler::<Self>(py)?,
+            (self.id.clone(), self.ordinal, self.assignments.clone()),
+        ))
+    }
+}
+
 /// Record of one analysis directive handled by `Engine.run`
 #[pyclass(name = "AnalysisRecord", module = "rspice", from_py_object)]
 #[derive(Debug, Clone)]
@@ -222,6 +343,12 @@ pub struct PyAnalysisRecord {
     /// Why the directive was skipped (when skipped)
     #[pyo3(get)]
     pub reason: Option<String>,
+    /// Stable authored-analysis identity (`ac-001`, `ac-002`, ...).
+    #[pyo3(get)]
+    pub analysis_id: Option<String>,
+    /// Materialized run coordinate, when the deck has a shared run axis.
+    #[pyo3(get)]
+    pub coordinate: Option<PyRunCoordinate>,
 }
 
 impl PyAnalysisRecord {
@@ -231,6 +358,8 @@ impl PyAnalysisRecord {
             detail,
             skipped: false,
             reason: None,
+            analysis_id: None,
+            coordinate: None,
         }
     }
 
@@ -240,7 +369,18 @@ impl PyAnalysisRecord {
             detail,
             skipped: true,
             reason: Some(reason.to_string()),
+            analysis_id: None,
+            coordinate: None,
         }
+    }
+
+    pub(crate) fn set_execution_context(
+        &mut self,
+        analysis_id: Option<String>,
+        coordinate: Option<PyRunCoordinate>,
+    ) {
+        self.analysis_id = analysis_id;
+        self.coordinate = coordinate;
     }
 }
 
@@ -260,12 +400,22 @@ impl PyAnalysisRecord {
 
     /// Rebuild from pickled state. Not part of the public API.
     #[staticmethod]
-    fn _unpickle(kind: String, detail: String, skipped: bool, reason: Option<String>) -> Self {
+    #[pyo3(signature = (kind, detail, skipped, reason, execution=None))]
+    fn _unpickle(
+        kind: String,
+        detail: String,
+        skipped: bool,
+        reason: Option<String>,
+        execution: Option<(Option<String>, Option<PyRunCoordinate>)>,
+    ) -> Self {
+        let (analysis_id, coordinate) = execution.unwrap_or((None, None));
         Self {
             kind,
             detail,
             skipped,
             reason,
+            analysis_id,
+            coordinate,
         }
     }
 
@@ -273,7 +423,16 @@ impl PyAnalysisRecord {
     fn __reduce__<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<(Bound<'py, PyAny>, (String, String, bool, Option<String>))> {
+    ) -> PyResult<(
+        Bound<'py, PyAny>,
+        (
+            String,
+            String,
+            bool,
+            Option<String>,
+            (Option<String>, Option<PyRunCoordinate>),
+        ),
+    )> {
         Ok((
             unpickler::<Self>(py)?,
             (
@@ -281,6 +440,7 @@ impl PyAnalysisRecord {
                 self.detail.clone(),
                 self.skipped,
                 self.reason.clone(),
+                (self.analysis_id.clone(), self.coordinate.clone()),
             ),
         ))
     }

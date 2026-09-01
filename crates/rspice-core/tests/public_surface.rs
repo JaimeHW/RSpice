@@ -258,7 +258,17 @@ use rspice_core::analysis::harmonic_balance::{
 /// module-name accessor that would have made a fourth was *not* added: no
 /// frontend reads it, `Debug` prints the name, and the refusal that cites it
 /// carries it.
-const MAX_PUBLIC_ITEMS: usize = 4300;
+///
+/// 2026-09-01, +106 deliberate (4,300 -> 4,406): the target-neutral execution
+/// contract required by the CLI, Python, WASM, and engine adapter. The public
+/// statements are the typed deck-plan, run-coordinate, analysis-identity,
+/// signal-schema/missingness, and topology-fingerprint vocabulary plus their
+/// validated constructors and read-only accessors. These are intentionally
+/// cross-crate: keeping them `pub(crate)` would force each frontend to invent
+/// the same semantics again, which is the architectural defect this layer is
+/// designed to remove. Construction details and hash encoders remain private
+/// or `pub(crate)`.
+const MAX_PUBLIC_ITEMS: usize = 4406;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

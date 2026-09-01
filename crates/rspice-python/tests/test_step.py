@@ -1,5 +1,7 @@
 """Parametric stepping (`.STEP`)."""
 
+import pickle
+
 import numpy as np
 import pytest
 
@@ -40,7 +42,90 @@ R2 out 0 1k
         assert report.temperature is not None
         assert report.temperature.primary_source == "TEMP"
         np.testing.assert_array_equal(report.temperature.sweep_values, [25, 100])
-        assert report.analyses_run == ["temp"]
+        assert report.analyses_run == ["op", "op"]
+        assert [record.analysis_id for record in report.records] == [
+            "implicit-op-001",
+            "implicit-op-001",
+        ]
+        assert [record.coordinate.assignments[0].value for record in report.records] == [
+            25,
+            100,
+        ]
+
+    def test_temperature_wraps_transient_and_repeated_frequency_analyses(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* TEMP analysis axis
+V1 in 0 DC 1 AC 1
+R1 in out 1k TC=0.01
+R2 out 0 1k
+.temp 25 100
+.tran 1u 2u
+.ac lin 2 1k 2k
+.ac lin 3 10k 30k
+.end
+"""
+        )
+
+        report = engine.run(netlist)
+        assert report.op is None
+        assert report.temperature is None
+        assert len(report.all_tran) == 2
+        assert len(report.all_ac) == 4
+        assert [record.kind for record in report.records] == [
+            "tran",
+            "ac",
+            "ac",
+            "tran",
+            "ac",
+            "ac",
+        ]
+        assert [record.analysis_id for record in report.records] == [
+            "tran-001",
+            "ac-001",
+            "ac-002",
+            "tran-001",
+            "ac-001",
+            "ac-002",
+        ]
+        assert [record.coordinate.ordinal for record in report.records] == [0, 0, 0, 1, 1, 1]
+        assert [record.coordinate.assignments[0].value for record in report.records] == [
+            25,
+            25,
+            25,
+            100,
+            100,
+            100,
+        ]
+        frequency_lengths = [len(result.frequencies) for result in report.all_ac]
+        assert frequency_lengths[:2] == frequency_lengths[2:]
+        assert frequency_lengths[0] != frequency_lengths[1]
+
+        restored_record = pickle.loads(pickle.dumps(report.records[-1]))
+        assert restored_record.analysis_id == "ac-002"
+        assert restored_record.coordinate.id == report.records[-1].coordinate.id
+        assert restored_record.coordinate.assignments[0].value == 100
+
+        repeated = engine.run(netlist)
+        assert [
+            (record.analysis_id, record.coordinate.id) for record in repeated.records
+        ] == [
+            (record.analysis_id, record.coordinate.id) for record in report.records
+        ]
+
+    def test_temperature_and_step_fail_closed_until_cartesian_execution(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* TEMP plus STEP
+.param rval=1k
+V1 in 0 1
+R1 in 0 {rval}
+.temp 25 100
+.step param rval list 1k 2k
+.op
+.end
+"""
+        )
+        with pytest.raises(rspice.SimulationError, match="shared STEP-axis executor"):
+            engine.run(netlist)
 
     def test_step_varies_results(self, engine, param_divider):
         results = engine.run_step(param_divider, "rval", [1e3, 2e3, 5e3])

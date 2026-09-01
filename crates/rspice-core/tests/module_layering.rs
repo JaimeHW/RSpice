@@ -144,6 +144,10 @@ const LAYERS: &[(&str, u32)] = &[
     // Phase 3 moves `SimulationConfig` and friends out to their own low rank;
     // Phase 7 moves `engine::builder` out to `elab`.
     ("engine", 12),
+    // Target-neutral deck planning and execution orchestration. It consumes
+    // parsed netlists and, as the shared executor is completed, the engine
+    // facade; neither lower layer may depend on frontend run coordinates.
+    ("execution", 13),
 ];
 
 /// Layer-order violations present in the tree today, with exact counts.

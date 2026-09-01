@@ -98,4 +98,6 @@ pub(crate) use stability::{
 };
 pub(crate) use transient::PyTransientResult;
 pub(crate) use transient_compression::{PyCompressedTransientResult, PyTransientCheckpoint};
-pub(crate) use verification::{PyAnalysisRecord, PyMeasurement, PyRunReport};
+pub(crate) use verification::{
+    PyAnalysisRecord, PyMeasurement, PyRunAxisAssignment, PyRunCoordinate, PyRunReport,
+};

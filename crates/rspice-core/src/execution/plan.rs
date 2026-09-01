@@ -498,6 +498,59 @@ struct CoordinateResourceEstimate {
 }
 
 impl DeckPlan {
+    /// Build the shared execution identity for an authored `.TEMP` axis.
+    ///
+    /// This is deliberately a bounded bridge while the remaining meta-analysis
+    /// forms move onto `DeckPlan`: `.TEMP` is removed from the analysis list,
+    /// every authored physical analysis retains deck order and a stable
+    /// per-kind ordinal, and a deck without a physical analysis receives the
+    /// planner-owned implicit operating point. `.STEP` composition is rejected
+    /// until that axis is executed by the same adapter instead of being
+    /// accidentally evaluated as a second, unrelated sweep.
+    pub fn from_netlist_temperature_axis(
+        netlist: &crate::netlist::Netlist,
+    ) -> Result<Option<Self>, DeckPlanError> {
+        let mut axes = Vec::new();
+        let mut analyses = Vec::new();
+
+        for command in &netlist.analyses {
+            match command {
+                crate::netlist::AnalysisCommand::Temp { temperatures } => {
+                    axes.push(RunAxis::new(
+                        AxisKind::Temperature,
+                        "temperature",
+                        temperatures
+                            .iter()
+                            .copied()
+                            .map(RunAxisValue::Numeric)
+                            .collect(),
+                    )?);
+                }
+                crate::netlist::AnalysisCommand::Step(_) => {
+                    // A STEP without TEMP remains on the legacy path. With a
+                    // temperature axis, fail closed instead of producing two
+                    // independent OP sweeps or silently dropping one axis.
+                    if netlist.analyses.iter().any(|analysis| {
+                        matches!(analysis, crate::netlist::AnalysisCommand::Temp { .. })
+                    }) {
+                        return Err(DeckPlanError::TemperatureAxisWithStep);
+                    }
+                }
+                crate::netlist::AnalysisCommand::Four { .. } => {
+                    // FOUR is attached to a transient result by the executor;
+                    // it is not a physical analysis that suppresses implicit
+                    // OP when it appears alone.
+                }
+                command => analyses.push(AnalysisRequest::new(analysis_kind(command))),
+            }
+        }
+
+        if axes.is_empty() {
+            return Ok(None);
+        }
+        Self::new(axes, analyses).map(Some)
+    }
+
     pub fn new(
         axes: Vec<RunAxis>,
         analysis_requests: Vec<AnalysisRequest>,
@@ -780,6 +833,7 @@ pub enum DeckPlanError {
         current: AxisKind,
     },
     ExplicitImplicitOp,
+    TemperatureAxisWithStep,
     AnalysisCountOverflow(AnalysisKind),
     Allocation {
         object: &'static str,
@@ -853,6 +907,8 @@ impl fmt::Display for DeckPlanError {
             Self::ExplicitImplicitOp => formatter.write_str(
                 "implicit operating point is planner-owned and cannot be authored explicitly",
             ),
+            Self::TemperatureAxisWithStep => formatter
+                .write_str(".TEMP and .STEP composition requires the shared STEP-axis executor"),
             Self::AnalysisCountOverflow(kind) => {
                 write!(
                     formatter,
@@ -881,6 +937,28 @@ impl fmt::Display for DeckPlanError {
 }
 
 impl std::error::Error for DeckPlanError {}
+
+fn analysis_kind(command: &crate::netlist::AnalysisCommand) -> AnalysisKind {
+    use crate::netlist::AnalysisCommand;
+
+    match command {
+        AnalysisCommand::Op => AnalysisKind::Op,
+        AnalysisCommand::Dc { .. } => AnalysisKind::Dc,
+        AnalysisCommand::Tran { .. } => AnalysisKind::Tran,
+        AnalysisCommand::Ac { .. } | AnalysisCommand::AcData { .. } => AnalysisKind::Ac,
+        AnalysisCommand::Hb { .. } => AnalysisKind::HarmonicBalance,
+        AnalysisCommand::Disto { .. } => AnalysisKind::Distortion,
+        AnalysisCommand::Sp { .. } => AnalysisKind::Sp,
+        AnalysisCommand::Noise { .. } | AnalysisCommand::NoiseData { .. } => AnalysisKind::Noise,
+        AnalysisCommand::Tf { .. } => AnalysisKind::TransferFunction,
+        AnalysisCommand::Stb { .. } => AnalysisKind::Stb,
+        AnalysisCommand::PoleZero { .. } => AnalysisKind::PoleZero,
+        AnalysisCommand::MonteCarlo(_) => AnalysisKind::MonteCarlo,
+        AnalysisCommand::Sensitivity { .. } => AnalysisKind::Sensitivity,
+        AnalysisCommand::Four { .. } => AnalysisKind::Fourier,
+        AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. } => AnalysisKind::ImplicitOp,
+    }
+}
 
 impl From<ResourceLimitError> for DeckPlanError {
     fn from(error: ResourceLimitError) -> Self {
@@ -1333,6 +1411,53 @@ mod tests {
             .expect("implicit coordinate");
         assert_eq!(coordinates.len(), 1);
         assert!(coordinates[0].assignments().is_empty());
+        assert_eq!(plan.analyses().len(), 1);
+        assert_eq!(plan.analyses()[0].id().kind(), AnalysisKind::ImplicitOp);
+    }
+
+    #[test]
+    fn netlist_temperature_axis_wraps_authored_analyses_with_stable_ids() {
+        let netlist = crate::Netlist::parse(
+            "temperature planner\nR1 in out 1k\nV1 in 0 1\n.temp -40 125\n.ac lin 2 1 2\n.tran 1u 2u\n.ac lin 2 10 20\n.end",
+        )
+        .expect("temperature deck parses");
+        let plan = DeckPlan::from_netlist_temperature_axis(&netlist)
+            .expect("temperature plan is valid")
+            .expect("temperature axis is present");
+
+        assert_eq!(plan.axes().len(), 1);
+        assert_eq!(plan.axes()[0].kind(), AxisKind::Temperature);
+        assert_eq!(
+            plan.analyses()
+                .iter()
+                .map(|analysis| analysis.id().tag())
+                .collect::<Vec<_>>(),
+            ["ac-001", "tran-001", "ac-002"]
+        );
+        let coordinates = plan
+            .coordinates_with_abort(&ResourceLimits::default(), &crate::NoAbort)
+            .expect("temperature coordinates materialize");
+        assert_eq!(coordinates.len(), 2);
+        assert_eq!(
+            coordinates
+                .iter()
+                .map(RunCoordinate::stable_tag)
+                .collect::<Vec<_>>(),
+            plan.coordinates_with_abort(&ResourceLimits::default(), &crate::NoAbort)
+                .expect("repeated materialization")
+                .iter()
+                .map(RunCoordinate::stable_tag)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn temperature_axis_without_physical_analysis_uses_implicit_op() {
+        let netlist = crate::Netlist::parse("implicit temperature\nR1 1 0 1k\n.temp 25 50\n.end")
+            .expect("temperature deck parses");
+        let plan = DeckPlan::from_netlist_temperature_axis(&netlist)
+            .expect("temperature plan is valid")
+            .expect("temperature axis is present");
         assert_eq!(plan.analyses().len(), 1);
         assert_eq!(plan.analyses()[0].id().kind(), AnalysisKind::ImplicitOp);
     }

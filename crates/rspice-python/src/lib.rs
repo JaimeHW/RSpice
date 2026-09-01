@@ -131,6 +131,8 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Result classes
     m.add_class::<results::PySimulationResult>()?;
+    m.add_class::<results::PyRunAxisAssignment>()?;
+    m.add_class::<results::PyRunCoordinate>()?;
     m.add_class::<results::PyDeviceOperatingPoint>()?;
     m.add_class::<results::PyTransientResult>()?;
     m.add_class::<results::PyCompressedTransientResult>()?;
@@ -261,6 +263,8 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "PeriodicNoiseResult",
             "OscillatorNoiseResult",
             "Measurement",
+            "RunAxisAssignment",
+            "RunCoordinate",
             "AnalysisRecord",
             "RunReport",
             "ac_frequencies",

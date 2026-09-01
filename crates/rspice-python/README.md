@@ -159,6 +159,10 @@ returns a `RunReport`:
   record per directive (`.four` adds one per output, `.sp donoise` adds a
   noise record); anything the engine could not execute is listed with
   `skipped=True` and a reason, never dropped silently
+- Each record produced under a run axis carries `analysis_id` (for example,
+  `ac-001` or `ac-002`) and a typed `coordinate` with its stable ID and axis
+  assignments. An authored `.TEMP` wraps the deck's physical analyses at each
+  temperature; it does not add an unrelated operating-point sweep.
 - `report.assert_passed()` — raises `MeasurementError` unless every directive
   ran, at least one measurement was evaluated, and all of them passed, so
   neither a skipped analysis nor a skipped measurement can green-wash a

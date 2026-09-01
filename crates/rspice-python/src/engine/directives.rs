@@ -31,6 +31,19 @@ struct LastAndAll<T> {
     all: Vec<T>,
 }
 
+#[derive(Clone)]
+struct ExecutionContext {
+    analysis_id: Option<String>,
+    coordinate: PyRunCoordinate,
+}
+
+struct PendingFourier {
+    fundamental: f64,
+    outputs: Vec<String>,
+    num_harmonics: usize,
+    context: Option<ExecutionContext>,
+}
+
 impl<T> Default for LastAndAll<T> {
     fn default() -> Self {
         Self {
@@ -92,7 +105,7 @@ struct DirectiveOutcomes {
     fourier: Vec<PyFourierResult>,
     /// `(fundamental, outputs, harmonics)` per `.four` card, evaluated after
     /// the loop.
-    pending_fourier: Vec<(f64, Vec<String>, usize)>,
+    pending_fourier: Vec<PendingFourier>,
 }
 
 /// Run every analysis directive the deck declares, then its `.MEAS` statements.
@@ -105,26 +118,172 @@ pub(super) fn run(
     let net = &netlist.inner;
     let mut out = DirectiveOutcomes::default();
 
-    for analysis in &net.analyses {
+    let temperature_plan = rspice_core::execution::DeckPlan::from_netlist_temperature_axis(net)
+        .map_err(|error| crate::errors::SimulationError::new_err(error.to_string()))?;
+    if let Some(plan) = temperature_plan {
+        run_temperature_plan(py_engine, py, netlist, &plan, continue_on_error, &mut out)?;
+    } else {
+        run_directives(
+            py_engine,
+            py,
+            netlist,
+            &net.analyses,
+            continue_on_error,
+            None,
+            &mut out,
+        )?;
+        evaluate_pending_fourier(py, &mut out);
+    }
+
+    let measurements = evaluate_measurements(py, net, &out);
+    Ok(into_report(out, measurements))
+}
+
+fn run_directives(
+    py_engine: &PyEngine,
+    py: Python<'_>,
+    netlist: &PyNetlist,
+    analyses: &[AnalysisCommand],
+    continue_on_error: bool,
+    coordinate: Option<&PyRunCoordinate>,
+    out: &mut DirectiveOutcomes,
+) -> PyResult<()> {
+    let mut planned = None;
+    if coordinate.is_some() {
+        let plan = rspice_core::execution::DeckPlan::from_netlist_temperature_axis(&netlist.inner)
+            .map_err(|error| crate::errors::SimulationError::new_err(error.to_string()))?;
+        planned = plan.map(|plan| plan.analyses().to_vec().into_iter());
+    }
+
+    for analysis in analyses {
+        if matches!(analysis, AnalysisCommand::Temp { .. }) {
+            continue;
+        }
+        let analysis_id = if matches!(analysis, AnalysisCommand::Four { .. }) {
+            None
+        } else {
+            planned
+                .as_mut()
+                .and_then(Iterator::next)
+                .map(|analysis| analysis.id().tag())
+        };
+        let context = coordinate.map(|coordinate| ExecutionContext {
+            analysis_id,
+            coordinate: coordinate.clone(),
+        });
         let records_before = out.records.len();
-        if let Err(error) = execute(py_engine, py, netlist, analysis, &mut out) {
+        if let Err(error) = execute(py_engine, py, netlist, analysis, context.as_ref(), out) {
             if !continue_on_error {
                 return Err(error);
             }
             // Drop any partial records the failed directive pushed so the
             // report never claims a half-executed analysis succeeded.
             out.records.truncate(records_before);
-            out.records.push(PyAnalysisRecord::skipped(
+            let mut record = PyAnalysisRecord::skipped(
                 analysis_record_kind(analysis),
                 describe_analysis(analysis),
                 &crate::errors::describe_pyerr(py, &error),
-            ));
+            );
+            if let Some(context) = &context {
+                record.set_execution_context(
+                    context.analysis_id.clone(),
+                    Some(context.coordinate.clone()),
+                );
+            }
+            out.records.push(record);
+        } else if let Some(context) = &context {
+            for record in &mut out.records[records_before..] {
+                record.set_execution_context(
+                    context.analysis_id.clone(),
+                    Some(context.coordinate.clone()),
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn run_temperature_plan(
+    py_engine: &PyEngine,
+    py: Python<'_>,
+    netlist: &PyNetlist,
+    plan: &rspice_core::execution::DeckPlan,
+    continue_on_error: bool,
+    out: &mut DirectiveOutcomes,
+) -> PyResult<()> {
+    let coordinates = plan
+        .coordinates_with_abort(&netlist.resource_limits, &rspice_core::NoAbort)
+        .map_err(|error| crate::errors::SimulationError::new_err(error.to_string()))?;
+    let implicit_op = plan.analyses().len() == 1
+        && plan.analyses()[0].id().kind() == rspice_core::execution::AnalysisKind::ImplicitOp;
+    let mut temperature_operating_points = Vec::new();
+
+    for coordinate in coordinates {
+        let coordinate = PyRunCoordinate::from_core(&coordinate);
+        let temperature = coordinate.temperature_celsius().ok_or_else(|| {
+            crate::errors::SimulationError::new_err(
+                "temperature plan produced a coordinate without a numeric temperature",
+            )
+        })?;
+        let mut materialized = netlist.inner.clone();
+        materialized.options.temp = Some(temperature);
+        let materialized = PyNetlist {
+            inner: materialized,
+            resource_limits: netlist.resource_limits,
+        };
+        let op_count_before = out.op.all.len();
+
+        if implicit_op {
+            let context = ExecutionContext {
+                analysis_id: Some(plan.analyses()[0].id().tag()),
+                coordinate: coordinate.clone(),
+            };
+            match py_engine.run_dc_op(py, &materialized) {
+                Ok(result) => {
+                    let handle = Py::new(py, result)?;
+                    out.op.push_with(handle, |handle| handle.clone_ref(py));
+                    let mut record = PyAnalysisRecord::executed("op", ".op (implicit)".to_string());
+                    record.set_execution_context(context.analysis_id, Some(context.coordinate));
+                    out.records.push(record);
+                }
+                Err(error) if continue_on_error => {
+                    let mut record = PyAnalysisRecord::skipped(
+                        "op",
+                        ".op (implicit)".to_string(),
+                        &crate::errors::describe_pyerr(py, &error),
+                    );
+                    record.set_execution_context(context.analysis_id, Some(context.coordinate));
+                    out.records.push(record);
+                }
+                Err(error) => return Err(error),
+            }
+        } else {
+            run_directives(
+                py_engine,
+                py,
+                &materialized,
+                &materialized.inner.analyses,
+                continue_on_error,
+                Some(&coordinate),
+                out,
+            )?;
+        }
+
+        evaluate_pending_fourier(py, out);
+        if out.op.all.len() > op_count_before
+            && let Some(result) = out.op.last()
+        {
+            temperature_operating_points.push((temperature, result.borrow(py).inner.clone()));
         }
     }
 
-    evaluate_pending_fourier(py, &mut out);
-    let measurements = evaluate_measurements(py, net, &out);
-    Ok(into_report(out, measurements))
+    if !temperature_operating_points.is_empty() {
+        out.temperature = Some(PyDcSweepResult::new_named(
+            temperature_operating_points,
+            "TEMP",
+        ));
+    }
+    Ok(())
 }
 
 /// Assemble the report, collapsing each `LastAndAll` into the pair it stores.
@@ -169,6 +328,7 @@ fn execute(
     py: Python<'_>,
     netlist: &PyNetlist,
     analysis: &AnalysisCommand,
+    context: Option<&ExecutionContext>,
     out: &mut DirectiveOutcomes,
 ) -> PyResult<()> {
     let net = &netlist.inner;
@@ -599,8 +759,12 @@ fn execute(
             outputs,
             num_harmonics,
         } => {
-            out.pending_fourier
-                .push((*fundamental, outputs.clone(), *num_harmonics));
+            out.pending_fourier.push(PendingFourier {
+                fundamental: *fundamental,
+                outputs: outputs.clone(),
+                num_harmonics: *num_harmonics,
+                context: context.cloned(),
+            });
         }
     }
     Ok(())
@@ -610,7 +774,14 @@ fn execute(
 fn evaluate_pending_fourier(py: Python<'_>, out: &mut DirectiveOutcomes) {
     // .FOUR needs a transient result; evaluate after the loop so a
     // .four directive may precede its .tran in the deck.
-    for (fundamental, outputs, num_harmonics) in std::mem::take(&mut out.pending_fourier) {
+    for pending in std::mem::take(&mut out.pending_fourier) {
+        let PendingFourier {
+            fundamental,
+            outputs,
+            num_harmonics,
+            context,
+        } = pending;
+        let records_before = out.records.len();
         match out.tran.last() {
             Some(tran_obj) => {
                 let tran_ref = tran_obj.borrow(py);
@@ -661,6 +832,14 @@ fn evaluate_pending_fourier(py: Python<'_>, out: &mut DirectiveOutcomes) {
                     format!(".four {fundamental} {}", outputs.join(" ")),
                     "requires a .tran analysis in the netlist",
                 ));
+            }
+        }
+        if let Some(context) = context {
+            for record in &mut out.records[records_before..] {
+                record.set_execution_context(
+                    context.analysis_id.clone(),
+                    Some(context.coordinate.clone()),
+                );
             }
         }
     }
