@@ -1,0 +1,6 @@
+Two-port passive SP numeric noise oracle
+VPORT1 in 0 0 portnum=1 z0=50
+R1 in out 50
+VPORT2 out 0 0 portnum=2 z0=50
+.SP LIN 3 1k 3k 1
+.END

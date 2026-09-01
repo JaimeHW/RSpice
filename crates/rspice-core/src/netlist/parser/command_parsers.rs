@@ -656,12 +656,43 @@ pub(super) fn parse_sp_command(
     let points = expect_value(stream, line_num, params)? as usize;
     let start_freq = expect_value(stream, line_num, params)?;
     let stop_freq = expect_value(stream, line_num, params)?;
-    let do_noise = if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        false
-    } else {
-        let raw = expect_value(stream, line_num, params)?;
-        raw != 0.0
+    let do_noise = match &stream.peek().kind {
+        TokenKind::Newline | TokenKind::Eof => false,
+        TokenKind::Ident(keyword) if keyword.eq_ignore_ascii_case("donoise") => {
+            stream.advance();
+            true
+        }
+        TokenKind::Ident(keyword)
+            if keyword.eq_ignore_ascii_case("true") || keyword.eq_ignore_ascii_case("false") =>
+        {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(".SP noise option must be DONOISE, 0, or 1; found {keyword}"),
+            });
+        }
+        _ => {
+            let raw = expect_value(stream, line_num, params)?;
+            match raw {
+                0.0 => false,
+                1.0 => true,
+                _ => {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!(".SP noise option must be DONOISE, 0, or 1; found {raw}"),
+                    });
+                }
+            }
+        }
     };
+    if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "unexpected trailing token '{}' after .SP noise option",
+                stream.peek().lexeme
+            ),
+        });
+    }
 
     Ok(AnalysisCommand::Sp {
         variation,
@@ -670,6 +701,45 @@ pub(super) fn parse_sp_command(
         stop_freq,
         do_noise,
     })
+}
+
+#[cfg(test)]
+mod sp_command_tests {
+    use crate::netlist::{AnalysisCommand, Netlist};
+
+    fn parsed_noise_flag(option: &str) -> bool {
+        let deck = format!(
+            "SP noise parser\nV1 in 0 0 portnum=1 z0=50\n.SP DEC 10 1k 1meg {option}\n.END\n"
+        );
+        let netlist = Netlist::parse(&deck).expect(".SP option parses");
+        let [AnalysisCommand::Sp { do_noise, .. }] = netlist.analyses.as_slice() else {
+            panic!("expected one .SP analysis, got {:?}", netlist.analyses);
+        };
+        *do_noise
+    }
+
+    #[test]
+    fn sp_accepts_keyword_and_deliberate_numeric_noise_forms() {
+        assert!(parsed_noise_flag("donoise"));
+        assert!(parsed_noise_flag("DoNoIsE"));
+        assert!(parsed_noise_flag("1"));
+        assert!(!parsed_noise_flag("0"));
+    }
+
+    #[test]
+    fn sp_rejects_unknown_flags_and_trailing_tokens() {
+        for option in ["2", "-1", "donoise extra", "0 extra", "true"] {
+            let deck = format!(
+                "bad SP noise option\nV1 in 0 0 portnum=1 z0=50\n.SP DEC 10 1k 1meg {option}\n.END\n"
+            );
+            let error = Netlist::parse(&deck).expect_err("malformed .SP option must fail");
+            let message = error.to_string();
+            assert!(
+                message.contains(".SP") || message.contains("trailing token"),
+                "unexpected error for '{option}': {message}"
+            );
+        }
+    }
 }
 
 /// Parse .DISTO command: .DISTO DEC|LIN|OCT np fstart fstop `[f2overf1]`
