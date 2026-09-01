@@ -633,25 +633,25 @@ mod tests {
             name: "design-netlist-first-1440x900",
             size: Vec2::new(1440.0, 900.0),
             truncated: false,
-            fingerprint: "b48463edaa1cca3ded701d236f979dedf85234407ebf82800416ded9c08839bf",
+            fingerprint: "8752a84e235327878c10e232db679e14745bc574d6f2dc9823767f55aaa72ecb",
         },
         NetlistFirstBaseline {
             name: "design-netlist-first-820x1180",
             size: Vec2::new(820.0, 1180.0),
             truncated: false,
-            fingerprint: "56dead751affee02043e750cb3f244cde376346497e2025356b6a0bda3d4f5e5",
+            fingerprint: "fbf5818eea809ff2c62f391dd05efe315f9970d9fe88e379b16c088991fe1eac",
         },
         NetlistFirstBaseline {
             name: "design-netlist-first-390x844",
             size: Vec2::new(390.0, 844.0),
             truncated: false,
-            fingerprint: "458f6391ca34d31a6c215db6b882bdba1be8372f7d2bb7227eda00e3a2110898",
+            fingerprint: "3241a0efcb4a688c127b1e4a7799fb9c1475f3c9221ff8194d8f8d28df63f7c5",
         },
         NetlistFirstBaseline {
             name: "design-netlist-first-1440x900-truncated",
             size: Vec2::new(1440.0, 900.0),
             truncated: true,
-            fingerprint: "93c7e7295618e57d7be01396707e79d9c61ba0f65a837887cfe0e54adadf4605",
+            fingerprint: "c60fc284a82efb7951ffbe57dc842682ef9cf20f041bd96a11a9f7e9bac114fc",
         },
     ];
 

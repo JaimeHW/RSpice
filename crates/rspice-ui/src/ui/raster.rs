@@ -41,6 +41,10 @@ pub(crate) struct Canvas {
     background: Color32,
     /// Premultiplied sRGBA, row-major.
     pixels: Vec<Color32>,
+    /// Geometry-authentic regression layer. Text is represented by stable
+    /// layout boxes rather than glyph texels so runtime identifiers and other
+    /// equal-width values cannot make a layout baseline process-random.
+    regression_pixels: Vec<Color32>,
 }
 
 impl Canvas {
@@ -50,6 +54,7 @@ impl Canvas {
             height,
             background,
             pixels: vec![background; width * height],
+            regression_pixels: vec![background; width * height],
         }
     }
 
@@ -62,17 +67,43 @@ impl Canvas {
     }
 
     fn blend(&mut self, x: usize, y: usize, src: [f32; 4]) {
-        let dst = &mut self.pixels[y * self.width + x];
-        let inv = 1.0 - src[3] / 255.0;
-        let mut channels = dst.to_array();
-        for channel in 0..4 {
-            channels[channel] = (src[channel] + f32::from(channels[channel]) * inv)
-                .round()
-                .clamp(0.0, 255.0) as u8;
-        }
-        *dst = Color32::from_rgba_premultiplied(channels[0], channels[1], channels[2], channels[3]);
+        let index = y * self.width + x;
+        blend_pixel(&mut self.pixels[index], src);
+        blend_pixel(&mut self.regression_pixels[index], src);
     }
 
+    fn blend_visual_only(&mut self, x: usize, y: usize, src: [f32; 4]) {
+        blend_pixel(&mut self.pixels[y * self.width + x], src);
+    }
+
+    fn blend_regression_only(&mut self, x: usize, y: usize, src: [f32; 4]) {
+        blend_pixel(&mut self.regression_pixels[y * self.width + x], src);
+    }
+
+    fn fill_regression_rect(&mut self, rect: Rect, color: Color32) {
+        let columns = covered(rect.min.x, rect.max.x, self.width);
+        let rows = covered(rect.min.y, rect.max.y, self.height);
+        let color = color.to_array().map(f32::from);
+        for y in rows {
+            for x in columns.clone() {
+                self.blend_regression_only(x, y, color);
+            }
+        }
+    }
+}
+
+fn blend_pixel(dst: &mut Color32, src: [f32; 4]) {
+    let inv = 1.0 - src[3] / 255.0;
+    let mut channels = dst.to_array();
+    for channel in 0..4 {
+        channels[channel] = (src[channel] + f32::from(channels[channel]) * inv)
+            .round()
+            .clamp(0.0, 255.0) as u8;
+    }
+    *dst = Color32::from_rgba_premultiplied(channels[0], channels[1], channels[2], channels[3]);
+}
+
+impl Canvas {
     /// The last row that anything painted on, so a surface shorter than the
     /// canvas is not reported as acres of empty space.
     pub(crate) fn content_height(&self) -> usize {
@@ -101,13 +132,16 @@ impl Canvas {
         })
     }
 
-    /// Stable SHA-256 fingerprint of an approved cropped render.
+    /// Stable SHA-256 fingerprint of an approved cropped layout render.
     ///
     /// The domain tag, dimensions, clear colour, and premultiplied sRGBA
-    /// pixels are all authenticated.  Keeping the premultiplied bytes avoids
-    /// the lossy straight-alpha conversion used only by [`Self::png`], while
-    /// including the crop height makes a vertical clipping regression visible
-    /// even when every surviving pixel is unchanged.
+    /// geometry pixels are all authenticated. Text glyph texels are replaced
+    /// by stable visual-bounds boxes before hashing: the surrounding contract
+    /// tests own wording, while this layer owns placement, extent, clipping,
+    /// tone, and every non-text pixel. Keeping premultiplied bytes avoids the
+    /// lossy straight-alpha conversion used only by [`Self::png`], while the
+    /// crop height makes vertical clipping visible even if all surviving
+    /// pixels are unchanged.
     pub(crate) fn regression_fingerprint(&self, height: usize) -> String {
         use sha2::{Digest as _, Sha256};
 
@@ -117,11 +151,11 @@ impl Canvas {
             self.height
         );
         let mut digest = Sha256::new();
-        digest.update(b"rspice-egui-software-raster-v1\0");
+        digest.update(b"rspice-egui-software-layout-raster-v2\0");
         digest.update((self.width as u64).to_le_bytes());
         digest.update((height as u64).to_le_bytes());
         digest.update(self.background.to_array());
-        for pixel in &self.pixels[..height * self.width] {
+        for pixel in &self.regression_pixels[..height * self.width] {
             digest.update(pixel.to_array());
         }
         let digest = digest.finalize();
@@ -271,7 +305,7 @@ fn render_at_pointer(
     let output = run();
 
     let atlas = ctx.fonts(|fonts| fonts.image());
-    let primitives = ctx.tessellate(output.shapes, 1.0);
+    let primitives = ctx.tessellate(output.shapes.clone(), 1.0);
 
     let mut canvas = Canvas::new(size.x as usize, size.y as usize, background);
     for primitive in &primitives {
@@ -285,10 +319,51 @@ fn render_at_pointer(
                 mesh.vertices[triangle[1] as usize],
                 mesh.vertices[triangle[2] as usize],
             ];
-            fill_triangle(&mut canvas, &atlas, &vertices, clip);
+            let glyph_triangle = mesh.texture_id == egui::TextureId::Managed(0)
+                && vertices
+                    .iter()
+                    .any(|vertex| vertex.uv != egui::epaint::WHITE_UV);
+            fill_triangle(&mut canvas, &atlas, &vertices, clip, glyph_triangle);
         }
     }
+    // Glyph texture coordinates encode the exact characters and therefore
+    // include legitimate process-random values such as freshly minted UUIDs.
+    // Reintroduce text into the regression layer as its laid-out visual box:
+    // position, extent, clipping, opacity and tone remain authenticated while
+    // the spelling continues to be owned by the galley contract tests.
+    for shape in &output.shapes {
+        paint_text_regression_shape(&mut canvas, &shape.shape, shape.clip_rect);
+    }
     canvas
+}
+
+fn paint_text_regression_shape(canvas: &mut Canvas, shape: &egui::Shape, clip: Rect) {
+    match shape {
+        egui::Shape::Vec(shapes) => {
+            for shape in shapes {
+                paint_text_regression_shape(canvas, shape, clip);
+            }
+        }
+        egui::Shape::Text(text) => {
+            let color = text.override_text_color.unwrap_or_else(|| {
+                text.galley
+                    .job
+                    .sections
+                    .iter()
+                    .map(|section| section.format.color)
+                    .find(|color| *color != Color32::PLACEHOLDER)
+                    .unwrap_or(text.fallback_color)
+            });
+            let color = color.gamma_multiply(text.opacity_factor);
+            // `visual_bounding_rect` follows the tight glyph mesh, so changing
+            // one equal-advance monospace character changes it. The galley's
+            // layout rectangle is the contract the surrounding UI actually
+            // reserves and remains stable for equal-width runtime values.
+            let layout_rect = Rect::from_min_size(text.pos, text.galley.size());
+            canvas.fill_regression_rect(layout_rect.intersect(clip), color);
+        }
+        _ => {}
+    }
 }
 
 fn fill_triangle(
@@ -296,6 +371,7 @@ fn fill_triangle(
     atlas: &egui::ColorImage,
     vertices: &[egui::epaint::Vertex; 3],
     clip: Rect,
+    glyph_triangle: bool,
 ) {
     let positions = vertices.map(|vertex| vertex.pos);
     let min_x = positions
@@ -359,7 +435,11 @@ fn fill_triangle(
             if color[3] <= 0.5 {
                 continue;
             }
-            canvas.blend(x, y, color);
+            if glyph_triangle {
+                canvas.blend_visual_only(x, y, color);
+            } else {
+                canvas.blend(x, y, color);
+            }
         }
     }
 }
@@ -472,13 +552,23 @@ fn a_painted_rect_covers_its_own_pixels_and_nothing_else() {
 #[test]
 fn regression_fingerprint_authenticates_geometry_background_crop_and_pixels() {
     let mut original = Canvas::new(3, 2, Color32::from_rgb(4, 8, 12));
-    original.pixels[4] = Color32::from_rgba_premultiplied(40, 30, 20, 128);
+    let painted = Color32::from_rgba_premultiplied(40, 30, 20, 128);
+    original.pixels[4] = painted;
+    original.regression_pixels[4] = painted;
     let approved = original.regression_fingerprint(2);
     original.assert_regression("unit-raster", 2, &approved);
 
     let mut pixel_changed = original.clone();
-    pixel_changed.pixels[4] = Color32::from_rgba_premultiplied(41, 30, 20, 128);
+    pixel_changed.regression_pixels[4] = Color32::from_rgba_premultiplied(41, 30, 20, 128);
     assert_ne!(pixel_changed.regression_fingerprint(2), approved);
+
+    let mut glyph_texel_only = original.clone();
+    glyph_texel_only.pixels[4] = Color32::from_rgba_premultiplied(41, 30, 20, 128);
+    assert_eq!(
+        glyph_texel_only.regression_fingerprint(2),
+        approved,
+        "the layout fingerprint must not authenticate process-variable glyph texels"
+    );
 
     let background_changed = Canvas {
         background: Color32::from_rgb(4, 8, 13),
