@@ -4040,6 +4040,7 @@ mod tests {
 
     fn fst_with_packed_signal(pack_type: u8, expanded_size: u64) -> Vec<u8> {
         let mut header = vec![0_u8; (FST_HEADER_SECTION_BYTES - 8) as usize];
+        header[16..24].copy_from_slice(&std::f64::consts::E.to_be_bytes());
         set_fst_u64(&mut header, 32, 1); // scopes
         set_fst_u64(&mut header, 40, 1); // variables
         set_fst_u64(&mut header, 48, 1); // handles
