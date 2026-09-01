@@ -168,6 +168,17 @@ impl AppState {
         *self.specialized_viewer_cache_authority_mut(viewer) = None;
     }
 
+    /// Forget ownership of the FFT cache after a transform-setting failure.
+    ///
+    /// The FFT document owns the setting controls but does not own the
+    /// application-level viewer vocabulary. Keeping that detail here lets the
+    /// document request the one transition it needs without reaching upward
+    /// for [`ActiveViewer`]. The cached samples remain intact so the reader can
+    /// correct the setting and recompute them.
+    pub(crate) fn clear_fft_viewer_cache_authority(&mut self) {
+        self.clear_specialized_viewer_cache_authority(ActiveViewer::Fft);
+    }
+
     /// Remove mutable viewer data that does not belong to the active result.
     ///
     /// Capability checks reject a mismatch synchronously, so a selection
@@ -544,6 +555,19 @@ mod tests {
                 viewer.name()
             );
         }
+    }
+
+    #[test]
+    fn clearing_fft_authority_preserves_samples_and_other_viewer_owners() {
+        let mut state = AppState::default();
+        seed_result_viewers(&mut state);
+        let bode_authority = state.analysis.cache_authority.bode;
+
+        state.clear_fft_viewer_cache_authority();
+
+        assert_eq!(state.analysis.cache_authority.fft, None);
+        assert_eq!(state.analysis.cache_authority.bode, bode_authority);
+        assert!(state.analysis.fft_state.has_data());
     }
 
     #[test]

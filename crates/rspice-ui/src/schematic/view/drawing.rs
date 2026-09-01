@@ -582,10 +582,6 @@ pub(super) fn port_symbol_stroke(
     Stroke::new(width * scale, symbol_stroke.color)
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the overlay mirrors the symbol transform contract"
-)]
 pub(super) fn draw_port_direction_overlay(
     painter: &Painter,
     pos: Pos2,
