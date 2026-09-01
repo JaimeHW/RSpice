@@ -1971,7 +1971,9 @@ fn simulation_error_message(e: &CliError) -> String {
 fn is_run_setup_or_output_error(error: &CliError) -> bool {
     matches!(
         error,
-        CliError::OutputError { .. } | CliError::OutputSerializationError { .. }
+        CliError::InvalidArgument { .. }
+            | CliError::OutputError { .. }
+            | CliError::OutputSerializationError { .. }
     )
 }
 

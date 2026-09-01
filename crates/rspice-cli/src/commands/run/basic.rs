@@ -515,9 +515,32 @@ pub(super) fn run_transient(
             ".OPTIONS RESTART cannot be combined with --checkpoint or --resume; choose one restart control plane",
         ));
     }
+    if authored_restart.is_some() && ctx.compress {
+        return Err(CliError::InvalidArgument {
+            message: "--compress cannot yet preserve authored .OPTIONS RESTART output semantics"
+                .to_string(),
+            suggestion: Some("remove --compress for authored restart runs".to_string()),
+        });
+    }
 
     let checkpointing = ctx.args.checkpoint.is_some() || ctx.args.resume.is_some();
     let startup_mode = rspice_core::engine::TransientStartupMode::from_uic(uic);
+    if ctx.compress && ctx.netlist.options.output_interval_schedule.is_some() {
+        return Err(CliError::InvalidArgument {
+            message: "--compress cannot yet preserve the exact INITIAL_INTERVAL output lattice"
+                .to_string(),
+            suggestion: Some(
+                "remove --compress; OUTPUTTIMEPOINTS is supported with compression because those solver points are retained exactly"
+                    .to_string(),
+            ),
+        });
+    }
+    let compression_config = || rspice_core::engine::CompressionConfig {
+        enabled: true,
+        abs_tol: ctx.compress_tol,
+        rel_tol: ctx.compress_tol,
+        min_interval: tstep / 10.0,
+    };
     let result = if let Some(restart) = authored_restart {
         let restart_run =
             run_authored_restart(ctx, restart, tstop, internal_max_step, startup_mode, &pb);
@@ -528,6 +551,12 @@ pub(super) fn run_transient(
         // run to this segment's stop time, and persist the new state (when
         // checkpointing). The core validates the netlist fingerprint, so a
         // checkpoint can never silently continue a different circuit.
+        enum SegmentResult {
+            Full(rspice_core::engine::TransientResult),
+            Compressed(rspice_core::engine::TransientResultCompressed),
+        }
+
+        let progress_abort = crate::abort::ProgressAbort::new(&pb);
         let run = if let Some(ref resume_path) = ctx.args.resume {
             let checkpoint_limit = ctx.engine.config().resource_limits.max_external_data_bytes;
             let checkpoint = rspice_core::engine::TransientCheckpoint::load_with_limit(
@@ -549,19 +578,73 @@ pub(super) fn run_transient(
                     analysis: Some("Transient".to_string()),
                 });
             }
+            if ctx.compress {
+                ctx.engine
+                    .run_tran_resume_compressed_with_abort(
+                        ctx.netlist,
+                        &checkpoint,
+                        tstop,
+                        internal_max_step,
+                        compression_config(),
+                        &progress_abort,
+                    )
+                    .map(|(result, checkpoint)| (SegmentResult::Compressed(result), checkpoint))
+            } else {
+                ctx.engine
+                    .run_tran_resume_with_abort(
+                        ctx.netlist,
+                        &checkpoint,
+                        tstop,
+                        internal_max_step,
+                        &progress_abort,
+                    )
+                    .map(|(result, checkpoint)| (SegmentResult::Full(result), checkpoint))
+            }
+        } else if ctx.compress {
             ctx.engine
-                .run_tran_resume(ctx.netlist, &checkpoint, tstop, internal_max_step)
+                .run_tran_checkpointed_compressed_with_startup_mode_and_abort(
+                    ctx.netlist,
+                    tstop,
+                    internal_max_step,
+                    startup_mode,
+                    compression_config(),
+                    &progress_abort,
+                )
+                .map(|(result, checkpoint)| (SegmentResult::Compressed(result), checkpoint))
         } else {
-            ctx.engine.run_tran_checkpointed_with_startup_mode(
-                ctx.netlist,
-                tstop,
-                internal_max_step,
-                startup_mode,
-            )
+            ctx.engine
+                .run_tran_checkpointed_with_startup_mode_and_abort(
+                    ctx.netlist,
+                    tstop,
+                    internal_max_step,
+                    startup_mode,
+                    &progress_abort,
+                )
+                .map(|(result, checkpoint)| (SegmentResult::Full(result), checkpoint))
         };
         pb.finish_and_clear();
         match run {
-            Ok((result, checkpoint)) => {
+            Ok((segment, checkpoint)) => {
+                let result = match segment {
+                    SegmentResult::Full(result) => result,
+                    SegmentResult::Compressed(compressed) => {
+                        if !ctx.quiet {
+                            println!(
+                                "  Compressed segment: {} of {} accepted points ({:.1}x)",
+                                compressed.time.len(),
+                                compressed.input_points,
+                                compressed.compression_ratio
+                            );
+                        }
+                        compressed.try_into_transient().map_err(|message| {
+                            CliError::InternalError {
+                                message: format!(
+                                    "core returned a malformed compressed checkpoint segment: {message}"
+                                ),
+                            }
+                        })?
+                    }
+                };
                 if let Some(ref checkpoint_path) = ctx.args.checkpoint {
                     checkpoint
                         .save(checkpoint_path)
@@ -584,23 +667,13 @@ pub(super) fn run_transient(
             }
             Err(e) => Err(e),
         }
-    } else if ctx.compress
-        && ctx.netlist.options.output_time_points.is_empty()
-        && ctx.netlist.options.output_interval_schedule.is_none()
-    {
-        let compression_tol = ctx.compress_tol;
-        let compression = rspice_core::engine::CompressionConfig {
-            enabled: true,
-            abs_tol: compression_tol,
-            rel_tol: compression_tol,
-            min_interval: tstep / 10.0,
-        };
+    } else if ctx.compress {
         let result = ctx.engine.run_tran_compressed_with_startup_mode_and_abort(
             ctx.netlist,
             tstop,
             internal_max_step,
             startup_mode,
-            compression,
+            compression_config(),
             &crate::abort::ProgressAbort::new(&pb),
         );
         pb.finish_and_clear();
@@ -610,7 +683,7 @@ pub(super) fn run_transient(
                     println!(
                         "✓ Transient complete (compressed): {} points (compression ratio: {:.1}x)",
                         compressed.time.len(),
-                        (tstop / tstep) / compressed.time.len() as f64
+                        compressed.compression_ratio
                     );
                 }
                 let expanded =

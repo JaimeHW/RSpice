@@ -83,6 +83,16 @@ c1 2 0 1
 .end
 ";
 
+const TRAN_OUTPUT_INTERVAL_DECK: &str = "* transient interval schedule compression preflight
+v1 in 0 sin(0 1 1k)
+r1 in out 1k
+c1 out 0 1u
+.tran 10u 200u
+.options output initial_interval=25u
+.print tran v(out)
+.end
+";
+
 const XSPICE_DIGITAL_TRAN_DECK: &str = "* xspice digital export test
 v1 in 0 pulse(0 5 0 1n 1n 5n 10n)
 abridge1 [in] [d] adc
@@ -401,6 +411,39 @@ fn transient_output_time_points_project_the_export_without_truncating_the_solve(
     assert_eq!(
         compressed_text, text,
         "OUTPUTTIMEPOINTS must retain its exact rows when compression is requested"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn compression_refuses_interval_output_before_solver_or_artifact_work() {
+    let dir = test_dir("compressed_interval_refusal");
+    let deck = dir.join("interval.sp");
+    let output_path = dir.join("interval.csv");
+    std::fs::write(&deck, TRAN_OUTPUT_INTERVAL_DECK).expect("write interval deck");
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "--quiet",
+            "run",
+            deck.to_str().expect("deck path is UTF-8"),
+            "--compress",
+            "-o",
+            output_path.to_str().expect("output path is UTF-8"),
+            "-f",
+            "csv",
+        ])
+        .output()
+        .expect("run rspice");
+
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("INITIAL_INTERVAL") && stderr.contains("--compress"),
+        "refusal must identify the incompatible contracts: {stderr}"
+    );
+    assert!(
+        !output_path.exists(),
+        "a rejected compression/output contract must not publish an artifact"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

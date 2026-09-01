@@ -369,6 +369,55 @@ fn checkpoint_resume_matches_uninterrupted_run() {
         "segmented run must match the full run: full={v_full}, resumed={v_seg}"
     );
 
+    // Compression is a result-storage consumer, not a solver-state consumer:
+    // it must leave the exact checkpoint image and resumed trajectory intact.
+    let compressed_state = dir.join("compressed-state.ckpt");
+    let output = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "--tran-stop",
+        "10u",
+        "--checkpoint",
+        compressed_state.to_str().unwrap(),
+        "--compress",
+    ]);
+    assert!(
+        output.status.success(),
+        "compressed checkpoint stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        std::fs::read(&compressed_state).expect("read compressed-run checkpoint"),
+        std::fs::read(&state).expect("read ordinary checkpoint"),
+        "result compression must not alter the exact checkpoint state"
+    );
+
+    let compressed_resumed = dir.join("compressed-resumed.csv");
+    let output = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "--resume",
+        compressed_state.to_str().unwrap(),
+        "--compress",
+        "-o",
+        compressed_resumed.to_str().unwrap(),
+        "-f",
+        "csv",
+    ]);
+    assert!(
+        output.status.success(),
+        "compressed resume stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let (t_compressed, v_compressed) = last_vout(&compressed_resumed);
+    assert!((t_compressed - t_full).abs() < 1e-9);
+    assert!(
+        (v_full - v_compressed).abs() < 1e-6,
+        "compressed segmented run must match the full run: full={v_full}, resumed={v_compressed}"
+    );
+
     // Fingerprint safety: a different deck cannot consume this state.
     let other = dir.join("other.sp");
     std::fs::write(

@@ -8806,13 +8806,93 @@ impl Engine {
             abort,
         )?;
 
-        compress_transient_result(&result, &compression, abort)
+        compress_transient_result(
+            &result,
+            &compression,
+            &netlist.options.output_time_points,
+            abort,
+        )
+    }
+
+    /// Run a checkpointed transient and independently compress its published
+    /// analog result without altering the exact continuation state.
+    pub fn run_tran_checkpointed_compressed_with_abort(
+        &self,
+        netlist: &Netlist,
+        tstop: Value,
+        max_step: Value,
+        compression: CompressionConfig,
+        abort: &dyn AbortSignal,
+    ) -> Result<(TransientResultCompressed, TransientCheckpoint), SimulationError> {
+        let startup_mode = Self::inferred_transient_startup_mode(netlist)?;
+        self.run_tran_checkpointed_compressed_with_startup_mode_and_abort(
+            netlist,
+            tstop,
+            max_step,
+            startup_mode,
+            compression,
+            abort,
+        )
+    }
+
+    /// Explicit-startup form of
+    /// [`Engine::run_tran_checkpointed_compressed_with_abort`].
+    ///
+    /// The checkpoint is captured from the complete accepted solver state.
+    /// Compression runs only after that capture and therefore cannot perturb
+    /// the continuation trajectory or discard state required by resume.
+    pub fn run_tran_checkpointed_compressed_with_startup_mode_and_abort(
+        &self,
+        netlist: &Netlist,
+        tstop: Value,
+        max_step: Value,
+        startup_mode: TransientStartupMode,
+        compression: CompressionConfig,
+        abort: &dyn AbortSignal,
+    ) -> Result<(TransientResultCompressed, TransientCheckpoint), SimulationError> {
+        let (result, checkpoint) = self.run_tran_checkpointed_with_startup_mode_and_abort(
+            netlist,
+            tstop,
+            max_step,
+            startup_mode,
+            abort,
+        )?;
+        let compressed = compress_transient_result(
+            &result,
+            &compression,
+            &netlist.options.output_time_points,
+            abort,
+        )?;
+        Ok((compressed, checkpoint))
+    }
+
+    /// Resume from an exact checkpoint while independently compressing the
+    /// returned segment's analog result.
+    pub fn run_tran_resume_compressed_with_abort(
+        &self,
+        netlist: &Netlist,
+        checkpoint: &TransientCheckpoint,
+        tstop: Value,
+        max_step: Value,
+        compression: CompressionConfig,
+        abort: &dyn AbortSignal,
+    ) -> Result<(TransientResultCompressed, TransientCheckpoint), SimulationError> {
+        let (result, next_checkpoint) =
+            self.run_tran_resume_with_abort(netlist, checkpoint, tstop, max_step, abort)?;
+        let compressed = compress_transient_result(
+            &result,
+            &compression,
+            &netlist.options.output_time_points,
+            abort,
+        )?;
+        Ok((compressed, next_checkpoint))
     }
 }
 
 fn compress_transient_result(
     result: &TransientResult,
     config: &CompressionConfig,
+    mandatory_time_points: &[Value],
     abort: &dyn AbortSignal,
 ) -> Result<TransientResultCompressed, SimulationError> {
     let point_count = result.time.len();
@@ -8888,6 +8968,37 @@ fn compress_transient_result(
             "Cannot compress a transient with non-finite or non-increasing time points".to_string(),
         ));
     }
+    let result_window = result
+        .time
+        .first()
+        .copied()
+        .zip(result.time.last().copied());
+    let mandatory_indices = mandatory_time_points
+        .iter()
+        .enumerate()
+        .map(|(schedule_index, &time)| {
+            if !time.is_finite() {
+                return Err(SimulationError::Circuit(format!(
+                    "Cannot compress non-finite mandatory output time at index {schedule_index}"
+                )));
+            }
+            if !result_window.is_some_and(|(start, stop)| time >= start && time <= stop) {
+                return Ok(None);
+            }
+            result
+                .time
+                .binary_search_by(|candidate| candidate.total_cmp(&time))
+                .map(Some)
+                .map_err(|_| {
+                    SimulationError::Circuit(format!(
+                        "Cannot compress transient because mandatory output time {time:.17e}s is not an exact accepted solver point"
+                    ))
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
     if point_count <= 2 || !config.enabled {
         return Ok(TransientResultCompressed {
             time: result.time.clone(),
@@ -8907,7 +9018,19 @@ fn compress_transient_result(
     let mut retained = vec![false; point_count];
     retained[0] = true;
     retained[point_count - 1] = true;
-    let mut segments = vec![(0usize, point_count - 1)];
+    for &index in &mandatory_indices {
+        retained[index] = true;
+    }
+    let mut anchors = std::iter::once(0)
+        .chain(mandatory_indices)
+        .chain(std::iter::once(point_count - 1))
+        .collect::<Vec<_>>();
+    anchors.sort_unstable();
+    anchors.dedup();
+    let mut segments = anchors
+        .windows(2)
+        .map(|window| (window[0], window[1]))
+        .collect::<Vec<_>>();
     while let Some((start, end)) = segments.pop() {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
@@ -11247,7 +11370,7 @@ D1 D 0 DMOD
             enabled: true,
             min_interval: 0.0,
         };
-        let compressed = compress_transient_result(&result, &config, &NoAbort)
+        let compressed = compress_transient_result(&result, &config, &[], &NoAbort)
             .expect("well-formed waveform compresses");
         assert!(compressed.time.len() < time.len() / 4);
         compressed.validate().expect("compressed inventory aligns");
@@ -11314,6 +11437,199 @@ D1 D 0 DMOD
     }
 
     #[test]
+    fn compressed_transient_retains_mandatory_output_points_exactly() {
+        let time = vec![0.0, 0.5, 1.0, 1.5, 2.0];
+        let result = TransientResult {
+            time: time.clone(),
+            step_sizes: vec![0.0, 0.5, 0.5, 0.5, 0.5],
+            voltages: vec![time.iter().map(|time| 2.0 * time).collect()],
+            branch_currents: Vec::new(),
+            num_nodes: 1,
+            node_names: vec!["out".to_string()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+            fft_results: Vec::new(),
+        };
+        let config = CompressionConfig {
+            abs_tol: 1.0,
+            rel_tol: 1.0,
+            enabled: true,
+            min_interval: 0.0,
+        };
+        let mandatory = [0.5, 1.5];
+        let compressed = compress_transient_result(&result, &config, &mandatory, &NoAbort)
+            .expect("mandatory accepted output points survive compression");
+
+        assert_eq!(compressed.time, [0.0, 0.5, 1.5, 2.0]);
+        for output_time in mandatory {
+            assert!(
+                compressed
+                    .time
+                    .binary_search_by(|time| time.total_cmp(&output_time))
+                    .is_ok()
+            );
+        }
+
+        let error = compress_transient_result(&result, &config, &[0.75], &NoAbort)
+            .expect_err("a mandatory non-accepted point must never be approximated silently");
+        assert!(
+            error
+                .to_string()
+                .contains("not an exact accepted solver point")
+        );
+    }
+
+    #[test]
+    fn transient_compression_polls_abort_during_large_waveform_scans() {
+        struct PollAbort {
+            polls: std::sync::atomic::AtomicUsize,
+        }
+
+        impl AbortSignal for PollAbort {
+            fn is_aborted(&self) -> bool {
+                self.polls
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                    >= 2
+            }
+        }
+
+        let time = (0..10_000).map(|index| index as Value).collect::<Vec<_>>();
+        let result = TransientResult {
+            step_sizes: std::iter::once(0.0)
+                .chain(std::iter::repeat_n(1.0, time.len() - 1))
+                .collect(),
+            voltages: vec![time.clone()],
+            time,
+            branch_currents: Vec::new(),
+            num_nodes: 1,
+            node_names: vec!["out".to_string()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+            fft_results: Vec::new(),
+        };
+        let abort = PollAbort {
+            polls: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let error = compress_transient_result(
+            &result,
+            &CompressionConfig {
+                abs_tol: 1.0e-12,
+                rel_tol: 1.0e-12,
+                enabled: true,
+                min_interval: 0.0,
+            },
+            &[],
+            &abort,
+        )
+        .expect_err("compression must stop when cancellation becomes visible");
+
+        assert!(matches!(error, SimulationError::Aborted));
+        assert_eq!(
+            abort.polls.load(std::sync::atomic::Ordering::Relaxed),
+            3,
+            "the long scan should observe cancellation at its second interior poll"
+        );
+    }
+
+    #[test]
+    fn compressed_checkpoint_and_resume_preserve_exact_solver_state() {
+        let netlist = Netlist::parse(
+            "compressed checkpoint composition\n\
+             V1 in 0 PULSE(0 1 10u 1u 1u 200u 500u)\n\
+             R1 in out 1k\n\
+             C1 out 0 100n\n\
+             .TRAN 2u 1m\n\
+             .END\n",
+        )
+        .expect("checkpoint-compression deck parses");
+        let engine = Engine::new(SimulationConfig::default());
+        let compression = CompressionConfig {
+            abs_tol: 1.0e-7,
+            rel_tol: 1.0e-4,
+            enabled: true,
+            min_interval: 20.0e-6,
+        };
+
+        let (first_full, first_checkpoint) = engine
+            .run_tran_checkpointed(&netlist, 500.0e-6, 2.0e-6)
+            .expect("ordinary first segment solves");
+        let (first_compressed, compressed_checkpoint) = engine
+            .run_tran_checkpointed_compressed_with_abort(
+                &netlist,
+                500.0e-6,
+                2.0e-6,
+                compression.clone(),
+                &NoAbort,
+            )
+            .expect("compressed first segment solves");
+        assert_eq!(compressed_checkpoint, first_checkpoint);
+        assert_eq!(first_compressed.input_points, first_full.time.len());
+        for output_time in [0.0, 500.0e-6] {
+            assert!(
+                first_compressed
+                    .time
+                    .binary_search_by(|time| time.total_cmp(&output_time))
+                    .is_ok(),
+                "first segment discarded authored output time {output_time:.17e}"
+            );
+        }
+
+        let (resumed_full, final_checkpoint) = engine
+            .run_tran_resume(&netlist, &first_checkpoint, 1.0e-3, 2.0e-6)
+            .expect("ordinary resumed segment solves");
+        let (resumed_compressed, compressed_final_checkpoint) = engine
+            .run_tran_resume_compressed_with_abort(
+                &netlist,
+                &compressed_checkpoint,
+                1.0e-3,
+                2.0e-6,
+                compression,
+                &NoAbort,
+            )
+            .expect("compressed resumed segment solves");
+        assert_eq!(compressed_final_checkpoint, final_checkpoint);
+        assert_eq!(resumed_compressed.input_points, resumed_full.time.len());
+        for output_time in [500.0e-6, 1.0e-3] {
+            assert!(
+                resumed_compressed
+                    .time
+                    .binary_search_by(|time| time.total_cmp(&output_time))
+                    .is_ok(),
+                "resumed segment discarded authored output time {output_time:.17e}"
+            );
+        }
+
+        let full_out = resumed_full
+            .try_voltage_waveform_named("out")
+            .expect("ordinary output exists");
+        let final_time = *resumed_full
+            .time
+            .last()
+            .expect("ordinary segment has samples");
+        let output_index = resumed_compressed
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .expect("compressed output name exists");
+        let compressed_out = resumed_compressed
+            .interpolate(output_index, final_time)
+            .expect("compressed output interpolates at the final point");
+        assert_eq!(
+            compressed_out.to_bits(),
+            full_out
+                .last()
+                .expect("ordinary output has samples")
+                .to_bits()
+        );
+    }
+
+    #[test]
     fn compressed_maximum_interval_splits_at_or_before_boundary() {
         let time = vec![0.0, 0.6, 1.01, 1.6];
         let result = TransientResult {
@@ -11338,6 +11654,7 @@ D1 D 0 DMOD
                 enabled: true,
                 min_interval: 1.0,
             },
+            &[],
             &NoAbort,
         )
         .expect("linear waveform compresses on the maximum-gap boundary");
