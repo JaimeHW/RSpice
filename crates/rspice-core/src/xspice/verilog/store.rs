@@ -392,6 +392,26 @@ impl DigitalSignalStore {
         value: FourStateValue,
         plan: &CanonicalDigitalPlan,
     ) -> Result<(), StoreError> {
+        self.check_force(signal, &value, plan)?;
+        self.publish(signal, value);
+        Ok(())
+    }
+
+    /// Whether [`Self::force`] would be accepted, without writing anything.
+    ///
+    /// Every reason `force` refuses is a property of the design and the value
+    /// offered, not of anything the write does, so the whole refusal can be
+    /// asked in advance. That is what lets a caller publishing a *bank* of
+    /// co-timed drives establish that all of them are acceptable before any of
+    /// them lands, instead of snapshotting the running host so a later refusal
+    /// can be undone. The rule is stated here once and `force` asks it, so the
+    /// predicate and the write can never disagree about what is allowed.
+    pub(crate) fn check_force(
+        &self,
+        signal: DigitalSignalId,
+        value: &FourStateValue,
+        plan: &CanonicalDigitalPlan,
+    ) -> Result<(), StoreError> {
         let index = usize::from(signal);
         let declared = *self
             .widths
@@ -417,7 +437,6 @@ impl DigitalSignalStore {
                 drivers,
             });
         }
-        self.publish(signal, value);
         Ok(())
     }
 

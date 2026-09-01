@@ -520,17 +520,25 @@ impl DigitalHost {
     /// All values enter the store before sensitivity is dispatched. This is
     /// essential for a bank of A/D bridges sampled from one converged Newton
     /// solution: no process may observe a half-updated bridge bank.
+    ///
+    /// Every drive is checked before any is published, so a bank containing
+    /// one unacceptable drive publishes none of it. This used to be done by
+    /// deep-copying the whole running host on the way in and restoring it on
+    /// the way out of a refusal — a copy of the plan handle, the store, the
+    /// scheduler, every process slot and the whole sensitivity index, paid on
+    /// every publish so that the rare refusal had somewhere to go back to.
+    /// [`DigitalSignalStore::check_force`] answers the same question without
+    /// writing, and the refusals it can return are the only ones `force` has.
     pub(crate) fn force_many(
         &mut self,
         drives: &[(DigitalSignalId, FourStateValue)],
         tick: u64,
     ) -> Result<(), DigitalRunError> {
-        let rollback = self.clone();
         for (signal, value) in drives {
-            if let Err(error) = self.store.force(*signal, value.clone(), &self.plan) {
-                *self = rollback;
-                return Err(error.into());
-            }
+            self.store.check_force(*signal, value, &self.plan)?;
+        }
+        for (signal, value) in drives {
+            self.store.force(*signal, value.clone(), &self.plan)?;
         }
         self.dispatch(tick)?;
         self.settle(tick)
