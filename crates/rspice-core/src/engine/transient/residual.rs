@@ -1480,6 +1480,7 @@ impl Engine {
                 time,
                 dt,
                 &companion_coeff,
+                num_nodes,
             )
             .map_err(SimulationError::Circuit)?;
         circuit.stamp_transient_inductor_companions(matrix, rhs, dt, &companion_coeff, num_nodes);

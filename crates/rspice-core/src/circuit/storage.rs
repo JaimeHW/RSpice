@@ -24,5 +24,6 @@ pub(crate) use nonlinear::{
     B3SoiDds, B3SoiFds, B3SoiPds, Bjts, Bsim3v3s, Bsim4v8s, Ekv3Mosfets, EkvMosfets, Mosfets,
     Vdmoses,
 };
+pub(crate) use passive::SolutionDependentCapacitorState;
 pub use passive::{Capacitors, ResistorBranches, Resistors, ThermalResistorState};
 pub use sources::{CurrentSources, VoltageSources};

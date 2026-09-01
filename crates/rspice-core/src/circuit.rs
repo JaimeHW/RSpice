@@ -29,7 +29,7 @@ pub use storage::{
 // because the public `CircuitData::diode_storage` returns one.
 pub(crate) use storage::{
     B3SoiDds, B3SoiFds, B3SoiPds, Bjts, Bsim3v3s, Bsim4v8s, Ekv3Mosfets, EkvMosfets, Mosfets,
-    Vdmoses,
+    SolutionDependentCapacitorState, Vdmoses,
 };
 mod construction;
 pub(crate) mod dae;

@@ -6041,13 +6041,6 @@ impl Engine {
                     // The transient companion evaluates the expression and
                     // applies this scale at each Newton point.
                     if let Some(expression) = value_expr.as_deref() {
-                        if initial_voltage.is_some() {
-                            return Err(SimulationError::Circuit(format!(
-                                "Capacitor '{}' combines a solution-dependent value expression with IC=; this combination is not yet supported",
-                                element.name
-                            )));
-                        }
-
                         let scale = resolve_capacitor_instance_value(
                             netlist,
                             &element.name,
@@ -6070,13 +6063,28 @@ impl Engine {
                         ));
                         evaluator.set_gmin(self.config.convergence_config.junction_gmin_target);
                         evaluator.set_expression_dialect(netlist.params.expression_dialect());
-                        circuit.capacitors.add_with_value_expression(
-                            element.name.clone(),
-                            np,
-                            nn,
-                            scale,
-                            evaluator,
-                        );
+                        if let Some(ic) = *initial_voltage {
+                            let branch_ordinal = (capacitor_ic_dc_mode(self.config.spice_dialect)
+                                == crate::netlist::CapacitorIcDcMode::EnforcedConstraint)
+                                .then(|| circuit.allocate_branch_named(&element.name));
+                            circuit.capacitors.add_with_value_expression_and_ic(
+                                element.name.clone(),
+                                np,
+                                nn,
+                                scale,
+                                evaluator,
+                                ic,
+                                branch_ordinal,
+                            );
+                        } else {
+                            circuit.capacitors.add_with_value_expression(
+                                element.name.clone(),
+                                np,
+                                nn,
+                                scale,
+                                evaluator,
+                            );
+                        }
                         continue;
                     }
 

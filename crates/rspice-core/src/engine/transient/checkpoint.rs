@@ -10,8 +10,9 @@
 //! interval; legacy continuation state fails closed rather than silently
 //! reconstructing different controls.
 //!
-//! Scope, stated precisely: accepted linear-reactive histories; native diode
-//! and legacy Gummel-Poon BJT limiter/evaluation state; the engine-owned
+//! Scope, stated precisely: accepted linear-reactive histories and
+//! solution-dependent capacitor charge/linearization state; native diode and
+//! legacy Gummel-Poon BJT limiter/evaluation state; the engine-owned
 //! accepted diode/BJT charge, derivative, predictor, lead-current, timestep,
 //! and optional charge-snapshot histories; ordinary lossless scalar
 //! transmission-line delay histories; generated Verilog-A `ddt`/`idt`
@@ -21,7 +22,7 @@
 //! An arbitrary accepted proposal continues exactly, while an explicitly
 //! normalized endpoint or breakpoint contract deliberately takes an order-one
 //! restart step. Exact-proposal restore is target-aware and fails closed for
-//! native compact-model, thermal, solution-dependent capacitor, magnetic,
+//! native compact-model, thermal, stateful capacitor-expression, magnetic,
 //! stateful behavioral/switch, runtime Verilog-A, or generated dynamic-charge
 //! histories that do not yet have a complete versioned contract. Native VBIC,
 //! distributed LTRA/TXL, and coupled-line convolution runtimes block restart
@@ -34,7 +35,9 @@
 //! envelope with declared lengths and a BLAKE3 integrity seal.
 
 use crate::Value;
-use crate::circuit::{AcceptedNativeNonlinearCheckpointStates, CircuitData};
+use crate::circuit::{
+    AcceptedNativeNonlinearCheckpointStates, CircuitData, SolutionDependentCapacitorState,
+};
 use crate::device::semiconductor::{
     AcceptedBjtChargeSnapshotCheckpoint, AcceptedBjtNonlinearCheckpoint,
     AcceptedDiodeNonlinearCheckpoint, BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT,
@@ -116,8 +119,11 @@ use super::{
 /// derivative for every runtime Verilog-A Laplace filter so trapezoidal and
 /// Gear-2 continuation is bit-exact across a restart. Version 32 adds the
 /// accepted TEAM resistance-noise PRNG, dwell, level, factor, and provenance.
-const FORMAT_VERSION: u32 = 32;
+/// Version 33 adds accepted solution-dependent capacitor charge,
+/// linearization, and effective-capacitance state.
+const FORMAT_VERSION: u32 = 33;
 const XYCE_TEAM_RESISTANCE_NOISE_FORMAT_VERSION: u32 = 32;
+const SOLUTION_DEPENDENT_CAPACITOR_FORMAT_VERSION: u32 = 33;
 const RUNTIME_VERILOGA_FORMAT_VERSION: u32 = 17;
 #[cfg(feature = "veriloga")]
 const RUNTIME_VERILOGA_SLEW_INITIALIZATION_FORMAT_VERSION: u32 = 23;
@@ -361,6 +367,9 @@ pub struct TransientCheckpoint {
     cap_v_prev_prev_prev: Vec<Value>,
     cap_i_prev: Vec<Value>,
     cap_i_eq: Vec<Value>,
+    solution_dependent_capacitor_state_available: bool,
+    solution_dependent_capacitor_states: Vec<Option<SolutionDependentCapacitorState>>,
+    cap_effective_capacitances: Vec<Value>,
     ind_i_prev: Vec<Value>,
     ind_i_prev_prev: Vec<Value>,
     /// Empty when `inductor_flux_history_available` is false: files older
@@ -1423,6 +1432,156 @@ fn read_value_section(
         }
     }
     Ok(cols)
+}
+
+fn write_solution_dependent_capacitor_states(
+    out: &mut String,
+    states: &[Option<SolutionDependentCapacitorState>],
+) {
+    out.push_str(&format!(
+        "solution_dependent_capacitor_states {}\n",
+        states.len()
+    ));
+    for state in states {
+        let Some(state) = state else {
+            out.push_str("solution_dependent_capacitor_state 0\n");
+            continue;
+        };
+        out.push_str(&format!(
+            "solution_dependent_capacitor_state 1 {} {} {} {} {}\n",
+            state.c_prev,
+            state.q_prev,
+            state.q_prev_prev,
+            state.dcdx_prev.len(),
+            state.dqdx_prev.len(),
+        ));
+        for (column, derivative) in &state.dcdx_prev {
+            out.push_str(&format!("capacitor_dcdx {column} {derivative}\n"));
+        }
+        for (column, derivative) in &state.dqdx_prev {
+            out.push_str(&format!("capacitor_dqdx {column} {derivative}\n"));
+        }
+    }
+}
+
+fn read_solution_dependent_capacitor_states(
+    lines: &mut CheckpointLines<'_>,
+    expected_count: usize,
+    budget: &mut CheckpointParseBudget,
+) -> Result<Vec<Option<SolutionDependentCapacitorState>>, String> {
+    let header = lines
+        .next()
+        .ok_or_else(|| "missing solution-dependent capacitor state header".to_string())?;
+    let count = parse_count_header(header, "solution_dependent_capacitor_states")?;
+    if count != expected_count {
+        return Err(format!(
+            "solution-dependent capacitor state count {count} does not match capacitor history count {expected_count}"
+        ));
+    }
+    let mut states = allocate_checkpoint_rows(
+        lines,
+        count,
+        "solution-dependent capacitor checkpoint states",
+        budget,
+    )?;
+    for index in 0..count {
+        let line = lines.next().ok_or_else(|| {
+            format!("missing solution-dependent capacitor checkpoint state {index}")
+        })?;
+        let fields = collect_checkpoint_fields(
+            line,
+            "solution-dependent capacitor checkpoint state fields",
+            budget,
+        )?;
+        match fields.as_slice() {
+            ["solution_dependent_capacitor_state", "0"] => states.push(None),
+            [
+                "solution_dependent_capacitor_state",
+                "1",
+                c_prev,
+                q_prev,
+                q_prev_prev,
+                dcdx_count,
+                dqdx_count,
+            ] => {
+                let parse_value = |field: &str, name: &str| {
+                    field.parse::<Value>().map_err(|_| {
+                        format!(
+                            "solution-dependent capacitor state {index} has malformed {name} '{field}'"
+                        )
+                    })
+                };
+                let c_prev = parse_value(c_prev, "accepted capacitance")?;
+                let q_prev = parse_value(q_prev, "accepted charge")?;
+                let q_prev_prev = parse_value(q_prev_prev, "older accepted charge")?;
+                let dcdx_count = dcdx_count.parse::<usize>().map_err(|_| {
+                    format!(
+                        "solution-dependent capacitor state {index} has malformed dC/dx count '{dcdx_count}'"
+                    )
+                })?;
+                let dqdx_count = dqdx_count.parse::<usize>().map_err(|_| {
+                    format!(
+                        "solution-dependent capacitor state {index} has malformed dQ/dx count '{dqdx_count}'"
+                    )
+                })?;
+                let read_partials = |lines: &mut CheckpointLines<'_>,
+                                     count: usize,
+                                     tag: &str,
+                                     description: &str,
+                                     budget: &mut CheckpointParseBudget|
+                 -> Result<Vec<(usize, Value)>, String> {
+                    let mut partials = allocate_checkpoint_rows(lines, count, description, budget)?;
+                    for partial_index in 0..count {
+                        let line = lines.next().ok_or_else(|| {
+                            format!(
+                                "solution-dependent capacitor state {index} {description} truncates at row {partial_index}"
+                            )
+                        })?;
+                        let mut fields = line.split_whitespace();
+                        if fields.next() != Some(tag) {
+                            return Err(format!(
+                                "malformed solution-dependent capacitor {description} row: '{line}'"
+                            ));
+                        }
+                        let column = fields
+                            .next()
+                            .ok_or_else(|| format!("{description} row is missing its column"))?
+                            .parse::<usize>()
+                            .map_err(|_| format!("{description} row has a malformed column"))?;
+                        let derivative = fields
+                            .next()
+                            .ok_or_else(|| format!("{description} row is missing its value"))?
+                            .parse::<Value>()
+                            .map_err(|_| format!("{description} row has a malformed value"))?;
+                        if let Some(extra) = fields.next() {
+                            return Err(format!(
+                                "solution-dependent capacitor {description} row has extra field '{extra}'"
+                            ));
+                        }
+                        partials.push((column, derivative));
+                    }
+                    Ok(partials)
+                };
+                let dcdx_prev =
+                    read_partials(lines, dcdx_count, "capacitor_dcdx", "dC/dx history", budget)?;
+                let dqdx_prev =
+                    read_partials(lines, dqdx_count, "capacitor_dqdx", "dQ/dx history", budget)?;
+                states.push(Some(SolutionDependentCapacitorState {
+                    c_prev,
+                    q_prev,
+                    q_prev_prev,
+                    dcdx_prev,
+                    dqdx_prev,
+                }));
+            }
+            _ => {
+                return Err(format!(
+                    "malformed solution-dependent capacitor checkpoint state {index}: '{line}'"
+                ));
+            }
+        }
+    }
+    Ok(states)
 }
 
 fn read_i64_vector(
@@ -4552,6 +4711,84 @@ impl TransientCheckpoint {
                 "checkpoint capacitor history vectors have inconsistent lengths".to_string(),
             );
         }
+        if self.solution_dependent_capacitor_state_available {
+            if self.solution_dependent_capacitor_states.len() != capacitor_len
+                || self.cap_effective_capacitances.len() != capacitor_len
+            {
+                return Err(
+                    "checkpoint solution-dependent capacitor state shape does not match capacitor history"
+                        .to_string(),
+                );
+            }
+            if self
+                .cap_effective_capacitances
+                .iter()
+                .any(|value| !value.is_finite() || *value < 0.0)
+            {
+                return Err(
+                    "checkpoint effective capacitor values must be finite and non-negative"
+                        .to_string(),
+                );
+            }
+            for (index, state) in self.solution_dependent_capacitor_states.iter().enumerate() {
+                let Some(state) = state else {
+                    continue;
+                };
+                if !state.c_prev.is_finite()
+                    || state.c_prev < 0.0
+                    || !state.q_prev.is_finite()
+                    || !state.q_prev_prev.is_finite()
+                {
+                    return Err(format!(
+                        "checkpoint solution-dependent capacitor state {index} contains invalid accepted charge data"
+                    ));
+                }
+                if state.c_prev.to_bits() != self.cap_effective_capacitances[index].to_bits() {
+                    return Err(format!(
+                        "checkpoint solution-dependent capacitor state {index} disagrees with its accepted effective capacitance"
+                    ));
+                }
+                for (name, partials) in [("dC/dx", &state.dcdx_prev), ("dQ/dx", &state.dqdx_prev)] {
+                    if partials
+                        .iter()
+                        .any(|(column, value)| *column >= self.solution.len() || !value.is_finite())
+                    {
+                        return Err(format!(
+                            "checkpoint solution-dependent capacitor state {index} has invalid {name} history"
+                        ));
+                    }
+                    let mut columns = match budget.as_deref_mut() {
+                        Some(budget) => allocate_checkpoint_capacity(
+                            partials.len(),
+                            "solution-dependent capacitor validation columns",
+                            budget,
+                        )?,
+                        None => {
+                            let mut columns = Vec::new();
+                            columns.try_reserve_exact(partials.len()).map_err(|_| {
+                                "solution-dependent capacitor validation column count exceeds allocation limits"
+                                    .to_string()
+                            })?;
+                            columns
+                        }
+                    };
+                    columns.extend(partials.iter().map(|(column, _)| *column));
+                    columns.sort_unstable();
+                    if columns.windows(2).any(|pair| pair[0] == pair[1]) {
+                        return Err(format!(
+                            "checkpoint solution-dependent capacitor state {index} has duplicate {name} columns"
+                        ));
+                    }
+                }
+            }
+        } else if !self.solution_dependent_capacitor_states.is_empty()
+            || !self.cap_effective_capacitances.is_empty()
+        {
+            return Err(
+                "checkpoint contains solution-dependent capacitor state without availability provenance"
+                    .to_string(),
+            );
+        }
         let inductor_len = self.ind_i_prev.len();
         if [self.ind_i_prev_prev.len(), self.ind_v_prev.len()]
             .into_iter()
@@ -5112,6 +5349,9 @@ impl TransientCheckpoint {
             cap_v_prev_prev_prev: circuit.capacitors.v_prev_prev_prev.clone(),
             cap_i_prev: circuit.capacitors.i_prev.clone(),
             cap_i_eq: circuit.capacitors.i_eq.clone(),
+            solution_dependent_capacitor_state_available: true,
+            solution_dependent_capacitor_states: circuit.capacitors.value_expression_states.clone(),
+            cap_effective_capacitances: circuit.capacitors.effective_capacitances.clone(),
             ind_i_prev: circuit.inductors.i_prev.clone(),
             ind_i_prev_prev: circuit.inductors.i_prev_prev.clone(),
             ind_i_prev_prev_prev: circuit.inductors.i_prev_prev_prev.clone(),
@@ -5327,6 +5567,14 @@ impl TransientCheckpoint {
                 circuit.inductors.len()
             ));
         }
+        if !self.solution_dependent_capacitor_state_available
+            && circuit.capacitors.has_solution_dependent_values()
+        {
+            return Err(
+                "legacy transient checkpoint does not contain accepted solution-dependent capacitor charge state; re-run the transient from t=0"
+                    .to_string(),
+            );
+        }
 
         let target_lengths = [
             (
@@ -5353,6 +5601,24 @@ impl TransientCheckpoint {
                 "capacitor i_eq",
                 self.cap_i_eq.len(),
                 circuit.capacitors.i_eq.len(),
+            ),
+            (
+                "solution-dependent capacitor states",
+                self.solution_dependent_capacitor_states.len(),
+                if self.solution_dependent_capacitor_state_available {
+                    circuit.capacitors.value_expression_states.len()
+                } else {
+                    0
+                },
+            ),
+            (
+                "effective capacitances",
+                self.cap_effective_capacitances.len(),
+                if self.solution_dependent_capacitor_state_available {
+                    circuit.capacitors.effective_capacitances.len()
+                } else {
+                    0
+                },
             ),
             (
                 "inductor i_prev",
@@ -5393,6 +5659,19 @@ impl TransientCheckpoint {
                 "checkpoint {name} shape mismatch: captured {captured}, circuit has {target}"
             ));
         }
+        if self.solution_dependent_capacitor_state_available
+            && self
+                .solution_dependent_capacitor_states
+                .iter()
+                .zip(&circuit.capacitors.value_expressions)
+                .enumerate()
+                .any(|(_, (state, expression))| state.is_some() != expression.is_some())
+        {
+            return Err(
+                "checkpoint solution-dependent capacitor state presence does not match the target circuit"
+                    .to_string(),
+            );
+        }
         // All state families are validated before the first mutation. The
         // restore calls below repeat their local validation defensively, but
         // cannot fail after this point without a violated internal invariant.
@@ -5413,6 +5692,16 @@ impl TransientCheckpoint {
             .copy_from_slice(&self.cap_v_prev_prev_prev);
         circuit.capacitors.i_prev.copy_from_slice(&self.cap_i_prev);
         circuit.capacitors.i_eq.copy_from_slice(&self.cap_i_eq);
+        if self.solution_dependent_capacitor_state_available {
+            circuit
+                .capacitors
+                .value_expression_states
+                .clone_from(&self.solution_dependent_capacitor_states);
+            circuit
+                .capacitors
+                .effective_capacitances
+                .copy_from_slice(&self.cap_effective_capacitances);
+        }
         circuit.inductors.i_prev.copy_from_slice(&self.ind_i_prev);
         circuit
             .inductors
@@ -5876,6 +6165,17 @@ impl TransientCheckpoint {
             .saturating_add(self.cap_v_prev_prev_prev.len())
             .saturating_add(self.cap_i_prev.len())
             .saturating_add(self.cap_i_eq.len())
+            .saturating_add(self.cap_effective_capacitances.len())
+            .saturating_add(self.solution_dependent_capacitor_states.iter().fold(
+                0_usize,
+                |count, state| {
+                    count.saturating_add(state.as_ref().map_or(1, |state| {
+                        4_usize
+                            .saturating_add(state.dcdx_prev.len().saturating_mul(2))
+                            .saturating_add(state.dqdx_prev.len().saturating_mul(2))
+                    }))
+                },
+            ))
             .saturating_add(self.ind_i_prev.len())
             .saturating_add(self.ind_i_prev_prev.len())
             .saturating_add(self.ind_i_prev_prev_prev.len())
@@ -6150,6 +6450,19 @@ impl TransientCheckpoint {
                 &self.cap_i_prev,
                 &self.cap_i_eq,
             ],
+        );
+        out.push_str(&format!(
+            "solution_dependent_capacitor_state_available {}\n",
+            u8::from(self.solution_dependent_capacitor_state_available)
+        ));
+        write_value_vector(
+            &mut out,
+            "cap_effective_capacitances",
+            &self.cap_effective_capacitances,
+        );
+        write_solution_dependent_capacitor_states(
+            &mut out,
+            &self.solution_dependent_capacitor_states,
         );
         out.push_str(&format!(
             "inductor_flux_history_available {}\n",
@@ -6965,6 +7278,48 @@ impl TransientCheckpoint {
             AcceptedIntegrationRuntime::UnavailableLegacy
         };
         let cap_cols = read_value_section(&mut lines, "capacitors", 5, budget)?;
+        let (
+            solution_dependent_capacitor_state_available,
+            cap_effective_capacitances,
+            solution_dependent_capacitor_states,
+        ) = if version >= SOLUTION_DEPENDENT_CAPACITOR_FORMAT_VERSION {
+            let availability_line = lines.next().ok_or_else(|| {
+                "missing solution-dependent capacitor state availability line".to_string()
+            })?;
+            let mut fields = availability_line.split_whitespace();
+            if fields.next() != Some("solution_dependent_capacitor_state_available") {
+                return Err(format!(
+                    "malformed solution-dependent capacitor state availability line: '{availability_line}'"
+                ));
+            }
+            let available = fields
+                .next()
+                .ok_or_else(|| {
+                    "solution-dependent capacitor state availability line is missing its boolean"
+                        .to_string()
+                })
+                .and_then(|field| {
+                    parse_checkpoint_bool(field, "solution-dependent capacitor state availability")
+                })?;
+            if let Some(extra) = fields.next() {
+                return Err(format!(
+                    "solution-dependent capacitor state availability line has extra field '{extra}'"
+                ));
+            }
+            let effective = read_value_vector(&mut lines, "cap_effective_capacitances", budget)?;
+            let states = read_solution_dependent_capacitor_states(
+                &mut lines,
+                if available {
+                    cap_cols.first().map_or(0, Vec::len)
+                } else {
+                    0
+                },
+                budget,
+            )?;
+            (available, effective, states)
+        } else {
+            (false, Vec::new(), Vec::new())
+        };
         let inductor_flux_history_available = if version >= 13 {
             let availability_line = lines
                 .next()
@@ -7263,6 +7618,9 @@ impl TransientCheckpoint {
             cap_v_prev_prev_prev: cap_iter.next().unwrap(),
             cap_i_prev: cap_iter.next().unwrap(),
             cap_i_eq: cap_iter.next().unwrap(),
+            solution_dependent_capacitor_state_available,
+            solution_dependent_capacitor_states,
+            cap_effective_capacitances,
             ind_i_prev: ind_iter.next().unwrap(),
             ind_i_prev_prev: ind_iter.next().unwrap(),
             ind_i_prev_prev_prev: ind_iter.next().unwrap(),
@@ -7939,6 +8297,18 @@ mod tests {
             cap_v_prev_prev_prev: vec![0.08, -0.18],
             cap_i_prev: vec![1e-3, -2e-3],
             cap_i_eq: vec![5e-4, -6e-4],
+            solution_dependent_capacitor_state_available: true,
+            solution_dependent_capacitor_states: vec![
+                Some(SolutionDependentCapacitorState {
+                    c_prev: 2.5e-12,
+                    q_prev: 2.5e-13,
+                    q_prev_prev: 2.25e-13,
+                    dcdx_prev: vec![(0, 1.0e-13), (2, -2.0e-13)],
+                    dqdx_prev: vec![(0, 1.0e-14), (2, -2.0e-14)],
+                }),
+                None,
+            ],
+            cap_effective_capacitances: vec![2.5e-12, 1.0e-9],
             ind_i_prev: vec![7e-3],
             ind_i_prev_prev: vec![6.5e-3],
             ind_i_prev_prev_prev: vec![6.25e-3],
@@ -8101,6 +8471,55 @@ mod tests {
                 continue;
             }
             if version < 13 && line.starts_with("inductor_flux_history_available ") {
+                continue;
+            }
+            if version < SOLUTION_DEPENDENT_CAPACITOR_FORMAT_VERSION
+                && line.starts_with("solution_dependent_capacitor_state_available ")
+            {
+                continue;
+            }
+            if version < SOLUTION_DEPENDENT_CAPACITOR_FORMAT_VERSION
+                && line.starts_with("cap_effective_capacitances ")
+            {
+                let count = line
+                    .split_whitespace()
+                    .nth(1)
+                    .expect("effective capacitor value count")
+                    .parse::<usize>()
+                    .expect("numeric effective capacitor value count");
+                for _ in 0..count {
+                    lines.next().expect("complete effective capacitor values");
+                }
+                continue;
+            }
+            if version < SOLUTION_DEPENDENT_CAPACITOR_FORMAT_VERSION
+                && line.starts_with("solution_dependent_capacitor_states ")
+            {
+                let count = line
+                    .split_whitespace()
+                    .nth(1)
+                    .expect("solution-dependent capacitor state count")
+                    .parse::<usize>()
+                    .expect("numeric solution-dependent capacitor state count");
+                for _ in 0..count {
+                    let state = lines
+                        .next()
+                        .expect("complete solution-dependent capacitor state rows");
+                    let fields = state.split_whitespace().collect::<Vec<_>>();
+                    if fields.get(1) == Some(&"1") {
+                        let dcdx_count = fields[5]
+                            .parse::<usize>()
+                            .expect("numeric dC/dx history count");
+                        let dqdx_count = fields[6]
+                            .parse::<usize>()
+                            .expect("numeric dQ/dx history count");
+                        for _ in 0..dcdx_count.saturating_add(dqdx_count) {
+                            lines
+                                .next()
+                                .expect("complete solution-dependent capacitor partials");
+                        }
+                    }
+                }
                 continue;
             }
             if version < 13 && line.starts_with("inductors ") {
@@ -10547,6 +10966,8 @@ mod tests {
         circuit.capacitors.v_prev_prev_prev = vec![71.0, 72.0];
         circuit.capacitors.i_prev = vec![61.0, 62.0];
         circuit.capacitors.i_eq = vec![51.0, 52.0];
+        circuit.capacitors.value_expression_states = vec![None, None];
+        circuit.capacitors.effective_capacitances = vec![41.0, 42.0];
         circuit.inductors.i_prev = vec![41.0];
         circuit.inductors.i_prev_prev = vec![31.0];
         circuit.inductors.i_prev_prev_prev = vec![26.0];
@@ -10557,6 +10978,8 @@ mod tests {
             circuit.capacitors.v_prev_prev_prev.clone(),
             circuit.capacitors.i_prev.clone(),
             circuit.capacitors.i_eq.clone(),
+            circuit.capacitors.value_expression_states.clone(),
+            circuit.capacitors.effective_capacitances.clone(),
             circuit.inductors.i_prev.clone(),
             circuit.inductors.i_prev_prev.clone(),
             circuit.inductors.i_prev_prev_prev.clone(),
@@ -10575,6 +10998,8 @@ mod tests {
                 circuit.capacitors.v_prev_prev_prev,
                 circuit.capacitors.i_prev,
                 circuit.capacitors.i_eq,
+                circuit.capacitors.value_expression_states,
+                circuit.capacitors.effective_capacitances,
                 circuit.inductors.i_prev,
                 circuit.inductors.i_prev_prev,
                 circuit.inductors.i_prev_prev_prev,
