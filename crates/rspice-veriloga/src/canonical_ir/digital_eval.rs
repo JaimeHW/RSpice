@@ -67,7 +67,7 @@ use super::digital::{
     DigitalSensitivityTerm, DigitalSignal, DigitalWriteSelect, DigitalWriteTarget,
 };
 use super::digital_value::{self, FourStateValue, truth};
-use super::ids::{BlockId, DigitalProcessId, DigitalSignalId, ValueId};
+use super::ids::{BlockId, DigitalAnalogProbeId, DigitalProcessId, DigitalSignalId, ValueId};
 use crate::four_state::FourStateBit;
 
 // ============================================================================
@@ -141,6 +141,27 @@ pub trait DigitalEnvironment {
     /// which at compile time. A union return would make every four-state
     /// consumer unwrap a case the compiler already ruled out.
     fn read_real_signal(&self, signal: DigitalSignalId) -> Option<f64>;
+
+    /// The continuous-domain potential this probe names, right now.
+    ///
+    /// Verilog-AMS LRM 2.4 section 7.3.3 makes the read legal; section 7.3.6.3
+    /// says which value it is — "the analog value calculated for the time
+    /// corresponding to a real promotion of the digital time at which the
+    /// expression is evaluated". Choosing that value is the environment's
+    /// whole job here, because only the environment knows what the analog
+    /// solver has settled: the interpreter has no clock, no solution vector,
+    /// and no way to interpolate one.
+    ///
+    /// `None` is a probe the environment was not built for, and the
+    /// interpreter refuses rather than reading zero volts — a missing node is
+    /// not a grounded one.
+    ///
+    /// A default implementation returning `None` is deliberately *not*
+    /// provided. An environment that silently answered "no such probe" for
+    /// every probe would turn a wiring mistake into a refusal at simulation
+    /// time on a design that compiled, which is exactly the shape of failure
+    /// the plan's probe table exists to make impossible.
+    fn read_analog_potential(&self, probe: DigitalAnalogProbeId) -> Option<f64>;
 
     /// Accept one driver's contribution to a real net.
     ///
@@ -374,6 +395,15 @@ pub enum DigitalEvalError {
     UndeclaredSignal(DigitalSignalId),
     /// The environment has no value for a declared signal.
     SignalUnavailable(DigitalSignalId),
+    /// The plan does not declare an analog probe a node names.
+    UndeclaredAnalogProbe(DigitalAnalogProbeId),
+    /// The environment has no analog solution for a declared probe.
+    ///
+    /// Refused rather than read as zero volts, for the reason
+    /// [`Self::SignalUnavailable`] is: an unbound net is not a grounded one,
+    /// and a process that computed against a fabricated 0 V would produce a
+    /// plausible waveform for a circuit nobody described.
+    AnalogProbeUnavailable(DigitalAnalogProbeId),
     /// A block ended with [`CfgTerminator::Unset`].
     UnterminatedBlock(BlockId),
     /// A block's entry arguments do not match its parameter list.
@@ -451,6 +481,16 @@ impl std::fmt::Display for DigitalEvalError {
                 f,
                 "the environment has no value for signal {}",
                 usize::from(*signal)
+            ),
+            Self::UndeclaredAnalogProbe(probe) => write!(
+                f,
+                "analog probe {} is not declared by this digital plan",
+                usize::from(*probe)
+            ),
+            Self::AnalogProbeUnavailable(probe) => write!(
+                f,
+                "the environment has no analog solution for probe {}",
+                usize::from(*probe)
             ),
             Self::UnterminatedBlock(block) => {
                 write!(f, "block {} has no terminator", usize::from(*block))
@@ -1062,6 +1102,25 @@ impl<'a, E: DigitalEnvironment + ?Sized> Interpreter<'a, E> {
                     .environment
                     .read_real_signal(id)
                     .ok_or(DigitalEvalError::SignalUnavailable(id))?;
+                Ok(DigitalScalar::Real(value))
+            }
+            // Verilog-AMS LRM 2.4 section 7.3.3's probe of a continuous net
+            // from a discrete context. Asked of the plan first, for the reason
+            // a signal read is: a probe the plan does not declare reports as
+            // that rather than as an environment miss.
+            //
+            // Which value the environment hands back is section 7.3.6.3's
+            // question, and it is deliberately not asked here — the
+            // interpreter has no clock to compare the two domains' against.
+            CfgValueKind::DigitalAnalogPotential { probe } => {
+                let id = *probe;
+                if self.plan.analog_probe(id).is_none() {
+                    return Err(DigitalEvalError::UndeclaredAnalogProbe(id));
+                }
+                let value = self
+                    .environment
+                    .read_analog_potential(id)
+                    .ok_or(DigitalEvalError::AnalogProbeUnavailable(id))?;
                 Ok(DigitalScalar::Real(value))
             }
             CfgValueKind::DigitalRealArithmetic { op, left, right } => {

@@ -198,6 +198,24 @@ impl DacBridge {
     }
 }
 
+/// One continuous-net probe of Verilog-AMS LRM 2.4 section 7.3.3, wired to the
+/// circuit.
+///
+/// `positive` and `negative` are circuit-node ids and `0` is ground, exactly as
+/// they are on a bridge — and for the same reason: the module's two halves
+/// name the same node, so they had better name it the same way.
+///
+/// The plan names the probe's nets by the author's own identifiers, because the
+/// analog levels and the discrete plan are lowered by two passes that share no
+/// numbering. Resolving those names to circuit nodes is this table, built once
+/// when the module is wired and never touched again — which is why it lives
+/// beside the bridge declarations rather than in the rollback image.
+#[derive(Clone)]
+struct AnalogProbeWiring {
+    positive: usize,
+    negative: usize,
+}
+
 /// The bridge declarations, fixed once the module is wired.
 ///
 /// Separate from the moving state because a bridge is added before the first
@@ -221,6 +239,18 @@ struct MixedState {
     /// Interpolated analog time of each A/D bridge's most recent accepted
     /// transition, unquantized. Parallel to `bridges.adc`.
     accepted_adc_transition_times: Vec<Option<f64>>,
+    /// The continuous-net potential each of the plan's probes read at the last
+    /// accepted timepoint, parallel to `MixedSignalHost::analog_probes`.
+    ///
+    /// This is the whole of Verilog-AMS LRM 2.4 section 7.3.6.3's answer for a
+    /// process that wakes on its *own* schedule — a `#delay` or a digital
+    /// edge — rather than on an analog one: at the moment such a process runs
+    /// there is no Newton candidate at this timepoint yet, and the most recent
+    /// analog value that exists is the one the solver last committed. A
+    /// process woken by an A/D transition instead reads the converged
+    /// candidate, because `settle_analog_bridges` refreshes the bank from it
+    /// before publishing the transition that wakes the process.
+    accepted_probe_values: Vec<f64>,
     accepted_tick: u64,
     accepted_time: f64,
     started: bool,
@@ -257,6 +287,10 @@ struct ActiveTrial {
     /// timepoint's crossings are interpolated in — without the caller having
     /// to hand the accepted solution back a second time.
     sampled_adc_voltages: Vec<f64>,
+    /// Continuous-net probe values sampled during this trial, parallel to
+    /// `MixedSignalHost::analog_probes`, folded into the accepted state on
+    /// acceptance for the reason `sampled_adc_voltages` is.
+    probe_values: Vec<f64>,
 }
 
 /// Opaque, exact restart image for a settled mixed module.
@@ -286,6 +320,11 @@ pub struct MixedSignalHost {
     resolution: TimeResolution,
     state: MixedState,
     trial: Option<ActiveTrial>,
+    /// Every continuous-net probe the discrete half declares, resolved to
+    /// circuit nodes. Empty for a module whose processes read no analog value,
+    /// which is what makes the whole cross-domain read path cost such a module
+    /// nothing.
+    analog_probes: Vec<AnalogProbeWiring>,
     max_circuit_node: usize,
     max_bridge_iterations: u32,
 }
@@ -389,9 +428,19 @@ impl MixedSignalHost {
                 detail: format!("transient initialization failed: {error}"),
             })?;
 
+        let analog_probes = wire_analog_probes(canonical_ir, &analog)?;
+
         let resolution = TimeResolution::new(TIME_UNIT_EXPONENT).map_err(DigitalRunError::from)?;
         let max_bridge_iterations = scheduler_limits.max_delta_cycles_per_tick.max(1);
         let mut digital = DigitalHost::new(&canonical_ir.digital, resolution, scheduler_limits);
+        // Before `start`, because `start` places every process's first
+        // activation at tick zero and an `initial` block that probes a
+        // continuous net runs there. Nothing has been solved yet, so what it
+        // reads is the zero vector — which is not a substitute for a solution,
+        // it *is* the solution state of an unsolved matrix, and the same thing
+        // a node voltage read before the first solve would give.
+        let initial_probe_values = vec![0.0; analog_probes.len()];
+        digital.sample_analog_potentials(&initial_probe_values);
         digital.start()?;
         let source_digest = canonical_ir.metadata.source_digest.to_string();
         Ok(Self {
@@ -404,14 +453,33 @@ impl MixedSignalHost {
                 bridges: MixedCell::new(Bridges::default()),
                 accepted_adc_voltages: Vec::new(),
                 accepted_adc_transition_times: Vec::new(),
+                accepted_probe_values: initial_probe_values,
                 accepted_tick: 0,
                 accepted_time: 0.0,
                 started: false,
             },
             trial: None,
+            analog_probes,
             max_circuit_node: terminal_nodes.iter().copied().max().unwrap_or(0),
             max_bridge_iterations,
         })
+    }
+
+    /// Every continuous-net probe's differential potential, out of one circuit
+    /// solution.
+    ///
+    /// The same arithmetic an A/D bridge samples with, through the same
+    /// `node_voltage` — a probe and a bridge that name one node must agree
+    /// about its voltage, and the way to guarantee that is for there to be one
+    /// function that answers.
+    fn sample_analog_probes(&self, circuit_voltages: &[f64]) -> Vec<f64> {
+        self.analog_probes
+            .iter()
+            .map(|probe| {
+                node_voltage(circuit_voltages, probe.positive)
+                    - node_voltage(circuit_voltages, probe.negative)
+            })
+            .collect()
     }
 
     /// The deck's name for this instance.
@@ -679,7 +747,18 @@ impl MixedSignalHost {
                 .next_tick()
                 .is_some_and(|next| next <= tick)
             {
-                self.state.digital.make_mut().advance_to(tick)?;
+                // The slot about to run may contain a process that probes a
+                // continuous net. Nothing has been solved at this timepoint
+                // yet, so what it reads is the last accepted analog solution —
+                // Verilog-AMS LRM 2.4 section 7.3.6.3's "analog value
+                // calculated for the time corresponding to a real promotion of
+                // the digital time", held from the last timepoint at or before
+                // this tick. Refreshed before `advance_to` rather than inside
+                // it, so every process in the slot sees one solution.
+                let probes = self.state.accepted_probe_values.clone();
+                let digital = self.state.digital.make_mut();
+                digital.sample_analog_potentials(&probes);
+                digital.advance_to(tick)?;
             }
             let analog = self.state.analog.make_mut();
             analog.try_set_analysis_type(2).map_err(analog_error)?;
@@ -701,6 +780,7 @@ impl MixedSignalHost {
         }
         let transition_times = self.state.accepted_adc_transition_times.clone();
         let sampled_adc_voltages = self.state.accepted_adc_voltages.clone();
+        let probe_values = self.state.accepted_probe_values.clone();
         self.trial = Some(ActiveTrial {
             rollback,
             tick,
@@ -711,6 +791,7 @@ impl MixedSignalHost {
             bridges_quiet: false,
             transition_times,
             sampled_adc_voltages,
+            probe_values,
         });
         Ok(())
     }
@@ -732,7 +813,14 @@ impl MixedSignalHost {
                 })?;
             parsed.push((signal, value));
         }
-        self.state.digital.make_mut().force_many(&parsed, tick)?;
+        let probes = self
+            .trial
+            .as_ref()
+            .map(|trial| trial.probe_values.clone())
+            .unwrap_or_default();
+        let digital = self.state.digital.make_mut();
+        digital.sample_analog_potentials(&probes);
+        digital.force_many(&parsed, tick)?;
         // A drive published into the slot can move a D/A input, so the
         // boundary is no longer known quiet.
         if let Some(trial) = self.trial.as_mut() {
@@ -869,11 +957,20 @@ impl MixedSignalHost {
             drives.push((bridge.signal, next));
             crossings.push((index, crossing));
         }
+        // Sampled from the same converged candidate the bridges were, and
+        // published into the store *before* the transitions that wake the
+        // processes reading it. That ordering is what makes the standard's own
+        // sampler exact: `always @(posedge clk) x = V(in);` wakes in the delta
+        // cycle this publish opens, and reads the analog solution the edge it
+        // woke on was itself detected in — Verilog-AMS LRM 2.4 section
+        // 7.3.6.3's "analog value calculated for the time corresponding to a
+        // real promotion of the digital time", with the two domains at one
+        // timepoint and nothing to interpolate between.
+        let probe_values = self.sample_analog_probes(circuit_voltages);
         if !drives.is_empty() {
-            self.state
-                .digital
-                .make_mut()
-                .force_many(&drives, publish_tick)?;
+            let digital = self.state.digital.make_mut();
+            digital.sample_analog_potentials(&probe_values);
+            digital.force_many(&drives, publish_tick)?;
             if let Some(trial) = self.trial.as_mut() {
                 for (index, crossing) in crossings {
                     trial.transition_times[index] = Some(crossing);
@@ -884,6 +981,7 @@ impl MixedSignalHost {
         if let Some(trial) = self.trial.as_mut() {
             trial.bridges_quiet = !changed;
             trial.sampled_adc_voltages = sampled;
+            trial.probe_values = probe_values;
         }
         Ok(changed)
     }
@@ -936,6 +1034,10 @@ impl MixedSignalHost {
         // what keeps the two from ever disagreeing about which solution was
         // kept.
         self.state.accepted_adc_voltages = trial.sampled_adc_voltages;
+        // And the probe bank the same settle sampled becomes what a process
+        // waking on its own schedule at a later tick reads, for the same
+        // reason: it is the analog solution this acceptance kept.
+        self.state.accepted_probe_values = trial.probe_values;
         Ok(())
     }
 
@@ -1112,6 +1214,73 @@ impl MixedSignalHost {
             })
             .collect()
     }
+}
+
+/// Resolve every continuous-net probe the discrete half declares to a pair of
+/// circuit nodes.
+///
+/// Verilog-AMS LRM 2.4 section 7.3.3 lets a process probe any continuous net of
+/// its module. What this host can *reach* is narrower, and the narrowing is the
+/// deck's rather than the standard's: a module terminal is attached to a
+/// circuit node the deck named, so its potential is an entry of the solution
+/// vector this host is handed on every Newton evaluation. A net declared
+/// `ground` is the reference, and reads zero for the same reason ground has no
+/// matrix row.
+///
+/// An internal analog net is refused by name. Its solver index is assigned
+/// after the module is built — `try_set_internal_node_indices` is the
+/// builder's, not this constructor's — so wiring one here would either capture
+/// a stale index or need a second wiring pass that runs later and could
+/// disagree with this one. A terminal is the shape every published connect
+/// module and every sampler in the standard's own examples probes, so the
+/// refusal names the gap rather than guessing across it.
+fn wire_analog_probes(
+    canonical_ir: &rspice_veriloga::canonical_ir::CanonicalIrArtifact,
+    analog: &VerilogADevice,
+) -> Result<Vec<AnalogProbeWiring>, MixedSignalError> {
+    let probes = &canonical_ir.digital.analog_probes;
+    if probes.is_empty() {
+        return Ok(Vec::new());
+    }
+    let terminals: Vec<&str> = analog
+        .terminal_names()
+        .iter()
+        .map(|name| name.as_str())
+        .collect();
+    let resolve = |net: &str| -> Result<usize, MixedSignalError> {
+        if canonical_ir
+            .hir
+            .ground_nodes
+            .iter()
+            .any(|ground| ground == net)
+        {
+            return Ok(0);
+        }
+        if let Some(terminal) = terminals.iter().position(|name| *name == net) {
+            return Ok(analog.node_for_terminal(terminal));
+        }
+        Err(MixedSignalError::InvalidBridge {
+            detail: format!(
+                "`{net}` is probed from a discrete-domain expression but is not a terminal of \
+                 module `{}`; Verilog-AMS LRM 2.4 section 7.3.3 allows a process to probe any \
+                 continuous net, and this boundary reaches only the ones the deck attached to a \
+                 circuit node",
+                canonical_ir.mir.module_name
+            ),
+        })
+    };
+    probes
+        .iter()
+        .map(|probe| {
+            Ok(AnalogProbeWiring {
+                positive: resolve(&probe.positive)?,
+                negative: match &probe.negative {
+                    Some(negative) => resolve(negative)?,
+                    None => 0,
+                },
+            })
+        })
+        .collect()
 }
 
 /// The matrix row a circuit-node id occupies, or `None` for ground.

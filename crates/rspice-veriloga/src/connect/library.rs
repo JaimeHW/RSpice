@@ -25,11 +25,17 @@
 //! revisited rather than forgotten:
 //!
 //! * an analog-sensing discrete process — `always @(above(V(a) - vhi))`, which
-//!   is how every published `a2d` is written — is refused three ways at once:
-//!   "call to `above` inside a discrete-domain expression is not supported
-//!   yet", "a branch access reads a continuous-domain signal and has no
-//!   meaning in a discrete-domain expression", and "sensitivity-list term
-//!   names no signal, so nothing can trigger it";
+//!   is how every published `a2d` is written — is refused for what it *waits
+//!   on*: "call to `above` inside a discrete-domain expression is not supported
+//!   yet", and "sensitivity-list term names no signal, so nothing can trigger
+//!   it". Reading `V(a)` from the process is no longer among the refusals —
+//!   Verilog-AMS LRM 2.4 section 7.3.3's probe of a continuous net from a
+//!   discrete context is compiled and executed, and
+//!   [`tests::a_connect_module_process_may_probe_its_continuous_port`] pins
+//!   that half. What is missing is section 7.3.5's other half, the
+//!   `event_expression` production that admits `analog_event_functions`:
+//!   nothing subscribes a process to an analog event yet, so an `a2d` can read
+//!   the analog side but cannot be *woken* by it;
 //! * a `d2a` written the other way — a discrete process setting a `real` that
 //!   an `analog` block contributes through `transition` — is refused because
 //!   "the continuous body and the discrete processes would both own the

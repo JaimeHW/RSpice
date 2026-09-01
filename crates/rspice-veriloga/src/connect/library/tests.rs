@@ -304,8 +304,17 @@ endmodule
     );
 }
 
-/// Every published `a2d` senses the analog side from a discrete process. This
-/// compiler refuses that, by name, three ways at once.
+/// Every published `a2d` senses the analog side from a discrete process. Half
+/// of what that needs now works, and the other half is what still holds the
+/// behavioural body back.
+///
+/// Reading `V(a)` from the process is Verilog-AMS LRM 2.4 section 7.3.3's
+/// probe and is accepted — see the mixed-signal tests in
+/// `digital_process_execution`. Waking on `above(V(a) - vhi)` is section
+/// 7.3.5's *event*, a different construct in a different position: the
+/// `event_expression` production admits `analog_event_functions`, and nothing
+/// here subscribes a process to one yet. So the refusal that remains is
+/// exactly one, and it names the event rather than the probe inside it.
 #[test]
 fn an_analog_sensing_discrete_process_is_refused_by_name() {
     let error = analysis_error(
@@ -327,12 +336,40 @@ endmodule
         "unexpected error: {error}"
     );
     assert!(
-        error.contains(
-            "a branch access reads a continuous-domain signal and has no meaning in a \
-             discrete-domain expression"
-        ),
-        "unexpected error: {error}"
+        !error.contains("has no meaning in a discrete-domain expression"),
+        "the probe inside the event argument is section 7.3.3's and is no longer refused: {error}"
     );
+}
+
+/// The probe on its own — section 7.3.3's read, without section 7.3.5's
+/// event — compiles inside a connect module's discrete half.
+///
+/// This is the half of an `a2d` body that now exists, pinned here rather than
+/// only in the front end's own tests because the library's decision to ship
+/// signatures rather than bodies rests on which half is missing.
+#[test]
+fn a_connect_module_process_may_probe_its_continuous_port() {
+    // Spelled `module`, for the reason [`as_plain_module`] gives: the analyzer
+    // walks modules and reads a connect module as a port signature only.
+    let file = parse(
+        "\
+module a2d_sampling(a, d);
+    input a;
+    output d;
+    electrical a;
+    logic d;
+    reg d;
+    wire tick;
+    parameter real vhi = 1.65;
+    always @(posedge tick)
+        d <= (V(a) > vhi);
+endmodule
+",
+    );
+    let mut analyzer = crate::semantic::SemanticAnalyzer::new();
+    analyzer
+        .analyze(&file)
+        .expect("a discrete process probing its continuous port analyzes");
 }
 
 /// A `d2a` written the other way — a discrete process setting a `real` that an

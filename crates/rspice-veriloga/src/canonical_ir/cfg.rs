@@ -47,6 +47,7 @@ use super::digital::{
     DigitalDriverId, DigitalSchedulingRegion, DigitalSensitivityTerm, DigitalWriteTarget,
 };
 use super::digital_value;
+use super::ids::DigitalAnalogProbeId;
 use super::{
     BlockId, BranchId, BranchUnknownId, ContributionId, DigitalLocalId, DigitalSignalId, ExprId,
     NodeId, ParamId, ShapeId, ValueId, VariableId,
@@ -408,6 +409,29 @@ pub enum CfgValueKind {
     DigitalRealSignalRead {
         signal: DigitalSignalId,
     },
+    /// A continuous-domain potential, read from inside a process function.
+    ///
+    /// Verilog-AMS LRM 2.4 section 7.3.3's probe, and the *only* direction the
+    /// section allows without qualification: section 7.3 permits reads from
+    /// either context and writes from neither but the value's own, so there is
+    /// no contributing twin of this node and there never will be.
+    ///
+    /// `is_digital`, and produces a [`CfgValueType::Real`], which is what makes
+    /// it compose with the rest of the discrete-domain real machinery — a
+    /// probe is an operand of [`Self::DigitalRealArithmetic`] and
+    /// [`Self::DigitalRealCompare`] exactly as a `wreal` read is. It is
+    /// deliberately *not* [`Self::NodePotential`] with a flag: that node is
+    /// the analog body's, is differentiated by the AD pass, and is scheduled
+    /// in the Newton class. This one is read by an interpreter that has no
+    /// derivatives and no Newton loop.
+    ///
+    /// A leaf in the same sense [`Self::DigitalSignalRead`] is, and not in the
+    /// `is_leaf_kind` sense, for the same reason: two probes on either side of
+    /// a `Wait` are two samples of a moving quantity and are meant to differ,
+    /// so the node stays pinned to its block.
+    DigitalAnalogPotential {
+        probe: DigitalAnalogProbeId,
+    },
     /// Arithmetic over two real values, inside a process function.
     ///
     /// Distinct from [`Self::Binary`], which is the analog body's arithmetic on
@@ -690,6 +714,7 @@ impl CfgValueKind {
             | Self::IntegerConstant(_)
             | Self::DigitalSignalRead { .. }
             | Self::DigitalRealSignalRead { .. }
+            | Self::DigitalAnalogPotential { .. }
             | Self::DigitalRealArithmetic { .. }
             | Self::DigitalRealCompare { .. }
             | Self::DigitalRealSelect { .. }

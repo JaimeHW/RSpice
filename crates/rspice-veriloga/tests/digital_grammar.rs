@@ -695,18 +695,70 @@ fn part_selects_resolve_and_are_bounds_checked() {
 }
 
 /// The two halves of the language share one expression grammar, so a
-/// continuous-domain form reaches a process's parser. It has no meaning there
-/// and stops by name.
+/// continuous-domain form reaches a process's parser. Most of them have no
+/// meaning there and stop by name.
+///
+/// A branch access is the exception and is tested separately below: Verilog-AMS
+/// LRM 2.4 section 7.3.3 makes probing a continuous net from a discrete context
+/// legal, and it is the one continuous-domain form a process is *supposed* to
+/// contain.
 #[test]
 fn continuous_domain_expressions_are_refused_inside_a_process() {
     let message = analyze_error(&digital_module(
         "    wire clk;\n\
          \x20   reg q;\n\
-         \x20   always @(posedge clk) q <= V(p, n);",
+         \x20   always @(posedge clk) q <= (ddt(V(p, n)) > 0.0);",
     ));
     assert!(
-        message.contains("branch access") && message.contains("discrete-domain expression"),
-        "expected a branch-access diagnostic, got {message:?}"
+        message.contains("call to `ddt` inside a discrete-domain expression"),
+        "expected an analog-operator diagnostic, got {message:?}"
+    );
+}
+
+/// Verilog-AMS LRM 2.4 section 7.3.3: "All continuous nets can be probed from
+/// a discrete context using access functions."
+///
+/// The clause's own example is `always @(posedge clk) out = V(in);`, so this is
+/// not a tolerated oddity — it is the construct that makes a module's two
+/// halves one design rather than two that happen to share a file. Section 7.3
+/// fixes the direction: reads cross, writes do not.
+#[test]
+fn a_process_may_probe_a_continuous_net() {
+    let analyzed = analyze(&digital_module(
+        "    wire clk;\n\
+         \x20   reg hi;\n\
+         \x20   always @(posedge clk) hi <= (V(p, n) > 0.5);",
+    ));
+    assert_eq!(only_module(&analyzed).digital.processes.len(), 1);
+}
+
+/// What section 7.3.3 permits and this compiler cannot serve, each named for
+/// the reason rather than for the clause — the clause allows all three.
+#[test]
+fn the_probe_forms_this_boundary_cannot_serve_are_refused_by_name() {
+    // A flow. There is no value between analog evaluations to sample: a branch
+    // flow is the analog body's own accumulated contribution, not an entry of
+    // the solution vector.
+    let message = analyze_error(&digital_module(
+        "    wire clk;\n\
+         \x20   reg hi;\n\
+         \x20   always @(posedge clk) hi <= (I(p, n) > 0.5);",
+    ));
+    assert!(
+        message.contains("`I` is a flow access")
+            && message.contains("no value between analog evaluations"),
+        "expected a flow-probe diagnostic, got {message:?}"
+    );
+
+    // A discrete net has no potential to probe at all.
+    let message = analyze_error(&digital_module(
+        "    wire clk;\n\
+         \x20   reg hi;\n\
+         \x20   always @(posedge clk) hi <= (V(clk) > 0.5);",
+    ));
+    assert!(
+        message.contains("which is a discrete-domain net and has no potential"),
+        "expected a discrete-net diagnostic, got {message:?}"
     );
 }
 

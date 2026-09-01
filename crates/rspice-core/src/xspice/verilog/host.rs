@@ -544,6 +544,22 @@ impl DigitalHost {
         self.settle(tick)
     }
 
+    /// Publish one converged analog solution's probe values into the store.
+    ///
+    /// Call this immediately before anything that can run a process, so that
+    /// every process activated by what follows reads the same analog
+    /// solution — Verilog-AMS LRM 2.4 section 7.3.6.3 fixes a probe's value by
+    /// the *time* the expression is evaluated, and a bank refreshed halfway
+    /// through a settle would give two processes in one slot two answers.
+    pub(crate) fn sample_analog_potentials(&mut self, values: &[f64]) {
+        self.store.sample_analog_potentials(values);
+    }
+
+    /// How many continuous-net probes this design declares.
+    pub(crate) fn analog_probe_count(&self) -> usize {
+        self.plan.analog_probes.len()
+    }
+
     /// Write a real net from outside the design and settle the consequences.
     pub(crate) fn force_real(
         &mut self,

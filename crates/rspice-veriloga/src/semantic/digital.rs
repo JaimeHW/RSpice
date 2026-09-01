@@ -1698,19 +1698,15 @@ impl SemanticAnalyzer {
                     }
                 }
             }
+            // Verilog-AMS LRM 2.4 section 7.3.3: "All continuous nets can be
+            // probed from a discrete context using access functions." This is
+            // the one continuous-domain form that belongs in a process, and
+            // `check_analog_probe` decides which of its spellings this
+            // compiler can serve.
+            Expression::BranchAccess(access) => self.check_analog_probe(access, index),
             // Continuous-domain-only forms. The parser accepts them because
             // one expression grammar serves both halves of the language; they
             // are meaningless in a process, so they stop here by name.
-            Expression::BranchAccess(access) => {
-                self.record_error_at(
-                    SemanticErrorKind::InvalidExpression(
-                        "a branch access reads a continuous-domain signal and has no meaning \
-                         in a discrete-domain expression"
-                            .to_string(),
-                    ),
-                    access.span(),
-                );
-            }
             Expression::AnalogOperator(operator) => {
                 self.record_error_at(
                     SemanticErrorKind::InvalidAnalogOperator(
@@ -1779,6 +1775,151 @@ impl SemanticAnalyzer {
                     self.check_digital_expression(argument, signals, index);
                 }
             }
+        }
+    }
+
+    /// Decide whether a probe of a continuous net can be served from a
+    /// discrete-domain expression.
+    ///
+    /// # What the standard allows
+    ///
+    /// Verilog-AMS LRM 2.4 section 7.3 opens the whole cross-domain question
+    /// with one sentence: "Read operations of nets and variables in both
+    /// domains are allowed from both contexts. Write operations of nets and
+    /// variables are only allowed from the context of their domain." Section
+    /// 7.3.3 spends the read half of that on probes — "All continuous nets can
+    /// be probed from a discrete context using access functions. All probes
+    /// which are legal in a continuous context of a module are also legal in
+    /// the discrete context of a module" — and its own example is the sampler
+    /// this exists for:
+    ///
+    /// ```verilog
+    /// always @(posedge clk)
+    ///     out = V(in);
+    /// ```
+    ///
+    /// So a probe in a process is not an error to be reported; the read half
+    /// of section 7.3 is the whole point of a mixed module. What is decided
+    /// here is which *spellings* of it this compiler can answer, and each
+    /// refusal names the reason rather than the clause, because the clause
+    /// permits all of them.
+    ///
+    /// # What is refused, and why each one is
+    ///
+    /// * **A flow probe** (`I(a, b)`, or any access function its discipline
+    ///   declares a flow). Section 7.3.3 makes it legal. A potential is an
+    ///   entry of the solution vector and can be read from wherever the analog
+    ///   solver last left one; a flow is not — it is the analog body's own
+    ///   accumulated contribution to a branch, produced by evaluating that
+    ///   body, and there is nothing to sample between evaluations. Reading a
+    ///   stale one would be a plausible number for a quantity nobody computed.
+    /// * **The named-branch form** (`V(<b>)`). It names an entry of the analog
+    ///   branch table, which the discrete plan does not carry — a probe names
+    ///   its nets, so the two halves need no shared numbering. The equivalent
+    ///   node form is what to write.
+    /// * **A net that is not continuous.** A discrete net has no potential to
+    ///   probe; it is read by naming it, which is what a process already does.
+    fn check_analog_probe(&mut self, access: &BranchAccess, index: &HashMap<SmolStr, usize>) {
+        let (function, positive, negative) = match access {
+            BranchAccess::Nodes {
+                access: function,
+                pos,
+                neg,
+                ..
+            } => (function, pos, neg.as_ref()),
+            BranchAccess::Branch {
+                access: function,
+                name,
+                span,
+            } => {
+                self.record_error_at(
+                    SemanticErrorKind::UnsupportedFeature(format!(
+                        "`{function}(<{name}>)` probes a declared branch from a discrete-domain \
+                         expression; Verilog-AMS LRM 2.4 section 7.3.3 allows it, but a \
+                         discrete-domain probe names its nets rather than the analog branch \
+                         table — write the equivalent node form"
+                    )),
+                    *span,
+                );
+                return;
+            }
+        };
+        if self.is_flow_access(function) {
+            self.record_error_at(
+                SemanticErrorKind::UnsupportedFeature(format!(
+                    "`{function}` is a flow access, and a flow has no value between analog \
+                     evaluations to sample from a discrete-domain expression; Verilog-AMS LRM \
+                     2.4 section 7.3.3 allows it, but only a potential probe is served here"
+                )),
+                access.span(),
+            );
+            return;
+        }
+        for net in std::iter::once(positive).chain(negative) {
+            self.check_probe_net(function, net, access.span(), index);
+        }
+    }
+
+    /// Refuse one operand of a discrete-domain probe that is not a continuous
+    /// net of this module.
+    fn check_probe_net(
+        &mut self,
+        function: &SmolStr,
+        net: &SmolStr,
+        span: Span,
+        index: &HashMap<SmolStr, usize>,
+    ) {
+        // A name the module declared in its discrete half is refused first and
+        // by that fact alone, without asking the discipline database. A `wire`
+        // written in a process's own half of the module is a discrete net
+        // whether or not discipline resolution ever gave it a discipline, and
+        // the author who wrote `V(clk)` needs to be told that `clk` is not a
+        // thing with a potential — not that it is undeclared.
+        if index.contains_key(net) {
+            self.record_error_at(
+                SemanticErrorKind::InvalidExpression(format!(
+                    "`{function}({net})` probes `{net}`, which is a discrete-domain net and has \
+                     no potential; a process reads one by naming it"
+                )),
+                span,
+            );
+            return;
+        }
+        // A net with no discipline of its own has not been resolved to a
+        // discrete one either, so it is read as continuous — the same default
+        // the analog half applies to an undeclared net.
+        let resolved = self.symbols.lookup(net).map(|symbol| {
+            let discrete = symbol.attrs.discipline.as_ref().is_some_and(|discipline| {
+                self.disciplines.get_discipline(discipline).is_some_and(
+                    |discipline| discipline.domain == crate::disciplines::Domain::Discrete,
+                )
+            });
+            (symbol.kind, discrete)
+        });
+        let Some((kind, discrete)) = resolved else {
+            self.record_error_at(
+                SemanticErrorKind::UndeclaredSymbol { name: net.clone() },
+                span,
+            );
+            return;
+        };
+        if !matches!(kind, SymbolKind::Port | SymbolKind::Node) {
+            self.record_error_at(
+                SemanticErrorKind::InvalidExpression(format!(
+                    "`{function}({net})` probes `{net}`, which is not a net"
+                )),
+                span,
+            );
+            return;
+        }
+        if discrete {
+            self.record_error_at(
+                SemanticErrorKind::InvalidExpression(format!(
+                    "`{function}({net})` probes `{net}`, which is a discrete-domain net and has \
+                     no potential; a process reads one by naming it"
+                )),
+                span,
+            );
         }
     }
 

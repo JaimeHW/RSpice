@@ -22,7 +22,7 @@ use rspice_veriloga::canonical_ir::digital_eval::{
     resume, start,
 };
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
-use rspice_veriloga::canonical_ir::ids::DigitalSignalId;
+use rspice_veriloga::canonical_ir::ids::{DigitalAnalogProbeId, DigitalSignalId};
 use rspice_veriloga::four_state::FourStateBit;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::collections::BTreeMap;
@@ -74,6 +74,14 @@ struct Store {
     driven: BTreeMap<DigitalDriverId, DigitalDrive>,
     /// The same, for a real net's drivers.
     driven_reals: BTreeMap<DigitalDriverId, DigitalRealDrive>,
+    /// The continuous-domain potential each of the plan's probes reads
+    /// (Verilog-AMS LRM 2.4 section 7.3.3), in probe id order.
+    ///
+    /// `None` until a test samples one in, so that a fixture which forgets to
+    /// supply an analog solution is refused by the interpreter rather than
+    /// passing against a fabricated zero — the same discipline the real store
+    /// applies.
+    analog: Vec<Option<f64>>,
 }
 
 impl DigitalEnvironment for Store {
@@ -103,6 +111,10 @@ impl DigitalEnvironment for Store {
 
     fn drive_real_signal(&mut self, drive: DigitalRealDrive) {
         self.driven_reals.insert(drive.driver, drive);
+    }
+
+    fn read_analog_potential(&self, probe: DigitalAnalogProbeId) -> Option<f64> {
+        self.analog.get(usize::from(probe)).copied().flatten()
     }
 }
 
@@ -143,6 +155,7 @@ impl Harness {
         // `z`, and that is stated as the *net's* initial value rather than as
         // an absence of drivers.
         let reals = vec![0.0; plan.signals.len()];
+        let analog = vec![None; plan.analog_probes.len()];
         Self {
             plan,
             store: Store {
@@ -151,8 +164,26 @@ impl Harness {
                 deferred: Vec::new(),
                 driven: BTreeMap::new(),
                 driven_reals: BTreeMap::new(),
+                analog,
             },
         }
+    }
+
+    /// The id of the probe a spelling names, as
+    /// [`DigitalAnalogProbe::spelling`] renders it.
+    fn probe(&self, spelling: &str) -> DigitalAnalogProbeId {
+        self.plan
+            .analog_probes
+            .iter()
+            .find(|probe| probe.spelling() == spelling)
+            .unwrap_or_else(|| panic!("no analog probe spelled {spelling}"))
+            .id
+    }
+
+    /// Publish one analog solution's value for a probe.
+    fn set_analog(&mut self, spelling: &str, value: f64) {
+        let id = self.probe(spelling);
+        self.store.analog[usize::from(id)] = Some(value);
     }
 
     fn signal(&self, name: &str) -> DigitalSignalId {
@@ -2916,6 +2947,7 @@ fn bitstoreal_refuses_an_unknown_bit() {
         deferred: Vec::new(),
         driven: BTreeMap::new(),
         driven_reals: BTreeMap::new(),
+        analog: vec![None; plan.analog_probes.len()],
     };
     let clk = plan
         .signals
@@ -2969,6 +3001,7 @@ impl Design {
             .collect();
         let waits = vec![None; plan.processes.len()];
         let reals = vec![0.0; plan.signals.len()];
+        let analog = vec![None; plan.analog_probes.len()];
         Self {
             plan,
             store: Store {
@@ -2977,6 +3010,7 @@ impl Design {
                 deferred: Vec::new(),
                 driven: BTreeMap::new(),
                 driven_reals: BTreeMap::new(),
+                analog,
             },
             waits,
         }
@@ -3434,5 +3468,105 @@ fn a_child_output_real_port_drives_a_parent_real_net() {
         design.get_real("sink"),
         4.5,
         "and the driver carried it to the parent's net"
+    );
+}
+
+// ===========================================================================
+// Cross-domain reads: Verilog-AMS LRM 2.4 section 7.3
+// ===========================================================================
+
+/// Section 7.3.3, and its own worked example: "All continuous nets can be
+/// probed from a discrete context using access functions." The clause's
+/// `always @(posedge clk) out = V(in);` is the shape below, and the point of
+/// running it is that the probe is *executed* — it reaches the environment,
+/// which is the only thing that knows what the analog solver has settled.
+///
+/// Section 7.3's opening paragraph is what makes the direction one-way: "Read
+/// operations of nets and variables in both domains are allowed from both
+/// contexts. Write operations of nets and variables are only allowed from the
+/// context of their domain." So there is a probe and no contribution, here or
+/// anywhere in a process.
+#[test]
+fn a_process_samples_a_continuous_net_when_it_wakes() {
+    let mut harness = Harness::new(
+        "    wire clk;\n\
+         \x20   reg hi;\n\
+         \x20   always @(posedge clk) hi <= (V(p, n) > 0.5);",
+    );
+
+    assert_eq!(
+        harness
+            .plan
+            .analog_probes
+            .iter()
+            .map(|probe| probe.spelling())
+            .collect::<Vec<_>>(),
+        vec!["V(p, n)".to_string()],
+        "the probe is registered on the plan, by the author's own net names"
+    );
+
+    harness.set("clk", "0");
+    harness.set_analog("V(p, n)", 0.25);
+    let DigitalProcessOutcome::Suspended(suspension) = harness.start(0) else {
+        panic!("the process must suspend on its event control");
+    };
+    let state = suspension.resume_state().clone();
+
+    // Below the threshold at the first edge.
+    harness.set("clk", "1");
+    let outcome = harness.resume(0, &state);
+    harness.flush_nonblocking();
+    assert_eq!(harness.get("hi"), "0", "0.25 V is not above 0.5 V");
+    let DigitalProcessOutcome::Suspended(suspension) = outcome else {
+        panic!("the process must suspend again");
+    };
+    let state = suspension.resume_state().clone();
+
+    // The probe is a leaf pinned to its block, so the second edge reads the
+    // solution that exists *then* rather than the one the first edge read.
+    // That is the whole reason it is not common-subexpressioned.
+    harness.set("clk", "0");
+    harness.set_analog("V(p, n)", 0.75);
+    harness.set("clk", "1");
+    harness.resume(0, &state);
+    harness.flush_nonblocking();
+    assert_eq!(
+        harness.get("hi"),
+        "1",
+        "the second sample is the second solution, not the first"
+    );
+}
+
+/// A probe the environment has no analog solution for is refused, not read as
+/// zero volts.
+///
+/// The distinction matters because an unbound net and a grounded one are
+/// different circuits: a process that computed against a fabricated 0 V would
+/// produce a plausible waveform for a design nobody described, which is the
+/// same failure `$bitstoreal` on an `x` refuses rather than guessing at.
+#[test]
+fn a_probe_with_no_analog_solution_is_refused_by_name() {
+    let mut harness = Harness::new(
+        "    wire clk;\n\
+         \x20   reg hi;\n\
+         \x20   always @(posedge clk) hi <= (V(p, n) > 0.5);",
+    );
+    harness.set("clk", "0");
+    let DigitalProcessOutcome::Suspended(suspension) = harness.start(0) else {
+        panic!("the process must suspend on its event control");
+    };
+    let state = suspension.resume_state().clone();
+    harness.set("clk", "1");
+
+    let error = resume(
+        &harness.plan,
+        &harness.plan.processes[0],
+        &state,
+        &mut harness.store,
+    )
+    .expect_err("an unsampled probe must refuse");
+    assert!(
+        matches!(error, DigitalEvalError::AnalogProbeUnavailable(_)),
+        "unexpected error: {error}"
     );
 }

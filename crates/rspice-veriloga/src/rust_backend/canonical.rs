@@ -499,6 +499,9 @@ fn kernel_region_metrics(
             CfgValueKind::DigitalRealSignalRead { signal } => {
                 write!(out, "digital-real-read:{signal}")
             }
+            CfgValueKind::DigitalAnalogPotential { probe } => {
+                write!(out, "digital-analog-potential:{probe}")
+            }
             CfgValueKind::DigitalRealArithmetic { op, .. } => {
                 write!(out, "digital-real-arithmetic:{op:?}")
             }

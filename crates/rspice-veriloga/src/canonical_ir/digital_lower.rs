@@ -126,20 +126,22 @@
 use super::cfg::{CfgTerminator, CfgValueKind, CfgValueType, CfgVariable, DigitalWait, SsaBuilder};
 use super::diagnostic::{CompilerPhase, IrDiagnostic, SourceSpanRef};
 use super::digital::{
-    CanonicalDigitalPlan, CfgDigitalProcess, DigitalDriver, DigitalDriverId, DigitalEdge,
-    DigitalProcessKind, DigitalRealResolution, DigitalSchedulingRegion, DigitalSensitivityOrigin,
-    DigitalSensitivityTerm, DigitalSignal, DigitalSignalKind, DigitalStaticSensitivity,
-    DigitalWriteSelect, DigitalWriteTarget,
+    CanonicalDigitalPlan, CfgDigitalProcess, DigitalAnalogProbe, DigitalDriver, DigitalDriverId,
+    DigitalEdge, DigitalProcessKind, DigitalRealResolution, DigitalSchedulingRegion,
+    DigitalSensitivityOrigin, DigitalSensitivityTerm, DigitalSignal, DigitalSignalKind,
+    DigitalStaticSensitivity, DigitalWriteSelect, DigitalWriteTarget,
 };
 use super::digital_value::{
     ArithmeticOp, BitwiseOp, DigitalCaseMatch, FourStateValue, LogicalOp, RealArithmeticOp,
     RealCompareOp, RelationalOp, ShiftOp,
 };
-use super::ids::{BlockId, DigitalLocalId, DigitalProcessId, DigitalSignalId, ValueId};
+use super::ids::{
+    BlockId, DigitalAnalogProbeId, DigitalLocalId, DigitalProcessId, DigitalSignalId, ValueId,
+};
 use crate::ast::DigitalProcessKind as AstKind;
 use crate::ast::{
-    ArrayLiteralElement, BinaryOp, DigitalAssign, DigitalCase, DigitalLValue, DigitalStatement,
-    EdgeKind, Expression, ReductionOp, TimingControl, UnaryOp, WrealResolution,
+    ArrayLiteralElement, BinaryOp, BranchAccess, DigitalAssign, DigitalCase, DigitalLValue,
+    DigitalStatement, EdgeKind, Expression, ReductionOp, TimingControl, UnaryOp, WrealResolution,
 };
 use crate::four_state::FourStateBit;
 use crate::semantic::{
@@ -270,9 +272,21 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
 
     let mut processes = Vec::new();
     let mut drivers = Vec::new();
+    // One probe table for the whole plan, in first-appearance order over the
+    // same fixed traversal the process and driver numbering follows, so a
+    // probe keeps its id across a recompilation for the reason a driver keeps
+    // its index.
+    let mut probes = Vec::new();
     for process in &digital.processes {
         let id = DigitalProcessId::from(usize::try_from(process.id.0).unwrap_or(usize::MAX));
-        match lower_process(process, id, &signals, &module_scope, &digital.constants) {
+        match lower_process(
+            process,
+            id,
+            &signals,
+            &module_scope,
+            &digital.constants,
+            &mut probes,
+        ) {
             Ok(lowered) => processes.push(lowered),
             Err(mut errors) => diagnostics.append(&mut errors),
         }
@@ -285,6 +299,7 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
             &digital.constants,
             allocate(),
             &mut drivers,
+            &mut probes,
         ) {
             Ok(lowered) => processes.push(lowered),
             Err(mut errors) => diagnostics.append(&mut errors),
@@ -292,7 +307,14 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
     }
     for (instance, scope) in digital.instances.iter().zip(&frame_scopes) {
         for process in &instance.processes {
-            match lower_process(process, allocate(), &signals, scope, &instance.constants) {
+            match lower_process(
+                process,
+                allocate(),
+                &signals,
+                scope,
+                &instance.constants,
+                &mut probes,
+            ) {
                 Ok(lowered) => processes.push(lowered),
                 Err(mut errors) => diagnostics.append(&mut errors),
             }
@@ -305,6 +327,7 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
                 &instance.constants,
                 allocate(),
                 &mut drivers,
+                &mut probes,
             ) {
                 Ok(lowered) => processes.push(lowered),
                 Err(mut errors) => diagnostics.append(&mut errors),
@@ -318,6 +341,7 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
                 &no_constants,
                 allocate(),
                 &mut drivers,
+                &mut probes,
             ) {
                 Ok(lowered) => processes.push(lowered),
                 Err(mut errors) => diagnostics.append(&mut errors),
@@ -334,6 +358,7 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
         signals,
         processes,
         drivers,
+        analog_probes: probes,
     })
 }
 
@@ -414,11 +439,13 @@ fn lower_continuous_assign(
     constants: &DigitalConstants,
     id: DigitalProcessId,
     drivers: &mut Vec<DigitalDriver>,
+    probes: &mut Vec<DigitalAnalogProbe>,
 ) -> Result<CfgDigitalProcess, Vec<IrDiagnostic>> {
     let mut lowerer = ProcessLowerer {
         signals,
         index,
         constants,
+        probes,
         builder: SsaBuilder::new(),
         diagnostics: Vec::new(),
         locals: Vec::new(),
@@ -566,11 +593,13 @@ fn lower_process(
     signals: &[DigitalSignal],
     index: &HashMap<&str, DigitalSignalId>,
     constants: &DigitalConstants,
+    probes: &mut Vec<DigitalAnalogProbe>,
 ) -> Result<CfgDigitalProcess, Vec<IrDiagnostic>> {
     let mut lowerer = ProcessLowerer {
         signals,
         index,
         constants,
+        probes,
         builder: SsaBuilder::new(),
         diagnostics: Vec::new(),
         locals: Vec::new(),
@@ -745,6 +774,14 @@ struct ProcessLowerer<'a> {
     /// is lowered against an empty table so a child's `WIDTH` can never be
     /// folded with a parent's.
     constants: &'a DigitalConstants,
+    /// The plan's continuous-net probe table, appended to as probes appear.
+    ///
+    /// Plan-wide rather than per-process, because it is what a host resolves
+    /// against and two processes probing one net should not make it resolve
+    /// the net twice. Threaded through by `&mut` rather than returned, because
+    /// a process is lowered in one pass and the table has to be shared with
+    /// the processes lowered before and after it.
+    probes: &'a mut Vec<DigitalAnalogProbe>,
     builder: SsaBuilder,
     diagnostics: Vec<IrDiagnostic>,
     /// Every variable declared in the process, by id.
@@ -1950,6 +1987,15 @@ impl ProcessLowerer<'_> {
             // classifying it by its operand would send it down the four-state
             // path it exists to leave.
             Expression::SystemFunction(function) => function.name == "$bitstoreal",
+            // A probe of a continuous net is a real, whichever net it names
+            // (Verilog-AMS LRM 2.4 section 7.3.3, and Table 7-1's converse —
+            // a continuous quantity crossing into the discrete domain arrives
+            // as the real it already is, because "the discrete domain can
+            // fully represent all continuous types", section 7.3.3). It is
+            // classified without looking at the operand for the same reason
+            // `$bitstoreal` is: it is a crossing, not a computation over what
+            // is on this side of it.
+            Expression::BranchAccess(_) => true,
             _ => false,
         }
     }
@@ -1977,6 +2023,68 @@ impl ProcessLowerer<'_> {
             .push_leaf(CfgValueType::Real, CfgValueKind::RealConstant(value))
     }
 
+    /// Lower a probe of a continuous net into a plan-level probe id.
+    ///
+    /// Verilog-AMS LRM 2.4 section 7.3.3. Which spellings are legal is the
+    /// analyzer's decision — `SemanticAnalyzer::check_analog_probe` refuses a
+    /// flow probe, a named-branch probe and a discrete net by name before
+    /// anything reaches here — so this only has to turn an accepted probe into
+    /// an id, and to fail closed if one it did not expect arrives anyway.
+    ///
+    /// Probes are deduplicated on the triple the host resolves against.
+    /// `V(a)` written in two processes is one entry, because two entries would
+    /// be one net the host had to look up twice and could conceivably resolve
+    /// two ways. The *node* is not deduplicated — each read is its own
+    /// `DigitalAnalogPotential` pinned to its own block, because two samples
+    /// of a moving quantity are meant to differ.
+    fn analog_probe(&mut self, block: BlockId, access: &BranchAccess) -> ValueId {
+        let (function, positive, negative) = match access {
+            BranchAccess::Nodes {
+                access: function,
+                pos,
+                neg,
+                ..
+            } => (function.clone(), pos.clone(), neg.clone()),
+            BranchAccess::Branch {
+                access: function,
+                name,
+                span,
+            } => {
+                self.error(
+                    format!(
+                        "`{function}(<{name}>)` probes a declared branch from a discrete-domain \
+                         expression, which names the analog branch table the discrete plan does \
+                         not carry"
+                    ),
+                    *span,
+                );
+                return self.real_constant(0.0);
+            }
+        };
+        let existing = self.probes.iter().position(|probe| {
+            probe.access == function && probe.positive == positive && probe.negative == negative
+        });
+        let id = match existing {
+            Some(index) => DigitalAnalogProbeId::from(index),
+            None => {
+                let id = DigitalAnalogProbeId::from(self.probes.len());
+                self.probes.push(DigitalAnalogProbe {
+                    id,
+                    access: function,
+                    positive,
+                    negative,
+                    span: SourceSpanRef::from(access.span()),
+                });
+                id
+            }
+        };
+        self.builder.push(
+            block,
+            CfgValueType::Real,
+            CfgValueKind::DigitalAnalogPotential { probe: id },
+        )
+    }
+
     /// Lower an expression that must produce a real.
     ///
     /// The whole real half of the expression grammar, and deliberately small:
@@ -1988,6 +2096,7 @@ impl ProcessLowerer<'_> {
             Expression::Number(number) if is_real_literal(&number.raw) => {
                 self.real_constant(number.value)
             }
+            Expression::BranchAccess(access) => self.analog_probe(block, access),
             Expression::Identifier(identifier) => {
                 if let Some(local) = self.lookup_local(&identifier.name) {
                     if self.local_is_real(local) {

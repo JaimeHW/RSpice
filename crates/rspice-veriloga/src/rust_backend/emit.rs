@@ -1767,6 +1767,7 @@ impl Emitter<'_> {
             | CfgValueKind::IntegerConstant(_)
             | CfgValueKind::DigitalSignalRead { .. }
             | CfgValueKind::DigitalRealSignalRead { .. }
+            | CfgValueKind::DigitalAnalogPotential { .. }
             | CfgValueKind::DigitalRealArithmetic { .. }
             | CfgValueKind::DigitalRealCompare { .. }
             | CfgValueKind::DigitalRealSelect { .. }

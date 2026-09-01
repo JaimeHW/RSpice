@@ -105,7 +105,7 @@
 
 use super::cfg::CfgFunction;
 use super::diagnostic::SourceSpanRef;
-use super::ids::{DigitalProcessId, DigitalSignalId};
+use super::ids::{DigitalAnalogProbeId, DigitalProcessId, DigitalSignalId};
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
@@ -288,6 +288,59 @@ fn is_four_state(kind: &DigitalSignalKind) -> bool {
     matches!(kind, DigitalSignalKind::FourState)
 }
 
+/// One continuous-domain potential the discrete-domain half reads.
+///
+/// Verilog-AMS LRM 2.4 section 7.3.3: "All continuous nets can be probed from
+/// a discrete context using access functions. All probes which are legal in a
+/// continuous context of a module are also legal in the discrete context of a
+/// module." Section 7.3's opening paragraph is what makes that a *read* and
+/// only a read — "Read operations of nets and variables in both domains are
+/// allowed from both contexts. Write operations of nets and variables are only
+/// allowed from the context of their domain" — so nothing here can be
+/// contributed to.
+///
+/// # Why the nets are named rather than numbered
+///
+/// The analog levels are lowered from the analyzed module by `hir`/`mir`,
+/// which allocate a [`NodeId`](super::ids::NodeId) per continuous net, and the
+/// discrete plan is lowered from the same module by `digital_lower`, which
+/// never sees that allocation. A probe carrying a `NodeId` would make one pass
+/// depend on the other's numbering; a probe carrying the author's own net name
+/// is resolvable by whichever side has the mapping — which is the host, the
+/// same way it already resolves a bridge's signal by name.
+///
+/// # What the reader owes
+///
+/// A value, at the time section 7.3.6.3 fixes: "the analog value calculated
+/// for the time corresponding to a real promotion of the digital time at which
+/// the expression is evaluated". The plan cannot enforce that; it can only
+/// make the probe a *leaf*, so that two reads on either side of a suspension
+/// are two calls and may differ, exactly as two reads of a signal are.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DigitalAnalogProbe {
+    pub id: DigitalAnalogProbeId,
+    /// The access function as written — `V` for an electrical potential, and
+    /// whichever name the net's discipline gives its potential otherwise.
+    /// Carried so a host can report the probe the way the author wrote it.
+    pub access: SmolStr,
+    /// The positive net's name, exactly as the author declared it.
+    pub positive: SmolStr,
+    /// The negative net's name. `None` is the single-ended form `V(a)`, whose
+    /// reference is the global ground rather than a second declared net.
+    pub negative: Option<SmolStr>,
+    pub span: SourceSpanRef,
+}
+
+impl DigitalAnalogProbe {
+    /// The probe as the author wrote it, for a diagnostic.
+    pub fn spelling(&self) -> String {
+        match &self.negative {
+            Some(negative) => format!("{}({}, {})", self.access, self.positive, negative),
+            None => format!("{}({})", self.access, self.positive),
+        }
+    }
+}
+
 /// Which bits of a signal an assignment drives.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DigitalWriteSelect {
@@ -436,11 +489,27 @@ pub struct CanonicalDigitalPlan {
     /// Every continuous driver in the module, in declaration order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub drivers: Vec<DigitalDriver>,
+    /// Every continuous-domain potential a process reads, in first-appearance
+    /// order (Verilog-AMS LRM 2.4 section 7.3.3).
+    ///
+    /// Empty for a design with no cross-domain read, which is every design
+    /// that existed before this table did, so an artifact serialized without
+    /// it decodes unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub analog_probes: Vec<DigitalAnalogProbe>,
 }
 
 impl CanonicalDigitalPlan {
     pub fn is_empty(&self) -> bool {
-        self.signals.is_empty() && self.processes.is_empty() && self.drivers.is_empty()
+        self.signals.is_empty()
+            && self.processes.is_empty()
+            && self.drivers.is_empty()
+            && self.analog_probes.is_empty()
+    }
+
+    /// The probe an id names.
+    pub fn analog_probe(&self, id: DigitalAnalogProbeId) -> Option<&DigitalAnalogProbe> {
+        self.analog_probes.get(usize::from(id))
     }
 
     /// Every driver of one net, in declaration order.

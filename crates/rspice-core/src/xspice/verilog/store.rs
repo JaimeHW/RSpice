@@ -87,7 +87,7 @@ use rspice_veriloga::canonical_ir::digital_eval::{
     DigitalDeferredUpdate, DigitalDrive, DigitalEnvironment, DigitalRealDrive,
 };
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
-use rspice_veriloga::canonical_ir::ids::DigitalSignalId;
+use rspice_veriloga::canonical_ir::ids::{DigitalAnalogProbeId, DigitalSignalId};
 use rspice_veriloga::four_state::FourStateBit;
 
 /// IEEE 1364-2005 table 4-1: the value one `wire` bit takes from two drivers.
@@ -299,6 +299,19 @@ pub(crate) struct DigitalSignalStore {
     deferred: Vec<DigitalDeferredUpdate>,
     /// Value changes since the host last drained, oldest first.
     transitions: Vec<SignalTransition>,
+    /// The continuous-domain potential each of the plan's probes reads
+    /// (Verilog-AMS LRM 2.4 section 7.3.3), in probe id order.
+    ///
+    /// `None` until an analog solution has been sampled into it, which is what
+    /// makes a design run without one refuse by name rather than compute
+    /// against a fabricated 0 V. Empty for every plan with no probe, which is
+    /// every plan a purely digital run produces — so the vector costs a design
+    /// without cross-domain reads nothing and cannot be written by one.
+    ///
+    /// Written only by [`Self::sample_analog_potentials`], which is the
+    /// mixed-signal host's; a process can only read it, which is section 7.3's
+    /// rule that writes stay in their own domain, enforced by the type.
+    analog_potentials: Vec<Option<f64>>,
 }
 
 impl DigitalSignalStore {
@@ -371,6 +384,34 @@ impl DigitalSignalStore {
             spans,
             deferred: Vec::new(),
             transitions: Vec::new(),
+            analog_potentials: vec![None; plan.analog_probes.len()],
+        }
+    }
+
+    /// Publish one converged analog solution's probe values into the store.
+    ///
+    /// The only writer of the continuous half, and the one place Verilog-AMS
+    /// LRM 2.4 section 7.3.6.3's timing question is answered: whatever the
+    /// caller samples here is what every process reads until the next call,
+    /// so the caller is choosing "the analog value calculated for the time
+    /// corresponding to a real promotion of the digital time".
+    ///
+    /// A slice of a different length than the plan declared probes is a caller
+    /// that built the store from one plan and the samples from another, so it
+    /// writes nothing rather than a prefix — a partially refreshed bank would
+    /// let a process read one net at this timepoint and another at the last.
+    pub(crate) fn sample_analog_potentials(&mut self, values: &[f64]) {
+        if values.len() != self.analog_potentials.len() {
+            debug_assert!(
+                false,
+                "analog probe sample has {} values for {} declared probes",
+                values.len(),
+                self.analog_potentials.len()
+            );
+            return;
+        }
+        for (slot, value) in self.analog_potentials.iter_mut().zip(values) {
+            *slot = Some(*value);
         }
     }
 
@@ -728,6 +769,18 @@ impl DigitalEnvironment for DigitalSignalStore {
 
     fn read_real_signal(&self, signal: DigitalSignalId) -> Option<f64> {
         self.reals.get(usize::from(signal)).copied()
+    }
+
+    fn read_analog_potential(&self, probe: DigitalAnalogProbeId) -> Option<f64> {
+        // Two different `None`s collapse to one on purpose: a probe the store
+        // was not built for, and a probe no solution has been sampled into
+        // yet. Both mean the same thing to a process — there is no analog
+        // value to read — and the interpreter's refusal names the probe, which
+        // is what tells the two apart in a diagnostic.
+        self.analog_potentials
+            .get(usize::from(probe))
+            .copied()
+            .flatten()
     }
 
     fn drive_real_signal(&mut self, drive: DigitalRealDrive) {
