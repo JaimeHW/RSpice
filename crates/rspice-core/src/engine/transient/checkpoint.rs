@@ -5664,8 +5664,7 @@ impl TransientCheckpoint {
                 .solution_dependent_capacitor_states
                 .iter()
                 .zip(&circuit.capacitors.value_expressions)
-                .enumerate()
-                .any(|(_, (state, expression))| state.is_some() != expression.is_some())
+                .any(|(state, expression)| state.is_some() != expression.is_some())
         {
             return Err(
                 "checkpoint solution-dependent capacitor state presence does not match the target circuit"

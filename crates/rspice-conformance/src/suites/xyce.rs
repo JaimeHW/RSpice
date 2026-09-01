@@ -2439,10 +2439,11 @@ const XYCE_ISSUE451_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 2] = [
 ];
 
 // BUG_1455 proves that SPICE model parameters separated by whitespace parse
-// identically to their `name=value` spellings. The Release wrapper executes
-// both MOS1 decks and applies a case-insensitive byte diff, with no numerical
-// gold. Bind its complete executable dependency set and add a closed-form
-// MOS/load-line check so shared parser or device failures cannot false-pass.
+// identically to their `name=value` spellings. The upstream Release wrapper
+// executes both MOS1 decks and applies a case-insensitive byte diff, with no
+// numerical gold. RSpice binds the complete executable dependency set and
+// applies a closed-form MOS/load-line check so shared parser or device failures
+// cannot false-pass.
 const XYCE_BUG1455_OWNER_CONTRACT: &str = "bug1455_model_equals_wrapper_owner";
 const XYCE_BUG1455_REFERENCE_CONTRACT: &str = "bug1455_model_whitespace_reference";
 const XYCE_BUG1455_OWNER_PATH: &str = "Netlists/Certification_Tests/BUG_1455/bug_1455.cir";

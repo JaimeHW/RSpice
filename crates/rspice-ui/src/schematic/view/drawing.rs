@@ -1018,7 +1018,7 @@ mod tests {
     /// never cost a device its glyph, and must never stretch one.
     #[test]
     fn every_catalog_device_with_matching_artwork_still_draws_it_undistorted() {
-        const ARTWORK_DEVICES: [&str; 23] = [
+        const ARTWORK_DEVICES: [&str; 25] = [
             "astate",
             "cmeter",
             "d_fdiv",
@@ -1031,6 +1031,7 @@ mod tests {
             "file_source",
             "hyst",
             "lmeter",
+            "pspice_d_stim",
             "pwl",
             "pwlts",
             "real_gain",
@@ -1041,6 +1042,7 @@ mod tests {
             "square",
             "table2d",
             "triangle",
+            "v_to_real",
             "xfer",
         ];
 
