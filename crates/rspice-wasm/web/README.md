@@ -38,9 +38,20 @@ after engine changes. The wasm-bindgen CLI version must match the
 - **Summarize** — `summarizeNetlist` element/analysis counts.
 - Every worker call uses browser-safe defaults (8 MiB netlists, 2,000 matrix
   unknowns, 200,000 analysis points, and 2,000,000 retained scalar values).
-  Direct API callers can pass a final `{resourceLimits: {...}}` options object.
+  Direct API callers and worker requests can pass a final options object with
+  `resourceLimits`, `timeoutMilliseconds`, and the documented `sharedInt32`
+  cancellation control.
 - Errors from the parser/engine surface in the console strip; worker replies
   retain structured resource, convergence, source, and output-symbol details.
+
+The worker reads execution options from `payload.options` on every `run`
+message. For cancellation during a synchronous solve, create an `Int32Array`
+over `SharedArrayBuffer` on the caller thread, include that view in
+`payload.options.cancellation`, and set its word with `Atomics.store` from the
+caller. A `cancel` message sent to this same worker cannot run while WebAssembly
+owns its event loop and is intentionally not advertised as cancellation. See
+the parent [`README.md`](../README.md#cancellation-and-deadlines) for the exact
+object, deployment-header, deadline, error, and reuse contract.
 
 ## Known gaps / next steps
 

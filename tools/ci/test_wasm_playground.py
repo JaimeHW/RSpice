@@ -43,6 +43,16 @@ class WasmPlaygroundWorkerTests(unittest.TestCase):
                 )
                 self.assertIn('case "ac":', worker)
                 self.assertIn("runAcAnalysis(payload.source, payload.frequencies)", worker)
+                self.assertIn("const options = payload.options", worker)
+                self.assertIn("summarizeNetlist(payload.source, options)", worker)
+                self.assertIn("runDcOperatingPoint(payload.source, options)", worker)
+                self.assertIn(
+                    "runAcAnalysis(payload.source, payload.frequencies, options)", worker
+                )
+                self.assertIn(
+                    "runTransientAnalysis(payload.source, payload.tstop, payload.hmax, options)",
+                    worker,
+                )
                 self.assertIn('postMessage({ type: "ready" })', worker)
                 self.assertRegex(worker, re.compile(r'postMessage\(\{\s*type: "result"', re.S))
                 self.assertRegex(worker, re.compile(r'postMessage\(\{\s*type: "error"', re.S))

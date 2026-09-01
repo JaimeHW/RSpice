@@ -54,6 +54,7 @@ async function ensureReady() {
 async function handleRequest(message) {
   const { id, operation, payload } = message;
   const start = performance.now();
+  const options = payload.options;
 
   try {
     await ensureReady();
@@ -61,16 +62,18 @@ async function handleRequest(message) {
     let result;
     switch (operation) {
       case "summary":
-        result = summarizeNetlist(payload.source);
+        result = summarizeNetlist(payload.source, options);
         break;
       case "op":
-        result = runDcOperatingPoint(payload.source);
+        result = runDcOperatingPoint(payload.source, options);
         break;
       case "ac":
-        result = runAcAnalysis(payload.source, payload.frequencies);
+        result = options === undefined
+          ? runAcAnalysis(payload.source, payload.frequencies)
+          : runAcAnalysis(payload.source, payload.frequencies, options);
         break;
       case "tran":
-        result = runTransientAnalysis(payload.source, payload.tstop, payload.hmax);
+        result = runTransientAnalysis(payload.source, payload.tstop, payload.hmax, options);
         break;
       default:
         throw new Error(`unknown engine operation '${operation}'`);

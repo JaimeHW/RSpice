@@ -62,6 +62,7 @@ The optional object is additive and existing calls need no changes:
 
 ```js
 const options = {
+  timeoutMilliseconds: 30_000,
   resourceLimits: {
     maxNetlistBytes: 2 * 1024 * 1024,
     maxAnalysisPoints: 50_000,
@@ -79,6 +80,62 @@ unknowns, analysis grids at 200,000 points, retained results at 2,000,000
 scalar values, shared caches at 64 MiB, and parallel workers at one because
 the browser build is single-threaded.
 
+### Cancellation and deadlines
+
+Every OP, AC, TRAN, and compressed-TRAN browser export calls the corresponding
+abort-aware `rspice-core` entrypoint. Parsing uses the core abort-aware parser
+as well. There are two supported controls:
+
+- `timeoutMilliseconds` is an integer from 0 through 86,400,000. It starts
+  after the options object is validated and before parser work. Zero requests
+  immediate cancellation. The worker's monotonic `performance.now()` clock
+  drives the deadline.
+- `cancellation` supports exactly the `sharedInt32` mechanism shown below. Its
+  `view` must be an `Int32Array` backed by `SharedArrayBuffer`; an ordinary
+  `ArrayBuffer`, a DOM `AbortSignal`, an unknown mechanism, an out-of-range
+  index, and unknown fields are rejected before parser or solver work.
+
+```js
+// Create this on the caller/main thread, then include `options` in the worker
+// run message. Structured cloning retains the same SharedArrayBuffer storage.
+const cancelBuffer = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT);
+const cancelView = new Int32Array(cancelBuffer);
+const options = {
+  timeoutMilliseconds: 30_000,
+  cancellation: {
+    mechanism: "sharedInt32",
+    view: cancelView,
+    index: 0, // optional; defaults to zero
+  },
+};
+
+// From the caller while the engine worker is synchronously inside WebAssembly:
+Atomics.store(cancelView, 0, 1);
+```
+
+The control word is caller-owned: `0` means continue and any nonzero value
+means cancel. Set it to zero before each new call and do not reuse the same word
+for concurrent calls. In browsers, `SharedArrayBuffer` requires the normal
+cross-origin-isolated deployment headers. The standalone Node contract uses
+the same object without special flags on supported Node releases.
+
+Cancellation is cooperative, not asynchronous exception injection. The core
+observes it at bounded parser chunks and natural numerical checkpoints (for
+example Newton/continuation, frequency, accepted-step, FFT, and compression
+boundaries). The exact wall-clock latency therefore depends on the cost of one
+uncancellable numerical kernel. A successful result is never returned after a
+poll observes cancellation; the export throws `RSpiceError` with
+`code: "aborted"`, `category: "cancellation"`, and `retryable: true`.
+Conversion of an already completed bounded result into JavaScript typed arrays
+is synchronous and is not an independently interruptible phase.
+
+A DOM `AbortSignal` cannot interrupt a synchronous WebAssembly call on the
+same worker event loop, so claiming support for it would be misleading. The
+binding rejects `mechanism: "abortSignal"` with
+`code: "unsupported_cancellation"`. If `SharedArrayBuffer` is unavailable,
+use `timeoutMilliseconds` for cooperative engine cancellation or terminate a
+dedicated worker for unconditional process-isolation cancellation.
+
 Thrown errors expose the cross-interface `code`, compatibility `kind`,
 `category`, conservative `retryable` policy, and `details`. Resource failures add
 `resource`, `requested`, and `limit`; convergence errors add `iterations`;
@@ -90,7 +147,11 @@ The same analysis operations are also exported as plain Rust functions
 `Result<T, String>`, since the crate
 builds as both `cdylib` and `rlib`. Their `*_detailed` variants return
 `WasmError`, and `*_with_options_detailed` variants accept the typed
-`WasmExecutionOptions` policy.
+`WasmExecutionOptions` policy. Rust embedders can use the additive
+`*_with_options_and_abort_detailed` variants to provide any core
+`AbortSignal`; the existing Rust APIs remain source-compatible and use
+`NoAbort`. The JavaScript shim composes its deadline and shared control into
+that explicit abort-aware path.
 
 ## Module layout
 
@@ -149,14 +210,17 @@ wasm threads.
 
 `cargo test -p rspice-wasm` runs native unit and integration tests for browser
 defaults, option decoding, fail-closed field handling, structured error
-contracts, and the analysis adapters. Transient tests compare the complete
+contracts, abort propagation across all four analog paths, and the analysis
+adapters. Transient tests compare the complete
 full and compressed analog inventories against `rspice-core`, exercise
 authored projection missingness and stable trace ordering, and run the real
 compressed solver path under Node. FFT tests compare every DTO field and
 source-order position with `rspice-core`, round-trip the serializable records,
 and ratchet the documented field inventory. Wasm32 tests additionally assert
 that time-domain, bin, and ranked-harmonic columns use JavaScript typed arrays
-and that optional fields are explicit `null`. CI also builds the real
+and that optional fields are explicit `null`. Node wasm-bindgen tests exercise
+pre-set shared control words, zero deadlines, unsupported mechanisms, and
+ordinary-buffer rejection through the actual JavaScript exports. CI also builds the real
 `wasm32-unknown-unknown` artifact. The static browser contract is guarded by
 `tools/ci/test_wasm_playground.py`, which verifies that the canonical
 playground routes engine calls through `engine-worker.js`, that AC controls are

@@ -5,7 +5,8 @@
 //! all numerical work to `rspice-core`.
 
 use rspice_core::{
-    Engine, Netlist, ResourceKind, ResourceLimitError, ResourceLimits, SimulationConfig,
+    AbortSignal, Engine, Netlist, NoAbort, ResourceKind, ResourceLimitError, ResourceLimits,
+    SimulationConfig,
 };
 use rspice_core::{
     engine::{
@@ -21,6 +22,7 @@ type WasmResult<T> = Result<T, String>;
 type DetailedWasmResult<T> = Result<T, Box<WasmError>>;
 
 const MEBIBYTE: usize = 1024 * 1024;
+const MAX_TIMEOUT_MILLISECONDS: u32 = 86_400_000;
 
 fn browser_resource_limits() -> ResourceLimits {
     let mut limits = ResourceLimits::default();
@@ -124,6 +126,108 @@ impl Default for WasmResourceLimits {
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct WasmExecutionOptions {
     pub resource_limits: WasmResourceLimits,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug)]
+struct ExecutionDeadline(Option<std::time::Instant>);
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug)]
+struct ExecutionDeadline(Option<f64>);
+
+impl ExecutionDeadline {
+    fn new(timeout_milliseconds: Option<u32>) -> DetailedWasmResult<Self> {
+        if let Some(timeout) = timeout_milliseconds
+            && timeout > MAX_TIMEOUT_MILLISECONDS
+        {
+            return Err(Box::new(WasmError::invalid_argument(format!(
+                "timeoutMilliseconds must not exceed {MAX_TIMEOUT_MILLISECONDS}, got {timeout}"
+            ))));
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Ok(Self(timeout_milliseconds.map(|timeout| {
+                std::time::Instant::now() + std::time::Duration::from_millis(u64::from(timeout))
+            })))
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let deadline = timeout_milliseconds
+                .map(|timeout| monotonic_now_milliseconds().map(|now| now + f64::from(timeout)))
+                .transpose()?;
+            Ok(Self(deadline))
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn expired(&self) -> bool {
+        self.0
+            .is_some_and(|deadline| std::time::Instant::now() >= deadline)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn expired(&self) -> bool {
+        self.0.is_some_and(|deadline| {
+            monotonic_now_milliseconds().map_or(true, |now| now >= deadline)
+        })
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn monotonic_now_milliseconds() -> DetailedWasmResult<f64> {
+    let global = js_sys::global();
+    let performance =
+        js_sys::Reflect::get(&global, &JsValue::from_str("performance")).map_err(|_| {
+            Box::new(WasmError::invalid_argument(
+                "timeoutMilliseconds requires a host performance clock".to_string(),
+            ))
+        })?;
+    let now = js_sys::Reflect::get(&performance, &JsValue::from_str("now"))
+        .ok()
+        .and_then(|value| value.dyn_into::<js_sys::Function>().ok())
+        .ok_or_else(|| {
+            Box::new(WasmError::invalid_argument(
+                "timeoutMilliseconds requires performance.now()".to_string(),
+            ))
+        })?;
+    let value = now
+        .call0(&performance)
+        .ok()
+        .and_then(|value| value.as_f64())
+        .filter(|value| value.is_finite())
+        .ok_or_else(|| {
+            Box::new(WasmError::invalid_argument(
+                "performance.now() did not return a finite timestamp".to_string(),
+            ))
+        })?;
+    Ok(value)
+}
+
+/// Compose one frontend cancellation source with the per-call deadline.
+/// Every browser analysis passes this object to an abort-aware core entrypoint.
+struct ConfiguredAbort<'a> {
+    external: &'a dyn AbortSignal,
+    deadline: ExecutionDeadline,
+}
+
+impl<'a> ConfiguredAbort<'a> {
+    fn new(
+        timeout_milliseconds: Option<u32>,
+        external: &'a dyn AbortSignal,
+    ) -> DetailedWasmResult<Self> {
+        Ok(Self {
+            external,
+            deadline: ExecutionDeadline::new(timeout_milliseconds)?,
+        })
+    }
+}
+
+impl AbortSignal for ConfiguredAbort<'_> {
+    fn is_aborted(&self) -> bool {
+        self.external.is_aborted() || self.deadline.expired()
+    }
 }
 
 /// Browser-facing transient compression policy.
@@ -542,6 +646,16 @@ impl WasmError {
         Self::new(message, "invalid_argument", "input_validation")
     }
 
+    fn unsupported_cancellation(mechanism: String) -> Self {
+        let mut error = Self::new(
+            format!("unsupported cancellation mechanism '{mechanism}'; expected 'sharedInt32'"),
+            "unsupported_cancellation",
+            "cancellation",
+        );
+        error.reason = Some(mechanism);
+        error
+    }
+
     fn resource_limit(message: String, error: ResourceLimitError) -> Self {
         let mut structured = Self::new(message, "resource_limit", "resource_limit");
         structured.resource = Some(error.resource.as_str().to_string());
@@ -789,15 +903,24 @@ fn output_symbol_kind_name(kind: rspice_core::netlist::OutputSymbolKind) -> &'st
 fn parse_netlist_detailed(
     source: &str,
     resource_limits: ResourceLimits,
+    abort: &dyn AbortSignal,
 ) -> DetailedWasmResult<Netlist> {
-    Netlist::parse_validated_with_options(
+    Netlist::parse_validated_with_options_and_abort(
         source,
         rspice_core::netlist::NetlistParseOptions {
             resource_limits,
             ..rspice_core::netlist::NetlistParseOptions::default()
         },
+        abort,
     )
-    .map_err(|error| Box::new(WasmError::from_parse_error(error)))
+    .map_err(|error| match error {
+        rspice_core::netlist::ParseWithAbortError::Aborted => Box::new(
+            WasmError::from_simulation_error(rspice_core::engine::SimulationError::Aborted),
+        ),
+        rspice_core::netlist::ParseWithAbortError::Parse(error) => {
+            Box::new(WasmError::from_parse_error(error))
+        }
+    })
 }
 
 fn engine_with_resource_limits(resource_limits: ResourceLimits) -> DetailedWasmResult<Engine> {
@@ -821,14 +944,245 @@ fn resource_limit_error(resource: ResourceKind, requested: usize, limit: usize) 
     Box::new(WasmError::resource_limit(error.to_string(), error))
 }
 
-fn execution_options_from_js(value: JsValue) -> DetailedWasmResult<WasmExecutionOptions> {
-    if value.is_undefined() || value.is_null() {
-        return Ok(WasmExecutionOptions::default());
+fn aborted_error() -> Box<WasmError> {
+    Box::new(WasmError::from_simulation_error(
+        rspice_core::engine::SimulationError::Aborted,
+    ))
+}
+
+fn ensure_not_aborted(abort: &dyn AbortSignal) -> DetailedWasmResult<()> {
+    if abort.is_aborted() {
+        Err(aborted_error())
+    } else {
+        Ok(())
     }
-    serde_wasm_bindgen::from_value(value).map_err(|error| {
+}
+
+#[derive(Clone)]
+struct JsSharedCancellationControl {
+    view: js_sys::Int32Array,
+    index: u32,
+}
+
+struct JsExecutionRequest {
+    options: WasmExecutionOptions,
+    timeout_milliseconds: Option<u32>,
+    cancellation: Option<JsSharedCancellationControl>,
+}
+
+thread_local! {
+    static ACTIVE_SHARED_CANCELLATION: std::cell::RefCell<Option<JsSharedCancellationControl>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// The signal itself owns no JavaScript handle and therefore satisfies the
+/// core's Send + Sync contract without unsafe code. The browser build is
+/// deliberately single-threaded; the per-agent control view lives in TLS.
+struct JsSharedAbortSignal {
+    enabled: bool,
+}
+
+impl AbortSignal for JsSharedAbortSignal {
+    fn is_aborted(&self) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        ACTIVE_SHARED_CANCELLATION.with(|active| {
+            active
+                .borrow()
+                .as_ref()
+                .is_none_or(|control| js_sys::Atomics::load(&control.view, control.index) != Ok(0))
+        })
+    }
+}
+
+struct ActiveSharedCancellationGuard {
+    installed: bool,
+}
+
+impl ActiveSharedCancellationGuard {
+    fn install(control: Option<JsSharedCancellationControl>) -> DetailedWasmResult<Self> {
+        let installed = control.is_some();
+        ACTIVE_SHARED_CANCELLATION.with(|active| {
+            let mut active = active.borrow_mut();
+            if active.is_some() {
+                return Err(Box::new(WasmError::invalid_argument(
+                    "nested WASM execution is not supported".to_string(),
+                )));
+            }
+            *active = control;
+            Ok(Self { installed })
+        })
+    }
+}
+
+impl Drop for ActiveSharedCancellationGuard {
+    fn drop(&mut self) {
+        if self.installed {
+            ACTIVE_SHARED_CANCELLATION.with(|active| {
+                *active.borrow_mut() = None;
+            });
+        }
+    }
+}
+
+fn js_object_keys(value: &JsValue) -> Vec<String> {
+    js_sys::Object::keys(value.unchecked_ref::<js_sys::Object>())
+        .iter()
+        .filter_map(|key| key.as_string())
+        .collect()
+}
+
+fn optional_js_property(object: &JsValue, name: &str) -> DetailedWasmResult<Option<JsValue>> {
+    let value = js_sys::Reflect::get(object, &JsValue::from_str(name)).map_err(|_| {
         Box::new(WasmError::invalid_argument(format!(
-            "invalid execution options: {error}"
+            "could not read execution option '{name}'"
         )))
+    })?;
+    // A missing JavaScript property reads as `undefined`. Preserve an
+    // explicitly authored `null` so the field's type validator rejects it
+    // instead of silently converting malformed input into a default.
+    Ok((!value.is_undefined()).then_some(value))
+}
+
+fn shared_cancellation_from_js(value: JsValue) -> DetailedWasmResult<JsSharedCancellationControl> {
+    if !value.is_object() || value.is_array() {
+        return Err(Box::new(WasmError::invalid_argument(
+            "cancellation must be an object".to_string(),
+        )));
+    }
+    for key in js_object_keys(&value) {
+        if !matches!(key.as_str(), "mechanism" | "view" | "index") {
+            return Err(Box::new(WasmError::invalid_argument(format!(
+                "unknown cancellation option '{key}'"
+            ))));
+        }
+    }
+
+    let mechanism = optional_js_property(&value, "mechanism")?
+        .and_then(|value| value.as_string())
+        .ok_or_else(|| {
+            Box::new(WasmError::invalid_argument(
+                "cancellation.mechanism must be the string 'sharedInt32'".to_string(),
+            ))
+        })?;
+    if mechanism != "sharedInt32" {
+        return Err(Box::new(WasmError::unsupported_cancellation(mechanism)));
+    }
+
+    let view = optional_js_property(&value, "view")?
+        .and_then(|value| value.dyn_into::<js_sys::Int32Array>().ok())
+        .ok_or_else(|| {
+            Box::new(WasmError::invalid_argument(
+                "cancellation.view must be an Int32Array over SharedArrayBuffer".to_string(),
+            ))
+        })?;
+    let buffer = js_sys::Reflect::get(&view, &JsValue::from_str("buffer")).map_err(|_| {
+        Box::new(WasmError::invalid_argument(
+            "could not inspect cancellation.view.buffer".to_string(),
+        ))
+    })?;
+    if !buffer.is_instance_of::<js_sys::SharedArrayBuffer>() {
+        return Err(Box::new(WasmError::invalid_argument(
+            "cancellation.view must use SharedArrayBuffer, not ArrayBuffer".to_string(),
+        )));
+    }
+
+    let index = match optional_js_property(&value, "index")? {
+        None => 0,
+        Some(value) => {
+            let number = value.as_f64().filter(|number| {
+                number.is_finite()
+                    && *number >= 0.0
+                    && number.fract() == 0.0
+                    && *number <= f64::from(u32::MAX)
+            });
+            number.ok_or_else(|| {
+                Box::new(WasmError::invalid_argument(
+                    "cancellation.index must be a non-negative integer".to_string(),
+                ))
+            })? as u32
+        }
+    };
+    if index >= view.length() {
+        return Err(Box::new(WasmError::invalid_argument(format!(
+            "cancellation.index {index} is outside a view of length {}",
+            view.length()
+        ))));
+    }
+    js_sys::Atomics::load(&view, index).map_err(|_| {
+        Box::new(WasmError::invalid_argument(
+            "cancellation.view does not support Atomics.load".to_string(),
+        ))
+    })?;
+
+    Ok(JsSharedCancellationControl { view, index })
+}
+
+fn execution_request_from_js(value: JsValue) -> DetailedWasmResult<JsExecutionRequest> {
+    if value.is_undefined() || value.is_null() {
+        return Ok(JsExecutionRequest {
+            options: WasmExecutionOptions::default(),
+            timeout_milliseconds: None,
+            cancellation: None,
+        });
+    }
+    if !value.is_object() || value.is_array() {
+        return Err(Box::new(WasmError::invalid_argument(
+            "execution options must be an object".to_string(),
+        )));
+    }
+    for key in js_object_keys(&value) {
+        if !matches!(
+            key.as_str(),
+            "resourceLimits" | "timeoutMilliseconds" | "cancellation"
+        ) {
+            return Err(Box::new(WasmError::invalid_argument(format!(
+                "unknown execution option '{key}'"
+            ))));
+        }
+    }
+
+    let serializable = js_sys::Object::new();
+    for name in ["resourceLimits"] {
+        if let Some(field) = optional_js_property(&value, name)? {
+            js_sys::Reflect::set(&serializable, &JsValue::from_str(name), &field).map_err(
+                |_| {
+                    Box::new(WasmError::invalid_argument(format!(
+                        "could not decode execution option '{name}'"
+                    )))
+                },
+            )?;
+        }
+    }
+    let options: WasmExecutionOptions = serde_wasm_bindgen::from_value(serializable.into())
+        .map_err(|error| {
+            Box::new(WasmError::invalid_argument(format!(
+                "invalid execution options: {error}"
+            )))
+        })?;
+    let timeout_milliseconds = optional_js_property(&value, "timeoutMilliseconds")?
+        .map(|value| {
+            let number = value.as_f64().filter(|number| {
+                number.is_finite()
+                    && *number >= 0.0
+                    && number.fract() == 0.0
+                    && *number <= f64::from(MAX_TIMEOUT_MILLISECONDS)
+            });
+            number.map(|number| number as u32).ok_or_else(|| {
+                Box::new(WasmError::invalid_argument(format!(
+                    "timeoutMilliseconds must be an integer from 0 through {MAX_TIMEOUT_MILLISECONDS}"
+                )))
+            })
+        })
+        .transpose()?;
+    let cancellation = optional_js_property(&value, "cancellation")?
+        .map(shared_cancellation_from_js)
+        .transpose()?;
+    Ok(JsExecutionRequest {
+        options,
+        timeout_milliseconds,
+        cancellation,
     })
 }
 
@@ -1486,13 +1840,23 @@ pub fn summarize_netlist_with_options_detailed(
     source: &str,
     options: &WasmExecutionOptions,
 ) -> DetailedWasmResult<NetlistSummary> {
-    let netlist = parse_netlist_detailed(source, options.resource_limits.to_core())?;
+    summarize_netlist_with_options_and_abort_detailed(source, options, &NoAbort)
+}
+
+/// Summarize a netlist while observing an explicit cooperative abort source.
+pub fn summarize_netlist_with_options_and_abort_detailed(
+    source: &str,
+    options: &WasmExecutionOptions,
+    external_abort: &dyn AbortSignal,
+) -> DetailedWasmResult<NetlistSummary> {
+    let netlist =
+        parse_netlist_detailed(source, options.resource_limits.to_core(), external_abort)?;
     let startup_diagnostics = netlist
         .startup_diagnostics()
         .iter()
         .map(startup_diagnostic_summary)
         .collect();
-    Ok(NetlistSummary {
+    let summary = NetlistSummary {
         title: netlist.title,
         element_count: netlist.elements.len(),
         analysis_count: netlist.analyses.len(),
@@ -1501,7 +1865,9 @@ pub fn summarize_netlist_with_options_detailed(
         parameter_count: netlist.params.all_params().len(),
         diagnostics: netlist.diagnostics.iter().map(diagnostic_summary).collect(),
         startup_diagnostics,
-    })
+    };
+    ensure_not_aborted(external_abort)?;
+    Ok(summary)
 }
 
 /// Backward-compatible string-error summary API.
@@ -1519,11 +1885,22 @@ pub fn run_dc_operating_point_with_options_detailed(
     source: &str,
     options: &WasmExecutionOptions,
 ) -> DetailedWasmResult<DcOperatingPoint> {
+    run_dc_operating_point_with_options_and_abort_detailed(source, options, &NoAbort)
+}
+
+/// Run an operating point under an explicit browser policy and cooperative
+/// abort source.
+pub fn run_dc_operating_point_with_options_and_abort_detailed(
+    source: &str,
+    options: &WasmExecutionOptions,
+    external_abort: &dyn AbortSignal,
+) -> DetailedWasmResult<DcOperatingPoint> {
     let resource_limits = options.resource_limits.to_core();
-    let netlist = parse_netlist_detailed(source, resource_limits)?;
+    let netlist = parse_netlist_detailed(source, resource_limits, external_abort)?;
     let result = engine_with_resource_limits(resource_limits)?
-        .run_dc_op(&netlist)
+        .run_dc_op_with_abort(&netlist, external_abort)
         .map_err(|error| Box::new(WasmError::from_simulation_error(error)))?;
+    ensure_not_aborted(external_abort)?;
     Ok(DcOperatingPoint {
         node_names: result.node_names,
         node_voltages: result.node_voltages,
@@ -1551,6 +1928,18 @@ pub fn run_ac_analysis_with_options_detailed(
     frequencies: &[f64],
     options: &WasmExecutionOptions,
 ) -> DetailedWasmResult<Vec<AcPointSnapshot>> {
+    run_ac_analysis_with_options_and_abort_detailed(source, frequencies, options, &NoAbort)
+}
+
+/// Run AC analysis under an explicit browser policy and cooperative abort
+/// source.
+pub fn run_ac_analysis_with_options_and_abort_detailed(
+    source: &str,
+    frequencies: &[f64],
+    options: &WasmExecutionOptions,
+    external_abort: &dyn AbortSignal,
+) -> DetailedWasmResult<Vec<AcPointSnapshot>> {
+    ensure_not_aborted(external_abort)?;
     if frequencies.is_empty() {
         return Err(Box::new(WasmError::invalid_argument(
             "AC analysis requires at least one frequency".to_string(),
@@ -1575,12 +1964,12 @@ pub fn run_ac_analysis_with_options_detailed(
         ))));
     }
 
-    let netlist = parse_netlist_detailed(source, resource_limits)?;
+    let netlist = parse_netlist_detailed(source, resource_limits, external_abort)?;
     let results = engine_with_resource_limits(resource_limits)?
-        .run_ac(&netlist, frequencies)
+        .run_ac_with_abort(&netlist, frequencies, external_abort)
         .map_err(|error| Box::new(WasmError::from_simulation_error(error)))?;
 
-    Ok(results
+    let snapshots = results
         .into_iter()
         .map(|point| AcPointSnapshot {
             frequency: point.frequency,
@@ -1589,7 +1978,9 @@ pub fn run_ac_analysis_with_options_detailed(
             voltages: complex_series_from_slice(&point.voltages),
             currents: complex_series_from_slice(&point.currents),
         })
-        .collect())
+        .collect();
+    ensure_not_aborted(external_abort)?;
+    Ok(snapshots)
 }
 
 /// Backward-compatible string-error AC API.
@@ -1645,21 +2036,38 @@ pub fn run_transient_analysis_with_options_detailed(
     max_step: f64,
     options: &WasmExecutionOptions,
 ) -> DetailedWasmResult<TransientSnapshot> {
+    run_transient_analysis_with_options_and_abort_detailed(
+        source, tstop, max_step, options, &NoAbort,
+    )
+}
+
+/// Run transient analysis under an explicit browser policy and cooperative
+/// abort source.
+pub fn run_transient_analysis_with_options_and_abort_detailed(
+    source: &str,
+    tstop: f64,
+    max_step: f64,
+    options: &WasmExecutionOptions,
+    external_abort: &dyn AbortSignal,
+) -> DetailedWasmResult<TransientSnapshot> {
+    ensure_not_aborted(external_abort)?;
     let resource_limits = options.resource_limits.to_core();
     validate_transient_request(tstop, max_step, resource_limits)?;
 
-    let netlist = parse_netlist_detailed(source, resource_limits)?;
+    let netlist = parse_netlist_detailed(source, resource_limits, external_abort)?;
     let result = engine_with_resource_limits(resource_limits)?
-        .run_tran(&netlist, tstop, max_step)
+        .run_tran_with_abort(&netlist, tstop, max_step, external_abort)
         .map_err(|error| Box::new(WasmError::from_simulation_error(error)))?;
 
-    transient_snapshot_from_result(result).map_err(|message| {
+    let snapshot = transient_snapshot_from_result(result).map_err(|message| {
         Box::new(WasmError::new(
             message,
             "invalid_transient_result",
             "result_validation",
         ))
-    })
+    })?;
+    ensure_not_aborted(external_abort)?;
+    Ok(snapshot)
 }
 
 /// Run transient analysis with bounded, multi-channel analog compression.
@@ -1688,20 +2096,44 @@ pub fn run_transient_analysis_compressed_with_options_detailed(
     compression: &WasmCompressionOptions,
     options: &WasmExecutionOptions,
 ) -> DetailedWasmResult<TransientSnapshot> {
+    run_transient_analysis_compressed_with_options_and_abort_detailed(
+        source,
+        tstop,
+        max_step,
+        compression,
+        options,
+        &NoAbort,
+    )
+}
+
+/// Run compressed transient analysis under explicit browser policies and a
+/// cooperative abort source. Both the solver and compression pass observe the
+/// same signal through the core abort-aware entrypoint.
+pub fn run_transient_analysis_compressed_with_options_and_abort_detailed(
+    source: &str,
+    tstop: f64,
+    max_step: f64,
+    compression: &WasmCompressionOptions,
+    options: &WasmExecutionOptions,
+    external_abort: &dyn AbortSignal,
+) -> DetailedWasmResult<TransientSnapshot> {
+    ensure_not_aborted(external_abort)?;
     let resource_limits = options.resource_limits.to_core();
     validate_transient_request(tstop, max_step, resource_limits)?;
     let compression = compression.to_core()?;
-    let netlist = parse_netlist_detailed(source, resource_limits)?;
+    let netlist = parse_netlist_detailed(source, resource_limits, external_abort)?;
     let result = engine_with_resource_limits(resource_limits)?
-        .run_tran_compressed(&netlist, tstop, max_step, compression)
+        .run_tran_compressed_with_abort(&netlist, tstop, max_step, compression, external_abort)
         .map_err(|error| Box::new(WasmError::from_simulation_error(error)))?;
-    transient_snapshot_from_compressed_result(result).map_err(|message| {
+    let snapshot = transient_snapshot_from_compressed_result(result).map_err(|message| {
         Box::new(WasmError::new(
             message,
             "invalid_transient_result",
             "result_validation",
         ))
-    })
+    })?;
+    ensure_not_aborted(external_abort)?;
+    Ok(snapshot)
 }
 
 /// Backward-compatible string-error compressed transient API.
@@ -1728,8 +2160,17 @@ pub fn run_transient_analysis(
 pub fn health_check_with_options_detailed(
     options: &WasmExecutionOptions,
 ) -> DetailedWasmResult<WasmHealthReport> {
+    health_check_with_options_and_abort_detailed(options, &NoAbort)
+}
+
+/// Execute the readiness probe with the same deadline and cancellation
+/// contract as analysis calls.
+pub fn health_check_with_options_and_abort_detailed(
+    options: &WasmExecutionOptions,
+    external_abort: &dyn AbortSignal,
+) -> DetailedWasmResult<WasmHealthReport> {
     let report = engine_with_resource_limits(options.resource_limits.to_core())?
-        .health_check()
+        .health_check_with_abort(external_abort)
         .map_err(|error| Box::new(WasmError::from_simulation_error(error)))?;
     Ok(WasmHealthReport {
         status: "ready".to_string(),
@@ -1749,25 +2190,51 @@ pub fn default_resource_limits_js() -> Result<JsValue, JsValue> {
 
 #[wasm_bindgen(js_name = healthCheck)]
 pub fn health_check_js(options: JsValue) -> Result<JsValue, JsValue> {
-    let options = execution_options_from_js(options).map_err(|error| wasm_error_to_js(*error))?;
-    let report =
-        health_check_with_options_detailed(&options).map_err(|error| wasm_error_to_js(*error))?;
+    let request = execution_request_from_js(options).map_err(|error| wasm_error_to_js(*error))?;
+    let cancellation_enabled = request.cancellation.is_some();
+    let _guard = ActiveSharedCancellationGuard::install(request.cancellation)
+        .map_err(|error| wasm_error_to_js(*error))?;
+    let shared_abort = JsSharedAbortSignal {
+        enabled: cancellation_enabled,
+    };
+    let abort = ConfiguredAbort::new(request.timeout_milliseconds, &shared_abort)
+        .map_err(|error| wasm_error_to_js(*error))?;
+    let report = health_check_with_options_and_abort_detailed(&request.options, &abort)
+        .map_err(|error| wasm_error_to_js(*error))?;
     serialize_to_js(&report)
 }
 
 #[wasm_bindgen(js_name = summarizeNetlist)]
 pub fn summarize_netlist_js(source: &str, options: JsValue) -> Result<JsValue, JsValue> {
-    let options = execution_options_from_js(options).map_err(|error| wasm_error_to_js(*error))?;
-    let summary = summarize_netlist_with_options_detailed(source, &options)
+    let request = execution_request_from_js(options).map_err(|error| wasm_error_to_js(*error))?;
+    let cancellation_enabled = request.cancellation.is_some();
+    let _guard = ActiveSharedCancellationGuard::install(request.cancellation)
         .map_err(|error| wasm_error_to_js(*error))?;
+    let shared_abort = JsSharedAbortSignal {
+        enabled: cancellation_enabled,
+    };
+    let abort = ConfiguredAbort::new(request.timeout_milliseconds, &shared_abort)
+        .map_err(|error| wasm_error_to_js(*error))?;
+    let summary =
+        summarize_netlist_with_options_and_abort_detailed(source, &request.options, &abort)
+            .map_err(|error| wasm_error_to_js(*error))?;
     serialize_to_js(&summary)
 }
 
 #[wasm_bindgen(js_name = runDcOperatingPoint)]
 pub fn run_dc_operating_point_js(source: &str, options: JsValue) -> Result<JsValue, JsValue> {
-    let options = execution_options_from_js(options).map_err(|error| wasm_error_to_js(*error))?;
-    let result = run_dc_operating_point_with_options_detailed(source, &options)
+    let request = execution_request_from_js(options).map_err(|error| wasm_error_to_js(*error))?;
+    let cancellation_enabled = request.cancellation.is_some();
+    let _guard = ActiveSharedCancellationGuard::install(request.cancellation)
         .map_err(|error| wasm_error_to_js(*error))?;
+    let shared_abort = JsSharedAbortSignal {
+        enabled: cancellation_enabled,
+    };
+    let abort = ConfiguredAbort::new(request.timeout_milliseconds, &shared_abort)
+        .map_err(|error| wasm_error_to_js(*error))?;
+    let result =
+        run_dc_operating_point_with_options_and_abort_detailed(source, &request.options, &abort)
+            .map_err(|error| wasm_error_to_js(*error))?;
     serialize_to_js(&result)
 }
 
@@ -1777,9 +2244,22 @@ pub fn run_ac_analysis_js(
     frequencies: Vec<f64>,
     options: JsValue,
 ) -> Result<JsValue, JsValue> {
-    let options = execution_options_from_js(options).map_err(|error| wasm_error_to_js(*error))?;
-    let result = run_ac_analysis_with_options_detailed(source, &frequencies, &options)
+    let request = execution_request_from_js(options).map_err(|error| wasm_error_to_js(*error))?;
+    let cancellation_enabled = request.cancellation.is_some();
+    let _guard = ActiveSharedCancellationGuard::install(request.cancellation)
         .map_err(|error| wasm_error_to_js(*error))?;
+    let shared_abort = JsSharedAbortSignal {
+        enabled: cancellation_enabled,
+    };
+    let abort = ConfiguredAbort::new(request.timeout_milliseconds, &shared_abort)
+        .map_err(|error| wasm_error_to_js(*error))?;
+    let result = run_ac_analysis_with_options_and_abort_detailed(
+        source,
+        &frequencies,
+        &request.options,
+        &abort,
+    )
+    .map_err(|error| wasm_error_to_js(*error))?;
     serialize_to_js(&result)
 }
 
@@ -1790,9 +2270,23 @@ pub fn run_transient_analysis_js(
     max_step: f64,
     options: JsValue,
 ) -> Result<JsValue, JsValue> {
-    let options = execution_options_from_js(options).map_err(|error| wasm_error_to_js(*error))?;
-    let result = run_transient_analysis_with_options_detailed(source, tstop, max_step, &options)
+    let request = execution_request_from_js(options).map_err(|error| wasm_error_to_js(*error))?;
+    let cancellation_enabled = request.cancellation.is_some();
+    let _guard = ActiveSharedCancellationGuard::install(request.cancellation)
         .map_err(|error| wasm_error_to_js(*error))?;
+    let shared_abort = JsSharedAbortSignal {
+        enabled: cancellation_enabled,
+    };
+    let abort = ConfiguredAbort::new(request.timeout_milliseconds, &shared_abort)
+        .map_err(|error| wasm_error_to_js(*error))?;
+    let result = run_transient_analysis_with_options_and_abort_detailed(
+        source,
+        tstop,
+        max_step,
+        &request.options,
+        &abort,
+    )
+    .map_err(|error| wasm_error_to_js(*error))?;
     serialize_transient_to_js(&result)
 }
 
@@ -1806,13 +2300,22 @@ pub fn run_transient_analysis_compressed_js(
 ) -> Result<JsValue, JsValue> {
     let compression =
         compression_options_from_js(compression).map_err(|error| wasm_error_to_js(*error))?;
-    let options = execution_options_from_js(options).map_err(|error| wasm_error_to_js(*error))?;
-    let result = run_transient_analysis_compressed_with_options_detailed(
+    let request = execution_request_from_js(options).map_err(|error| wasm_error_to_js(*error))?;
+    let cancellation_enabled = request.cancellation.is_some();
+    let _guard = ActiveSharedCancellationGuard::install(request.cancellation)
+        .map_err(|error| wasm_error_to_js(*error))?;
+    let shared_abort = JsSharedAbortSignal {
+        enabled: cancellation_enabled,
+    };
+    let abort = ConfiguredAbort::new(request.timeout_milliseconds, &shared_abort)
+        .map_err(|error| wasm_error_to_js(*error))?;
+    let result = run_transient_analysis_compressed_with_options_and_abort_detailed(
         source,
         tstop,
         max_step,
         &compression,
-        &options,
+        &request.options,
+        &abort,
     )
     .map_err(|error| wasm_error_to_js(*error))?;
     serialize_transient_to_js(&result)
@@ -2103,6 +2606,77 @@ mod tests {
             assert_eq!(error.kind, "invalid_argument");
             assert_eq!(error.category, "input_validation");
         }
+    }
+
+    const CANCELLATION_DECK: &str = "browser cancellation\n\
+        V1 out 0 PULSE(0 1 0 1n 1n 1u 2u)\n\
+        R1 out 0 1k\n\
+        .end\n";
+
+    fn assert_cancelled(error: Box<WasmError>) {
+        assert_eq!(error.code, "aborted");
+        assert_eq!(error.kind, "aborted");
+        assert_eq!(error.category, "cancellation");
+        assert!(error.retryable);
+    }
+
+    #[test]
+    fn every_browser_analog_path_propagates_the_explicit_abort_source() {
+        let options = WasmExecutionOptions::default();
+        let abort = rspice_core::abort_signal::ImmediateAbort;
+
+        assert_cancelled(
+            run_dc_operating_point_with_options_and_abort_detailed(
+                CANCELLATION_DECK,
+                &options,
+                &abort,
+            )
+            .expect_err("OP must observe the frontend abort source"),
+        );
+        assert_cancelled(
+            run_ac_analysis_with_options_and_abort_detailed(
+                CANCELLATION_DECK,
+                &[1.0, 10.0],
+                &options,
+                &abort,
+            )
+            .expect_err("AC must observe the frontend abort source"),
+        );
+        assert_cancelled(
+            run_transient_analysis_with_options_and_abort_detailed(
+                CANCELLATION_DECK,
+                10.0e-6,
+                1.0e-9,
+                &options,
+                &abort,
+            )
+            .expect_err("TRAN must observe the frontend abort source"),
+        );
+        assert_cancelled(
+            run_transient_analysis_compressed_with_options_and_abort_detailed(
+                CANCELLATION_DECK,
+                10.0e-6,
+                1.0e-9,
+                &WasmCompressionOptions::default(),
+                &options,
+                &abort,
+            )
+            .expect_err("compressed TRAN must observe the frontend abort source"),
+        );
+    }
+
+    #[test]
+    fn zero_timeout_cancels_and_oversized_timeout_fails_before_work() {
+        let abort = ConfiguredAbort::new(Some(0), &NoAbort)
+            .expect("a zero deadline is a valid immediate-cancellation policy");
+        assert!(abort.is_aborted());
+
+        let error = match ConfiguredAbort::new(Some(MAX_TIMEOUT_MILLISECONDS + 1), &NoAbort) {
+            Ok(_) => panic!("an implausibly large browser deadline must fail closed"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code, "invalid_argument");
+        assert!(error.message.contains("timeoutMilliseconds"));
     }
 
     const FFT_PARITY_DECK: &str = "browser transient FFT parity\n\
@@ -2647,6 +3221,148 @@ mod tests {
         let decoded: TransientSnapshot =
             serde_json::from_value(encoded).expect("deserialize complete analog DTO");
         assert_eq!(decoded, analog);
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn js_shared_cancellation_options(cancelled: bool) -> JsValue {
+        let buffer = js_sys::SharedArrayBuffer::new(4);
+        let view = js_sys::Int32Array::new(buffer.as_ref());
+        js_sys::Atomics::store(&view, 0, i32::from(cancelled))
+            .expect("Node supports Atomics.store on SharedArrayBuffer");
+
+        let cancellation = js_sys::Object::new();
+        js_sys::Reflect::set(
+            &cancellation,
+            &JsValue::from_str("mechanism"),
+            &JsValue::from_str("sharedInt32"),
+        )
+        .expect("set cancellation mechanism");
+        js_sys::Reflect::set(&cancellation, &JsValue::from_str("view"), &view)
+            .expect("set cancellation view");
+
+        let options = js_sys::Object::new();
+        js_sys::Reflect::set(&options, &JsValue::from_str("cancellation"), &cancellation)
+            .expect("set cancellation policy");
+        options.into()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn assert_js_error_code(error: JsValue, expected: &str) {
+        assert_eq!(
+            js_property(&error, "code")
+                .expect("RSpiceError has a code")
+                .as_string()
+                .as_deref(),
+            Some(expected)
+        );
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    fn node_shared_control_word_cancels_every_analog_export() {
+        let options = || js_shared_cancellation_options(true);
+
+        assert_js_error_code(
+            run_dc_operating_point_js(CANCELLATION_DECK, options())
+                .expect_err("pre-set shared flag cancels OP"),
+            "aborted",
+        );
+        assert_js_error_code(
+            run_ac_analysis_js(CANCELLATION_DECK, vec![1.0, 10.0], options())
+                .expect_err("pre-set shared flag cancels AC"),
+            "aborted",
+        );
+        assert_js_error_code(
+            run_transient_analysis_js(CANCELLATION_DECK, 10.0e-6, 1.0e-9, options())
+                .expect_err("pre-set shared flag cancels TRAN"),
+            "aborted",
+        );
+        assert_js_error_code(
+            run_transient_analysis_compressed_js(
+                CANCELLATION_DECK,
+                10.0e-6,
+                1.0e-9,
+                JsValue::NULL,
+                options(),
+            )
+            .expect_err("pre-set shared flag cancels compressed TRAN"),
+            "aborted",
+        );
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    fn node_cancellation_options_fail_closed() {
+        let unsupported = js_sys::Object::new();
+        let unsupported_cancellation = js_sys::Object::new();
+        js_sys::Reflect::set(
+            &unsupported_cancellation,
+            &JsValue::from_str("mechanism"),
+            &JsValue::from_str("abortSignal"),
+        )
+        .expect("set unsupported mechanism");
+        js_sys::Reflect::set(
+            &unsupported,
+            &JsValue::from_str("cancellation"),
+            &unsupported_cancellation,
+        )
+        .expect("set unsupported cancellation object");
+        assert_js_error_code(
+            run_dc_operating_point_js(CANCELLATION_DECK, unsupported.into())
+                .expect_err("DOM AbortSignal must not appear supported"),
+            "unsupported_cancellation",
+        );
+
+        let ordinary = js_sys::Object::new();
+        let ordinary_cancellation = js_sys::Object::new();
+        js_sys::Reflect::set(
+            &ordinary_cancellation,
+            &JsValue::from_str("mechanism"),
+            &JsValue::from_str("sharedInt32"),
+        )
+        .expect("set shared mechanism");
+        let ordinary_view = js_sys::Int32Array::new_with_length(1);
+        js_sys::Reflect::set(
+            &ordinary_cancellation,
+            &JsValue::from_str("view"),
+            &ordinary_view,
+        )
+        .expect("set ordinary view");
+        js_sys::Reflect::set(
+            &ordinary,
+            &JsValue::from_str("cancellation"),
+            &ordinary_cancellation,
+        )
+        .expect("set ordinary cancellation object");
+        assert_js_error_code(
+            run_dc_operating_point_js(CANCELLATION_DECK, ordinary.into())
+                .expect_err("ordinary ArrayBuffer must not masquerade as shared cancellation"),
+            "invalid_argument",
+        );
+
+        for field in ["resourceLimits", "timeoutMilliseconds", "cancellation"] {
+            let malformed = js_sys::Object::new();
+            js_sys::Reflect::set(&malformed, &JsValue::from_str(field), &JsValue::NULL)
+                .expect("set explicit null execution option");
+            assert_js_error_code(
+                run_dc_operating_point_js(CANCELLATION_DECK, malformed.into())
+                    .expect_err("explicit null execution fields must not become defaults"),
+                "invalid_argument",
+            );
+        }
+
+        let timeout = js_sys::Object::new();
+        js_sys::Reflect::set(
+            &timeout,
+            &JsValue::from_str("timeoutMilliseconds"),
+            &JsValue::from_f64(0.0),
+        )
+        .expect("set zero timeout");
+        assert_js_error_code(
+            run_dc_operating_point_js(CANCELLATION_DECK, timeout.into())
+                .expect_err("zero timeout requests immediate cancellation"),
+            "aborted",
+        );
     }
 
     #[cfg(target_arch = "wasm32")]
