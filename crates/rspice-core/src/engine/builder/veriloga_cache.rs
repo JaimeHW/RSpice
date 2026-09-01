@@ -128,7 +128,17 @@ use super::*;
 // therefore no longer stands for the same compile, and the fail-closed
 // reading is to rebuild rather than to reason about which sources are
 // unaffected.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 34;
+//
+// Version 35 is version 34's situation again, for one line of the front end.
+// A compiler directive the preprocessor does not know now takes its operand
+// with it, per the preprocessor's own rule that a line opening with a backtick
+// is a directive line. Under version 34 the operand stayed in the token
+// stream, so `` `default_nettype wire `` was a hard parse error — the `wire`
+// reached the top-level item loop alone — and under 35 the whole line is
+// dropped and the file compiles. That is the same kind of change as 34's:
+// nothing in a cached plan is reinterpreted, but a cached artifact no longer
+// stands for the same compile, and the fail-closed reading is to rebuild.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 35;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
