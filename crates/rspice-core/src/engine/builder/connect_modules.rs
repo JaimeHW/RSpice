@@ -385,6 +385,32 @@ impl DesignConnectRules {
             .as_ref()
             .map(|_| (&self.table, DisciplineDb::with_standard()))
     }
+
+    /// Select a connect module for one boundary named directly rather than
+    /// found by the XSPICE bridge planner.
+    ///
+    /// A mixed Verilog-AMS module's discrete port *is* the boundary — the
+    /// instance and port clause 7's [`PortLink`] wants are the deck's X-card
+    /// and the module's own port name — so there is nothing for
+    /// [`attach_to_planned_bridges`] to search for. What must not differ is
+    /// the selection itself, so this is the same
+    /// [`select_for_boundary`] call with the two names supplied instead of
+    /// recovered.
+    ///
+    /// `None` for a design with no connect rules, which is every design that
+    /// had none before this existed.
+    pub(super) fn select_for_boundary_node(
+        &self,
+        kind: super::XspiceAutoBridgeKind,
+        node_label: &str,
+        instance_name: &str,
+        port_name: &str,
+    ) -> Result<Option<PlannedConnectModule>, SimulationError> {
+        let Some((table, db)) = self.selected() else {
+            return Ok(None);
+        };
+        select_for_boundary(table, &db, kind, node_label, instance_name, port_name)
+    }
 }
 
 /// The XSPICE instance and port that made each node discrete.

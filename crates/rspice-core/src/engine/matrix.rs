@@ -1671,6 +1671,21 @@ impl Engine {
             }
         }
 
+        // A mixed Verilog-AMS module contributes the same conservative dense
+        // block, spanning its analog terminals together with the nodes its D/A
+        // bridges drive. The bridges are part of the block rather than a set of
+        // isolated diagonals because a bridge referred to a node other than
+        // ground couples its two nodes, and because the module's own terminals
+        // and its bridges can be the same nodes.
+        #[cfg(feature = "veriloga")]
+        for device_nodes in circuit.mixed_signal_coupled_nodes() {
+            for &row in &device_nodes {
+                for &col in &device_nodes {
+                    triplets.push((row - 1, col - 1, 0.0));
+                }
+            }
+        }
+
         #[cfg(feature = "veriloga-builtins-base")]
         for device in circuit.generated_veriloga_devices().iter() {
             let mut device_nodes: Vec<usize> = device

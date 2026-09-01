@@ -66,6 +66,8 @@ use veriloga_cache::{
 
 #[cfg(feature = "veriloga")]
 mod connect_modules;
+#[cfg(feature = "veriloga")]
+mod mixed_modules;
 
 mod model_policy;
 use model_policy::*;
@@ -8469,6 +8471,25 @@ impl Engine {
                     {
                         if let Some(entry) = veriloga_models.get(&normalize_model_key(subckt_name))
                         {
+                            // A module whose canonical artifact carries a
+                            // discrete plan is elaborated as a mixed instance:
+                            // same cache entry, same compile, different half of
+                            // the artifact executed. Asking first is what keeps
+                            // the analog route from building a device out of the
+                            // continuous equations alone and dropping the
+                            // processes the author wrote.
+                            if mixed_modules::try_build_mixed_signal_instance(
+                                &mut circuit,
+                                netlist,
+                                element,
+                                subckt_name,
+                                params,
+                                entry,
+                                &design_connect_rules,
+                            )? {
+                                continue;
+                            }
+
                             let model = &entry.model;
                             if element.nodes.len() > model.num_terminals {
                                 return Err(SimulationError::Circuit(format!(
