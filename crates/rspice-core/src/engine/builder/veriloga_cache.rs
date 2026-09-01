@@ -153,7 +153,23 @@ use super::*;
 // changes is once again what the front end accepts, so a cached artifact no
 // longer stands for the same compile, and the fail-closed reading is to rebuild
 // rather than to reason about which sources are unaffected.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 36;
+//
+// Version 37 changes the shape of a cached plan and what the front end
+// accepts, both at once, for the same construct: Verilog-AMS LRM 2.4 section
+// 7.3.3's probe of a continuous net from a discrete context. A plan now carries
+// an analog-probe table and process functions carry a value kind that reads
+// one, neither of which a version-36 reader has a case for; and a process that
+// wrote `V(p, n)` was refused by name under 36, so a source that did not
+// compile now does. It also moves the ownership rule for a module-level `real`
+// off the *module* and onto the *name*, per section 7.3's "Write operations of
+// nets and variables are only allowed from the context of their domain", which
+// makes a third class of source compile that did not: one whose analog body
+// neither reads nor writes the variable a process owns.
+//
+// Nothing cached is reinterpreted — every construct involved was refused under
+// 36, so no version-36 record contains one — but a cached artifact no longer
+// stands for the same compile, and the fail-closed reading is to rebuild.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 37;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

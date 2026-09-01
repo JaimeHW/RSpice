@@ -1902,6 +1902,15 @@ impl SemanticAnalyzer {
                 return;
             }
         };
+        if self.disciplines.resolve_access(function).is_none() && function != "I" {
+            self.record_error_at(
+                SemanticErrorKind::InvalidExpression(format!(
+                    "`{function}` is not an access function of any declared discipline"
+                )),
+                access.span(),
+            );
+            return;
+        }
         if self.is_flow_access(function) {
             self.record_error_at(
                 SemanticErrorKind::UnsupportedFeature(format!(

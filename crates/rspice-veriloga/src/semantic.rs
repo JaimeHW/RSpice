@@ -3090,17 +3090,31 @@ impl SemanticAnalyzer {
 
     /// Decide what a `posedge`/`negedge` operand means before it is lowered.
     ///
-    /// This compiler has no digital solver, so an edge event can only be
-    /// approximated by the analog `cross` operator — a continuous zero-crossing
+    /// In a *Verilog-A* module there is no discrete domain, so an edge event
+    /// can only be the analog `cross` operator — a continuous zero-crossing
     /// detector on the *value* of the operand. That approximation is the
     /// conventional Verilog-A reading of `@(posedge expr)` and is kept, but it
     /// is not silent: an accepted edge event records why the source now means
     /// something else.
     ///
-    /// On a discrete-discipline signal the approximation is simply wrong. A
-    /// digital net has no continuous value to cross zero, so `cross` would
-    /// stamp a detector on a quantity the solver never integrates and the event
-    /// would never fire. That is refused instead of miscompiled.
+    /// On a discrete-discipline signal it is simply wrong, and the wrongness
+    /// is not a matter of degree. Verilog-AMS LRM 2.4 section 7.3.4 makes
+    /// `@(posedge clk1 or cross(V(clk2), 1))` inside an `analog` block legal —
+    /// its `analog_event_expression` production lists `posedge expression`
+    /// beside the analog event functions, and its worked example declares
+    /// `clk1` a `wire` — and section 7.3.6.2 fixes when the guarded statement
+    /// runs: "at the time corresponding to a real promotion of the digital
+    /// time". So the construct means something specific, and `cross` on a
+    /// four-state net's absent continuous value is not it: `cross` would stamp
+    /// a detector on a quantity the solver never integrates and the event would
+    /// never fire at all.
+    ///
+    /// What this compiler is short of is the seam rather than the semantics.
+    /// The engine already breakpoints a digital event's tick and already runs
+    /// the discrete half at the accepted timepoint that lands on it, so the
+    /// instant section 7.3.6.2 names exists and is reached; what does not exist
+    /// is a way for the compiled analog body to be told an edge happened at it.
+    /// The refusal names that rather than the construct.
     fn qualify_edge_event_operand(
         &mut self,
         keyword: &str,
@@ -3110,9 +3124,12 @@ impl SemanticAnalyzer {
         if let Some(net) = self.discrete_net_operand(signal) {
             return Err(CompileError::Semantic(SemanticError::new(
                 SemanticErrorKind::UnsupportedFeature(format!(
-                    "`{keyword} {net}` is a digital edge event on a discrete-discipline signal; \
-                     this compiler has no digital solver and will not approximate it with the \
-                     analog `cross` operator"
+                    "`{keyword} {net}` in an analog event control is a digital edge event on a \
+                     discrete-discipline signal; Verilog-AMS LRM 2.4 section 7.3.4 allows it and \
+                     section 7.3.6.2 runs the guarded statement at the real promotion of the \
+                     digital time, but the compiled analog body has no route to the digital \
+                     event yet, and the analog `cross` operator is not a substitute — a discrete \
+                     net has no continuous value to cross"
                 )),
                 span,
             )));

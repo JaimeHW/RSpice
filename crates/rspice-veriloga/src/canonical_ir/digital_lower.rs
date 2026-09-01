@@ -92,10 +92,15 @@
 //! its author wrote. What still refuses here:
 //!
 //! - A module-level analog `integer` read from a process, and a `real` the
-//!   ownership rule above left in the continuous domain. Either is shared with
-//!   the continuous-domain body, which runs on a different clock in a different
-//!   value domain; a process-local declaration is the lowered form of the same
-//!   intent.
+//!   ownership rule above left in the continuous domain. Verilog-AMS LRM 2.4
+//!   section 7.3 allows both reads and section 7.3.6.3 fixes their value —
+//!   "the analog value calculated for the time corresponding to a real
+//!   promotion of the digital time at which the expression is evaluated" — so
+//!   what is missing is a boundary node for a *variable*, the way
+//!   [`CfgValueKind::DigitalAnalogPotential`] is one for a net. Until there is
+//!   one, a process-local declaration is the lowered form of the same intent.
+//!
+//!   [`CfgValueKind::DigitalAnalogPotential`]: super::cfg::CfgValueKind::DigitalAnalogPotential
 //! - A process-local `string`: a process computes in four-state and real
 //!   values, and a string is neither.
 //! - A nonblocking assignment to a process-local, which would need a store to

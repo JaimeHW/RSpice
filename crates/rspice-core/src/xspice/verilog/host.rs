@@ -555,11 +555,6 @@ impl DigitalHost {
         self.store.sample_analog_potentials(values);
     }
 
-    /// How many continuous-net probes this design declares.
-    pub(crate) fn analog_probe_count(&self) -> usize {
-        self.plan.analog_probes.len()
-    }
-
     /// Write a real net from outside the design and settle the consequences.
     pub(crate) fn force_real(
         &mut self,

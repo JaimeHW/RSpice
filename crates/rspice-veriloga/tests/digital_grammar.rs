@@ -2078,22 +2078,84 @@ fn a_module_level_real_a_process_writes_becomes_a_digital_variable() {
     );
 }
 
-/// The same `real`, in a module that also has an analog block, is refused.
+/// The same `real`, in a module whose analog body *reads* it, is refused —
+/// and refused for what is missing rather than for the boundary.
 ///
-/// Two owners for one variable, advancing on different clocks. The message has
-/// to name the variable and say what to do instead, because the author's model
-/// is almost right and the fix is a line.
+/// Verilog-AMS LRM 2.4 section 7.3 allows the read: `gain` is written by the
+/// discrete domain and only by it, and reads cross both ways. Section 7.3.6.5
+/// even fixes the value — "the digital value calculated for the greatest
+/// digital time tick which is less than or equal to the analog time when the
+/// expression is evaluated". What the compiler is short of is the route from
+/// the compiled analog body to the digital signal store, so that is what the
+/// message says.
 #[test]
-fn a_module_level_real_written_by_both_domains_is_refused_by_name() {
+fn a_module_level_real_the_analog_body_reads_is_refused_by_name() {
+    // `digital_module`'s analog block is `I(p, n) <+ gain * V(p, n)`, so this
+    // fixture is precisely the read case.
     let error = analyze_error(&digital_module(
         "    wire clk;\n\
      \x20   always @(posedge clk) gain = gain + 1.0;",
     ));
     assert!(
         error.contains("`gain`")
-            && error.contains("analog block")
-            && error.contains("declare it inside the process"),
-        "the refusal must name the variable and the fix, got {error:?}"
+            && error.contains("read by the analog body")
+            && error.contains("section 7.3.6.5"),
+        "the refusal must name the variable and the clause, got {error:?}"
+    );
+}
+
+/// A `real` **both** halves write is a different refusal, and a permanent one.
+///
+/// Section 7.3: "Write operations of nets and variables are only allowed from
+/// the context of their domain." No scheduling rule makes two writers legal, so
+/// the message cites the sentence rather than promising a later wave.
+#[test]
+fn a_module_level_real_written_by_both_domains_is_refused_by_name() {
+    let error = analyze_error(
+        "module dut(p, n);\n\
+     \x20   inout p, n;\n\
+     \x20   electrical p, n;\n\
+     \x20   real gain;\n\
+     \x20   wire clk;\n\
+     \x20   always @(posedge clk) gain = gain + 1.0;\n\
+     \x20   analog begin\n\
+     \x20       gain = 2.0;\n\
+     \x20       I(p, n) <+ V(p, n);\n\
+     \x20   end\n\
+     endmodule\n",
+    );
+    assert!(
+        error.contains("`gain` is written by both the analog body and a discrete process")
+            && error.contains("section 7.3"),
+        "the refusal must name the variable and the clause, got {error:?}"
+    );
+}
+
+/// And an analog body that never mentions the variable does not refuse at all.
+///
+/// This is the refusal that went away. The rule used to be about the *module* —
+/// any analog block disqualified every module-level `real` a process wrote —
+/// so a module whose two halves are simply independent was refused, with a
+/// message about clocks that did not describe it.
+#[test]
+fn an_analog_body_that_ignores_the_variable_leaves_the_promotion_alone() {
+    let analyzed = analyze(
+        "module dut(p, n);\n\
+     \x20   inout p, n;\n\
+     \x20   electrical p, n;\n\
+     \x20   real acc;\n\
+     \x20   wire clk;\n\
+     \x20   always @(posedge clk) acc = acc + 1.0;\n\
+     \x20   analog I(p, n) <+ V(p, n) / 1000.0;\n\
+     endmodule\n",
+    );
+    assert!(
+        only_module(&analyzed)
+            .digital
+            .signals
+            .iter()
+            .any(|signal| signal.name == "acc"),
+        "the process's `real` moved into the discrete domain"
     );
 }
 
