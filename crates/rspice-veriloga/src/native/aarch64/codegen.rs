@@ -39,9 +39,9 @@ use crate::native::expr::{
 };
 use crate::native::model::{CodeOffset, NativeStampKernelIo};
 use crate::native::ssa::{
-    AllocatedInstruction, AssignmentProgram, Instruction, LOGICAL_VALUE_REGISTER_COUNT, Program,
-    RegisterAllocation, RegisterBank, ValueLocation, ValueType, dynamic_variable_inline_supported,
-    plan_shared_outputs,
+    AllocatedInstruction, AssignmentProgram, BasicBlock, BlockId, Instruction,
+    LOGICAL_VALUE_REGISTER_COUNT, Program, RegisterAllocation, RegisterBank, Terminator,
+    ValueLocation, ValueType, dynamic_variable_inline_supported, plan_shared_outputs,
 };
 use crate::native::{EvalContext, JitError, JitResult};
 
@@ -59,6 +59,12 @@ const A64_ALLOCATABLE_VALUE_REGISTERS: usize = 15;
 /// helper call has nowhere to sit but a spill slot.
 const A64_VALUE_BANK: RegisterBank =
     RegisterBank::all_caller_saved(A64_ALLOCATABLE_VALUE_REGISTERS);
+/// Every logical register the allocator can hand out, as a mask.
+///
+/// A block terminator runs between instructions, so anything above the bank is
+/// free to materialize a spilled branch condition or relay a memory-to-memory
+/// edge move.
+const A64_ALLOCATED_REGISTER_MASK: u32 = (1_u32 << A64_ALLOCATABLE_VALUE_REGISTERS) - 1;
 
 const VOLTAGES_OFFSET: usize = std::mem::offset_of!(EvalContext, voltages);
 const INTERNAL_VOLTAGES_OFFSET: usize = std::mem::offset_of!(EvalContext, internal_voltages);
@@ -93,9 +99,17 @@ const KERNEL_JACOBIANS_OFFSET: usize = std::mem::offset_of!(NativeStampKernelIo,
 /// conditions, stamps, Jacobians, and noise expressions.
 pub(crate) fn compile_value_function(program: &NativeProgram) -> JitResult<Vec<u8>> {
     validate_expression_stack_depth(program.max_stack_depth())?;
-    let ssa = Program::lower(program)?;
+    compile_value_function_from_ssa(&Program::lower(program)?)
+}
+
+/// Compile one already-lowered value entry.
+///
+/// The postfix lift is the shipped route into this; taking the SSA directly is
+/// what lets the branch form of a conditional be compiled through exactly the
+/// same allocator, emitter, and independent A64 verifier as the select form.
+pub(crate) fn compile_value_function_from_ssa(ssa: &Program) -> JitResult<Vec<u8>> {
     validate_expression_stack_depth(ssa.maximum_stack_depth())?;
-    let allocation = RegisterAllocation::build(&ssa, A64_VALUE_BANK)?;
+    let allocation = RegisterAllocation::build(ssa, A64_VALUE_BANK)?;
     let frame_bytes = spill_frame_bytes(&allocation)?;
     let mut compiler = FunctionCompiler::new(frame_bytes, ssa.requires_call_frame())?;
     compiler.emit_program(&ssa, &allocation)?;
@@ -710,8 +724,137 @@ impl FunctionCompiler {
             ));
         }
 
-        for (instruction, allocated) in ssa.instructions().iter().zip(allocation.instructions()) {
-            self.emit_allocated_instruction(instruction, allocated)?;
+        let mut block_offsets: Vec<Option<usize>> = vec![None; ssa.blocks().len()];
+        let mut pending_branches: Vec<(usize, BranchPatch)> = Vec::new();
+        for block in ssa.blocks() {
+            block_offsets[block.id().index()] = Some(self.encoder.position());
+            let range = block.instruction_start()..block.instruction_end();
+            for (instruction, allocated) in ssa.instructions()[range.clone()]
+                .iter()
+                .zip(&allocation.instructions()[range])
+            {
+                self.emit_allocated_instruction(instruction, allocated)?;
+            }
+            self.emit_terminator(allocation, block, &mut pending_branches)?;
+        }
+        for (target, patch) in pending_branches {
+            let offset = block_offsets[target].ok_or_else(|| {
+                verifier_error(format!(
+                    "AArch64 branch targets block {target}, which was never emitted"
+                ))
+            })?;
+            self.encoder.patch_branch(patch, offset)?;
+        }
+        Ok(())
+    }
+
+    /// Emit one block's terminator.
+    ///
+    /// `Return` emits nothing: the caller decides what to do with the
+    /// allocation's result location, and the exit block is always last in
+    /// layout order.
+    fn emit_terminator(
+        &mut self,
+        allocation: &RegisterAllocation,
+        block: &BasicBlock,
+        pending_branches: &mut Vec<(usize, BranchPatch)>,
+    ) -> JitResult<()> {
+        let fallthrough = block.id().index() + 1;
+        match block.terminator() {
+            Terminator::Return(_) => Ok(()),
+            Terminator::Jump(edge) => {
+                self.emit_edge_moves(allocation, block.id(), 0)?;
+                if edge.target().index() != fallthrough {
+                    pending_branches.push((edge.target().index(), self.encoder.b_placeholder()));
+                }
+                Ok(())
+            }
+            Terminator::Branch {
+                condition,
+                then_edge,
+                else_edge,
+            } => {
+                // FCMP against zero leaves Z clear for every nonzero value and
+                // for an unordered compare, so NE is exactly Verilog-A
+                // truthiness: the same condition the select form hands to
+                // FCSEL.
+                let condition = match allocation.location(*condition)? {
+                    ValueLocation::Register(index) => logical_register(index)?,
+                    ValueLocation::Spill(slot) => {
+                        let mut used = A64_ALLOCATED_REGISTER_MASK;
+                        let register = take_temporary(&mut used)?;
+                        self.encoder.ldr_d_unsigned(
+                            register,
+                            XReg::Sp,
+                            spill_slot_offset(slot)?,
+                        )?;
+                        register
+                    }
+                };
+                self.encoder.fcmp_d_zero(condition);
+                let taken = self.encoder.b_cond_placeholder(Condition::NotEqual);
+
+                self.emit_edge_moves(allocation, block.id(), 1)?;
+                // The taken arm's moves are laid out next, so the untaken edge
+                // always needs its own branch even when its target follows.
+                pending_branches.push((else_edge.target().index(), self.encoder.b_placeholder()));
+
+                let taken_offset = self.encoder.position();
+                self.encoder.patch_branch(taken, taken_offset)?;
+                self.emit_edge_moves(allocation, block.id(), 0)?;
+                if then_edge.target().index() != fallthrough {
+                    pending_branches
+                        .push((then_edge.target().index(), self.encoder.b_placeholder()));
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn emit_edge_moves(
+        &mut self,
+        allocation: &RegisterAllocation,
+        block: BlockId,
+        edge: usize,
+    ) -> JitResult<()> {
+        for step in allocation.edge_moves(block, edge)?.to_vec() {
+            self.emit_location_move(step.from(), step.to())?;
+        }
+        Ok(())
+    }
+
+    fn emit_location_move(&mut self, from: ValueLocation, to: ValueLocation) -> JitResult<()> {
+        match (from, to) {
+            (ValueLocation::Register(source), ValueLocation::Register(destination)) => {
+                let source = logical_register(source)?;
+                let destination = logical_register(destination)?;
+                if source != destination {
+                    self.encoder.fmov_d(destination, source);
+                }
+            }
+            (ValueLocation::Register(source), ValueLocation::Spill(slot)) => {
+                let source = logical_register(source)?;
+                self.encoder
+                    .str_d_unsigned(source, XReg::Sp, spill_slot_offset(slot)?)?;
+            }
+            (ValueLocation::Spill(slot), ValueLocation::Register(destination)) => {
+                let destination = logical_register(destination)?;
+                self.encoder
+                    .ldr_d_unsigned(destination, XReg::Sp, spill_slot_offset(slot)?)?;
+            }
+            (ValueLocation::Spill(source), ValueLocation::Spill(destination)) => {
+                if source == destination {
+                    return Ok(());
+                }
+                // The bank stops short of D16-D22, which the host convention
+                // leaves volatile, so a temporary here costs no prologue save.
+                let mut used = A64_ALLOCATED_REGISTER_MASK;
+                let scratch = take_temporary(&mut used)?;
+                self.encoder
+                    .ldr_d_unsigned(scratch, XReg::Sp, spill_slot_offset(source)?)?;
+                self.encoder
+                    .str_d_unsigned(scratch, XReg::Sp, spill_slot_offset(destination)?)?;
+            }
         }
         Ok(())
     }
@@ -2982,6 +3125,75 @@ mod cross_target_contract_tests {
                 "AArch64 transition derivative must contain exactly one {label}"
             );
         }
+    }
+
+    /// The branch form of a conditional encodes real A64 control flow.
+    ///
+    /// Nothing here executes A64: the checked encoder plus the independent
+    /// decoder in [`verify_exact_function`] is the contract every non-AArch64
+    /// host can hold the backend to, and it is what rejects a branch landing
+    /// anywhere but an instruction boundary.
+    #[test]
+    fn branch_lowered_conditionals_encode_verified_a64_control_flow() {
+        let source = NativeProgram::from_ops_for_test(
+            vec![
+                NativeOp::LoadParam(0),
+                NativeOp::LoadParam(1),
+                NativeOp::LoadParam(2),
+                NativeOp::Mul,
+                NativeOp::LoadParam(3),
+                NativeOp::UnaryMath(crate::native::expr::UnaryMathOp::Exp),
+                NativeOp::IfElse,
+                NativeOp::LoadParam(4),
+                NativeOp::Add,
+            ],
+            3,
+            Vec::new(),
+            Vec::new(),
+        );
+        let select = compile_value_function(&source).expect("encode the select form");
+        let ssa = crate::native::ssa::Program::lower(&source)
+            .expect("lower the postfix program")
+            .with_branching_conditionals()
+            .expect("re-express conditionals as branches");
+        assert_eq!(ssa.blocks().len(), 4, "branch, then, else, join");
+        let branch = super::compile_value_function_from_ssa(&ssa)
+            .expect("encode and verify the branch form");
+
+        let words = |bytes: &[u8], mask: u32, expected: u32| {
+            bytes
+                .chunks_exact(4)
+                .filter(|word| {
+                    let word = u32::from_le_bytes((*word).try_into().expect("aligned word"));
+                    word & mask == expected
+                })
+                .count()
+        };
+        // FCSEL is how the select form picks an arm.
+        assert_eq!(
+            words(&select, 0xFFE0_0C00, 0x1E60_0C00),
+            1,
+            "the select form folds the conditional into one FCSEL"
+        );
+        assert_eq!(
+            words(&branch, 0xFFE0_0C00, 0x1E60_0C00),
+            0,
+            "the branch form selects nothing"
+        );
+        // A64 conditional branches reach only +/-1 MiB, so the encoder's
+        // fixed-size long form is B.<inverse> over an unconditional B. NE
+        // inverts to EQ, and the skip is exactly two instructions.
+        assert_eq!(
+            words(&branch, 0xFFFF_FFFF, 0x5400_0040),
+            1,
+            "the branch form takes its arm through exactly one conditional branch"
+        );
+        assert!(
+            words(&branch, 0xFC00_0000, 0x1400_0000) >= 3,
+            "the taken branch, the untaken edge, and the arm's jump to the join each need a B"
+        );
+        verify_exact_function(&branch, "branch-form scalar value function")
+            .expect("the independent A64 decoder accepts the branch form");
     }
 }
 

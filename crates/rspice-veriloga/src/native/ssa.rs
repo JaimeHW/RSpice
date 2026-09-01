@@ -641,7 +641,78 @@ impl Program {
         self.validate_edges()?;
         let idom = self.immediate_dominators(&predecessors);
         self.validate_dominance(&idom)?;
+        self.validate_structured_regions(&idom)?;
         self.validate_effect_discipline(&idom)
+    }
+
+    /// The block at which a two-way branch's arms reconverge.
+    ///
+    /// Every edge runs forward in layout order, so the reconvergence point is
+    /// the first block index past which nothing inside the region still
+    /// branches: start at the furthest successor and extend the watermark
+    /// while any block before it reaches further.
+    pub(crate) fn branch_join(&self, block: &BasicBlock) -> JitResult<BlockId> {
+        let furthest = |block: &BasicBlock| {
+            block
+                .terminator
+                .edges()
+                .map(|edge| edge.target.index())
+                .max()
+        };
+        let mut watermark = furthest(block).ok_or_else(|| JitError::Verifier {
+            model: MODEL.into(),
+            detail: format!("SSA block {} has no successor to join", block.id.index()).into(),
+        })?;
+        let mut cursor = block.id.index() + 1;
+        while cursor < watermark {
+            if let Some(target) = furthest(&self.blocks[cursor]) {
+                watermark = watermark.max(target);
+            } else {
+                // A `Return` inside the region: the arms cannot reconverge.
+                return Err(JitError::Verifier {
+                    model: MODEL.into(),
+                    detail: format!(
+                        "SSA block {} returns inside the region branching from block {}",
+                        cursor,
+                        block.id.index()
+                    )
+                    .into(),
+                });
+            }
+            cursor += 1;
+        }
+        BlockId::new(watermark)
+    }
+
+    /// Branch arms must form single-entry regions that reconverge.
+    ///
+    /// WebAssembly has no `goto`: its only control flow is nested blocks,
+    /// loops and `br_if`. Requiring the CFG to be structured is what lets the
+    /// WebAssembly backend emit `if`/`else`/`end` directly instead of carrying
+    /// a relooper, and it costs nothing, because structured Verilog-A control
+    /// flow is the only thing that lowers here. The check is that nothing
+    /// outside a branch's region enters it, which is exactly that every block
+    /// strictly inside is dominated by the branch.
+    fn validate_structured_regions(&self, idom: &[Option<BlockId>]) -> JitResult<()> {
+        for block in &self.blocks {
+            if !matches!(block.terminator, Terminator::Branch { .. }) {
+                continue;
+            }
+            let join = self.branch_join(block)?;
+            for inside in (block.id.index() + 1)..join.index() {
+                if idom[inside].is_none_or(|dominator| dominator < block.id) {
+                    return Err(JitError::Verifier {
+                        model: MODEL.into(),
+                        detail: format!(
+                            "SSA block {inside} is entered from outside the region branching from block {}",
+                            block.id.index()
+                        )
+                        .into(),
+                    });
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Structural identity rules: block ranges partition the instruction and

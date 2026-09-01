@@ -18,7 +18,7 @@ use crate::jit::expr::{
     BinaryMathOp, CompareOp, ExtremumOp, IntegerBinaryOp, LogicalOp, NativeOp, NativeProgram,
     UnaryMathOp, VoltageNode,
 };
-use crate::jit::ssa::{Instruction, Program};
+use crate::jit::ssa::{Instruction, Program, Terminator};
 
 pub(crate) const WASM_JIT_EVAL_HELPER_IMPORT: &str = "eval_op_v1";
 /// Frame-relative, bounded variable-arity helper capability.
@@ -194,6 +194,11 @@ pub(crate) struct WasmFusedKernel {
 
 #[cfg(test)]
 pub(crate) fn encode_value_program(program: &NativeProgram) -> WasmJitResult<Vec<u8>> {
+    encode_value_module(encode_value_body(program)?)
+}
+
+/// Wrap one encoded value body in a single-entry module.
+fn encode_value_module(body: Function) -> WasmJitResult<Vec<u8>> {
     let mut module = Module::new();
 
     encode_capability_types(&mut module);
@@ -220,7 +225,6 @@ pub(crate) fn encode_value_program(program: &NativeProgram) -> WasmJitResult<Vec
         data: Cow::Owned(contract),
     });
 
-    let body = encode_value_body(program)?;
     let mut code = CodeSection::new();
     code.function(&body);
     module.section(&code);
@@ -315,7 +319,11 @@ fn encode_model_program_set(
     kernels: &[WasmAssignmentKernel],
     fused: &[WasmFusedKernel],
 ) -> WasmJitResult<Vec<u8>> {
-    let function_count = u32::try_from(programs.len())
+    let value_bodies = programs
+        .iter()
+        .map(|program| encode_value_body(program))
+        .collect::<WasmJitResult<Vec<_>>>()?;
+    let function_count = u32::try_from(value_bodies.len())
         .map_err(|_| WasmJitError::Encoding("model entry count exceeds u32".into()))?;
     let kernel_count = u32::try_from(kernels.len())
         .map_err(|_| WasmJitError::Encoding("assignment kernel count exceeds u32".into()))?;
@@ -373,8 +381,8 @@ fn encode_model_program_set(
     });
 
     let mut code = CodeSection::new();
-    for program in programs {
-        code.function(&encode_value_body(program)?);
+    for body in &value_bodies {
+        code.function(body);
     }
     for kernel in kernels {
         code.function(&encode_assignment_kernel(kernel, function_count)?);
@@ -388,7 +396,16 @@ fn encode_model_program_set(
 
 fn encode_value_body(program: &NativeProgram) -> WasmJitResult<Function> {
     let ssa = Program::lower(program).map_err(|error| WasmJitError::Encoding(error.to_string()))?;
-    let local_count = u32::try_from(ssa.instructions().len())
+    encode_value_body_from_ssa(&ssa)
+}
+
+/// Encode one already-lowered value entry.
+///
+/// Taking the SSA directly is what lets the branch form of a conditional reach
+/// this encoder through the same locals, helpers and module validator as the
+/// shipped select form.
+fn encode_value_body_from_ssa(ssa: &Program) -> WasmJitResult<Function> {
+    let local_count = u32::try_from(ssa.value_count())
         .map_err(|_| WasmJitError::Encoding("SSA local count exceeds u32".into()))?;
     let locals = (local_count != 0)
         .then_some((local_count, ValType::F64))
@@ -396,20 +413,96 @@ fn encode_value_body(program: &NativeProgram) -> WasmJitResult<Function> {
     let mut body = Function::new(locals);
     emit_frame_guard(&mut body);
     emit_clear_error_status(&mut body);
-    for instruction in ssa.instructions() {
-        emit_instruction(&mut body, instruction)?;
-        body.instruction(&WasmInstruction::LocalSet(value_local(
-            instruction.result().index(),
-        )?));
-    }
-    body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
-    body.instruction(&WasmInstruction::LocalGet(value_local(
-        ssa.result().index(),
-    )?));
-    body.instruction(&WasmInstruction::F64Store(f64_mem(FRAME_RESULT_OFFSET)));
+    emit_block_region(&mut body, ssa, ssa.entry(), None)?;
     body.instruction(&WasmInstruction::I32Const(WASM_JIT_STATUS_OK));
     body.instruction(&WasmInstruction::End);
     Ok(body)
+}
+
+/// Emit the straight-line chain of blocks starting at `start`, stopping when
+/// it reaches `stop`.
+///
+/// WebAssembly has no `goto`, so control flow is realized structurally: a
+/// branch becomes `if`/`else`/`end` around the two arm regions, and execution
+/// continues at the block where they reconverge. The SSA verifier already
+/// requires every branch's arms to be single-entry regions that reconverge at
+/// exactly one block, which is what makes this total without a relooper.
+fn emit_block_region(
+    body: &mut Function,
+    ssa: &Program,
+    start: crate::jit::ssa::BlockId,
+    stop: Option<crate::jit::ssa::BlockId>,
+) -> WasmJitResult<()> {
+    let verifier = |error: crate::jit::JitError| WasmJitError::Encoding(error.to_string());
+    let mut current = start;
+    loop {
+        if Some(current) == stop {
+            return Ok(());
+        }
+        let block = ssa.block(current).map_err(verifier)?;
+        for instruction in &ssa.instructions()[block.instruction_start()..block.instruction_end()] {
+            emit_instruction(body, instruction)?;
+            body.instruction(&WasmInstruction::LocalSet(value_local(
+                instruction.result().index(),
+            )?));
+        }
+        match block.terminator() {
+            Terminator::Return(value) => {
+                body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+                body.instruction(&WasmInstruction::LocalGet(value_local(value.index())?));
+                body.instruction(&WasmInstruction::F64Store(f64_mem(FRAME_RESULT_OFFSET)));
+                return Ok(());
+            }
+            Terminator::Jump(edge) => {
+                emit_edge_arguments(body, ssa, edge)?;
+                current = edge.target();
+            }
+            Terminator::Branch {
+                condition,
+                then_edge,
+                else_edge,
+            } => {
+                let join = ssa.branch_join(block).map_err(verifier)?;
+                // Verilog-A truthiness: anything but exact zero, NaN included.
+                // `f64.ne` reports an unordered compare as true, which is the
+                // same predicate the select form feeds to `select`.
+                body.instruction(&WasmInstruction::LocalGet(value_local(condition.index())?));
+                body.instruction(&WasmInstruction::F64Const(0.0.into()));
+                body.instruction(&WasmInstruction::F64Ne);
+                body.instruction(&WasmInstruction::If(BlockType::Empty));
+                emit_edge_arguments(body, ssa, then_edge)?;
+                emit_block_region(body, ssa, then_edge.target(), Some(join))?;
+                body.instruction(&WasmInstruction::Else);
+                emit_edge_arguments(body, ssa, else_edge)?;
+                emit_block_region(body, ssa, else_edge.target(), Some(join))?;
+                body.instruction(&WasmInstruction::End);
+                current = join;
+            }
+        }
+    }
+}
+
+/// Bind one edge's arguments to its target's block parameters.
+///
+/// Every SSA value owns a distinct local here, so a parameter can never
+/// already hold an argument and the assignments need no sequencing: the
+/// swap hazard the machine backends sequence away cannot arise when nothing
+/// shares storage.
+fn emit_edge_arguments(
+    body: &mut Function,
+    ssa: &Program,
+    edge: &crate::jit::ssa::Edge,
+) -> WasmJitResult<()> {
+    let target = ssa
+        .block(edge.target())
+        .map_err(|error| WasmJitError::Encoding(error.to_string()))?;
+    for (argument, parameter) in edge.arguments().iter().zip(ssa.parameters(target)) {
+        body.instruction(&WasmInstruction::LocalGet(value_local(argument.index())?));
+        body.instruction(&WasmInstruction::LocalSet(value_local(
+            parameter.value().index(),
+        )?));
+    }
+    Ok(())
 }
 
 fn encode_assignment_kernel(
@@ -3136,5 +3229,124 @@ mod tests {
                 .unwrap_or_else(|error| panic!("missing WASM translation for {op:?}: {error}"));
             assert!(module.len() <= super::super::SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES);
         }
+    }
+
+    /// Encode the branch form of one value entry into a single-entry module.
+    fn branching_value_module(program: &NativeProgram) -> Vec<u8> {
+        let ssa = Program::lower(program)
+            .expect("lower the postfix program")
+            .with_branching_conditionals()
+            .expect("re-express conditionals as branches");
+        let body = encode_value_body_from_ssa(&ssa).expect("encode the branch-form body");
+        let bytes = encode_value_module(body).expect("assemble the module");
+        Validator::new()
+            .validate_all(&bytes)
+            .expect("branch-form module is valid WebAssembly");
+        bytes
+    }
+
+    #[test]
+    fn structured_branches_agree_with_the_select_form_bit_for_bit() {
+        // Nested conditionals whose arms own real work, including a helper
+        // call the untaken arm must not make.
+        let source = program(
+            vec![
+                NativeOp::LoadParam(0),
+                NativeOp::LoadParam(1),
+                NativeOp::LoadParam(2),
+                NativeOp::LoadParam(3),
+                NativeOp::Mul,
+                NativeOp::LoadParam(4),
+                NativeOp::UnaryMath(UnaryMathOp::Exp),
+                NativeOp::IfElse,
+                NativeOp::LoadParam(5),
+                NativeOp::Sqrt,
+                NativeOp::IfElse,
+                NativeOp::LoadParam(6),
+                NativeOp::Add,
+            ],
+            4,
+        );
+
+        let engine = Engine::default();
+        let select_bytes = emit_verified_value_program(&source).expect("encode the select form");
+        let branch_bytes = branching_value_module(&source);
+        let (mut select_store, select_memory, select_instance) =
+            instantiate_value_module(&engine, &select_bytes);
+        let (mut branch_store, branch_memory, branch_instance) =
+            instantiate_value_module(&engine, &branch_bytes);
+
+        let truthiness = [
+            0.0_f64,
+            -0.0,
+            f64::NAN,
+            1.0,
+            -1.0,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ];
+        for outer in truthiness {
+            for inner in truthiness {
+                let parameters = [outer, inner, 3.0_f64, 0.5, 2.0, 9.0, -4.5];
+                let expected = call_value_entry(
+                    &mut select_store,
+                    &select_memory,
+                    &select_instance,
+                    &parameters,
+                );
+                let actual = call_value_entry(
+                    &mut branch_store,
+                    &branch_memory,
+                    &branch_instance,
+                    &parameters,
+                );
+                assert_eq!(
+                    actual.to_bits(),
+                    expected.to_bits(),
+                    "structured branch and select disagree at outer={outer} inner={inner}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_structured_branch_binds_its_join_parameter_from_both_arms() {
+        let source = program(
+            vec![
+                NativeOp::LoadParam(0),
+                NativeOp::LoadParam(1),
+                NativeOp::Sqrt,
+                NativeOp::LoadParam(2),
+                NativeOp::UnaryMath(UnaryMathOp::Exp),
+                NativeOp::IfElse,
+            ],
+            3,
+        );
+        let ssa = Program::lower(&source)
+            .expect("lower")
+            .with_branching_conditionals()
+            .expect("split");
+        assert_eq!(ssa.blocks().len(), 4);
+        assert_eq!(ssa.block_parameter_count(), 1);
+        assert_eq!(
+            ssa.branch_join(&ssa.blocks()[0])
+                .expect("join block")
+                .index(),
+            3
+        );
+
+        let engine = Engine::default();
+        let bytes = branching_value_module(&source);
+        let (mut store, memory, instance) = instantiate_value_module(&engine, &bytes);
+        assert_eq!(
+            call_value_entry(&mut store, &memory, &instance, &[1.0, 9.0, 2.0]).to_bits(),
+            3.0_f64.to_bits(),
+            "the taken arm's square root reaches the join parameter"
+        );
+        assert_eq!(
+            call_value_entry(&mut store, &memory, &instance, &[0.0, 9.0, 0.0]).to_bits(),
+            1.0_f64.to_bits(),
+            "the untaken arm's exponential reaches the join parameter"
+        );
     }
 }
