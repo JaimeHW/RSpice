@@ -137,6 +137,9 @@ pub(in crate::engine::builder) struct CplModelParams {
     pub(in crate::engine::builder) c: Vec<Vec<f64>>,
     pub(in crate::engine::builder) g: Vec<Vec<f64>>,
     pub(in crate::engine::builder) length: f64,
+    /// True when the authored matrices, before the transient kernel's
+    /// numerical R floor is applied, describe a physically lossless line.
+    pub(in crate::engine::builder) exact_lossless_frequency_model: bool,
 }
 
 pub(in crate::engine::builder) const CPL_MIN_SERIES_RESISTANCE_PER_LENGTH: f64 = 1.0e-4;
@@ -698,6 +701,8 @@ pub(in crate::engine::builder) fn resolve_cpl_model_params(
         )));
     }
 
+    let exact_lossless_frequency_model =
+        parsed.r.iter().chain(&parsed.g).all(|value| *value == 0.0);
     Ok(Some(CplModelParams {
         r: symmetric_matrix_from_upper_triangle(
             model_name,
@@ -710,6 +715,7 @@ pub(in crate::engine::builder) fn resolve_cpl_model_params(
         c: symmetric_matrix_from_upper_triangle(model_name, "C", &parsed.c, conductors, None)?,
         g: symmetric_matrix_from_upper_triangle(model_name, "G", &parsed.g, conductors, None)?,
         length,
+        exact_lossless_frequency_model,
     }))
 }
 

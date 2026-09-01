@@ -216,13 +216,20 @@ impl Engine {
         if num_nodes == 0 {
             return Err(SimulationError::Circuit("Circuit has no nodes".to_string()));
         }
-        let periodic_unknowns = num_nodes
-            .checked_add(circuit.num_branches())
+        let periodic_branches = circuit
+            .num_branches()
+            .checked_add(Self::hb_periodic_extra_branch_count(&circuit)?)
             .ok_or_else(|| {
                 SimulationError::Circuit(
-                    "PAC periodic node and branch count overflows this platform".to_string(),
+                    "PAC canonical and distributed-network branch count overflows this platform"
+                        .to_string(),
                 )
             })?;
+        let periodic_unknowns = num_nodes.checked_add(periodic_branches).ok_or_else(|| {
+            SimulationError::Circuit(
+                "PAC periodic node and branch count overflows this platform".to_string(),
+            )
+        })?;
         let lifted_unknowns = periodic_unknowns.checked_mul(sideband_count).ok_or_else(|| {
             SimulationError::Circuit(format!(
                 "PAC lifted dimension {periodic_unknowns} MNA unknowns x {sideband_count} sidebands overflows this platform"

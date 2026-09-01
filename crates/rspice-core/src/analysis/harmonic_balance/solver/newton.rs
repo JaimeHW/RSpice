@@ -46,6 +46,7 @@ struct ExactHbOperator<'a> {
     mna_branches: &'a [ExactMnaBranch],
     mna_static_entries: &'a [(usize, usize, Value)],
     mna_inductance_entries: &'a [(usize, usize, Value)],
+    periodic_networks: &'a [ExactPeriodicNetwork],
 }
 
 #[cfg(test)]
@@ -72,6 +73,7 @@ mod exact_matrix_free_tests {
             mna_branches: &[],
             mna_static_entries: &[],
             mna_inductance_entries: &[],
+            periodic_networks: &[],
         }
     }
 
@@ -407,6 +409,86 @@ mod exact_matrix_free_tests {
     }
 
     #[test]
+    fn matrix_free_operator_applies_exact_delay_line_branch_rows() {
+        let branches = vec![
+            ExactMnaBranch::NetworkPort {
+                branch_ordinal: 1,
+                node_pos: 1,
+                node_neg: 0,
+            },
+            ExactMnaBranch::NetworkPort {
+                branch_ordinal: 2,
+                node_pos: 2,
+                node_neg: 0,
+            },
+        ];
+        let delay = 137.0e-9;
+        let impedance = 50.0;
+        let network = ExactPeriodicNetwork::ScalarWave {
+            name: "T1".to_string(),
+            node1_pos: 1,
+            node1_neg: 0,
+            node2_pos: 2,
+            node2_neg: 0,
+            branch1: 2,
+            branch2: 3,
+            impedance,
+            delay,
+            attenuation: 1.0,
+        };
+        let networks = [network];
+        let operator = ExactHbOperator {
+            gmin: 0.0,
+            mna_branches: &branches,
+            periodic_networks: &networks,
+            ..fixture(&[], &[], &[], &[])
+        };
+        operator.validate().expect("delay-line operator is valid");
+        let size = operator.entity_count() * operator.real_width;
+        let input = (0..size)
+            .map(|index| Complex64::new(0.07 * index as Value - 0.4, 0.0))
+            .collect::<Vec<_>>();
+        let actual = operator.apply(&input);
+        let coefficient = |entity: usize, harmonic: usize| {
+            Complex64::new(
+                input[operator.re_idx(entity, harmonic)].re,
+                if harmonic == 0 {
+                    0.0
+                } else {
+                    input[operator.im_idx(entity, harmonic)].re
+                },
+            )
+        };
+        let output = |entity: usize, harmonic: usize| {
+            Complex64::new(
+                actual[operator.re_idx(entity, harmonic)].re,
+                if harmonic == 0 {
+                    0.0
+                } else {
+                    actual[operator.im_idx(entity, harmonic)].re
+                },
+            )
+        };
+        for harmonic in 0..operator.num_components {
+            let q = Complex64::from_polar(1.0, -(harmonic as Value) * operator.omega0 * delay);
+            let v1 = coefficient(0, harmonic);
+            let v2 = coefficient(1, harmonic);
+            let i1 = coefficient(2, harmonic);
+            let i2 = coefficient(3, harmonic);
+            assert_close(output(0, harmonic), -i1);
+            assert_close(output(1, harmonic), -i2);
+            assert_close(
+                output(2, harmonic),
+                -v1 + q * v2 + impedance * i1 + q * impedance * i2,
+            );
+            assert_close(
+                output(3, harmonic),
+                -v2 + q * v1 + impedance * i2 + q * impedance * i1,
+            );
+        }
+    }
+
+    #[test]
     fn nonlinear_residual_and_dense_jacobian_include_mutual_inductance() {
         let fundamental = 1.0e6;
         let mut solver = HbSolver::new(HbConfig::new(fundamental).with_harmonics(2), 2);
@@ -450,6 +532,63 @@ mod exact_matrix_free_tests {
         let h = 3;
         assert_close(jacobian[(2 * h) + 2][(3 * h) + 2], jw * mutual);
         assert_close(jacobian[(3 * h) + 2][(2 * h) + 2], jw * mutual);
+    }
+
+    #[test]
+    fn nonlinear_residual_and_dense_jacobian_include_exact_delay_line() {
+        let fundamental = 1.0e6;
+        let delay = 137.0e-9;
+        let impedance = 50.0;
+        let mut solver = HbSolver::new(HbConfig::new(fundamental).with_harmonics(2), 2);
+        solver
+            .try_add_periodic_network_port_branch(1, 0, 1, "T1#port1")
+            .expect("first line port registers");
+        solver
+            .try_add_periodic_network_port_branch(2, 0, 2, "T1#port2")
+            .expect("second line port registers");
+        solver
+            .try_add_exact_periodic_network(ExactPeriodicNetwork::ScalarWave {
+                name: "T1".to_string(),
+                node1_pos: 1,
+                node1_neg: 0,
+                node2_pos: 2,
+                node2_neg: 0,
+                branch1: 2,
+                branch2: 3,
+                impedance,
+                delay,
+                attenuation: 1.0,
+            })
+            .expect("delay-line equations register");
+        let mut state = HbSolverState::new(2, 2);
+        state
+            .try_prepare_mna_branches(2, 2)
+            .expect("port-current spectra allocate");
+        state.x[0][2] = Complex64::new(0.3, -0.2);
+        state.x[1][2] = Complex64::new(-0.1, 0.4);
+        state.mna_branch_currents[0][2] = Complex64::new(0.02, 0.01);
+        state.mna_branch_currents[1][2] = Complex64::new(-0.03, 0.04);
+        solver
+            .add_exact_mna_residual(&mut state, 1.0)
+            .expect("exact delay-line residual evaluates");
+
+        let q = Complex64::from_polar(1.0, -2.0 * 2.0 * PI * fundamental * delay);
+        let expected_row1 = -state.x[0][2]
+            + q * state.x[1][2]
+            + impedance * state.mna_branch_currents[0][2]
+            + q * impedance * state.mna_branch_currents[1][2];
+        assert_close(state.mna_branch_residual[0][2], expected_row1);
+        assert_close(state.residual[0][2], -state.mna_branch_currents[0][2]);
+
+        let jacobian = solver
+            .build_full_jacobian(&state)
+            .expect("dense exact delay-line Jacobian evaluates");
+        let h = 3;
+        let row = 2 * h + 2;
+        assert_close(jacobian[row][2], Complex64::new(-1.0, 0.0));
+        assert_close(jacobian[row][h + 2], q);
+        assert_close(jacobian[row][2 * h + 2], Complex64::new(impedance, 0.0));
+        assert_close(jacobian[row][3 * h + 2], q * impedance);
     }
 
     #[test]
@@ -855,6 +994,15 @@ impl ExactHbOperator<'_> {
                 }
             }
         }
+        for network in self.periodic_networks {
+            for harmonic in 0..self.num_components {
+                network.try_visit_direct_entries(
+                    self.omega0 * harmonic as Value,
+                    unknowns,
+                    |_, _, _| {},
+                )?;
+            }
+        }
         Ok(())
     }
 
@@ -982,14 +1130,16 @@ impl ExactHbOperator<'_> {
                         Complex64::new(-1.0, 0.0),
                         &mut visitor,
                     );
-                    self.visit_linear_term(
-                        branch_entity,
-                        k,
-                        node,
-                        k,
-                        Complex64::new(-1.0, 0.0),
-                        &mut visitor,
-                    );
+                    if !matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
+                        self.visit_linear_term(
+                            branch_entity,
+                            k,
+                            node,
+                            k,
+                            Complex64::new(-1.0, 0.0),
+                            &mut visitor,
+                        );
+                    }
                 }
                 if node_neg > 0 {
                     let node = node_neg - 1;
@@ -1001,14 +1151,16 @@ impl ExactHbOperator<'_> {
                         Complex64::new(1.0, 0.0),
                         &mut visitor,
                     );
-                    self.visit_linear_term(
-                        branch_entity,
-                        k,
-                        node,
-                        k,
-                        Complex64::new(1.0, 0.0),
-                        &mut visitor,
-                    );
+                    if !matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
+                        self.visit_linear_term(
+                            branch_entity,
+                            k,
+                            node,
+                            k,
+                            Complex64::new(1.0, 0.0),
+                            &mut visitor,
+                        );
+                    }
                 }
                 if let ExactMnaBranch::Inductor { inductance, .. } = branch {
                     self.visit_linear_term(
@@ -1043,6 +1195,13 @@ impl ExactHbOperator<'_> {
             }
             for &(row, column, inductance) in self.mna_inductance_entries {
                 self.visit_linear_term(row, k, column, k, jw * inductance, &mut visitor);
+            }
+            for network in self.periodic_networks {
+                network
+                    .try_visit_direct_entries(jw.im, self.entity_count(), |row, column, value| {
+                        self.visit_linear_term(row, k, column, k, -value, &mut visitor);
+                    })
+                    .expect("validated exact HB distributed network remains representable");
             }
         }
 
@@ -1796,6 +1955,7 @@ impl HbSolver {
                         (resistor_voltage - voltage_drop, resistor_voltage.norm())
                     }
                     ExactMnaBranch::ControlledVoltageSource { .. } => (-voltage_drop, 0.0),
+                    ExactMnaBranch::NetworkPort { .. } => (Complex64::new(0.0, 0.0), 0.0),
                 };
                 if !residual.re.is_finite()
                     || !residual.im.is_finite()
@@ -1838,6 +1998,28 @@ impl HbSolver {
                     * state.mna_branch_currents[control_branch][harmonic];
                 state.mna_branch_residual[branch][harmonic] += contribution;
                 state.mna_branch_residual_scale[branch][harmonic] += contribution.norm();
+            }
+        }
+        let unknowns = self.num_nodes + self.exact_mna_branches().len();
+        for harmonic in 0..harmonic_count {
+            let omega = harmonic as Value * omega0;
+            for network in &self.exact_periodic_networks {
+                network.try_visit_direct_entries(omega, unknowns, |row, column, value| {
+                    let input = if column < self.num_nodes {
+                        state.x[column][harmonic]
+                    } else {
+                        state.mna_branch_currents[column - self.num_nodes][harmonic]
+                    };
+                    let contribution = value * input;
+                    if row < self.num_nodes {
+                        state.residual[row][harmonic] -= contribution;
+                        state.residual_scale[row][harmonic] += contribution.norm();
+                    } else {
+                        let branch = row - self.num_nodes;
+                        state.mna_branch_residual[branch][harmonic] -= contribution;
+                        state.mna_branch_residual_scale[branch][harmonic] += contribution.norm();
+                    }
+                })?;
             }
         }
         state.compute_residual_norm();
@@ -2190,12 +2372,16 @@ impl HbSolver {
                 if node_pos > 0 {
                     let node_coordinate = (node_pos - 1) * h + k;
                     jac[node_coordinate][branch_coordinate] -= 1.0;
-                    jac[branch_coordinate][node_coordinate] -= 1.0;
+                    if !matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
+                        jac[branch_coordinate][node_coordinate] -= 1.0;
+                    }
                 }
                 if node_neg > 0 {
                     let node_coordinate = (node_neg - 1) * h + k;
                     jac[node_coordinate][branch_coordinate] += 1.0;
-                    jac[branch_coordinate][node_coordinate] += 1.0;
+                    if !matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
+                        jac[branch_coordinate][node_coordinate] += 1.0;
+                    }
                 }
                 if let ExactMnaBranch::Inductor { inductance, .. } = branch {
                     jac[branch_coordinate][branch_coordinate] +=
@@ -2210,6 +2396,11 @@ impl HbSolver {
             }
             for &(row, column, inductance) in &self.exact_mna_inductance_entries {
                 jac[row * h + k][column * h + k] += Complex64::new(0.0, omega_k * inductance);
+            }
+            for network in &self.exact_periodic_networks {
+                network.try_visit_direct_entries(omega_k, entity_count, |row, column, value| {
+                    jac[row * h + k][column * h + k] -= value;
+                })?;
             }
         }
 
@@ -2510,6 +2701,7 @@ impl HbSolver {
                 mna_branches: self.exact_mna_branches(),
                 mna_static_entries: &self.exact_mna_static_entries,
                 mna_inductance_entries: &self.exact_mna_inductance_entries,
+                periodic_networks: &self.exact_periodic_networks,
             };
             operator.validate()?;
             let preconditioner = ExactHbPreconditioner::build(&operator);

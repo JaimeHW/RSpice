@@ -860,8 +860,28 @@ impl Engine {
         if !circuit.ekv26s.is_empty() || !circuit.ekv3s.is_empty() || !circuit.vdmoses.is_empty() {
             kinds.push("unstamped advanced semiconductor models");
         }
-        if !circuit.tlines.is_empty() || !circuit.coupled_tlines.is_empty() {
-            kinds.push("distributed transmission-line equations");
+        if circuit.tlines.iter().any(|line| line.has_txl_runtime()) {
+            kinds.push(
+                "native TXL lines without retained exact physical frequency-domain RLGC data",
+            );
+        }
+        if circuit.tlines.iter().any(|line| {
+            !line.has_txl_runtime()
+                && !line.is_zero_length_pass_through()
+                && line.ltra_ac_total_rlc().is_none()
+                && (line.attenuation() != 1.0
+                    || line.loss_time_constant() != 0.0
+                    || line.dc_series_resistance() != 0.0
+                    || line.has_distributed_rlgc())
+        }) {
+            kinds.push("scalar delay lines with retained lossy approximation state");
+        }
+        if circuit
+            .coupled_tlines
+            .iter()
+            .any(|line| line.lossless_frequency_data().is_none())
+        {
+            kinds.push("lossy CPL lines without retained full physical RLGC matrices");
         }
         if !circuit.jiles_atherton_inductors.is_empty() || !circuit.xyce_core_groups.is_empty() {
             kinds.push("nonlinear magnetic-core branch equations");
@@ -902,6 +922,38 @@ impl Engine {
                 *slot = true;
             }
         }
+        for line in &circuit.tlines {
+            if let Some((branch1, branch2)) = line
+                .zero_length_branch_ordinals()
+                .or_else(|| line.ltra_branch_ordinals())
+                .or_else(|| line.txl_branch_ordinals())
+            {
+                for ordinal in [branch1, branch2] {
+                    if let Some(slot) = ordinal
+                        .checked_sub(1)
+                        .and_then(|index| represented_branches.get_mut(index))
+                    {
+                        *slot = true;
+                    }
+                }
+            }
+        }
+        for line in &circuit.coupled_tlines {
+            if let Some(branches) = line.native_branch_ordinals() {
+                for conductor in 0..line.conductors() {
+                    if let Some((near, far)) = branches.conductor(conductor) {
+                        for ordinal in [near, far] {
+                            if let Some(slot) = ordinal
+                                .checked_sub(1)
+                                .and_then(|index| represented_branches.get_mut(index))
+                            {
+                                *slot = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
         if represented_branches.iter().any(|represented| !represented) {
             kinds.push("unrepresented MNA branch families");
         }
@@ -912,6 +964,42 @@ impl Engine {
             kinds.dedup();
             Some(kinds.join(", "))
         }
+    }
+
+    pub(in crate::engine::hb) fn hb_periodic_extra_branch_count(
+        circuit: &CircuitData,
+    ) -> Result<usize, SimulationError> {
+        let scalar = circuit
+            .tlines
+            .iter()
+            .filter(|line| {
+                line.zero_length_branch_ordinals().is_none()
+                    && line.ltra_branch_ordinals().is_none()
+                    && line.txl_branch_ordinals().is_none()
+            })
+            .count()
+            .checked_mul(2)
+            .ok_or_else(|| {
+                SimulationError::Circuit(
+                    "periodic scalar transmission-line port count exceeds this platform"
+                        .to_string(),
+                )
+            })?;
+        circuit
+            .coupled_tlines
+            .iter()
+            .filter(|line| line.native_branch_ordinals().is_none())
+            .try_fold(scalar, |count, line| {
+                line.conductors()
+                    .checked_mul(2)
+                    .and_then(|ports| count.checked_add(ports))
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(
+                            "periodic coupled transmission-line port count exceeds this platform"
+                                .to_string(),
+                        )
+                    })
+            })
     }
 
     #[inline]

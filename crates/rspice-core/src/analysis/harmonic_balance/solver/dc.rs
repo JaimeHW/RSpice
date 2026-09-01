@@ -245,11 +245,15 @@ impl HbSolver {
             let (node_pos, node_neg) = Self::dc_branch_terminals(branch);
             if node_pos > 0 {
                 g_dc[node_pos - 1][row] += 1.0;
-                g_dc[row][node_pos - 1] += 1.0;
+                if !matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
+                    g_dc[row][node_pos - 1] += 1.0;
+                }
             }
             if node_neg > 0 {
                 g_dc[node_neg - 1][row] -= 1.0;
-                g_dc[row][node_neg - 1] -= 1.0;
+                if !matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
+                    g_dc[row][node_neg - 1] -= 1.0;
+                }
             }
             if let ExactMnaBranch::Resistor { resistance, .. } = branch {
                 g_dc[row][row] -= *resistance;
@@ -258,6 +262,11 @@ impl HbSolver {
         }
         for &(row, column, value) in &self.exact_mna_static_entries {
             g_dc[row][column] += value;
+        }
+        for network in &self.exact_periodic_networks {
+            network.try_visit_direct_entries(0.0, total_unknowns, |row, column, value| {
+                g_dc[row][column] += value.re;
+            })?;
         }
 
         let solution = self.solve_real_linear_system(&g_dc, &rhs)?;
@@ -471,14 +480,23 @@ impl HbSolver {
                 ExactMnaBranch::Resistor { resistance, .. } => {
                     state.mna_branch_currents[branch_index][0].re * *resistance
                 }
+                ExactMnaBranch::NetworkPort { .. } => 0.0,
                 _ => self.dc_branch_source(branch, source_scale)?,
             };
-            state.mna_branch_residual[branch_index][0] =
-                Complex64::new(constitutive_voltage - voltage, 0.0);
-            state.mna_branch_residual_scale[branch_index][0] = constitutive_voltage
-                .abs()
-                .max(Self::dc_node_voltage(&v_dc, node_pos).abs())
-                .max(Self::dc_node_voltage(&v_dc, node_neg).abs());
+            if matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
+                // A distributed-network branch row is wholly supplied by its
+                // frequency-domain two-port below; it has no independent base
+                // KVL term to count or differentiate a second time.
+                state.mna_branch_residual[branch_index][0] = Complex64::new(0.0, 0.0);
+                state.mna_branch_residual_scale[branch_index][0] = 0.0;
+            } else {
+                state.mna_branch_residual[branch_index][0] =
+                    Complex64::new(constitutive_voltage - voltage, 0.0);
+                state.mna_branch_residual_scale[branch_index][0] = constitutive_voltage
+                    .abs()
+                    .max(Self::dc_node_voltage(&v_dc, node_pos).abs())
+                    .max(Self::dc_node_voltage(&v_dc, node_neg).abs());
+            }
         }
         for &(row, column, coefficient) in &self.exact_mna_static_entries {
             let input = if column < n {
@@ -495,6 +513,25 @@ impl HbSolver {
                 state.mna_branch_residual[branch][0].re -= contribution;
                 state.mna_branch_residual_scale[branch][0] += contribution.abs();
             }
+        }
+        let unknowns = n + self.exact_mna_branches().len();
+        for network in &self.exact_periodic_networks {
+            network.try_visit_direct_entries(0.0, unknowns, |row, column, value| {
+                let input = if column < n {
+                    state.x[column][0]
+                } else {
+                    state.mna_branch_currents[column - n][0]
+                };
+                let contribution = value * input;
+                if row < n {
+                    state.residual[row][0] -= contribution;
+                    state.residual_scale[row][0] += contribution.norm();
+                } else {
+                    let branch = row - n;
+                    state.mna_branch_residual[branch][0] -= contribution;
+                    state.mna_branch_residual_scale[branch][0] += contribution.norm();
+                }
+            })?;
         }
 
         self.validate_dc_residual_state(state)?;
@@ -601,11 +638,15 @@ impl HbSolver {
             let (node_pos, node_neg) = Self::dc_branch_terminals(branch);
             if node_pos > 0 {
                 jacobian[node_pos - 1][branch_coordinate] -= 1.0;
-                jacobian[branch_coordinate][node_pos - 1] -= 1.0;
+                if !matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
+                    jacobian[branch_coordinate][node_pos - 1] -= 1.0;
+                }
             }
             if node_neg > 0 {
                 jacobian[node_neg - 1][branch_coordinate] += 1.0;
-                jacobian[branch_coordinate][node_neg - 1] += 1.0;
+                if !matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
+                    jacobian[branch_coordinate][node_neg - 1] += 1.0;
+                }
             }
             if let ExactMnaBranch::Resistor { resistance, .. } = branch {
                 jacobian[branch_coordinate][branch_coordinate] += *resistance;
@@ -613,6 +654,12 @@ impl HbSolver {
         }
         for &(row, column, value) in &self.exact_mna_static_entries {
             jacobian[row][column] -= value;
+        }
+        let unknowns = n + self.exact_mna_branches().len();
+        for network in &self.exact_periodic_networks {
+            network.try_visit_direct_entries(0.0, unknowns, |row, column, value| {
+                jacobian[row][column] -= value.re;
+            })?;
         }
 
         Ok(jacobian)
@@ -814,6 +861,11 @@ impl HbSolver {
                     node_pos,
                     node_neg,
                 } => (*branch_ordinal, *node_pos, *node_neg),
+                ExactMnaBranch::NetworkPort {
+                    branch_ordinal,
+                    node_pos,
+                    node_neg,
+                } => (*branch_ordinal, *node_pos, *node_neg),
             };
             if branch_ordinal != expected_ordinal
                 || node_pos > self.num_nodes
@@ -961,6 +1013,7 @@ impl HbSolver {
             ExactMnaBranch::Inductor { .. } => 0.0,
             ExactMnaBranch::Resistor { .. } => 0.0,
             ExactMnaBranch::ControlledVoltageSource { .. } => 0.0,
+            ExactMnaBranch::NetworkPort { .. } => 0.0,
         };
         if !source.is_finite() {
             return Err(HbError::InvalidCircuit(

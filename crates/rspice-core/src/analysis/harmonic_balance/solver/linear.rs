@@ -1,7 +1,257 @@
 //! Linear harmonic-balance assembly, source setup, and direct solve helpers.
 
 use super::*;
+use std::cell::RefCell;
 use std::f64::consts::PI;
+
+impl ExactPeriodicNetwork {
+    pub(crate) fn try_visit_direct_entries(
+        &self,
+        omega: Value,
+        unknowns: usize,
+        mut visitor: impl FnMut(usize, usize, Complex64),
+    ) -> Result<(), HbError> {
+        if !omega.is_finite() {
+            return Err(HbError::InvalidCircuit(
+                "periodic distributed-network frequency is non-finite".to_string(),
+            ));
+        }
+        let finite = |value: Complex64| value.re.is_finite() && value.im.is_finite();
+        let visitor = RefCell::new(&mut visitor);
+        let add = |row: usize, column: usize, value: Complex64| -> Result<(), HbError> {
+            if row >= unknowns || column >= unknowns || !finite(value) {
+                return Err(HbError::InvalidCircuit(format!(
+                    "periodic distributed-network entry ({row}, {column}, {value}) is malformed for {unknowns} unknowns"
+                )));
+            }
+            (visitor.borrow_mut())(row, column, value);
+            Ok(())
+        };
+        let add_diff =
+            |row: usize, pos: usize, neg: usize, value: Complex64| -> Result<(), HbError> {
+                if pos > 0 {
+                    add(row, pos - 1, value)?;
+                }
+                if neg > 0 {
+                    add(row, neg - 1, -value)?;
+                }
+                Ok(())
+            };
+
+        match self {
+            Self::ScalarWave {
+                name,
+                node1_pos,
+                node1_neg,
+                node2_pos,
+                node2_neg,
+                branch1,
+                branch2,
+                impedance,
+                delay,
+                attenuation,
+            } => {
+                if name.trim().is_empty()
+                    || !impedance.is_finite()
+                    || *impedance <= 0.0
+                    || !delay.is_finite()
+                    || *delay < 0.0
+                    || !attenuation.is_finite()
+                    || *attenuation != 1.0
+                    || branch1 == branch2
+                {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "periodic scalar transmission line '{name}' is malformed or is not exactly lossless"
+                    )));
+                }
+                let q = Complex64::from_polar(*attenuation, -omega * *delay);
+                let one = Complex64::new(1.0, 0.0);
+                let z = Complex64::new(*impedance, 0.0);
+                add_diff(*branch1, *node1_pos, *node1_neg, one)?;
+                add_diff(*branch1, *node2_pos, *node2_neg, -q)?;
+                add(*branch1, *branch1, -z)?;
+                add(*branch1, *branch2, -q * z)?;
+                add_diff(*branch2, *node2_pos, *node2_neg, one)?;
+                add_diff(*branch2, *node1_pos, *node1_neg, -q)?;
+                add(*branch2, *branch2, -z)?;
+                add(*branch2, *branch1, -q * z)?;
+            }
+            Self::ScalarLtra {
+                name,
+                node1_pos,
+                node1_neg,
+                node2_pos,
+                node2_neg,
+                branch1,
+                branch2,
+                total_inductance,
+                total_capacitance,
+                total_resistance,
+            } => {
+                if name.trim().is_empty()
+                    || !total_inductance.is_finite()
+                    || *total_inductance < 0.0
+                    || !total_capacitance.is_finite()
+                    || *total_capacitance <= 0.0
+                    || !total_resistance.is_finite()
+                    || *total_resistance < 0.0
+                    || (*total_inductance == 0.0 && *total_resistance == 0.0)
+                    || branch1 == branch2
+                {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "periodic scalar LTRA line '{name}' is malformed"
+                    )));
+                }
+                let one = Complex64::new(1.0, 0.0);
+                if omega == 0.0 {
+                    add(*branch1, *branch1, one)?;
+                    add(*branch1, *branch2, one)?;
+                    add_diff(*branch2, *node1_pos, *node1_neg, one)?;
+                    add_diff(*branch2, *node2_pos, *node2_neg, -one)?;
+                    add(*branch2, *branch1, Complex64::new(-*total_resistance, 0.0))?;
+                } else {
+                    let s_c = Complex64::new(0.0, omega * *total_capacitance);
+                    let z_series = Complex64::new(*total_resistance, omega * *total_inductance);
+                    let y0 = (s_c / z_series).sqrt();
+                    let mut propagation = (s_c * z_series).sqrt();
+                    // On a perfectly lossless line the radicand lies exactly
+                    // on the negative real axis, where the principal square
+                    // root loses the sign of frequency. Restore the physical
+                    // conjugate branch so negative PAC/PXF sidebands remain
+                    // the conjugates of their positive-frequency operators.
+                    if *total_resistance == 0.0 && omega < 0.0 {
+                        propagation = propagation.conj();
+                    }
+                    let q = (-propagation).exp();
+                    if !finite(y0) || !finite(q) {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "periodic scalar LTRA line '{name}' is non-representable at omega={omega}"
+                        )));
+                    }
+                    for &(row, sp, sn, fp, far_neg, own_branch, far_branch) in &[
+                        (
+                            *branch1, *node1_pos, *node1_neg, *node2_pos, *node2_neg, *branch1,
+                            *branch2,
+                        ),
+                        (
+                            *branch2, *node2_pos, *node2_neg, *node1_pos, *node1_neg, *branch2,
+                            *branch1,
+                        ),
+                    ] {
+                        add_diff(row, sp, sn, y0)?;
+                        add_diff(row, fp, far_neg, -y0 * q)?;
+                        add(row, own_branch, -one)?;
+                        add(row, far_branch, -q)?;
+                    }
+                }
+            }
+            Self::LosslessCpl {
+                name,
+                near_nodes,
+                far_nodes,
+                near_ref,
+                far_ref,
+                near_branches,
+                far_branches,
+                voltage_transform,
+                current_transform,
+                modal_impedances,
+                modal_delays,
+            } => {
+                let n = near_nodes.len();
+                if name.trim().is_empty()
+                    || n < 2
+                    || far_nodes.len() != n
+                    || near_branches.len() != n
+                    || far_branches.len() != n
+                    || voltage_transform.len() != n
+                    || current_transform.len() != n
+                    || voltage_transform.iter().any(|row| row.len() != n)
+                    || current_transform.iter().any(|row| row.len() != n)
+                    || modal_impedances.len() != n
+                    || modal_delays.len() != n
+                    || near_nodes.iter().enumerate().any(|(index, node)| {
+                        *node == *near_ref || near_nodes[..index].contains(node)
+                    })
+                    || far_nodes
+                        .iter()
+                        .enumerate()
+                        .any(|(index, node)| *node == *far_ref || far_nodes[..index].contains(node))
+                    || near_branches
+                        .iter()
+                        .enumerate()
+                        .any(|(index, branch)| near_branches[..index].contains(branch))
+                    || far_branches.iter().enumerate().any(|(index, branch)| {
+                        far_branches[..index].contains(branch) || near_branches.contains(branch)
+                    })
+                {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "periodic lossless CPL '{name}' has malformed modal topology"
+                    )));
+                }
+                for mode in 0..n {
+                    let z = modal_impedances[mode];
+                    let delay = modal_delays[mode];
+                    if !z.is_finite() || z <= 0.0 || !delay.is_finite() || delay <= 0.0 {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "periodic lossless CPL '{name}' mode {} is malformed",
+                            mode + 1
+                        )));
+                    }
+                    let q = Complex64::from_polar(1.0, -omega * delay);
+                    for &(
+                        row,
+                        self_nodes,
+                        self_ref,
+                        far_nodes,
+                        far_ref,
+                        self_branches,
+                        far_branches,
+                    ) in &[
+                        (
+                            near_branches[mode],
+                            near_nodes.as_slice(),
+                            *near_ref,
+                            far_nodes.as_slice(),
+                            *far_ref,
+                            near_branches.as_slice(),
+                            far_branches.as_slice(),
+                        ),
+                        (
+                            far_branches[mode],
+                            far_nodes.as_slice(),
+                            *far_ref,
+                            near_nodes.as_slice(),
+                            *near_ref,
+                            far_branches.as_slice(),
+                            near_branches.as_slice(),
+                        ),
+                    ] {
+                        for conductor in 0..n {
+                            let av = voltage_transform[mode][conductor];
+                            let bi = current_transform[mode][conductor];
+                            if !av.is_finite() || !bi.is_finite() {
+                                return Err(HbError::InvalidCircuit(format!(
+                                    "periodic lossless CPL '{name}' modal transform is non-finite"
+                                )));
+                            }
+                            add_diff(
+                                row,
+                                self_nodes[conductor],
+                                self_ref,
+                                Complex64::new(av, 0.0),
+                            )?;
+                            add_diff(row, far_nodes[conductor], far_ref, -q * av)?;
+                            add(row, self_branches[conductor], Complex64::new(-z * bi, 0.0))?;
+                            add(row, far_branches[conductor], -q * z * bi)?;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
 
 impl HbSolver {
     /// Create a new HB solver from a configuration already authenticated by
@@ -43,6 +293,7 @@ impl HbSolver {
             periodic_mna_branch_names: Vec::new(),
             exact_mna_static_entries: Vec::new(),
             exact_mna_inductance_entries: Vec::new(),
+            exact_periodic_networks: Vec::new(),
             node_names: (0..num_nodes).map(|i| format!("n{}", i)).collect(),
             source_spectra: vec![vec![Complex64::new(0.0, 0.0); num_harmonics + 1]; num_nodes],
             nonlinear_devices: Vec::new(),
@@ -72,6 +323,7 @@ impl HbSolver {
             periodic_mna_branch_names: Vec::new(),
             exact_mna_static_entries: Vec::new(),
             exact_mna_inductance_entries: Vec::new(),
+            exact_periodic_networks: Vec::new(),
             node_names: Vec::new(),
             source_spectra: Vec::new(),
             nonlinear_devices: Vec::new(),
@@ -514,6 +766,48 @@ impl HbSolver {
             },
             name,
         )
+    }
+
+    pub(crate) fn try_add_periodic_network_port_branch(
+        &mut self,
+        node_pos: usize,
+        node_neg: usize,
+        branch_ordinal: usize,
+        name: &str,
+    ) -> Result<(), HbError> {
+        self.validate_periodic_mna_branch_identity(node_pos, node_neg, branch_ordinal, name)?;
+        self.try_push_periodic_mna_branch(
+            ExactMnaBranch::NetworkPort {
+                branch_ordinal,
+                node_pos,
+                node_neg,
+            },
+            name,
+        )
+    }
+
+    pub(crate) fn try_add_exact_periodic_network(
+        &mut self,
+        network: ExactPeriodicNetwork,
+    ) -> Result<(), HbError> {
+        let unknowns = self
+            .num_nodes
+            .checked_add(self.periodic_mna_branches.len())
+            .ok_or_else(|| {
+                HbError::InvalidCircuit(
+                    "periodic distributed-network dimension exceeds this platform".to_string(),
+                )
+            })?;
+        network.try_visit_direct_entries(0.0, unknowns, |_, _, _| {})?;
+        self.exact_periodic_networks
+            .try_reserve(1)
+            .map_err(|error| {
+                HbError::InvalidCircuit(format!(
+                    "periodic distributed-network allocation failed: {error}"
+                ))
+            })?;
+        self.exact_periodic_networks.push(network);
+        Ok(())
     }
 
     /// Add one frequency-independent controlled-source entry to the complete
@@ -964,6 +1258,11 @@ impl HbSolver {
                     node_pos,
                     node_neg,
                 } => (*branch_ordinal, *node_pos, *node_neg, false),
+                ExactMnaBranch::NetworkPort {
+                    branch_ordinal,
+                    node_pos,
+                    node_neg,
+                } => (*branch_ordinal, *node_pos, *node_neg, false),
             };
             if branch_ordinal != expected_ordinal {
                 return Err(HbError::InvalidCircuit(format!(
@@ -1037,6 +1336,15 @@ impl HbSolver {
                         "exact linear MNA mutual-inductance entry #{entry} has non-representable impedance at harmonic {harmonic}"
                     )));
                 }
+            }
+        }
+        for network in &self.exact_periodic_networks {
+            for harmonic in 0..=self.num_harmonics {
+                network.try_visit_direct_entries(
+                    2.0 * PI * self.config.fundamental_freq * harmonic as Value,
+                    unknowns,
+                    |_, _, _| {},
+                )?;
             }
         }
         Ok(())
@@ -1338,6 +1646,7 @@ impl HbSolver {
                             )
                         }
                         ExactMnaBranch::ControlledVoltageSource { .. } => (-voltage_drop, 0.0),
+                        ExactMnaBranch::NetworkPort { .. } => (Complex64::new(0.0, 0.0), 0.0),
                     };
                     state.mna_branch_residual[branch_index][k] = residual;
                     state.mna_branch_residual_scale[branch_index][k] =
@@ -1393,6 +1702,28 @@ impl HbSolver {
                         * branch_currents[control_branch][k];
                     state.mna_branch_residual[branch][k] += contribution;
                     state.mna_branch_residual_scale[branch][k] += contribution.norm();
+                }
+            }
+            let unknowns = self.num_nodes + self.periodic_mna_branches.len();
+            for k in 0..h {
+                let omega = k as Value * omega0;
+                for network in &self.exact_periodic_networks {
+                    network.try_visit_direct_entries(omega, unknowns, |row, column, value| {
+                        let input = if column < self.num_nodes {
+                            state.x[column][k]
+                        } else {
+                            branch_currents[column - self.num_nodes][k]
+                        };
+                        let contribution = value * input;
+                        if row < self.num_nodes {
+                            state.residual[row][k] -= contribution;
+                            state.residual_scale[row][k] += contribution.norm();
+                        } else {
+                            let branch = row - self.num_nodes;
+                            state.mna_branch_residual[branch][k] -= contribution;
+                            state.mna_branch_residual_scale[branch][k] += contribution.norm();
+                        }
+                    })?;
                 }
             }
         }
@@ -1483,12 +1814,16 @@ impl HbSolver {
                     if node_pos > 0 {
                         let node = node_pos - 1;
                         y_matrix[node][row] += Complex64::new(1.0, 0.0);
-                        y_matrix[row][node] += Complex64::new(1.0, 0.0);
+                        if !matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
+                            y_matrix[row][node] += Complex64::new(1.0, 0.0);
+                        }
                     }
                     if node_neg > 0 {
                         let node = node_neg - 1;
                         y_matrix[node][row] -= Complex64::new(1.0, 0.0);
-                        y_matrix[row][node] -= Complex64::new(1.0, 0.0);
+                        if !matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
+                            y_matrix[row][node] -= Complex64::new(1.0, 0.0);
+                        }
                     }
                     match branch {
                         ExactMnaBranch::VoltageSource { source, .. } => {
@@ -1507,6 +1842,7 @@ impl HbSolver {
                             y_matrix[row][row] -= *resistance;
                         }
                         ExactMnaBranch::ControlledVoltageSource { .. } => {}
+                        ExactMnaBranch::NetworkPort { .. } => {}
                     }
                 }
                 for &(row, column, value) in &self.exact_mna_static_entries {
@@ -1514,6 +1850,15 @@ impl HbSolver {
                 }
                 for &(row, column, inductance) in &self.exact_mna_inductance_entries {
                     y_matrix[row][column] -= Complex64::new(0.0, omega_k * inductance);
+                }
+                for network in &self.exact_periodic_networks {
+                    network.try_visit_direct_entries(
+                        omega_k,
+                        total_unknowns,
+                        |row, column, value| {
+                            y_matrix[row][column] += value;
+                        },
+                    )?;
                 }
             } else {
                 for branch in &self.voltage_source_branches {

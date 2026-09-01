@@ -714,6 +714,14 @@ pub(crate) enum ExactMnaBranch {
         node_pos: usize,
         node_neg: usize,
     },
+    /// Port-current unknown owned by an exact frequency-dependent network.
+    /// Nodal KCL incidence is canonical, while the branch row is supplied in
+    /// full by `exact_periodic_networks`.
+    NetworkPort {
+        branch_ordinal: usize,
+        node_pos: usize,
+        node_neg: usize,
+    },
 }
 
 impl ExactMnaBranch {
@@ -741,9 +749,57 @@ impl ExactMnaBranch {
                 branch_ordinal,
                 node_pos,
                 node_neg,
+            }
+            | Self::NetworkPort {
+                branch_ordinal,
+                node_pos,
+                node_neg,
             } => (*branch_ordinal, *node_pos, *node_neg),
         }
     }
+}
+
+/// Exact frequency-domain distributed network. Each variant emits the direct
+/// MNA operator `Y(omega)`; residual/Jacobian paths consume its negative.
+#[derive(Debug, Clone)]
+pub(crate) enum ExactPeriodicNetwork {
+    ScalarWave {
+        name: String,
+        node1_pos: usize,
+        node1_neg: usize,
+        node2_pos: usize,
+        node2_neg: usize,
+        branch1: usize,
+        branch2: usize,
+        impedance: Value,
+        delay: Value,
+        attenuation: Value,
+    },
+    ScalarLtra {
+        name: String,
+        node1_pos: usize,
+        node1_neg: usize,
+        node2_pos: usize,
+        node2_neg: usize,
+        branch1: usize,
+        branch2: usize,
+        total_inductance: Value,
+        total_capacitance: Value,
+        total_resistance: Value,
+    },
+    LosslessCpl {
+        name: String,
+        near_nodes: Vec<usize>,
+        far_nodes: Vec<usize>,
+        near_ref: usize,
+        far_ref: usize,
+        near_branches: Vec<usize>,
+        far_branches: Vec<usize>,
+        voltage_transform: Vec<Vec<Value>>,
+        current_transform: Vec<Vec<Value>>,
+        modal_impedances: Vec<Value>,
+        modal_delays: Vec<Value>,
+    },
 }
 
 impl VoltageSourceBranch {
@@ -855,6 +911,9 @@ pub struct HbSolver {
     /// convention. Coupled-inductor and transformer mutual terms live here;
     /// self-inductance remains owned by each exact branch descriptor.
     exact_mna_inductance_entries: Vec<(usize, usize, Value)>,
+
+    /// Exact arbitrary-frequency distributed-network operators.
+    exact_periodic_networks: Vec<ExactPeriodicNetwork>,
 
     /// Node names
     node_names: Vec<String>,

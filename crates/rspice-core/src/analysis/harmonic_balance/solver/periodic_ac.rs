@@ -514,6 +514,7 @@ struct PeriodicConversionOperator<'a> {
     mna_branches: &'a [ExactMnaBranch],
     mna_static_entries: &'a [(usize, usize, Value)],
     mna_inductance_entries: &'a [(usize, usize, Value)],
+    periodic_networks: &'a [ExactPeriodicNetwork],
     g_spectra: &'a [PeriodicSpectrum],
     c_spectra: &'a [PeriodicSpectrum],
 }
@@ -718,6 +719,15 @@ impl PeriodicConversionOperator<'_> {
                 }
             }
         }
+        for network in self.periodic_networks {
+            for sideband_index in 0..self.num_sidebands {
+                network.try_visit_direct_entries(
+                    self.omega(sideband_index),
+                    unknowns,
+                    |_, _, _| {},
+                )?;
+            }
+        }
         for (kind, spectra) in [
             ("conductance", self.g_spectra),
             ("capacitance", self.c_spectra),
@@ -815,7 +825,9 @@ impl PeriodicConversionOperator<'_> {
                 if node_pos > 0 {
                     let node_coordinate = (node_pos - 1) * s + k_idx;
                     visitor(node_coordinate, branch_coordinate, Complex64::new(1.0, 0.0));
-                    visitor(branch_coordinate, node_coordinate, Complex64::new(1.0, 0.0));
+                    if !matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
+                        visitor(branch_coordinate, node_coordinate, Complex64::new(1.0, 0.0));
+                    }
                 }
                 if node_neg > 0 {
                     let node_coordinate = (node_neg - 1) * s + k_idx;
@@ -824,11 +836,13 @@ impl PeriodicConversionOperator<'_> {
                         branch_coordinate,
                         Complex64::new(-1.0, 0.0),
                     );
-                    visitor(
-                        branch_coordinate,
-                        node_coordinate,
-                        Complex64::new(-1.0, 0.0),
-                    );
+                    if !matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
+                        visitor(
+                            branch_coordinate,
+                            node_coordinate,
+                            Complex64::new(-1.0, 0.0),
+                        );
+                    }
                 }
                 if let ExactMnaBranch::Inductor { inductance, .. } = branch {
                     visitor(
@@ -867,6 +881,20 @@ impl PeriodicConversionOperator<'_> {
                     column * s + k_idx,
                     Complex64::new(0.0, -self.omega(k_idx) * inductance),
                 );
+            }
+        }
+        for k_idx in 0..s {
+            for network in self.periodic_networks {
+                network
+                    .try_visit_direct_entries(
+                        self.omega(k_idx),
+                        self.num_unknowns()
+                            .expect("validated periodic MNA dimension remains representable"),
+                        |row, column, value| {
+                            visitor(row * s + k_idx, column * s + k_idx, value);
+                        },
+                    )
+                    .expect("validated periodic distributed network remains representable");
             }
         }
 
@@ -1005,12 +1033,16 @@ impl PeriodicConversionOperator<'_> {
             if node_pos > 0 {
                 let node = node_pos - 1;
                 block[node * n + row] += Complex64::new(1.0, 0.0);
-                block[row * n + node] += Complex64::new(1.0, 0.0);
+                if !matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
+                    block[row * n + node] += Complex64::new(1.0, 0.0);
+                }
             }
             if node_neg > 0 {
                 let node = node_neg - 1;
                 block[node * n + row] -= Complex64::new(1.0, 0.0);
-                block[row * n + node] -= Complex64::new(1.0, 0.0);
+                if !matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
+                    block[row * n + node] -= Complex64::new(1.0, 0.0);
+                }
             }
             if let ExactMnaBranch::Inductor { inductance, .. } = branch {
                 block[row * n + row] -= jw * *inductance;
@@ -1028,6 +1060,11 @@ impl PeriodicConversionOperator<'_> {
         }
         for &(row, column, inductance) in self.mna_inductance_entries {
             block[row * n + column] -= jw * inductance;
+        }
+        for network in self.periodic_networks {
+            network.try_visit_direct_entries(jw.im, n, |row, column, value| {
+                block[row * n + column] += value;
+            })?;
         }
         if transpose {
             for i in 0..n {
@@ -1724,6 +1761,7 @@ impl HbSolver {
             mna_branches: &self.periodic_mna_branches,
             mna_static_entries: &self.exact_mna_static_entries,
             mna_inductance_entries: &self.exact_mna_inductance_entries,
+            periodic_networks: &self.exact_periodic_networks,
             g_spectra: &spectra,
             c_spectra: &cap_spectra,
         };
@@ -1878,6 +1916,7 @@ impl HbSolver {
             mna_branches: &self.periodic_mna_branches,
             mna_static_entries: &self.exact_mna_static_entries,
             mna_inductance_entries: &self.exact_mna_inductance_entries,
+            periodic_networks: &self.exact_periodic_networks,
             g_spectra: &spectra,
             c_spectra: &cap_spectra,
         };
@@ -2298,6 +2337,7 @@ impl HbSolver {
             mna_branches: &self.periodic_mna_branches,
             mna_static_entries: &self.exact_mna_static_entries,
             mna_inductance_entries: &self.exact_mna_inductance_entries,
+            periodic_networks: &self.exact_periodic_networks,
             g_spectra: &spectra,
             c_spectra: &cap_spectra,
         };
@@ -2546,6 +2586,7 @@ mod matrix_free_tests {
             mna_branches: &[],
             mna_static_entries: &[],
             mna_inductance_entries: &[],
+            periodic_networks: &[],
             g_spectra: spectra,
             c_spectra: cap_spectra,
         }
@@ -3115,6 +3156,7 @@ mod matrix_free_tests {
             mna_branches: &branches,
             mna_static_entries: &[],
             mna_inductance_entries: &mutual_entries,
+            periodic_networks: &[],
             g_spectra: &spectra,
             c_spectra: &cap_spectra,
         };
@@ -3241,6 +3283,7 @@ mod matrix_free_tests {
             mna_branches: &[],
             mna_static_entries: &[],
             mna_inductance_entries: &[],
+            periodic_networks: &[],
             g_spectra: &[],
             c_spectra: &[],
         };
@@ -3299,6 +3342,7 @@ mod matrix_free_tests {
             mna_branches: &[],
             mna_static_entries: &[],
             mna_inductance_entries: &[],
+            periodic_networks: &[],
             g_spectra: &[],
             c_spectra: &[],
         };
@@ -3352,6 +3396,7 @@ mod matrix_free_tests {
             mna_branches: &[],
             mna_static_entries: &[],
             mna_inductance_entries: &[],
+            periodic_networks: &[],
             g_spectra: &[],
             c_spectra: &[],
         };
@@ -3396,6 +3441,7 @@ mod matrix_free_tests {
             mna_branches: &[],
             mna_static_entries: &[],
             mna_inductance_entries: &[],
+            periodic_networks: &[],
             g_spectra: &[],
             c_spectra: &[],
         };
@@ -3423,6 +3469,7 @@ mod matrix_free_tests {
             mna_branches: &[],
             mna_static_entries: &[],
             mna_inductance_entries: &[],
+            periodic_networks: &[],
             g_spectra: &[],
             c_spectra: &[],
         };
@@ -3449,6 +3496,7 @@ mod matrix_free_tests {
             mna_branches: &[],
             mna_static_entries: &[],
             mna_inductance_entries: &[],
+            periodic_networks: &[],
             g_spectra: &[],
             c_spectra: &periodic_c,
         };
@@ -3546,6 +3594,7 @@ mod matrix_free_tests {
             mna_branches: &[],
             mna_static_entries: &[],
             mna_inductance_entries: &[],
+            periodic_networks: &[],
             g_spectra: &invalid_spectra,
             c_spectra: &[],
         };
@@ -3687,6 +3736,7 @@ mod matrix_free_tests {
             mna_branches: &[],
             mna_static_entries: &[],
             mna_inductance_entries: &[],
+            periodic_networks: &[],
             g_spectra: &[],
             c_spectra: &[],
         };
@@ -3731,6 +3781,7 @@ mod matrix_free_tests {
             mna_branches: &[],
             mna_static_entries: &[],
             mna_inductance_entries: &[],
+            periodic_networks: &[],
             g_spectra: &[],
             c_spectra: &[],
         };
@@ -3766,6 +3817,7 @@ mod matrix_free_tests {
             mna_branches: &[],
             mna_static_entries: &[],
             mna_inductance_entries: &[],
+            periodic_networks: &[],
             g_spectra: &[],
             c_spectra: &[],
         };
@@ -3799,6 +3851,7 @@ mod matrix_free_tests {
             mna_branches: &[],
             mna_static_entries: &[],
             mna_inductance_entries: &[],
+            periodic_networks: &[],
             g_spectra: &invalid_spectra,
             c_spectra: &[],
         };

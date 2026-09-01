@@ -406,7 +406,7 @@ pub(in crate::engine::builder) fn build_cpl_multiconductor_line(
         .map(|idx| circuit.get_or_create_node(&element.nodes[conductors + 1 + idx]))
         .collect();
 
-    let coupled_tline = crate::device::CoupledTransmissionLine::new(
+    let mut coupled_tline = crate::device::CoupledTransmissionLine::new(
         element.name.clone(),
         near_nodes,
         near_ref,
@@ -419,6 +419,12 @@ pub(in crate::engine::builder) fn build_cpl_multiconductor_line(
         params.length,
     )
     .map_err(SimulationError::Circuit)?;
+    if params.exact_lossless_frequency_model {
+        // The CPL transient kernel floors an authored zero R matrix to keep
+        // its convolution setup nonsingular. Preserve the authored, physical
+        // lossless classification separately for exact periodic analysis.
+        coupled_tline.set_exact_lossless_frequency_model();
+    }
     let native_available = coupled_tline.native_runtime_available();
     if let Some(min_taul) = coupled_tline.native_min_taul_seconds() {
         // ngspice caps CKTmaxStep to 0.9*min(taul) for CPL so every mode's
@@ -483,6 +489,7 @@ P1 n1 n2 0 f1 f2 0 m
             c: vec![vec![1.0e-12, -1.0e-13], vec![-1.0e-13, 1.0e-12]],
             g: vec![vec![0.0, 0.0], vec![0.0, 0.0]],
             length: 1.0,
+            exact_lossless_frequency_model: false,
         }
     }
 
