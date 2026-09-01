@@ -734,6 +734,97 @@ rdiv div 0 1k
     );
 }
 
+/// A `d_fdiv` clock that is already high at t=0 has not risen, so the level
+/// standing at t=0 must not be counted the first time the event scheduler
+/// re-evaluates the divider. ngspice 46 holds this deck's `d_fdiv` output at
+/// ZERO for the whole 20ns run, because its TIME==0 branch never writes the
+/// stored input and the constant clock queues no further event.
+#[test]
+fn fdiv_constant_high_clock_never_counts_an_edge_like_ngspice() {
+    let result = run_temp_deck(
+        "rspice-fdiv-constant-high-clock",
+        "",
+        "\
+* A clock that never transitions must never advance the divider
+vin in 0 dc 1
+a_adc [in] [din] adc
+.model adc adc_bridge (in_low=0.4 in_high=0.6)
+a_div din dout fdiv
+.model fdiv d_fdiv (div_factor=2 high_cycles=1 i_count=0
++ rise_delay=1n fall_delay=1n)
+.end
+",
+        20.0e-9,
+        1.0e-9,
+    );
+
+    let dout = digital_tokens(&result, "dout");
+    assert!(
+        dout.iter().all(|(_, token)| token == "0s"),
+        "a d_fdiv clock held high for the whole run has no rising edge to count, \
+         so the output must stay ZERO as it does in ngspice, got {dout:?}"
+    );
+}
+
+/// The divider's output phase must follow the real clock edges, not a phantom
+/// edge synthesized from the t=0 level. Measured against ngspice 46 on this
+/// deck, whose divided output first goes high after the ~11ns rising edge and
+/// then toggles on every later rising edge. Counting the t=0 level would emit a
+/// spurious pulse ~1ns in and invert every transition after it.
+#[test]
+fn fdiv_clock_high_at_time_zero_keeps_ngspice_output_phase() {
+    let result = run_temp_deck(
+        "rspice-fdiv-clock-high-at-zero",
+        "",
+        "\
+* Divider phase for a clock that starts high
+vin in 0 pulse(1 0 5n 0.01n 0.01n 4.99n 10n)
+a_adc [in] [din] adc
+.model adc adc_bridge (in_low=0.4 in_high=0.6)
+a_div din dout fdiv
+.model fdiv d_fdiv (div_factor=2 high_cycles=1 i_count=0
++ rise_delay=1n fall_delay=1n)
+.end
+",
+        45.0e-9,
+        0.5e-9,
+    );
+
+    let dout = digital_tokens(&result, "dout");
+    assert!(
+        !dout.iter().any(|(time, _)| *time > 0.0 && *time < 11.0e-9),
+        "the clock's first rising edge is at ~11ns, so nothing may drive the \
+         divider output before it, got {dout:?}"
+    );
+
+    let transitions: Vec<(f64, String)> = dout
+        .iter()
+        .filter(|(time, _)| *time > 0.0)
+        .cloned()
+        .collect();
+    let expected = [
+        (12.0065e-9, "1s"),
+        (22.0065e-9, "0s"),
+        (32.0065e-9, "1s"),
+        (42.0065e-9, "0s"),
+    ];
+    assert_eq!(
+        transitions.len(),
+        expected.len(),
+        "expected one divided transition per clock rise, got {transitions:?}"
+    );
+    for ((time, token), (want_time, want_token)) in transitions.iter().zip(expected) {
+        assert_eq!(
+            token, want_token,
+            "divided output phase must match ngspice, got {transitions:?}"
+        );
+        assert!(
+            (time - want_time).abs() <= 0.1e-9,
+            "divided transition expected near {want_time}, got {transitions:?}"
+        );
+    }
+}
+
 #[test]
 fn adc_bridge_drives_unknown_inside_threshold_window_like_ngspice() {
     let result = run_temp_deck(

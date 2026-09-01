@@ -730,8 +730,14 @@ mod tests {
         );
     }
 
+    /// A level that is already high at t=0 is not a transition, so re-evaluating
+    /// the divider before the clock has moved must not manufacture a count.
+    /// ngspice never counts one here: its TIME==0 branch leaves the stored input
+    /// untouched and its initialization pass aliases `freq_in` onto
+    /// `freq_in_old`. Measured against ngspice 46 on a `dc 1` clock through an
+    /// `adc_bridge`, whose `d_fdiv` output stays ZERO for the whole run.
     #[test]
-    fn d_fdiv_high_initial_input_counts_first_transient_edge_like_ngspice() {
+    fn d_fdiv_high_initial_input_is_not_replayed_as_an_edge_like_ngspice() {
         let model = DigitalFrequencyDivider;
         let mut ctx = CmContext::new();
         ctx.set_param("div_factor", 2.0);
@@ -747,6 +753,12 @@ mod tests {
             ctx.output_digital_vector("freq_out"),
             vec![DigitalValue::zero()]
         );
+        assert_eq!(
+            ctx.int_state(FDIV_PREV_INPUT),
+            1,
+            "the t=0 pass must record the level it observed instead of returning \
+             with the default previous input still in place"
+        );
 
         ctx.time = 1.0e-12;
         model
@@ -755,9 +767,42 @@ mod tests {
 
         assert_eq!(
             ctx.output_digital_vector("freq_out"),
-            vec![DigitalValue::one()],
-            "ngspice leaves freq_in_old at ZERO during TIME=0, so a high initial input is counted on the first transient evaluation"
+            vec![DigitalValue::zero()],
+            "a clock already high at t=0 has not risen, so the first transient \
+             evaluation must leave the divider output and count alone"
         );
+        assert_eq!(ctx.int_state(FDIV_COUNT), 0);
+    }
+
+    /// The genuine edge immediately after t=0 must still be counted: seeding the
+    /// previous input from the t=0 level may not swallow a real transition.
+    #[test]
+    fn d_fdiv_counts_a_real_edge_immediately_after_time_zero() {
+        let model = DigitalFrequencyDivider;
+        let mut ctx = CmContext::new();
+        ctx.set_param("div_factor", 2.0);
+        ctx.set_param("high_cycles", 1.0);
+        ctx.set_param("i_count", 0.0);
+        ctx.set_param("rise_delay", 1.0e-9);
+        ctx.set_param("fall_delay", 1.0e-9);
+        model.init(&mut ctx).expect("fdiv init");
+
+        ctx.set_input_digital("freq_in", DigitalValue::zero());
+        model.evaluate(&mut ctx).expect("initial fdiv evaluation");
+        assert_eq!(ctx.int_state(FDIV_PREV_INPUT), 0);
+
+        ctx.time = 1.0e-12;
+        ctx.set_input_digital("freq_in", DigitalValue::one());
+        model
+            .evaluate(&mut ctx)
+            .expect("first transient fdiv evaluation");
+
+        assert_eq!(
+            ctx.output_digital_vector("freq_out"),
+            vec![DigitalValue::one()],
+            "a clock that rises just after t=0 must still be counted"
+        );
+        assert_eq!(ctx.int_state(FDIV_COUNT), 1);
     }
 
     #[test]
@@ -950,6 +995,7 @@ impl CodeModel for DigitalFrequencyDivider {
         let input = input_code(ctx.input_digital("freq_in"));
         let mut count = ctx.int_state(FDIV_COUNT);
         let mut output = ctx.int_state(FDIV_OUTPUT);
+        let mut previous_input = ctx.int_state(FDIV_PREV_INPUT);
 
         if ctx.time == 0.0 || output == FDIV_INITIAL_OUTPUT {
             count = official_min_integer_param(ctx, "i_count", 0)?;
@@ -961,7 +1007,16 @@ impl CodeModel for DigitalFrequencyDivider {
             } else {
                 0
             };
+            // ngspice cannot see an edge on this pass: its initialization pass
+            // aliases `freq_in` and `freq_in_old` onto one another, and its
+            // TIME==0 branch never writes the input state at all, so the level
+            // standing at t=0 is not a transition. Seed the previous input from
+            // the live level so a divider whose clock is already high at t=0
+            // does not replay that level as a rising edge the first time the
+            // event scheduler re-evaluates it.
+            previous_input = input;
             ctx.set_output_digital("freq_out", output_value(output), 0.0);
+            sequential_set_int_state(ctx, FDIV_PREV_INPUT, input);
             sequential_set_int_state(ctx, FDIV_COUNT, count);
             sequential_set_int_state(ctx, FDIV_OUTPUT, output);
             if ctx.time == 0.0 {
@@ -969,7 +1024,6 @@ impl CodeModel for DigitalFrequencyDivider {
             }
         }
 
-        let previous_input = ctx.int_state(FDIV_PREV_INPUT);
         let mut next_output = output;
         let mut delay = None;
 
