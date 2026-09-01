@@ -28,6 +28,45 @@ struct ModelImageDigest {
     name: String,
     digest: String,
     bytes: usize,
+    helper_calls: usize,
+}
+
+/// Blank the host addresses an image embeds, so its digest survives ASLR.
+///
+/// A runtime helper is called as `movabs <reg>, <address>` immediately
+/// followed by `call <reg>`, and that address is where the loader happened to
+/// place the process this run. Requiring the call to name the same register
+/// the move loaded is what keeps a mask constant — the encoder emits those
+/// through the same `movabs` — out of the normalization. Everything else in
+/// the image is position independent: literals are RIP relative and entry
+/// calls are image relative.
+fn normalize_host_addresses(image: &[u8]) -> (Vec<u8>, usize) {
+    let mut normalized = image.to_vec();
+    let mut helper_calls = 0;
+    let mut offset = 0;
+    while offset + 10 <= normalized.len() {
+        let rex = normalized[offset];
+        let opcode = normalized[offset + 1];
+        if (rex == 0x48 || rex == 0x49) && (0xB8..=0xBF).contains(&opcode) {
+            let register = (opcode - 0xB8) | ((rex & 1) << 3);
+            let after = offset + 10;
+            let call = match (rex & 1, normalized.get(after..after + 3)) {
+                // call r0-r7: FF /2
+                (0, Some([0xFF, modrm, _])) if *modrm == 0xD0 | register => Some(2),
+                // call r8-r15: REX.B FF /2
+                (1, Some([0x41, 0xFF, modrm])) if *modrm == 0xD0 | (register & 7) => Some(3),
+                _ => None,
+            };
+            if call.is_some() {
+                normalized[offset + 2..offset + 10].fill(0);
+                helper_calls += 1;
+                offset = after;
+                continue;
+            }
+        }
+        offset += 1;
+    }
+    (normalized, helper_calls)
 }
 
 fn census() -> Vec<ModelImageDigest> {
@@ -57,10 +96,12 @@ fn census() -> Vec<ModelImageDigest> {
                 )
             });
             let image = native.image_bytes();
+            let (normalized, helper_calls) = normalize_host_addresses(image);
             digests.push(ModelImageDigest {
                 name: module.to_string(),
-                digest: blake3::hash(image).to_hex().to_string(),
+                digest: blake3::hash(&normalized).to_hex().to_string(),
                 bytes: image.len(),
+                helper_calls,
             });
         }
     }
@@ -79,8 +120,8 @@ fn shipped_model_machine_code_census_digest() {
     let mut combined = blake3::Hasher::new();
     for entry in &census {
         eprintln!(
-            "code-identity model={} bytes={} digest={}",
-            entry.name, entry.bytes, entry.digest
+            "code-identity model={} bytes={} helper_calls={} digest={}",
+            entry.name, entry.bytes, entry.helper_calls, entry.digest
         );
         combined.update(entry.name.as_bytes());
         combined.update(entry.digest.as_bytes());

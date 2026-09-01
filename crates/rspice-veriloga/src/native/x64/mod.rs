@@ -47,7 +47,7 @@ const ENTRY_ALIGNMENT: usize = 16;
 const X64_NOP: u8 = 0x90;
 
 #[derive(Debug)]
-struct CompiledX64Function {
+pub(crate) struct CompiledX64Function {
     bytes: Vec<u8>,
     code_len: usize,
     data_ranges: Vec<X64DataRange>,
@@ -88,6 +88,12 @@ impl CompiledX64Function {
 
     fn code_only(bytes: Vec<u8>, windows_unwind: Option<WindowsX64UnwindInfo>) -> Self {
         Self::new(X64FunctionBody::code_only(bytes), windows_unwind)
+    }
+
+    /// The verified function image, for publishing one entry on its own.
+    #[cfg(test)]
+    pub(crate) fn bytes(&self) -> &[u8] {
+        &self.bytes
     }
 }
 

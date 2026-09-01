@@ -474,38 +474,6 @@ impl Program {
             .all(|instruction| instruction.effects.permits_result_sharing())
     }
 
-    /// Which block defines `value`, and the block-layout position at which it
-    /// becomes available.
-    ///
-    /// An instruction is available after itself; a block parameter is available
-    /// from the earliest predecessor terminator that binds it, because that is
-    /// where a backend performs the edge's parallel move.
-    fn definition_block(&self, value: ValueId) -> JitResult<BlockId> {
-        if value.index() < self.instructions.len() {
-            let index = value.index();
-            let block = self
-                .blocks
-                .iter()
-                .position(|block| block.instruction_start <= index && index < block.instruction_end)
-                .ok_or_else(|| JitError::Verifier {
-                    model: MODEL.into(),
-                    detail: format!("SSA instruction {index} lies outside every block range")
-                        .into(),
-                })?;
-            return BlockId::new(block);
-        }
-        let parameter = value.index() - self.instructions.len();
-        let block = self
-            .blocks
-            .iter()
-            .position(|block| block.parameter_start <= parameter && parameter < block.parameter_end)
-            .ok_or_else(|| JitError::Verifier {
-                model: MODEL.into(),
-                detail: format!("SSA block parameter {parameter} belongs to no block").into(),
-            })?;
-        BlockId::new(block)
-    }
-
     /// For every block parameter, the instruction boundary at which a backend
     /// first writes it: the earliest predecessor terminator in layout order.
     fn parameter_definition_positions(&self) -> JitResult<Vec<usize>> {
@@ -614,35 +582,69 @@ impl Program {
         left
     }
 
-    fn dominates(
-        idom: &[Option<BlockId>],
-        entry: BlockId,
-        ancestor: BlockId,
-        block: BlockId,
-    ) -> bool {
-        let mut current = block;
-        loop {
-            if current == ancestor {
-                return true;
-            }
-            if current == entry {
-                return false;
-            }
-            match idom[current.index()] {
-                Some(parent) => current = parent,
-                None => return false,
-            }
-        }
-    }
-
     fn validate(&self) -> JitResult<()> {
         self.validate_layout()?;
+        if self.is_single_block() {
+            // One block is its own entry and exit, has no edges and no
+            // parameters, and dominates everything, so every rule below is
+            // vacuous on it. What remains is the operand index rule the
+            // postfix lift has always been held to, and keeping this path
+            // allocation-free keeps the shipped route's verification cost
+            // exactly what it was.
+            return self.validate_straight_line();
+        }
         let predecessors = self.predecessors_checked()?;
         self.validate_edges()?;
         let idom = self.immediate_dominators(&predecessors);
-        self.validate_dominance(&idom)?;
+        let dominance = DominatorTree::new(&idom, self.entry);
+        self.validate_dominance(&dominance)?;
         self.validate_structured_regions(&idom)?;
-        self.validate_effect_discipline(&idom)
+        self.validate_effect_discipline(&dominance)
+    }
+
+    /// The whole verification for a program with one block.
+    fn validate_straight_line(&self) -> JitResult<()> {
+        for (index, instruction) in self.instructions.iter().enumerate() {
+            if instruction
+                .operands
+                .iter()
+                .any(|operand| operand.index() >= index)
+            {
+                return Err(JitError::Verifier {
+                    model: MODEL.into(),
+                    detail: format!("SSA instruction {index} uses a non-dominating value").into(),
+                });
+            }
+        }
+        if self
+            .instructions
+            .get(self.result().index())
+            .is_none_or(|instruction| instruction.value_type != ValueType::F64)
+        {
+            return Err(JitError::Verifier {
+                model: MODEL.into(),
+                detail: "SSA return does not reference a defined f64 value".into(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Which block defines each value, indexed by [`ValueId`].
+    ///
+    /// Built once per verification: walking the block list for every operand
+    /// turns a program with one block per conditional arm into a quadratic
+    /// check, and a compact model splits thousands of conditionals.
+    fn definition_blocks(&self) -> Vec<BlockId> {
+        let mut blocks = vec![BlockId(0); self.value_count()];
+        for block in &self.blocks {
+            for index in block.instruction_start..block.instruction_end {
+                blocks[index] = block.id;
+            }
+            for parameter in block.parameter_start..block.parameter_end {
+                blocks[self.instructions.len() + parameter] = block.id;
+            }
+        }
+        blocks
     }
 
     /// The block at which a two-way branch's arms reconverge.
@@ -913,13 +915,20 @@ impl Program {
 
     /// Every use is dominated by its definition, and the returned value is a
     /// defined f64.
-    fn validate_dominance(&self, idom: &[Option<BlockId>]) -> JitResult<()> {
+    fn validate_dominance(&self, dominance: &DominatorTree) -> JitResult<()> {
         let verifier = |detail: String| JitError::Verifier {
             model: MODEL.into(),
             detail: detail.into(),
         };
+        let definitions = self.definition_blocks();
+        let defining_block = |value: ValueId| -> JitResult<BlockId> {
+            definitions
+                .get(value.index())
+                .copied()
+                .ok_or_else(|| verifier(format!("SSA value {} is not defined", value.index())))
+        };
         for (index, instruction) in self.instructions.iter().enumerate() {
-            let using_block = self.definition_block(instruction.result)?;
+            let using_block = defining_block(instruction.result)?;
             for operand in instruction.operands.iter().copied() {
                 if operand.index() < self.instructions.len() && operand.index() >= index {
                     return Err(verifier(format!(
@@ -927,8 +936,7 @@ impl Program {
                         operand.index()
                     )));
                 }
-                let defining_block = self.definition_block(operand)?;
-                if !Self::dominates(idom, self.entry, defining_block, using_block) {
+                if !dominance.dominates(defining_block(operand)?, using_block) {
                     return Err(verifier(format!(
                         "SSA instruction {index} uses value {} from a non-dominating block",
                         operand.index()
@@ -938,8 +946,7 @@ impl Program {
         }
         for block in &self.blocks {
             for use_value in block.terminator.uses() {
-                let defining_block = self.definition_block(use_value)?;
-                if !Self::dominates(idom, self.entry, defining_block, block.id) {
+                if !dominance.dominates(defining_block(use_value)?, block.id) {
                     return Err(verifier(format!(
                         "SSA block {} terminator uses value {} from a non-dominating block",
                         block.id.index(),
@@ -972,9 +979,9 @@ impl Program {
     /// desynchronizes it. Requiring its block to dominate the exit block is
     /// exactly the condition that it runs unconditionally, and it is the rule
     /// that keeps the conditional-splitting transform sound.
-    fn validate_effect_discipline(&self, idom: &[Option<BlockId>]) -> JitResult<()> {
+    fn validate_effect_discipline(&self, dominance: &DominatorTree) -> JitResult<()> {
         for block in &self.blocks {
-            if Self::dominates(idom, self.entry, block.id, self.exit) {
+            if dominance.dominates(block.id, self.exit) {
                 continue;
             }
             for instruction in &self.instructions[block.instruction_start..block.instruction_end] {
@@ -992,6 +999,67 @@ impl Program {
             }
         }
         Ok(())
+    }
+}
+
+/// Constant-time dominance queries over the immediate-dominator forest.
+///
+/// A depth-first numbering of the dominator tree turns "does `ancestor`
+/// dominate `block`" into one interval containment test. Walking parent links
+/// instead is quadratic on a program whose blocks chain one conditional after
+/// another, which is exactly what a compact model produces.
+struct DominatorTree {
+    enter: Vec<usize>,
+    exit: Vec<usize>,
+}
+
+impl DominatorTree {
+    fn new(idom: &[Option<BlockId>], entry: BlockId) -> Self {
+        let mut children: Vec<Vec<usize>> = vec![Vec::new(); idom.len()];
+        for (index, parent) in idom.iter().enumerate() {
+            if index == entry.index() {
+                continue;
+            }
+            if let Some(parent) = parent {
+                children[parent.index()].push(index);
+            }
+        }
+        let mut enter = vec![usize::MAX; idom.len()];
+        let mut exit = vec![usize::MAX; idom.len()];
+        let mut clock = 0;
+        let mut stack = vec![(entry.index(), false)];
+        while let Some((block, finished)) = stack.pop() {
+            if finished {
+                exit[block] = clock;
+                clock += 1;
+                continue;
+            }
+            enter[block] = clock;
+            clock += 1;
+            stack.push((block, true));
+            for child in children[block].iter().rev() {
+                stack.push((*child, false));
+            }
+        }
+        Self { enter, exit }
+    }
+
+    fn dominates(&self, ancestor: BlockId, block: BlockId) -> bool {
+        let (Some(ancestor_enter), Some(ancestor_exit)) = (
+            self.enter.get(ancestor.index()).copied(),
+            self.exit.get(ancestor.index()).copied(),
+        ) else {
+            return false;
+        };
+        let Some(block_enter) = self.enter.get(block.index()).copied() else {
+            return false;
+        };
+        // A block the depth-first walk never reached has no numbering, and
+        // `predecessors_checked` has already rejected that program.
+        ancestor_enter != usize::MAX
+            && block_enter != usize::MAX
+            && ancestor_enter <= block_enter
+            && block_enter < ancestor_exit
     }
 }
 

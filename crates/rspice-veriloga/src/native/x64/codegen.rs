@@ -152,7 +152,7 @@ pub(crate) fn compile_value_function(program: &NativeProgram) -> JitResult<Vec<u
     Ok(compile_value_function_artifact(program)?.bytes)
 }
 
-pub(super) fn compile_value_function_artifact(
+pub(crate) fn compile_value_function_artifact(
     program: &NativeProgram,
 ) -> JitResult<CompiledX64Function> {
     validate_expression_stack_depth(program.max_stack_depth())?;
@@ -164,7 +164,7 @@ pub(super) fn compile_value_function_artifact(
 /// The postfix lift is the shipped route into this; taking the SSA directly is
 /// what lets the branch form of a conditional be compiled through exactly the
 /// same emitter, allocator, and verifier as the select form.
-pub(super) fn compile_value_function_artifact_from_ssa(
+pub(crate) fn compile_value_function_artifact_from_ssa(
     ssa: &X64SsaProgram,
 ) -> JitResult<CompiledX64Function> {
     validate_expression_stack_depth(ssa.maximum_stack_depth())?;
