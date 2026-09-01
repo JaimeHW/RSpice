@@ -1407,6 +1407,7 @@ enum XspiceAutoBridgeKind {
     Dac,
     Bidi,
     RealToV,
+    VToReal,
 }
 
 #[derive(Debug, Clone)]
@@ -1442,6 +1443,25 @@ struct XspiceAutoBridgeUsage {
     digital_inout: bool,
 }
 
+/// Which directions of real-valued event traffic a node carries.
+///
+/// The real-valued analogue of [`XspiceAutoBridgeUsage`], and separate from it
+/// because the two node worlds meet the matrix through different models: a
+/// digital node needs a threshold and a supply, a real one needs neither.
+///
+/// A node that carries a real event *output* is driven by a model, so the
+/// bridge it needs is `real_to_v` — carry that event into the matrix. A node
+/// that carries only a real event *input* has no driver at all, so the bridge
+/// it needs is the observer `v_to_real` — sample the matrix into the event.
+/// Output wins when a node has both, because a driven event needs no observer
+/// and observing one would publish a second value onto a net that already has
+/// one.
+#[derive(Debug, Default, Clone, Copy)]
+struct XspiceRealBridgeUsage {
+    real_input: bool,
+    real_output: bool,
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 struct XspiceExplicitDigitalBridgeCoverage {
     adc: bool,
@@ -1455,7 +1475,7 @@ impl XspiceExplicitDigitalBridgeCoverage {
             XspiceAutoBridgeKind::Adc => self.adc = true,
             XspiceAutoBridgeKind::Dac => self.dac = true,
             XspiceAutoBridgeKind::Bidi => self.bidi = true,
-            XspiceAutoBridgeKind::RealToV => {}
+            XspiceAutoBridgeKind::RealToV | XspiceAutoBridgeKind::VToReal => {}
         }
     }
 
@@ -1717,22 +1737,33 @@ fn xspice_instance_hierarchy_depth(name: &str) -> usize {
     name.bytes().filter(|byte| *byte == b'.').count()
 }
 
-fn register_real_output_connection_nodes(
-    nodes: &mut BTreeSet<usize>,
+fn register_real_connection_nodes(
+    nodes: &mut BTreeMap<usize, XspiceRealBridgeUsage>,
     connection: &crate::xspice::PortConnection,
     direction: crate::xspice::PortDirection,
 ) {
-    use crate::xspice::PortConnection;
+    use crate::xspice::{PortConnection, PortDirection};
 
-    if !direction_outputs_events(direction) {
+    let outputs = direction_outputs_events(direction);
+    let inputs = matches!(direction, PortDirection::In | PortDirection::InOut);
+    if !outputs && !inputs {
         return;
     }
 
+    let mut register = |node: usize| {
+        if node == 0 {
+            return;
+        }
+        let usage = nodes.entry(node).or_default();
+        usage.real_output |= outputs;
+        usage.real_input |= inputs;
+    };
+
     match connection {
-        PortConnection::Real(node) => insert_non_ground_node(nodes, *node),
+        PortConnection::Real(node) => register(*node),
         PortConnection::RealVector(vector) => {
             for node in vector {
-                insert_non_ground_node(nodes, *node);
+                register(*node);
             }
         }
         _ => {}
@@ -1782,7 +1813,7 @@ fn plan_xspice_auto_bridges(
     let mut analog_nodes = BTreeSet::new();
     let mut digital_nodes = BTreeMap::new();
     let mut digital_node_families = BTreeMap::new();
-    let mut real_output_nodes = BTreeSet::new();
+    let mut real_nodes: BTreeMap<usize, XspiceRealBridgeUsage> = BTreeMap::new();
     let mut explicit_digital_bridge_coverage = BTreeMap::new();
     let mut explicit_real_bridge_nodes = BTreeSet::new();
 
@@ -1823,11 +1854,7 @@ fn plan_xspice_auto_bridges(
                     xspice_instance_hierarchy_depth(&instance.name),
                 );
             } else if port.default_type == crate::xspice::PortType::Real {
-                register_real_output_connection_nodes(
-                    &mut real_output_nodes,
-                    connection,
-                    port.direction,
-                );
+                register_real_connection_nodes(&mut real_nodes, connection, port.direction);
             }
         }
     }
@@ -1859,19 +1886,37 @@ fn plan_xspice_auto_bridges(
         })
         .collect();
 
-    planned.extend(
-        real_output_nodes
-            .into_iter()
-            .filter(|node| {
-                analog_nodes.contains(node) && !explicit_real_bridge_nodes.contains(node)
-            })
-            .map(|node| PlannedXspiceAutoBridge {
-                node,
-                kind: XspiceAutoBridgeKind::RealToV,
-                vcc: 0.0,
-                family: None,
-            }),
-    );
+    planned.extend(real_nodes.into_iter().filter_map(|(node, usage)| {
+        if !analog_nodes.contains(&node) {
+            return None;
+        }
+        let kind = if usage.real_output {
+            // An explicit `real_to_v`/`r_to_v` already reading this event net
+            // is the bridge, so a second one is not planned. That suppression
+            // is the driver direction's alone: an explicit reader is not a
+            // *producer*, so it says nothing about whether the observer below
+            // is needed.
+            if explicit_real_bridge_nodes.contains(&node) {
+                return None;
+            }
+            XspiceAutoBridgeKind::RealToV
+        } else if usage.real_input {
+            // Nothing drives this real event net and an analog node carries
+            // the same name, so the value the reader wants is the node's. An
+            // explicit `v_to_real` publishing here would have set
+            // `real_output` above, which is why no separate coverage set is
+            // needed to keep the two from both firing.
+            XspiceAutoBridgeKind::VToReal
+        } else {
+            return None;
+        };
+        Some(PlannedXspiceAutoBridge {
+            node,
+            kind,
+            vcc: 0.0,
+            family: None,
+        })
+    }));
 
     planned
 }
@@ -2144,6 +2189,7 @@ fn xspice_auto_bridge_kind_label(kind: XspiceAutoBridgeKind) -> &'static str {
         XspiceAutoBridgeKind::Dac => "digital-to-analog",
         XspiceAutoBridgeKind::Bidi => "bidirectional digital/analog",
         XspiceAutoBridgeKind::RealToV => "real-to-voltage",
+        XspiceAutoBridgeKind::VToReal => "voltage-to-real",
     }
 }
 
@@ -2167,6 +2213,9 @@ fn xspice_auto_bridge_generated_card(
         XspiceAutoBridgeKind::RealToV => {
             format!("{instance_name} {node_label} null {node_label} r_to_v")
         }
+        XspiceAutoBridgeKind::VToReal => {
+            format!("{instance_name} {node_label} {node_label} v_to_real")
+        }
     }
 }
 
@@ -2189,13 +2238,17 @@ fn reject_disabled_xspice_auto_bridge(
 fn xspice_auto_bridge_template_type_name(kind: XspiceAutoBridgeKind) -> &'static str {
     match kind {
         XspiceAutoBridgeKind::Adc | XspiceAutoBridgeKind::Dac | XspiceAutoBridgeKind::Bidi => "d",
-        XspiceAutoBridgeKind::RealToV => "real",
+        XspiceAutoBridgeKind::RealToV | XspiceAutoBridgeKind::VToReal => "real",
     }
 }
 
 fn xspice_auto_bridge_template_direction(kind: XspiceAutoBridgeKind) -> &'static str {
     match kind {
-        XspiceAutoBridgeKind::Adc => "in",
+        // The direction names the *node's* side of the bridge, which is what a
+        // deck author overriding the template has in hand. `adc_bridge` reads an
+        // analog node, so does the observer; `dac_bridge` and `real_to_v` drive
+        // one.
+        XspiceAutoBridgeKind::Adc | XspiceAutoBridgeKind::VToReal => "in",
         XspiceAutoBridgeKind::Dac | XspiceAutoBridgeKind::RealToV => "out",
         XspiceAutoBridgeKind::Bidi => "inout",
     }
@@ -3581,6 +3634,19 @@ fn add_planned_xspice_auto_bridge(
             Vec::new(),
             Some(XspiceAutoBridgeOutputBranch::Scalar { port_idx: 1 }),
         ),
+        XspiceAutoBridgeKind::VToReal => (
+            "v_to_real",
+            format!("__rspice_auto_v_to_real_{}", bridge.node),
+            vec![
+                PortConnection::Analog(bridge.node),
+                PortConnection::Real(bridge.node),
+            ],
+            Vec::new(),
+            // No output branch: the observer's output is an event, not a
+            // matrix contribution, so there is no current for a branch to
+            // carry.
+            None,
+        ),
     };
 
     let code_model = circuit.xspice_registry.get(model_name).ok_or_else(|| {
@@ -4771,6 +4837,159 @@ rload mix 0 1k
             xspice_model_count(&circuit, "dac_bridge"),
             1,
             "explicit adc_bridge only covers analog-to-digital; mixed node 'mix' still needs a generated dac_bridge"
+        );
+    }
+
+    #[test]
+    fn real_input_on_an_analog_node_gets_a_generated_observer() {
+        let netlist = Netlist::parse(
+            "\
+* a real event reader sitting on a node the matrix also owns
+vin mix 0 dc 1.5
+rload mix 0 1k
+again mix robs rg
+.model rg real_gain
+.end
+",
+        )
+        .expect("deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(xspice_model_count(&circuit, "real_gain"), 1);
+        assert_eq!(
+            xspice_model_count(&circuit, "v_to_real"),
+            1,
+            "nothing drives the real event on 'mix' and the matrix owns the node, so the reader needs the observer"
+        );
+        assert_eq!(
+            xspice_model_count(&circuit, "real_to_v"),
+            0,
+            "the observer direction must not also plan the driver"
+        );
+
+        let observer = single_xspice_instance(&circuit, "v_to_real");
+        let mix = circuit
+            .get_node_by_name("mix")
+            .expect("the deck's mixed node is allocated");
+        assert!(matches!(
+            observer.connection_at(0),
+            Some(crate::xspice::PortConnection::Analog(node)) if *node == mix
+        ));
+        assert!(matches!(
+            observer.connection_at(1),
+            Some(crate::xspice::PortConnection::Real(node)) if *node == mix
+        ));
+    }
+
+    #[test]
+    fn a_real_event_net_with_no_analog_node_gets_no_observer() {
+        let netlist = Netlist::parse(
+            "\
+* the corpus shape: a real event chain the matrix never touches
+avec [dclk] rmid d2r
+again rmid rout rg
+.model d2r d_to_real
+.model rg real_gain
+.end
+",
+        )
+        .expect("deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(
+            xspice_model_count(&circuit, "v_to_real"),
+            0,
+            "an event-only net has no analog value to observe"
+        );
+    }
+
+    #[test]
+    fn a_driven_real_event_net_keeps_its_driver_and_gains_no_observer() {
+        let netlist = Netlist::parse(
+            "\
+* a real event both produced onto and read from one analog node
+rload mix 0 1k
+avec [dclk] mix d2r
+again mix rout rg
+.model d2r d_to_real
+.model rg real_gain
+.end
+",
+        )
+        .expect("deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(
+            xspice_model_count(&circuit, "real_to_v"),
+            1,
+            "the driven event still reaches the matrix through the existing driver bridge"
+        );
+        assert_eq!(
+            xspice_model_count(&circuit, "v_to_real"),
+            0,
+            "a driven real net must not also be observed; the two would race on one value"
+        );
+    }
+
+    #[test]
+    fn an_authored_observer_suppresses_the_generated_one() {
+        let netlist = Netlist::parse(
+            "\
+* an author's own observer publishing onto the node a reader reads
+vsrc src 0 dc 2
+rsrc src 0 1k
+rload mix 0 1k
+aobs src mix obs
+again mix rout rg
+.model obs v_to_real
+.model rg real_gain
+.end
+",
+        )
+        .expect("deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(
+            xspice_model_count(&circuit, "v_to_real"),
+            1,
+            "the authored observer is the only one; real event drivers sum, so a second would double the value"
+        );
+    }
+
+    #[test]
+    fn disabled_auto_bridging_names_the_observer_direction() {
+        let netlist = Netlist::parse(
+            "\
+* auto bridging off, with a node that would need an observer
+.options auto_bridge=0
+vin mix 0 dc 1.5
+rload mix 0 1k
+again mix robs rg
+.model rg real_gain
+.end
+",
+        )
+        .expect("deck parses");
+
+        let error = Engine::default()
+            .build_circuit(&netlist)
+            .expect_err("disabled auto bridging refuses the mixed node");
+        let message = error.to_string();
+        assert!(
+            message.contains("voltage-to-real"),
+            "the refusal must name the bridge the node needs, got: {message}"
         );
     }
 
