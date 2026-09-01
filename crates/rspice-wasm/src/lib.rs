@@ -8,7 +8,10 @@ use rspice_core::{
     Engine, Netlist, ResourceKind, ResourceLimitError, ResourceLimits, SimulationConfig,
 };
 use rspice_core::{
-    engine::{TransientFftHarmonic, TransientFftMetrics, TransientFftResult, TransientResult},
+    engine::{
+        TransientFftHarmonic, TransientFftMetrics, TransientFftResult, TransientResult,
+        TransientResultCompressed,
+    },
     netlist::{FftFormat, FftOutput, FftWindow, XyceFftMode},
 };
 use serde::{Deserialize, Serialize};
@@ -121,6 +124,55 @@ impl Default for WasmResourceLimits {
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct WasmExecutionOptions {
     pub resource_limits: WasmResourceLimits,
+}
+
+/// Browser-facing transient compression policy.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+pub struct WasmCompressionOptions {
+    /// Absolute interpolation error in each channel's native units.
+    pub absolute_tolerance: f64,
+    /// Relative interpolation error as a fraction of the actual value.
+    pub relative_tolerance: f64,
+    /// Maximum retained time-axis gap. Zero disables the gap ceiling.
+    pub maximum_interval: f64,
+    /// Set false to preserve every accepted point while retaining explicit
+    /// compression provenance.
+    pub enabled: bool,
+}
+
+impl Default for WasmCompressionOptions {
+    fn default() -> Self {
+        let defaults = rspice_core::engine::CompressionConfig::default();
+        Self {
+            absolute_tolerance: defaults.abs_tol,
+            relative_tolerance: defaults.rel_tol,
+            maximum_interval: defaults.min_interval,
+            enabled: defaults.enabled,
+        }
+    }
+}
+
+impl WasmCompressionOptions {
+    fn to_core(&self) -> DetailedWasmResult<rspice_core::engine::CompressionConfig> {
+        for (name, value) in [
+            ("absoluteTolerance", self.absolute_tolerance),
+            ("relativeTolerance", self.relative_tolerance),
+            ("maximumInterval", self.maximum_interval),
+        ] {
+            if !value.is_finite() || value < 0.0 {
+                return Err(Box::new(WasmError::invalid_argument(format!(
+                    "transient compression {name} must be finite and non-negative, got {value}"
+                ))));
+            }
+        }
+        Ok(rspice_core::engine::CompressionConfig {
+            abs_tol: self.absolute_tolerance,
+            rel_tol: self.relative_tolerance,
+            enabled: self.enabled,
+            min_interval: self.maximum_interval,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -316,10 +368,53 @@ pub struct AcPointSnapshot {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TransientSnapshot {
     pub time: Vec<f64>,
+    /// Exact accepted integration intervals aligned with `time`.
+    pub step_sizes: Vec<f64>,
+    /// Core node count, retained explicitly so schema drift cannot hide an
+    /// incomplete name or waveform inventory.
+    pub num_nodes: usize,
     pub node_names: Vec<String>,
-    pub voltages: Vec<Vec<f64>>,
+    /// Node waveforms in core node order. A projected-out waveform is `None`
+    /// (`null` in JavaScript), while a retained zero-point waveform is an
+    /// explicitly present empty typed array.
+    pub voltages: Vec<Option<Vec<f64>>>,
+    /// Branch identities in the same stable order as `branch_currents`.
+    pub branch_names: Vec<String>,
+    /// Branch-current waveforms in core branch order. `None` means the known
+    /// branch was deliberately projected out of the result.
+    pub branch_currents: Vec<Option<Vec<f64>>>,
+    /// Requested device operating-point channels in core discovery order.
+    pub device_op_traces: Vec<TransientDeviceOpSnapshot>,
+    /// Typed non-solution device-store channels in core topology order.
+    pub store_traces: Vec<TransientStoreSnapshot>,
     /// Source-authored transient FFT results in declaration order.
     pub fft_results: Vec<TransientFftSnapshot>,
+    /// Compression provenance. Full accepted-grid results use `None`; a
+    /// compressed result reports its original and retained point counts.
+    pub compression: Option<TransientCompressionSnapshot>,
+}
+
+/// One requested device operating-point history.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TransientDeviceOpSnapshot {
+    pub device_name: String,
+    pub parameter: String,
+    pub values: Vec<f64>,
+}
+
+/// One typed, non-solution device-store history.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TransientStoreSnapshot {
+    pub name: String,
+    pub values: Vec<f64>,
+}
+
+/// Provenance for a compressed transient result.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TransientCompressionSnapshot {
+    pub input_points: usize,
+    pub retained_points: usize,
+    pub compression_ratio: f64,
 }
 
 /// Columnar FFT bins. The JavaScript export materializes every field as a
@@ -737,6 +832,17 @@ fn execution_options_from_js(value: JsValue) -> DetailedWasmResult<WasmExecution
     })
 }
 
+fn compression_options_from_js(value: JsValue) -> DetailedWasmResult<WasmCompressionOptions> {
+    if value.is_undefined() || value.is_null() {
+        return Ok(WasmCompressionOptions::default());
+    }
+    serde_wasm_bindgen::from_value(value).map_err(|error| {
+        Box::new(WasmError::invalid_argument(format!(
+            "invalid transient compression options: {error}"
+        )))
+    })
+}
+
 fn serialize_to_js<T: Serialize>(value: &T) -> Result<JsValue, JsValue> {
     serde_wasm_bindgen::to_value(value)
         .map_err(|err| JsValue::from_str(&format!("serialization failed: {err}")))
@@ -745,7 +851,7 @@ fn serialize_to_js<T: Serialize>(value: &T) -> Result<JsValue, JsValue> {
 fn js_property(object: &JsValue, name: &str) -> Result<JsValue, JsValue> {
     js_sys::Reflect::get(object, &JsValue::from_str(name)).map_err(|_| {
         JsValue::from_str(&format!(
-            "serialization failed: transient FFT property `{name}` is unavailable"
+            "serialization failed: transient property `{name}` is unavailable"
         ))
     })
 }
@@ -756,9 +862,67 @@ fn set_float64_array(object: &JsValue, name: &str, values: &[f64]) -> Result<(),
         .map(|_| ())
         .map_err(|_| {
             JsValue::from_str(&format!(
-                "serialization failed: cannot publish transient FFT typed array `{name}`"
+                "serialization failed: cannot publish transient typed array `{name}`"
             ))
         })
+}
+
+fn set_float64_array_entry(
+    array: &js_sys::Array,
+    index: usize,
+    values: &[f64],
+    name: &str,
+) -> Result<(), JsValue> {
+    let index = u32::try_from(index).map_err(|_| {
+        JsValue::from_str(&format!(
+            "serialization failed: transient `{name}` index exceeds JavaScript array bounds"
+        ))
+    })?;
+    let values = js_sys::Float64Array::from(values);
+    array.set(index, values.into());
+    Ok(())
+}
+
+fn js_array_property(object: &JsValue, name: &str) -> Result<js_sys::Array, JsValue> {
+    js_property(object, name)?
+        .dyn_into::<js_sys::Array>()
+        .map_err(|_| {
+            JsValue::from_str(&format!(
+                "serialization failed: transient property `{name}` is not an array"
+            ))
+        })
+}
+
+fn publish_optional_waveforms_as_typed_arrays(
+    object: &JsValue,
+    name: &str,
+    waveforms: &[Option<Vec<f64>>],
+) -> Result<(), JsValue> {
+    let serialized = js_array_property(object, name)?;
+    for (index, waveform) in waveforms.iter().enumerate() {
+        if let Some(values) = waveform {
+            set_float64_array_entry(&serialized, index, values, name)?;
+        }
+    }
+    Ok(())
+}
+
+fn publish_trace_values_as_typed_arrays<T>(
+    object: &JsValue,
+    name: &str,
+    traces: &[T],
+    values: impl Fn(&T) -> &[f64],
+) -> Result<(), JsValue> {
+    let serialized = js_array_property(object, name)?;
+    for (index, trace) in traces.iter().enumerate() {
+        let js_trace = serialized.get(u32::try_from(index).map_err(|_| {
+            JsValue::from_str(&format!(
+                "serialization failed: transient `{name}` index exceeds JavaScript array bounds"
+            ))
+        })?);
+        set_float64_array(&js_trace, "values", values(trace))?;
+    }
+    Ok(())
 }
 
 fn set_uint32_array(object: &JsValue, name: &str, values: &[usize]) -> Result<(), JsValue> {
@@ -806,18 +970,37 @@ fn publish_fft_harmonics_as_typed_arrays(
     set_float64_array(object, "phase_degrees", &harmonics.phase_degrees)
 }
 
-/// Serialize transient FFT numeric columns as compact, interoperable
-/// JavaScript typed arrays. Optional FFT fields are deliberately encoded as
-/// `null`, not omitted or `undefined`, so consumers can distinguish absence
-/// explicitly.
+/// Serialize transient analog and FFT numeric columns as compact,
+/// interoperable JavaScript typed arrays. Optional projected waveforms,
+/// compression provenance, and FFT fields are deliberately encoded as `null`,
+/// not omitted or `undefined`, so consumers can distinguish absence explicitly.
 fn serialize_transient_to_js(snapshot: &TransientSnapshot) -> Result<JsValue, JsValue> {
     let serializer = serde_wasm_bindgen::Serializer::new().serialize_missing_as_null(true);
     let serialized = snapshot
         .serialize(&serializer)
         .map_err(|error| JsValue::from_str(&format!("serialization failed: {error}")))?;
-    let fft_results = js_property(&serialized, "fft_results")?
-        .dyn_into::<js_sys::Array>()
-        .map_err(|_| JsValue::from_str("serialization failed: `fft_results` is not an array"))?;
+    set_float64_array(&serialized, "time", &snapshot.time)?;
+    set_float64_array(&serialized, "step_sizes", &snapshot.step_sizes)?;
+    publish_optional_waveforms_as_typed_arrays(&serialized, "voltages", &snapshot.voltages)?;
+    publish_optional_waveforms_as_typed_arrays(
+        &serialized,
+        "branch_currents",
+        &snapshot.branch_currents,
+    )?;
+    publish_trace_values_as_typed_arrays(
+        &serialized,
+        "device_op_traces",
+        &snapshot.device_op_traces,
+        |trace| &trace.values,
+    )?;
+    publish_trace_values_as_typed_arrays(
+        &serialized,
+        "store_traces",
+        &snapshot.store_traces,
+        |trace| &trace.values,
+    )?;
+
+    let fft_results = js_array_property(&serialized, "fft_results")?;
 
     for (index, fft) in snapshot.fft_results.iter().enumerate() {
         let js_fft = fft_results.get(index as u32);
@@ -1102,14 +1285,195 @@ fn fft_snapshot(result: &TransientFftResult) -> TransientFftSnapshot {
     }
 }
 
-fn transient_snapshot(result: TransientResult) -> TransientSnapshot {
-    let fft_results = result.fft_results.iter().map(fft_snapshot).collect();
-    TransientSnapshot {
-        time: result.time,
-        node_names: result.node_names,
-        voltages: result.voltages,
-        fft_results,
+#[allow(clippy::too_many_arguments)]
+fn validate_transient_analog_inventory(
+    time: &[f64],
+    step_sizes: &[f64],
+    num_nodes: usize,
+    node_names: &[String],
+    voltages: &[Vec<f64>],
+    branch_names: &[String],
+    branch_currents: &[Vec<f64>],
+    device_op_traces: &[rspice_core::engine::TransientDeviceOpTrace],
+    store_traces: &[rspice_core::engine::TransientStoreTrace],
+) -> Result<(), String> {
+    let point_count = time.len();
+    if step_sizes.len() != point_count {
+        return Err(format!(
+            "transient result has {} step sizes for {point_count} time points",
+            step_sizes.len()
+        ));
     }
+    if num_nodes != node_names.len() || num_nodes != voltages.len() {
+        return Err(format!(
+            "transient result declares {num_nodes} nodes but has {} node names and {} voltage channels",
+            node_names.len(),
+            voltages.len()
+        ));
+    }
+    if branch_names.len() != branch_currents.len() {
+        return Err(format!(
+            "transient result has {} branch names but {} branch-current channels",
+            branch_names.len(),
+            branch_currents.len()
+        ));
+    }
+    if time
+        .windows(2)
+        .any(|window| !window[0].is_finite() || window[1] <= window[0])
+        || time.last().is_some_and(|value| !value.is_finite())
+    {
+        return Err(
+            "transient result time points must be finite and strictly increasing".to_string(),
+        );
+    }
+    if step_sizes
+        .iter()
+        .any(|step| !step.is_finite() || *step < 0.0)
+    {
+        return Err("transient result step sizes must be finite and non-negative".to_string());
+    }
+
+    for (kind, name, values, may_be_projected_out) in
+        voltages
+            .iter()
+            .enumerate()
+            .map(|(index, values)| ("voltage", node_names[index].as_str(), values, true))
+            .chain(branch_currents.iter().enumerate().map(|(index, values)| {
+                ("branch-current", branch_names[index].as_str(), values, true)
+            }))
+            .chain(device_op_traces.iter().map(|trace| {
+                (
+                    "device operating-point",
+                    trace.parameter.as_str(),
+                    &trace.values,
+                    false,
+                )
+            }))
+            .chain(
+                store_traces
+                    .iter()
+                    .map(|trace| ("device store", trace.name.as_str(), &trace.values, false)),
+            )
+    {
+        if values.len() != point_count && !(may_be_projected_out && values.is_empty()) {
+            return Err(format!(
+                "transient {kind} channel '{name}' has {} values for {point_count} time points",
+                values.len()
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn solution_waveforms(waveforms: Vec<Vec<f64>>, point_count: usize) -> Vec<Option<Vec<f64>>> {
+    waveforms
+        .into_iter()
+        .map(|waveform| {
+            if waveform.is_empty() && point_count != 0 {
+                None
+            } else {
+                Some(waveform)
+            }
+        })
+        .collect()
+}
+
+fn device_op_snapshots(
+    traces: Vec<rspice_core::engine::TransientDeviceOpTrace>,
+) -> Vec<TransientDeviceOpSnapshot> {
+    traces
+        .into_iter()
+        .map(|trace| TransientDeviceOpSnapshot {
+            device_name: trace.device_name,
+            parameter: trace.parameter,
+            values: trace.values,
+        })
+        .collect()
+}
+
+fn store_snapshots(
+    traces: Vec<rspice_core::engine::TransientStoreTrace>,
+) -> Vec<TransientStoreSnapshot> {
+    traces
+        .into_iter()
+        .map(|trace| TransientStoreSnapshot {
+            name: trace.name,
+            values: trace.values,
+        })
+        .collect()
+}
+
+/// Convert a complete core transient result into the loss-aware browser DTO.
+/// Solution-channel vector order is preserved exactly; an empty projected-out
+/// voltage or branch-current channel becomes typed `None`/JavaScript `null`.
+pub fn transient_snapshot_from_result(
+    result: TransientResult,
+) -> Result<TransientSnapshot, String> {
+    validate_transient_analog_inventory(
+        &result.time,
+        &result.step_sizes,
+        result.num_nodes,
+        &result.node_names,
+        &result.voltages,
+        &result.branch_names,
+        &result.branch_currents,
+        &result.device_op_traces,
+        &result.store_traces,
+    )?;
+    let point_count = result.time.len();
+    let fft_results = result.fft_results.iter().map(fft_snapshot).collect();
+    Ok(TransientSnapshot {
+        time: result.time,
+        step_sizes: result.step_sizes,
+        num_nodes: result.num_nodes,
+        node_names: result.node_names,
+        voltages: solution_waveforms(result.voltages, point_count),
+        branch_names: result.branch_names,
+        branch_currents: solution_waveforms(result.branch_currents, point_count),
+        device_op_traces: device_op_snapshots(result.device_op_traces),
+        store_traces: store_snapshots(result.store_traces),
+        fft_results,
+        compression: None,
+    })
+}
+
+/// Convert a validated compressed core transient into the same browser DTO.
+/// Compression provenance is retained rather than inferred from the grid.
+pub fn transient_snapshot_from_compressed_result(
+    result: TransientResultCompressed,
+) -> Result<TransientSnapshot, String> {
+    result.validate()?;
+    validate_transient_analog_inventory(
+        &result.time,
+        &result.step_sizes,
+        result.num_nodes,
+        &result.node_names,
+        &result.voltages,
+        &result.branch_names,
+        &result.branch_currents,
+        &result.device_op_traces,
+        &result.store_traces,
+    )?;
+    let point_count = result.time.len();
+    let fft_results = result.fft_results.iter().map(fft_snapshot).collect();
+    Ok(TransientSnapshot {
+        time: result.time,
+        step_sizes: result.step_sizes,
+        num_nodes: result.num_nodes,
+        node_names: result.node_names,
+        voltages: solution_waveforms(result.voltages, point_count),
+        branch_names: result.branch_names,
+        branch_currents: solution_waveforms(result.branch_currents, point_count),
+        device_op_traces: device_op_snapshots(result.device_op_traces),
+        store_traces: store_snapshots(result.store_traces),
+        fft_results,
+        compression: Some(TransientCompressionSnapshot {
+            input_points: result.input_points,
+            retained_points: point_count,
+            compression_ratio: result.compression_ratio,
+        }),
+    })
 }
 
 /// Summarize and semantically validate a netlist, returning typed diagnostics.
@@ -1248,12 +1612,11 @@ pub fn run_transient_analysis_detailed(
 }
 
 /// Run transient analysis under an explicit browser execution policy.
-pub fn run_transient_analysis_with_options_detailed(
-    source: &str,
+fn validate_transient_request(
     tstop: f64,
     max_step: f64,
-    options: &WasmExecutionOptions,
-) -> DetailedWasmResult<TransientSnapshot> {
+    resource_limits: ResourceLimits,
+) -> DetailedWasmResult<()> {
     if !tstop.is_finite() || tstop <= 0.0 {
         return Err(Box::new(WasmError::invalid_argument(format!(
             "Transient stop time must be positive and finite, got {tstop}"
@@ -1264,7 +1627,6 @@ pub fn run_transient_analysis_with_options_detailed(
             "Transient maximum step must be positive and finite, got {max_step}"
         ))));
     }
-    let resource_limits = options.resource_limits.to_core();
     let estimated_points = (tstop / max_step).ceil() as usize;
     let estimated_points = estimated_points.saturating_add(1);
     if estimated_points > resource_limits.max_analysis_points {
@@ -1274,13 +1636,83 @@ pub fn run_transient_analysis_with_options_detailed(
             resource_limits.max_analysis_points,
         ));
     }
+    Ok(())
+}
+
+pub fn run_transient_analysis_with_options_detailed(
+    source: &str,
+    tstop: f64,
+    max_step: f64,
+    options: &WasmExecutionOptions,
+) -> DetailedWasmResult<TransientSnapshot> {
+    let resource_limits = options.resource_limits.to_core();
+    validate_transient_request(tstop, max_step, resource_limits)?;
 
     let netlist = parse_netlist_detailed(source, resource_limits)?;
     let result = engine_with_resource_limits(resource_limits)?
         .run_tran(&netlist, tstop, max_step)
         .map_err(|error| Box::new(WasmError::from_simulation_error(error)))?;
 
-    Ok(transient_snapshot(result))
+    transient_snapshot_from_result(result).map_err(|message| {
+        Box::new(WasmError::new(
+            message,
+            "invalid_transient_result",
+            "result_validation",
+        ))
+    })
+}
+
+/// Run transient analysis with bounded, multi-channel analog compression.
+pub fn run_transient_analysis_compressed_detailed(
+    source: &str,
+    tstop: f64,
+    max_step: f64,
+    compression: &WasmCompressionOptions,
+) -> DetailedWasmResult<TransientSnapshot> {
+    run_transient_analysis_compressed_with_options_detailed(
+        source,
+        tstop,
+        max_step,
+        compression,
+        &WasmExecutionOptions::default(),
+    )
+}
+
+/// Run a compressed transient under explicit compression and browser resource
+/// policies. The solver and authored output projection are identical to the
+/// full-grid path; only the published analog history is decimated.
+pub fn run_transient_analysis_compressed_with_options_detailed(
+    source: &str,
+    tstop: f64,
+    max_step: f64,
+    compression: &WasmCompressionOptions,
+    options: &WasmExecutionOptions,
+) -> DetailedWasmResult<TransientSnapshot> {
+    let resource_limits = options.resource_limits.to_core();
+    validate_transient_request(tstop, max_step, resource_limits)?;
+    let compression = compression.to_core()?;
+    let netlist = parse_netlist_detailed(source, resource_limits)?;
+    let result = engine_with_resource_limits(resource_limits)?
+        .run_tran_compressed(&netlist, tstop, max_step, compression)
+        .map_err(|error| Box::new(WasmError::from_simulation_error(error)))?;
+    transient_snapshot_from_compressed_result(result).map_err(|message| {
+        Box::new(WasmError::new(
+            message,
+            "invalid_transient_result",
+            "result_validation",
+        ))
+    })
+}
+
+/// Backward-compatible string-error compressed transient API.
+pub fn run_transient_analysis_compressed(
+    source: &str,
+    tstop: f64,
+    max_step: f64,
+    compression: &WasmCompressionOptions,
+) -> WasmResult<TransientSnapshot> {
+    run_transient_analysis_compressed_detailed(source, tstop, max_step, compression)
+        .map_err(|error| error.message)
 }
 
 /// Backward-compatible string-error transient API.
@@ -1361,6 +1793,28 @@ pub fn run_transient_analysis_js(
     let options = execution_options_from_js(options).map_err(|error| wasm_error_to_js(*error))?;
     let result = run_transient_analysis_with_options_detailed(source, tstop, max_step, &options)
         .map_err(|error| wasm_error_to_js(*error))?;
+    serialize_transient_to_js(&result)
+}
+
+#[wasm_bindgen(js_name = runTransientAnalysisCompressed)]
+pub fn run_transient_analysis_compressed_js(
+    source: &str,
+    tstop: f64,
+    max_step: f64,
+    compression: JsValue,
+    options: JsValue,
+) -> Result<JsValue, JsValue> {
+    let compression =
+        compression_options_from_js(compression).map_err(|error| wasm_error_to_js(*error))?;
+    let options = execution_options_from_js(options).map_err(|error| wasm_error_to_js(*error))?;
+    let result = run_transient_analysis_compressed_with_options_detailed(
+        source,
+        tstop,
+        max_step,
+        &compression,
+        &options,
+    )
+    .map_err(|error| wasm_error_to_js(*error))?;
     serialize_transient_to_js(&result)
 }
 
@@ -1660,6 +2114,73 @@ mod tests {
         .fft {2*v(out)} np=64 format=norm window=rect\n\
         .end\n";
 
+    const ANALOG_PARITY_DECK: &str = "browser complete analog transient parity\n\
+        VDD d 0 5\n\
+        VG g 0 PULSE(0 3 100n 20n 20n 500n 1u)\n\
+        M1 d g 0 0 NM W=10u L=1u\n\
+        .model NM NMOS (LEVEL=1 VTO=1 KP=100u)\n\
+        VMEM memory 0 0.2\n\
+        .model MRM MEMRISTOR LEVEL=2 RON=50 ROFF=1k\n\
+        YMEMRISTOR MR1 memory 0 MRM IVRELATION=1\n\
+        .save V(d) I(VDD) @M1[gm] @M1[id]\n\
+        .tran 20n 2u\n\
+        .end\n";
+
+    fn synthetic_analog_result() -> TransientResult {
+        TransientResult {
+            time: vec![0.0, 1.0, 2.0],
+            step_sizes: vec![0.0, 1.0, 1.0],
+            voltages: vec![vec![1.0, 2.0, 3.0], Vec::new()],
+            branch_currents: vec![vec![4.0, 5.0, 6.0], Vec::new()],
+            num_nodes: 2,
+            node_names: vec!["first".into(), "projected-node".into()],
+            branch_names: vec!["VFIRST".into(), "VPROJECTED".into()],
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: vec![
+                rspice_core::engine::TransientDeviceOpTrace {
+                    device_name: "M2".into(),
+                    parameter: "gm".into(),
+                    values: vec![7.0, 8.0, 9.0],
+                },
+                rspice_core::engine::TransientDeviceOpTrace {
+                    device_name: "M1".into(),
+                    parameter: "id".into(),
+                    values: vec![10.0, 11.0, 12.0],
+                },
+            ],
+            store_traces: vec![
+                rspice_core::engine::TransientStoreTrace {
+                    name: "YMEMRISTOR!SECOND:R".into(),
+                    values: vec![13.0, 14.0, 15.0],
+                },
+                rspice_core::engine::TransientStoreTrace {
+                    name: "YMEMRISTOR!FIRST:R".into(),
+                    values: vec![16.0, 17.0, 18.0],
+                },
+            ],
+            fft_results: Vec::new(),
+        }
+    }
+
+    fn synthetic_compressed_analog_result() -> TransientResultCompressed {
+        let result = synthetic_analog_result();
+        TransientResultCompressed {
+            time: result.time,
+            step_sizes: result.step_sizes,
+            voltages: result.voltages,
+            branch_currents: result.branch_currents,
+            num_nodes: result.num_nodes,
+            node_names: result.node_names,
+            branch_names: result.branch_names,
+            device_op_traces: result.device_op_traces,
+            store_traces: result.store_traces,
+            fft_results: result.fft_results,
+            compression_ratio: 2.0,
+            input_points: 6,
+        }
+    }
+
     fn fft_parity_fixture() -> (TransientResult, TransientSnapshot) {
         let netlist = Netlist::parse(FFT_PARITY_DECK).expect("FFT parity deck parses in core");
         let core = Engine::new(SimulationConfig::default())
@@ -1813,8 +2334,232 @@ mod tests {
     }
 
     #[test]
+    fn transient_analog_adapter_preserves_complete_inventory_order_and_missingness() {
+        let full = transient_snapshot_from_result(synthetic_analog_result())
+            .expect("valid full analog result adapts");
+        assert_eq!(full.time, [0.0, 1.0, 2.0]);
+        assert_eq!(full.step_sizes, [0.0, 1.0, 1.0]);
+        assert_eq!(full.num_nodes, 2);
+        assert_eq!(full.node_names, ["first", "projected-node"]);
+        assert_eq!(full.voltages[0].as_deref(), Some(&[1.0, 2.0, 3.0][..]));
+        assert_eq!(full.voltages[1], None);
+        assert_eq!(full.branch_names, ["VFIRST", "VPROJECTED"]);
+        assert_eq!(
+            full.branch_currents[0].as_deref(),
+            Some(&[4.0, 5.0, 6.0][..])
+        );
+        assert_eq!(full.branch_currents[1], None);
+        assert_eq!(
+            full.device_op_traces
+                .iter()
+                .map(|trace| (trace.device_name.as_str(), trace.parameter.as_str()))
+                .collect::<Vec<_>>(),
+            [("M2", "gm"), ("M1", "id")]
+        );
+        assert_eq!(
+            full.store_traces
+                .iter()
+                .map(|trace| trace.name.as_str())
+                .collect::<Vec<_>>(),
+            ["YMEMRISTOR!SECOND:R", "YMEMRISTOR!FIRST:R"]
+        );
+        assert_eq!(full.compression, None);
+
+        let compressed =
+            transient_snapshot_from_compressed_result(synthetic_compressed_analog_result())
+                .expect("valid compressed analog result adapts");
+        assert_eq!(compressed.time, full.time);
+        assert_eq!(compressed.step_sizes, full.step_sizes);
+        assert_eq!(compressed.node_names, full.node_names);
+        assert_eq!(compressed.voltages, full.voltages);
+        assert_eq!(compressed.branch_names, full.branch_names);
+        assert_eq!(compressed.branch_currents, full.branch_currents);
+        assert_eq!(compressed.device_op_traces, full.device_op_traces);
+        assert_eq!(compressed.store_traces, full.store_traces);
+        assert_eq!(
+            compressed.compression,
+            Some(TransientCompressionSnapshot {
+                input_points: 6,
+                retained_points: 3,
+                compression_ratio: 2.0,
+            })
+        );
+    }
+
+    #[test]
+    fn transient_analog_adapter_matches_actual_core_execution_inventory() {
+        let netlist = Netlist::parse(ANALOG_PARITY_DECK).expect("analog parity deck parses");
+        let core = Engine::new(SimulationConfig::default())
+            .run_tran(&netlist, 2.0e-6, 20.0e-9)
+            .expect("analog parity deck executes in core");
+        let wasm = run_transient_analysis_detailed(ANALOG_PARITY_DECK, 2.0e-6, 20.0e-9)
+            .expect("analog parity deck executes through browser adapter");
+
+        assert_eq!(wasm.time, core.time);
+        assert_eq!(wasm.step_sizes, core.step_sizes);
+        assert_eq!(wasm.num_nodes, core.num_nodes);
+        assert_eq!(wasm.node_names, core.node_names);
+        assert_eq!(wasm.branch_names, core.branch_names);
+        for (adapted, source) in wasm.voltages.iter().zip(&core.voltages) {
+            assert_eq!(
+                adapted.as_deref(),
+                (!source.is_empty()).then_some(source.as_slice())
+            );
+        }
+        for (adapted, source) in wasm.branch_currents.iter().zip(&core.branch_currents) {
+            assert_eq!(
+                adapted.as_deref(),
+                (!source.is_empty()).then_some(source.as_slice())
+            );
+        }
+        assert_eq!(
+            wasm.device_op_traces
+                .iter()
+                .map(|trace| (
+                    trace.device_name.as_str(),
+                    trace.parameter.as_str(),
+                    &trace.values
+                ))
+                .collect::<Vec<_>>(),
+            core.device_op_traces
+                .iter()
+                .map(|trace| (
+                    trace.device_name.as_str(),
+                    trace.parameter.as_str(),
+                    &trace.values
+                ))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            wasm.store_traces
+                .iter()
+                .map(|trace| (trace.name.as_str(), &trace.values))
+                .collect::<Vec<_>>(),
+            core.store_traces
+                .iter()
+                .map(|trace| (trace.name.as_str(), &trace.values))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            wasm.voltages.iter().any(Option::is_none),
+            "authored .SAVE projection must remain explicit"
+        );
+        assert!(
+            wasm.branch_currents.iter().any(Option::is_none),
+            "projected-out branch currents must remain explicit"
+        );
+        assert!(
+            wasm.device_op_traces
+                .iter()
+                .any(|trace| trace.device_name.eq_ignore_ascii_case("M1")
+                    && trace.parameter.eq_ignore_ascii_case("gm")),
+            "requested device operating-point trace is missing"
+        );
+        assert_eq!(
+            wasm.store_traces
+                .iter()
+                .map(|trace| trace.name.as_str())
+                .collect::<Vec<_>>(),
+            ["YMEMRISTOR!MR1:R"]
+        );
+        assert_eq!(wasm.compression, None);
+
+        let compression_options = WasmCompressionOptions {
+            absolute_tolerance: 1.0e-8,
+            relative_tolerance: 1.0e-4,
+            enabled: true,
+            maximum_interval: 100.0e-9,
+        };
+        let compressed_core = Engine::new(SimulationConfig::default())
+            .run_tran_compressed(
+                &netlist,
+                2.0e-6,
+                20.0e-9,
+                compression_options
+                    .to_core()
+                    .expect("compression options are valid"),
+            )
+            .expect("analog parity deck executes through core compression");
+        let compressed = transient_snapshot_from_compressed_result(compressed_core.clone())
+            .expect("actual compressed core result adapts");
+        let public_compressed = run_transient_analysis_compressed_detailed(
+            ANALOG_PARITY_DECK,
+            2.0e-6,
+            20.0e-9,
+            &compression_options,
+        )
+        .expect("compressed browser API executes");
+        assert_eq!(public_compressed, compressed);
+        assert_eq!(compressed.time, compressed_core.time);
+        assert_eq!(compressed.step_sizes, compressed_core.step_sizes);
+        assert_eq!(compressed.node_names, compressed_core.node_names);
+        assert_eq!(compressed.branch_names, compressed_core.branch_names);
+        assert_eq!(
+            compressed.device_op_traces.len(),
+            compressed_core.device_op_traces.len()
+        );
+        assert_eq!(
+            compressed.store_traces.len(),
+            compressed_core.store_traces.len()
+        );
+        assert_eq!(
+            compressed.compression,
+            Some(TransientCompressionSnapshot {
+                input_points: compressed_core.input_points,
+                retained_points: compressed_core.time.len(),
+                compression_ratio: compressed_core.compression_ratio,
+            })
+        );
+    }
+
+    #[test]
+    fn transient_compression_options_fail_closed() {
+        for options in [
+            WasmCompressionOptions {
+                absolute_tolerance: -1.0,
+                ..WasmCompressionOptions::default()
+            },
+            WasmCompressionOptions {
+                relative_tolerance: f64::NAN,
+                ..WasmCompressionOptions::default()
+            },
+            WasmCompressionOptions {
+                maximum_interval: f64::INFINITY,
+                ..WasmCompressionOptions::default()
+            },
+        ] {
+            let error = options
+                .to_core()
+                .expect_err("invalid compression policy must be rejected");
+            assert_eq!(error.kind, "invalid_argument");
+            assert_eq!(error.category, "input_validation");
+        }
+
+        let unknown = serde_json::from_value::<WasmCompressionOptions>(serde_json::json!({
+            "absoluteTolerance": 1.0e-6,
+            "misspelledTolerance": 1.0e-3,
+        }));
+        assert!(
+            unknown.is_err(),
+            "unknown compression fields must fail closed"
+        );
+    }
+
+    #[test]
     fn transient_fft_dto_round_trips_and_inventory_covers_every_field() {
-        const TRANSIENT_FIELDS: &[&str] = &["time", "node_names", "voltages", "fft_results"];
+        const TRANSIENT_FIELDS: &[&str] = &[
+            "time",
+            "step_sizes",
+            "num_nodes",
+            "node_names",
+            "voltages",
+            "branch_names",
+            "branch_currents",
+            "device_op_traces",
+            "store_traces",
+            "fft_results",
+            "compression",
+        ];
         const FFT_FIELDS: &[&str] = &[
             "source_kind",
             "source_text",
@@ -1867,6 +2612,10 @@ mod tests {
             "magnitudes_db",
             "phase_degrees",
         ];
+        const DEVICE_OP_FIELDS: &[&str] = &["device_name", "parameter", "values"];
+        const STORE_FIELDS: &[&str] = &["name", "values"];
+        const COMPRESSION_FIELDS: &[&str] =
+            &["input_points", "retained_points", "compression_ratio"];
 
         let (_, snapshot) = fft_parity_fixture();
         let encoded = serde_json::to_value(&snapshot).expect("serialize transient FFT DTO");
@@ -1885,6 +2634,118 @@ mod tests {
         without_metrics.fft_results[0].metrics = None;
         let encoded = serde_json::to_value(without_metrics).expect("serialize absent metrics");
         assert!(encoded["fft_results"][0]["metrics"].is_null());
+
+        let analog =
+            transient_snapshot_from_compressed_result(synthetic_compressed_analog_result())
+                .expect("compressed analog DTO adapts");
+        let encoded = serde_json::to_value(&analog).expect("serialize complete analog DTO");
+        assert_object_fields(&encoded["device_op_traces"][0], DEVICE_OP_FIELDS);
+        assert_object_fields(&encoded["store_traces"][0], STORE_FIELDS);
+        assert_object_fields(&encoded["compression"], COMPRESSION_FIELDS);
+        assert!(encoded["voltages"][1].is_null());
+        assert!(encoded["branch_currents"][1].is_null());
+        let decoded: TransientSnapshot =
+            serde_json::from_value(encoded).expect("deserialize complete analog DTO");
+        assert_eq!(decoded, analog);
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    fn transient_analog_js_contract_uses_typed_arrays_and_explicit_missingness() {
+        let snapshot = transient_snapshot_from_result(synthetic_analog_result())
+            .expect("full analog fixture adapts");
+        let serialized =
+            serialize_transient_to_js(&snapshot).expect("serialize complete analog DTO");
+
+        for field in ["time", "step_sizes"] {
+            assert!(
+                js_property(&serialized, field)
+                    .expect("top-level numeric column exists")
+                    .is_instance_of::<js_sys::Float64Array>(),
+                "{field} is not a Float64Array"
+            );
+        }
+
+        let voltages =
+            js_array_property(&serialized, "voltages").expect("voltage waveform collection exists");
+        assert!(voltages.get(0).is_instance_of::<js_sys::Float64Array>());
+        assert!(voltages.get(1).is_null());
+        let currents = js_array_property(&serialized, "branch_currents")
+            .expect("branch-current waveform collection exists");
+        assert!(currents.get(0).is_instance_of::<js_sys::Float64Array>());
+        assert!(currents.get(1).is_null());
+
+        for collection in ["device_op_traces", "store_traces"] {
+            let traces =
+                js_array_property(&serialized, collection).expect("trace collection exists");
+            assert!(
+                js_property(&traces.get(0), "values")
+                    .expect("trace values exist")
+                    .is_instance_of::<js_sys::Float64Array>(),
+                "{collection} values are not a Float64Array"
+            );
+        }
+        assert!(
+            js_property(&serialized, "compression")
+                .expect("compression property exists")
+                .is_null()
+        );
+
+        let decoded: TransientSnapshot = serde_wasm_bindgen::from_value(serialized)
+            .expect("typed-array analog contract round-trips to its Rust DTO");
+        assert_eq!(decoded, snapshot);
+
+        let compressed =
+            transient_snapshot_from_compressed_result(synthetic_compressed_analog_result())
+                .expect("compressed analog fixture adapts");
+        let serialized =
+            serialize_transient_to_js(&compressed).expect("serialize compressed analog DTO");
+        assert!(
+            !js_property(&serialized, "compression")
+                .expect("compression property exists")
+                .is_null()
+        );
+        let decoded: TransientSnapshot = serde_wasm_bindgen::from_value(serialized)
+            .expect("compressed analog contract round-trips to its Rust DTO");
+        assert_eq!(decoded, compressed);
+
+        let compression_options = serde_wasm_bindgen::to_value(&WasmCompressionOptions {
+            absolute_tolerance: 1.0e-8,
+            relative_tolerance: 1.0e-4,
+            maximum_interval: 100.0e-9,
+            enabled: true,
+        })
+        .expect("compression options serialize");
+        let executed = run_transient_analysis_compressed_js(
+            ANALOG_PARITY_DECK,
+            2.0e-6,
+            20.0e-9,
+            compression_options,
+            JsValue::NULL,
+        )
+        .expect("compressed analog API executes under wasm32");
+        assert!(
+            js_property(&executed, "time")
+                .expect("executed time exists")
+                .is_instance_of::<js_sys::Float64Array>()
+        );
+        assert!(
+            !js_property(&executed, "compression")
+                .expect("executed compression provenance exists")
+                .is_null()
+        );
+        assert!(
+            js_array_property(&executed, "device_op_traces")
+                .expect("executed device operating-point traces exist")
+                .length()
+                >= 2
+        );
+        assert_eq!(
+            js_array_property(&executed, "store_traces")
+                .expect("executed typed store traces exist")
+                .length(),
+            1
+        );
     }
 
     #[cfg(target_arch = "wasm32")]

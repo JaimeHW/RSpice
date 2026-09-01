@@ -25,7 +25,23 @@ by throwing an `RSpiceError` with stable structured fields.
 | `summarizeNetlist(source[, options])` | netlist text and optional execution options | `{title, element_count, analysis_count, model_count, subcircuit_count, parameter_count}` |
 | `runDcOperatingPoint(source[, options])` | netlist text and optional execution options | `{node_names, node_voltages, branch_names, branch_currents}` |
 | `runAcAnalysis(source, frequencies[, options])` | netlist text, `Float64Array`/array of Hz values (non-empty, finite, and non-negative), and optional options | array of `{frequency, node_names, branch_names, voltages: {real, imag}, currents: {real, imag}}`, one entry per frequency |
-| `runTransientAnalysis(source, tstop, max_step[, options])` | netlist text, positive finite stop/max-step values, and optional options | `{time, node_names, voltages, fft_results}`; `fft_results` preserves source order and is empty when the deck has no active `.FFT` |
+| `runTransientAnalysis(source, tstop, max_step[, options])` | netlist text, positive finite stop/max-step values, and optional options | complete analog transient inventory: accepted `time`/`step_sizes`, node and branch identities/waveforms, device operating-point and typed store traces, FFT products, and explicit compression provenance |
+| `runTransientAnalysisCompressed(source, tstop, max_step, compression[, options])` | the transient inputs plus a fail-closed compression object | the same complete transient DTO on a bounded decimated grid, with non-null compression provenance |
+
+Transient numeric columns cross the JavaScript boundary as typed arrays:
+`time`, `step_sizes`, each retained voltage or branch-current waveform, and
+each device operating-point/store `values` column are `Float64Array` values.
+`node_names` and `branch_names` retain core ordering. A known solution channel
+excluded by authored output projection is explicitly `null` at its aligned
+position rather than being confused with a retained empty waveform. Full-grid
+execution returns `compression: null`; Rust callers adapting a validated
+`TransientResultCompressed` receive `{input_points, retained_points,
+compression_ratio}` through the same DTO.
+
+The compression object accepts `absoluteTolerance`, `relativeTolerance`,
+`maximumInterval`, and `enabled`. Omitted fields use core defaults; tolerance
+and interval values must be finite and non-negative, and unknown fields are
+rejected. `maximumInterval: 0` disables the time-axis gap ceiling.
 
 Each transient FFT entry exposes the complete authored and resolved identity
 (`source_kind`, `source_text`, `authored_output`, `output_name`,
@@ -70,7 +86,8 @@ diagnostic errors retain source locations and unresolved output symbols.
 
 The same analysis operations are also exported as plain Rust functions
 (`summarize_netlist`, `run_dc_operating_point`, `run_ac_analysis`,
-`run_transient_analysis`) returning `Result<T, String>`, since the crate
+`run_transient_analysis`, `run_transient_analysis_compressed`) returning
+`Result<T, String>`, since the crate
 builds as both `cdylib` and `rlib`. Their `*_detailed` variants return
 `WasmError`, and `*_with_options_detailed` variants accept the typed
 `WasmExecutionOptions` policy.
@@ -80,8 +97,9 @@ builds as both `cdylib` and `rlib`. Their `*_detailed` variants return
 There are no submodules — `src/lib.rs` contains:
 
 - Snapshot types: `NetlistSummary`, `DcOperatingPoint`, `ComplexSeries`
-  (parallel real/imag vectors), `AcPointSnapshot`, `TransientSnapshot`, and
-  the complete `TransientFftSnapshot`/bins/metrics/harmonics DTO family
+  (parallel real/imag vectors), `AcPointSnapshot`, the complete analog
+  `TransientSnapshot`/device-op/store/compression family, and the complete
+  `TransientFftSnapshot`/bins/metrics/harmonics DTO family
 - Browser-safe resource defaults, typed per-call options, and input validation
 - Structured error conversion with stable machine-readable resource details
 - The `#[wasm_bindgen]` export shims
@@ -131,11 +149,14 @@ wasm threads.
 
 `cargo test -p rspice-wasm` runs native unit and integration tests for browser
 defaults, option decoding, fail-closed field handling, structured error
-contracts, and the four analysis adapters. The transient FFT tests compare
-every DTO field and source-order position with `rspice-core`, round-trip the
-serializable records, and ratchet the documented field inventory. A wasm32
-test additionally asserts that bin and ranked-harmonic columns are JavaScript
-typed arrays and absent metrics are `null`. CI also builds the real
+contracts, and the analysis adapters. Transient tests compare the complete
+full and compressed analog inventories against `rspice-core`, exercise
+authored projection missingness and stable trace ordering, and run the real
+compressed solver path under Node. FFT tests compare every DTO field and
+source-order position with `rspice-core`, round-trip the serializable records,
+and ratchet the documented field inventory. Wasm32 tests additionally assert
+that time-domain, bin, and ranked-harmonic columns use JavaScript typed arrays
+and that optional fields are explicit `null`. CI also builds the real
 `wasm32-unknown-unknown` artifact. The static browser contract is guarded by
 `tools/ci/test_wasm_playground.py`, which verifies that the canonical
 playground routes engine calls through `engine-worker.js`, that AC controls are
