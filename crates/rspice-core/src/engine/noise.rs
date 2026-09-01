@@ -3,10 +3,14 @@ use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::noise::{
     Bsim3FlickerNoise, Bsim4FlickerNoise, CorrelatedNoisePair, NoiseContribution, NoisePort,
-    NoiseResult, NoiseSource, NoiseSourceType, PortNoiseCorrelationResult, T_NOMINAL,
+    NoiseResult, NoiseSource, PortNoiseCorrelationResult,
 };
+#[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+use crate::analysis::noise::{NoiseSourceType, T_NOMINAL};
 use crate::{CircuitData, Complex64, Netlist, Value};
-use std::collections::{BTreeMap, HashMap, HashSet};
+#[cfg(any(test, feature = "veriloga", feature = "veriloga-builtins-base"))]
+use std::collections::BTreeMap;
+use std::collections::{HashMap, HashSet};
 use std::f64::consts::PI;
 
 #[derive(Clone, Copy)]
@@ -55,11 +59,13 @@ struct BinaryScaledComplex {
 }
 
 #[derive(Clone, Copy, Default)]
+#[cfg(any(test, feature = "veriloga", feature = "veriloga-builtins-base"))]
 struct CompensatedComplex {
     sum: Complex64,
     correction: Complex64,
 }
 
+#[cfg(any(test, feature = "veriloga", feature = "veriloga-builtins-base"))]
 impl CompensatedComplex {
     fn add_component(sum: &mut Value, correction: &mut Value, value: Value) {
         let next = *sum + value;
@@ -85,12 +91,14 @@ impl CompensatedComplex {
 /// binary-exponent bin before lower-magnitude bins are combined, retaining a
 /// physically meaningful residual such as `[1e16, 1, -1e16]`.
 #[derive(Default)]
+#[cfg(any(test, feature = "veriloga", feature = "veriloga-builtins-base"))]
 struct ComplexBinAccumulator {
     real_bins: BTreeMap<i32, CompensatedComplex>,
     imaginary_bins: BTreeMap<i32, CompensatedComplex>,
 }
 
 impl Engine {
+    #[cfg(any(test, feature = "veriloga", feature = "veriloga-builtins-base"))]
     fn add_complex_bin(
         accumulator: &mut ComplexBinAccumulator,
         value: Complex64,
@@ -121,6 +129,7 @@ impl Engine {
         Ok(())
     }
 
+    #[cfg(any(test, feature = "veriloga", feature = "veriloga-builtins-base"))]
     fn finish_complex_bins(
         accumulator: ComplexBinAccumulator,
         label: &str,
@@ -1084,6 +1093,7 @@ impl Engine {
     /// persistable shape becomes `_` and the rest is upper-cased, which is how
     /// the code generator composes the compiled catalog's own mechanism names,
     /// so a ranked contributor row can always carry what this names.
+    #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
     fn canonical_veriloga_noise_mechanism(label: &str) -> String {
         let mut mechanism = label
             .bytes()

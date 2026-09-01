@@ -56,51 +56,6 @@ pub use rspice_veriloga_runtime::{
 #[cfg(feature = "veriloga-builtins-base")]
 use rspice_veriloga_runtime::{GeneratedParameterAssignment, GeneratedParameterOrigin};
 
-/// Compatibility extension for catalogs produced before grouped generated
-/// noise existed. Newly generated registries expose inherent methods with the
-/// same signatures, which Rust selects in preference to this explicit empty
-/// capability implementation.
-///
-/// Which is why it reads as dead: against a catalog regenerated for grouped
-/// noise — the vendored one, and the only one the digest audit lets you build
-/// against — inherent resolution wins at every call site and nothing selects
-/// the trait. It earns its place only in the window where the checked-in
-/// catalog is older than this crate, so silence the lint rather than delete
-/// the shim. If that window is meant to be closed, the shim goes with it, and
-/// that is the noise program owner's call, not a build repair's.
-#[cfg(feature = "veriloga-builtins-base")]
-#[allow(dead_code)]
-trait LegacyGeneratedGroupedNoiseRegistry {
-    fn grouped_noise_process_descriptors(&self) -> &'static [GeneratedNoiseProcessDescriptor];
-    fn grouped_noise_injection_descriptors(&self) -> &'static [GeneratedNoiseInjectionDescriptor];
-    fn evaluate_noise_processes_at_frequency(
-        &self,
-        ctx: &GeneratedEvalContext<'_>,
-        frequency_hz: Value,
-        visitor: &mut dyn GeneratedNoiseProcessVisitor,
-    ) -> Result<(), GeneratedNoiseEvaluationError>;
-}
-
-#[cfg(feature = "veriloga-builtins-base")]
-impl LegacyGeneratedGroupedNoiseRegistry for builtins::GeneratedBuiltinKind {
-    fn grouped_noise_process_descriptors(&self) -> &'static [GeneratedNoiseProcessDescriptor] {
-        &[]
-    }
-
-    fn grouped_noise_injection_descriptors(&self) -> &'static [GeneratedNoiseInjectionDescriptor] {
-        &[]
-    }
-
-    fn evaluate_noise_processes_at_frequency(
-        &self,
-        _ctx: &GeneratedEvalContext<'_>,
-        _frequency_hz: Value,
-        _visitor: &mut dyn GeneratedNoiseProcessVisitor,
-    ) -> Result<(), GeneratedNoiseEvaluationError> {
-        Ok(())
-    }
-}
-
 #[cfg(feature = "veriloga-builtins-base")]
 #[derive(Debug, Clone)]
 pub(crate) struct BuiltinParameterAssignment {
@@ -298,14 +253,14 @@ pub struct BuiltinEvaluatedNoiseSource {
 
 #[cfg(feature = "veriloga-builtins-base")]
 #[derive(Debug, Clone, PartialEq)]
-pub struct BuiltinEvaluatedNoiseInjection {
+pub(crate) struct BuiltinEvaluatedNoiseInjection {
     pub mapped: GeneratedMappedNoiseInjectionDescriptor,
     pub gain: GeneratedNoiseComplex,
 }
 
 #[cfg(feature = "veriloga-builtins-base")]
 #[derive(Debug, Clone, PartialEq)]
-pub struct BuiltinEvaluatedNoiseProcess {
+pub(crate) struct BuiltinEvaluatedNoiseProcess {
     pub descriptor: GeneratedNoiseProcessDescriptor,
     pub active: bool,
     pub psd: Value,
@@ -1011,7 +966,7 @@ impl BuiltinVerilogAInstance {
     /// injections, so the process table — not the injection table — is the
     /// compatibility signal used by catalogs generated before that ABI.
     #[inline]
-    pub fn has_grouped_noise_processes(&self) -> bool {
+    pub(crate) fn has_grouped_noise_processes(&self) -> bool {
         Self::grouped_noise_capability(self.kind.grouped_noise_process_descriptors())
     }
 
@@ -1044,7 +999,7 @@ impl BuiltinVerilogAInstance {
         Ok(())
     }
 
-    pub fn grouped_noise_process_catalog(&self) -> Vec<(usize, &'static str)> {
+    pub(crate) fn grouped_noise_process_catalog(&self) -> Vec<(usize, &'static str)> {
         if !self.has_grouped_noise_processes() {
             return Vec::new();
         }
@@ -1353,7 +1308,7 @@ impl BuiltinVerilogAInstance {
         Ok(evaluated)
     }
 
-    pub fn evaluate_noise_processes_at_frequency(
+    pub(crate) fn evaluate_noise_processes_at_frequency(
         &self,
         voltages: &[Value],
         num_nodes: usize,

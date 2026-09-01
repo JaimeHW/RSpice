@@ -8318,6 +8318,10 @@ endmodule
             matrix_indices: MatrixIndices::default(),
             stamp_matrix_buffer: Vec::new(),
             stamp_rhs_buffer: Vec::new(),
+            // This helper deliberately builds a synthetic native executable
+            // without the canonical artifact required by production
+            // construction. None of its fixtures contains grouped noise.
+            canonical_noise_plan: None,
             native_model: Arc::new(NativeModel::new_for_test_with_shape(
                 num_terminals,
                 num_internal_nodes,
