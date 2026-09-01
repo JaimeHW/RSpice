@@ -20,7 +20,7 @@
 
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
-use crate::analysis::harmonic_balance::{HbDcSeedPolicy, HbFft};
+use crate::analysis::harmonic_balance::{ExactPeriodicNetwork, HbDcSeedPolicy, HbFft};
 use crate::analysis::{HbConfig, HbResult, HbSolver, HbSolverState};
 use crate::circuit::CircuitData;
 use crate::engine::transient::netlist_checkpoint_identity;
@@ -1117,13 +1117,20 @@ impl Engine {
                 "exact HB MNA is unavailable because the circuit contains {summary}"
             )));
         }
-        let mna_unknowns = num_nodes
-            .checked_add(circuit.num_branches())
+        let periodic_branches = circuit
+            .num_branches()
+            .checked_add(Self::hb_periodic_extra_branch_count(&circuit)?)
             .ok_or_else(|| {
                 SimulationError::Circuit(
-                    "HB node and canonical branch count overflows this platform".to_string(),
+                    "HB canonical and distributed-network branch count overflows this platform"
+                        .to_string(),
                 )
             })?;
+        let mna_unknowns = num_nodes.checked_add(periodic_branches).ok_or_else(|| {
+            SimulationError::Circuit(
+                "HB node and canonical branch count overflows this platform".to_string(),
+            )
+        })?;
         let one_sided_scalar_coordinates = config
             .num_harmonics
             .checked_mul(2)

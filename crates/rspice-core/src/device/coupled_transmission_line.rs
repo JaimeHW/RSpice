@@ -99,6 +99,18 @@ pub struct CoupledTransmissionLine {
     /// branch-current transient stamp when present.
     native: Option<CplNativeState>,
     modes: Vec<TransmissionLine>,
+    /// True only when the authored physical R and G matrices were exactly
+    /// zero, making the retained lossless modal decomposition an exact
+    /// frequency-domain representation of the original multiconductor line.
+    exact_lossless_frequency_model: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct LosslessCplFrequencyData {
+    pub(crate) voltage_transform: Vec<Vec<Value>>,
+    pub(crate) current_transform: Vec<Vec<Value>>,
+    pub(crate) modal_impedances: Vec<Value>,
+    pub(crate) modal_delays: Vec<Value>,
 }
 
 impl CoupledTransmissionLine {
@@ -233,6 +245,7 @@ impl CoupledTransmissionLine {
         } else {
             None
         };
+        let exact_lossless_frequency_model = r.iter().chain(g).flatten().all(|value| *value == 0.0);
 
         Ok(Self {
             name,
@@ -251,6 +264,7 @@ impl CoupledTransmissionLine {
             native_runtime_template,
             native: None,
             modes,
+            exact_lossless_frequency_model,
         })
     }
 
@@ -270,6 +284,22 @@ impl CoupledTransmissionLine {
     #[inline]
     pub fn propagation_delays(&self) -> impl Iterator<Item = Value> + '_ {
         self.modes.iter().map(TransmissionLine::delay)
+    }
+
+    pub(crate) fn lossless_frequency_data(&self) -> Option<LosslessCplFrequencyData> {
+        self.exact_lossless_frequency_model
+            .then(|| LosslessCplFrequencyData {
+                voltage_transform: self.modal_from_physical_voltage.clone(),
+                current_transform: self.modal_from_physical_current.clone(),
+                modal_impedances: self.modes.iter().map(TransmissionLine::impedance).collect(),
+                modal_delays: self.modes.iter().map(TransmissionLine::delay).collect(),
+            })
+    }
+
+    /// Preserve the authored lossless classification when the native
+    /// transient CPL setup has introduced its private numerical R floor.
+    pub(crate) fn set_exact_lossless_frequency_model(&mut self) {
+        self.exact_lossless_frequency_model = true;
     }
 
     #[inline]

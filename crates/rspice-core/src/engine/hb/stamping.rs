@@ -5,6 +5,8 @@ enum PeriodicMnaRegistration {
     VoltageSource(usize),
     Inductor(usize),
     TransformerWinding(usize, usize),
+    TlinePort(usize, usize),
+    CplPort(usize, bool, usize),
     Resistor(usize),
     Vcvs(usize),
     Ccvs(usize),
@@ -286,6 +288,15 @@ impl Engine {
                 ))
             })?;
         registrations.resize(branch_count, None);
+        let canonical_branch_names = circuit.branch_names_sorted();
+        if canonical_branch_names.len() != branch_count {
+            return Err(SimulationError::Circuit(format!(
+                "periodic MNA canonical branch-name registry has {} entries for {branch_count} branches",
+                canonical_branch_names.len()
+            )));
+        }
+        let mut tline_branches = vec![None; circuit.tlines.len()];
+        let mut cpl_branches = vec![None; circuit.coupled_tlines.len()];
 
         for source_index in 0..circuit.voltage_sources.len() {
             let name = circuit
@@ -591,6 +602,112 @@ impl Engine {
             }
         }
 
+        for (line_index, line) in circuit.tlines.iter().enumerate() {
+            if line.has_txl_runtime() {
+                return Err(SimulationError::Circuit(format!(
+                    "periodic MNA transmission line '{}' uses native TXL state that does not retain exact physical frequency-domain RLGC data",
+                    line.name
+                )));
+            }
+            if !line.is_zero_length_pass_through()
+                && line.ltra_ac_total_rlc().is_none()
+                && (line.attenuation() != 1.0
+                    || line.loss_time_constant() != 0.0
+                    || line.dc_series_resistance() != 0.0
+                    || line.has_distributed_rlgc())
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "periodic MNA transmission line '{}' retains only a lossy approximation rather than exact physical frequency-domain data",
+                    line.name
+                )));
+            }
+            let branches = line
+                .zero_length_branch_ordinals()
+                .or_else(|| line.ltra_branch_ordinals());
+            let Some((branch1, branch2)) = branches else {
+                continue;
+            };
+            if branch1 == branch2 {
+                return Err(SimulationError::Circuit(format!(
+                    "periodic MNA transmission line '{}' aliases both ports on branch ordinal {branch1}",
+                    line.name
+                )));
+            }
+            for (port, ordinal) in [(0, branch1), (1, branch2)] {
+                let slot = ordinal
+                    .checked_sub(1)
+                    .and_then(|index| registrations.get_mut(index))
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "periodic MNA transmission line '{}' port {} has branch ordinal {ordinal}, outside 1..={branch_count}",
+                            line.name,
+                            port + 1
+                        ))
+                    })?;
+                if slot
+                    .replace(PeriodicMnaRegistration::TlinePort(line_index, port))
+                    .is_some()
+                {
+                    return Err(SimulationError::Circuit(format!(
+                        "periodic MNA transmission line '{}' port {} duplicates canonical branch ordinal {ordinal}",
+                        line.name,
+                        port + 1
+                    )));
+                }
+            }
+            tline_branches[line_index] = Some((branch1, branch2));
+        }
+
+        for (line_index, line) in circuit.coupled_tlines.iter().enumerate() {
+            if line.lossless_frequency_data().is_none() {
+                return Err(SimulationError::Circuit(format!(
+                    "periodic MNA coupled line '{}' is lossy; its retained modal state does not preserve the full physical RLGC matrices required for an exact frequency-domain operator",
+                    line.name
+                )));
+            }
+            let Some(branches) = line.native_branch_ordinals() else {
+                continue;
+            };
+            let mut near = Vec::with_capacity(line.conductors());
+            let mut far = Vec::with_capacity(line.conductors());
+            for conductor in 0..line.conductors() {
+                let (near_ordinal, far_ordinal) = branches.conductor(conductor).ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "periodic MNA coupled line '{}' is missing branch topology for conductor {}",
+                        line.name,
+                        conductor + 1
+                    ))
+                })?;
+                for (near_end, ordinal) in [(true, near_ordinal), (false, far_ordinal)] {
+                    let slot = ordinal
+                        .checked_sub(1)
+                        .and_then(|index| registrations.get_mut(index))
+                        .ok_or_else(|| {
+                            SimulationError::Circuit(format!(
+                                "periodic MNA coupled line '{}' conductor {} branch ordinal {ordinal} is outside 1..={branch_count}",
+                                line.name,
+                                conductor + 1
+                            ))
+                        })?;
+                    if slot
+                        .replace(PeriodicMnaRegistration::CplPort(
+                            line_index, near_end, conductor,
+                        ))
+                        .is_some()
+                    {
+                        return Err(SimulationError::Circuit(format!(
+                            "periodic MNA coupled line '{}' conductor {} duplicates canonical branch ordinal {ordinal}",
+                            line.name,
+                            conductor + 1
+                        )));
+                    }
+                }
+                near.push(near_ordinal);
+                far.push(far_ordinal);
+            }
+            cpl_branches[line_index] = Some((near, far));
+        }
+
         for (slot_index, registration) in registrations.into_iter().enumerate() {
             let branch_ordinal = slot_index.checked_add(1).ok_or_else(|| {
                 SimulationError::Circuit(
@@ -652,6 +769,38 @@ impl Engine {
                             ))
                         })?;
                 }
+                PeriodicMnaRegistration::TlinePort(line_index, port) => {
+                    let line = &circuit.tlines[line_index];
+                    let (node_pos, node_neg) = if port == 0 {
+                        (line.node1_pos, line.node1_neg)
+                    } else {
+                        (line.node2_pos, line.node2_neg)
+                    };
+                    solver
+                        .try_add_periodic_network_port_branch(
+                            node_pos,
+                            node_neg,
+                            branch_ordinal,
+                            &canonical_branch_names[slot_index],
+                        )
+                        .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                }
+                PeriodicMnaRegistration::CplPort(line_index, near_end, conductor) => {
+                    let line = &circuit.coupled_tlines[line_index];
+                    let (node_pos, node_neg) = if near_end {
+                        (line.near_nodes[conductor], line.near_ref)
+                    } else {
+                        (line.far_nodes[conductor], line.far_ref)
+                    };
+                    solver
+                        .try_add_periodic_network_port_branch(
+                            node_pos,
+                            node_neg,
+                            branch_ordinal,
+                            &canonical_branch_names[slot_index],
+                        )
+                        .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                }
                 PeriodicMnaRegistration::Resistor(resistor_index) => {
                     let name = &circuit.resistor_branches.names[resistor_index];
                     solver
@@ -700,6 +849,148 @@ impl Engine {
                         })?;
                 }
             }
+        }
+
+        // Branchless delay-line and floating-reference CPL devices receive
+        // solver-local port-current unknowns after every authored canonical
+        // branch, preserving authored ordering as an exact prefix.
+        for (line_index, line) in circuit.tlines.iter().enumerate() {
+            if tline_branches[line_index].is_some() {
+                continue;
+            }
+            let branch1 = solver.exact_mna_branches().len() + 1;
+            solver
+                .try_add_periodic_network_port_branch(
+                    line.node1_pos,
+                    line.node1_neg,
+                    branch1,
+                    &format!("{}#port1", line.name),
+                )
+                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+            let branch2 = solver.exact_mna_branches().len() + 1;
+            solver
+                .try_add_periodic_network_port_branch(
+                    line.node2_pos,
+                    line.node2_neg,
+                    branch2,
+                    &format!("{}#port2", line.name),
+                )
+                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+            tline_branches[line_index] = Some((branch1, branch2));
+        }
+        for (line_index, line) in circuit.coupled_tlines.iter().enumerate() {
+            if cpl_branches[line_index].is_some() {
+                continue;
+            }
+            let mut near = Vec::with_capacity(line.conductors());
+            let mut far = Vec::with_capacity(line.conductors());
+            for conductor in 0..line.conductors() {
+                let ordinal = solver.exact_mna_branches().len() + 1;
+                solver
+                    .try_add_periodic_network_port_branch(
+                        line.near_nodes[conductor],
+                        line.near_ref,
+                        ordinal,
+                        &format!("{}#near[{}]", line.name, conductor + 1),
+                    )
+                    .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                near.push(ordinal);
+            }
+            for conductor in 0..line.conductors() {
+                let ordinal = solver.exact_mna_branches().len() + 1;
+                solver
+                    .try_add_periodic_network_port_branch(
+                        line.far_nodes[conductor],
+                        line.far_ref,
+                        ordinal,
+                        &format!("{}#far[{}]", line.name, conductor + 1),
+                    )
+                    .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                far.push(ordinal);
+            }
+            cpl_branches[line_index] = Some((near, far));
+        }
+
+        let branch_index = |ordinal: usize| circuit.num_nodes() + ordinal - 1;
+        for (line_index, line) in circuit.tlines.iter().enumerate() {
+            let (branch1, branch2) = tline_branches[line_index].ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "periodic MNA transmission line '{}' did not receive complete port branches",
+                    line.name
+                ))
+            })?;
+            let network = if line.is_zero_length_pass_through() {
+                ExactPeriodicNetwork::ScalarWave {
+                    name: line.name.clone(),
+                    node1_pos: line.node1_pos,
+                    node1_neg: line.node1_neg,
+                    node2_pos: line.node2_pos,
+                    node2_neg: line.node2_neg,
+                    branch1: branch_index(branch1),
+                    branch2: branch_index(branch2),
+                    impedance: line.impedance(),
+                    delay: 0.0,
+                    attenuation: 1.0,
+                }
+            } else if let Some((ltot, ctot, rtot)) = line.ltra_ac_total_rlc() {
+                ExactPeriodicNetwork::ScalarLtra {
+                    name: line.name.clone(),
+                    node1_pos: line.node1_pos,
+                    node1_neg: line.node1_neg,
+                    node2_pos: line.node2_pos,
+                    node2_neg: line.node2_neg,
+                    branch1: branch_index(branch1),
+                    branch2: branch_index(branch2),
+                    total_inductance: ltot,
+                    total_capacitance: ctot,
+                    total_resistance: rtot,
+                }
+            } else {
+                ExactPeriodicNetwork::ScalarWave {
+                    name: line.name.clone(),
+                    node1_pos: line.node1_pos,
+                    node1_neg: line.node1_neg,
+                    node2_pos: line.node2_pos,
+                    node2_neg: line.node2_neg,
+                    branch1: branch_index(branch1),
+                    branch2: branch_index(branch2),
+                    impedance: line.impedance(),
+                    delay: line.delay(),
+                    attenuation: line.attenuation(),
+                }
+            };
+            solver
+                .try_add_exact_periodic_network(network)
+                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+        }
+        for (line_index, line) in circuit.coupled_tlines.iter().enumerate() {
+            let data = line.lossless_frequency_data().ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "periodic MNA coupled line '{}' has no exact lossless modal data",
+                    line.name
+                ))
+            })?;
+            let (near, far) = cpl_branches[line_index].as_ref().ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "periodic MNA coupled line '{}' did not receive complete port branches",
+                    line.name
+                ))
+            })?;
+            solver
+                .try_add_exact_periodic_network(ExactPeriodicNetwork::LosslessCpl {
+                    name: line.name.clone(),
+                    near_nodes: line.near_nodes.clone(),
+                    far_nodes: line.far_nodes.clone(),
+                    near_ref: line.near_ref,
+                    far_ref: line.far_ref,
+                    near_branches: near.iter().map(|ordinal| branch_index(*ordinal)).collect(),
+                    far_branches: far.iter().map(|ordinal| branch_index(*ordinal)).collect(),
+                    voltage_transform: data.voltage_transform,
+                    current_transform: data.current_transform,
+                    modal_impedances: data.modal_impedances,
+                    modal_delays: data.modal_delays,
+                })
+                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
         }
         self.hb_stamp_controlled_sources(circuit, solver, branch_count)?;
         self.hb_stamp_mutual_inductances(circuit, solver, branch_count)?;
@@ -1580,6 +1871,32 @@ mod tests {
                 && message.contains("winding 1")
                 && message.contains("canonical branch binding"),
             "unexpected transformer branch diagnostic: {message}"
+        );
+    }
+
+    #[test]
+    fn periodic_transmission_line_rejects_aliased_port_branches() {
+        let mut circuit = CircuitData::new();
+        let near = circuit.get_or_create_node("near");
+        let far = circuit.get_or_create_node("far");
+        let branch = circuit.allocate_branch_named("Tbad#ibr1");
+        let mut line =
+            crate::device::TransmissionLine::new("Tbad".to_string(), near, 0, far, 0, 50.0, 1.0e-9);
+        line.set_zero_length_pass_through();
+        line.set_zero_length_branch_ordinals(branch, branch);
+        circuit.tlines.push(line);
+
+        let engine = Engine::new(SimulationConfig::default());
+        let mut solver =
+            HbSolver::try_new(HbConfig::new(1.0e6).with_harmonics(1), circuit.num_nodes())
+                .expect("solver fixture is valid");
+        let error = engine
+            .hb_stamp_periodic_mna_branches(&circuit, &mut solver)
+            .expect_err("aliased transmission-line port branches must fail closed");
+        let message = error.to_string();
+        assert!(
+            message.contains("Tbad") && message.contains("aliases both ports"),
+            "unexpected malformed transmission-line diagnostic: {message}"
         );
     }
 }
