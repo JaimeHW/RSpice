@@ -3650,73 +3650,73 @@ fn add_planned_xspice_auto_bridge(
 
     let vcc = bridge.vcc;
     let half_vcc = vcc / 2.0;
-    let (model_name, instance_name, connections, mut numeric_params, output_branch) =
-        match bridge.kind {
-            XspiceAutoBridgeKind::Adc => (
-                "adc_bridge",
-                format!("__rspice_auto_adc_{}", bridge.node),
-                vec![
-                    PortConnection::AnalogVector(vec![bridge.node]),
-                    PortConnection::DigitalVector(vec![bridge.node]),
-                ],
-                vec![
-                    ("in_low".to_string(), half_vcc),
-                    ("in_high".to_string(), half_vcc),
-                ],
-                None,
-            ),
-            XspiceAutoBridgeKind::Dac => (
-                "dac_bridge",
-                format!("__rspice_auto_dac_{}", bridge.node),
-                vec![
-                    PortConnection::DigitalVector(vec![bridge.node]),
-                    PortConnection::AnalogVector(vec![bridge.node]),
-                ],
-                vec![("out_low".to_string(), 0.0), ("out_high".to_string(), vcc)],
-                Some(XspiceAutoBridgeOutputBranch::Vector {
-                    port_idx: 1,
-                    element_idx: 0,
-                }),
-            ),
-            XspiceAutoBridgeKind::Bidi => (
-                "bidi_bridge",
-                format!("__rspice_auto_bidi_{}", bridge.node),
-                vec![
-                    PortConnection::AnalogVector(vec![bridge.node]),
-                    PortConnection::DigitalVector(vec![bridge.node]),
-                    PortConnection::Null,
-                ],
-                vec![
-                    ("out_high".to_string(), vcc),
-                    ("in_low".to_string(), half_vcc),
-                    ("in_high".to_string(), half_vcc),
-                ],
-                None,
-            ),
-            XspiceAutoBridgeKind::RealToV => (
-                "real_to_v",
-                format!("__rspice_auto_real_to_v_{}", bridge.node),
-                vec![
-                    PortConnection::Real(bridge.node),
-                    PortConnection::Analog(bridge.node),
-                ],
-                Vec::new(),
-                Some(XspiceAutoBridgeOutputBranch::Scalar { port_idx: 1 }),
-            ),
-            XspiceAutoBridgeKind::VToReal => (
-                "v_to_real",
-                format!("__rspice_auto_v_to_real_{}", bridge.node),
-                vec![
-                    PortConnection::Analog(bridge.node),
-                    PortConnection::Real(bridge.node),
-                ],
-                Vec::new(),
-                // No output branch: the observer's output is an event, not a
-                // matrix contribution, so there is no current for a branch to
-                // carry.
-                None,
-            ),
-        };
+    let (model_name, instance_name, connections, numeric_params, output_branch) = match bridge.kind
+    {
+        XspiceAutoBridgeKind::Adc => (
+            "adc_bridge",
+            format!("__rspice_auto_adc_{}", bridge.node),
+            vec![
+                PortConnection::AnalogVector(vec![bridge.node]),
+                PortConnection::DigitalVector(vec![bridge.node]),
+            ],
+            vec![
+                ("in_low".to_string(), half_vcc),
+                ("in_high".to_string(), half_vcc),
+            ],
+            None,
+        ),
+        XspiceAutoBridgeKind::Dac => (
+            "dac_bridge",
+            format!("__rspice_auto_dac_{}", bridge.node),
+            vec![
+                PortConnection::DigitalVector(vec![bridge.node]),
+                PortConnection::AnalogVector(vec![bridge.node]),
+            ],
+            vec![("out_low".to_string(), 0.0), ("out_high".to_string(), vcc)],
+            Some(XspiceAutoBridgeOutputBranch::Vector {
+                port_idx: 1,
+                element_idx: 0,
+            }),
+        ),
+        XspiceAutoBridgeKind::Bidi => (
+            "bidi_bridge",
+            format!("__rspice_auto_bidi_{}", bridge.node),
+            vec![
+                PortConnection::AnalogVector(vec![bridge.node]),
+                PortConnection::DigitalVector(vec![bridge.node]),
+                PortConnection::Null,
+            ],
+            vec![
+                ("out_high".to_string(), vcc),
+                ("in_low".to_string(), half_vcc),
+                ("in_high".to_string(), half_vcc),
+            ],
+            None,
+        ),
+        XspiceAutoBridgeKind::RealToV => (
+            "real_to_v",
+            format!("__rspice_auto_real_to_v_{}", bridge.node),
+            vec![
+                PortConnection::Real(bridge.node),
+                PortConnection::Analog(bridge.node),
+            ],
+            Vec::new(),
+            Some(XspiceAutoBridgeOutputBranch::Scalar { port_idx: 1 }),
+        ),
+        XspiceAutoBridgeKind::VToReal => (
+            "v_to_real",
+            format!("__rspice_auto_v_to_real_{}", bridge.node),
+            vec![
+                PortConnection::Analog(bridge.node),
+                PortConnection::Real(bridge.node),
+            ],
+            Vec::new(),
+            // No output branch: the observer's output is an event, not a
+            // matrix contribution, so there is no current for a branch to
+            // carry.
+            None,
+        ),
+    };
 
     // A selected connect module replaces the parameters this bridge would have
     // stamped, not the model it stamps them on: delegation is the whole reason
@@ -3725,9 +3725,11 @@ fn add_planned_xspice_auto_bridge(
     // which is why a deck that names a connect module gets the bridge it would
     // have got without one.
     #[cfg(feature = "veriloga")]
-    if let Some(selected) = bridge.connect_module.as_ref() {
-        numeric_params = connect_modules::delegated_parameters(selected, bridge.kind, vcc)?;
-    }
+    let numeric_params = if let Some(selected) = bridge.connect_module.as_ref() {
+        connect_modules::delegated_parameters(selected, bridge.kind, vcc)?
+    } else {
+        numeric_params
+    };
 
     let code_model = circuit.xspice_registry.get(model_name).ok_or_else(|| {
         SimulationError::Circuit(format!(
