@@ -140,6 +140,7 @@ impl Engine {
 
         let (period, mut circuit, mut matrix, x0) = if let Some(operating_point) = operating_point {
             let mut circuit = self.build_circuit_with_abort(netlist, abort)?;
+            Self::ensure_no_mixed_signal_analysis(&circuit, "PSS noise analysis")?;
             let matrix = self.build_matrix(&circuit)?;
             circuit.link_indices(&matrix);
             operating_point.authenticate_for_reuse(netlist, &self.config, &config)?;

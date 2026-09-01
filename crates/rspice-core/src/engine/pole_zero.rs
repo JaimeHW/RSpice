@@ -330,6 +330,24 @@ impl Engine {
         }
     }
 
+    /// Refuse an analysis a mixed Verilog-AMS module cannot take part in.
+    ///
+    /// Placed beside the XSPICE MIF boundary warning because it answers the
+    /// same shape of question at the same point of every small-signal and
+    /// steady-state analysis: what does this circuit contain that this analysis
+    /// cannot represent. The difference is that a code model still linearizes
+    /// and a process does not, so this refuses where that one warns.
+    pub(in crate::engine) fn ensure_no_mixed_signal_analysis(
+        circuit: &CircuitData,
+        analysis: &str,
+    ) -> Result<(), SimulationError> {
+        #[cfg(feature = "veriloga")]
+        circuit.ensure_no_mixed_signal_hosts(analysis)?;
+        #[cfg(not(feature = "veriloga"))]
+        let _ = (circuit, analysis);
+        Ok(())
+    }
+
     pub(in crate::engine) fn warn_xspice_mif_analysis_boundary(
         circuit: &CircuitData,
         analysis: &str,
@@ -624,6 +642,7 @@ impl Engine {
             "Pole-zero",
             "using the AC linearization path because ngspice MIF code models do not provide DEVpzLoad hooks",
         );
+        Self::ensure_no_mixed_signal_analysis(&circuit, "pole-zero analysis")?;
         Self::ensure_supported_dynamic_charges(&circuit, "Pole-zero")?;
         Self::ensure_supported_bsim_ac_nqs_pz_models(&circuit)?;
         let num_nodes = circuit.num_nodes();

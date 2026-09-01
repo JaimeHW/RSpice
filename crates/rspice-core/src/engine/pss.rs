@@ -2017,6 +2017,7 @@ impl Engine {
         // Build and prepare circuit
         let mut circuit = self.build_circuit_with_abort(netlist, abort)?;
         Self::freeze_pss_independent_sources(&mut circuit, frozen_sources)?;
+        Self::ensure_no_mixed_signal_analysis(&circuit, "PSS analysis")?;
         Self::ensure_supported_xyce_memristor_small_signal(&circuit, "PSS")?;
         if require_exact_continuation_state {
             Self::ensure_pss_continuation_state_supported(&circuit)?;

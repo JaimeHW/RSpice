@@ -1034,6 +1034,7 @@ impl Engine {
 
         // Build circuit using SoA architecture
         let circuit = engine.build_circuit_with_abort(netlist, abort)?;
+        Self::ensure_no_mixed_signal_analysis(&circuit, "harmonic-balance analysis")?;
         if producer_identity != HbOperatingPointIdentity::capture(netlist, &engine.config, &config)?
         {
             return Err(SimulationError::Circuit(
