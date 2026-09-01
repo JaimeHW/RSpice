@@ -60,7 +60,16 @@ use rspice_veriloga_runtime::{GeneratedParameterAssignment, GeneratedParameterOr
 /// noise existed. Newly generated registries expose inherent methods with the
 /// same signatures, which Rust selects in preference to this explicit empty
 /// capability implementation.
+///
+/// Which is why it reads as dead: against a catalog regenerated for grouped
+/// noise — the vendored one, and the only one the digest audit lets you build
+/// against — inherent resolution wins at every call site and nothing selects
+/// the trait. It earns its place only in the window where the checked-in
+/// catalog is older than this crate, so silence the lint rather than delete
+/// the shim. If that window is meant to be closed, the shim goes with it, and
+/// that is the noise program owner's call, not a build repair's.
 #[cfg(feature = "veriloga-builtins-base")]
+#[allow(dead_code)]
 trait LegacyGeneratedGroupedNoiseRegistry {
     fn grouped_noise_process_descriptors(&self) -> &'static [GeneratedNoiseProcessDescriptor];
     fn grouped_noise_injection_descriptors(&self) -> &'static [GeneratedNoiseInjectionDescriptor];
