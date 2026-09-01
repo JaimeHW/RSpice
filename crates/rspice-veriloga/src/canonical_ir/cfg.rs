@@ -453,6 +453,41 @@ pub enum CfgValueKind {
         then_value: ValueId,
         else_value: ValueId,
     },
+    /// `$realtobits(x)` — the IEEE 754 bit pattern of a real, 64 bits wide.
+    ///
+    /// The one direction the two value domains are allowed to meet in.
+    /// Verilog-AMS LRM 2.4 section 3.7 says a `wreal` "cannot be connected to
+    /// any other wires, although connection to explicitly declared 64-bit wires
+    /// can be done via system tasks `$realtobits` and `$bitstoreal`", and IEEE
+    /// 1364-2005's conversion functions define the pattern as the real's own
+    /// storage rather than as a rounding. So this is not a numeric conversion
+    /// and loses nothing: every `f64`, including a NaN and both infinities, has
+    /// a bit pattern, and it is exactly the one `f64::to_bits` returns.
+    ///
+    /// The width is fixed at 64 and is not context-determined. It is a property
+    /// of the double-precision format the standard names, not of the expression
+    /// the call sits in; a call sized to its context would produce a different
+    /// pattern in a narrower one and still call itself the conversion.
+    DigitalRealToBits {
+        input: ValueId,
+    },
+    /// `$bitstoreal(b)` — the real whose IEEE 754 pattern `b` is.
+    ///
+    /// The exact inverse of [`Self::DigitalRealToBits`] over the values that
+    /// have one. What has none is a four-state value holding `x` or `z`: the
+    /// standard defines the conversion over a *bit pattern*, and an unknown bit
+    /// is the absence of one. Neither standard rules on that case, so this one
+    /// does, and it refuses at runtime rather than substituting a bit — the
+    /// same reading [`digital_value::FourStateValue::to_u64`] already takes,
+    /// where returning a number for an unknown would answer the question with a
+    /// lie.
+    ///
+    /// The operand is 64 bits. A narrower one is a different pattern, not a
+    /// shorter spelling of this one, and the lowering resizes to 64 before the
+    /// node the way section 5.2.1 resizes to any other operand width.
+    DigitalBitsToReal {
+        input: ValueId,
+    },
     /// Elementwise bitwise operator over four-state values.
     DigitalBitwise {
         op: digital_value::BitwiseOp,
@@ -658,6 +693,8 @@ impl CfgValueKind {
             | Self::DigitalRealArithmetic { .. }
             | Self::DigitalRealCompare { .. }
             | Self::DigitalRealSelect { .. }
+            | Self::DigitalRealToBits { .. }
+            | Self::DigitalBitsToReal { .. }
             | Self::DigitalBitwise { .. }
             | Self::DigitalBitwiseNot { .. }
             | Self::DigitalLogical { .. }
@@ -742,6 +779,8 @@ impl CfgValueKind {
 
             Self::DigitalBitwiseNot { input }
             | Self::DigitalLogicalNot { input }
+            | Self::DigitalRealToBits { input }
+            | Self::DigitalBitsToReal { input }
             | Self::DigitalPartSelect { input, .. } => vec![*input],
             Self::DigitalBitwise { left, right, .. }
             | Self::DigitalLogical { left, right, .. }
@@ -871,6 +910,8 @@ impl CfgValueKind {
 
             Self::DigitalBitwiseNot { input }
             | Self::DigitalLogicalNot { input }
+            | Self::DigitalRealToBits { input }
+            | Self::DigitalBitsToReal { input }
             | Self::DigitalPartSelect { input, .. } => *input = map(*input),
             Self::DigitalBitwise { left, right, .. }
             | Self::DigitalLogical { left, right, .. }

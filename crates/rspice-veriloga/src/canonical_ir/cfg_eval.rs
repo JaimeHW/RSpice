@@ -760,6 +760,8 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             | CfgValueKind::DigitalRealArithmetic { .. }
             | CfgValueKind::DigitalRealCompare { .. }
             | CfgValueKind::DigitalRealSelect { .. }
+            | CfgValueKind::DigitalRealToBits { .. }
+            | CfgValueKind::DigitalBitsToReal { .. }
             | CfgValueKind::DigitalBitwise { .. }
             | CfgValueKind::DigitalBitwiseNot { .. }
             | CfgValueKind::DigitalLogical { .. }

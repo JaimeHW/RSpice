@@ -403,6 +403,21 @@ pub enum DigitalEvalError {
     /// reaching this means the plan and this interpreter disagree about a
     /// node's type.
     MixedValueDomains(ValueId),
+    /// `$bitstoreal` was given a value with an `x` or a `z` in it.
+    ///
+    /// Neither standard rules on this case, so RSpice does, and it refuses.
+    /// Verilog-AMS LRM 2.4 section 3.7 offers `$bitstoreal` as the conversion
+    /// of a *bit pattern* into the real it encodes, and an unknown bit is the
+    /// absence of a bit rather than a third value the IEEE 754 format has a
+    /// place for. Substituting a `0` or a `1` would produce a specific, wrong,
+    /// perfectly plausible number — the same reason
+    /// [`FourStateValue::to_u64`](super::digital_value::FourStateValue::to_u64)
+    /// answers `None` instead of guessing.
+    ///
+    /// A runtime refusal and not a compile-time one because the operand is a
+    /// runtime value: a `reg` holds `x` until something writes it, and whether
+    /// it still does when the conversion runs is a fact about the simulation.
+    UnknownBitsToReal(ValueId),
     /// The process ran this many blocks without suspending or returning.
     StepLimitExceeded(usize),
 }
@@ -475,6 +490,13 @@ impl std::fmt::Display for DigitalEvalError {
                 "value {} mixes a real and a four-state operand in one operator, which \
                  Verilog-AMS LRM 2.4 section 3.7 converts between only with an explicit \
                  `$realtobits` or `$bitstoreal`",
+                usize::from(*value)
+            ),
+            Self::UnknownBitsToReal(value) => write!(
+                f,
+                "value {} reached `$bitstoreal` with an `x` or `z` bit; the conversion is \
+                 defined over an IEEE 754 bit pattern and an unknown bit is not one, so there \
+                 is no real to produce — drive every bit of the operand before converting it",
                 usize::from(*value)
             ),
             Self::StepLimitExceeded(limit) => write!(
@@ -1057,6 +1079,28 @@ impl<'a, E: DigitalEnvironment + ?Sized> Interpreter<'a, E> {
                 Ok(DigitalScalar::FourState(digital_value::real_compare(
                     op, left, right,
                 )))
+            }
+            // The two crossings the standard defines, and the only two nodes
+            // in this interpreter whose operand and result are in different
+            // value domains.
+            CfgValueKind::DigitalRealToBits { input } => {
+                let value = self.real(*input)?;
+                Ok(DigitalScalar::FourState(FourStateValue::from_u64(
+                    64,
+                    value.to_bits(),
+                )))
+            }
+            CfgValueKind::DigitalBitsToReal { input } => {
+                let input = *input;
+                let bits = self.four_state(input)?;
+                // `to_u64` refuses a value with an unknown bit, which is
+                // exactly the case this node has no answer for. Its `None` is
+                // the refusal, reported under this node's own name rather than
+                // turned into a number.
+                let Some(bits) = bits.resized(64).to_u64() else {
+                    return Err(DigitalEvalError::UnknownBitsToReal(input));
+                };
+                Ok(DigitalScalar::Real(f64::from_bits(bits)))
             }
             CfgValueKind::DigitalRealSelect {
                 condition,

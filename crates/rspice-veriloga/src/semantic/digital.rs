@@ -49,21 +49,59 @@ pub struct AnalyzedDigital {
     /// order, and every entry is already resolved against the scope it was
     /// instantiated in; see [`crate::semantic::digital_elaborate`].
     pub instances: Vec<ElaboratedDigitalInstance>,
-    /// Integer-valued parameters and localparams of *this* module, by name.
-    ///
-    /// IEEE 1364-2005 section 12.2 fixes a parameter at elaboration, so the
-    /// places a discrete-domain construct needs a constant — a replication
-    /// count, a part-select bound, a delay — may name one. The analog half
-    /// deliberately treats a parameter as a per-instance runtime value and
-    /// folds nothing, which is why this is a separate table rather than a
-    /// widening of the invariant environment.
+    /// Parameters and localparams of *this* module a discrete-domain body may
+    /// fold, by name.
     ///
     /// Only the compiled module's own. An elaborated instance's body is
     /// lowered against [`ElaboratedDigitalInstance::constants`] — the *child's*
     /// table — so a child's `{WIDTH{1'b0}}` folds with the child's `WIDTH` and
     /// never with the parent's, which would be a wrong answer wearing a right
     /// one's clothes.
-    pub constants: HashMap<SmolStr, i64>,
+    pub constants: DigitalConstants,
+}
+
+/// The elaboration-time constants a discrete-domain body may fold.
+///
+/// IEEE 1364-2005 section 12.2 fixes a parameter at elaboration, so a
+/// discrete-domain construct may name one wherever it needs a constant. The
+/// analog half deliberately treats a parameter as a per-instance runtime value
+/// and folds nothing, which is why this is a separate table rather than a
+/// widening of the invariant environment.
+///
+/// Two tables and not one, because the two are asked different questions. A
+/// replication count, a part-select bound and a delay want an integer and have
+/// no reading for `2.5`; a real expression wants the value the author wrote and
+/// has no reading for its integer part. A name can be in both — `parameter real
+/// N = 2.0;` is a legitimate bit position and a legitimate real — and answers
+/// each question in the domain that asked it.
+#[derive(Debug, Clone, Default)]
+pub struct DigitalConstants {
+    /// Parameters whose default is a whole finite number, as that number.
+    ///
+    /// A non-integer default is absent rather than rounded: every place this is
+    /// consulted wants a bit position or a repetition count, and there is no
+    /// defensible integer for `parameter GAIN = 2.5`.
+    pub integers: HashMap<SmolStr, i64>,
+    /// Parameters the author declared `parameter real`, as their default.
+    ///
+    /// Explicitly typed only. An untyped `parameter WIDTH = 8;` takes
+    /// Verilog-AMS's real default type, so admitting untyped parameters here
+    /// would make every existing bit-width parameter a real operand and change
+    /// what `q = WIDTH;` means. `parameter real K = 0.25;` says which domain it
+    /// belongs in, and this table holds exactly the parameters that said so.
+    pub reals: HashMap<SmolStr, f64>,
+}
+
+impl DigitalConstants {
+    /// The integer a name denotes, if it denotes one.
+    pub fn integer(&self, name: &str) -> Option<i64> {
+        self.integers.get(name).copied()
+    }
+
+    /// The real a name denotes, if it was declared `parameter real`.
+    pub fn real(&self, name: &str) -> Option<f64> {
+        self.reals.get(name).copied()
+    }
 }
 
 impl AnalyzedDigital {
@@ -334,7 +372,7 @@ pub struct ElaboratedDigitalInstance {
     /// so the two tables never meet. With a parameter override on a digital
     /// instance refused (section 12.2), the child's declared defaults *are* its
     /// elaborated values, and every instance of one module sees the same table.
-    pub constants: HashMap<SmolStr, i64>,
+    pub constants: DigitalConstants,
     /// The instance statement, for diagnostics.
     pub span: Span,
 }
@@ -754,18 +792,14 @@ impl SemanticAnalyzer {
         }
     }
 
-    /// The module's integer parameters and localparams, by name.
+    /// The module's foldable parameters and localparams, by name.
     ///
     /// Read out of the declarations rather than out of the analyzer's constant
     /// environments so the table names exactly what this module declares: the
     /// environments accumulate, and a table that inherited a neighbour's
     /// parameter would fold a name this module never wrote.
-    ///
-    /// A non-integer default is skipped rather than rounded. Every place this
-    /// table is consulted wants a bit position or a repetition count, and there
-    /// is no defensible integer for `parameter GAIN = 2.5`.
-    fn digital_constants(&self, module: &Module) -> HashMap<SmolStr, i64> {
-        let mut constants = HashMap::new();
+    fn digital_constants(&self, module: &Module) -> DigitalConstants {
+        let mut constants = DigitalConstants::default();
         let declarations = module.parameters.iter().chain(&module.localparams);
         for parameter in declarations {
             let Some(default) = &parameter.default else {
@@ -774,10 +808,23 @@ impl SemanticAnalyzer {
             let Some(value) = self.eval_const_parameter_default(default) else {
                 continue;
             };
-            if value.fract() != 0.0 || !value.is_finite() {
+            if !value.is_finite() {
                 continue;
             }
-            constants.insert(parameter.name.clone(), value as i64);
+            // A parameter array is a name with no scalar value at all; folding
+            // its first element under the array's own name would answer a
+            // question nobody asked.
+            if !parameter.dimensions.is_empty() {
+                continue;
+            }
+            if parameter.type_is_explicit && parameter.param_type == ParamType::Real {
+                constants.reals.insert(parameter.name.clone(), value);
+            }
+            if value.fract() == 0.0 {
+                constants
+                    .integers
+                    .insert(parameter.name.clone(), value as i64);
+            }
         }
         constants
     }
@@ -1700,14 +1747,34 @@ impl SemanticAnalyzer {
                 }
             }
             Expression::SystemFunction(function) => {
-                self.record_error_at(
-                    SemanticErrorKind::UnsupportedFeature(format!(
-                        "system function `{}` inside a discrete-domain expression is not \
-                         supported yet",
-                        function.name
-                    )),
-                    function.span,
-                );
+                // The two the standard leaves open. Verilog-AMS LRM 2.4 section
+                // 3.7 names them as the *only* bridge between a real net and
+                // bits — "connection to explicitly declared 64-bit wires can be
+                // done via system tasks `$realtobits` and `$bitstoreal`" — and
+                // every refusal of an implicit conversion in this compiler
+                // points the author at them, so accepting them is what makes
+                // that advice followable.
+                if matches!(function.name.as_str(), "$realtobits" | "$bitstoreal") {
+                    if function.args.len() != 1 {
+                        self.record_error_at(
+                            SemanticErrorKind::InvalidExpression(format!(
+                                "`{}` takes exactly one argument, and was given {}",
+                                function.name,
+                                function.args.len()
+                            )),
+                            function.span,
+                        );
+                    }
+                } else {
+                    self.record_error_at(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "system function `{}` inside a discrete-domain expression is not \
+                             supported yet",
+                            function.name
+                        )),
+                        function.span,
+                    );
+                }
                 for argument in &function.args {
                     self.check_digital_expression(argument, signals, index);
                 }

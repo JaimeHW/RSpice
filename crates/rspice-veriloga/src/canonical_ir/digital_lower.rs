@@ -149,7 +149,9 @@ use crate::ast::{
     EdgeKind, Expression, ReductionOp, TimingControl, UnaryOp, WrealResolution,
 };
 use crate::four_state::FourStateBit;
-use crate::semantic::{AnalyzedDigital, AnalyzedDigitalProcess, AnalyzedDigitalSignal};
+use crate::semantic::{
+    AnalyzedDigital, AnalyzedDigitalProcess, AnalyzedDigitalSignal, DigitalConstants,
+};
 use crate::source::Span;
 use smol_str::SmolStr;
 use std::collections::{BTreeSet, HashMap};
@@ -271,7 +273,7 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
     // it belongs to neither scope: this pass wrote it, in elaborated names, and
     // the only expressions in one are a name and a select whose bounds are
     // already literals.
-    let no_constants: HashMap<SmolStr, i64> = HashMap::new();
+    let no_constants = DigitalConstants::default();
 
     let mut processes = Vec::new();
     let mut drivers = Vec::new();
@@ -416,7 +418,7 @@ fn lower_continuous_assign(
     assignment: &crate::semantic::AnalyzedContinuousAssign,
     signals: &[DigitalSignal],
     index: &HashMap<&str, DigitalSignalId>,
-    constants: &HashMap<SmolStr, i64>,
+    constants: &DigitalConstants,
     id: DigitalProcessId,
     drivers: &mut Vec<DigitalDriver>,
 ) -> Result<CfgDigitalProcess, Vec<IrDiagnostic>> {
@@ -570,7 +572,7 @@ fn lower_process(
     id: DigitalProcessId,
     signals: &[DigitalSignal],
     index: &HashMap<&str, DigitalSignalId>,
-    constants: &HashMap<SmolStr, i64>,
+    constants: &DigitalConstants,
 ) -> Result<CfgDigitalProcess, Vec<IrDiagnostic>> {
     let mut lowerer = ProcessLowerer {
         signals,
@@ -661,6 +663,13 @@ fn lower_process(
     })
 }
 
+/// Width of the bit pattern `$realtobits` produces and `$bitstoreal` consumes.
+///
+/// A property of the format rather than of the expression: Verilog-AMS LRM 2.4
+/// section 3.7 speaks of "explicitly declared 64-bit wires", and IEEE 754
+/// double precision is 64 bits. Not context-determined, and not configurable.
+const REAL_BIT_PATTERN_WIDTH: u32 = 64;
+
 /// What a loop runs at the end of each pass.
 enum LoopUpdate<'a> {
     /// A `for` loop's third clause, written by the author.
@@ -742,7 +751,7 @@ struct ProcessLowerer<'a> {
     /// scope rather than being read out of one place: an instance frame's body
     /// is lowered against an empty table so a child's `WIDTH` can never be
     /// folded with a parent's.
-    constants: &'a HashMap<SmolStr, i64>,
+    constants: &'a DigitalConstants,
     builder: SsaBuilder,
     diagnostics: Vec<IrDiagnostic>,
     /// Every variable declared in the process, by id.
@@ -1910,10 +1919,16 @@ impl ProcessLowerer<'_> {
             Expression::Number(number) => is_real_literal(&number.raw),
             Expression::Identifier(identifier) => match self.lookup_local(&identifier.name) {
                 Some(local) => self.local_is_real(local),
-                None => self
-                    .index
-                    .get(identifier.name.as_str())
-                    .is_some_and(|signal| self.real_signal(*signal)),
+                None => match self.index.get(identifier.name.as_str()) {
+                    Some(signal) => self.real_signal(*signal),
+                    // A `parameter real` is an elaboration constant (IEEE
+                    // 1364-2005 section 12.2), so it classifies by the type its
+                    // declaration wrote and folds to a literal below. Consulted
+                    // after the signal table for the reason `constant` is: a
+                    // name that denotes a signal is a runtime value and is
+                    // never a constant, whatever else shares its spelling.
+                    None => self.constants.real(&identifier.name).is_some(),
+                },
             },
             // Section 5.1 permits real operands for `+ - * /`; the result is
             // real when either operand is. A mixed pair is caught in
@@ -1937,6 +1952,11 @@ impl ProcessLowerer<'_> {
                 self.is_real_expression(&conditional.then_expr)
                     || self.is_real_expression(&conditional.else_expr)
             }
+            // `$bitstoreal` produces a real whatever its operand is, which is
+            // the whole point of it: it is the standard's own crossing, and
+            // classifying it by its operand would send it down the four-state
+            // path it exists to leave.
+            Expression::SystemFunction(function) => function.name == "$bitstoreal",
             _ => false,
         }
     }
@@ -1995,13 +2015,21 @@ impl ProcessLowerer<'_> {
                     Some(_) => {
                         self.not_a_real(&identifier.name, "a four-state signal", identifier.span)
                     }
-                    None => {
-                        self.error(
-                            format!("`{}` is not a discrete-domain signal", identifier.name),
-                            identifier.span,
-                        );
-                        self.real_constant(0.0)
-                    }
+                    // A `parameter real`. Section 12.2 fixes its value at
+                    // elaboration, so it becomes the literal it denotes and no
+                    // runtime machinery is involved — the same folding a
+                    // replication count or a part-select bound already gets,
+                    // in the other value domain.
+                    None => match self.constants.real(&identifier.name) {
+                        Some(value) => self.real_constant(value),
+                        None => {
+                            self.error(
+                                format!("`{}` is not a discrete-domain signal", identifier.name),
+                                identifier.span,
+                            );
+                            self.real_constant(0.0)
+                        }
+                    },
                 }
             }
             Expression::Binary(binary) => {
@@ -2084,6 +2112,30 @@ impl ProcessLowerer<'_> {
                         then_value,
                         else_value,
                     },
+                )
+            }
+            // `$bitstoreal(b)`: the crossing in the other direction. The
+            // operand is sized to 64 bits here rather than taken as written,
+            // because the pattern the standard names is a 64-bit one and a
+            // narrower operand has to be extended to *be* one — section 5.2.1's
+            // rule, applied at the only place that knows the width.
+            Expression::SystemFunction(function) if function.name == "$bitstoreal" => {
+                let Some(argument) = function.args.first() else {
+                    return self.real_constant(0.0);
+                };
+                let input = self.sized(
+                    block,
+                    argument,
+                    Context {
+                        width: REAL_BIT_PATTERN_WIDTH,
+                        signed: false,
+                    },
+                );
+                let input = self.resize(block, input, REAL_BIT_PATTERN_WIDTH, false);
+                self.builder.push(
+                    block,
+                    CfgValueType::Real,
+                    CfgValueKind::DigitalBitsToReal { input },
                 )
             }
             other => {
@@ -2476,6 +2528,25 @@ impl ProcessLowerer<'_> {
             }
             Expression::Unary(unary) => self.unary(block, unary, inner),
             Expression::Binary(binary) => self.binary(block, binary, inner),
+            // `$realtobits(x)`: the one construct that produces bits from a
+            // real, and the reason every other real-to-bits path is a refusal
+            // rather than a coercion.
+            Expression::SystemFunction(function) if function.name == "$realtobits" => {
+                let Some(argument) = function.args.first() else {
+                    // The analyzer refuses the arity; producing a
+                    // width-correct unknown keeps this pass reporting its own
+                    // findings rather than panicking on that one.
+                    return self.unknown(REAL_BIT_PATTERN_WIDTH);
+                };
+                let input = self.real_operand(block, argument);
+                self.builder.push(
+                    block,
+                    CfgValueType::FourState {
+                        width: REAL_BIT_PATTERN_WIDTH,
+                    },
+                    CfgValueKind::DigitalRealToBits { input },
+                )
+            }
             other => {
                 self.error(
                     "this expression form has no discrete-domain lowering",
@@ -2709,6 +2780,13 @@ impl ProcessLowerer<'_> {
                 // not enter.
                 BinaryOp::Shl | BinaryOp::Shr => self.self_width(&binary.left),
             },
+            // `$realtobits` is 64 bits by the format it names, not by the
+            // context it sits in: it is double-precision's own pattern, and a
+            // narrower one would be a different pattern rather than a shorter
+            // spelling of this one.
+            Expression::SystemFunction(function) if function.name == "$realtobits" => {
+                REAL_BIT_PATTERN_WIDTH
+            }
             _ => 1,
         }
     }
@@ -3164,7 +3242,7 @@ impl ProcessLowerer<'_> {
             if self.index.contains_key(identifier.name.as_str()) {
                 return None;
             }
-            return self.constants.get(&identifier.name).copied();
+            return self.constants.integer(&identifier.name);
         }
         if let Expression::Unary(unary) = expression {
             return match unary.op {
