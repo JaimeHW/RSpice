@@ -10729,6 +10729,7 @@ mod tests {
         let analyzed = AnalyzedModule {
             name: module_name.into(),
             default_transition: 1.0e-9,
+            default_discipline: None,
             noise_process_count: 0,
             ports: vec![
                 AnalyzedPort {
