@@ -36,9 +36,9 @@ rspice health --json
 
 `.OP`, `.DC`, `.TRAN`, `.AC`, `.HB`, `.SP`, `.STB`, `.DISTO`, `.NOISE`, `.TF`, `.SENS`, `.PZ`, `.STEP`, `.FOUR`, `.TEMP`, and Monte Carlo cards. `.AC` and `.NOISE` additionally accept the `DATA=<table>` form, sweeping the frequencies listed in a `.DATA` table instead of a generated sweep. If the netlist contains no analysis cards, a DC operating point is run by default.
 
-Two cards are narrower than their full SPICE definition:
+Frequency-domain analysis notes:
 
-- `.DISTO` runs the linearized AC sweep its card describes; it does not emit Volterra distortion products. Use `.FOUR`/THD/IMD post-processing for distortion metrics.
+- `.DISTO` runs the third-order Volterra solver in harmonic or two-tone mode and exports each physical product (`2f1`, `3f1`, `f1+f2`, `f1-f2`, or `2f1-f2`) as an actual sinusoidal peak phasor with magnitude, phase, product frequency, and an explicit magnitude ratio to the F1 response. Two-tone cards use the SPICE ratio contract `0 < f2/f1 < 1`, with F2 fixed relative to the first swept F1 point.
 - `.SP` exports S-parameters only. It needs voltage sources annotated `portnum=<n> [z0=<ohms>]`, numbered densely from 1, and the optional ngspice SP-noise flag parses without producing noise output.
 
 A handful of analyses can instead be requested from the command line. When one of these flags is present, it runs **instead of** the netlist's analysis cards; if several are given, the first match in this order wins:

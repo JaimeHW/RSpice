@@ -2,16 +2,22 @@
 //! table sweeps), `.DISTO`, `.STB`, `.NOISE` (including `DATA=`), `.PZ`,
 //! `.TF`, and `.SENS`.
 //!
-//! `.DISTO` runs the linearized AC sweep its card describes; the CLI does not
-//! emit Volterra distortion products. The report-shaped analyses (`.TF`,
-//! `.PZ`, `.SENS`) have no natural HDF5 section and reject `-f hdf5` rather
-//! than write a misleading file.
+//! `.DISTO` exports the actual sinusoidal peak phasors produced by the core's
+//! third-order Volterra solver, together with each product's physical
+//! frequency and explicit magnitude normalization to the F1 response. The
+//! report-shaped analyses (`.TF`, `.PZ`, `.SENS`) have no natural HDF5 section
+//! and reject `-f hdf5` rather than write a misleading file.
 
 use super::RunContext;
 use super::shared::{NodeResolver, generate_frequency_sweep, map_hdf5_output_error};
 use crate::cli::{CliError, OutputFormat};
-use crate::commands::run_signals::{ac_signals, voltage_display_name};
-use crate::hdf5::{Hdf5AcSection, Hdf5SimulationData, Hdf5WaveformSection, write_hdf5};
+use crate::commands::run_signals::{
+    ComplexSignal, ac_signals, apply_save_set_complex_checked, voltage_display_name,
+};
+use crate::hdf5::{
+    Hdf5AcSection, Hdf5DistortionSection, Hdf5DistortionSeries, Hdf5DistortionSignal,
+    Hdf5SimulationData, Hdf5WaveformSection, write_hdf5,
+};
 use crate::report::format_spice_exponent;
 
 /// Run `.TF`: DC small-signal transfer function, input impedance, and
@@ -115,31 +121,436 @@ pub(super) fn run_disto(
     stop_freq: f64,
     f2_over_f1: Option<f64>,
 ) -> Result<(), CliError> {
-    if let Some(ratio) = f2_over_f1
-        && (!ratio.is_finite() || ratio <= 1.0)
-    {
-        return Err(CliError::simulation_error_in(
-            format!(
-                "Invalid .DISTO f2_over_f1 ratio '{}': expected a finite value > 1",
-                ratio
-            ),
-            "DISTO",
-        ));
+    let mode = if f2_over_f1.is_some() {
+        "two-tone intermodulation"
+    } else {
+        "single-tone harmonic"
+    };
+    if !ctx.quiet {
+        println!(
+            "Running DISTO {mode} analysis: {start_freq} to {stop_freq} Hz ({points} points)..."
+        );
     }
 
-    if ctx.verbose && !ctx.quiet {
-        match f2_over_f1 {
-            Some(ratio) => println!(
-                "DISTO note: using linearized AC sweep in CLI (f2/f1={:.6}); full IMD metrics are available in rspice-ui",
-                ratio
-            ),
-            None => println!(
-                "DISTO note: using linearized AC sweep in CLI; full harmonic/IMD metrics are available in rspice-ui"
-            ),
+    let frequencies = generate_frequency_sweep(variation, points, start_freq, stop_freq);
+    let result = ctx
+        .engine
+        .run_distortion_with_abort(
+            ctx.netlist,
+            &frequencies,
+            f2_over_f1,
+            &crate::abort::ProcessAbort,
+        )
+        .map_err(|source| {
+            if matches!(source, rspice_core::SimulationError::Aborted) {
+                super::cancellation_cli_error(ctx.args.timeout)
+            } else {
+                CliError::CoreSimulationError {
+                    source,
+                    analysis: Some("DISTO".to_string()),
+                }
+            }
+        })?;
+
+    let projection = distortion_projection(ctx, &result)?;
+    if !ctx.quiet {
+        println!(
+            "DISTO Analysis: {} F1 points, products: {}",
+            result.points.len(),
+            projection
+                .series
+                .iter()
+                .filter(|series| series.is_product)
+                .map(|series| series.label.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        if ctx.verbose {
+            println!(
+                "  Values are actual sinusoidal peak phasors; every non-F1 ratio is |response|/|F1| for the same signal"
+            );
         }
     }
 
-    run_ac(ctx, variation, points, start_freq, stop_freq)
+    if let Some(ref output_path) = ctx.output_path_for("disto") {
+        if matches!(ctx.format, OutputFormat::Hdf5) {
+            let mut data = Hdf5SimulationData::new();
+            data.title = "Volterra Distortion Analysis".to_string();
+            data.distortion = Some(distortion_hdf5_section(&projection)?);
+            write_hdf5(output_path, &data)
+                .map_err(|error| map_hdf5_output_error(output_path, error))?;
+        } else {
+            distortion_export_table(projection)?.write(output_path, ctx.format)?;
+        }
+        if !ctx.quiet {
+            println!(
+                "  Volterra distortion products exported to: {}",
+                output_path.display()
+            );
+        }
+    }
+
+    Ok(())
+}
+
+#[derive(Debug)]
+struct DistortionSeries {
+    label: String,
+    is_product: bool,
+    physical_frequencies: Vec<f64>,
+    signals: Vec<ComplexSignal>,
+}
+
+#[derive(Debug)]
+struct DistortionProjection {
+    f2_over_f1: Option<f64>,
+    f1_frequencies: Vec<f64>,
+    series: Vec<DistortionSeries>,
+}
+
+fn distortion_projection(
+    ctx: &RunContext<'_>,
+    result: &rspice_core::analysis::DistortionAnalysisResult,
+) -> Result<DistortionProjection, CliError> {
+    use rspice_core::analysis::{AcResult, DistortionProduct};
+
+    if result.points.is_empty() {
+        return Err(distortion_schema_error(
+            "the core returned no F1 result points".to_string(),
+        ));
+    }
+
+    let f1_rows: Vec<AcResult> = result
+        .points
+        .iter()
+        .map(|point| point.fundamental_f1.clone())
+        .collect();
+    let f1_frequencies: Vec<f64> = f1_rows.iter().map(|row| row.frequency).collect();
+    let mut series = vec![distortion_series(ctx, "f1", false, f1_rows)?];
+
+    if result.is_two_tone() {
+        let f2_rows = result
+            .points
+            .iter()
+            .enumerate()
+            .map(|(index, point)| {
+                point.fundamental_f2.clone().ok_or_else(|| {
+                    distortion_schema_error(format!(
+                        "missing F2 fundamental response at F1 point {index}"
+                    ))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        series.push(distortion_series(ctx, "f2", false, f2_rows)?);
+    }
+
+    let product_kinds: &[DistortionProduct] = if result.is_two_tone() {
+        &[
+            DistortionProduct::Sum,
+            DistortionProduct::Difference,
+            DistortionProduct::ThirdOrderDifference,
+        ]
+    } else {
+        &[
+            DistortionProduct::SecondHarmonic,
+            DistortionProduct::ThirdHarmonic,
+        ]
+    };
+    for &product in product_kinds {
+        let rows = result
+            .points
+            .iter()
+            .enumerate()
+            .map(|(index, point)| {
+                point
+                    .product(product)
+                    .map(|value| value.response.clone())
+                    .ok_or_else(|| {
+                        distortion_schema_error(format!(
+                            "missing '{}' response at F1 point {index}",
+                            product.label()
+                        ))
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        series.push(distortion_series(ctx, product.label(), true, rows)?);
+    }
+
+    let sample_count = f1_frequencies.len();
+    if series.iter().any(|value| {
+        value.physical_frequencies.len() != sample_count
+            || value.signals.iter().any(|signal| {
+                signal.real.len() != sample_count || signal.imag.len() != sample_count
+            })
+    }) {
+        return Err(distortion_schema_error(
+            "a projected series length does not match the F1 sweep".to_string(),
+        ));
+    }
+
+    Ok(DistortionProjection {
+        f2_over_f1: result.f2_over_f1,
+        f1_frequencies,
+        series,
+    })
+}
+
+fn distortion_series(
+    ctx: &RunContext<'_>,
+    label: &str,
+    is_product: bool,
+    rows: Vec<rspice_core::analysis::AcResult>,
+) -> Result<DistortionSeries, CliError> {
+    let physical_frequencies = rows.iter().map(|row| row.frequency).collect();
+    let signals = ac_signals(&rows).map_err(|source| CliError::CoreSimulationError {
+        source,
+        analysis: Some(format!("DISTO {label} output projection")),
+    })?;
+    let signals =
+        apply_save_set_complex_checked(signals, &ctx.netlist.saves, "DISTO").map_err(|source| {
+            CliError::CoreSimulationError {
+                source,
+                analysis: Some(format!("DISTO {label} output projection")),
+            }
+        })?;
+
+    if !ctx.args.allow_nonfinite {
+        for signal in &signals {
+            for (index, (&real, &imag)) in signal.real.iter().zip(&signal.imag).enumerate() {
+                if !real.is_finite() || !imag.is_finite() {
+                    return Err(CliError::SimulationError {
+                        message: format!(
+                            "{label}:{} is non-finite at F1 point {index}; the distortion response is not physical. Use --allow-nonfinite to export anyway.",
+                            signal.display_name
+                        ),
+                        analysis: Some("DISTO".to_string()),
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(DistortionSeries {
+        label: label.to_string(),
+        is_product,
+        physical_frequencies,
+        signals,
+    })
+}
+
+fn distortion_schema_error(message: String) -> CliError {
+    CliError::CoreSimulationError {
+        source: rspice_core::SimulationError::Circuit(format!(
+            "malformed distortion result: {message}"
+        )),
+        analysis: Some("DISTO output projection".to_string()),
+    }
+}
+
+fn distortion_export_table(
+    projection: DistortionProjection,
+) -> Result<super::export::ExportTable, CliError> {
+    use super::export::{ColumnData, ExportColumn, ExportTable};
+
+    let f1_signals = projection
+        .series
+        .first()
+        .map(|series| series.signals.clone())
+        .unwrap_or_default();
+    let mut columns = Vec::new();
+    if let Some(ratio) = projection.f2_over_f1 {
+        columns.push(ExportColumn {
+            name: "f2_over_f1".to_string(),
+            var_type: "ratio".to_string(),
+            data: ColumnData::Real(vec![ratio; projection.f1_frequencies.len()]),
+        });
+    }
+
+    for series in projection.series {
+        if series.label != "f1" {
+            columns.push(ExportColumn {
+                name: format!("frequency({})", series.label),
+                var_type: "frequency".to_string(),
+                data: ColumnData::Real(series.physical_frequencies),
+            });
+        }
+
+        for signal in series.signals {
+            let phasor_name = format!("peak({}:{})", series.label, signal.display_name);
+            let magnitudes: Vec<f64> = signal
+                .real
+                .iter()
+                .zip(&signal.imag)
+                .map(|(&real, &imag)| real.hypot(imag))
+                .collect();
+            let phases: Vec<f64> = signal
+                .real
+                .iter()
+                .zip(&signal.imag)
+                .map(|(&real, &imag)| imag.atan2(real).to_degrees())
+                .collect();
+            let ratios = if series.label == "f1" {
+                None
+            } else {
+                Some(distortion_magnitude_ratio(
+                    &f1_signals,
+                    &series.label,
+                    &signal,
+                    &magnitudes,
+                )?)
+            };
+            columns.push(ExportColumn {
+                name: phasor_name,
+                var_type: signal.kind.raw_variable_type().to_string(),
+                data: ColumnData::Complex {
+                    real: signal.real,
+                    imag: signal.imag,
+                },
+            });
+            columns.push(ExportColumn {
+                name: format!("magnitude({}:{})", series.label, signal.display_name),
+                var_type: signal.kind.raw_variable_type().to_string(),
+                data: ColumnData::Real(magnitudes.clone()),
+            });
+            columns.push(ExportColumn {
+                name: format!("phase_deg({}:{})", series.label, signal.display_name),
+                var_type: "phase".to_string(),
+                data: ColumnData::Real(phases),
+            });
+
+            if let Some(ratios) = ratios {
+                columns.push(ExportColumn {
+                    name: format!(
+                        "magnitude_ratio_to_f1({}:{})",
+                        series.label, signal.display_name
+                    ),
+                    var_type: "ratio".to_string(),
+                    data: ColumnData::Real(ratios),
+                });
+            }
+        }
+    }
+
+    Ok(ExportTable {
+        analysis: "disto".to_string(),
+        plot_name: "Volterra Distortion Analysis".to_string(),
+        scale_name: "frequency(f1)".to_string(),
+        scale_type: "frequency".to_string(),
+        scale: projection.f1_frequencies,
+        columns,
+    })
+}
+
+fn distortion_hdf5_section(
+    projection: &DistortionProjection,
+) -> Result<Hdf5DistortionSection, CliError> {
+    let f1_signals = projection
+        .series
+        .first()
+        .map(|series| series.signals.as_slice())
+        .unwrap_or_default();
+    let mut hdf5_series = Vec::with_capacity(projection.series.len());
+
+    for series in &projection.series {
+        let mut signals = Vec::with_capacity(series.signals.len());
+        for signal in &series.signals {
+            let magnitude: Vec<f64> = signal
+                .real
+                .iter()
+                .zip(&signal.imag)
+                .map(|(&real, &imag)| real.hypot(imag))
+                .collect();
+            let phase_degrees = signal
+                .real
+                .iter()
+                .zip(&signal.imag)
+                .map(|(&real, &imag)| imag.atan2(real).to_degrees())
+                .collect();
+            let magnitude_ratio_to_f1 = if series.label == "f1" {
+                None
+            } else {
+                Some(distortion_magnitude_ratio(
+                    f1_signals,
+                    &series.label,
+                    signal,
+                    &magnitude,
+                )?)
+            };
+            signals.push(Hdf5DistortionSignal {
+                name: signal.display_name.clone(),
+                var_type: signal.kind.raw_variable_type().to_string(),
+                real: signal.real.clone(),
+                imag: signal.imag.clone(),
+                magnitude,
+                phase_degrees,
+                magnitude_ratio_to_f1,
+            });
+        }
+        hdf5_series.push(Hdf5DistortionSeries {
+            label: series.label.clone(),
+            is_product: series.is_product,
+            physical_frequency: series.physical_frequencies.clone(),
+            signals,
+        });
+    }
+
+    Ok(Hdf5DistortionSection {
+        mode: if projection.f2_over_f1.is_some() {
+            "two_tone".to_string()
+        } else {
+            "harmonic".to_string()
+        },
+        f2_over_f1: projection.f2_over_f1,
+        phasor_convention: "actual_sinusoidal_peak".to_string(),
+        ratio_normalization: "magnitude_over_same_signal_f1_magnitude".to_string(),
+        f1_frequency: projection.f1_frequencies.clone(),
+        series: hdf5_series,
+    })
+}
+
+fn distortion_magnitude_ratio(
+    f1_signals: &[ComplexSignal],
+    series_label: &str,
+    signal: &ComplexSignal,
+    numerator_magnitudes: &[f64],
+) -> Result<Vec<f64>, CliError> {
+    let fundamental = f1_signals
+        .iter()
+        .find(|fundamental| {
+            fundamental.kind == signal.kind
+                && fundamental.raw_name.eq_ignore_ascii_case(&signal.raw_name)
+        })
+        .ok_or_else(|| {
+            distortion_schema_error(format!(
+                "{series_label} response has signal '{}' but the F1 response does not",
+                signal.display_name
+            ))
+        })?;
+    if fundamental.real.len() != numerator_magnitudes.len()
+        || fundamental.imag.len() != numerator_magnitudes.len()
+    {
+        return Err(distortion_schema_error(format!(
+            "{series_label} response signal '{}' does not align with its F1 normalization series",
+            signal.display_name
+        )));
+    }
+
+    numerator_magnitudes
+        .iter()
+        .zip(fundamental.real.iter().zip(&fundamental.imag))
+        .enumerate()
+        .map(|(index, (&numerator, (&real, &imag)))| {
+            let denominator = real.hypot(imag);
+            if denominator == 0.0 {
+                Err(distortion_schema_error(format!(
+                    "cannot normalize {series_label} signal '{}' at F1 point {index}: the F1 magnitude is zero (response magnitude {numerator:.17e}); no finite magnitude ratio exists",
+                    signal.display_name
+                )))
+            } else {
+                Ok(numerator / denominator)
+            }
+        })
+        .collect()
 }
 
 pub(super) fn run_ac_data(ctx: &RunContext<'_>, table_name: &str) -> Result<(), CliError> {
@@ -260,14 +671,23 @@ fn finish_ac_results(
         }
     }
 
+    // Projection is part of executing an authored output contract, not merely
+    // serialization. Validate it even when the caller did not request a file
+    // so `.SAVE`/`.PRINT` can never be reported as successful while skipped.
+    let signals = crate::commands::run_signals::apply_save_set_complex_checked(
+        ac_signals(&results).map_err(|source| CliError::CoreSimulationError {
+            source,
+            analysis: Some("AC output projection".to_string()),
+        })?,
+        &ctx.netlist.saves,
+        "AC",
+    )
+    .map_err(|source| CliError::CoreSimulationError {
+        source,
+        analysis: Some("AC output projection".to_string()),
+    })?;
+
     if let Some(ref output_path) = ctx.output_path_for("ac") {
-        let signals = crate::commands::run_signals::apply_save_set_complex(
-            ac_signals(&results).map_err(|source| CliError::CoreSimulationError {
-                source,
-                analysis: Some("AC output projection".to_string()),
-            })?,
-            &ctx.netlist.saves,
-        );
         let frequencies: Vec<f64> = results.iter().map(|result| result.frequency).collect();
         if matches!(ctx.format, OutputFormat::Hdf5) {
             let mut data = Hdf5SimulationData::new();

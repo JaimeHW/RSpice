@@ -1,0 +1,6 @@
+* The SPICE two-tone ratio is F2/F1_start and must lie strictly below one.
+V1 out 0 DC 0.5 DISTOF1 1m 0 DISTOF2 2m 0
+D1 out 0 DM
+.model DM D(IS=1e-12 N=1 CJO=0 TT=0)
+.disto lin 3 1k 2k 1.1
+.end

@@ -566,6 +566,64 @@ fn load_hdf5(
     if let Some(section) = data.noise.clone() {
         return Ok(from_section(section, "noise"));
     }
+    if let Some(distortion) = data.distortion.clone() {
+        let mut columns = Vec::new();
+        if let Some(ratio) = distortion.f2_over_f1 {
+            columns.push(ExportColumn {
+                name: "f2_over_f1".to_string(),
+                var_type: "ratio".to_string(),
+                data: ColumnData::Real(vec![ratio; distortion.f1_frequency.len()]),
+            });
+        }
+        for series in distortion.series {
+            if series.label != "f1" {
+                columns.push(ExportColumn {
+                    name: format!("frequency({})", series.label),
+                    var_type: "frequency".to_string(),
+                    data: ColumnData::Real(series.physical_frequency),
+                });
+            }
+            for signal in series.signals {
+                columns.push(ExportColumn {
+                    name: format!("peak({}:{})", series.label, signal.name),
+                    var_type: signal.var_type.clone(),
+                    data: ColumnData::Complex {
+                        real: signal.real,
+                        imag: signal.imag,
+                    },
+                });
+                columns.push(ExportColumn {
+                    name: format!("magnitude({}:{})", series.label, signal.name),
+                    var_type: signal.var_type,
+                    data: ColumnData::Real(signal.magnitude),
+                });
+                columns.push(ExportColumn {
+                    name: format!("phase_deg({}:{})", series.label, signal.name),
+                    var_type: "phase".to_string(),
+                    data: ColumnData::Real(signal.phase_degrees),
+                });
+                if let Some(ratio) = signal.magnitude_ratio_to_f1 {
+                    columns.push(ExportColumn {
+                        name: format!("magnitude_ratio_to_f1({}:{})", series.label, signal.name),
+                        var_type: "ratio".to_string(),
+                        data: ColumnData::Real(ratio),
+                    });
+                }
+            }
+        }
+        return Ok(ExportTable {
+            analysis: "disto".to_string(),
+            plot_name: if data.title.is_empty() {
+                "Volterra Distortion Analysis".to_string()
+            } else {
+                data.title.clone()
+            },
+            scale_name: "frequency(f1)".to_string(),
+            scale_type: "frequency".to_string(),
+            scale: distortion.f1_frequency,
+            columns,
+        });
+    }
     if let Some(ac) = data.ac.clone() {
         return Ok(ExportTable {
             analysis: "ac".to_string(),

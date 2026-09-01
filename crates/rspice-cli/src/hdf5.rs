@@ -149,6 +149,169 @@ impl Hdf5AcSection {
     }
 }
 
+/// One complex signal within an F1 fundamental, F2 fundamental, or nonlinear
+/// product series in a `.DISTO` result.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Hdf5DistortionSignal {
+    pub name: String,
+    pub var_type: String,
+    /// Actual sinusoidal peak phasor components, never an internal Volterra
+    /// kernel.
+    pub real: Vec<f64>,
+    pub imag: Vec<f64>,
+    pub magnitude: Vec<f64>,
+    pub phase_degrees: Vec<f64>,
+    /// Magnitude divided by the F1 magnitude for the same signal. F1 itself
+    /// has no ratio because it is the normalization reference.
+    pub magnitude_ratio_to_f1: Option<Vec<f64>>,
+}
+
+/// A stable spectral identity and its response across the swept F1 values.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Hdf5DistortionSeries {
+    /// `f1`, `f2`, `2f1`, `3f1`, `f1+f2`, `f1-f2`, or `2f1-f2`.
+    pub label: String,
+    pub is_product: bool,
+    /// Physical output frequency for every swept F1 row.
+    pub physical_frequency: Vec<f64>,
+    pub signals: Vec<Hdf5DistortionSignal>,
+}
+
+/// Typed third-order Volterra distortion results.
+///
+/// This is an additive schema-v1 section. Older readers that ignore unknown
+/// root groups remain compatible; updated readers retain product identity,
+/// phasor convention, and normalization provenance without pretending the
+/// result is an ordinary AC sweep.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Hdf5DistortionSection {
+    pub mode: String,
+    pub f2_over_f1: Option<f64>,
+    pub phasor_convention: String,
+    pub ratio_normalization: String,
+    pub f1_frequency: Vec<f64>,
+    pub series: Vec<Hdf5DistortionSeries>,
+}
+
+impl Hdf5DistortionSection {
+    fn validate(&self) -> Result<()> {
+        if self.mode != "harmonic" && self.mode != "two_tone" {
+            return Err(Hdf5Error::InvalidSchema(format!(
+                "distortion mode must be 'harmonic' or 'two_tone', got '{}'",
+                self.mode
+            )));
+        }
+        if self.phasor_convention != "actual_sinusoidal_peak" {
+            return Err(Hdf5Error::InvalidSchema(format!(
+                "unsupported distortion phasor convention '{}'",
+                self.phasor_convention
+            )));
+        }
+        if self.ratio_normalization != "magnitude_over_same_signal_f1_magnitude" {
+            return Err(Hdf5Error::InvalidSchema(format!(
+                "unsupported distortion ratio normalization '{}'",
+                self.ratio_normalization
+            )));
+        }
+        match (self.mode.as_str(), self.f2_over_f1) {
+            ("harmonic", None) => {}
+            ("two_tone", Some(ratio)) if ratio.is_finite() && ratio > 0.0 && ratio < 1.0 => {}
+            ("harmonic", Some(ratio)) => {
+                return Err(Hdf5Error::InvalidSchema(format!(
+                    "harmonic distortion section unexpectedly has f2_over_f1={ratio}"
+                )));
+            }
+            ("two_tone", ratio) => {
+                return Err(Hdf5Error::InvalidSchema(format!(
+                    "two-tone distortion section requires 0 < f2_over_f1 < 1, got {ratio:?}"
+                )));
+            }
+            _ => unreachable!("mode was validated above"),
+        }
+        if self.f1_frequency.is_empty() {
+            return Err(Hdf5Error::InvalidSchema(
+                "distortion section has no F1 frequencies".to_string(),
+            ));
+        }
+
+        let count = self.f1_frequency.len();
+        let expected_series: &[(&str, bool)] = if self.mode == "two_tone" {
+            &[
+                ("f1", false),
+                ("f2", false),
+                ("f1+f2", true),
+                ("f1-f2", true),
+                ("2f1-f2", true),
+            ]
+        } else {
+            &[("f1", false), ("2f1", true), ("3f1", true)]
+        };
+        if self.series.len() != expected_series.len() {
+            return Err(Hdf5Error::InvalidSchema(format!(
+                "{} distortion section has {} spectral series, expected {}",
+                self.mode,
+                self.series.len(),
+                expected_series.len()
+            )));
+        }
+
+        for (series, &(expected_label, expected_product)) in self.series.iter().zip(expected_series)
+        {
+            if series.label != expected_label || series.is_product != expected_product {
+                return Err(Hdf5Error::InvalidSchema(format!(
+                    "distortion series expected label '{expected_label}' with is_product={expected_product}, got '{}' with is_product={}",
+                    series.label, series.is_product
+                )));
+            }
+            if series.physical_frequency.len() != count {
+                return Err(Hdf5Error::InvalidSchema(format!(
+                    "distortion series '{}' has {} frequencies, expected {count}",
+                    series.label,
+                    series.physical_frequency.len()
+                )));
+            }
+            if series.label == "f1" && series.physical_frequency != self.f1_frequency {
+                return Err(Hdf5Error::InvalidSchema(
+                    "distortion F1 series frequency does not match the independent F1 scale"
+                        .to_string(),
+                ));
+            }
+            for signal in &series.signals {
+                for (quantity, actual) in [
+                    ("real", signal.real.len()),
+                    ("imaginary", signal.imag.len()),
+                    ("magnitude", signal.magnitude.len()),
+                    ("phase", signal.phase_degrees.len()),
+                ] {
+                    if actual != count {
+                        return Err(Hdf5Error::InvalidSchema(format!(
+                            "distortion series '{}' signal '{}' {quantity} data has {actual} points, expected {count}",
+                            series.label, signal.name
+                        )));
+                    }
+                }
+                if let Some(ratio) = &signal.magnitude_ratio_to_f1
+                    && ratio.len() != count
+                {
+                    return Err(Hdf5Error::InvalidSchema(format!(
+                        "distortion series '{}' signal '{}' ratio data has {} points, expected {count}",
+                        series.label,
+                        signal.name,
+                        ratio.len()
+                    )));
+                }
+                if (series.label == "f1") != signal.magnitude_ratio_to_f1.is_none() {
+                    return Err(Hdf5Error::InvalidSchema(format!(
+                        "distortion series '{}' signal '{}' has inconsistent F1 normalization provenance",
+                        series.label, signal.name
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Hdf5Measurement {
     pub name: String,
@@ -172,6 +335,7 @@ pub struct Hdf5SimulationData {
     pub dc_sweep: Option<Hdf5WaveformSection>,
     pub noise: Option<Hdf5WaveformSection>,
     pub ac: Option<Hdf5AcSection>,
+    pub distortion: Option<Hdf5DistortionSection>,
     pub measurements: Vec<Hdf5Measurement>,
 }
 
@@ -195,6 +359,9 @@ impl Hdf5SimulationData {
         }
         if let Some(ac) = &self.ac {
             ac.validate()?;
+        }
+        if let Some(distortion) = &self.distortion {
+            distortion.validate()?;
         }
         Ok(())
     }
@@ -225,6 +392,9 @@ pub fn write_hdf5(path: &Path, data: &Hdf5SimulationData) -> Result<()> {
     }
     if let Some(ac) = &data.ac {
         add_ac_section(&mut builder, ac)?;
+    }
+    if let Some(distortion) = &data.distortion {
+        add_distortion_section(&mut builder, distortion)?;
     }
     if !data.measurements.is_empty() {
         add_measurements(&mut builder, &data.measurements)?;
@@ -267,6 +437,11 @@ pub fn read_hdf5(path: &Path) -> Result<Hdf5SimulationData> {
     } else {
         None
     };
+    let distortion = if root_groups.iter().any(|group| group == "distortion") {
+        Some(read_distortion_section(&file)?)
+    } else {
+        None
+    };
     let measurements = if root_groups.iter().any(|group| group == "measurements") {
         read_measurements(&file)?
     } else {
@@ -280,6 +455,7 @@ pub fn read_hdf5(path: &Path) -> Result<Hdf5SimulationData> {
         dc_sweep,
         noise,
         ac,
+        distortion,
         measurements,
     })
 }
@@ -392,6 +568,169 @@ fn read_ac_section(file: &Hdf5File) -> Result<Hdf5AcSection> {
     Ok(section)
 }
 
+fn add_distortion_section(
+    builder: &mut FileBuilder,
+    section: &Hdf5DistortionSection,
+) -> Result<()> {
+    let mut group = builder.create_group("distortion");
+    group.set_attr("section_type", AttrValue::String("distortion".to_string()));
+    group.set_attr("mode", AttrValue::String(section.mode.clone()));
+    group.set_attr(
+        "phasor_convention",
+        AttrValue::String(section.phasor_convention.clone()),
+    );
+    group.set_attr(
+        "ratio_normalization",
+        AttrValue::String(section.ratio_normalization.clone()),
+    );
+    if let Some(ratio) = section.f2_over_f1 {
+        group.set_attr("f2_over_f1", AttrValue::F64(ratio));
+    }
+    group.set_attr("series_count", AttrValue::I64(section.series.len() as i64));
+    group
+        .create_dataset("f1_frequency")
+        .with_f64_data(&section.f1_frequency);
+
+    for (series_index, series) in section.series.iter().enumerate() {
+        let series_prefix = format!("series_{series_index:04}");
+        group.set_attr(
+            &format!("{series_prefix}_label"),
+            AttrValue::String(series.label.clone()),
+        );
+        group.set_attr(
+            &format!("{series_prefix}_is_product"),
+            AttrValue::I64(i64::from(series.is_product)),
+        );
+        group.set_attr(
+            &format!("{series_prefix}_signal_count"),
+            AttrValue::I64(series.signals.len() as i64),
+        );
+        group
+            .create_dataset(&format!("{series_prefix}_frequency"))
+            .with_f64_data(&series.physical_frequency);
+
+        for (signal_index, signal) in series.signals.iter().enumerate() {
+            let signal_prefix = format!("{series_prefix}_signal_{signal_index:04}");
+            group.set_attr(
+                &format!("{signal_prefix}_name"),
+                AttrValue::String(signal.name.clone()),
+            );
+            group.set_attr(
+                &format!("{signal_prefix}_type"),
+                AttrValue::String(signal.var_type.clone()),
+            );
+            group.set_attr(
+                &format!("{signal_prefix}_has_ratio"),
+                AttrValue::I64(i64::from(signal.magnitude_ratio_to_f1.is_some())),
+            );
+            group
+                .create_dataset(&format!("{signal_prefix}_real"))
+                .with_f64_data(&signal.real);
+            group
+                .create_dataset(&format!("{signal_prefix}_imag"))
+                .with_f64_data(&signal.imag);
+            group
+                .create_dataset(&format!("{signal_prefix}_magnitude"))
+                .with_f64_data(&signal.magnitude);
+            group
+                .create_dataset(&format!("{signal_prefix}_phase_degrees"))
+                .with_f64_data(&signal.phase_degrees);
+            if let Some(ratio) = &signal.magnitude_ratio_to_f1 {
+                group
+                    .create_dataset(&format!("{signal_prefix}_magnitude_ratio_to_f1"))
+                    .with_f64_data(ratio);
+            }
+        }
+    }
+
+    builder.add_group(group.finish());
+    Ok(())
+}
+
+fn read_distortion_section(file: &Hdf5File) -> Result<Hdf5DistortionSection> {
+    let group = file.group("distortion")?;
+    let attrs = group.attrs()?;
+    let mode = read_required_string_attr(&attrs, "mode")?;
+    let f2_over_f1 = read_f64_attr(&attrs, "f2_over_f1")?;
+    let phasor_convention = read_required_string_attr(&attrs, "phasor_convention")?;
+    let ratio_normalization = read_required_string_attr(&attrs, "ratio_normalization")?;
+    let series_count = non_negative_count(
+        read_required_i64_attr(&attrs, "series_count")?,
+        "distortion series_count",
+    )?;
+    let f1_frequency = group.dataset("f1_frequency")?.read_f64()?;
+    let mut series = Vec::with_capacity(series_count);
+
+    for series_index in 0..series_count {
+        let series_prefix = format!("series_{series_index:04}");
+        let label = read_required_string_attr(&attrs, &format!("{series_prefix}_label"))?;
+        let is_product = read_binary_flag(&attrs, &format!("{series_prefix}_is_product"))?;
+        let signal_count = non_negative_count(
+            read_required_i64_attr(&attrs, &format!("{series_prefix}_signal_count"))?,
+            &format!("{series_prefix}_signal_count"),
+        )?;
+        let physical_frequency = group
+            .dataset(&format!("{series_prefix}_frequency"))?
+            .read_f64()?;
+        let mut signals = Vec::with_capacity(signal_count);
+
+        for signal_index in 0..signal_count {
+            let signal_prefix = format!("{series_prefix}_signal_{signal_index:04}");
+            let name = read_required_string_attr(&attrs, &format!("{signal_prefix}_name"))?;
+            let var_type = read_required_string_attr(&attrs, &format!("{signal_prefix}_type"))?;
+            let has_ratio = read_binary_flag(&attrs, &format!("{signal_prefix}_has_ratio"))?;
+            let real = group
+                .dataset(&format!("{signal_prefix}_real"))?
+                .read_f64()?;
+            let imag = group
+                .dataset(&format!("{signal_prefix}_imag"))?
+                .read_f64()?;
+            let magnitude = group
+                .dataset(&format!("{signal_prefix}_magnitude"))?
+                .read_f64()?;
+            let phase_degrees = group
+                .dataset(&format!("{signal_prefix}_phase_degrees"))?
+                .read_f64()?;
+            let magnitude_ratio_to_f1 = if has_ratio {
+                Some(
+                    group
+                        .dataset(&format!("{signal_prefix}_magnitude_ratio_to_f1"))?
+                        .read_f64()?,
+                )
+            } else {
+                None
+            };
+            signals.push(Hdf5DistortionSignal {
+                name,
+                var_type,
+                real,
+                imag,
+                magnitude,
+                phase_degrees,
+                magnitude_ratio_to_f1,
+            });
+        }
+
+        series.push(Hdf5DistortionSeries {
+            label,
+            is_product,
+            physical_frequency,
+            signals,
+        });
+    }
+
+    let section = Hdf5DistortionSection {
+        mode,
+        f2_over_f1,
+        phasor_convention,
+        ratio_normalization,
+        f1_frequency,
+        series,
+    };
+    section.validate()?;
+    Ok(section)
+}
+
 fn add_measurements(builder: &mut FileBuilder, measurements: &[Hdf5Measurement]) -> Result<()> {
     let mut group = builder.create_group("measurements");
     group.set_attr(
@@ -452,6 +791,31 @@ fn read_required_i64_attr(attrs: &HashMap<String, AttrValue>, name: &str) -> Res
         ))),
         None => Err(Hdf5Error::InvalidSchema(format!(
             "missing required integer attribute '{name}'"
+        ))),
+    }
+}
+
+fn read_f64_attr(attrs: &HashMap<String, AttrValue>, name: &str) -> Result<Option<f64>> {
+    match attrs.get(name) {
+        None => Ok(None),
+        Some(AttrValue::F64(value)) => Ok(Some(*value)),
+        Some(other) => Err(Hdf5Error::InvalidSchema(format!(
+            "attribute '{name}' expected f64, found {other:?}"
+        ))),
+    }
+}
+
+fn non_negative_count(value: i64, name: &str) -> Result<usize> {
+    usize::try_from(value)
+        .map_err(|_| Hdf5Error::InvalidSchema(format!("{name} must be non-negative, got {value}")))
+}
+
+fn read_binary_flag(attrs: &HashMap<String, AttrValue>, name: &str) -> Result<bool> {
+    match read_required_i64_attr(attrs, name)? {
+        0 => Ok(false),
+        1 => Ok(true),
+        value => Err(Hdf5Error::InvalidSchema(format!(
+            "attribute '{name}' must be 0 or 1, got {value}"
         ))),
     }
 }

@@ -1,0 +1,10 @@
+* A selected quiet branch has no F1 response, so product/F1 normalization is
+* undefined even though both phasors are exactly zero.
+V1 out 0 DC 0.5 DISTOF1 1m 0
+D1 out 0 DM
+.model DM D(IS=1e-12 N=1 CJO=0 TT=0)
+Vquiet quiet 0 0
+Rquiet quiet 0 1k
+.save I(Vquiet)
+.disto lin 3 1k 2k
+.end
