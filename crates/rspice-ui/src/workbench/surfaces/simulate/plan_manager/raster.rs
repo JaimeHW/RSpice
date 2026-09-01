@@ -154,16 +154,21 @@ fn every_plan_manager_route_matches_its_reviewed_gated_viewport_baselines() {
 #[test]
 #[ignore = "prints source-ready visual fingerprints after explicit review"]
 fn print_plan_manager_visual_fingerprints_for_review() {
+    use std::io::Write as _;
+
+    let mut stdout = std::io::stdout().lock();
     for (_, mode, viewport, screen) in baseline_cases() {
         let canvas = raster(mode, screen);
         let height = regression_height(&canvas);
-        eprintln!(
+        writeln!(
+            stdout,
             "{} {}x{} {}",
             file_stem(mode, viewport),
             canvas.width(),
             height,
             canvas.regression_fingerprint(height)
-        );
+        )
+        .expect("write visual fingerprint");
     }
 }
 

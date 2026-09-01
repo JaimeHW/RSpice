@@ -239,13 +239,14 @@ fn validate_dataset(dataset: &NativeBundleDataset<'_>) -> Result<(), String> {
                 signal.name
             ));
         }
-        if let Some(unit) = signal.unit {
-            if unit.len() > MAX_NAME_BYTES || unit.chars().any(char::is_control) {
-                return Err(format!(
-                    "native bundle signal '{}' has an invalid unit",
-                    signal.name
-                ));
-            }
+        if signal
+            .unit
+            .is_some_and(|unit| unit.len() > MAX_NAME_BYTES || unit.chars().any(char::is_control))
+        {
+            return Err(format!(
+                "native bundle signal '{}' has an invalid unit",
+                signal.name
+            ));
         }
         match signal.values {
             NativeBundleSignalValues::Real(values) => {

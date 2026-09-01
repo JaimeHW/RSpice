@@ -348,9 +348,11 @@ fn pss_continuation_checkpoint_has_bit_exact_split_run_parity() {
          .end\n",
     )
     .expect("split-run deck parses");
-    let mut simulation = SimulationConfig::default();
-    simulation.integration_method = IntegrationMethod::BackwardEuler;
-    simulation.transient_initial_timestep = Some(100.0e-9);
+    let simulation = SimulationConfig {
+        integration_method: IntegrationMethod::BackwardEuler,
+        transient_initial_timestep: Some(100.0e-9),
+        ..SimulationConfig::default()
+    };
     let engine = Engine::new(simulation);
     let (_, state) = engine
         .run_pss_with_continuation_state(&netlist, compact_pss_config())

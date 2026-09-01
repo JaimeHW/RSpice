@@ -753,16 +753,21 @@ mod tests {
     #[test]
     #[ignore = "prints source-ready visual fingerprints after explicit review"]
     fn print_netlist_first_visual_fingerprints_for_review() {
+        use std::io::Write as _;
+
+        let mut stdout = std::io::stdout().lock();
         for baseline in NETLIST_FIRST_BASELINES {
             let canvas = netlist_first_canvas(baseline.size, baseline.truncated);
             let height = regression_height(&canvas);
-            eprintln!(
+            writeln!(
+                stdout,
                 "{} {}x{} {}",
                 baseline.name,
                 canvas.width(),
                 height,
                 canvas.regression_fingerprint(height)
-            );
+            )
+            .expect("write visual fingerprint");
         }
     }
 

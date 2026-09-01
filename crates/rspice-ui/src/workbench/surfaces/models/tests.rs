@@ -160,16 +160,21 @@ fn every_models_workspace_page_matches_its_reviewed_visual_baseline() {
 #[test]
 #[ignore = "prints source-ready visual fingerprints after explicit review"]
 fn print_models_visual_fingerprints_for_review() {
+    use std::io::Write as _;
+
+    let mut stdout = std::io::stdout().lock();
     for baseline in MODELS_BASELINES {
         let canvas = models_canvas(baseline.page, baseline.scope);
         let height = models_regression_height(&canvas);
-        eprintln!(
+        writeln!(
+            stdout,
             "{} {}x{} {}",
             baseline.name,
             canvas.width(),
             height,
             canvas.regression_fingerprint(height)
-        );
+        )
+        .expect("write visual fingerprint");
     }
 }
 

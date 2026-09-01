@@ -147,15 +147,20 @@ fn every_studio_page_matches_its_reviewed_visual_baseline() {
 #[test]
 #[ignore = "prints source-ready visual fingerprints after explicit review"]
 fn print_studio_visual_fingerprints_for_review() {
+    use std::io::Write as _;
+
+    let mut stdout = std::io::stdout().lock();
     for baseline in STUDIO_BASELINES {
         let canvas = raster(baseline.page, APPROVED_PAGE_WIDTH, |_| {});
-        eprintln!(
+        writeln!(
+            stdout,
             "{} {}x{} {}",
             baseline.name,
             canvas.width(),
             regression_height(&canvas),
             canvas.regression_fingerprint(regression_height(&canvas))
-        );
+        )
+        .expect("write visual fingerprint");
     }
 }
 
