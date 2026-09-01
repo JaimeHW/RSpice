@@ -653,6 +653,10 @@ fn an_analog_upper_connection_driving_a_digital_input_takes_the_a2d_module() {
     );
     assert_eq!(plan.insertions[0].continuous, "electrical");
     assert_eq!(plan.insertions[0].discrete, "ddiscrete");
+    // The port binding: which of the connect module's own ports takes which
+    // side of the boundary.
+    assert_eq!(plan.insertions[0].continuous_port, "el");
+    assert_eq!(plan.insertions[0].discrete_port, "cm");
 }
 
 #[test]

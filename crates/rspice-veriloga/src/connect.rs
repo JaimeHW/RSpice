@@ -138,8 +138,12 @@ pub struct InsertionRule {
     /// Section 7.7.3's parameter values, retained as written. Folding them is
     /// the instantiating pass's job, not selection's.
     pub parameters: Vec<ParameterOverride>,
-    pub continuous: SmolStr,
-    pub discrete: SmolStr,
+    /// The connect module's continuous-side port: the discipline it bridges
+    /// after any override, and the port's own name, which is what an
+    /// instantiating pass binds the analog side to.
+    pub continuous: ConnectModulePort,
+    /// The discrete-side port, the same way.
+    pub discrete: ConnectModulePort,
     pub direction: ConnectDirection,
     pub span: Span,
 }
@@ -154,36 +158,27 @@ pub struct ResolutionRule {
     pub span: Span,
 }
 
-/// The typed table a `connectrules` block becomes.
+/// The typed table a file's `connectrules` blocks become.
+///
+/// Every block in the file contributes to one table. Clause 7 names a
+/// `connectrules` block but gives no way to select among several, so merging
+/// them is the only reading available; the consequence is that two blocks each
+/// declaring a rule for one discipline pair make that pair ambiguous, which
+/// [`Self::select`] refuses rather than resolving by block order.
 #[derive(Debug, Clone, Default)]
 pub struct ConnectRuleTable {
     modules: BTreeMap<SmolStr, ConnectModuleDecl>,
     insertions: Vec<InsertionRule>,
     resolutions: Vec<ResolutionRule>,
-    /// Section 7.7.2.1's "a warning message shall be issued", in the order the
-    /// matches were made.
-    warnings: Vec<String>,
 }
 
 impl ConnectRuleTable {
-    pub fn is_empty(&self) -> bool {
-        self.insertions.is_empty() && self.resolutions.is_empty()
-    }
-
     pub fn insertions(&self) -> &[InsertionRule] {
         &self.insertions
     }
 
     pub fn resolutions(&self) -> &[ResolutionRule] {
         &self.resolutions
-    }
-
-    pub fn connect_modules(&self) -> impl Iterator<Item = &ConnectModuleDecl> {
-        self.modules.values()
-    }
-
-    pub fn warnings(&self) -> &[String] {
-        &self.warnings
     }
 
     /// Section 7.8.4 rule 3: select the one connect statement a mixed port
@@ -210,8 +205,8 @@ impl ConnectRuleTable {
 
         for rule in &self.insertions {
             if !rule.direction.admits(required)
-                || !disciplines_compatible(db, &rule.continuous, continuous)
-                || !disciplines_compatible(db, &rule.discrete, discrete)
+                || !disciplines_compatible(db, &rule.continuous.discipline, continuous)
+                || !disciplines_compatible(db, &rule.discrete.discipline, discrete)
             {
                 continue;
             }
@@ -681,11 +676,16 @@ pub struct ConnectModuleInsertion {
     /// Section 7.8.4 insertion rule 2: "The connect module for a port shall be
     /// instantiated in the context of the port's upper connection."
     pub context: usize,
+    /// The resolved discipline on the continuous side of the boundary, and the
+    /// name of the connect module port that binds to it.
     pub continuous: SmolStr,
+    pub continuous_port: SmolStr,
+    /// The same for the discrete side.
     pub discrete: SmolStr,
+    pub discrete_port: SmolStr,
     pub direction: ConnectDirection,
-    /// Every port this one instance bridges, in traversal order. More than one
-    /// is section 7.8.3.1's `merged`.
+    /// Every design port this one instance bridges, in traversal order. More
+    /// than one is section 7.8.3.1's `merged`.
     pub bindings: Vec<ConnectModuleBinding>,
     pub parameters: Vec<ParameterOverride>,
 }
@@ -785,7 +785,9 @@ pub fn plan_connect_modules(
                 mode: rule.mode,
                 context: upper,
                 continuous: continuous.into(),
+                continuous_port: rule.continuous.name.clone(),
                 discrete: discrete.into(),
+                discrete_port: rule.discrete.name.clone(),
                 direction: required,
                 bindings: vec![binding],
                 parameters: rule.parameters.clone(),
@@ -974,19 +976,32 @@ fn insertion_rule(
         }
     }
 
-    let direction = ConnectDirection::from_ports(continuous.direction, discrete.direction)
-        .ok_or_else(|| ConnectError::ConnectModuleDirections {
-            module: insertion.connect_module.clone(),
-            span: insertion.span,
-        })?;
+    // With no directed override the declaration's own kind stands, already
+    // validated against Table 7-2 when the module was read. An override that
+    // named directions has to be checked again, because section 7.7.1 lets it
+    // pick any pair and only Table 7-2's three are admissible.
+    let direction = if insertion
+        .port_overrides
+        .as_ref()
+        .is_some_and(|overrides| overrides.first.direction.is_some())
+    {
+        ConnectDirection::from_ports(continuous.direction, discrete.direction).ok_or_else(|| {
+            ConnectError::ConnectModuleDirections {
+                module: insertion.connect_module.clone(),
+                span: insertion.span,
+            }
+        })?
+    } else {
+        decl.direction
+    };
 
     Ok(InsertionRule {
         connect_module: insertion.connect_module.clone(),
         // Section 7.8.3: "The default is merged."
         mode: insertion.mode.unwrap_or(ConnectMode::Merged),
         parameters: insertion.parameters.clone(),
-        continuous: continuous.discipline,
-        discrete: discrete.discipline,
+        continuous,
+        discrete,
         direction,
         span: insertion.span,
     })
