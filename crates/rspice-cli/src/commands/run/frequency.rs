@@ -978,6 +978,23 @@ pub(super) fn run_sensitivity_from_command(
             None => 0,
         }
     };
+    let output = if output_is_current {
+        rspice_core::analysis::AcSensitivityOutput::BranchCurrent(output_node.to_string())
+    } else {
+        rspice_core::analysis::AcSensitivityOutput::Voltage {
+            positive: out_pos,
+            negative: (out_neg != 0).then_some(out_neg),
+        }
+    };
+    let output_label = if output_is_current {
+        format!("I({output_node})")
+    } else {
+        reference_node.map_or_else(
+            || format!("V({output_node})"),
+            |reference| format!("V({output_node},{reference})"),
+        )
+    };
+    let output_unit = if output_is_current { "A" } else { "V" };
 
     if let Some(ac) = ac_sweep {
         let freqs = generate_frequency_sweep(ac.variation, ac.points, ac.start_freq, ac.stop_freq);
@@ -990,21 +1007,12 @@ pub(super) fn run_sensitivity_from_command(
 
         if !ctx.quiet {
             println!(
-                "Running AC Sensitivity analysis: V({},{}) over {} frequencies",
-                output_node,
-                reference_node.unwrap_or("0"),
+                "Running AC Sensitivity analysis: {} over {} frequencies",
+                output_label,
                 freqs.len()
             );
         }
 
-        let output = if output_is_current {
-            rspice_core::analysis::AcSensitivityOutput::BranchCurrent(output_node.to_string())
-        } else {
-            rspice_core::analysis::AcSensitivityOutput::Voltage {
-                positive: out_pos,
-                negative: (out_neg != 0).then_some(out_neg),
-            }
-        };
         let result = ctx
             .engine
             .run_sensitivity_ac_complete(ctx.netlist, output, &freqs, filters)
@@ -1017,9 +1025,11 @@ pub(super) fn run_sensitivity_from_command(
                 let first = combined.first().copied().unwrap_or(0.0);
                 let last = combined.last().copied().unwrap_or(0.0);
                 println!(
-                    "  d|V|/d{}: {:.6e} @ {:e} Hz, {:.6e} @ {:e} Hz",
+                    "  d|{}|/d{}: {:.6e} {} per native parameter unit @ {:e} Hz, {:.6e} @ {:e} Hz",
+                    output_label,
                     trace.vector_name,
                     first,
+                    output_unit,
                     freqs.first().copied().unwrap_or(0.0),
                     last,
                     freqs.last().copied().unwrap_or(0.0)
@@ -1031,7 +1041,10 @@ pub(super) fn run_sensitivity_from_command(
                     .iter()
                     .map(|v| v.abs())
                     .fold(0.0_f64, |acc, v| acc.max(v));
-                println!("    peak |d|V|/d{}| = {:.6e}", trace.vector_name, peak);
+                println!(
+                    "    peak |d|{}|/d{}| = {:.6e} {} per native parameter unit",
+                    output_label, trace.vector_name, peak, output_unit
+                );
             }
         }
 
@@ -1049,7 +1062,7 @@ pub(super) fn run_sensitivity_from_command(
                     .sensitivities
                     .iter()
                     .map(|trace| ExportColumn {
-                        name: format!("dV/d({})", trace.vector_name),
+                        name: format!("d{}/d({})", output_label, trace.vector_name),
                         var_type: "sensitivity".to_string(),
                         data: ColumnData::Complex {
                             real: trace.absolute.iter().map(|value| value.re).collect(),
@@ -1068,53 +1081,42 @@ pub(super) fn run_sensitivity_from_command(
         return Ok(());
     }
 
-    if output_is_current {
-        return Err(CliError::SimulationError {
-            message: "DC .SENS I(element) is not yet supported by the DC adjoint path".to_string(),
-            analysis: Some("Sensitivity".to_string()),
-        });
-    }
-
-    if !filters.is_empty() {
-        return Err(CliError::SimulationError {
-            message: "DC .SENS device filters are not yet supported by the DC adjoint path"
-                .to_string(),
-            analysis: Some("Sensitivity".to_string()),
-        });
-    }
-
     if !ctx.quiet {
-        println!(
-            "Running DC Sensitivity analysis: V({},{})",
-            output_node,
-            reference_node.unwrap_or("0")
-        );
+        println!("Running DC Sensitivity analysis: {output_label}");
     }
 
-    let linearized = ctx
+    let result = ctx
         .engine
-        .run_sensitivity_linearized(ctx.netlist, out_pos, (out_neg != 0).then_some(out_neg))
+        .run_sensitivity_dc_complete(ctx.netlist, output, filters)
         .map_err(|e| CliError::simulation_error_in(e.to_string(), "Sensitivity"))?;
-    let mut results = linearized
-        .sensitivities
-        .into_iter()
-        .map(|trace| (trace.element, trace.absolute))
-        .collect::<Vec<_>>();
+    let mut sensitivities = result.sensitivities;
 
-    results.sort_by(|a, b| {
-        b.1.abs()
-            .partial_cmp(&a.1.abs())
+    sensitivities.sort_by(|a, b| {
+        b.absolute
+            .abs()
+            .partial_cmp(&a.absolute.abs())
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
     if !ctx.quiet {
         println!("✓ Sensitivity analysis complete");
-        for (name, value) in &results {
-            println!("  ∂V/∂{} = {:.6e}", name, value);
+        for sensitivity in &sensitivities {
+            println!(
+                "  ∂{}/∂{} = {:.6e} {} per native parameter unit (normalized: {:.6e})",
+                output_label,
+                sensitivity.vector_name,
+                sensitivity.absolute,
+                output_unit,
+                sensitivity.normalized
+            );
         }
     }
 
-    export_dc_sensitivities(ctx, &results)?;
+    let results = sensitivities
+        .iter()
+        .map(|sensitivity| (sensitivity.vector_name.clone(), sensitivity.absolute))
+        .collect::<Vec<_>>();
+    export_dc_sensitivity_result(ctx, &output_label, &results)?;
     Ok(())
 }
 
@@ -1122,6 +1124,16 @@ pub(super) fn run_sensitivity_from_command(
 /// column per parameter.
 fn export_dc_sensitivities(
     ctx: &RunContext<'_>,
+    results: &[(String, f64)],
+) -> Result<(), CliError> {
+    export_dc_sensitivity_result(ctx, "V", results)
+}
+
+/// Write a complete `.SENS` result using the selected probe identity in every
+/// derivative column (for example `dV(out)/d(R1)` or `dI(V1)/d(R1)`).
+fn export_dc_sensitivity_result(
+    ctx: &RunContext<'_>,
+    output: &str,
     results: &[(String, f64)],
 ) -> Result<(), CliError> {
     let Some(ref output_path) = ctx.output_path_for("sens") else {
@@ -1139,7 +1151,7 @@ fn export_dc_sensitivities(
         columns: results
             .iter()
             .map(|(name, value)| ExportColumn {
-                name: format!("dV/d({name})"),
+                name: format!("d{output}/d({name})"),
                 var_type: "sensitivity".to_string(),
                 data: ColumnData::Real(vec![*value]),
             })
