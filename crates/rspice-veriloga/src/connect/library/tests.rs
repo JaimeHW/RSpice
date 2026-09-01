@@ -472,10 +472,7 @@ endmodule
     let analyzed = analyzer
         .analyze(&file)
         .expect("an analog body that never names the variable is not a second owner");
-    let module = analyzed
-        .modules
-        .get("independent_halves")
-        .expect("module");
+    let module = analyzed.modules.get("independent_halves").expect("module");
     assert!(
         module
             .digital

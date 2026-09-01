@@ -1957,9 +1957,11 @@ impl SemanticAnalyzer {
         // the analog half applies to an undeclared net.
         let resolved = self.symbols.lookup(net).map(|symbol| {
             let discrete = symbol.attrs.discipline.as_ref().is_some_and(|discipline| {
-                self.disciplines.get_discipline(discipline).is_some_and(
-                    |discipline| discipline.domain == crate::disciplines::Domain::Discrete,
-                )
+                self.disciplines
+                    .get_discipline(discipline)
+                    .is_some_and(|discipline| {
+                        discipline.domain == crate::disciplines::Domain::Discrete
+                    })
             });
             (symbol.kind, discrete)
         });
