@@ -1,5 +1,5 @@
-//! Offscreen renders of the plan manager, so its layout can be looked at
-//! rather than only asserted about.
+//! Deterministic visual regressions for every plan-manager route and gated
+//! viewport.
 //!
 //! The contract tests next door read what the manager paints and how wide it
 //! came out; nothing in them sees the result. This runs the real dialog through
@@ -19,8 +19,9 @@
 //! glyph read off one of these images is not a defect report; check the string
 //! in `tests.rs`, which reads the galley rather than the pixels.
 //!
-//! Run with `--ignored`; the renders go to `RSPICE_RASTER_DIR` (default: the
-//! system temp directory).
+//! The default tests compare reviewed fingerprints and never write files. The
+//! ignored review tools print replacement fingerprints or write PNGs to
+//! `RSPICE_RASTER_DIR` (default: the system temp directory).
 
 // Native-only, like the render harnesses in `tests.rs` it shares fixtures with:
 // it rasterizes to a file for a person to open.
@@ -30,6 +31,12 @@ use egui::Vec2;
 
 use crate::ui::raster::Canvas;
 use crate::workbench::state::SimulationPlanManagerMode;
+
+const PENDING_FINGERPRINT: &str =
+    "0000000000000000000000000000000000000000000000000000000000000000";
+
+/// Route-major, then viewport-major, matching `EVERY_ROUTE × GATED_VIEWPORTS`.
+const PLAN_MANAGER_FINGERPRINTS: [&str; 24] = [PENDING_FINGERPRINT; 24];
 
 /// Render one route at one gated viewport and rasterize it.
 ///
@@ -68,6 +75,76 @@ fn file_stem(mode: SimulationPlanManagerMode, viewport: &str) -> String {
     )
 }
 
+fn regression_height(canvas: &Canvas) -> usize {
+    canvas.content_height().max(1)
+}
+
+fn baseline_cases() -> impl Iterator<Item = (usize, SimulationPlanManagerMode, &'static str, Vec2)>
+{
+    super::tests::EVERY_ROUTE
+        .into_iter()
+        .flat_map(|mode| {
+            super::tests::GATED_VIEWPORTS
+                .into_iter()
+                .map(move |(viewport, screen)| (mode, viewport, screen))
+        })
+        .enumerate()
+        .map(|(index, (mode, viewport, screen))| (index, mode, viewport, screen))
+}
+
+#[test]
+fn plan_manager_visual_baselines_cover_the_route_viewport_product_and_are_unique() {
+    assert_eq!(
+        PLAN_MANAGER_FINGERPRINTS.len(),
+        super::tests::EVERY_ROUTE.len() * super::tests::GATED_VIEWPORTS.len(),
+        "the visual baseline table must cover every route at every gated viewport"
+    );
+    let names = baseline_cases()
+        .map(|(_, mode, viewport, _)| file_stem(mode, viewport))
+        .collect::<std::collections::HashSet<_>>();
+    let fingerprints = PLAN_MANAGER_FINGERPRINTS
+        .into_iter()
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(
+        names.len(),
+        PLAN_MANAGER_FINGERPRINTS.len(),
+        "duplicate plan-manager visual baseline identity"
+    );
+    assert_eq!(
+        fingerprints.len(),
+        PLAN_MANAGER_FINGERPRINTS.len(),
+        "each route/viewport pair must have an independently reviewed fingerprint"
+    );
+}
+
+#[test]
+fn every_plan_manager_route_matches_its_reviewed_gated_viewport_baselines() {
+    for (index, mode, viewport, screen) in baseline_cases() {
+        let canvas = raster(mode, screen);
+        canvas.assert_regression(
+            &file_stem(mode, viewport),
+            regression_height(&canvas),
+            PLAN_MANAGER_FINGERPRINTS[index],
+        );
+    }
+}
+
+#[test]
+#[ignore = "prints source-ready visual fingerprints after explicit review"]
+fn print_plan_manager_visual_fingerprints_for_review() {
+    for (_, mode, viewport, screen) in baseline_cases() {
+        let canvas = raster(mode, screen);
+        let height = regression_height(&canvas);
+        eprintln!(
+            "{} {}x{} {}",
+            file_stem(mode, viewport),
+            canvas.width(),
+            height,
+            canvas.regression_fingerprint(height)
+        );
+    }
+}
+
 /// Write every route at every gated viewport to PNGs so the design can be
 /// reviewed.
 ///
@@ -97,7 +174,7 @@ fn render_every_route_at_every_gated_viewport() {
             // surface *taller* than its viewport cannot hide here: the canvas
             // is the viewport, so the overflow is simply cut off, and the fit
             // gates are what prove there is none.
-            let height = canvas.content_height().max(1);
+            let height = regression_height(&canvas);
             let bytes = canvas.png(height);
             let path = directory.join(format!("{}.png", file_stem(mode, viewport)));
             std::fs::write(&path, &bytes).expect("write plan-manager render");

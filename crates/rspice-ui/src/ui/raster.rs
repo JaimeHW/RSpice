@@ -32,6 +32,7 @@
 use egui::{Color32, Rect, Vec2};
 
 /// A rasterized render, and the colour it was cleared to.
+#[derive(Clone)]
 pub(crate) struct Canvas {
     width: usize,
     height: usize,
@@ -98,6 +99,53 @@ impl Canvas {
                 .clone()
                 .map(move |x| self.pixels[y * self.width + x])
         })
+    }
+
+    /// Stable SHA-256 fingerprint of an approved cropped render.
+    ///
+    /// The domain tag, dimensions, clear colour, and premultiplied sRGBA
+    /// pixels are all authenticated.  Keeping the premultiplied bytes avoids
+    /// the lossy straight-alpha conversion used only by [`Self::png`], while
+    /// including the crop height makes a vertical clipping regression visible
+    /// even when every surviving pixel is unchanged.
+    pub(crate) fn regression_fingerprint(&self, height: usize) -> String {
+        use sha2::{Digest as _, Sha256};
+
+        assert!(
+            height <= self.height,
+            "raster regression crop {height} exceeds canvas height {}",
+            self.height
+        );
+        let mut digest = Sha256::new();
+        digest.update(b"rspice-egui-software-raster-v1\0");
+        digest.update((self.width as u64).to_le_bytes());
+        digest.update((height as u64).to_le_bytes());
+        digest.update(self.background.to_array());
+        for pixel in &self.pixels[..height * self.width] {
+            digest.update(pixel.to_array());
+        }
+        let digest = digest.finalize();
+        format!("{digest:x}")
+    }
+
+    /// Compare a render with its reviewed visual baseline.
+    ///
+    /// Baselines are deliberately source constants rather than files emitted
+    /// during a test run.  A changed render therefore fails CI with the exact
+    /// replacement fingerprint in the diagnostic; accepting it remains an
+    /// explicit code review decision.
+    pub(crate) fn assert_regression(&self, name: &str, height: usize, expected_fingerprint: &str) {
+        assert_eq!(
+            expected_fingerprint.len(),
+            64,
+            "visual baseline {name} is not a SHA-256 fingerprint"
+        );
+        let actual = self.regression_fingerprint(height);
+        assert_eq!(
+            actual, expected_fingerprint,
+            "visual regression in {name} ({}x{height}); review the render before accepting the new fingerprint",
+            self.width
+        );
     }
 
     /// A PNG with stored (uncompressed) deflate blocks, cropped to `height`
@@ -419,6 +467,28 @@ fn a_painted_rect_covers_its_own_pixels_and_nothing_else() {
         outside.iter().all(|pixel| *pixel == canvas.background()),
         "something painted below the rect"
     );
+}
+
+#[test]
+fn regression_fingerprint_authenticates_geometry_background_crop_and_pixels() {
+    let mut original = Canvas::new(3, 2, Color32::from_rgb(4, 8, 12));
+    original.pixels[4] = Color32::from_rgba_premultiplied(40, 30, 20, 128);
+    let approved = original.regression_fingerprint(2);
+    original.assert_regression("unit-raster", 2, &approved);
+
+    let mut pixel_changed = original.clone();
+    pixel_changed.pixels[4] = Color32::from_rgba_premultiplied(41, 30, 20, 128);
+    assert_ne!(pixel_changed.regression_fingerprint(2), approved);
+
+    let background_changed = Canvas {
+        background: Color32::from_rgb(4, 8, 13),
+        ..original.clone()
+    };
+    assert_ne!(background_changed.regression_fingerprint(2), approved);
+    assert_ne!(original.regression_fingerprint(1), approved);
+
+    let wider = Canvas::new(4, 2, original.background);
+    assert_ne!(wider.regression_fingerprint(2), approved);
 }
 
 /// Which rows of a rasterized `text` carry ink, at the mono size a surface
