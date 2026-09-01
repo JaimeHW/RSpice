@@ -13,7 +13,14 @@ use smol_str::SmolStr;
 /// This is a hard compatibility boundary: caches and external backends must
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 12;
+///
+/// Version 13 adds [`crate::canonical_ir::HirExecutedCorrespondence`] to the
+/// HIR: the map from each structured-body expression to the executed expression
+/// it is a second lowering of. A version-12 record carries no such map, and a
+/// consumer that read one would find every CFG operator unmapped — correct as a
+/// refusal, wrong as an answer — so a version-12 artifact is rebuilt rather than
+/// reinterpreted.
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 13;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

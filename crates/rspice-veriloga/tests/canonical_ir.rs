@@ -17,7 +17,9 @@ use rspice_veriloga::canonical_ir::{
     HirParamRange, HirStatement, IrDiagnostic, MirAnalysisDomain, MirEquationKind, MirModel,
     MirStateSlot, SourceSpanRef, StableDigest,
 };
-use rspice_veriloga::semantic::{AnalyzedContribution, AnalyzedModule, AnalyzedPort, SymbolTable};
+use rspice_veriloga::semantic::{
+    AnalogSiteGuard, AnalogSiteId, AnalyzedContribution, AnalyzedModule, AnalyzedPort, SymbolTable,
+};
 use rspice_veriloga::source::Span;
 use rspice_veriloga::types::ValueType;
 use rspice_veriloga::{
@@ -1292,7 +1294,7 @@ fn metadata_digest_is_stable_and_hex_encoded() {
     assert_ne!(digest, StableDigest::from_text("module other; endmodule"));
 
     let metadata = CanonicalMetadata::for_source("fixture", "module tiny; endmodule");
-    assert_eq!(metadata.schema_version, 12);
+    assert_eq!(metadata.schema_version, 13);
     assert_eq!(metadata.source_package.as_str(), "fixture");
     assert_eq!(metadata.source_digest.as_str(), digest.as_hex());
 }
@@ -2163,7 +2165,7 @@ fn artifact_dump_is_deterministic_and_contains_phase_summaries() {
 
     assert_eq!(first, second);
     assert!(first.contains("canonical-veriloga-ir"));
-    assert!(first.contains("schema_version=12"));
+    assert!(first.contains("schema_version=13"));
     assert!(first.contains("source_package=fixture"));
     assert!(first.contains("source_digest="));
     assert!(first.contains("source_identity="));
@@ -3159,11 +3161,14 @@ fn hir_lowering_preserves_laplace_operand_groups() {
                 })),
                 span,
             }),
+            site: AnalogSiteId(0),
+            expression_guard: AnalogSiteGuard::None,
             expr_type: ValueType::Real,
             span,
         }],
         statements: Vec::new(),
         body: Vec::new(),
+        analog_site_count: 1,
         internal_nodes: Vec::new(),
         ground_nodes: Vec::new(),
         arrays: HashMap::new(),
@@ -3263,11 +3268,14 @@ fn hir_lowering_preserves_typed_analog_operator_slots() {
                 abstol: Some(Box::new(number(1e-9, "1e-9"))),
                 span,
             }),
+            site: AnalogSiteId(0),
+            expression_guard: AnalogSiteGuard::None,
             expr_type: ValueType::Real,
             span,
         }],
         statements: Vec::new(),
         body: Vec::new(),
+        analog_site_count: 1,
         internal_nodes: Vec::new(),
         ground_nodes: Vec::new(),
         arrays: HashMap::new(),

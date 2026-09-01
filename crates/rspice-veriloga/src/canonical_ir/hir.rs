@@ -14,7 +14,7 @@
 
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast::{
     AnalogOperator, ArrayLiteralElement, BinaryOp, BranchAccess, CrossDirection, Expression,
@@ -22,7 +22,10 @@ use crate::ast::{
 };
 use crate::ir::TransitionSiteId;
 use crate::numeric_literal::parse_integer_literal;
-use crate::semantic::{AnalyzedModule, AnalyzedRegion, AnalyzedStatement, ParameterScope};
+use crate::semantic::{
+    AnalogSiteGuard, AnalogSiteId, AnalyzedModule, AnalyzedRegion, AnalyzedStatement,
+    ParameterScope,
+};
 use crate::types::{ParameterRange, ValueType};
 
 use super::{
@@ -531,6 +534,364 @@ pub enum HirRegion {
     },
 }
 
+/// One run of body expression ids and the run of executed ids it names.
+///
+/// Runs rather than pairs, because a correspondence between two lowerings of
+/// one source expression is an *offset*, not a table.
+/// [`HirLowerer::lower_expr`] appends children before their parent and mints
+/// each id from the arena's length, so lowering a subtree occupies a contiguous
+/// block of ids ending at the root. Two lowerings of the same
+/// [`crate::ast::Expression`] therefore walk identically and mint identically
+/// many ids in identically the same order, which makes the whole subtree's
+/// correspondence `executed_start + (body - body_start)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HirCorrespondenceSpan {
+    /// First body-copy id in the run.
+    pub body_start: u32,
+    /// The executed-copy id that `body_start` names.
+    pub executed_start: u32,
+    /// How many ids the run covers. Never zero.
+    pub len: u32,
+}
+
+/// Which executed expression each structured-body expression is a second
+/// lowering of.
+///
+/// [`HirModel`] lowers a module twice into one arena: once as the guard-folded
+/// `contributions`/`statements` the runtimes execute and checkpoint, and again
+/// as the structured `body` the CFG consumes. The two copies share no ids, so a
+/// CFG value naming its `ddt` by [`ExprId`] names an expression that
+/// [`crate::canonical_ir::state::CanonicalStateLayout`] — which numbers the
+/// executed copy, because that is the copy whose records the runtime allocates —
+/// has never seen. This is the map across.
+///
+/// ## Built, not matched
+///
+/// The analyzer stamps one [`crate::semantic::AnalogSiteId`] on both recordings
+/// of every analog-block step at the moment it clones one expression into two
+/// ([`crate::semantic::AnalyzedRegion`] and the flat sink), and names the guard
+/// shape it is about to fold. Lowering reads that stamp: it knows which executed
+/// root a region's expression is the authored half of, walks off the guard
+/// wrapper by the recorded shape, and pairs the two subtrees by their lengths.
+/// Nothing here compares expression *content* to decide what pairs with what.
+///
+/// Congruence is nevertheless checked while the span is built — kind
+/// discriminants must agree position for position — because one thing can make
+/// two lowerings of one expression differ: `HirLowerer`'s array-replication work
+/// budget is per module, so a replication expanded in the first copy can be
+/// refused in the second. A run that fails congruence is not recorded, and the
+/// operator inside it is then simply unmapped, which every consumer must refuse
+/// by name rather than guess at.
+///
+/// ## What is deliberately not covered
+///
+/// A `case` arm's structured condition is `selector == match` while its executed
+/// counterpart is `__guardN == match`: two different expressions, not two copies
+/// of one, so no site pairs them. Prologue statements (localparam and variable
+/// initializers, `$bound_step` resets) and a named block's local initializers
+/// exist only in the executed copy and pair with nothing in the body. Neither
+/// gap is silent: [`Self::executed`] returns `None`, and
+/// [`crate::canonical_ir::state::CfgStateAllocation`] refuses the model by name.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HirExecutedCorrespondence {
+    /// Sorted by `body_start` and pairwise disjoint, so a lookup is a binary
+    /// search and a builder that overlapped two sites is a detectable bug
+    /// rather than a silent last-writer-wins.
+    spans: Vec<HirCorrespondenceSpan>,
+}
+
+impl HirExecutedCorrespondence {
+    /// The executed-copy expression `body` is a second lowering of.
+    pub fn executed(&self, body: ExprId) -> Option<ExprId> {
+        let body = body.index();
+        let index = match self
+            .spans
+            .binary_search_by_key(&body, |span| span.body_start)
+        {
+            Ok(index) => index,
+            Err(0) => return None,
+            Err(index) => index - 1,
+        };
+        let span = self.spans.get(index)?;
+        let offset = body.checked_sub(span.body_start)?;
+        if offset >= span.len {
+            return None;
+        }
+        Some(ExprId::from(
+            usize::try_from(span.executed_start.checked_add(offset)?).ok()?,
+        ))
+    }
+
+    /// Every run, in body-id order.
+    pub fn spans(&self) -> &[HirCorrespondenceSpan] {
+        &self.spans
+    }
+
+    /// How many body expressions are covered.
+    pub fn len(&self) -> usize {
+        self.spans
+            .iter()
+            .map(|span| usize::try_from(span.len).unwrap_or(usize::MAX))
+            .sum()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.spans.is_empty()
+    }
+}
+
+/// Accumulates [`HirExecutedCorrespondence`] runs while the body is lowered.
+#[derive(Debug, Default)]
+struct CorrespondenceBuilder {
+    spans: Vec<HirCorrespondenceSpan>,
+}
+
+impl CorrespondenceBuilder {
+    /// Pair the body subtree ending at `body_root` with the executed subtree
+    /// ending at `executed_root`.
+    ///
+    /// `body_start` is the arena length captured before the body subtree was
+    /// lowered, so the run is `body_start ..= body_root`. The executed run has
+    /// the same length by construction and ends at `executed_root`; both are
+    /// re-checked against the arena before anything is recorded.
+    fn pair(
+        &mut self,
+        expressions: &[HirExpression],
+        body_start: usize,
+        body_root: ExprId,
+        executed_root: ExprId,
+    ) {
+        let body_root = body_root.index() as usize;
+        let executed_root = executed_root.index() as usize;
+        let Some(len) = body_root.checked_sub(body_start).map(|len| len + 1) else {
+            return;
+        };
+        let Some(executed_start) = executed_root.checked_sub(len - 1) else {
+            return;
+        };
+        // The executed copy is lowered first, so it must end before the body
+        // copy begins; a run that straddles the two halves is a bug in the
+        // caller's unwrapping, not a correspondence.
+        if executed_root >= body_start {
+            return;
+        }
+        for offset in 0..len {
+            let (Some(body), Some(executed)) = (
+                expressions.get(body_start + offset),
+                expressions.get(executed_start + offset),
+            ) else {
+                return;
+            };
+            if !same_expression_kind(&body.kind, &executed.kind) {
+                return;
+            }
+        }
+        let (Ok(body_start), Ok(executed_start), Ok(len)) = (
+            u32::try_from(body_start),
+            u32::try_from(executed_start),
+            u32::try_from(len),
+        ) else {
+            return;
+        };
+        self.spans.push(HirCorrespondenceSpan {
+            body_start,
+            executed_start,
+            len,
+        });
+    }
+
+    fn finish(mut self) -> HirExecutedCorrespondence {
+        self.spans.sort_unstable_by_key(|span| span.body_start);
+        // Nested regions pair their own subtrees, so an outer run can cover an
+        // inner one. Keep the first (outermost) and drop anything it already
+        // covers: both answer the same question, and a disjoint list is what
+        // makes the lookup a binary search.
+        let mut spans: Vec<HirCorrespondenceSpan> = Vec::with_capacity(self.spans.len());
+        for span in self.spans {
+            if let Some(previous) = spans.last()
+                && span.body_start < previous.body_start + previous.len
+            {
+                continue;
+            }
+            spans.push(span);
+        }
+        HirExecutedCorrespondence { spans }
+    }
+}
+
+/// Whether two lowered expressions are the same construct.
+///
+/// Discriminant equality plus the operand counts a walk depends on. It is not
+/// structural equality — the ids differ, which is the whole point — but it is
+/// enough that a positional pairing between the two runs cannot land an
+/// operator on something that is not the same operator.
+fn same_expression_kind(left: &HirExprKind, right: &HirExprKind) -> bool {
+    match (left, right) {
+        (HirExprKind::NullArgument, HirExprKind::NullArgument) => true,
+        (HirExprKind::Number { value: left, .. }, HirExprKind::Number { value: right, .. }) => {
+            left.to_bits() == right.to_bits()
+        }
+        (
+            HirExprKind::StringLiteral { value: left },
+            HirExprKind::StringLiteral { value: right },
+        ) => left == right,
+        (HirExprKind::Identifier { name: left }, HirExprKind::Identifier { name: right }) => {
+            left == right
+        }
+        (
+            HirExprKind::BranchAccess {
+                access: left_access,
+                pos: left_pos,
+                neg: left_neg,
+            },
+            HirExprKind::BranchAccess {
+                access: right_access,
+                pos: right_pos,
+                neg: right_neg,
+            },
+        ) => left_access == right_access && left_pos == right_pos && left_neg == right_neg,
+        (
+            HirExprKind::NamedBranchAccess {
+                access: left_access,
+                name: left_name,
+            },
+            HirExprKind::NamedBranchAccess {
+                access: right_access,
+                name: right_name,
+            },
+        ) => left_access == right_access && left_name == right_name,
+        (
+            HirExprKind::SystemFunction {
+                name: left_name,
+                args: left_args,
+            },
+            HirExprKind::SystemFunction {
+                name: right_name,
+                args: right_args,
+            },
+        )
+        | (
+            HirExprKind::Call {
+                name: left_name,
+                args: left_args,
+            },
+            HirExprKind::Call {
+                name: right_name,
+                args: right_args,
+            },
+        ) => left_name == right_name && left_args.len() == right_args.len(),
+        (
+            HirExprKind::ArrayLiteral {
+                elements: left,
+                assignment_pattern: left_pattern,
+            },
+            HirExprKind::ArrayLiteral {
+                elements: right,
+                assignment_pattern: right_pattern,
+            },
+        ) => left.len() == right.len() && left_pattern == right_pattern,
+        (
+            HirExprKind::NoiseSource {
+                source: left_source,
+                operands: left_operands,
+                ..
+            },
+            HirExprKind::NoiseSource {
+                source: right_source,
+                operands: right_operands,
+                ..
+            },
+        ) => left_source == right_source && left_operands.len() == right_operands.len(),
+        (HirExprKind::Unary { op: left, .. }, HirExprKind::Unary { op: right, .. }) => {
+            left == right
+        }
+        (
+            HirExprKind::ArrayAccess { array: left, .. },
+            HirExprKind::ArrayAccess { array: right, .. },
+        ) => left == right,
+        (HirExprKind::Binary { op: left, .. }, HirExprKind::Binary { op: right, .. }) => {
+            left == right
+        }
+        (HirExprKind::Conditional { .. }, HirExprKind::Conditional { .. }) => true,
+        (HirExprKind::AnalogOperator { op: left }, HirExprKind::AnalogOperator { op: right }) => {
+            same_analog_operator(left, right)
+        }
+        (HirExprKind::Laplace { kind: left, .. }, HirExprKind::Laplace { kind: right, .. }) => {
+            std::mem::discriminant(left) == std::mem::discriminant(right)
+        }
+        (HirExprKind::Zi { kind: left, .. }, HirExprKind::Zi { kind: right, .. }) => {
+            std::mem::discriminant(left) == std::mem::discriminant(right)
+        }
+        _ => false,
+    }
+}
+
+/// Whether two analog operators are the same operator.
+///
+/// Deliberately blind to [`TransitionSiteId`]: the ordinal counter runs across
+/// both copies, so a `transition`'s two lowerings carry *different* ordinals by
+/// construction. That difference is exactly what the correspondence exists to
+/// bridge, so demanding equality here would refuse every module that transitions.
+fn same_analog_operator(left: &HirAnalogOperator, right: &HirAnalogOperator) -> bool {
+    match (left, right) {
+        (
+            HirAnalogOperator::Limit { selector: left, .. },
+            HirAnalogOperator::Limit {
+                selector: right, ..
+            },
+        ) => left == right,
+        (
+            HirAnalogOperator::LimiterArgument { argument: left },
+            HirAnalogOperator::LimiterArgument { argument: right },
+        ) => left == right,
+        (
+            HirAnalogOperator::LastCrossing { edge: left, .. },
+            HirAnalogOperator::LastCrossing { edge: right, .. },
+        ) => left == right,
+        _ => std::mem::discriminant(left) == std::mem::discriminant(right),
+    }
+}
+
+/// The executed root one analog site produced, and how it wraps the authored
+/// expression the structured body holds.
+#[derive(Debug, Clone, Copy)]
+struct ExecutedSite {
+    value: ExprId,
+    value_guard: AnalogSiteGuard,
+    index: Option<ExprId>,
+}
+
+impl ExecutedSite {
+    /// Walk off the guard wrapper to the executed copy of the authored
+    /// expression.
+    ///
+    /// `None` when the lowered tree does not have the shape the analyzer said
+    /// it folded — which cannot happen through the compiler's own pipeline, and
+    /// is a refusal rather than an assertion because a hand-built
+    /// `AnalyzedModule` can reach here.
+    fn authored(&self, expressions: &[HirExpression]) -> Option<ExprId> {
+        match self.value_guard {
+            AnalogSiteGuard::None => Some(self.value),
+            AnalogSiteGuard::Select => match &expressions.get(self.value.index() as usize)?.kind {
+                HirExprKind::Conditional { then_expr, .. } => Some(*then_expr),
+                _ => None,
+            },
+            AnalogSiteGuard::Conjunction => {
+                match &expressions.get(self.value.index() as usize)?.kind {
+                    // The lowering spells a binary operator with `{:?}`, so the
+                    // label is asked for the same way rather than written out.
+                    HirExprKind::Binary { op, right, .. }
+                        if *op == format!("{:?}", BinaryOp::And) =>
+                    {
+                        Some(*right)
+                    }
+                    _ => None,
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HirModel {
     pub module_id: ModuleId,
@@ -555,6 +916,10 @@ pub struct HirModel {
     pub statements: Vec<HirStatement>,
     /// The analog block with its control flow intact; see [`HirRegion`].
     pub body: Vec<HirRegion>,
+    /// Which executed expression each [`Self::body`] expression is a second
+    /// lowering of. See [`HirExecutedCorrespondence`].
+    #[serde(default)]
+    pub executed_correspondence: HirExecutedCorrespondence,
     pub expressions: Vec<HirExpression>,
     pub internal_nodes: Vec<HirInternalNode>,
     pub ground_nodes: Vec<SmolStr>,
@@ -639,25 +1004,41 @@ impl HirModel {
             })
             .collect();
 
+        // The executed copy is lowered first and records, per analog site, the
+        // root it produced and the guard shape wrapped around it. The body
+        // lowering below reads that back to pair its own ids with these.
+        let mut executed_sites: HashMap<AnalogSiteId, ExecutedSite> = HashMap::new();
+
         let contributions = module
             .contributions
             .iter()
             .enumerate()
-            .map(|(index, contribution)| HirContribution {
-                id: ContributionId::from(index),
-                branch: contribution.branch.clone(),
-                declared_branch: contribution.declared_branch.clone(),
-                kind: contribution_kind(contribution.indirect, contribution.is_current),
-                expression: lowerer.lower_expr(&contribution.expression),
-                expr_type: CanonicalValueType::from(contribution.expr_type),
-                span: SourceSpanRef::from(contribution.span),
+            .map(|(index, contribution)| {
+                let expression = lowerer.lower_expr(&contribution.expression);
+                executed_sites.insert(
+                    contribution.site,
+                    ExecutedSite {
+                        value: expression.id,
+                        value_guard: contribution.expression_guard,
+                        index: None,
+                    },
+                );
+                HirContribution {
+                    id: ContributionId::from(index),
+                    branch: contribution.branch.clone(),
+                    declared_branch: contribution.declared_branch.clone(),
+                    kind: contribution_kind(contribution.indirect, contribution.is_current),
+                    expression,
+                    expr_type: CanonicalValueType::from(contribution.expr_type),
+                    span: SourceSpanRef::from(contribution.span),
+                }
             })
             .collect();
 
         let statements = module
             .statements
             .iter()
-            .map(|statement| lower_statement(&mut lowerer, statement))
+            .map(|statement| lower_statement(&mut lowerer, statement, &mut executed_sites))
             .collect();
 
         // The analyzer records a region and pushes the flat contribution at the
@@ -665,12 +1046,22 @@ impl HirModel {
         // order they were assigned ids. `validate_body` re-checks that against
         // the flat list rather than trusting it.
         let mut next_contribution = 0usize;
+        let mut correspondence = CorrespondenceBuilder::default();
         let body = module
             .body
             .iter()
-            .map(|region| lower_region(&mut lowerer, &mut next_contribution, region))
+            .map(|region| {
+                lower_region(
+                    &mut lowerer,
+                    &mut next_contribution,
+                    region,
+                    &executed_sites,
+                    &mut correspondence,
+                )
+            })
             .collect();
 
+        let executed_correspondence = correspondence.finish();
         let expressions = lowerer.expressions;
 
         Self {
@@ -724,6 +1115,7 @@ impl HirModel {
             contributions,
             statements,
             body,
+            executed_correspondence,
             expressions,
             internal_nodes: module
                 .internal_nodes
@@ -2169,73 +2561,141 @@ fn is_valid_contribution_branch(
     known_nodes.contains(branch)
 }
 
-fn lower_statement(lowerer: &mut HirLowerer, statement: &AnalyzedStatement) -> HirStatement {
+/// Lower one executed statement, recording the root each analog site produced.
+///
+/// The record is what the body lowering pairs against; it is written here
+/// rather than derived later because here is the only place the site stamp and
+/// the freshly minted id are both in hand.
+fn lower_statement(
+    lowerer: &mut HirLowerer,
+    statement: &AnalyzedStatement,
+    executed_sites: &mut HashMap<AnalogSiteId, ExecutedSite>,
+) -> HirStatement {
     match statement {
-        AnalyzedStatement::Assignment(assignment) => HirStatement::Assignment(HirAssignment {
-            target: VariableId::from(assignment.var_index),
-            target_name: assignment.target.clone(),
-            index: assignment
+        AnalyzedStatement::Assignment(assignment) => {
+            let index = assignment
                 .index
                 .as_ref()
-                .map(|expr| lowerer.lower_expr(expr)),
-            expr: lowerer.lower_expr(&assignment.expression),
-            expr_type: CanonicalValueType::from(assignment.expr_type),
-            span: SourceSpanRef::from(assignment.span),
-            unfiltered_initial_step_guard: assignment.unfiltered_initial_step_guard.clone(),
-        }),
-        AnalyzedStatement::Loop(loop_statement) => HirStatement::Loop(HirLoop {
-            condition: lowerer.lower_expr(&loop_statement.condition),
-            body: loop_statement
-                .body
-                .iter()
-                .map(|statement| lower_statement(lowerer, statement))
-                .collect(),
-            span: SourceSpanRef::from(loop_statement.span),
-        }),
+                .map(|expr| lowerer.lower_expr(expr));
+            let expr = lowerer.lower_expr(&assignment.expression);
+            executed_sites.insert(
+                assignment.site,
+                ExecutedSite {
+                    value: expr.id,
+                    value_guard: assignment.expression_guard,
+                    index: index.as_ref().map(|index| index.id),
+                },
+            );
+            HirStatement::Assignment(HirAssignment {
+                target: VariableId::from(assignment.var_index),
+                target_name: assignment.target.clone(),
+                index,
+                expr,
+                expr_type: CanonicalValueType::from(assignment.expr_type),
+                span: SourceSpanRef::from(assignment.span),
+                unfiltered_initial_step_guard: assignment.unfiltered_initial_step_guard.clone(),
+            })
+        }
+        AnalyzedStatement::Loop(loop_statement) => {
+            let condition = lowerer.lower_expr(&loop_statement.condition);
+            executed_sites.insert(
+                loop_statement.site,
+                ExecutedSite {
+                    value: condition.id,
+                    value_guard: loop_statement.condition_guard,
+                    index: None,
+                },
+            );
+            HirStatement::Loop(HirLoop {
+                condition,
+                body: loop_statement
+                    .body
+                    .iter()
+                    .map(|statement| lower_statement(lowerer, statement, executed_sites))
+                    .collect(),
+                span: SourceSpanRef::from(loop_statement.span),
+            })
+        }
     }
 }
 
-/// Lower one region, numbering contributions in the order the analyzer met them.
+/// Lower one region, numbering contributions in the order the analyzer met them
+/// and pairing each authored expression with its executed twin.
 fn lower_region(
     lowerer: &mut HirLowerer,
     next_contribution: &mut usize,
     region: &AnalyzedRegion,
+    executed_sites: &HashMap<AnalogSiteId, ExecutedSite>,
+    correspondence: &mut CorrespondenceBuilder,
 ) -> HirRegion {
     match region {
-        AnalyzedRegion::Assignment(assignment) => HirRegion::Assignment(HirAssignment {
-            target: VariableId::from(assignment.var_index),
-            target_name: assignment.target.clone(),
-            index: assignment
-                .index
-                .as_ref()
-                .map(|expr| lowerer.lower_expr(expr)),
-            expr: lowerer.lower_expr(&assignment.expression),
-            expr_type: CanonicalValueType::from(assignment.expr_type),
-            span: SourceSpanRef::from(assignment.span),
-            unfiltered_initial_step_guard: assignment.unfiltered_initial_step_guard.clone(),
-        }),
+        AnalyzedRegion::Assignment(assignment) => {
+            let executed = executed_sites.get(&assignment.site).copied();
+            let index = assignment.index.as_ref().map(|expr| {
+                let start = lowerer.expressions.len();
+                let lowered = lowerer.lower_expr(expr);
+                // An array index is never guarded: the fallback re-reads the
+                // same element, so only the value is wrapped.
+                if let Some(executed_index) = executed.and_then(|site| site.index) {
+                    correspondence.pair(&lowerer.expressions, start, lowered.id, executed_index);
+                }
+                lowered
+            });
+            let start = lowerer.expressions.len();
+            let expr = lowerer.lower_expr(&assignment.expression);
+            pair_authored(lowerer, correspondence, executed, start, expr.id);
+            HirRegion::Assignment(HirAssignment {
+                target: VariableId::from(assignment.var_index),
+                target_name: assignment.target.clone(),
+                index,
+                expr,
+                expr_type: CanonicalValueType::from(assignment.expr_type),
+                span: SourceSpanRef::from(assignment.span),
+                unfiltered_initial_step_guard: assignment.unfiltered_initial_step_guard.clone(),
+            })
+        }
         AnalyzedRegion::Contribution(contribution) => {
             let id = ContributionId::from(*next_contribution);
             *next_contribution += 1;
+            let executed = executed_sites.get(&contribution.site).copied();
+            let start = lowerer.expressions.len();
+            let expression = lowerer.lower_expr(&contribution.expression);
+            pair_authored(lowerer, correspondence, executed, start, expression.id);
             HirRegion::Contribution(HirContribution {
                 id,
                 branch: contribution.branch.clone(),
                 declared_branch: contribution.declared_branch.clone(),
                 kind: contribution_kind(contribution.indirect, contribution.is_current),
-                expression: lowerer.lower_expr(&contribution.expression),
+                expression,
                 expr_type: CanonicalValueType::from(contribution.expr_type),
                 span: SourceSpanRef::from(contribution.span),
             })
         }
         AnalyzedRegion::Conditional {
             condition,
+            condition_site,
             then_body,
             else_body,
             span,
         } => {
+            let executed = condition_site.and_then(|site| executed_sites.get(&site).copied());
+            let start = lowerer.expressions.len();
             let condition = lowerer.lower_expr(condition);
-            let then_body = lower_regions(lowerer, next_contribution, then_body);
-            let else_body = lower_regions(lowerer, next_contribution, else_body);
+            pair_authored(lowerer, correspondence, executed, start, condition.id);
+            let then_body = lower_regions(
+                lowerer,
+                next_contribution,
+                then_body,
+                executed_sites,
+                correspondence,
+            );
+            let else_body = lower_regions(
+                lowerer,
+                next_contribution,
+                else_body,
+                executed_sites,
+                correspondence,
+            );
             HirRegion::Conditional {
                 condition,
                 then_body,
@@ -2245,11 +2705,21 @@ fn lower_region(
         }
         AnalyzedRegion::Loop {
             condition,
+            site,
             body,
             span,
         } => {
+            let executed = executed_sites.get(site).copied();
+            let start = lowerer.expressions.len();
             let condition = lowerer.lower_expr(condition);
-            let body = lower_regions(lowerer, next_contribution, body);
+            pair_authored(lowerer, correspondence, executed, start, condition.id);
+            let body = lower_regions(
+                lowerer,
+                next_contribution,
+                body,
+                executed_sites,
+                correspondence,
+            );
             HirRegion::Loop {
                 condition,
                 body,
@@ -2259,14 +2729,39 @@ fn lower_region(
     }
 }
 
+/// Record the run pairing a just-lowered authored subtree with its executed twin.
+fn pair_authored(
+    lowerer: &HirLowerer,
+    correspondence: &mut CorrespondenceBuilder,
+    executed: Option<ExecutedSite>,
+    start: usize,
+    root: ExprId,
+) {
+    let Some(executed) = executed else { return };
+    let Some(authored) = executed.authored(&lowerer.expressions) else {
+        return;
+    };
+    correspondence.pair(&lowerer.expressions, start, root, authored);
+}
+
 fn lower_regions(
     lowerer: &mut HirLowerer,
     next_contribution: &mut usize,
     regions: &[AnalyzedRegion],
+    executed_sites: &HashMap<AnalogSiteId, ExecutedSite>,
+    correspondence: &mut CorrespondenceBuilder,
 ) -> Vec<HirRegion> {
     regions
         .iter()
-        .map(|region| lower_region(lowerer, next_contribution, region))
+        .map(|region| {
+            lower_region(
+                lowerer,
+                next_contribution,
+                region,
+                executed_sites,
+                correspondence,
+            )
+        })
         .collect()
 }
 

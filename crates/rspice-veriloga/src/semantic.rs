@@ -107,6 +107,13 @@ pub struct SemanticAnalyzer {
     function_side_effects: Vec<AssignmentStmt>,
     /// Counter for generating unique hoisted local names
     local_counter: usize,
+    /// Next [`AnalogSiteId`] to mint.
+    ///
+    /// One id names one analog-block step, and it is stamped on *both* the
+    /// structured region and the guard-folded statement the analyzer records
+    /// for that step, so canonical lowering can pair the two lowerings of the
+    /// module without reconstructing the correspondence.
+    next_analog_site: u32,
     /// Constant parameter default values (compile-time diagnostics only:
     /// instances may override parameters, so these must never influence
     /// generated code)
@@ -180,6 +187,7 @@ impl SemanticAnalyzer {
             subst_stack: Vec::new(),
             function_side_effects: Vec::new(),
             local_counter: 0,
+            next_analog_site: 0,
             param_consts: HashMap::new(),
             invariant_consts: HashMap::new(),
             inline_depth: 0,
@@ -284,6 +292,7 @@ impl SemanticAnalyzer {
                 self.subst_stack.clear();
                 self.function_side_effects.clear();
                 self.local_counter = 0;
+                self.next_analog_site = 0;
                 self.param_consts.clear();
                 self.invariant_consts.clear();
                 self.inline_depth = 0;
@@ -460,6 +469,7 @@ impl SemanticAnalyzer {
             contributions: Vec::new(),
             statements: Vec::new(),
             body: Vec::new(),
+            analog_site_count: 0,
             internal_nodes: Vec::new(),
             ground_nodes: Vec::new(),
             arrays: HashMap::new(),
@@ -1102,11 +1112,18 @@ impl SemanticAnalyzer {
             let expression =
                 self.lower_expression_with_side_effects(default, &mut analyzed, &mut statements)?;
             let expr_type = self.infer_type(&expression)?;
+            // Prologue statements run before the analog block and have no
+            // structured counterpart at all: the body starts at the `analog`
+            // keyword. They are still stamped, because a site names an
+            // executed step whether or not one of the two lowerings elides it.
+            let site = self.next_analog_site();
             statements.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
                 target: localparam.name.clone(),
                 var_index,
                 index: None,
                 expression,
+                site,
+                expression_guard: AnalogSiteGuard::None,
                 expr_type,
                 span: localparam.span,
                 unfiltered_initial_step_guard: None,
@@ -1165,11 +1182,14 @@ impl SemanticAnalyzer {
                             &mut statements,
                         )?;
                         let expr_type = self.infer_type(&expression)?;
+                        let site = self.next_analog_site();
                         statements.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
                             target: analyzed.variables[var_index].name.clone(),
                             var_index,
                             index: None,
                             expression,
+                            site,
+                            expression_guard: AnalogSiteGuard::None,
                             expr_type,
                             span: item.span,
                             unfiltered_initial_step_guard: None,
@@ -1186,11 +1206,14 @@ impl SemanticAnalyzer {
                 let expression =
                     self.lower_expression_with_side_effects(init, &mut analyzed, &mut statements)?;
                 let expr_type = self.infer_type(&expression)?;
+                let site = self.next_analog_site();
                 statements.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
                     target: item.name.clone(),
                     var_index,
                     index: None,
                     expression,
+                    site,
+                    expression_guard: AnalogSiteGuard::None,
                     expr_type,
                     span: item.span,
                     unfiltered_initial_step_guard: None,
@@ -1246,6 +1269,7 @@ impl SemanticAnalyzer {
 
         analyzed.statements = statements;
         analyzed.body = self.take_body();
+        analyzed.analog_site_count = self.next_analog_site;
 
         // Surface every recorded diagnostic instead of silently succeeding
         if !self.errors.is_empty() {
@@ -1441,6 +1465,40 @@ impl SemanticAnalyzer {
                 span,
             })
         }))
+    }
+
+    /// Mint the identity shared by one analog-block step's two recordings.
+    ///
+    /// Minted once per step and stamped on both copies, which is what makes the
+    /// correspondence a fact of construction rather than a reconstruction. The
+    /// counter is per module and is reset alongside `local_counter`.
+    fn next_analog_site(&mut self) -> AnalogSiteId {
+        let site = AnalogSiteId(self.next_analog_site);
+        self.next_analog_site = self
+            .next_analog_site
+            .checked_add(1)
+            .expect("analog site ordinal overflow");
+        site
+    }
+
+    /// The shape [`Self::apply_guard`] will fold around an expression here.
+    ///
+    /// Asked *before* the fold, because after it an unguarded `a ? b : c` and a
+    /// guarded one are indistinguishable.
+    fn active_site_guard(&self) -> AnalogSiteGuard {
+        match self.current_guard() {
+            Some(_) => AnalogSiteGuard::Select,
+            None => AnalogSiteGuard::None,
+        }
+    }
+
+    /// The shape [`Self::fold_guard_into_condition`] will fold around a loop
+    /// condition here.
+    fn active_condition_guard(&self) -> AnalogSiteGuard {
+        match self.current_guard() {
+            Some(_) => AnalogSiteGuard::Conjunction,
+            None => AnalogSiteGuard::None,
+        }
     }
 
     /// Record a step in the innermost open region.
@@ -2017,6 +2075,7 @@ impl SemanticAnalyzer {
                         if let Some(init) = &item.init {
                             let expression =
                                 self.lower_expression_with_side_effects(init, module, sink)?;
+                            let expression_guard = self.active_site_guard();
                             let expression =
                                 self.apply_guard(expression, Self::number_expr(0.0, item.span));
                             let expr_type = self.infer_type(&expression)?;
@@ -2025,11 +2084,17 @@ impl SemanticAnalyzer {
                                 .iter()
                                 .position(|v| v.name == hoisted)
                                 .expect("just registered");
+                            // Recorded but unpaired: a named block's local
+                            // initializer is emitted into the flat sink only,
+                            // never into a region.
+                            let site = self.next_analog_site();
                             sink.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
                                 target: hoisted.clone(),
                                 var_index,
                                 index: None,
                                 expression,
+                                site,
+                                expression_guard,
                                 expr_type,
                                 span: item.span,
                                 unfiltered_initial_step_guard: None,
@@ -2071,7 +2136,8 @@ impl SemanticAnalyzer {
                 // the snapshot variable's own assignment only ever went into the
                 // flat list.
                 let unsnapshotted = condition.clone();
-                let condition = self.snapshot_guard(condition, cond.span, module, sink)?;
+                let (condition, condition_site) =
+                    self.snapshot_guard_with_site(condition, cond.span, module, sink)?;
 
                 self.guard_stack.push(condition.clone());
                 self.open_region();
@@ -2104,6 +2170,7 @@ impl SemanticAnalyzer {
 
                 self.record_region(AnalyzedRegion::Conditional {
                     condition: unsnapshotted,
+                    condition_site,
                     then_body,
                     else_body,
                     span: cond.span,
@@ -2240,9 +2307,18 @@ impl SemanticAnalyzer {
                 }
 
                 // Fold innermost-first so arm order becomes else-nesting depth.
+                // A case arm's structured condition is `raw_selector == match`
+                // while its executed counterpart is `__guardN == match`: the two
+                // are different expressions, not two copies of one, so no site
+                // pairs them. Every state operator reachable from either lives
+                // in the selector or a match expression, each of which is
+                // snapshotted into its own paired statement — and
+                // `HirExecutedCorrespondence` refuses by name if one ever ends
+                // up outside a paired subtree.
                 for (condition, then_body) in arms.into_iter().rev() {
                     chain = vec![AnalyzedRegion::Conditional {
                         condition,
+                        condition_site: None,
                         then_body,
                         else_body: chain,
                         span: case_stmt.span,
@@ -2313,16 +2389,21 @@ impl SemanticAnalyzer {
                             // would only add a read of a snapshot variable that the
                             // region body never assigns.
                             let unguarded = condition.clone();
+                            let site = self.next_analog_site();
+                            let condition_guard = self.active_condition_guard();
                             let condition = self.fold_guard_into_condition(condition);
                             let (body, regions) =
                                 self.analyze_loop_body(&while_stmt.body, None, module)?;
                             self.record_region(AnalyzedRegion::Loop {
                                 condition: unguarded,
+                                site,
                                 body: regions,
                                 span: while_stmt.span,
                             });
                             sink.push(AnalyzedStatement::Loop(AnalyzedLoop {
                                 condition,
+                                site,
+                                condition_guard,
                                 body,
                                 span: while_stmt.span,
                             }));
@@ -2346,7 +2427,8 @@ impl SemanticAnalyzer {
                 // generated backends execute every event unconditionally.
                 let unsnapshotted = guard.clone();
                 // Snapshot: the body must not perturb its own guard.
-                let guard = self.snapshot_guard(guard, event_ctrl.span, module, sink)?;
+                let (guard, condition_site) =
+                    self.snapshot_guard_with_site(guard, event_ctrl.span, module, sink)?;
                 // The guard snapshot is an evaluation-local implementation
                 // detail, not event-controlled procedural state. Start the
                 // write set after it has been emitted so only the event body
@@ -2375,6 +2457,7 @@ impl SemanticAnalyzer {
                 self.guard_stack.pop();
                 self.record_region(AnalyzedRegion::Conditional {
                     condition: unsnapshotted,
+                    condition_site,
                     then_body,
                     else_body: Vec::new(),
                     span: event_ctrl.span,
@@ -2662,9 +2745,27 @@ impl SemanticAnalyzer {
         module: &mut AnalyzedModule,
         sink: &mut Vec<AnalyzedStatement>,
     ) -> CompileResult<Expression> {
+        Ok(self
+            .snapshot_guard_with_site(condition, span, module, sink)?
+            .0)
+    }
+
+    /// [`Self::snapshot_guard`], also reporting the site the snapshot statement
+    /// was stamped with.
+    ///
+    /// `None` means the condition passed through unsnapshotted, which happens
+    /// for exactly an identifier or a numeric literal — neither of which owns a
+    /// state record, so an unpaired condition is a leaf rather than a hole.
+    fn snapshot_guard_with_site(
+        &mut self,
+        condition: Expression,
+        span: Span,
+        module: &mut AnalyzedModule,
+        sink: &mut Vec<AnalyzedStatement>,
+    ) -> CompileResult<(Expression, Option<AnalogSiteId>)> {
         // Identifiers and literals are stable by construction
         if matches!(condition, Expression::Identifier(_) | Expression::Number(_)) {
-            return Ok(condition);
+            return Ok((condition, None));
         }
 
         self.local_counter += 1;
@@ -2688,17 +2789,23 @@ impl SemanticAnalyzer {
         // The snapshot assignment itself is unconditional: guard
         // expressions are pure, and enclosing guards already gate every
         // consumer of this variable.
+        let site = self.next_analog_site();
         sink.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
             target: name.clone(),
             var_index,
             index: None,
             expression: condition,
+            site,
+            expression_guard: AnalogSiteGuard::None,
             expr_type: ValueType::Real,
             span,
             unfiltered_initial_step_guard: None,
         }));
 
-        Ok(Expression::Identifier(Identifier { name, span }))
+        Ok((
+            Expression::Identifier(Identifier { name, span }),
+            Some(site),
+        ))
     }
 
     /// Add every variable slot that an event-controlled statement can write.
@@ -2819,6 +2926,8 @@ impl SemanticAnalyzer {
             );
         }
         let unguarded = condition.clone();
+        let site = self.next_analog_site();
+        let condition_guard = self.active_condition_guard();
         let condition = self.fold_guard_into_condition(condition);
 
         // Body, then the update assignment, inside the loop sink
@@ -2827,11 +2936,14 @@ impl SemanticAnalyzer {
 
         self.record_region(AnalyzedRegion::Loop {
             condition: unguarded,
+            site,
             body: regions,
             span: for_stmt.span,
         });
         sink.push(AnalyzedStatement::Loop(AnalyzedLoop {
             condition,
+            site,
+            condition_guard,
             body,
             span: for_stmt.span,
         }));
@@ -2882,20 +2994,26 @@ impl SemanticAnalyzer {
         };
 
         // cnt = <count>; idx = 0;
+        let count_site = self.next_analog_site();
         sink.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
             target: cnt_name.clone(),
             var_index: cnt_index,
             index: None,
             expression: count_expr,
+            site: count_site,
+            expression_guard: AnalogSiteGuard::None,
             expr_type: ValueType::Real,
             span,
             unfiltered_initial_step_guard: None,
         }));
+        let index_site = self.next_analog_site();
         sink.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
             target: idx_name.clone(),
             var_index: idx_index,
             index: None,
             expression: Self::number_expr(0.0, span),
+            site: index_site,
+            expression_guard: AnalogSiteGuard::None,
             expr_type: ValueType::Real,
             span,
             unfiltered_initial_step_guard: None,
@@ -2903,11 +3021,15 @@ impl SemanticAnalyzer {
 
         // while (guard && idx < cnt) { body; idx = idx + 1; }
         let unguarded = Self::binary_expr(BinaryOp::Lt, ident(&idx_name), ident(&cnt_name));
+        let loop_site = self.next_analog_site();
+        let condition_guard = self.active_condition_guard();
         let condition = self.fold_guard_into_condition(unguarded.clone());
 
         let (mut body, mut regions) = self.analyze_loop_body(&repeat.body, None, module)?;
         // The synthesized counter bump closes the loop in both forms; a
         // structured body without it would describe a loop that never advances.
+        // One struct, cloned: the site travels with it, so the two copies of
+        // the counter bump are paired without a second stamp.
         let increment = AnalyzedAssignment {
             target: idx_name.clone(),
             var_index: idx_index,
@@ -2917,6 +3039,8 @@ impl SemanticAnalyzer {
                 ident(&idx_name),
                 Self::number_expr(1.0, span),
             ),
+            site: self.next_analog_site(),
+            expression_guard: AnalogSiteGuard::None,
             expr_type: ValueType::Real,
             span,
             unfiltered_initial_step_guard: None,
@@ -2926,11 +3050,14 @@ impl SemanticAnalyzer {
 
         self.record_region(AnalyzedRegion::Loop {
             condition: unguarded,
+            site: loop_site,
             body: regions,
             span,
         });
         sink.push(AnalyzedStatement::Loop(AnalyzedLoop {
             condition,
+            site: loop_site,
+            condition_guard,
             body,
             span,
         }));
@@ -3215,12 +3342,16 @@ impl SemanticAnalyzer {
             );
         }
 
+        let site = self.next_analog_site();
+        let expression_guard = self.active_site_guard();
         self.record_region(AnalyzedRegion::Contribution(AnalyzedContribution {
             branch: branch_name.clone(),
             declared_branch: declared_branch.clone(),
             is_current,
             indirect: false,
             expression: expression.clone(),
+            site,
+            expression_guard,
             expr_type,
             span: contrib.span,
         }));
@@ -3233,6 +3364,8 @@ impl SemanticAnalyzer {
             is_current,
             indirect: false,
             expression,
+            site,
+            expression_guard,
             expr_type,
             span: contrib.span,
         });
@@ -3560,12 +3693,16 @@ impl SemanticAnalyzer {
                 span: *span,
             },
         });
+        let site = self.next_analog_site();
+        let expression_guard = self.active_site_guard();
         self.record_region(AnalyzedRegion::Contribution(AnalyzedContribution {
             branch: branch_name.clone(),
             declared_branch: declared_branch.clone(),
             is_current,
             indirect: true,
             expression: residual.clone(),
+            site,
+            expression_guard,
             expr_type: ValueType::Real,
             span: stmt.span,
         }));
@@ -3577,6 +3714,8 @@ impl SemanticAnalyzer {
             is_current,
             indirect: true,
             expression,
+            site,
+            expression_guard,
             expr_type: ValueType::Real,
             span: stmt.span,
         });
@@ -3615,12 +3754,15 @@ impl SemanticAnalyzer {
             args: vec![current.clone(), bound],
             span: call.span,
         });
+        let expression_guard = self.active_site_guard();
         let expression = self.apply_guard(min, current);
         sink.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
             target: "$bound_step".into(),
             var_index,
             index: None,
             expression,
+            site: self.next_analog_site(),
+            expression_guard,
             expr_type: ValueType::Real,
             span: call.span,
             unfiltered_initial_step_guard: None,
@@ -3657,12 +3799,15 @@ impl SemanticAnalyzer {
             name: "$discontinuity".into(),
             span: call.span,
         });
+        let expression_guard = self.active_site_guard();
         let expression = self.apply_guard(Self::number_expr(1.0, call.span), current);
         sink.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
             target: "$discontinuity".into(),
             var_index,
             index: None,
             expression,
+            site: self.next_analog_site(),
+            expression_guard,
             expr_type: ValueType::Real,
             span: call.span,
             unfiltered_initial_step_guard: None,
@@ -3699,6 +3844,8 @@ impl SemanticAnalyzer {
             var_index,
             index: None,
             expression: Self::number_expr(reset, span),
+            site: self.next_analog_site(),
+            expression_guard: AnalogSiteGuard::None,
             expr_type: ValueType::Real,
             span,
             unfiltered_initial_step_guard: None,
@@ -3980,11 +4127,15 @@ impl SemanticAnalyzer {
         });
         // Structured form first: it needs the expression as written, and the
         // next line is where that stops being available.
+        let site = self.next_analog_site();
+        let expression_guard = self.active_site_guard();
         self.record_region(AnalyzedRegion::Assignment(AnalyzedAssignment {
             target: target_name.clone(),
             var_index,
             index: None,
             expression: expression.clone(),
+            site,
+            expression_guard,
             expr_type: value_type,
             span,
             unfiltered_initial_step_guard: self.unfiltered_initial_step_guards.last().cloned(),
@@ -3997,6 +4148,8 @@ impl SemanticAnalyzer {
             var_index,
             index: None,
             expression,
+            site,
+            expression_guard,
             expr_type: value_type,
             span,
             unfiltered_initial_step_guard: self.unfiltered_initial_step_guards.last().cloned(),
@@ -4023,11 +4176,15 @@ impl SemanticAnalyzer {
             index: Box::new(index.clone()),
             span,
         });
+        let site = self.next_analog_site();
+        let expression_guard = self.active_site_guard();
         self.record_region(AnalyzedRegion::Assignment(AnalyzedAssignment {
             target: array_name.clone(),
             var_index: layout.base,
             index: Some(index.clone()),
             expression: expression.clone(),
+            site,
+            expression_guard,
             expr_type: value_type,
             span,
             unfiltered_initial_step_guard: None,
@@ -4038,6 +4195,8 @@ impl SemanticAnalyzer {
             var_index: layout.base,
             index: Some(index),
             expression,
+            site,
+            expression_guard,
             expr_type: value_type,
             span,
             unfiltered_initial_step_guard: None,

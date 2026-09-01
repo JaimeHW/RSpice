@@ -7,10 +7,10 @@
 //! nodes, and equations.
 
 use super::{
-    AnalyzedArray, AnalyzedAssignment, AnalyzedBranch, AnalyzedContribution, AnalyzedFile,
-    AnalyzedInternalNode, AnalyzedLoop, AnalyzedModule, AnalyzedParameter, AnalyzedRegion,
-    AnalyzedStatement, ConstantValue, MAX_PARAMETER_ARRAY_ELEMENTS, MAX_PARAMETER_ARRAY_RANK,
-    SemanticAnalyzer,
+    AnalogSiteId, AnalyzedArray, AnalyzedAssignment, AnalyzedBranch, AnalyzedContribution,
+    AnalyzedFile, AnalyzedInternalNode, AnalyzedLoop, AnalyzedModule, AnalyzedParameter,
+    AnalyzedRegion, AnalyzedStatement, ConstantValue, MAX_PARAMETER_ARRAY_ELEMENTS,
+    MAX_PARAMETER_ARRAY_RANK, SemanticAnalyzer,
 };
 use crate::ast::{
     AnalogOperator, ArrayAccessExpr, ArrayLiteralElement, ArrayLiteralExpr, BinaryExpr,
@@ -507,25 +507,36 @@ impl<'a> HierarchyElaborator<'a> {
             });
         }
 
+        // One base for both spaces, taken before anything is appended, so the
+        // two lowerings of an inlined instance keep naming each other.
+        let base = InstanceBase {
+            variables: variable_base,
+            sites: self.flattened.analog_site_count,
+        };
+        self.flattened.analog_site_count = self
+            .flattened
+            .analog_site_count
+            .checked_add(child.analog_site_count)
+            .ok_or_else(|| internal_error("hierarchy analog site count overflow".to_string()))?;
         self.flattened.statements.extend(
             child
                 .statements
                 .iter()
-                .map(|statement| rewrite_statement(statement, &scope, variable_base))
+                .map(|statement| rewrite_statement(statement, &scope, base))
                 .collect::<CompileResult<Vec<_>>>()?,
         );
         self.flattened.body.extend(
             child
                 .body
                 .iter()
-                .map(|region| rewrite_region(region, &scope, variable_base))
+                .map(|region| rewrite_region(region, &scope, base))
                 .collect::<CompileResult<Vec<_>>>()?,
         );
         self.flattened.contributions.extend(
             child
                 .contributions
                 .iter()
-                .map(|contribution| rewrite_contribution(contribution, &scope))
+                .map(|contribution| rewrite_contribution(contribution, &scope, base))
                 .collect::<CompileResult<Vec<_>>>()?,
         );
         module_stack.push(instance.module.clone());
@@ -984,21 +995,43 @@ fn resolve_connection(
     Ok(binding)
 }
 
+/// Where one child's ids land in the flattened parent.
+///
+/// Both bases have to travel together: an inlined instance's variables and its
+/// analog sites are each renumbered onto the parent's spaces, and rebasing one
+/// without the other would leave a site pointing at another instance's copy.
+#[derive(Debug, Clone, Copy)]
+struct InstanceBase {
+    variables: usize,
+    sites: u32,
+}
+
+impl InstanceBase {
+    fn site(self, site: AnalogSiteId) -> CompileResult<AnalogSiteId> {
+        self.sites
+            .checked_add(site.0)
+            .map(AnalogSiteId)
+            .ok_or_else(|| internal_error("hierarchy analog site index overflow".to_string()))
+    }
+}
+
 fn rewrite_statement(
     statement: &AnalyzedStatement,
     scope: &ScopeMap,
-    variable_base: usize,
+    base: InstanceBase,
 ) -> CompileResult<AnalyzedStatement> {
     Ok(match statement {
         AnalyzedStatement::Assignment(assignment) => {
-            AnalyzedStatement::Assignment(rewrite_assignment(assignment, scope, variable_base)?)
+            AnalyzedStatement::Assignment(rewrite_assignment(assignment, scope, base)?)
         }
         AnalyzedStatement::Loop(loop_) => AnalyzedStatement::Loop(AnalyzedLoop {
             condition: rewrite_expression(&loop_.condition, scope)?,
+            site: base.site(loop_.site)?,
+            condition_guard: loop_.condition_guard,
             body: loop_
                 .body
                 .iter()
-                .map(|statement| rewrite_statement(statement, scope, variable_base))
+                .map(|statement| rewrite_statement(statement, scope, base))
                 .collect::<CompileResult<Vec<_>>>()?,
             span: loop_.span,
         }),
@@ -1008,41 +1041,45 @@ fn rewrite_statement(
 fn rewrite_region(
     region: &AnalyzedRegion,
     scope: &ScopeMap,
-    variable_base: usize,
+    base: InstanceBase,
 ) -> CompileResult<AnalyzedRegion> {
     Ok(match region {
         AnalyzedRegion::Assignment(assignment) => {
-            AnalyzedRegion::Assignment(rewrite_assignment(assignment, scope, variable_base)?)
+            AnalyzedRegion::Assignment(rewrite_assignment(assignment, scope, base)?)
         }
         AnalyzedRegion::Contribution(contribution) => {
-            AnalyzedRegion::Contribution(rewrite_contribution(contribution, scope)?)
+            AnalyzedRegion::Contribution(rewrite_contribution(contribution, scope, base)?)
         }
         AnalyzedRegion::Conditional {
             condition,
+            condition_site,
             then_body,
             else_body,
             span,
         } => AnalyzedRegion::Conditional {
             condition: rewrite_expression(condition, scope)?,
+            condition_site: condition_site.map(|site| base.site(site)).transpose()?,
             then_body: then_body
                 .iter()
-                .map(|region| rewrite_region(region, scope, variable_base))
+                .map(|region| rewrite_region(region, scope, base))
                 .collect::<CompileResult<Vec<_>>>()?,
             else_body: else_body
                 .iter()
-                .map(|region| rewrite_region(region, scope, variable_base))
+                .map(|region| rewrite_region(region, scope, base))
                 .collect::<CompileResult<Vec<_>>>()?,
             span: *span,
         },
         AnalyzedRegion::Loop {
             condition,
+            site,
             body,
             span,
         } => AnalyzedRegion::Loop {
             condition: rewrite_expression(condition, scope)?,
+            site: base.site(*site)?,
             body: body
                 .iter()
-                .map(|region| rewrite_region(region, scope, variable_base))
+                .map(|region| rewrite_region(region, scope, base))
                 .collect::<CompileResult<Vec<_>>>()?,
             span: *span,
         },
@@ -1052,8 +1089,9 @@ fn rewrite_region(
 fn rewrite_assignment(
     assignment: &AnalyzedAssignment,
     scope: &ScopeMap,
-    variable_base: usize,
+    base: InstanceBase,
 ) -> CompileResult<AnalyzedAssignment> {
+    let variable_base = base.variables;
     let target = scope
         .variables
         .get(&assignment.target)
@@ -1071,6 +1109,8 @@ fn rewrite_assignment(
             .map(|expression| rewrite_expression(expression, scope))
             .transpose()?,
         expression: rewrite_expression(&assignment.expression, scope)?,
+        site: base.site(assignment.site)?,
+        expression_guard: assignment.expression_guard,
         expr_type: assignment.expr_type,
         span: assignment.span,
         unfiltered_initial_step_guard: assignment.unfiltered_initial_step_guard.as_ref().map(
@@ -1088,6 +1128,7 @@ fn rewrite_assignment(
 fn rewrite_contribution(
     contribution: &AnalyzedContribution,
     scope: &ScopeMap,
+    base: InstanceBase,
 ) -> CompileResult<AnalyzedContribution> {
     let mut endpoints = contribution.branch.split(',');
     let pos = endpoints.next().unwrap_or_default();
@@ -1122,6 +1163,8 @@ fn rewrite_contribution(
         is_current: contribution.is_current,
         indirect: contribution.indirect,
         expression: rewrite_expression(&contribution.expression, scope)?,
+        site: base.site(contribution.site)?,
+        expression_guard: contribution.expression_guard,
         expr_type: contribution.expr_type,
         span: contribution.span,
     })

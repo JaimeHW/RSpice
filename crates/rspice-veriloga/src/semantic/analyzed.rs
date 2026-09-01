@@ -90,6 +90,12 @@ pub struct AnalyzedModule {
     /// the CFG level consumes. The flat list goes away with the last of those
     /// consumers.
     pub body: Vec<AnalyzedRegion>,
+    /// How many [`AnalogSiteId`]s this module has minted.
+    ///
+    /// Every id in the module is below it, which is what lets hierarchy
+    /// elaboration rebase a child's sites onto the flattened parent the same
+    /// way it rebases variable indices.
+    pub analog_site_count: u32,
     pub internal_nodes: Vec<AnalyzedInternalNode>,
     /// Names of nets declared `ground` (they map to the global reference)
     pub ground_nodes: Vec<SmolStr>,
@@ -105,6 +111,49 @@ pub struct AnalyzedModule {
     pub digital: AnalyzedDigital,
 }
 
+/// Identity of one analog-block site that *both* lowerings of the module
+/// describe.
+///
+/// The analyzer emits every guarded step twice: once into [`AnalyzedModule::body`]
+/// as the author wrote it, and once into [`AnalyzedModule::statements`] /
+/// [`AnalyzedModule::contributions`] with the enclosing guard folded in. The two
+/// copies are literally clones of one expression at the moment the guard is
+/// applied, so the analyzer is the only level that can state their
+/// correspondence without reconstructing it — and it states it by stamping one
+/// id on both copies as they are built.
+///
+/// Canonical lowering turns that into
+/// [`crate::canonical_ir::HirExecutedCorrespondence`], which is what lets a
+/// CFG-sourced backend name the state record an operator owns: the CFG carries
+/// body-copy expression ids, and the runtime's state arrays are numbered in the
+/// executed copy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct AnalogSiteId(pub u32);
+
+impl std::fmt::Display for AnalogSiteId {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "AnalogSiteId({})", self.0)
+    }
+}
+
+/// How the executed copy of a site wraps the copy the author wrote.
+///
+/// The analyzer applies exactly one of these shapes when it folds a guard, so
+/// naming the shape is enough for canonical lowering to walk from the executed
+/// root back down to the expression the structured body holds. Recording it is
+/// not an optimisation over inspecting the lowered tree: an *unguarded* `a ? b
+/// : c` assignment and a *guarded* one are the same shape, and only the
+/// analyzer knows which it built.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnalogSiteGuard {
+    /// No guard was active: the executed copy is the authored expression.
+    None,
+    /// `guard ? authored : fallback` — the authored copy is the then-arm.
+    Select,
+    /// `guard && authored` — the authored copy is the right operand.
+    Conjunction,
+}
+
 /// One step of the analog block, with control flow intact.
 ///
 /// The expressions here are *unguarded*: an assignment inside an `if` carries
@@ -118,6 +167,14 @@ pub enum AnalyzedRegion {
     Contribution(AnalyzedContribution),
     Conditional {
         condition: Expression,
+        /// The site of the `__guardN` snapshot assignment holding this
+        /// condition's executed copy, when one was materialised.
+        ///
+        /// `None` when [`super::SemanticAnalyzer::snapshot_guard`] passed the
+        /// condition through — which it does exactly for an identifier or a
+        /// numeric literal, neither of which can own a state record. So an
+        /// unpaired condition is not a hole in the correspondence: it is a leaf.
+        condition_site: Option<AnalogSiteId>,
         then_body: Vec<AnalyzedRegion>,
         else_body: Vec<AnalyzedRegion>,
         span: Span,
@@ -128,6 +185,8 @@ pub enum AnalyzedRegion {
     /// are for the flat list.
     Loop {
         condition: Expression,
+        /// The flat [`AnalyzedLoop`] this region was recorded beside.
+        site: AnalogSiteId,
         body: Vec<AnalyzedRegion>,
         span: Span,
     },
@@ -161,6 +220,10 @@ pub struct AnalyzedLoop {
     /// Loop continues while this evaluates nonzero (any enclosing guard
     /// is folded in, so a guarded loop runs zero iterations when inactive)
     pub condition: Expression,
+    /// Identity shared with the [`AnalyzedRegion::Loop`] recorded for the same
+    /// source loop, and the shape by which `condition` wraps that region's.
+    pub site: AnalogSiteId,
+    pub condition_guard: AnalogSiteGuard,
     /// Loop body (assignments and nested loops)
     pub body: Vec<AnalyzedStatement>,
     /// Source span
@@ -284,6 +347,11 @@ pub struct AnalyzedContribution {
     /// zero
     pub indirect: bool,
     pub expression: Expression,
+    /// Identity shared with the [`AnalyzedRegion::Contribution`] recorded for
+    /// the same `<+`, and the shape by which this copy's `expression` wraps
+    /// that region's.
+    pub site: AnalogSiteId,
+    pub expression_guard: AnalogSiteGuard,
     pub expr_type: ValueType,
     pub span: Span,
 }
@@ -302,6 +370,16 @@ pub struct AnalyzedAssignment {
     pub index: Option<Expression>,
     /// The expression being assigned
     pub expression: Expression,
+    /// Identity shared with the [`AnalyzedRegion::Assignment`] recorded for the
+    /// same source assignment, and the shape by which this copy's `expression`
+    /// wraps that region's.
+    ///
+    /// A statement with no region counterpart — a `__guard` snapshot, a
+    /// synthesized `repeat` counter — still carries a site, because it is the
+    /// executed half of a pair whose other half may be a region *condition*
+    /// rather than a region assignment.
+    pub site: AnalogSiteId,
+    pub expression_guard: AnalogSiteGuard,
     /// Type of the expression
     pub expr_type: ValueType,
     /// Source span

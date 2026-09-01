@@ -169,7 +169,18 @@ use super::*;
 // Nothing cached is reinterpreted — every construct involved was refused under
 // 36, so no version-36 record contains one — but a cached artifact no longer
 // stands for the same compile, and the fail-closed reading is to rebuild.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 37;
+//
+// Version 38 follows the canonical IR's own schema from 12 to 13. The HIR now
+// carries `HirExecutedCorrespondence`: which executed expression each
+// structured-body expression is a second lowering of, which is what lets a
+// CFG-sourced backend name the state record an operator owns. A version-37
+// record predates the map and would deserialize with an empty one, and an empty
+// correspondence is not "no operators" — it is "every operator unmapped", which
+// a CFG-sourced consumer must refuse. Rebuilding is both the fail-closed and the
+// only useful reading. `CANONICAL_IR_SCHEMA_VERSION` would refuse such a record
+// on its own; this constant moves with it so the refusal happens at the cache
+// boundary, where the diagnostic names the cache file.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 38;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
