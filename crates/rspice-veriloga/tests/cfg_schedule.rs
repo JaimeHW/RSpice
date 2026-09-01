@@ -461,6 +461,10 @@ fn inputs(staged: &[f64]) -> CfgEvalInputs<f64> {
     CfgEvalInputs {
         parameters: vec![1.0e-6, 0.4, 300.15, 250.0, 1.0e-14, 2.0],
         parameter_given: vec![false; 6],
+        // Connected, like every fixture's terminals here — at the CFG level
+        // `$port_connected` folds to a constant one — and sized past the widest
+        // of them, the way the fixed vectors around it are.
+        port_connected: vec![true; 4],
         event_state: Vec::new(),
         event_controls: HashMap::new(),
         node_potentials: vec![0.41, 0.28, 0.15, 0.07],

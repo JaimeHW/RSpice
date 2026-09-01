@@ -172,6 +172,10 @@ endmodule
 #[derive(Clone)]
 struct Bias {
     parameters: Vec<f64>,
+    /// One flag per declared port, all connected — the CFG level's own
+    /// convention, where `$port_connected` folds to a constant one. A shorter
+    /// vector would read as *unconnected*, which no drawn module means.
+    port_connected: Vec<bool>,
     node_potentials: Vec<f64>,
     branch_unknown_flows: Vec<f64>,
 }
@@ -184,6 +188,7 @@ fn bias(artifact: &CanonicalIrArtifact, rng: &mut Rng) -> Bias {
             .iter()
             .map(|parameter| parameter.default.unwrap_or(0.0))
             .collect(),
+        port_connected: vec![true; artifact.hir.ports.len()],
         node_potentials: (0..artifact.mir.nodes.len())
             .map(|_| BIAS * (2.0 * rng.unit() - 1.0))
             .collect(),
@@ -197,6 +202,7 @@ fn inputs<S: CfgScalar>(bias: &Bias, promote: impl Fn(f64) -> S) -> CfgEvalInput
     CfgEvalInputs {
         parameters: bias.parameters.iter().copied().map(&promote).collect(),
         parameter_given: vec![false; bias.parameters.len()],
+        port_connected: bias.port_connected.clone(),
         event_state: Vec::new(),
         event_controls: HashMap::new(),
         node_potentials: bias.node_potentials.iter().copied().map(&promote).collect(),
@@ -234,7 +240,13 @@ fn complex_step(function: &CfgFunction, bias: &Bias, seed: AdSeed, residual: Val
             evaluated.branch_unknown_flows[usize::from(unknown)] =
                 ComplexStep::new(bias.branch_unknown_flows[usize::from(unknown)], STEP);
         }
-        AdSeed::LimiterCorrection => return 0.0,
+        // Neither is an input this interpreter exposes. The limiter correction
+        // is a displacement rather than an unknown, and a noise process
+        // evaluates as a constant zero — it is the fluctuation about the
+        // operating point, not part of it — so no imaginary step can move
+        // either. The lanes drawn above hold node potentials only, so neither
+        // arm is reached; keeping the helper total is what a fuzz loop wants.
+        AdSeed::LimiterCorrection | AdSeed::NoiseProcess(_) => return 0.0,
     }
     evaluate_cfg(function, &evaluated)
         .ok()

@@ -877,6 +877,10 @@ endmodule
 /// is not symmetric: equal potentials would hide a sign error in a difference.
 struct BiasPoint {
     parameters: Vec<f64>,
+    /// One flag per declared port, all connected — the CFG level's own
+    /// convention, where `$port_connected` folds to a constant one. A shorter
+    /// vector would read as *unconnected*, which no fixture here means.
+    port_connected: Vec<bool>,
     node_potentials: Vec<f64>,
     branch_flows: Vec<f64>,
 }
@@ -901,6 +905,7 @@ fn bias_point(artifact: &CanonicalIrArtifact) -> BiasPoint {
         .collect();
     BiasPoint {
         parameters,
+        port_connected: vec![true; artifact.hir.ports.len()],
         node_potentials,
         branch_flows,
     }
@@ -910,6 +915,7 @@ fn cfg_inputs(bias: &BiasPoint) -> CfgEvalInputs<f64> {
     CfgEvalInputs {
         parameters: bias.parameters.clone(),
         parameter_given: vec![false; bias.parameters.len()],
+        port_connected: bias.port_connected.clone(),
         event_state: Vec::new(),
         event_controls: HashMap::new(),
         node_potentials: bias.node_potentials.clone(),
