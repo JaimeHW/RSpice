@@ -1349,6 +1349,12 @@ impl NativeModel {
         self.image.len()
     }
 
+    /// The published image, for digesting a compiled model's machine code.
+    #[cfg(test)]
+    pub(crate) fn image_bytes(&self) -> &[u8] {
+        self.image.as_bytes()
+    }
+
     pub fn plan_stats(&self) -> PlanStats {
         self.stats
     }

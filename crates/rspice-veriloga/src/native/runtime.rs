@@ -460,6 +460,15 @@ impl ExecutableMemory {
         self.len == 0
     }
 
+    /// The published image as bytes, for digesting a compiled model.
+    #[cfg(test)]
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        // Safety: the allocation is `len` bytes long and lives as long as
+        // `self`; publication has already made it read-execute, and reading
+        // executable memory is defined.
+        unsafe { std::slice::from_raw_parts(self.ptr.as_ptr(), self.len) }
+    }
+
     pub(crate) fn ptr_at(&self, offset: usize) -> JitResult<*const u8> {
         if offset >= self.len {
             return Err(JitError::ExecutableMemory {

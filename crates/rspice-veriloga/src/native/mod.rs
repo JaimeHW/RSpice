@@ -6,6 +6,8 @@
 pub(crate) mod aarch64;
 mod abi;
 pub mod bench;
+#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
+mod code_identity;
 mod model;
 mod runtime;
 mod target;
