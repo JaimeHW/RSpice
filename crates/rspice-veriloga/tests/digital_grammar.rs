@@ -1978,3 +1978,126 @@ fn a_gate_drive_strength_is_refused_by_name() {
     );
     assert!(error.contains("strength"), "{error}");
 }
+
+// ===========================================================================
+// Who owns a module-level `real`
+// ===========================================================================
+//
+// The rule is stated in full in the `digital_lower` module documentation.
+// These pin its three answers, because the interesting one — the refusal — is
+// the only thing standing between a mixed-signal module and two owners for one
+// variable.
+
+/// A `real` a process writes, in a module with no analog block, moves.
+///
+/// This is the whole point of the rule: `state` becomes a discrete-domain
+/// variable of the plan, which is what lets the canonical filter idiom hold its
+/// state across a clock edge.
+#[test]
+fn a_module_level_real_a_process_writes_becomes_a_digital_variable() {
+    let plan = VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir(
+            "module f(clk, vin, vout);\n\
+             \x20   input clk;\n\
+             \x20   input wreal vin;\n\
+             \x20   output wreal vout;\n\
+             \x20   real state;\n\
+             \x20   always @(posedge clk) state <= state + (vin - state) * 0.25;\n\
+             \x20   assign vout = state;\n\
+             endmodule\n",
+        )
+        .expect("a module with no analog block may own a real in the discrete domain")
+        .digital;
+    let state = plan
+        .signals
+        .iter()
+        .find(|signal| signal.name == "state")
+        .expect("`state` is a discrete-domain signal now");
+    assert!(state.kind.is_real(), "it carries a real");
+    assert_eq!(state.width, 0, "and therefore no bits");
+    assert!(
+        state.procedurally_assignable,
+        "it is a variable, so section 6.2 lets a process write it"
+    );
+    assert_eq!(
+        plan.drivers_of(state.id).count(),
+        0,
+        "a variable has no drivers; the write goes straight into the store"
+    );
+}
+
+/// The same `real`, in a module that also has an analog block, is refused.
+///
+/// Two owners for one variable, advancing on different clocks. The message has
+/// to name the variable and say what to do instead, because the author's model
+/// is almost right and the fix is a line.
+#[test]
+fn a_module_level_real_written_by_both_domains_is_refused_by_name() {
+    let error = analyze_error(&digital_module(
+        "    wire clk;\n\
+     \x20   always @(posedge clk) gain = gain + 1.0;",
+    ));
+    assert!(
+        error.contains("`gain`")
+            && error.contains("analog block")
+            && error.contains("declare it inside the process"),
+        "the refusal must name the variable and the fix, got {error:?}"
+    );
+}
+
+/// A `real` no process writes is not touched at all.
+///
+/// The half of the rule that keeps every shipped analog model compiling exactly
+/// as it did: reading one from a process is still the old refusal, and the
+/// variable stays the continuous body's.
+#[test]
+fn a_module_level_real_no_process_writes_stays_in_the_analog_domain() {
+    let error = VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir(&digital_module(
+            "    wire clk;\n\
+         \x20   reg q;\n\
+         \x20   always @(posedge clk) q = (gain > 1.0);",
+        ))
+        .expect_err("reading an analog variable from a process is still refused")
+        .to_string();
+    assert!(
+        error.contains("real expression has no conversion") || error.contains("`gain`"),
+        "the read is refused rather than silently rehoused, got {error:?}"
+    );
+}
+
+/// `input real` is refused: only an output port may be a variable.
+#[test]
+fn an_input_real_port_is_refused() {
+    let error = VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir_module(
+            "module child(vin);\n\
+             \x20   input real vin;\n\
+             endmodule\n\
+             module top(vin);\n\
+             \x20   input wreal vin;\n\
+             \x20   child u1(vin);\n\
+             endmodule\n",
+            Some("top"),
+        )
+        .expect_err("an input port cannot be a variable")
+        .to_string();
+    assert!(
+        error.contains("only an output port be a variable"),
+        "expected section 12.3.3's rule, got {error:?}"
+    );
+}
+
+/// A packed range on a `real` is refused rather than read as a width.
+#[test]
+fn a_range_on_a_real_port_is_refused() {
+    let error = analyze_error(
+        "module f(vout);\n\
+         \x20   output real [3:0] vout;\n\
+         endmodule\n",
+    );
+    assert!(
+        error.contains("no bit width"),
+        "expected section 3.9's rule, got {error:?}"
+    );
+}
