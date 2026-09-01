@@ -712,6 +712,152 @@ endmodule
     }
 }
 
+/// Every stateful analog operator the executable backends run is representable
+/// here, and each names the operator its state slot is keyed by.
+///
+/// The point is the *keying*, not the mere presence of a node. `native/expr.rs`
+/// resolves each of these to a slot through `canonical_absdelay_slot`,
+/// `canonical_slew_slot`, `canonical_idtmod_slot` and `canonical_cross_slot`,
+/// all of which take the operator's own expression id. A canonical node keyed
+/// by anything else — its argument, its position — would name a slot no backend
+/// allocated, which is the defect this pins against.
+#[test]
+fn every_stateful_analog_operator_lowers_keyed_by_its_own_call() {
+    let artifact = artifact(
+        r#"
+module stateful_operators(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real tr = 1.0e-9;
+    real delayed, wrapped, limited, crossed;
+    analog begin
+        delayed = absdelay(V(p, n), tr);
+        wrapped = idtmod(V(p, n), 0.0, 1.0, -0.5);
+        limited = slew(V(p, n), 1.0e6, -2.0e6);
+        crossed = last_crossing(V(p, n) - 0.5, 1);
+        I(p, n) <+ 1.0e-3 * (delayed + wrapped + limited + crossed);
+    end
+endmodule
+"#,
+    );
+    let model = CfgModel::from_hir(&artifact.hir, &artifact.mir)
+        .unwrap_or_else(|diagnostics| panic!("{}", render(&diagnostics)));
+
+    let mut absdelay = None;
+    let mut idtmod = None;
+    let mut slew = None;
+    let mut last_crossing = None;
+    for value in &model.function.values {
+        match value.kind {
+            CfgValueKind::AbsDelay { operator, .. } => absdelay = Some(operator),
+            CfgValueKind::IdtMod { operator, .. } => idtmod = Some(operator),
+            CfgValueKind::Slew { operator, .. } => slew = Some(operator),
+            CfgValueKind::LastCrossing { operator, .. } => last_crossing = Some(operator),
+            _ => {}
+        }
+    }
+
+    let operators = [
+        ("absdelay", absdelay),
+        ("idtmod", idtmod),
+        ("slew", slew),
+        ("last_crossing", last_crossing),
+    ];
+    for (name, operator) in operators {
+        let operator = operator.unwrap_or_else(|| panic!("{name} must lower to its own CFG kind"));
+        let expression = artifact
+            .hir
+            .expressions
+            .get(usize::from(operator))
+            .unwrap_or_else(|| panic!("{name} must name an expression in the HIR arena"));
+        let spelled = match &expression.kind {
+            rspice_veriloga::canonical_ir::HirExprKind::Call { name, .. } => name.to_string(),
+            other => panic!("{name} must be keyed by its call, found {other:?}"),
+        };
+        assert_eq!(
+            spelled.to_ascii_lowercase(),
+            name,
+            "{name} is keyed by the wrong expression"
+        );
+    }
+}
+
+/// The stateless spelling stays stateless.
+///
+/// `slew(x)` with no rates is an exact passthrough by the LRM, and a model that
+/// writes it must not acquire a filter slot it never asked for — which is
+/// exactly what would happen if the rate-limited lowering swallowed both forms.
+#[test]
+fn slew_without_rates_stays_a_passthrough_rather_than_claiming_a_filter() {
+    let model = lower(
+        r#"
+module unrated_slew(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ 1.0e-3 * slew(V(p, n));
+endmodule
+"#,
+    );
+    assert!(
+        !model
+            .function
+            .values
+            .iter()
+            .any(|value| matches!(value.kind, CfgValueKind::Slew { .. })),
+        "an unrated slew must not claim a filter slot"
+    );
+}
+
+/// The analog `integer` operators, which used to be refused as unknown binary
+/// and unary operator spellings.
+///
+/// Their result stays [`CfgValueType::Real`]: the analog half carries `integer`
+/// in an `f64` and that ABI is frozen. What the node adds is the operation.
+#[test]
+fn analog_integer_bitwise_operators_lower_to_their_own_kinds() {
+    let model = lower(
+        r#"
+module integer_bitwise(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer mask = 12;
+    parameter integer shift = 2;
+    integer combined;
+    analog begin
+        combined = ((mask & 6) | (mask ^ 5)) + (mask << shift) + (mask >> shift) + (~mask);
+        I(p, n) <+ 1.0e-6 * combined * V(p, n);
+    end
+endmodule
+"#,
+    );
+    let ops: HashSet<rspice_veriloga::canonical_ir::CfgIntegerBitwiseOp> = model
+        .function
+        .values
+        .iter()
+        .filter_map(|value| match value.kind {
+            CfgValueKind::IntegerBitwise { op, .. } => Some(op),
+            _ => None,
+        })
+        .collect();
+    for op in [
+        rspice_veriloga::canonical_ir::CfgIntegerBitwiseOp::And,
+        rspice_veriloga::canonical_ir::CfgIntegerBitwiseOp::Or,
+        rspice_veriloga::canonical_ir::CfgIntegerBitwiseOp::Xor,
+        rspice_veriloga::canonical_ir::CfgIntegerBitwiseOp::Shl,
+        rspice_veriloga::canonical_ir::CfgIntegerBitwiseOp::Shr,
+    ] {
+        assert!(ops.contains(&op), "{op:?} did not survive lowering");
+    }
+    assert!(
+        model
+            .function
+            .values
+            .iter()
+            .any(|value| matches!(value.kind, CfgValueKind::IntegerBitwiseNot { .. })),
+        "`~` did not survive lowering"
+    );
+}
+
 #[test]
 fn analysis_lists_are_static_but_lifecycle_event_topology_remains_dynamic() {
     let analysis_artifact = artifact(

@@ -1682,6 +1682,34 @@ impl<'a> CfgLowerer<'a> {
                 self.named_branch_access(access, name, span)
             }
             HirExprKind::SystemFunction { name, args } => self.system_function(name, args, span),
+            // The call spelling of a dynamic operator, which the arm below
+            // covers for the operator spelling.
+            //
+            // `absdelay(x, d)` reaches the HIR as an `AnalogOperator` or as a
+            // `Call` depending on how it was written, and this mode has to
+            // treat the two the same: it substitutes the operator's zero primal
+            // and records the noise site, which is what makes
+            // `noise_metadata_from_hir` able to slice a model whose routing
+            // operator the residual CFG need not implement. Keying the guard on
+            // the spelling let the call form through — invisibly, while the
+            // call form of these operators was refused outright.
+            HirExprKind::Call { name, .. }
+                if self.noise_metadata_only
+                    && is_dynamic_operator_call(name)
+                    && contains_noise(self.hir, expression.id) =>
+            {
+                if self.metadata_assignment_value
+                    && !noise_substitution_is_zero(self.hir, expression.id)
+                {
+                    self.unsupported(
+                        span,
+                        "a noise-bearing dynamic operator assignment whose deterministic primal can reach later noise metadata"
+                            .to_string(),
+                    );
+                }
+                self.metadata_noise_expr(expression.id);
+                self.real_constant(0.0)
+            }
             HirExprKind::Call { name, args } => self.call(expression.id, name, args, span),
             HirExprKind::AnalogOperator { .. }
                 if self.noise_metadata_only && contains_noise(self.hir, expression.id) =>
@@ -3147,6 +3175,20 @@ fn binary_op(op: &str) -> Option<CfgBinaryOp> {
         "Or" => CfgBinaryOp::Or,
         _ => return None,
     })
+}
+
+/// Whether a call spells one of the dynamic operators whose noise-metadata
+/// treatment is the operator spelling's.
+///
+/// Deliberately only the operators this level newly represents. `ddt`, `idt`,
+/// `cross`, `above` and `timer` have always lowered from their call spelling,
+/// so their metadata behaviour is settled and is not this list's to change —
+/// see the report's found-broken note on the remaining spelling asymmetry.
+fn is_dynamic_operator_call(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "absdelay" | "slew" | "idtmod" | "last_crossing"
+    )
 }
 
 /// The runtime encoding of a crossing direction: `+1` rising, `-1` falling,

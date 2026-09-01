@@ -2397,4 +2397,112 @@ mod digital_leaf_class {
         );
         assert!(!node.is_digital());
     }
+
+    /// Every kind that owns accepted history is classified directly, not by the
+    /// catch-all.
+    ///
+    /// Called on the kinds themselves rather than through a lowered model,
+    /// because the classification that matters is the one before propagation
+    /// raises anything: an operator whose operands are all bias-dependent comes
+    /// out `Newton` no matter what this function says, so a model-level test
+    /// cannot see the hole. `transition` and `TransitionDerivative` are here
+    /// for a second reason — no Verilog-A source reaches them through
+    /// `cfg_lower` today, so this is the only place their classification can be
+    /// checked at all.
+    #[test]
+    fn every_history_owning_kind_is_classified_rather_than_defaulted() {
+        let value = ValueId::from(0usize);
+        let operator = crate::canonical_ir::ExprId::from(0usize);
+        let site = crate::ir::TransitionSiteId {
+            source: 0,
+            start: 0,
+            end: 0,
+            ordinal: 0,
+        };
+        let kinds = [
+            CfgValueKind::Transition {
+                site,
+                input: value,
+                delay: value,
+                rise: value,
+                fall: value,
+            },
+            CfgValueKind::TransitionDerivative {
+                site,
+                input: value,
+                input_derivative: value,
+                delay: value,
+                rise: value,
+                fall: value,
+            },
+            CfgValueKind::IdtMod {
+                operator,
+                input: value,
+                ic: value,
+                modulus: value,
+                offset: value,
+            },
+            CfgValueKind::AbsDelay {
+                operator,
+                input: value,
+                delay: value,
+                max_delay: None,
+            },
+            CfgValueKind::AbsDelayDerivative {
+                operator,
+                input: value,
+                input_derivative: value,
+                delay: value,
+                delay_derivative: value,
+                max_delay: None,
+                order: 1,
+            },
+            CfgValueKind::Slew {
+                operator,
+                input: value,
+                max_rise: value,
+                max_fall: None,
+            },
+            CfgValueKind::SlewDerivative {
+                operator,
+                input: value,
+                input_derivative: value,
+                max_rise: value,
+                max_rise_derivative: value,
+                max_fall: value,
+                max_fall_derivative: value,
+            },
+            CfgValueKind::LastCrossing {
+                operator,
+                input: value,
+                direction: value,
+            },
+        ];
+        for kind in kinds {
+            assert_eq!(
+                leaf_class(&kind, &[]),
+                InvalidationClass::Newton,
+                "{kind:?} owns accepted history and must not fall through to Model"
+            );
+            assert!(!kind.is_digital(), "{kind:?}");
+        }
+    }
+
+    /// The analog integer operators are ordinary pure arithmetic: their class is
+    /// whatever their operands' is, which is what the catch-all already answers.
+    #[test]
+    fn analog_integer_operators_take_their_operands_class() {
+        let value = ValueId::from(0usize);
+        for kind in [
+            CfgValueKind::IntegerBitwise {
+                op: crate::canonical_ir::CfgIntegerBitwiseOp::And,
+                left: value,
+                right: value,
+            },
+            CfgValueKind::IntegerBitwiseNot { input: value },
+        ] {
+            assert_eq!(leaf_class(&kind, &[]), InvalidationClass::Model, "{kind:?}");
+            assert!(!kind.is_digital(), "{kind:?}");
+        }
+    }
 }

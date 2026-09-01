@@ -1620,6 +1620,69 @@ impl CfgFunction {
                         return Err(CfgValidationError::LaneShapeMismatch(value.id));
                     }
                 }
+                // The stateful operators' Jacobian actions, which are the one
+                // family whose operands are deliberately of two kinds: the
+                // primal ones the runtime evaluates its local coefficient from,
+                // which are always scalar, and the derivative ones it
+                // multiplies, which carry this value's own lanes.
+                //
+                // They cannot go through the catch-all below, which reads any
+                // packed operand as a mistake — correctly, for arithmetic, and
+                // wrongly for these. `TransitionDerivative` was in that
+                // position: no fixture reached it in packed form, so the
+                // rejection was latent rather than absent.
+                CfgValueKind::TransitionDerivative {
+                    input,
+                    input_derivative,
+                    delay,
+                    rise,
+                    fall,
+                    ..
+                } => {
+                    self.validate_stateful_derivative(
+                        value.id,
+                        lanes,
+                        &[*input, *delay, *rise, *fall],
+                        &[*input_derivative],
+                    )?;
+                }
+                CfgValueKind::AbsDelayDerivative {
+                    input,
+                    input_derivative,
+                    delay,
+                    delay_derivative,
+                    max_delay,
+                    ..
+                } => {
+                    let mut primal = vec![*input, *delay];
+                    primal.extend(*max_delay);
+                    self.validate_stateful_derivative(
+                        value.id,
+                        lanes,
+                        &primal,
+                        &[*input_derivative, *delay_derivative],
+                    )?;
+                }
+                CfgValueKind::SlewDerivative {
+                    input,
+                    input_derivative,
+                    max_rise,
+                    max_rise_derivative,
+                    max_fall,
+                    max_fall_derivative,
+                    ..
+                } => {
+                    self.validate_stateful_derivative(
+                        value.id,
+                        lanes,
+                        &[*input, *max_rise, *max_fall],
+                        &[
+                            *input_derivative,
+                            *max_rise_derivative,
+                            *max_fall_derivative,
+                        ],
+                    )?;
+                }
                 // Every other kind is scalar arithmetic, and a packed operand
                 // reaching one is the mistake this catches.
                 kind => {
@@ -1633,6 +1696,35 @@ impl CfgFunction {
                     }
                 }
             }
+        }
+        Ok(())
+    }
+
+    /// A stateful operator's Jacobian action agrees with its two operand
+    /// classes.
+    ///
+    /// `primal` operands are what the runtime evaluates the local coefficient
+    /// from and are always scalar; `derivative` operands are what it multiplies
+    /// and carry exactly this value's lanes. The scalar `ddx` shadow form falls
+    /// out of the same rule with an empty lane set on both sides.
+    fn validate_stateful_derivative(
+        &self,
+        value: ValueId,
+        lanes: &[u32],
+        primal: &[ValueId],
+        derivative: &[ValueId],
+    ) -> Result<(), CfgValidationError> {
+        if primal
+            .iter()
+            .any(|operand| self.value(*operand).value_type.shape().is_some())
+        {
+            return Err(CfgValidationError::LaneShapeMismatch(value));
+        }
+        if derivative
+            .iter()
+            .any(|operand| self.value_lanes(*operand) != lanes)
+        {
+            return Err(CfgValidationError::LaneShapeMismatch(value));
         }
         Ok(())
     }

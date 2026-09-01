@@ -1514,6 +1514,14 @@ endmodule
     }
 }
 
+/// The refusal moved, and where it moved to is the point.
+///
+/// It used to come from the CFG lowering, which could not represent a
+/// rate-limited `slew` at all. The canonical level represents one now, so the
+/// refusal is the direct generated-Rust backend's: that backend owns no
+/// accepted filter state, and the runtimes that do are named. What must not
+/// change — and is what this test is for — is that nothing degrades the
+/// operator to the passthrough its unrated form is.
 #[test]
 fn generated_rust_fails_closed_for_slew_instead_of_emitting_a_passthrough() {
     let source = r#"
@@ -1537,12 +1545,84 @@ endmodule
         "error={error:?}"
     );
     assert!(
-        error.message.contains("cannot degrade it to a passthrough")
-            || error
-                .message
-                .contains("cannot be degraded to a passthrough"),
+        error.message.contains("accepted filter state is preserved"),
         "error={error:?}"
     );
+}
+
+/// Representable at the canonical level, and still refused by the one backend
+/// that cannot run it.
+///
+/// This is the contract that lets the canonical level grow without moving any
+/// shipped compilation onto it: `absdelay`, `idtmod` and `last_crossing` each
+/// own accepted history that the direct generated-Rust backend has no place
+/// for, and the analog integer operators need a checked conversion Rust's `as`
+/// casts do not perform. Each lowers to its own CFG kind — that is the point of
+/// the lane — and each is named at the refusal, so a model reaching one is sent
+/// to a runtime that implements it rather than emitted as something weaker.
+#[test]
+fn generated_rust_fails_closed_for_every_newly_representable_operator() {
+    let cases = [
+        (
+            "absdelay",
+            "1.0e-3 * absdelay(V(p, n), 1.0e-9)",
+            "stateful absdelay",
+        ),
+        (
+            "idtmod",
+            "1.0e-3 * idtmod(V(p, n), 0.0, 1.0, -0.5)",
+            "stateful idtmod",
+        ),
+        (
+            "last_crossing",
+            "1.0e-9 * last_crossing(V(p, n) - 0.5, 1)",
+            "last_crossing",
+        ),
+        (
+            "integer_bitwise",
+            "1.0e-6 * ((mask & 6) | (mask << 1)) * V(p, n)",
+            "analog integer bitwise or shift operator",
+        ),
+    ];
+
+    for (name, expression, expected) in cases {
+        let source = format!(
+            r#"
+`include "disciplines.vams"
+module generated_rust_{name}(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer mask = 12;
+    analog I(p, n) <+ {expression};
+endmodule
+"#
+        );
+        let artifact = VerilogACompiler::default()
+            .compile_canonical_ir(&source)
+            .unwrap_or_else(|error| panic!("{name} must compile to canonical IR: {error}"));
+        let cfg = rspice_veriloga::canonical_ir::CfgModel::from_hir(&artifact.hir, &artifact.mir)
+            .unwrap_or_else(|diagnostics| panic!("{name} must lower to a CFG: {diagnostics:?}"));
+        assert!(
+            cfg.function.values.iter().any(|value| matches!(
+                value.kind,
+                rspice_veriloga::canonical_ir::CfgValueKind::AbsDelay { .. }
+                    | rspice_veriloga::canonical_ir::CfgValueKind::IdtMod { .. }
+                    | rspice_veriloga::canonical_ir::CfgValueKind::LastCrossing { .. }
+                    | rspice_veriloga::canonical_ir::CfgValueKind::IntegerBitwise { .. }
+            )),
+            "{name} must reach its own canonical kind"
+        );
+
+        let error = rspice_veriloga::rust_backend::RustTranspiler::default()
+            .transpile(&artifact)
+            .err()
+            .unwrap_or_else(|| panic!("{name} must not be emitted by the direct Rust backend"));
+        assert!(error.is_unsupported(), "{name}: error={error:?}");
+        assert!(
+            error.message.contains(expected),
+            "{name}: error={error:?} does not name `{expected}`"
+        );
+    }
 }
 
 #[test]
