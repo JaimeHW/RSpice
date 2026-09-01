@@ -1703,6 +1703,13 @@ endmodule
         model.noise_sources[1].exponent_program = Some(BytecodeProgram {
             instructions: vec![Instruction::PushConst(77.0)],
         });
+        // The equation-local canonical noise plan this test pins is now scoped
+        // to schema-0 artifacts: grouped noise reaches the backends through the
+        // process plan instead, and asking for the equation-local one there
+        // would be asking for a route the compiler deliberately stopped taking.
+        // A schema-0 model is exactly the deserialized pre-grouped artifact the
+        // route still serves.
+        model.noise_process_schema = 0;
 
         let native = compile_model_with_canonical_ir(&model, &artifact)
             .expect("canonical noise entries compile to native x64");
@@ -1743,7 +1750,11 @@ module native_canonical_noise_kind_guard(p, n);
 endmodule
 "#;
         let compiler = VerilogACompiler::new(CompilerOptions::default());
-        let model = compiler.compile(source).expect("compile bytecode model");
+        let mut model = compiler.compile(source).expect("compile bytecode model");
+        // As in the entry-lowering test above: the guard this pins belongs to
+        // the equation-local canonical noise plan, which grouped noise no
+        // longer routes through.
+        model.noise_process_schema = 0;
         let mut artifact = compiler
             .compile_canonical_ir(source)
             .expect("compile canonical IR");
@@ -1762,8 +1773,18 @@ endmodule
             .expect("fixture has canonical noise source");
         let mut exponent_expr = None;
         match &mut artifact.mir.expressions[noise_index].kind {
-            HirExprKind::NoiseSource { source, .. } => {
-                *source = "flicker".into();
+            HirExprKind::NoiseSource {
+                source, operands, ..
+            } => {
+                // A *well-formed* flicker source. The canonical kind names are
+                // capitalized, and a flicker source carries power and exponent,
+                // so drifting the kind alone would leave a one-operand source
+                // that HIR validation rejects before the guard under test ever
+                // runs. Reusing the power expression as the exponent keeps the
+                // drift to the kind, which is what this pins.
+                *source = "Flicker".into();
+                let power = operands[0];
+                operands.push(power);
             }
             HirExprKind::SystemFunction { name, args } | HirExprKind::Call { name, args } => {
                 *name = "flicker_noise".into();
