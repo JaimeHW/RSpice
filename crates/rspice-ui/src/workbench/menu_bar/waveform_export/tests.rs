@@ -1279,10 +1279,7 @@ fn engineering_export_ui_publishes_reopenable_native_real_and_complex_bundles() 
     )
     .expect("reopen result bundle");
     assert_eq!(reopened.analysis_type, AnalysisType::Transient);
-    // The retained identity remains `V(out)` in the complex payload. The
-    // ordinary waveform name describes the magnitude trace the result viewer
-    // materializes from those authoritative rectangular samples.
-    assert_eq!(reopened.waveforms[0].name, "|V(out)|");
+    assert_eq!(reopened.waveforms[0].name, "V(out)");
     assert_eq!(reopened.waveforms[0].y.as_ref(), &[0.0, 1.25, -0.5]);
     drop(result_files);
 
@@ -1317,7 +1314,10 @@ fn engineering_export_ui_publishes_reopenable_native_real_and_complex_bundles() 
     .expect("reopen dataset bundle");
     assert_eq!(reopened.analysis_type, AnalysisType::Ac);
     assert_eq!(reopened.waveforms.len(), 1);
-    assert_eq!(reopened.waveforms[0].name, "V(out)");
+    // The retained identity remains `V(out)` in the complex payload. The
+    // ordinary waveform name describes the magnitude trace the result viewer
+    // materializes from those authoritative rectangular samples.
+    assert_eq!(reopened.waveforms[0].name, "|V(out)|");
     let complex = reopened.waveforms[0]
         .complex
         .as_ref()
