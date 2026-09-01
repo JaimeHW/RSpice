@@ -35,7 +35,7 @@ use crate::resource::{
 /// The byte and nesting budgets are configurable through [`ResourceLimits`].
 /// This separate structural ceiling prevents tiny include fan-out attacks and
 /// is intentionally far above normal foundry PDK closure sizes.
-pub const DEFAULT_MAX_LIBRARY_SOURCE_FILES: usize = 16_384;
+pub(crate) const DEFAULT_MAX_LIBRARY_SOURCE_FILES: usize = 16_384;
 
 fn ensure_library_parse_not_aborted(abort: &dyn AbortSignal) -> io::Result<()> {
     if abort.is_aborted() {
@@ -404,15 +404,20 @@ impl LibParser {
 
     /// Apply resource limits to subsequent file and authenticated-closure parses.
     #[must_use]
-    pub fn with_resource_limits(mut self, limits: ResourceLimits) -> Self {
+    pub(crate) fn with_resource_limits(mut self, limits: ResourceLimits) -> Self {
         self.resource_limits = limits;
         self.max_include_depth = limits.max_include_depth;
         self
     }
 
     /// Override the distinct-source ceiling for subsequent parses.
+    ///
+    /// Production parses take the ceiling [`LibParser::new`] installs; this
+    /// exists so the tests below can drive the cap down far enough to observe
+    /// it refuse a fan-out without authoring 16,384 files.
+    #[cfg(test)]
     #[must_use]
-    pub fn with_max_source_files(mut self, max_source_files: usize) -> Self {
+    pub(crate) fn with_max_source_files(mut self, max_source_files: usize) -> Self {
         self.max_source_files = max_source_files;
         self
     }
@@ -426,7 +431,7 @@ impl LibParser {
     ///
     /// The parser returns [`io::ErrorKind::Interrupted`] on cancellation and
     /// never returns a partially parsed result as success.
-    pub fn parse_file_with_abort(
+    pub(crate) fn parse_file_with_abort(
         &mut self,
         path: impl AsRef<Path>,
         abort: &dyn AbortSignal,

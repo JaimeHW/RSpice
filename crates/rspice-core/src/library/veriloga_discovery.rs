@@ -11,11 +11,11 @@ use crate::resource::{
 };
 
 /// Default cap on filesystem entries inspected by one Verilog-A discovery.
-pub const DEFAULT_MAX_VERILOGA_DISCOVERY_FILES: usize = 100_000;
+pub(crate) const DEFAULT_MAX_VERILOGA_DISCOVERY_FILES: usize = 100_000;
 
 /// Resource policy for one Verilog-A model-library discovery.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct VerilogADiscoveryLimits {
+pub(crate) struct VerilogADiscoveryLimits {
     /// Maximum directory nesting below the selected root.
     pub max_depth: usize,
     /// Maximum filesystem entries inspected, including directories and
@@ -67,7 +67,12 @@ pub fn discover_veriloga_models(root: impl AsRef<Path>) -> io::Result<Vec<Verilo
 }
 
 /// Discover Verilog-A models with explicit traversal and source-byte limits.
-pub fn discover_veriloga_models_with_limits(
+///
+/// Every shipping caller either takes the defaults through
+/// [`discover_veriloga_models`] or names an abort signal, so this uncancellable
+/// form is what the tests below use to drive one limit at a time to its edge.
+#[cfg(test)]
+pub(crate) fn discover_veriloga_models_with_limits(
     root: impl AsRef<Path>,
     limits: VerilogADiscoveryLimits,
 ) -> io::Result<Vec<VerilogAModelEntry>> {
@@ -79,7 +84,7 @@ pub fn discover_veriloga_models_with_limits(
 /// Directory symlinks are followed only when their canonical target remains
 /// inside `root`. Canonical identities are visited once, so symlink cycles and
 /// aliases cannot amplify traversal or source reads.
-pub fn discover_veriloga_models_with_limits_and_abort(
+pub(crate) fn discover_veriloga_models_with_limits_and_abort(
     root: impl AsRef<Path>,
     limits: VerilogADiscoveryLimits,
     abort: &dyn AbortSignal,

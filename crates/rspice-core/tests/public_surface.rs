@@ -211,7 +211,42 @@ use rspice_core::analysis::harmonic_balance::{
 /// item is genuinely frontend-facing or a `pub(crate)` candidate is the
 /// visibility-narrowing pass's question, not this ratchet's. Recorded here so
 /// the next raise cannot mistake the arrears for headroom.
-const MAX_PUBLIC_ITEMS: usize = 4307;
+///
+/// 2026-08-31, -10 (4,307 → 4,297): the narrowing pass the +30 above asked for,
+/// run over the ten statements `b97258608` added under `src/library/`. All ten
+/// are now `pub(crate)`: the ingestion ceilings
+/// `DEFAULT_MAX_LIBRARY_SOURCE_FILES` and
+/// `DEFAULT_MAX_VERILOGA_DISCOVERY_FILES`; the `LibParser` builders
+/// `with_resource_limits` and `with_max_source_files` and its
+/// `parse_file_with_abort`; the `LibraryManager` loaders
+/// `load_external_lib_with_limits` and
+/// `load_external_lib_with_limits_and_abort`; and the discovery limit type
+/// `VerilogADiscoveryLimits` with `discover_veriloga_models_with_limits` and
+/// `discover_veriloga_models_with_limits_and_abort`.
+///
+/// Every one is an explicit-limit or cancellation overload, and the only
+/// callers are `LibraryManager` and this crate's own tests. The entry points a
+/// frontend actually names — `LibParser::new`, `parse_file`, `parse_string`,
+/// `LibraryManager::load_external_lib`, `discover_veriloga_models` — stay
+/// public and still apply those bounds from `ResourceLimits::default()`, so
+/// the ingestion that commit bounded remains bounded on the public path.
+///
+/// Three of the ten turned out to have no shipping caller at all once they
+/// stopped being API, which `-D warnings` then said out loud.
+/// `load_external_lib_with_limits` had no caller in any configuration and an
+/// abort-taking twin one line below it, so it is deleted rather than narrowed;
+/// `with_max_source_files` and `discover_veriloga_models_with_limits` are
+/// `#[cfg(test)]`, being how the tests drive one ingestion limit at a time to
+/// its edge. All three still count as -1 each: a deleted `pub fn` and a
+/// cfg-gated `pub(crate) fn` are both gone from this number.
+///
+/// Established by compiling the CLI, the GUI, the Python and WASM bindings and
+/// the conformance suite against the narrowed items, which is the check this
+/// question needs: a bare-name grep cannot answer it, because a grouped
+/// `pub use` lets a frontend name an item through a path the declaration's own
+/// name never appears in. The two grouped re-exports in `src/library.rs` drop
+/// those names but keep their statements, so the whole -10 is declarations.
+const MAX_PUBLIC_ITEMS: usize = 4297;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

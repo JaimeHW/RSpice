@@ -387,22 +387,12 @@ impl LibraryManager {
         )
     }
 
-    /// Load an external library with explicit resource limits.
-    pub fn load_external_lib_with_limits(
-        &mut self,
-        path: impl AsRef<std::path::Path>,
-        section: Option<&str>,
-        resource_limits: ResourceLimits,
-    ) -> Result<usize, String> {
-        self.load_external_lib_with_limits_and_abort(path, section, resource_limits, &NoAbort)
-    }
-
     /// Load an external library with explicit ingestion limits and cancellation.
     ///
     /// Parsing and definition conversion complete before the manager is
     /// mutated. Cancellation, resource violations, and parser diagnostics are
     /// therefore fail-closed and cannot register a partial library.
-    pub fn load_external_lib_with_limits_and_abort(
+    pub(crate) fn load_external_lib_with_limits_and_abort(
         &mut self,
         path: impl AsRef<std::path::Path>,
         section: Option<&str>,
