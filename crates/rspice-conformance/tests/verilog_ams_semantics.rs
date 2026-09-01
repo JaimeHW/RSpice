@@ -588,6 +588,52 @@ fn the_table_and_the_suite_agree() {
     }
 }
 
+/// The connect-module signatures this suite declares still match the shipped
+/// library's.
+///
+/// The clause-7 case has to put `connectmodule` declarations in the file its
+/// deck includes, because section 7.7.1 refuses a `connect` statement naming an
+/// undeclared module. Reaching the shipped ones would mean this crate depending
+/// on the Verilog-AMS front end, and that edge changes `Cargo.lock` — which is
+/// a digest input of the generated-built-ins bundle, so adding it would make
+/// every build demand a regeneration of a ten-gigabyte corpus to carry two
+/// module signatures.
+///
+/// So the signatures are declared here and checked against there. What is
+/// checked is what the case depends on: that both modules still exist under
+/// these names, and that `vsup` is still the parameter a `connect` statement
+/// overrides to move the boundary's thresholds.
+#[test]
+fn connect_module_signatures_still_match_the_shipped_library() {
+    let path = ams::workspace_root().join(ams::SHIPPED_LIBRARY_SOURCE);
+    let source = std::fs::read_to_string(&path).unwrap_or_else(|error| {
+        panic!(
+            "the shipped connect-module library this suite copies from is missing from {}: \
+             {error}",
+            path.display()
+        )
+    });
+    for declaration in ["connectmodule a2d(a, d);", "connectmodule d2a(d, a);"] {
+        assert!(
+            source.contains(declaration),
+            "`{}` no longer declares `{declaration}`; this suite's own copy is now describing \
+             something the engine does not ship",
+            path.display()
+        );
+        assert!(
+            ams::CONNECT_MODULE_SIGNATURES.contains(declaration),
+            "this suite stopped declaring `{declaration}`"
+        );
+    }
+    assert!(
+        source.contains("parameter real vsup = 3.3;"),
+        "`{}` no longer gives its connect modules a `vsup` parameter with the deck-supply \
+         default; the clause-7 case's whole derivation is that overriding it moves the \
+         boundary's threshold to half of whatever was supplied",
+        path.display()
+    );
+}
+
 /// The suite does not restate clause 7's discipline resolution.
 ///
 /// The LRM's Figure 7-3 hierarchy, section 7.4.4.1's basic algorithm and Annex

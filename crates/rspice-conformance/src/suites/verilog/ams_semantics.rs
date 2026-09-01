@@ -47,7 +47,7 @@
 
 use std::fmt;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use rspice_core::engine::TransientResult;
@@ -566,15 +566,62 @@ module ramp_toggle(p, n, clk, q);
 endmodule
 "#;
 
-/// The shipped connect modules plus one `connectrules` block, as a `.va` file.
+/// The two connect-module signatures a deck-level clause-7 case has to declare.
 ///
-/// The module sources are the library's own, verbatim: a suite that wrote its
-/// own would pin its copy rather than what a deck actually gets.
+/// Verilog-AMS LRM 2.4 section 7.7.1 requires a `connect` statement to name a
+/// *declared* connect module, so a `connectrules` block on its own is refused —
+/// the declarations have to be in the file the deck includes.
+///
+/// These are signatures, and that is not this suite cutting a corner: the
+/// shipped library's own `a2d` and `d2a` carry no behavioural body either. A
+/// connect module's behaviour is delegated by *name* to the XSPICE bridge code
+/// model the engine already ships, so what a declaration contributes is its
+/// name, its two ports and its parameters — which is all of this. What would be
+/// dishonest is copying a body and pinning the copy, and there is no body to
+/// copy.
+///
+/// [`SHIPPED_LIBRARY_SOURCE`] is where the originals live, and
+/// `connect_module_signatures_still_match_the_shipped_library` reads that file
+/// to check these have not drifted from them.
+pub const CONNECT_MODULE_SIGNATURES: &str = "\
+connectmodule a2d(a, d);
+    input a;
+    output d;
+    electrical a;
+    logic d;
+
+    parameter real vsup = 3.3;
+    parameter real tdrise = 1e-9;
+    parameter real tdfall = 1e-9;
+endmodule
+connectmodule d2a(d, a);
+    input d;
+    output a;
+    logic d;
+    electrical a;
+
+    parameter real vsup = 3.3;
+    parameter real trise = 1e-9;
+    parameter real tfall = 1e-9;
+endmodule
+";
+
+/// Where the shipped connect-module library lives, relative to the workspace
+/// root.
+pub const SHIPPED_LIBRARY_SOURCE: &str = "crates/rspice-veriloga/src/connect/library.rs";
+
+/// The connect modules plus one `connectrules` block, as a `.va` file.
 pub fn connect_library(rules: &str) -> ModelFile {
-    let mut source = String::new();
-    for (_, module) in rspice_veriloga::connect::library::BUILTIN_CONNECT_MODULES {
-        source.push_str(module);
-    }
+    let mut source = String::from(CONNECT_MODULE_SIGNATURES);
     source.push_str(rules);
     ModelFile::new("connect_library", &source)
+}
+
+/// The workspace root, from this crate's manifest directory.
+pub fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("the conformance crate sits two levels below the workspace root")
+        .to_path_buf()
 }

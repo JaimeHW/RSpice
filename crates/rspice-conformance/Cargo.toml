@@ -119,14 +119,6 @@ doctest = false
 
 [dependencies]
 rspice-core = { path = "../rspice-core", version = "0.1.0" }
-# The Verilog-AMS front end, for its shipped `connectmodule` library and
-# nothing else. Verilog-AMS LRM 2.4 section 7.7.1 requires a `connect`
-# statement to name a declared connect module, so a deck-level clause-7 case
-# has to put those declarations in the file it writes — and writing its own
-# copies of them would pin the copies rather than what a deck actually gets.
-# rspice-core already builds this crate under its `veriloga` feature, so the
-# edge costs no additional compilation.
-rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0" }
 blake3 = "1.5"
 clap.workspace = true
 log.workspace = true
