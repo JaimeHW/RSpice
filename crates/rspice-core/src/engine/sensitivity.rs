@@ -2,7 +2,7 @@ use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::sensitivity::{
     AcSensitivity, AcSensitivityOutput, AcSensitivityResult, ElementDesc, ElementType, Sensitivity,
-    SensitivityAnalyzer, SensitivityResult,
+    SensitivityAnalysisError, SensitivityAnalyzer, SensitivityResult,
 };
 use crate::netlist::{ElementKind, SourceSpec};
 use crate::solver::SimulationResult;
@@ -260,8 +260,15 @@ impl Engine {
             adjoint.push(value.re);
         }
 
-        SensitivityAnalyzer::with_precomputed_adjoint(dc_solution, adjoint, elements)
-            .and_then(|analyzer| analyzer.analyze_precomputed(output_index, reference_index))
+        let analyzer =
+            SensitivityAnalyzer::with_precomputed_adjoint(dc_solution, adjoint, elements).ok_or(
+                SimulationError::Solver(crate::solver::SolverError::SingularMatrix),
+            )?;
+        analyzer
+            .analyze_precomputed_with_abort(output_index, reference_index, abort)
+            .map_err(|error| match error {
+                SensitivityAnalysisError::Aborted => SimulationError::Aborted,
+            })?
             .ok_or(SimulationError::Solver(
                 crate::solver::SolverError::SingularMatrix,
             ))

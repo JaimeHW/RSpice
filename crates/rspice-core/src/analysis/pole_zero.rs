@@ -26,6 +26,7 @@
 //! ```
 
 #![allow(clippy::needless_range_loop)]
+use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::{Complex64, Value};
 use faer::{Mat, linalg::solvers::GeneralizedEigen};
 use std::f64::consts::PI;
@@ -41,6 +42,9 @@ const REAL_ROOT_TOLERANCE: Value = 1e-10;
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum PoleZeroAnalysisError {
+    /// The caller cancelled the analysis.
+    #[error("pole-zero analysis was aborted")]
+    Aborted,
     /// The descriptor, state-space model, or port definition is malformed.
     #[error("invalid pole-zero system: {0}")]
     InvalidSystem(String),
@@ -599,6 +603,15 @@ impl PoleZeroAnalyzer {
     }
 }
 
+#[inline]
+fn ensure_pole_zero_not_aborted(abort: &dyn AbortSignal) -> Result<(), PoleZeroAnalysisError> {
+    if abort.is_aborted() {
+        Err(PoleZeroAnalysisError::Aborted)
+    } else {
+        Ok(())
+    }
+}
+
 mod gain;
 mod matrix_ops;
 mod poles;
@@ -612,6 +625,7 @@ mod zeros;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::abort_signal::CountingAbort;
 
     fn second_order_model(c: [Value; 2], d: Value) -> StateSpaceModel {
         // det(sI-A) = s^2 + 7s + 12, and for B=[0,1],
@@ -622,6 +636,26 @@ mod tests {
             c: c.to_vec(),
             d,
         }
+    }
+
+    #[test]
+    fn dense_extraction_polls_between_eigensolver_phases() {
+        let analyzer = PoleZeroAnalyzer::new(
+            Matrix::from_dense(vec![vec![1.0]]),
+            Matrix::from_dense(vec![vec![1.0]]),
+        );
+        let abort = CountingAbort::new(3);
+
+        let error = analyzer
+            .analyze_with_abort(&PoleZeroConfig::poles_and_zeros(0, 0), &abort)
+            .expect_err("counted cancellation must stop between PZ phases");
+
+        assert!(matches!(error, PoleZeroAnalysisError::Aborted));
+        assert_eq!(
+            abort.count(),
+            4,
+            "PZ must stop on the first true coarse poll"
+        );
     }
 
     fn state_space_zeros(model: &StateSpaceModel) -> Vec<Complex64> {

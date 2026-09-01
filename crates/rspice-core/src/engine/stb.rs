@@ -29,7 +29,7 @@
 
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
-use crate::analysis::stb::{StbAnalyzer, StbConfig, StbResult};
+use crate::analysis::stb::{StbAnalysisError, StbAnalyzer, StbConfig, StbResult};
 use crate::{Complex64, Netlist, Value};
 use std::f64::consts::PI;
 
@@ -227,7 +227,11 @@ impl Engine {
         }
 
         let analyzer = StbAnalyzer::new(config);
-        let result = analyzer.analyze(&frequencies, &loop_gains);
+        let result = analyzer
+            .analyze_with_abort(&frequencies, &loop_gains, abort)
+            .map_err(|error| match error {
+                StbAnalysisError::Aborted => SimulationError::Aborted,
+            })?;
 
         Ok(StbAnalysisResult {
             frequencies,

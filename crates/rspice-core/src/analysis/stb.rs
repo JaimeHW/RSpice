@@ -28,6 +28,7 @@
 //! - Gain margin > 0 dB (typically > 10 dB for robustness)
 
 use crate::Value;
+use crate::abort_signal::{AbortSignal, NoAbort};
 use num_complex::Complex64;
 use std::f64::consts::PI;
 
@@ -437,6 +438,25 @@ pub struct StbAnalyzer {
     config: StbConfig,
 }
 
+/// Failure while projecting an already-computed loop-gain sweep into Bode,
+/// Nyquist, and stability-margin results.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum StbAnalysisError {
+    /// The caller cancelled the projection.
+    Aborted,
+}
+
+impl std::fmt::Display for StbAnalysisError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Aborted => formatter.write_str("STB result projection was aborted"),
+        }
+    }
+}
+
+impl std::error::Error for StbAnalysisError {}
+
 impl StbAnalyzer {
     /// Create new STB analyzer
     pub fn new(config: StbConfig) -> Self {
@@ -445,12 +465,25 @@ impl StbAnalyzer {
 
     /// Analyze loop gain data and extract stability margins
     pub fn analyze(&self, frequencies: &[Value], loop_gains: &[Complex64]) -> StbResult {
+        self.analyze_with_abort(frequencies, loop_gains, &NoAbort)
+            .expect("NoAbort cannot cancel STB result projection")
+    }
+
+    /// Analyze loop-gain data with cooperative cancellation during every
+    /// linear scan of the potentially large sweep.
+    pub fn analyze_with_abort(
+        &self,
+        frequencies: &[Value],
+        loop_gains: &[Complex64],
+        abort: &dyn AbortSignal,
+    ) -> Result<StbResult, StbAnalysisError> {
+        ensure_not_aborted(abort)?;
         let mut result = StbResult::new();
 
         if frequencies.is_empty() || loop_gains.is_empty() {
             result.success = false;
             result.warnings.push("Empty input data".to_string());
-            return result;
+            return Ok(result);
         }
 
         if frequencies.len() != loop_gains.len() {
@@ -458,11 +491,12 @@ impl StbAnalyzer {
             result
                 .warnings
                 .push("Frequency/gain length mismatch".to_string());
-            return result;
+            return Ok(result);
         }
 
         // Build Bode points
         for (i, &freq) in frequencies.iter().enumerate() {
+            poll_abort(abort, i)?;
             result
                 .bode_points
                 .push(BodePoint::from_loop_gain(freq, loop_gains[i]));
@@ -471,6 +505,7 @@ impl StbAnalyzer {
         // Build Nyquist points if configured
         if self.config.compute_nyquist {
             for (i, &freq) in frequencies.iter().enumerate() {
+                poll_abort(abort, i)?;
                 result
                     .nyquist_points
                     .push(NyquistPoint::from_loop_gain(loop_gains[i], freq));
@@ -478,7 +513,7 @@ impl StbAnalyzer {
         }
 
         // Extract margins
-        result.margins = self.extract_margins(&result.bode_points);
+        result.margins = self.extract_margins(&result.bode_points, abort)?;
 
         // Check for conditional stability
         if result.margins.num_crossovers > 1 {
@@ -488,22 +523,28 @@ impl StbAnalyzer {
             ));
         }
 
-        result
+        ensure_not_aborted(abort)?;
+        Ok(result)
     }
 
     /// Extract stability margins from Bode data
-    fn extract_margins(&self, points: &[BodePoint]) -> StabilityMargins {
+    fn extract_margins(
+        &self,
+        points: &[BodePoint],
+        abort: &dyn AbortSignal,
+    ) -> Result<StabilityMargins, StbAnalysisError> {
+        ensure_not_aborted(abort)?;
         let mut margins = StabilityMargins::default();
 
         if points.is_empty() {
-            return margins;
+            return Ok(margins);
         }
 
         // DC gain (lowest frequency point)
         margins.dc_gain_db = points[0].magnitude_db;
 
         // Find unity gain crossover(s) - where magnitude crosses 0 dB
-        let crossovers = self.find_zero_crossings(points, |p| p.magnitude_db);
+        let crossovers = self.find_zero_crossings(points, |p| p.magnitude_db, abort)?;
         margins.num_crossovers = crossovers.len();
         margins.conditionally_stable = crossovers.len() > 1;
 
@@ -513,50 +554,60 @@ impl StbAnalyzer {
             margins.unity_gain_bandwidth = freq;
 
             // Interpolate phase at crossover
-            let phase = self.interpolate_at_frequency(points, freq, |p| p.phase_deg);
+            let phase = self.interpolate_at_frequency(points, freq, |p| p.phase_deg, abort)?;
             margins.phase_margin_deg = 180.0 + phase; // PM = 180° + phase
         } else {
             // No crossover found - either always > 0dB or always < 0dB
-            if points.iter().all(|p| p.magnitude_db > 0.0) {
+            let mut all_above_unity = true;
+            let mut maximum = f64::NEG_INFINITY;
+            for (index, point) in points.iter().enumerate() {
+                poll_abort(abort, index)?;
+                all_above_unity &= point.magnitude_db > 0.0;
+                maximum = maximum.max(point.magnitude_db);
+            }
+            if all_above_unity {
                 margins.phase_margin_deg = f64::NEG_INFINITY;
                 margins.gain_margin_db = f64::NEG_INFINITY;
-                return margins;
+                return Ok(margins);
             } else {
                 // High gain margin (loop never reaches 0 dB)
                 margins.phase_margin_deg = f64::INFINITY;
-                margins.gain_margin_db = -points
-                    .iter()
-                    .map(|p| p.magnitude_db)
-                    .fold(f64::NEG_INFINITY, f64::max);
+                margins.gain_margin_db = -maximum;
             }
         }
 
         // Find phase crossover(s) - where phase crosses -180°
-        let phase_crossings = self.find_phase_crossings(points, -180.0);
+        let phase_crossings = self.find_phase_crossings(points, -180.0, abort)?;
 
         // Gain margin: magnitude at first phase crossover
         if let Some(&(freq, _)) = phase_crossings.first() {
             margins.gain_margin_freq = freq;
 
             // Interpolate magnitude at phase crossover
-            let mag_db = self.interpolate_at_frequency(points, freq, |p| p.magnitude_db);
+            let mag_db = self.interpolate_at_frequency(points, freq, |p| p.magnitude_db, abort)?;
             margins.gain_margin_db = -mag_db; // GM = -|L| at -180°
         } else {
             // Phase never crosses -180° - infinite gain margin
             margins.gain_margin_db = f64::INFINITY;
         }
 
-        margins
+        Ok(margins)
     }
 
     /// Find zero crossings in a curve
-    fn find_zero_crossings<F>(&self, points: &[BodePoint], extractor: F) -> Vec<(Value, Value)>
+    fn find_zero_crossings<F>(
+        &self,
+        points: &[BodePoint],
+        extractor: F,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<(Value, Value)>, StbAnalysisError>
     where
         F: Fn(&BodePoint) -> Value,
     {
         let mut crossings = Vec::new();
 
-        for window in points.windows(2) {
+        for (index, window) in points.windows(2).enumerate() {
+            poll_abort(abort, index)?;
             let v0 = extractor(&window[0]);
             let v1 = extractor(&window[1]);
 
@@ -577,7 +628,7 @@ impl StbAnalyzer {
             }
         }
 
-        crossings
+        Ok(crossings)
     }
 
     /// Find phase crossings at specific phase value
@@ -585,10 +636,12 @@ impl StbAnalyzer {
         &self,
         points: &[BodePoint],
         target_phase: Value,
-    ) -> Vec<(Value, Value)> {
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<(Value, Value)>, StbAnalysisError> {
         let mut crossings = Vec::new();
 
-        for window in points.windows(2) {
+        for (index, window) in points.windows(2).enumerate() {
+            poll_abort(abort, index)?;
             let p0 = window[0].phase_deg;
             let p1 = window[1].phase_deg;
 
@@ -613,7 +666,7 @@ impl StbAnalyzer {
             }
         }
 
-        crossings
+        Ok(crossings)
     }
 
     /// Unwrap phase for proper crossing detection
@@ -629,12 +682,19 @@ impl StbAnalyzer {
     }
 
     /// Interpolate value at specific frequency
-    fn interpolate_at_frequency<F>(&self, points: &[BodePoint], freq: Value, extractor: F) -> Value
+    fn interpolate_at_frequency<F>(
+        &self,
+        points: &[BodePoint],
+        freq: Value,
+        extractor: F,
+        abort: &dyn AbortSignal,
+    ) -> Result<Value, StbAnalysisError>
     where
         F: Fn(&BodePoint) -> Value,
     {
         // Find bracketing points
-        for window in points.windows(2) {
+        for (index, window) in points.windows(2).enumerate() {
+            poll_abort(abort, index)?;
             if window[0].frequency <= freq && window[1].frequency >= freq {
                 let f0 = window[0].frequency.log10();
                 let f1 = window[1].frequency.log10();
@@ -642,17 +702,36 @@ impl StbAnalyzer {
                 let v1 = extractor(&window[1]);
 
                 let alpha = (freq.log10() - f0) / (f1 - f0);
-                return v0 + alpha * (v1 - v0);
+                return Ok(v0 + alpha * (v1 - v0));
             }
         }
 
         // Extrapolate from nearest
         if freq < points[0].frequency {
-            extractor(&points[0])
+            Ok(extractor(&points[0]))
         } else {
-            extractor(points.last().unwrap())
+            Ok(extractor(points.last().expect("non-empty STB points")))
         }
     }
+}
+
+const STB_ABORT_POLL_STRIDE: usize = 256;
+
+#[inline]
+fn ensure_not_aborted(abort: &dyn AbortSignal) -> Result<(), StbAnalysisError> {
+    if abort.is_aborted() {
+        Err(StbAnalysisError::Aborted)
+    } else {
+        Ok(())
+    }
+}
+
+#[inline]
+fn poll_abort(abort: &dyn AbortSignal, index: usize) -> Result<(), StbAnalysisError> {
+    if index.is_multiple_of(STB_ABORT_POLL_STRIDE) {
+        ensure_not_aborted(abort)?;
+    }
+    Ok(())
 }
 
 //=============================================================================
@@ -662,6 +741,7 @@ impl StbAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::abort_signal::CountingAbort;
 
     #[test]
     fn log_sweeps_reject_invalid_frequency_grids() {
@@ -687,5 +767,26 @@ mod tests {
                 "invalid STB sweep config produced points: {config:?}"
             );
         }
+    }
+
+    #[test]
+    fn result_projection_observes_abort_within_one_poll_stride() {
+        let count = STB_ABORT_POLL_STRIDE * 4;
+        let frequencies = (0..count)
+            .map(|index| 1.0 + index as Value)
+            .collect::<Vec<_>>();
+        let loop_gains = vec![Complex64::new(2.0, 0.0); count];
+        let abort = CountingAbort::new(2);
+
+        let error = StbAnalyzer::new(StbConfig::new())
+            .analyze_with_abort(&frequencies, &loop_gains, &abort)
+            .expect_err("counted cancellation must stop STB projection");
+
+        assert_eq!(error, StbAnalysisError::Aborted);
+        assert_eq!(
+            abort.count(),
+            3,
+            "projection must stop on the first true poll"
+        );
     }
 }

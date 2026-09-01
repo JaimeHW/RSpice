@@ -83,10 +83,11 @@ pub use s_param::{
 };
 pub use sensitivity::{
     AcSensitivity, AcSensitivityOutput, AcSensitivityResult, ElementDesc, ElementType, Sensitivity,
-    SensitivityAnalyzer, SensitivityResult,
+    SensitivityAnalysisError, SensitivityAnalyzer, SensitivityResult,
 };
 pub use stb::{
-    BodePoint, NyquistPoint, StabilityMargins, StbAnalyzer, StbConfig, StbResult, StbSweepType,
+    BodePoint, NyquistPoint, StabilityMargins, StbAnalysisError, StbAnalyzer, StbConfig, StbResult,
+    StbSweepType,
 };
 pub use temperature::{
     JunctionTempScaling, MosfetTempScaling, ResistorTempCoeffs, TemperatureContext,

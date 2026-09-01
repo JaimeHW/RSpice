@@ -26,6 +26,7 @@
 //! ```
 
 #![allow(clippy::needless_range_loop)]
+use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::{Complex64, Value};
 
 //=============================================================================
@@ -377,6 +378,24 @@ pub struct SensitivityAnalyzer {
     elements: Vec<ElementDesc>,
 }
 
+/// Failure while solving or projecting an adjoint sensitivity result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SensitivityAnalysisError {
+    /// The caller cancelled the operation.
+    Aborted,
+}
+
+impl std::fmt::Display for SensitivityAnalysisError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Aborted => formatter.write_str("sensitivity analysis was aborted"),
+        }
+    }
+}
+
+impl std::error::Error for SensitivityAnalysisError {}
+
 impl SensitivityAnalyzer {
     /// Create analyzer with pre-solved circuit
     ///
@@ -426,27 +445,36 @@ impl SensitivityAnalyzer {
         })
     }
 
-    fn solve_adjoint_transposed(&mut self, output_node: usize) -> bool {
+    fn solve_adjoint_transposed_with_abort(
+        &mut self,
+        output_node: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<bool, SensitivityAnalysisError> {
+        ensure_sensitivity_not_aborted(abort)?;
         if output_node >= self.system_size {
-            return false;
+            return Ok(false);
         }
 
         let mut e = vec![0.0; self.system_size];
         e[output_node] = 1.0;
         let n = self.system_size;
         let mut aug = vec![vec![0.0; n + 1]; n];
+        let mut work = 0usize;
 
         for row in 0..n {
             for col in 0..n {
+                poll_sensitivity_work(abort, &mut work)?;
                 aug[row][col] = self.g_matrix[col][row];
             }
             aug[row][n] = e[row];
         }
 
         for k in 0..n {
+            poll_sensitivity_work(abort, &mut work)?;
             let mut max_row = k;
             let mut max_val = aug[k][k].abs();
             for i in (k + 1)..n {
+                poll_sensitivity_work(abort, &mut work)?;
                 if aug[i][k].abs() > max_val {
                     max_val = aug[i][k].abs();
                     max_row = i;
@@ -454,7 +482,7 @@ impl SensitivityAnalyzer {
             }
 
             if max_val < 1e-15 {
-                return false;
+                return Ok(false);
             }
 
             if max_row != k {
@@ -463,23 +491,28 @@ impl SensitivityAnalyzer {
 
             let pivot = aug[k][k];
             for i in (k + 1)..n {
+                poll_sensitivity_work(abort, &mut work)?;
                 let factor = aug[i][k] / pivot;
                 aug[i][k] = 0.0;
                 for j in (k + 1)..=n {
+                    poll_sensitivity_work(abort, &mut work)?;
                     aug[i][j] -= factor * aug[k][j];
                 }
             }
         }
 
         for i in (0..n).rev() {
+            poll_sensitivity_work(abort, &mut work)?;
             let mut sum = aug[i][n];
             for j in (i + 1)..n {
+                poll_sensitivity_work(abort, &mut work)?;
                 sum -= aug[i][j] * self.adjoint[j];
             }
             self.adjoint[i] = sum / aug[i][i];
         }
 
-        true
+        ensure_sensitivity_not_aborted(abort)?;
+        Ok(true)
     }
 
     /// Compute sensitivity of a resistor
@@ -558,10 +591,23 @@ impl SensitivityAnalyzer {
         output_node: usize,
         output_ref: Option<usize>,
     ) -> Option<SensitivityResult> {
+        self.analyze_with_abort(output_node, output_ref, &NoAbort)
+            .expect("NoAbort cannot cancel sensitivity analysis")
+    }
+
+    /// Run sensitivity analysis with cooperative cancellation during the
+    /// dense adjoint solve and per-element result projection.
+    pub fn analyze_with_abort(
+        &mut self,
+        output_node: usize,
+        output_ref: Option<usize>,
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<SensitivityResult>, SensitivityAnalysisError> {
+        ensure_sensitivity_not_aborted(abort)?;
         if output_node >= self.system_size
             || output_ref.is_some_and(|reference| reference >= self.system_size)
         {
-            return None;
+            return Ok(None);
         }
         // Get output value
         let output_value = match output_ref {
@@ -570,8 +616,8 @@ impl SensitivityAnalyzer {
         };
 
         // Solve adjoint for output node
-        if !self.solve_adjoint_transposed(output_node) {
-            return None;
+        if !self.solve_adjoint_transposed_with_abort(output_node, abort)? {
+            return Ok(None);
         }
 
         // If differential output, also solve for reference and combine
@@ -582,17 +628,19 @@ impl SensitivityAnalyzer {
             let adj_output = self.adjoint.clone();
 
             // Solve for reference node
-            if !self.solve_adjoint_transposed(ref_node) {
-                return None;
+            if !self.solve_adjoint_transposed_with_abort(ref_node, abort)? {
+                return Ok(None);
             }
 
             // Combine: λ = λ_output - λ_ref
             for i in 0..self.system_size {
+                poll_sensitivity_index(abort, i)?;
                 self.adjoint[i] = adj_output[i] - self.adjoint[i];
             }
         }
 
-        Some(self.build_result(output_node, output_value))
+        self.build_result_with_abort(output_node, output_value, abort)
+            .map(Some)
     }
 
     /// Assemble sensitivities from the adjoint supplied to
@@ -604,22 +652,41 @@ impl SensitivityAnalyzer {
         output_node: usize,
         output_ref: Option<usize>,
     ) -> Option<SensitivityResult> {
+        self.analyze_precomputed_with_abort(output_node, output_ref, &NoAbort)
+            .expect("NoAbort cannot cancel sensitivity result projection")
+    }
+
+    /// Assemble a precomputed-adjoint result with cooperative cancellation.
+    pub fn analyze_precomputed_with_abort(
+        &self,
+        output_node: usize,
+        output_ref: Option<usize>,
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<SensitivityResult>, SensitivityAnalysisError> {
+        ensure_sensitivity_not_aborted(abort)?;
         if output_node >= self.system_size
             || output_ref.is_some_and(|reference| reference >= self.system_size)
         {
-            return None;
+            return Ok(None);
         }
         let output_value = output_ref
             .map(|reference| self.solution[output_node] - self.solution[reference])
             .unwrap_or(self.solution[output_node]);
-        Some(self.build_result(output_node, output_value))
+        self.build_result_with_abort(output_node, output_value, abort)
+            .map(Some)
     }
 
-    fn build_result(&self, output_node: usize, output_value: Value) -> SensitivityResult {
+    fn build_result_with_abort(
+        &self,
+        output_node: usize,
+        output_value: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<SensitivityResult, SensitivityAnalysisError> {
         let mut result = SensitivityResult::new(&format!("V({})", output_node + 1), output_value);
 
         // Compute sensitivity for each element
-        for elem in &self.elements {
+        for (index, elem) in self.elements.iter().enumerate() {
+            poll_sensitivity_index(abort, index)?;
             let absolute = match elem.element_type {
                 ElementType::Resistor => self.resistor_sensitivity(elem),
                 ElementType::Capacitor => self.capacitor_sensitivity(elem),
@@ -654,8 +721,41 @@ impl SensitivityAnalyzer {
             result.add(sensitivity);
         }
 
-        result
+        ensure_sensitivity_not_aborted(abort)?;
+        Ok(result)
     }
+}
+
+const SENSITIVITY_ABORT_POLL_STRIDE: usize = 256;
+
+#[inline]
+fn ensure_sensitivity_not_aborted(abort: &dyn AbortSignal) -> Result<(), SensitivityAnalysisError> {
+    if abort.is_aborted() {
+        Err(SensitivityAnalysisError::Aborted)
+    } else {
+        Ok(())
+    }
+}
+
+#[inline]
+fn poll_sensitivity_index(
+    abort: &dyn AbortSignal,
+    index: usize,
+) -> Result<(), SensitivityAnalysisError> {
+    if index.is_multiple_of(SENSITIVITY_ABORT_POLL_STRIDE) {
+        ensure_sensitivity_not_aborted(abort)?;
+    }
+    Ok(())
+}
+
+#[inline]
+fn poll_sensitivity_work(
+    abort: &dyn AbortSignal,
+    work: &mut usize,
+) -> Result<(), SensitivityAnalysisError> {
+    poll_sensitivity_index(abort, *work)?;
+    *work = work.wrapping_add(1);
+    Ok(())
 }
 
 //=============================================================================
@@ -665,3 +765,52 @@ impl SensitivityAnalyzer {
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::abort_signal::CountingAbort;
+
+    #[test]
+    fn precomputed_projection_observes_abort_within_one_poll_stride() {
+        let elements = (0..SENSITIVITY_ABORT_POLL_STRIDE * 4)
+            .map(|index| ElementDesc::resistor(&format!("R{index}"), Some(0), None, 1_000.0))
+            .collect();
+        let analyzer =
+            SensitivityAnalyzer::with_precomputed_adjoint(vec![1.0], vec![1.0], elements)
+                .expect("precomputed sensitivity fixture is valid");
+        let abort = CountingAbort::new(2);
+
+        let error = analyzer
+            .analyze_precomputed_with_abort(0, None, &abort)
+            .expect_err("counted cancellation must stop sensitivity projection");
+
+        assert_eq!(error, SensitivityAnalysisError::Aborted);
+        assert_eq!(
+            abort.count(),
+            3,
+            "projection must stop on the first true poll"
+        );
+    }
+
+    #[test]
+    fn dense_adjoint_entry_preserves_typed_abort() {
+        let mut analyzer = SensitivityAnalyzer::new(
+            vec![vec![1.0]],
+            vec![1.0],
+            vec![ElementDesc::resistor("R1", Some(0), None, 1_000.0)],
+        );
+        let abort = CountingAbort::new(1);
+
+        let error = analyzer
+            .analyze_with_abort(0, None, &abort)
+            .expect_err("counted cancellation must stop the dense adjoint path");
+
+        assert_eq!(error, SensitivityAnalysisError::Aborted);
+        assert_eq!(
+            abort.count(),
+            2,
+            "adjoint path must stop on the first true poll"
+        );
+    }
+}

@@ -7,9 +7,11 @@ impl PoleZeroAnalyzer {
     /// eliminating algebraic MNA variables with sparse LU. Dense eigen work is
     /// then proportional only to the number of dynamic states, while root
     /// filtering, canonical ordering, gain, and zero extraction remain shared
-    /// with the ordinary descriptor analyzer.
+    /// with the ordinary descriptor analyzer. Dense eigensolver calls are
+    /// coarse cancellation regions; the signal is checked immediately before
+    /// and after each one.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn analyze_state_space(
+    pub(crate) fn analyze_state_space_with_abort(
         a: Matrix,
         b: Vec<Value>,
         c: Vec<Value>,
@@ -17,7 +19,9 @@ impl PoleZeroAnalyzer {
         config: &PoleZeroConfig,
         input_label: &str,
         output_label: &str,
+        abort: &dyn AbortSignal,
     ) -> Result<PoleZeroResult, PoleZeroAnalysisError> {
+        ensure_pole_zero_not_aborted(abort)?;
         let n = a.dims().0;
         if n == 0
             || a.dims().1 != n
@@ -38,7 +42,9 @@ impl PoleZeroAnalyzer {
         let model = StateSpaceModel { a, b, c, d };
         let mut result = PoleZeroResult::new(input_label, output_label);
         if config.compute_poles {
+            ensure_pole_zero_not_aborted(abort)?;
             let mut spectrum = helper.eigenvalues_from_matrix(&model.a)?;
+            ensure_pole_zero_not_aborted(abort)?;
             helper.ensure_roots_within_frequency_limit(&spectrum.finite, config, "pole")?;
             spectrum
                 .finite
@@ -46,9 +52,12 @@ impl PoleZeroAnalyzer {
             result.set_poles(spectrum);
         }
         if config.compute_zeros {
+            ensure_pole_zero_not_aborted(abort)?;
             let spectrum = helper.zeros_from_state_space(&model, config)?;
+            ensure_pole_zero_not_aborted(abort)?;
             result.set_zeros(spectrum);
         }
+        ensure_pole_zero_not_aborted(abort)?;
         if let Some(a_inv_b) = helper.solve_linear(&model.a, &model.b) {
             let correction = model
                 .c
@@ -64,6 +73,7 @@ impl PoleZeroAnalyzer {
         result.hf_gain = model.d.is_finite().then_some(model.d);
         result.sort_poles_by_magnitude();
         result.sort_zeros_by_magnitude();
+        ensure_pole_zero_not_aborted(abort)?;
         Ok(result)
     }
 
@@ -194,6 +204,17 @@ impl PoleZeroAnalyzer {
         &self,
         config: &PoleZeroConfig,
     ) -> Result<PoleZeroResult, PoleZeroAnalysisError> {
+        self.analyze_with_abort(config, &NoAbort)
+    }
+
+    /// Run complete pole-zero analysis with cooperative cancellation around
+    /// each dense factorization/eigensolver phase and every major projection.
+    pub fn analyze_with_abort(
+        &self,
+        config: &PoleZeroConfig,
+        abort: &dyn AbortSignal,
+    ) -> Result<PoleZeroResult, PoleZeroAnalysisError> {
+        ensure_pole_zero_not_aborted(abort)?;
         let (g_rows, g_cols) = self.g_matrix.dims();
         let (c_rows, c_cols) = self.c_matrix.dims();
         if g_rows == 0
@@ -223,6 +244,7 @@ impl PoleZeroAnalyzer {
             &format!("node{}", config.input_pos),
             &format!("node{}", config.output_pos),
         );
+        ensure_pole_zero_not_aborted(abort)?;
 
         if !config.input_is_current {
             let (_, output_vec) = self.build_port_vectors(config).ok_or(
@@ -234,11 +256,14 @@ impl PoleZeroAnalyzer {
                     "voltage input source could not be constructed",
                 ))?;
             if config.compute_poles {
+                ensure_pole_zero_not_aborted(abort)?;
                 let spectrum = voltage_analyzer.find_poles(config)?;
+                ensure_pole_zero_not_aborted(abort)?;
                 result.set_poles(spectrum);
             }
 
             if config.compute_zeros {
+                ensure_pole_zero_not_aborted(abort)?;
                 if self.is_direct_voltage_port_measurement(config) {
                     result.set_zeros(ComputedSpectrum::exact(Vec::new(), 0, 0)?);
                 } else if let Some(state_space) =
@@ -252,30 +277,38 @@ impl PoleZeroAnalyzer {
                     let spectrum = voltage_analyzer.finalize_zero_roots(spectrum, config)?;
                     result.set_zeros(spectrum);
                 }
+                ensure_pole_zero_not_aborted(abort)?;
             }
 
+            ensure_pole_zero_not_aborted(abort)?;
             if let Some(gain) = self.dc_gain_from_config(config) {
                 result.dc_gain = Some(gain);
             }
 
             result.sort_poles_by_magnitude();
             result.sort_zeros_by_magnitude();
+            ensure_pole_zero_not_aborted(abort)?;
             return Ok(result);
         }
 
         // Find poles
         if config.compute_poles {
+            ensure_pole_zero_not_aborted(abort)?;
             let spectrum = self.find_poles(config)?;
+            ensure_pole_zero_not_aborted(abort)?;
             result.set_poles(spectrum);
         }
 
         // Find zeros
         if config.compute_zeros {
+            ensure_pole_zero_not_aborted(abort)?;
             let spectrum = self.find_zeros(config)?;
+            ensure_pole_zero_not_aborted(abort)?;
             result.set_zeros(spectrum);
         }
 
         // Compute DC gain
+        ensure_pole_zero_not_aborted(abort)?;
         if let Some(gain) = self.dc_gain_from_config(config) {
             result.dc_gain = Some(gain);
         }
@@ -283,6 +316,7 @@ impl PoleZeroAnalyzer {
         result.sort_poles_by_magnitude();
         result.sort_zeros_by_magnitude();
 
+        ensure_pole_zero_not_aborted(abort)?;
         Ok(result)
     }
 }

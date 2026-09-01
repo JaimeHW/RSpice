@@ -23,7 +23,11 @@ impl Engine {
         g_descriptor: &crate::solver::ComplexMatrix,
         c_descriptor: &crate::solver::ComplexMatrix,
         config: &PoleZeroConfig,
+        abort: &dyn AbortSignal,
     ) -> Result<Option<PoleZeroResult>, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         let n = g_descriptor.nrows;
         if n == 0 || g_descriptor.ncols != n || c_descriptor.nrows != n || c_descriptor.ncols != n {
             return Ok(None);
@@ -40,6 +44,9 @@ impl Engine {
                 dynamic_mask[col] = true;
             }
         });
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         let dynamic = dynamic_mask
             .iter()
             .enumerate()
@@ -58,9 +65,15 @@ impl Engine {
         let mut dynamic_map = vec![usize::MAX; n];
         let mut algebraic_map = vec![usize::MAX; n];
         for (reduced, &original) in dynamic.iter().enumerate() {
+            if reduced.is_multiple_of(256) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             dynamic_map[original] = reduced;
         }
         for (reduced, &original) in algebraic.iter().enumerate() {
+            if reduced.is_multiple_of(256) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             algebraic_map[original] = reduced;
         }
 
@@ -263,11 +276,17 @@ impl Engine {
         }
         rhs.extend_from_slice(&b_eff);
         let mut solved = Vec::new();
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         if c_sparse
             .solve_many_into(&rhs, dynamic_count + 1, &mut solved)
             .is_err()
         {
             return Ok(None);
+        }
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
         }
 
         let mut a = Matrix::zeros(dynamic_count, dynamic_count);
@@ -277,7 +296,7 @@ impl Engine {
             }
         }
         let b = solved[dynamic_count * dynamic_count..].to_vec();
-        let result = match PoleZeroAnalyzer::analyze_state_space(
+        let result = match PoleZeroAnalyzer::analyze_state_space_with_abort(
             a,
             b,
             c_eff,
@@ -285,6 +304,7 @@ impl Engine {
             config,
             &format!("node{}", config.input_pos),
             &format!("node{}", config.output_pos),
+            abort,
         ) {
             Ok(result) => result,
             // Sparse reduction is an optimization. Its numerical path may
@@ -298,6 +318,7 @@ impl Engine {
                 | PoleZeroAnalysisError::InvalidSystem(_)
                 | PoleZeroAnalysisError::TransferExtraction(_),
             ) => return Ok(None),
+            Err(PoleZeroAnalysisError::Aborted) => return Err(SimulationError::Aborted),
             Err(error) => {
                 return Err(SimulationError::Solver(
                     crate::solver::SolverError::InvalidCircuit(format!(
@@ -780,7 +801,7 @@ impl Engine {
             .any(|bjt| bjt.uses_vbic_dynamic_charges());
         if !has_external_vbic_descriptor_states
             && let Some(result) =
-                Self::try_sparse_pz_state_space(&g_descriptor, &c_descriptor, &config)?
+                Self::try_sparse_pz_state_space(&g_descriptor, &c_descriptor, &config, abort)?
         {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
@@ -802,11 +823,14 @@ impl Engine {
         Self::stamp_vbic_pz_descriptor_states(&circuit, &dc_solution, &mut g_matrix, &mut c_matrix);
         let analyzer = PoleZeroAnalyzer::new(g_matrix, c_matrix);
 
-        let result = analyzer.analyze(&config).map_err(|error| {
-            SimulationError::Solver(crate::solver::SolverError::InvalidCircuit(format!(
-                "pole-zero extraction failed: {error}"
-            )))
-        })?;
+        let result = analyzer
+            .analyze_with_abort(&config, abort)
+            .map_err(|error| match error {
+                PoleZeroAnalysisError::Aborted => SimulationError::Aborted,
+                error => SimulationError::Solver(crate::solver::SolverError::InvalidCircuit(
+                    format!("pole-zero extraction failed: {error}"),
+                )),
+            })?;
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -895,7 +919,7 @@ mod tests {
             }
         }
         let config = PoleZeroConfig::poles_and_zeros(0, 1);
-        let sparse = Engine::try_sparse_pz_state_space(&g_sparse, &c_sparse, &config)
+        let sparse = Engine::try_sparse_pz_state_space(&g_sparse, &c_sparse, &config, &NoAbort)
             .expect("sparse reduction does not error")
             .expect("descriptor is reducible");
         let dense = PoleZeroAnalyzer::new(
@@ -941,7 +965,7 @@ mod tests {
 
         let mut config = PoleZeroConfig::poles_and_zeros(0, 1);
         config.compute_zeros = false;
-        let sparse = Engine::try_sparse_pz_state_space(&g_sparse, &c_sparse, &config)
+        let sparse = Engine::try_sparse_pz_state_space(&g_sparse, &c_sparse, &config, &NoAbort)
             .expect("sparse reduction does not error")
             .expect("both mixed-scale capacitances remain dynamic");
         let dense = PoleZeroAnalyzer::new(
