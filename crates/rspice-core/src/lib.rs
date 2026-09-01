@@ -110,6 +110,7 @@ pub mod constants;
 pub mod device;
 pub mod diagnostics;
 pub mod engine;
+pub mod execution;
 pub mod expr;
 pub mod io;
 pub mod library;
