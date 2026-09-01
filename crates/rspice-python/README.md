@@ -507,6 +507,12 @@ Touchstone v1 carries a single reference impedance. A sweep whose ports do not
 all share one is refused rather than written with an `R` that misdescribes it;
 renormalize the ports first.
 
+Native result-file publication (`write_csv`, `write_raw`, and
+`write_touchstone`) is transactional: RSpice stages and synchronizes the
+complete file beside its destination before atomically replacing it. A
+serialization, flush, or commit failure therefore preserves the previous
+complete artifact, or leaves an absent destination absent.
+
 ## Parallelism
 
 Simulation calls release the GIL, so threads work directly. For process-based

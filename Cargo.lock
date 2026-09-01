@@ -5400,6 +5400,7 @@ dependencies = [
  "pyo3",
  "pyo3-build-config",
  "rspice-core",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
