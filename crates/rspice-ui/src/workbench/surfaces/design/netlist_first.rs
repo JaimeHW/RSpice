@@ -620,9 +620,6 @@ mod tests {
         ("820x1180", Vec2::new(820.0, 1180.0)),
         ("390x844", Vec2::new(390.0, 844.0)),
     ];
-    const PENDING_FINGERPRINT: &str =
-        "0000000000000000000000000000000000000000000000000000000000000000";
-
     #[derive(Clone, Copy)]
     struct NetlistFirstBaseline {
         name: &'static str,
@@ -636,25 +633,25 @@ mod tests {
             name: "design-netlist-first-1440x900",
             size: Vec2::new(1440.0, 900.0),
             truncated: false,
-            fingerprint: PENDING_FINGERPRINT,
+            fingerprint: "b48463edaa1cca3ded701d236f979dedf85234407ebf82800416ded9c08839bf",
         },
         NetlistFirstBaseline {
             name: "design-netlist-first-820x1180",
             size: Vec2::new(820.0, 1180.0),
             truncated: false,
-            fingerprint: PENDING_FINGERPRINT,
+            fingerprint: "56dead751affee02043e750cb3f244cde376346497e2025356b6a0bda3d4f5e5",
         },
         NetlistFirstBaseline {
             name: "design-netlist-first-390x844",
             size: Vec2::new(390.0, 844.0),
             truncated: false,
-            fingerprint: PENDING_FINGERPRINT,
+            fingerprint: "458f6391ca34d31a6c215db6b882bdba1be8372f7d2bb7227eda00e3a2110898",
         },
         NetlistFirstBaseline {
             name: "design-netlist-first-1440x900-truncated",
             size: Vec2::new(1440.0, 900.0),
             truncated: true,
-            fingerprint: PENDING_FINGERPRINT,
+            fingerprint: "93c7e7295618e57d7be01396707e79d9c61ba0f65a837887cfe0e54adadf4605",
         },
     ];
 

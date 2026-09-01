@@ -10,9 +10,6 @@ use super::*;
 use crate::workbench::state::{ModelsCatalogScope, ModelsPage};
 
 const MODELS_RASTER_SIZE: egui::Vec2 = egui::Vec2::new(1_180.0, 900.0);
-const PENDING_FINGERPRINT: &str =
-    "0000000000000000000000000000000000000000000000000000000000000000";
-
 #[derive(Clone, Copy)]
 struct ModelsBaseline {
     name: &'static str,
@@ -26,49 +23,49 @@ const MODELS_BASELINES: [ModelsBaseline; 8] = [
         name: "models-00-models-project",
         page: ModelsPage::Models,
         scope: ModelsCatalogScope::Project,
-        fingerprint: PENDING_FINGERPRINT,
+        fingerprint: "061265cf15ba42fc1ac7e390c4a4f87057deb1a92b6e3deb0e7b40ca7176f02b",
     },
     ModelsBaseline {
         name: "models-01-symbols-cdf",
         page: ModelsPage::Symbols,
         scope: ModelsCatalogScope::Project,
-        fingerprint: PENDING_FINGERPRINT,
+        fingerprint: "1622088abf454d2baf1b52f7845f59d1fe0818d890712b3785c9dfe8922268ad",
     },
     ModelsBaseline {
         name: "models-02-corners-sections",
         page: ModelsPage::Corners,
         scope: ModelsCatalogScope::Project,
-        fingerprint: PENDING_FINGERPRINT,
+        fingerprint: "c6c5fa1aafaf3b96222d1aa4dd6fd0563183d33f8f0e79cfaefe5a15b4adb945",
     },
     ModelsBaseline {
         name: "models-03-bins-geometry",
         page: ModelsPage::Bins,
         scope: ModelsCatalogScope::Project,
-        fingerprint: PENDING_FINGERPRINT,
+        fingerprint: "c0d9d3b2a0ad5ab07ff5e16a22183a79cfb1a39da15dbedb24ccc135a0328219",
     },
     ModelsBaseline {
         name: "models-04-include-graph",
         page: ModelsPage::Include,
         scope: ModelsCatalogScope::Project,
-        fingerprint: PENDING_FINGERPRINT,
+        fingerprint: "aaf28f7c71b58cc70d1944da5db6469f8e933e7ea81a5db80f575a7eb4094cd7",
     },
     ModelsBaseline {
         name: "models-05-qualification",
         page: ModelsPage::Qualification,
         scope: ModelsCatalogScope::Project,
-        fingerprint: PENDING_FINGERPRINT,
+        fingerprint: "dc345e81745ac3aaa3d6c96add70fb5668f9057b7b5c4abf6c73e08966753294",
     },
     ModelsBaseline {
         name: "models-00b-rspice-library",
         page: ModelsPage::Models,
         scope: ModelsCatalogScope::RSpiceLibrary,
-        fingerprint: PENDING_FINGERPRINT,
+        fingerprint: "fc1cea77ac0ac7733f04b153896cc185615cb3461469109da31c16af50cad821",
     },
     ModelsBaseline {
         name: "models-00c-installed-packs",
         page: ModelsPage::Models,
         scope: ModelsCatalogScope::InstalledPacks,
-        fingerprint: PENDING_FINGERPRINT,
+        fingerprint: "841dc7c52cad1f011b45318b40db5fa6d56bc4a250688ee1c7056e7df9fbb127",
     },
 ];
 
