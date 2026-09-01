@@ -264,6 +264,27 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
         CoreParseError::StartupDirectiveConflict(error) => {
             directives::startup_directive_conflict_attributes(error)
         }
+        CoreParseError::StartupConstraintConflict(error) => {
+            let mut attributes = ParseErrorAttributes::new("conflicting_startup_constraints");
+            attributes.category = Some("startup_directive_validation");
+            attributes.set_primary(&error.conflicting);
+            attributes.set_related(&error.established);
+            let startup_kind = match error.kind {
+                rspice_core::netlist::StartupDirectiveKind::Ic => "ic",
+                rspice_core::netlist::StartupDirectiveKind::NodeSet => "nodeset",
+            };
+            let expression = format!("V({},{})", error.positive, error.negative);
+            attributes.detail = Some(format!(
+                "{startup_kind} {expression}: expected {:.17e}, actual {:.17e}",
+                error.expected, error.actual
+            ));
+            attributes.expression = Some(expression);
+            attributes.expected = Some(format!("{:.17e}", error.expected));
+            attributes.value = Some(error.actual);
+            attributes.first_startup_kind = Some(startup_kind.to_string());
+            attributes.conflicting_startup_kind = Some(startup_kind.to_string());
+            attributes
+        }
         CoreParseError::DeviceInitialCondition(error) => {
             device::device_initial_condition_attributes(error.as_ref())
         }

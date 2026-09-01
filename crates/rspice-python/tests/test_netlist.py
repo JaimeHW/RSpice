@@ -38,6 +38,35 @@ class TestParseStatementSemantics:
         assert diagnostic.scopes[0].qualified_definition is None
         assert diagnostic.scopes[0].qualified_instances == []
 
+    def test_inconsistent_startup_constraint_preserves_typed_detail(self):
+        with pytest.raises(rspice.ParseError) as exc_info:
+            rspice.Netlist.parse_spice(
+                "inconsistent startup constraints\n"
+                "V1 a 0 0\n"
+                "V2 b 0 0\n"
+                ".NODESET V(a,b)=1\n"
+                ".NODESET V(b,0)=2\n"
+                ".NODESET V(a,0)=4\n"
+                ".END\n"
+            )
+
+        error = exc_info.value
+        assert error.kind == "conflicting_startup_constraints"
+        assert error.category == "startup_directive_validation"
+        assert error.line == 6
+        assert error.primary_line == 6
+        assert error.related_line == 5
+        assert error.source is None
+        assert error.primary_source is None
+        assert error.related_source is None
+        assert error.expression == "V(A,0)"
+        assert error.expected == "3.00000000000000000e0"
+        assert error.value == pytest.approx(4.0)
+        assert error.first_startup_kind == "nodeset"
+        assert error.conflicting_startup_kind == "nodeset"
+        assert "expected 3.00000000000000000e0" in error.detail
+        assert "actual 4.00000000000000000e0" in error.detail
+
     def test_titleless_content_parses_all_elements(self):
         netlist = rspice.Netlist.parse("V1 1 0 10\nR1 1 0 1k\n.end")
         assert netlist.num_elements == 2
