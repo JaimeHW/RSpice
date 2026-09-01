@@ -226,6 +226,48 @@ endmodule
     );
 }
 
+/// The filters too, and this is where the catch-all would have been most
+/// convincing: a `laplace_nd` over two literals reads nothing volatile at all,
+/// so a classifier that went by operands alone would compute its step response
+/// once per model card and hold it forever.
+#[test]
+fn filters_are_newton_class_even_over_static_operands() {
+    let artifact = artifact(
+        r#"
+module static_operand_filters(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real level = 1.0;
+    real continuous, sampled;
+    analog begin
+        continuous = laplace_nd(level, '{1.0}, '{1.0, 1.0e-9});
+        sampled = zi_nd(level, '{1.0}, '{1.0}, 1.0e-6, 0.0);
+        I(p, n) <+ 1.0e-3 * (continuous + sampled) * V(p, n);
+    end
+endmodule
+"#,
+    );
+    let cfg =
+        CfgModel::from_hir(&artifact.hir, &artifact.mir).expect("static-operand filter lowering");
+    let schedule = schedule_cfg(&cfg.function);
+    let mut filters = 0;
+    for value in &cfg.function.values {
+        if matches!(
+            value.kind,
+            CfgValueKind::Laplace { .. } | CfgValueKind::Zi { .. }
+        ) {
+            filters += 1;
+            assert_eq!(
+                schedule.class(value.id),
+                InvalidationClass::Newton,
+                "{:?} owns accepted history and cannot be cached at a coarser class",
+                value.kind
+            );
+        }
+    }
+    assert_eq!(filters, 2, "the fixture must reach both filter families");
+}
+
 #[test]
 fn source_parameter_scope_separates_model_card_and_instance_geometry_work() {
     let source = r#"

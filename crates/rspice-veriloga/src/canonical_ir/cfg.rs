@@ -39,6 +39,23 @@
 //! incomplete parameter behind, which is filled in on sealing. Loops are the
 //! only construct that needs the delay, because a loop header is reachable from
 //! its own body.
+//!
+//! ## The two filter coefficient contracts
+//!
+//! [`CfgValueKind::Laplace`] carries folded `f64` constants and
+//! [`CfgValueKind::Zi`] carries SSA operands. That is deliberate asymmetry, not
+//! an inconsistency waiting to be tidied, and each kind's documentation gives
+//! the argument in full. In short: the front end *refuses* a non-constant
+//! `laplace_*` coefficient by name, so an operand form there could hold nothing
+//! a constant form cannot; while a `zi_*` coefficient is an ordinary expression
+//! the runtime freezes per instance, which is exactly why a Zi checkpoint
+//! serializes `num` and `den` where a Laplace checkpoint serializes only state.
+//!
+//! What both forms share is the property the state layout needs: the *length*
+//! of each polynomial is syntactic either way, so the record's width is fixed at
+//! compile time whether or not its contents are. The spelling of the
+//! coefficients was never what made the state shape static, which is why the
+//! two contracts can differ without the layout having to care.
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -186,6 +203,74 @@ pub enum CfgIntegerBitwiseOp {
     Xor,
     Shl,
     Shr,
+}
+
+/// A Laplace transfer function, in whichever of the two realizable forms the
+/// source's spelling reduces to.
+///
+/// See [`CfgValueKind::Laplace`] for why these are folded constants and why
+/// there are two forms rather than the language's four.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum CfgLaplaceTransfer {
+    /// `laplace_zp`: complex zeros and poles as `(real, imaginary)` pairs. Kept
+    /// unexpanded because the realization is built from the roots.
+    ///
+    /// No gain factor: the operator takes three arguments in Verilog-AMS, so a
+    /// pole-zero filter's leading coefficient is always one, and a field that
+    /// can only hold one is a field a consumer has to check.
+    ZeroPole {
+        zeros: Vec<(f64, f64)>,
+        poles: Vec<(f64, f64)>,
+    },
+    /// `laplace_nd`, and `laplace_zd`/`laplace_np` after their root half is
+    /// expanded: numerator and denominator coefficients in ascending powers of
+    /// `s`, the convention the operator's argument lists use.
+    Coefficients {
+        numerator: Vec<f64>,
+        denominator: Vec<f64>,
+    },
+}
+
+/// One polynomial of a sampled-data filter, as the source wrote it.
+///
+/// The values are SSA operands rather than numbers; see [`CfgValueKind::Zi`]
+/// for why, and for why the *count* is nonetheless a compile-time constant.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CfgZiPolynomial {
+    /// Coefficients ascending in `z^-1`.
+    Coefficients(Vec<ValueId>),
+    /// Roots as `(real, imaginary)` operand pairs, expanded by the runtime once
+    /// they have values.
+    Roots(Vec<(ValueId, ValueId)>),
+}
+
+impl CfgZiPolynomial {
+    /// The operands, in the order the runtime reads them.
+    pub fn operands(&self) -> Vec<ValueId> {
+        match self {
+            Self::Coefficients(values) => values.clone(),
+            Self::Roots(values) => values
+                .iter()
+                .flat_map(|(real, imaginary)| [*real, *imaginary])
+                .collect(),
+        }
+    }
+
+    fn map_operands(&mut self, map: &mut impl FnMut(ValueId) -> ValueId) {
+        match self {
+            Self::Coefficients(values) => {
+                for value in values {
+                    *value = map(*value);
+                }
+            }
+            Self::Roots(values) => {
+                for (real, imaginary) in values {
+                    *real = map(*real);
+                    *imaginary = map(*imaginary);
+                }
+            }
+        }
+    }
 }
 
 /// What an SSA value is.
@@ -406,6 +491,123 @@ pub enum CfgValueKind {
         delay: ValueId,
         rise: ValueId,
         fall: ValueId,
+    },
+    /// `laplace_zp`, `laplace_zd`, `laplace_np` or `laplace_nd` — a continuous
+    /// linear filter applied to `input`.
+    ///
+    /// ## The coefficient contract
+    ///
+    /// The transfer function is carried as **folded constants**, not as SSA
+    /// values, and the four spellings collapse to the two realizable forms in
+    /// [`CfgLaplaceTransfer`].
+    ///
+    /// Constants because they cannot be anything else. The front end refuses a
+    /// `laplace_*` whose coefficient list is not compile-time constant, by
+    /// name, so a `Vec<ValueId>` form could hold nothing a `Vec<f64>` cannot —
+    /// it would be a strictly wider representation with no wider meaning, and
+    /// no backend to execute the extra width. It is also what makes the state
+    /// *shape* static: the realization's order, and therefore the length of the
+    /// state vector the checkpoint serializes, is a function of the polynomial
+    /// degree. A runtime-valued coefficient list would make the size of a
+    /// checkpoint record a runtime quantity.
+    ///
+    /// Two forms rather than four because the remaining two spellings are the
+    /// same transfer function written differently: `laplace_zd` expands its
+    /// zeros and `laplace_np` its poles into the corresponding polynomial, an
+    /// exact and total compile-time step the executable IR already performs.
+    /// Pole-zero form is *not* expanded, because the state-space realization is
+    /// built from the roots directly and expanding first would lose that.
+    ///
+    /// ## State (W-B inventory)
+    ///
+    /// One state-space filter per operator: the realization's state vector, its
+    /// older accepted copy, and its derivative lane, each of the realization's
+    /// order. All three are checkpointed;
+    /// [`crate::canonical_ir::state::CanonicalStateFamily::LaplaceFilter`]
+    /// names the array.
+    Laplace {
+        operator: ExprId,
+        input: ValueId,
+        transfer: CfgLaplaceTransfer,
+    },
+    /// Exact local Jacobian action of one `laplace_*` candidate.
+    ///
+    /// Only the input is differentiated: the coefficients are constants, so the
+    /// filter is linear in its operand and the action is the same filter driven
+    /// by the operand's derivative. Shares [`Self::Laplace`]'s realization and
+    /// allocates none of its own.
+    LaplaceDerivative {
+        operator: ExprId,
+        input_derivative: ValueId,
+        transfer: CfgLaplaceTransfer,
+    },
+    /// `zi_zp`, `zi_zd`, `zi_np` or `zi_nd` — a sampled-data filter whose input
+    /// is read every `period` seconds and whose output holds between samples.
+    ///
+    /// ## The coefficient contract
+    ///
+    /// The opposite of [`Self::Laplace`]'s, and for the opposite reason: the
+    /// coefficients are **SSA operands**, in the polynomial form the source
+    /// wrote.
+    ///
+    /// The `zi_*` front end does not fold them. It accepts arbitrary
+    /// expressions, the executable IR retains them as programs, and the runtime
+    /// installs the evaluated values per instance the first time the filter is
+    /// viewed — which is why the checkpoint serializes `num` and `den` at all,
+    /// where a Laplace checkpoint serializes only state. Folding them here
+    /// would refuse the parameterised filters the language admits and the
+    /// shipped runtime already runs.
+    ///
+    /// What *is* compile-time is the polynomial's length, and that is what
+    /// fixes the state shape: the sampled input and output histories are one
+    /// element shorter than their coefficient lists, and both lists are
+    /// syntactic. So the record's width is static even though its contents are
+    /// not, which is the property the layout needs and the property the
+    /// spelling of the coefficients was never the source of.
+    ///
+    /// The four spellings are kept as [`CfgZiPolynomial`]'s two forms per
+    /// polynomial, matching the executable IR: a root list is expanded by the
+    /// runtime, after the roots have values.
+    ///
+    /// ## State (W-B inventory)
+    ///
+    /// One sampled filter per operator: the frozen definition (coefficients,
+    /// period, first-transition time), the committed input and output
+    /// histories, the held output and its visible transition segment, the next
+    /// sample index, and the accepted-time bookkeeping that lets the stepper
+    /// land on the next edge. All of it is checkpointed; the speculative
+    /// candidate for the current Newton pass is not.
+    Zi {
+        operator: ExprId,
+        input: ValueId,
+        numerator: CfgZiPolynomial,
+        denominator: CfgZiPolynomial,
+        period: ValueId,
+        transition: ValueId,
+        first_transition: ValueId,
+        /// Whether this site is written directly into a contribution rather
+        /// than into a variable. Verilog-AMS 2023 section 4.5.12 requires a
+        /// strictly positive transition time of a filter in that position, and
+        /// the runtime enforces it, so the distinction is semantic and belongs
+        /// on the node rather than in whatever lowered it.
+        direct_assignment: bool,
+    },
+    /// Exact local Jacobian action of one `zi_*` candidate.
+    ///
+    /// Shares [`Self::Zi`]'s filter. Like the Laplace derivative it
+    /// differentiates only the input — but for a weaker reason, since a
+    /// coefficient here *can* depend on a parameter. It cannot depend on an
+    /// unknown: the definition is frozen once per instance, before the first
+    /// Newton pass, so with respect to the solve it is a constant.
+    ZiDerivative {
+        operator: ExprId,
+        input_derivative: ValueId,
+        numerator: CfgZiPolynomial,
+        denominator: CfgZiPolynomial,
+        period: ValueId,
+        transition: ValueId,
+        first_transition: ValueId,
+        direct_assignment: bool,
     },
     /// `cross(expr, direction, time_tol, expr_tol, enable)`, evaluated from
     /// accepted detector history into a speculative candidate lane.
@@ -882,6 +1084,10 @@ impl CfgValueKind {
             | Self::Slew { .. }
             | Self::SlewDerivative { .. }
             | Self::LastCrossing { .. }
+            | Self::Laplace { .. }
+            | Self::LaplaceDerivative { .. }
+            | Self::Zi { .. }
+            | Self::ZiDerivative { .. }
             | Self::Cross { .. }
             | Self::Above { .. }
             | Self::Timer { .. }
@@ -1026,6 +1232,43 @@ impl CfgValueKind {
                 fall,
                 ..
             } => vec![*input, *input_derivative, *delay, *rise, *fall],
+            // Only the input is an operand. The transfer function is folded
+            // constants, so there is nothing else in the node for a pass to
+            // rename, and nothing for the scheduler to depend on.
+            Self::Laplace { input, .. } => vec![*input],
+            Self::LaplaceDerivative {
+                input_derivative, ..
+            } => vec![*input_derivative],
+            // Every coefficient *is* an operand here, and in the order the
+            // runtime reads them: numerator, denominator, then the timing.
+            Self::Zi {
+                input,
+                numerator,
+                denominator,
+                period,
+                transition,
+                first_transition,
+                ..
+            } => {
+                let mut operands = numerator.operands();
+                operands.extend(denominator.operands());
+                operands.extend([*period, *transition, *first_transition, *input]);
+                operands
+            }
+            Self::ZiDerivative {
+                input_derivative,
+                numerator,
+                denominator,
+                period,
+                transition,
+                first_transition,
+                ..
+            } => {
+                let mut operands = numerator.operands();
+                operands.extend(denominator.operands());
+                operands.extend([*period, *transition, *first_transition, *input_derivative]);
+                operands
+            }
             Self::Cross {
                 input,
                 direction,
@@ -1188,6 +1431,42 @@ impl CfgValueKind {
                 *max_rise_derivative = map(*max_rise_derivative);
                 *max_fall = map(*max_fall);
                 *max_fall_derivative = map(*max_fall_derivative);
+            }
+            Self::Laplace { input, .. } => *input = map(*input),
+            Self::LaplaceDerivative {
+                input_derivative, ..
+            } => *input_derivative = map(*input_derivative),
+            Self::Zi {
+                input,
+                numerator,
+                denominator,
+                period,
+                transition,
+                first_transition,
+                ..
+            } => {
+                *input = map(*input);
+                numerator.map_operands(&mut map);
+                denominator.map_operands(&mut map);
+                *period = map(*period);
+                *transition = map(*transition);
+                *first_transition = map(*first_transition);
+            }
+            Self::ZiDerivative {
+                input_derivative,
+                numerator,
+                denominator,
+                period,
+                transition,
+                first_transition,
+                ..
+            } => {
+                *input_derivative = map(*input_derivative);
+                numerator.map_operands(&mut map);
+                denominator.map_operands(&mut map);
+                *period = map(*period);
+                *transition = map(*transition);
+                *first_transition = map(*first_transition);
             }
             Self::Transition {
                 input,
@@ -1683,6 +1962,34 @@ impl CfgFunction {
                         ],
                     )?;
                 }
+                // The filters' actions have only the one derivative operand,
+                // because they are linear and their coefficients are constants
+                // of the solve. The `zi` coefficients and timing are primal
+                // operands of the same node, so they go on the scalar side.
+                CfgValueKind::LaplaceDerivative {
+                    input_derivative, ..
+                } => {
+                    self.validate_stateful_derivative(value.id, lanes, &[], &[*input_derivative])?;
+                }
+                CfgValueKind::ZiDerivative {
+                    input_derivative,
+                    numerator,
+                    denominator,
+                    period,
+                    transition,
+                    first_transition,
+                    ..
+                } => {
+                    let mut primal = numerator.operands();
+                    primal.extend(denominator.operands());
+                    primal.extend([*period, *transition, *first_transition]);
+                    self.validate_stateful_derivative(
+                        value.id,
+                        lanes,
+                        &primal,
+                        &[*input_derivative],
+                    )?;
+                }
                 // Every other kind is scalar arithmetic, and a packed operand
                 // reaching one is the mistake this catches.
                 kind => {
@@ -2075,6 +2382,16 @@ impl SsaBuilder {
         self.values
             .get(usize::from(value))
             .map(|value| value.value_type)
+    }
+
+    /// What a value defined so far is.
+    ///
+    /// The counterpart of [`Self::value_type_of`] for a lowering that has to
+    /// read an operand's *definition* back before the function is finished —
+    /// folding a filter's coefficient list, which must be constants before the
+    /// node carrying them can be built at all.
+    pub fn kind_of(&self, value: ValueId) -> Option<&CfgValueKind> {
+        self.values.get(usize::from(value)).map(|value| &value.kind)
     }
 
     /// Define a value without placing it in a block.

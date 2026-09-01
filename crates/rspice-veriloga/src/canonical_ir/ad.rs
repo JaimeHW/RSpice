@@ -456,6 +456,20 @@ fn lane_liveness_with_control(
                         changed |= live.union_from(value.id, *max_rise_derivative);
                         changed |= live.union_from(value.id, *max_fall_derivative);
                     }
+                    // Only the input. The coefficients are constants of the
+                    // solve, so a lane through one would be a lane through a
+                    // number.
+                    CfgValueKind::Laplace { input, .. } | CfgValueKind::Zi { input, .. } => {
+                        changed |= live.union_from(value.id, *input);
+                    }
+                    CfgValueKind::LaplaceDerivative {
+                        input_derivative, ..
+                    }
+                    | CfgValueKind::ZiDerivative {
+                        input_derivative, ..
+                    } => {
+                        changed |= live.union_from(value.id, *input_derivative);
+                    }
                     _ => unreachable!("every differentiable value kind is covered"),
                 },
                 _ => {}
@@ -498,6 +512,15 @@ fn differentiable(kind: &CfgValueKind) -> bool {
         | CfgValueKind::AbsDelayDerivative { .. }
         | CfgValueKind::Slew { .. }
         | CfgValueKind::SlewDerivative { .. }
+        // A filter is linear in its input, so its action is the same filter
+        // driven by the input's derivative. Its coefficients are not operands
+        // of the solve either way: a Laplace coefficient is a compile-time
+        // constant, and a `zi_*` coefficient is frozen per instance before the
+        // first Newton pass.
+        | CfgValueKind::Laplace { .. }
+        | CfgValueKind::LaplaceDerivative { .. }
+        | CfgValueKind::Zi { .. }
+        | CfgValueKind::ZiDerivative { .. }
         | CfgValueKind::Limit { .. } => true,
         // The previous iterate is a constant as far as this iteration's Newton
         // step is concerned; that is what makes limiting a damping and not a
@@ -803,6 +826,17 @@ fn ddx_direction_liveness(
                     changed |= needed.union_from(*input_derivative, value.id);
                     changed |= needed.union_from(*max_rise_derivative, value.id);
                     changed |= needed.union_from(*max_fall_derivative, value.id);
+                }
+                CfgValueKind::Laplace { input, .. } | CfgValueKind::Zi { input, .. } => {
+                    changed |= needed.union_from(*input, value.id);
+                }
+                CfgValueKind::LaplaceDerivative {
+                    input_derivative, ..
+                }
+                | CfgValueKind::ZiDerivative {
+                    input_derivative, ..
+                } => {
+                    changed |= needed.union_from(*input_derivative, value.id);
                 }
                 CfgValueKind::Binary {
                     op: CfgBinaryOp::Mod,
@@ -1245,6 +1279,95 @@ impl<'a> ScalarDdxBuilder<'a> {
                         max_rise_derivative,
                         max_fall: *max_fall,
                         max_fall_derivative,
+                    },
+                ))
+            }
+            // A filter is linear, so differentiating it twice is the same node
+            // again with the next derivative in it. There is no order to track
+            // the way `absdelay` tracks one: the second derivative of a linear
+            // map is not a Hessian term the runtime has to refuse, it is the
+            // filter applied to a second derivative that is usually zero.
+            CfgValueKind::Laplace {
+                operator,
+                input,
+                transfer,
+            } => {
+                let input_derivative = self.derivative(*input, lane)?;
+                let transfer = transfer.clone();
+                Some(self.push(
+                    CfgValueType::Real,
+                    CfgValueKind::LaplaceDerivative {
+                        operator: *operator,
+                        input_derivative,
+                        transfer,
+                    },
+                ))
+            }
+            CfgValueKind::LaplaceDerivative {
+                operator,
+                input_derivative,
+                transfer,
+            } => {
+                let next = self.derivative(*input_derivative, lane)?;
+                let transfer = transfer.clone();
+                Some(self.push(
+                    CfgValueType::Real,
+                    CfgValueKind::LaplaceDerivative {
+                        operator: *operator,
+                        input_derivative: next,
+                        transfer,
+                    },
+                ))
+            }
+            CfgValueKind::Zi {
+                operator,
+                input,
+                numerator,
+                denominator,
+                period,
+                transition,
+                first_transition,
+                direct_assignment,
+            } => {
+                let input_derivative = self.derivative(*input, lane)?;
+                let (numerator, denominator) = (numerator.clone(), denominator.clone());
+                Some(self.push(
+                    CfgValueType::Real,
+                    CfgValueKind::ZiDerivative {
+                        operator: *operator,
+                        input_derivative,
+                        numerator,
+                        denominator,
+                        period: *period,
+                        transition: *transition,
+                        first_transition: *first_transition,
+                        direct_assignment: *direct_assignment,
+                    },
+                ))
+            }
+            CfgValueKind::ZiDerivative {
+                operator,
+                input_derivative,
+                numerator,
+                denominator,
+                period,
+                transition,
+                first_transition,
+                direct_assignment,
+            } => {
+                let next = self.derivative(*input_derivative, lane)?;
+                let (numerator, denominator) = (numerator.clone(), denominator.clone());
+                Some(self.push(
+                    CfgValueType::Real,
+                    CfgValueKind::ZiDerivative {
+                        operator: *operator,
+                        input_derivative: next,
+                        numerator,
+                        denominator,
+                        period: *period,
+                        transition: *transition,
+                        first_transition: *first_transition,
+                        direct_assignment: *direct_assignment,
                     },
                 ))
             }
@@ -2257,6 +2380,90 @@ impl<'a> AdBuilder<'a> {
                         max_rise_derivative,
                         max_fall: *max_fall,
                         max_fall_derivative,
+                    },
+                ))
+            }
+            CfgValueKind::Laplace {
+                operator,
+                input,
+                transfer,
+            } => {
+                let input_derivative = self.derivatives[usize::from(*input)]?;
+                let transfer = transfer.clone();
+                Some(self.push(
+                    CfgValueType::Lanes(target),
+                    CfgValueKind::LaplaceDerivative {
+                        operator: *operator,
+                        input_derivative,
+                        transfer,
+                    },
+                ))
+            }
+            CfgValueKind::LaplaceDerivative {
+                operator,
+                input_derivative,
+                transfer,
+            } => {
+                let next = self.derivatives[usize::from(*input_derivative)]?;
+                let transfer = transfer.clone();
+                Some(self.push(
+                    CfgValueType::Lanes(target),
+                    CfgValueKind::LaplaceDerivative {
+                        operator: *operator,
+                        input_derivative: next,
+                        transfer,
+                    },
+                ))
+            }
+            CfgValueKind::Zi {
+                operator,
+                input,
+                numerator,
+                denominator,
+                period,
+                transition,
+                first_transition,
+                direct_assignment,
+            } => {
+                let input_derivative = self.derivatives[usize::from(*input)]?;
+                let (numerator, denominator) = (numerator.clone(), denominator.clone());
+                Some(self.push(
+                    CfgValueType::Lanes(target),
+                    CfgValueKind::ZiDerivative {
+                        operator: *operator,
+                        input_derivative,
+                        numerator,
+                        denominator,
+                        period: *period,
+                        transition: *transition,
+                        first_transition: *first_transition,
+                        direct_assignment: *direct_assignment,
+                    },
+                ))
+            }
+            CfgValueKind::ZiDerivative {
+                operator,
+                input_derivative,
+                numerator,
+                denominator,
+                period,
+                transition,
+                first_transition,
+                direct_assignment,
+            } => {
+                let next = self.derivatives[usize::from(*input_derivative)]?;
+                let (numerator, denominator) = (numerator.clone(), denominator.clone());
+                Some(self.push(
+                    CfgValueType::Lanes(target),
+                    CfgValueKind::ZiDerivative {
+                        operator: *operator,
+                        input_derivative: next,
+                        numerator,
+                        denominator,
+                        period: *period,
+                        transition: *transition,
+                        first_transition: *first_transition,
+                        direct_assignment: *direct_assignment,
                     },
                 ))
             }

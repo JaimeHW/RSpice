@@ -42,9 +42,9 @@ pub mod state;
 pub use ad::{AdFunction, AdSeed, differentiate};
 pub use artifact::CanonicalIrArtifact;
 pub use cfg::{
-    CfgBinaryOp, CfgBlock, CfgFunction, CfgInstruction, CfgIntegerBitwiseOp, CfgTerminator,
-    CfgUnaryOp, CfgValidationError, CfgValue, CfgValueKind, CfgValueType, CfgVariable, DigitalWait,
-    SsaBuilder,
+    CfgBinaryOp, CfgBlock, CfgFunction, CfgInstruction, CfgIntegerBitwiseOp, CfgLaplaceTransfer,
+    CfgTerminator, CfgUnaryOp, CfgValidationError, CfgValue, CfgValueKind, CfgValueType,
+    CfgVariable, CfgZiPolynomial, DigitalWait, SsaBuilder,
 };
 pub use cfg_complex::{COMPLEX_STEP, ComplexStep};
 pub use cfg_eval::{

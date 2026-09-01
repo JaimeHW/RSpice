@@ -19,7 +19,10 @@
 use smol_str::SmolStr;
 use std::collections::{HashMap, HashSet};
 
-use super::cfg::{CfgBinaryOp, CfgFunction, CfgTerminator, CfgUnaryOp, CfgValueKind, is_leaf_kind};
+use super::cfg::{
+    CfgBinaryOp, CfgFunction, CfgLaplaceTransfer, CfgTerminator, CfgUnaryOp, CfgValueKind,
+    CfgZiPolynomial, is_leaf_kind,
+};
 use super::{BlockId, ExprId, ValueId};
 
 /// The arithmetic a CFG needs from its scalar type.
@@ -301,6 +304,13 @@ pub enum CfgEvalError {
     IntegerOperand {
         reason: &'static str,
     },
+    /// A filter's transfer function has no finite zero-frequency gain, so its
+    /// equilibrium value is not a number.
+    ///
+    /// Refused rather than substituted, for the reason a singular DC operating
+    /// point is refused: a filter whose denominator vanishes at zero frequency
+    /// is an integrator, and an integrator has no equilibrium to report.
+    SingularFilterGain(ValueId),
 }
 
 impl std::fmt::Display for CfgEvalError {
@@ -323,6 +333,11 @@ impl std::fmt::Display for CfgEvalError {
             Self::IntegerOperand { reason } => {
                 write!(f, "an analog integer operator operand is {reason}")
             }
+            Self::SingularFilterGain(value) => write!(
+                f,
+                "{value} is a filter with no finite zero-frequency gain, so it has no \
+                 equilibrium value"
+            ),
         }
     }
 }
@@ -474,6 +489,55 @@ impl<S: CfgScalar> Evaluator<'_, S> {
         Ok(value)
     }
 
+    /// `H(1)` of a sampled filter, evaluated from its operands.
+    ///
+    /// In scalar arithmetic rather than from constants, because a `zi_*`
+    /// coefficient is an expression — see the contract on
+    /// [`CfgValueKind::Zi`]. Both operand forms reduce to a product or a sum
+    /// evaluated at `z = 1`: the coefficient form's polynomial is its
+    /// coefficient sum there, and the root form's is the product of `1 - r` over
+    /// its roots, which is real because the root multiset is conjugate-closed.
+    fn zi_dc_gain(
+        &mut self,
+        id: ValueId,
+        numerator: &CfgZiPolynomial,
+        denominator: &CfgZiPolynomial,
+    ) -> Result<S, CfgEvalError> {
+        let numerator = self.zi_polynomial_at_unit_circle(numerator)?;
+        let denominator = self.zi_polynomial_at_unit_circle(denominator)?;
+        if denominator.real() == 0.0 || !denominator.real().is_finite() {
+            return Err(CfgEvalError::SingularFilterGain(id));
+        }
+        Ok(numerator.div(denominator))
+    }
+
+    fn zi_polynomial_at_unit_circle(
+        &mut self,
+        polynomial: &CfgZiPolynomial,
+    ) -> Result<S, CfgEvalError> {
+        match polynomial {
+            CfgZiPolynomial::Coefficients(values) => {
+                let mut total = S::from_f64(0.0);
+                for value in values {
+                    total = total.add(self.read(*value)?);
+                }
+                Ok(total)
+            }
+            CfgZiPolynomial::Roots(values) => {
+                let (mut real, mut imaginary) = (S::from_f64(1.0), S::from_f64(0.0));
+                for (root_real, root_imaginary) in values {
+                    let factor_real = S::from_f64(1.0).sub(self.read(*root_real)?);
+                    let factor_imaginary = self.read(*root_imaginary)?.neg();
+                    let next_real = real.mul(factor_real).sub(imaginary.mul(factor_imaginary));
+                    let next_imaginary = real.mul(factor_imaginary).add(imaginary.mul(factor_real));
+                    real = next_real;
+                    imaginary = next_imaginary;
+                }
+                Ok(real)
+            }
+        }
+    }
+
     fn read_lanes(&mut self, id: ValueId) -> Result<Vec<S>, CfgEvalError> {
         if let Some(lanes) = &self.lanes[usize::from(id)] {
             return Ok(lanes.clone());
@@ -582,6 +646,43 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                 self.read(max_fall)?;
                 self.read_lanes(max_fall_derivative)?;
                 self.read_lanes(input_derivative)?
+            }
+            // A linear filter's equilibrium value is its zero-frequency gain
+            // times its input, so its Jacobian action is that gain times the
+            // input's — the one dynamic operator whose local coefficient is not
+            // one at equilibrium, and the reason the oracles can tell a filter
+            // apart from a passthrough at all.
+            CfgValueKind::LaplaceDerivative {
+                input_derivative,
+                transfer,
+                ..
+            } => {
+                let gain = S::from_f64(laplace_dc_gain(id, &transfer)?);
+                self.read_lanes(input_derivative)?
+                    .into_iter()
+                    .map(|lane| lane.mul(gain))
+                    .collect()
+            }
+            // The sampled filter's gain is H(1) rather than H(0), and it is
+            // computed from operands rather than from constants; otherwise the
+            // rule is the Laplace one.
+            CfgValueKind::ZiDerivative {
+                input_derivative,
+                numerator,
+                denominator,
+                period,
+                transition,
+                first_transition,
+                ..
+            } => {
+                let gain = self.zi_dc_gain(id, &numerator, &denominator)?;
+                self.read(period)?;
+                self.read(transition)?;
+                self.read(first_transition)?;
+                self.read_lanes(input_derivative)?
+                    .into_iter()
+                    .map(|lane| lane.mul(gain))
+                    .collect()
             }
             // A merge that no predecessor supplied is a bug in the graph, not a
             // derivative of zero.
@@ -757,6 +858,58 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                 self.read(max_fall)?;
                 self.read(max_fall_derivative)?;
                 self.read(input_derivative)?
+            }
+            // A linear filter at equilibrium passes its input through its
+            // zero-frequency gain. The interpreter is a static oracle, so this
+            // is the whole of what a filter means to it: the accepted history a
+            // transient response is built from does not exist here.
+            CfgValueKind::Laplace {
+                input, transfer, ..
+            } => {
+                let gain = S::from_f64(laplace_dc_gain(id, &transfer)?);
+                self.read(input)?.mul(gain)
+            }
+            CfgValueKind::LaplaceDerivative {
+                input_derivative,
+                transfer,
+                ..
+            } => {
+                let gain = S::from_f64(laplace_dc_gain(id, &transfer)?);
+                self.read(input_derivative)?.mul(gain)
+            }
+            // The sampled counterpart, whose gain is H(1) and whose
+            // coefficients are operands rather than constants. The timing
+            // operands are read because the graph defines them and they play no
+            // part in an equilibrium value.
+            CfgValueKind::Zi {
+                input,
+                numerator,
+                denominator,
+                period,
+                transition,
+                first_transition,
+                ..
+            } => {
+                let gain = self.zi_dc_gain(id, &numerator, &denominator)?;
+                self.read(period)?;
+                self.read(transition)?;
+                self.read(first_transition)?;
+                self.read(input)?.mul(gain)
+            }
+            CfgValueKind::ZiDerivative {
+                input_derivative,
+                numerator,
+                denominator,
+                period,
+                transition,
+                first_transition,
+                ..
+            } => {
+                let gain = self.zi_dc_gain(id, &numerator, &denominator)?;
+                self.read(period)?;
+                self.read(transition)?;
+                self.read(first_transition)?;
+                self.read(input_derivative)?.mul(gain)
             }
             // A time, not a level, so the supplied-site default is the LRM's
             // "no crossing yet" answer rather than the zero the event levels
@@ -1035,6 +1188,39 @@ pub(super) fn apply_unary<S: CfgScalar>(op: CfgUnaryOp, input: S) -> S {
         CfgUnaryOp::Atanh => input.atanh(),
         CfgUnaryOp::Floor => input.floor(),
         CfgUnaryOp::Ceil => input.ceil(),
+    }
+}
+
+/// `H(0)` of a continuous filter, from the constants it carries.
+///
+/// The pole-zero form goes through the same checked root expansion the runtime
+/// realization is built from, so the interpreter cannot read the flattened
+/// real/imaginary storage as independent roots where the runtime reads
+/// conjugate pairs.
+fn laplace_dc_gain(id: ValueId, transfer: &CfgLaplaceTransfer) -> Result<f64, CfgEvalError> {
+    let gain = match transfer {
+        CfgLaplaceTransfer::ZeroPole { zeros, poles } => {
+            crate::laplace::checked_pole_zero_dc_gain(1.0, zeros, poles)
+                .map_err(|_| CfgEvalError::SingularFilterGain(id))?
+        }
+        // Ascending in `s`, so the constant terms are the leading elements and
+        // H(0) is their ratio.
+        CfgLaplaceTransfer::Coefficients {
+            numerator,
+            denominator,
+        } => {
+            let numerator = numerator.first().copied().unwrap_or(0.0);
+            let denominator = denominator.first().copied().unwrap_or(0.0);
+            if denominator == 0.0 {
+                return Err(CfgEvalError::SingularFilterGain(id));
+            }
+            numerator / denominator
+        }
+    };
+    if gain.is_finite() {
+        Ok(gain)
+    } else {
+        Err(CfgEvalError::SingularFilterGain(id))
     }
 }
 

@@ -35,8 +35,8 @@ use std::collections::{HashMap, HashSet};
 use crate::disciplines::is_standard_flow_access;
 
 use super::cfg::{
-    CfgBinaryOp, CfgDdxAxis, CfgFunction, CfgIntegerBitwiseOp, CfgTerminator, CfgUnaryOp,
-    CfgValueKind, CfgValueType, CfgVariable, SsaBuilder,
+    CfgBinaryOp, CfgDdxAxis, CfgFunction, CfgIntegerBitwiseOp, CfgLaplaceTransfer, CfgTerminator,
+    CfgUnaryOp, CfgValueKind, CfgValueType, CfgVariable, CfgZiPolynomial, SsaBuilder,
 };
 use super::hir::{
     HirAnalogOperator, HirContribution, HirContributionKind, HirCrossDirection, HirExprKind,
@@ -234,6 +234,78 @@ fn resolve_noise_processes(
         .collect()
 }
 
+/// Which halves of a filter's transfer function are named by roots.
+///
+/// One descriptor for both operator families, because the four spellings mean
+/// the same four things in each: `laplace_zd` and `zi_zd` both name zeros by
+/// their roots and the denominator by its coefficients. Having one lets the two
+/// lowerings differ only where the contract does — in whether the values are
+/// folded — instead of each carrying its own four-way match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FilterForm {
+    ZeroPole,
+    ZeroDenominator,
+    NumeratorPole,
+    NumeratorDenominator,
+}
+
+impl FilterForm {
+    /// The form an operator's name spells, if it names one.
+    fn from_operator(name: &str) -> Option<Self> {
+        match name.rsplit_once('_') {
+            Some((_, "zp")) => Some(Self::ZeroPole),
+            Some((_, "zd")) => Some(Self::ZeroDenominator),
+            Some((_, "np")) => Some(Self::NumeratorPole),
+            Some((_, "nd")) => Some(Self::NumeratorDenominator),
+            _ => None,
+        }
+    }
+}
+
+fn laplace_form(kind: &HirLaplaceKind) -> FilterForm {
+    match kind {
+        HirLaplaceKind::ZeroPole { .. } => FilterForm::ZeroPole,
+        HirLaplaceKind::ZeroDenominator { .. } => FilterForm::ZeroDenominator,
+        HirLaplaceKind::NumeratorPole { .. } => FilterForm::NumeratorPole,
+        HirLaplaceKind::NumeratorDenominator { .. } => FilterForm::NumeratorDenominator,
+    }
+}
+
+fn zi_form(kind: &HirZiKind) -> FilterForm {
+    match kind {
+        HirZiKind::ZeroPole { .. } => FilterForm::ZeroPole,
+        HirZiKind::ZeroDenominator { .. } => FilterForm::ZeroDenominator,
+        HirZiKind::NumeratorPole { .. } => FilterForm::NumeratorPole,
+        HirZiKind::NumeratorDenominator { .. } => FilterForm::NumeratorDenominator,
+    }
+}
+
+/// The numerator-then-denominator operand lists of a Laplace transfer function.
+fn laplace_polynomials(kind: &HirLaplaceKind) -> (&[ExprId], &[ExprId]) {
+    match kind {
+        HirLaplaceKind::ZeroPole { zeros, poles } => (zeros, poles),
+        HirLaplaceKind::ZeroDenominator { zeros, denominator } => (zeros, denominator),
+        HirLaplaceKind::NumeratorPole { numerator, poles } => (numerator, poles),
+        HirLaplaceKind::NumeratorDenominator {
+            numerator,
+            denominator,
+        } => (numerator, denominator),
+    }
+}
+
+/// The sampled-filter counterpart of [`laplace_polynomials`].
+fn zi_polynomials(kind: &HirZiKind) -> (&[ExprId], &[ExprId]) {
+    match kind {
+        HirZiKind::ZeroPole { zeros, poles } => (zeros, poles),
+        HirZiKind::ZeroDenominator { zeros, denominator } => (zeros, denominator),
+        HirZiKind::NumeratorPole { numerator, poles } => (numerator, poles),
+        HirZiKind::NumeratorDenominator {
+            numerator,
+            denominator,
+        } => (numerator, denominator),
+    }
+}
+
 fn laplace_kind_children(kind: &HirLaplaceKind) -> Vec<ExprId> {
     match kind {
         HirLaplaceKind::ZeroPole { zeros, poles } => zeros.iter().chain(poles).copied().collect(),
@@ -361,6 +433,11 @@ struct CfgLowerer<'a> {
     /// changes ordinary canonical residual lowering or its diagnostics.
     noise_metadata_only: bool,
     metadata_assignment_value: bool,
+    /// Whether the expression being lowered is a contribution's right-hand
+    /// side. Verilog-AMS 2023 section 4.5.12 requires a strictly positive
+    /// transition time of a `zi_*` filter written there, so the distinction
+    /// reaches the node rather than being rediscovered by a backend.
+    zi_direct_assignment: bool,
     diagnostics: Vec<IrDiagnostic>,
 }
 
@@ -709,6 +786,7 @@ impl<'a> CfgLowerer<'a> {
             noise_processes: Vec::new(),
             noise_metadata_only,
             metadata_assignment_value: false,
+            zi_direct_assignment: false,
             diagnostics: Vec::new(),
         }
     }
@@ -953,7 +1031,9 @@ impl<'a> CfgLowerer<'a> {
     }
 
     fn contribution(&mut self, contribution: &HirContribution, dynamic_topology_ancestor: bool) {
+        self.zi_direct_assignment = true;
         let value = self.expr(contribution.expression.id);
+        self.zi_direct_assignment = false;
         let variable = CfgVariable::Residual(contribution.id);
         let accumulated = match self.builder.read_variable(variable, self.block) {
             Some(accumulated) => accumulated,
@@ -1751,10 +1831,310 @@ impl<'a> CfgLowerer<'a> {
                 operands,
                 name,
             } => self.noise_process(*process_id, source, operands, name.clone(), span),
+            // The public-AST route. The compiler's own parser writes these as
+            // calls, which [`Self::call`] resolves to the same two kinds; both
+            // routes exist because [`crate::ast`] is a public builder as well as
+            // the parser's output.
+            HirExprKind::Laplace { expr, kind } => {
+                let (numerator, denominator) = laplace_polynomials(kind);
+                let form = laplace_form(kind);
+                self.laplace(expression.id, *expr, form, numerator, denominator, span)
+            }
+            HirExprKind::Zi {
+                expr,
+                kind,
+                period,
+                transition,
+                first_transition,
+            } => {
+                let (numerator, denominator) = zi_polynomials(kind);
+                let form = zi_form(kind);
+                self.zi(
+                    expression.id,
+                    *expr,
+                    form,
+                    numerator,
+                    denominator,
+                    *period,
+                    *transition,
+                    *first_transition,
+                    span,
+                )
+            }
             other => {
                 self.unsupported(span, format!("{} expression", kind_label(other)));
                 self.real_constant(0.0)
             }
+        }
+    }
+
+    /// `laplace_zp`, `laplace_zd`, `laplace_np` or `laplace_nd`.
+    ///
+    /// The transfer function is folded here rather than carried as operands;
+    /// [`CfgValueKind::Laplace`] documents why, and the front end's own refusal
+    /// of a non-constant coefficient list is what makes the fold total. When it
+    /// is not - a coefficient this level can reach but cannot fold - the answer
+    /// is a diagnostic, not a filter with a coefficient guessed at.
+    fn laplace(
+        &mut self,
+        operator: ExprId,
+        input: ExprId,
+        form: FilterForm,
+        numerator: &[ExprId],
+        denominator: &[ExprId],
+        span: SourceSpanRef,
+    ) -> ValueId {
+        let Some(transfer) = self.laplace_transfer(form, numerator, denominator, span) else {
+            return self.real_constant(0.0);
+        };
+        let input = self.expr(input);
+        self.builder.push(
+            self.block,
+            CfgValueType::Real,
+            CfgValueKind::Laplace {
+                operator,
+                input,
+                transfer,
+            },
+        )
+    }
+
+    fn laplace_transfer(
+        &mut self,
+        form: FilterForm,
+        numerator: &[ExprId],
+        denominator: &[ExprId],
+        span: SourceSpanRef,
+    ) -> Option<CfgLaplaceTransfer> {
+        // `laplace_zd` and `laplace_np` name one half of the transfer function
+        // by its roots and the other by its coefficients. Expanding the root
+        // half is exact and is what the executable IR does, which is why there
+        // are two forms here and four spellings in the language.
+        let expand = |lowerer: &mut Self, roots: &[ExprId]| -> Option<Vec<f64>> {
+            let roots = lowerer.laplace_roots(roots, span)?;
+            match crate::laplace::roots_to_polynomial(&roots) {
+                Ok(polynomial) => Some(polynomial),
+                Err(error) => {
+                    lowerer.unsupported(span, format!("a filter root list that {error}"));
+                    None
+                }
+            }
+        };
+        Some(match form {
+            FilterForm::ZeroPole => CfgLaplaceTransfer::ZeroPole {
+                zeros: self.laplace_roots(numerator, span)?,
+                poles: self.laplace_roots(denominator, span)?,
+            },
+            FilterForm::ZeroDenominator => CfgLaplaceTransfer::Coefficients {
+                numerator: expand(self, numerator)?,
+                denominator: self.laplace_coefficients(denominator, span)?,
+            },
+            FilterForm::NumeratorPole => CfgLaplaceTransfer::Coefficients {
+                numerator: self.laplace_coefficients(numerator, span)?,
+                denominator: expand(self, denominator)?,
+            },
+            FilterForm::NumeratorDenominator => CfgLaplaceTransfer::Coefficients {
+                numerator: self.laplace_coefficients(numerator, span)?,
+                denominator: self.laplace_coefficients(denominator, span)?,
+            },
+        })
+    }
+
+    fn laplace_coefficients(
+        &mut self,
+        coefficients: &[ExprId],
+        span: SourceSpanRef,
+    ) -> Option<Vec<f64>> {
+        coefficients
+            .iter()
+            .map(|coefficient| self.filter_constant(*coefficient, span))
+            .collect()
+    }
+
+    /// A root list, read as the `(real, imaginary)` pairs the operator's
+    /// argument is. An odd length is not a pair list, and the runtime would
+    /// read the trailing element as a real part with an invented imaginary one.
+    fn laplace_roots(&mut self, roots: &[ExprId], span: SourceSpanRef) -> Option<Vec<(f64, f64)>> {
+        if !roots.len().is_multiple_of(2) {
+            self.unsupported(
+                span,
+                "a filter pole/zero list whose length is not a whole number of (real, imaginary) pairs"
+                    .to_string(),
+            );
+            return None;
+        }
+        let values = self.laplace_coefficients(roots, span)?;
+        Some(
+            values
+                .chunks_exact(2)
+                .map(|pair| (pair[0], pair[1]))
+                .collect(),
+        )
+    }
+
+    /// One Laplace coefficient, as the constant it has to be.
+    fn filter_constant(&mut self, expr: ExprId, span: SourceSpanRef) -> Option<f64> {
+        let value = self.expr(expr);
+        match self.folded_constant(value) {
+            Some(constant) if constant.is_finite() => Some(constant),
+            Some(_) => {
+                self.unsupported(span, "a non-finite laplace coefficient".to_string());
+                None
+            }
+            None => {
+                self.unsupported(
+                    span,
+                    "a laplace coefficient that is not a compile-time constant".to_string(),
+                );
+                None
+            }
+        }
+    }
+
+    /// The constant a value folds to, if it is one.
+    ///
+    /// A local fold rather than a call into the optimizer: the coefficients
+    /// have to be numbers before the node can be built, and the optimizer runs
+    /// over a finished function.
+    fn folded_constant(&self, value: ValueId) -> Option<f64> {
+        match self.builder.kind_of(value)? {
+            CfgValueKind::RealConstant(constant) => Some(*constant),
+            CfgValueKind::BooleanConstant(constant) => Some(f64::from(u8::from(*constant))),
+            CfgValueKind::Unary { op, input } => Some(super::cfg_eval::apply_unary(
+                *op,
+                self.folded_constant(*input)?,
+            )),
+            CfgValueKind::Binary { op, left, right } => Some(super::cfg_eval::apply_binary(
+                *op,
+                self.folded_constant(*left)?,
+                self.folded_constant(*right)?,
+            )),
+            _ => None,
+        }
+    }
+
+    /// `zi_zp`, `zi_zd`, `zi_np` or `zi_nd`.
+    ///
+    /// The mirror image of [`Self::laplace`]: the coefficients stay operands,
+    /// because the language lets them depend on parameters and the runtime
+    /// installs them per instance. See [`CfgValueKind::Zi`].
+    #[allow(clippy::too_many_arguments)]
+    fn zi(
+        &mut self,
+        operator: ExprId,
+        input: ExprId,
+        form: FilterForm,
+        numerator: &[ExprId],
+        denominator: &[ExprId],
+        period: ExprId,
+        transition: Option<ExprId>,
+        first_transition: Option<ExprId>,
+        span: SourceSpanRef,
+    ) -> ValueId {
+        let Some((numerator, denominator)) =
+            self.zi_polynomials(form, numerator, denominator, span)
+        else {
+            return self.real_constant(0.0);
+        };
+        let input = self.expr(input);
+        let period = self.expr(period);
+        // An omitted transition time is the module's `default_transition`, and
+        // an omitted first-transition time is zero: the same defaults the
+        // executable IR applies, applied where the node is built rather than
+        // left for a consumer to know.
+        let transition = match transition {
+            Some(transition) => self.expr(transition),
+            None => self.real_constant(self.hir.default_transition),
+        };
+        let first_transition = match first_transition {
+            Some(first_transition) => self.expr(first_transition),
+            None => self.real_constant(0.0),
+        };
+        self.builder.push(
+            self.block,
+            CfgValueType::Real,
+            CfgValueKind::Zi {
+                operator,
+                input,
+                numerator,
+                denominator,
+                period,
+                transition,
+                first_transition,
+                direct_assignment: self.zi_direct_assignment,
+            },
+        )
+    }
+
+    fn zi_polynomials(
+        &mut self,
+        form: FilterForm,
+        numerator: &[ExprId],
+        denominator: &[ExprId],
+        span: SourceSpanRef,
+    ) -> Option<(CfgZiPolynomial, CfgZiPolynomial)> {
+        Some(match form {
+            FilterForm::ZeroPole => (
+                self.zi_roots(numerator, span)?,
+                self.zi_roots(denominator, span)?,
+            ),
+            FilterForm::ZeroDenominator => (
+                self.zi_roots(numerator, span)?,
+                CfgZiPolynomial::Coefficients(self.zi_coefficients(denominator)),
+            ),
+            FilterForm::NumeratorPole => (
+                CfgZiPolynomial::Coefficients(self.zi_coefficients(numerator)),
+                self.zi_roots(denominator, span)?,
+            ),
+            FilterForm::NumeratorDenominator => (
+                CfgZiPolynomial::Coefficients(self.zi_coefficients(numerator)),
+                CfgZiPolynomial::Coefficients(self.zi_coefficients(denominator)),
+            ),
+        })
+    }
+
+    fn zi_coefficients(&mut self, coefficients: &[ExprId]) -> Vec<ValueId> {
+        coefficients
+            .iter()
+            .map(|coefficient| self.expr(*coefficient))
+            .collect()
+    }
+
+    fn zi_roots(&mut self, roots: &[ExprId], span: SourceSpanRef) -> Option<CfgZiPolynomial> {
+        if !roots.len().is_multiple_of(2) {
+            self.unsupported(
+                span,
+                "a zi pole/zero list whose length is not a whole number of (real, imaginary) pairs"
+                    .to_string(),
+            );
+            return None;
+        }
+        let values = self.zi_coefficients(roots);
+        Some(CfgZiPolynomial::Roots(
+            values
+                .chunks_exact(2)
+                .map(|pair| (pair[0], pair[1]))
+                .collect(),
+        ))
+    }
+
+    /// The elements of a filter's polynomial argument.
+    ///
+    /// The argument is an array literal in every model that writes more than
+    /// one coefficient, and a bare expression in the ones that write exactly
+    /// one; an explicitly null argument is the empty root list the LRM allows
+    /// for a filter with no zeros. Matching [`crate::expr_converter`]'s reading
+    /// of the same argument is what keeps the two routes describing one filter.
+    fn filter_operand_list(&self, argument: ExprId) -> Vec<ExprId> {
+        match self
+            .hir
+            .expressions
+            .get(usize::from(argument))
+            .map(|expression| &expression.kind)
+        {
+            Some(HirExprKind::ArrayLiteral { elements, .. }) => elements.clone(),
+            Some(HirExprKind::NullArgument) => Vec::new(),
+            _ => vec![argument],
         }
     }
 
@@ -2466,6 +2846,47 @@ impl<'a> CfgLowerer<'a> {
                         max_rise,
                         max_fall,
                     },
+                )
+            }
+            // The route the compiler's own parser takes: these are calls in the
+            // AST, and the four spellings of each family differ only in which
+            // half of the transfer function is named by roots.
+            ("laplace_zp" | "laplace_zd" | "laplace_np" | "laplace_nd", 3) => {
+                let Some(form) = FilterForm::from_operator(lowered.as_str()) else {
+                    self.unsupported(span, format!("function '{name}'"));
+                    return self.real_constant(0.0);
+                };
+                let numerator = self.filter_operand_list(args[1]);
+                let denominator = self.filter_operand_list(args[2]);
+                self.laplace(expression, args[0], form, &numerator, &denominator, span)
+            }
+            ("zi_zp" | "zi_zd" | "zi_np" | "zi_nd", 4..=6) => {
+                let Some(form) = FilterForm::from_operator(lowered.as_str()) else {
+                    self.unsupported(span, format!("function '{name}'"));
+                    return self.real_constant(0.0);
+                };
+                let numerator = self.filter_operand_list(args[1]);
+                let denominator = self.filter_operand_list(args[2]);
+                let transition = args.get(4).copied().filter(|argument| {
+                    !matches!(
+                        self.hir
+                            .expressions
+                            .get(usize::from(*argument))
+                            .map(|expression| &expression.kind),
+                        Some(HirExprKind::NullArgument)
+                    )
+                });
+                let first_transition = args.get(5).copied();
+                self.zi(
+                    expression,
+                    args[0],
+                    form,
+                    &numerator,
+                    &denominator,
+                    args[3],
+                    transition,
+                    first_transition,
+                    span,
                 )
             }
             // Keyed by the call, like `ddt` and `idt` above: the transport

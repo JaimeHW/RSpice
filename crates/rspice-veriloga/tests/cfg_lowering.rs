@@ -12,7 +12,8 @@
 use rspice_veriloga::canonical_ir::cfg::{CfgBinaryOp, CfgTerminator, CfgUnaryOp, CfgValueKind};
 use rspice_veriloga::canonical_ir::cfg_lower::CfgModel;
 use rspice_veriloga::canonical_ir::{
-    CanonicalIrArtifact, CfgEvalInputs, IrDiagnostic, evaluate_cfg,
+    CanonicalIrArtifact, CfgEvalInputs, CfgLaplaceTransfer, CfgZiPolynomial, IrDiagnostic,
+    evaluate_cfg,
 };
 use rspice_veriloga::rust_backend::discover_veriloga_sources;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
@@ -855,6 +856,207 @@ endmodule
             .iter()
             .any(|value| matches!(value.kind, CfgValueKind::IntegerBitwiseNot { .. })),
         "`~` did not survive lowering"
+    );
+}
+
+/// The Laplace spellings reduce to the two realizable forms, with their
+/// coefficients folded.
+///
+/// The contract, stated as an executable check: `laplace_zp` keeps its roots
+/// because the realization is built from them, and `laplace_zd`/`laplace_np`
+/// expand their root half rather than carrying a third and fourth form nothing
+/// realizes. A `Vec<ValueId>` form would fail here by not being constants at
+/// all.
+#[test]
+fn laplace_spellings_reduce_to_folded_constants_in_two_forms() {
+    let model = lower(
+        r#"
+module laplace_forms(p, n);
+    inout p, n;
+    electrical p, n;
+    real zp, zd, np, nd;
+    analog begin
+        zp = laplace_zp(V(p, n), '{-1.0, 0.0}, '{-2.0, 0.0});
+        zd = laplace_zd(V(p, n), '{-1.0, 0.0}, '{1.0, 0.5});
+        np = laplace_np(V(p, n), '{1.0, 0.25}, '{-2.0, 0.0});
+        nd = laplace_nd(V(p, n), '{1.0}, '{1.0, 1.0e-9});
+        I(p, n) <+ 1.0e-3 * (zp + zd + np + nd);
+    end
+endmodule
+"#,
+    );
+
+    let mut roots = 0usize;
+    let mut coefficients = 0usize;
+    for value in &model.function.values {
+        if let CfgValueKind::Laplace { transfer, .. } = &value.kind {
+            match transfer {
+                CfgLaplaceTransfer::ZeroPole { zeros, poles } => {
+                    assert_eq!(zeros, &[(-1.0, 0.0)]);
+                    assert_eq!(poles, &[(-2.0, 0.0)]);
+                    roots += 1;
+                }
+                CfgLaplaceTransfer::Coefficients {
+                    numerator,
+                    denominator,
+                } => {
+                    assert!(!numerator.is_empty() && !denominator.is_empty());
+                    coefficients += 1;
+                }
+            }
+        }
+    }
+    assert_eq!(roots, 1, "only laplace_zp keeps its roots");
+    assert_eq!(
+        coefficients, 3,
+        "laplace_zd, laplace_np and laplace_nd share the coefficient form"
+    );
+}
+
+/// A Laplace coefficient that is not a compile-time constant is refused rather
+/// than guessed at.
+///
+/// The front end refuses one by name; this is the canonical level holding the
+/// same line, so that a route which reached CFG lowering without passing
+/// through that refusal cannot quietly install a coefficient of zero.
+#[test]
+fn a_parameter_dependent_laplace_coefficient_is_refused() {
+    let artifact = artifact(
+        r#"
+module laplace_parametric(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real tau = 1.0e-9;
+    analog I(p, n) <+ 1.0e-3 * laplace_nd(V(p, n), '{1.0}, '{1.0, tau});
+endmodule
+"#,
+    );
+    let diagnostics = CfgModel::from_hir(&artifact.hir, &artifact.mir)
+        .expect_err("a parameter-dependent laplace coefficient must be refused");
+    let rendered = render(&diagnostics);
+    assert!(
+        rendered.contains("laplace coefficient"),
+        "unexpected refusal: {rendered}"
+    );
+}
+
+/// The sampled filters keep their coefficients as operands, in the polynomial
+/// form the source wrote, and each names the operator its filter is keyed by.
+///
+/// The mirror of the Laplace test, and the other half of the contract: a `zi_*`
+/// coefficient may depend on a parameter, so folding it would refuse a filter
+/// the shipped runtime already runs.
+#[test]
+fn zi_spellings_keep_their_coefficients_as_operands() {
+    let artifact = artifact(
+        r#"
+module zi_forms(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real b1 = 0.25;
+    real nd, zp;
+    analog begin
+        nd = zi_nd(V(p, n), '{0.5, b1}, '{1.0, -0.5}, 1.0e-6, 0.0);
+        zp = zi_zp(V(p, n), '{0.5, 0.0}, '{0.25, 0.0}, 1.0e-6, 0.0);
+        I(p, n) <+ 1.0e-3 * (nd + zp);
+    end
+endmodule
+"#,
+    );
+    let model = CfgModel::from_hir(&artifact.hir, &artifact.mir)
+        .unwrap_or_else(|diagnostics| panic!("{}", render(&diagnostics)));
+
+    let mut coefficient_form = 0usize;
+    let mut root_form = 0usize;
+    let mut operators = Vec::new();
+    for value in &model.function.values {
+        if let CfgValueKind::Zi {
+            operator,
+            numerator,
+            denominator,
+            ..
+        } = &value.kind
+        {
+            operators.push(*operator);
+            match (numerator, denominator) {
+                (CfgZiPolynomial::Coefficients(num), CfgZiPolynomial::Coefficients(den)) => {
+                    assert_eq!(num.len(), 2);
+                    assert_eq!(den.len(), 2);
+                    coefficient_form += 1;
+                }
+                (CfgZiPolynomial::Roots(zeros), CfgZiPolynomial::Roots(poles)) => {
+                    assert_eq!(zeros.len(), 1);
+                    assert_eq!(poles.len(), 1);
+                    root_form += 1;
+                }
+                other => panic!("unexpected zi polynomial pairing: {other:?}"),
+            }
+        }
+    }
+    assert_eq!(coefficient_form, 1, "zi_nd keeps coefficients");
+    assert_eq!(root_form, 1, "zi_zp keeps roots");
+
+    for operator in operators {
+        let expression = artifact
+            .hir
+            .expressions
+            .get(usize::from(operator))
+            .expect("a zi filter must name an expression in the HIR arena");
+        // Keyed by the call, which is what the compiler's own parser produces
+        // for a filter; the public AST's `HirExprKind::Zi` is the other
+        // spelling of the same site and keys the same way.
+        let spelled = match &expression.kind {
+            rspice_veriloga::canonical_ir::HirExprKind::Call { name, .. } => {
+                name.to_ascii_lowercase()
+            }
+            rspice_veriloga::canonical_ir::HirExprKind::Zi { .. } => "zi_nd".to_string(),
+            other => panic!("a zi filter must be keyed by its own operator, found {other:?}"),
+        };
+        assert!(
+            spelled.starts_with("zi_"),
+            "a zi filter must be keyed by its own operator, found {spelled}"
+        );
+    }
+}
+
+/// A filter in a contribution is marked as such, and one in a variable
+/// assignment is not.
+///
+/// Verilog-AMS 2023 section 4.5.12 makes the transition-time rule depend on
+/// exactly that distinction, so the node carries it rather than leaving a
+/// backend to rediscover where the value was written.
+#[test]
+fn zi_records_whether_it_was_written_into_a_contribution() {
+    let model = lower(
+        r#"
+module zi_positions(p, n);
+    inout p, n;
+    electrical p, n;
+    real assigned;
+    analog begin
+        assigned = zi_nd(V(p, n), '{1.0}, '{1.0}, 1.0e-6, 0.0);
+        I(p, n) <+ 1.0e-3 * assigned
+                 + 1.0e-3 * zi_nd(V(p, n), '{1.0}, '{1.0}, 1.0e-6, 1.0e-9);
+    end
+endmodule
+"#,
+    );
+    let mut positions: Vec<bool> = model
+        .function
+        .values
+        .iter()
+        .filter_map(|value| match value.kind {
+            CfgValueKind::Zi {
+                direct_assignment, ..
+            } => Some(direct_assignment),
+            _ => None,
+        })
+        .collect();
+    positions.sort_unstable();
+    assert_eq!(
+        positions,
+        vec![false, true],
+        "one filter is written into a variable and one into a contribution"
     );
 }
 

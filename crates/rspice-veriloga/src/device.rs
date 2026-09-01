@@ -2043,6 +2043,10 @@ impl CanonicalNoiseRuntimePlan {
                     | CfgValueKind::Slew { .. }
                     | CfgValueKind::SlewDerivative { .. }
                     | CfgValueKind::LastCrossing { .. }
+                    | CfgValueKind::Laplace { .. }
+                    | CfgValueKind::LaplaceDerivative { .. }
+                    | CfgValueKind::Zi { .. }
+                    | CfgValueKind::ZiDerivative { .. }
                     | CfgValueKind::Cross { .. }
                     | CfgValueKind::Above { .. }
                     | CfgValueKind::Timer { .. }
