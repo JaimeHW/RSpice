@@ -5215,6 +5215,7 @@ dependencies = [
  "mimalloc",
  "rayon",
  "rspice-core",
+ "rspice-output",
  "rspice-veriloga",
  "rustyhdf5",
  "serde",
@@ -5359,6 +5360,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rspice-output"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.20",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "rspice-pack"
 version = "0.1.0"
 dependencies = [
@@ -5401,7 +5410,7 @@ dependencies = [
  "pyo3",
  "pyo3-build-config",
  "rspice-core",
- "windows-sys 0.61.2",
+ "rspice-output",
 ]
 
 [[package]]

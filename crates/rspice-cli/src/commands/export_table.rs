@@ -14,10 +14,10 @@
 //! The same structure is what `convert` and `compare` read files back into;
 //! see [`crate::commands::waveform_io`].
 
-use crate::atomic_artifact::{AtomicArtifactError, write_atomic};
 use crate::cli::{CliError, OutputFormat};
 use crate::commands::run_signals::{ComplexSignal, ScalarSignal};
-use std::io::{BufWriter, Write};
+use rspice_output::{AtomicArtifactError, AtomicArtifactOptions, Durability, write_atomic};
+use std::io::Write;
 use std::path::Path;
 
 /// Data for one exported signal column.
@@ -207,25 +207,26 @@ impl ExportTable {
             });
         }
 
-        write_atomic(path, |file| {
-            let mut writer = BufWriter::new(file);
-            match format {
-                OutputFormat::Raw => self.write_raw(&mut writer, path, true)?,
-                OutputFormat::RawAscii => self.write_raw(&mut writer, path, false)?,
-                OutputFormat::Csv => self.write_delimited(&mut writer, path, ',')?,
-                OutputFormat::Tsv => self.write_delimited(&mut writer, path, '\t')?,
-                OutputFormat::Json => self.write_json(&mut writer, path)?,
-                OutputFormat::Hdf5 => {
-                    return Err(CliError::InternalError {
-                        message: "HDF5 export must be handled by the analysis-specific writer"
-                            .to_string(),
-                    });
+        write_atomic(
+            path,
+            AtomicArtifactOptions::new(Durability::SyncFileAndParent),
+            |writer| {
+                match format {
+                    OutputFormat::Raw => self.write_raw(writer, path, true)?,
+                    OutputFormat::RawAscii => self.write_raw(writer, path, false)?,
+                    OutputFormat::Csv => self.write_delimited(writer, path, ',')?,
+                    OutputFormat::Tsv => self.write_delimited(writer, path, '\t')?,
+                    OutputFormat::Json => self.write_json(writer, path)?,
+                    OutputFormat::Hdf5 => {
+                        return Err(CliError::InternalError {
+                            message: "HDF5 export must be handled by the analysis-specific writer"
+                                .to_string(),
+                        });
+                    }
                 }
-            }
-            writer
-                .flush()
-                .map_err(|error| CliError::output_error(path, error))
-        })
+                Ok(())
+            },
+        )
         .map_err(|error| map_atomic_error(path, error))
     }
 
@@ -240,7 +241,7 @@ impl ExportTable {
         }
     }
 
-    fn write_raw<W: Write>(
+    fn write_raw<W: Write + ?Sized>(
         &self,
         writer: &mut W,
         path: &Path,
@@ -307,7 +308,7 @@ impl ExportTable {
         Ok(())
     }
 
-    fn write_delimited<W: Write>(
+    fn write_delimited<W: Write + ?Sized>(
         &self,
         writer: &mut W,
         path: &Path,
@@ -362,7 +363,7 @@ impl ExportTable {
         Ok(())
     }
 
-    fn write_json<W: Write>(&self, writer: &mut W, path: &Path) -> Result<(), CliError> {
+    fn write_json<W: Write + ?Sized>(&self, writer: &mut W, path: &Path) -> Result<(), CliError> {
         let signals: Vec<serde_json::Value> = self
             .columns
             .iter()
@@ -400,9 +401,26 @@ impl ExportTable {
 fn map_atomic_error(path: &Path, error: AtomicArtifactError<CliError>) -> CliError {
     match error {
         AtomicArtifactError::Write(error) => error,
-        AtomicArtifactError::Preparation(error) => atomic_io_error(path, "preparation", error),
-        AtomicArtifactError::Flush(error) => atomic_io_error(path, "flush", error),
-        AtomicArtifactError::Commit(error) => atomic_io_error(path, "commit", error),
+        AtomicArtifactError::Prepare(error) => atomic_io_error(path, "preparation", error),
+        AtomicArtifactError::Flush { source, .. } => atomic_io_error(path, "flush", source),
+        AtomicArtifactError::Commit {
+            source,
+            recovery_path,
+            ..
+        } => {
+            let error = if let Some(recovery_path) = recovery_path {
+                std::io::Error::new(
+                    source.kind(),
+                    format!(
+                        "{source}; complete staging artifact retained at {}",
+                        recovery_path.display()
+                    ),
+                )
+            } else {
+                source
+            };
+            atomic_io_error(path, "commit", error)
+        }
     }
 }
 
@@ -443,6 +461,54 @@ pub(crate) fn delimited_cell(value: &str, delimiter: char) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn one_row_table() -> ExportTable {
+        ExportTable {
+            analysis: "tran".to_string(),
+            plot_name: "Transient Analysis".to_string(),
+            scale_name: "time".to_string(),
+            scale_type: "time".to_string(),
+            scale: vec![0.0],
+            columns: vec![ExportColumn {
+                name: "V(out)".to_string(),
+                var_type: "voltage".to_string(),
+                data: ColumnData::Real(vec![1.25]),
+            }],
+        }
+    }
+
+    #[test]
+    fn csv_publication_replaces_only_with_the_complete_format() {
+        for preexisting in [false, true] {
+            let directory = std::env::temp_dir().join(format!(
+                "rspice-export-table-csv-{}-{preexisting}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&directory);
+            std::fs::create_dir(&directory).expect("create CSV export test directory");
+            let destination = directory.join("result.csv");
+            if preexisting {
+                std::fs::write(&destination, b"old complete artifact")
+                    .expect("seed CSV destination");
+            }
+
+            one_row_table()
+                .write(&destination, OutputFormat::Csv)
+                .expect("publish CSV table");
+
+            let expected = format!("time,V(out)\n{:.17e},{:.17e}\n", 0.0_f64, 1.25_f64);
+            assert_eq!(
+                std::fs::read(&destination).expect("read published CSV"),
+                expected.as_bytes()
+            );
+            assert!(
+                rspice_output::stale_artifacts(&destination)
+                    .expect("inspect CSV staging artifacts")
+                    .is_empty()
+            );
+            std::fs::remove_dir_all(directory).expect("remove CSV export test directory");
+        }
+    }
 
     #[test]
     fn analysis_specific_hdf5_rejection_does_not_touch_existing_destination() {

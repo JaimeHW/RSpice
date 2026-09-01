@@ -23,14 +23,12 @@
 //! plain `Result<_, String>` that the binding layer maps to an exception. That
 //! keeps the format logic unit-testable without an embedded CPython.
 
-use std::ffi::OsString;
 use std::fmt::Write as _;
-use std::fs::{File, OpenOptions};
-use std::io::{self, Write as _};
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::io;
+use std::path::Path;
 
 use rspice_core::Complex64;
+use rspice_output::{AtomicArtifactError, AtomicArtifactOptions, Durability, write_atomic};
 
 // The Touchstone writer lives in core so the CLI and the desktop runner emit
 // byte-identical files; the result types keep reaching it through this module.
@@ -319,10 +317,6 @@ pub(crate) fn csv(headers: &[String], rows: &[Vec<f64>]) -> Result<String, Strin
 // File writing
 //=============================================================================
 
-const TEMP_MARKER: &str = ".rspice-python-tmp-";
-const MAX_TEMP_ATTEMPTS: u64 = 128;
-static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
-
 /// Publish bytes transactionally beside the destination.
 ///
 /// Serialization is complete before this function is called. The complete
@@ -331,68 +325,38 @@ static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 /// failure therefore leaves an existing complete artifact unchanged or an
 /// absent destination absent; callers never observe a truncated result file.
 pub(crate) fn write_bytes(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    write_atomic_impl(
+    write_atomic(
         path,
-        |file| file.write_all(bytes),
-        #[cfg(test)]
-        None,
+        AtomicArtifactOptions::new(Durability::SyncFileAndParent),
+        |writer| writer.write_all(bytes),
     )
+    .map_err(map_atomic_error)
 }
 
-fn write_atomic_impl<F>(
-    destination: &Path,
-    write: F,
-    #[cfg(test)] fault: Option<TestFault>,
-) -> io::Result<()>
-where
-    F: FnOnce(&mut File) -> io::Result<()>,
-{
-    reject_symlink_destination(destination)
-        .map_err(|error| atomic_phase_error("preparation", error))?;
-    let (temporary_path, mut temporary_file) = create_staging_file(destination)
-        .map_err(|error| atomic_phase_error("preparation", error))?;
-    let mut cleanup = StagingCleanup::new(temporary_path.clone());
-
-    if let Err(error) = write(&mut temporary_file) {
-        drop(temporary_file);
-        cleanup.remove_now();
-        return Err(atomic_phase_error("write", error));
+fn map_atomic_error(error: AtomicArtifactError<io::Error>) -> io::Error {
+    match error {
+        AtomicArtifactError::Prepare(source) => atomic_phase_error("preparation", source),
+        AtomicArtifactError::Write(source) => atomic_phase_error("write", source),
+        AtomicArtifactError::Flush { source, .. } => atomic_phase_error("flush", source),
+        AtomicArtifactError::Commit {
+            source,
+            recovery_path,
+            ..
+        } => {
+            let source = if let Some(recovery_path) = recovery_path {
+                io::Error::new(
+                    source.kind(),
+                    format!(
+                        "{source}; complete staging result retained at {}",
+                        recovery_path.display()
+                    ),
+                )
+            } else {
+                source
+            };
+            atomic_phase_error("commit", source)
+        }
     }
-
-    #[cfg(test)]
-    if let Err(error) = inject_fault(fault, TestFault::Flush) {
-        drop(temporary_file);
-        cleanup.remove_now();
-        return Err(atomic_phase_error("flush", error));
-    }
-
-    if let Err(error) = temporary_file
-        .flush()
-        .and_then(|()| temporary_file.sync_all())
-    {
-        drop(temporary_file);
-        cleanup.remove_now();
-        return Err(atomic_phase_error("flush", error));
-    }
-    drop(temporary_file);
-
-    #[cfg(test)]
-    if let Err(error) = inject_fault(fault, TestFault::BeforeCommit) {
-        cleanup.remove_now();
-        return Err(atomic_phase_error("commit", error));
-    }
-
-    reject_symlink_destination(destination).map_err(|error| atomic_phase_error("commit", error))?;
-    if let Err(error) = commit_staging_file(&temporary_path, destination) {
-        cleanup.remove_now();
-        return Err(atomic_phase_error("commit", error));
-    }
-    cleanup.disarm();
-
-    #[cfg(unix)]
-    sync_parent_directory(destination).map_err(|error| atomic_phase_error("commit", error))?;
-
-    Ok(())
 }
 
 fn atomic_phase_error(phase: &str, error: io::Error) -> io::Error {
@@ -402,168 +366,11 @@ fn atomic_phase_error(phase: &str, error: io::Error) -> io::Error {
     )
 }
 
-fn create_staging_file(destination: &Path) -> io::Result<(PathBuf, File)> {
-    let file_name = destination.file_name().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "result destination must name a file",
-        )
-    })?;
-    let parent = destination_parent(destination);
-    let process_id = std::process::id();
-
-    for _ in 0..MAX_TEMP_ATTEMPTS {
-        let id = NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed);
-        let mut staging_name = OsString::from(".");
-        staging_name.push(file_name);
-        staging_name.push(format!("{TEMP_MARKER}{process_id}-{id}"));
-        let staging_path = parent.join(staging_name);
-        match OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&staging_path)
-        {
-            Ok(file) => return Ok((staging_path, file)),
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(error) => return Err(error),
-        }
-    }
-
-    Err(io::Error::new(
-        io::ErrorKind::AlreadyExists,
-        format!(
-            "could not allocate a unique staging file beside {}",
-            destination.display()
-        ),
-    ))
-}
-
-fn destination_parent(destination: &Path) -> &Path {
-    match destination.parent() {
-        Some(parent) if !parent.as_os_str().is_empty() => parent,
-        _ => Path::new("."),
-    }
-}
-
-fn reject_symlink_destination(destination: &Path) -> io::Result<()> {
-    match std::fs::symlink_metadata(destination) {
-        Ok(metadata) if metadata.file_type().is_symlink() => Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!(
-                "refusing to replace symlink result destination {}",
-                destination.display()
-            ),
-        )),
-        Ok(_) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
-}
-
-#[cfg(not(windows))]
-fn commit_staging_file(staging: &Path, destination: &Path) -> io::Result<()> {
-    std::fs::rename(staging, destination)
-}
-
-#[cfg(windows)]
-fn commit_staging_file(staging: &Path, destination: &Path) -> io::Result<()> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::{
-        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
-    };
-
-    fn wide_path(path: &Path) -> io::Result<Vec<u16>> {
-        let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
-        if wide.contains(&0) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "result path contains an embedded NUL",
-            ));
-        }
-        wide.push(0);
-        Ok(wide)
-    }
-
-    let staging_wide = wide_path(staging)?;
-    let destination_wide = wide_path(destination)?;
-
-    // SAFETY: Both buffers are NUL-terminated and remain alive through this
-    // call. The staging file is a sibling of the destination, so this is a
-    // same-volume replace and never degrades into a copy operation.
-    let succeeded = unsafe {
-        MoveFileExW(
-            staging_wide.as_ptr(),
-            destination_wide.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    };
-    if succeeded == 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(())
-    }
-}
-
-#[cfg(unix)]
-fn sync_parent_directory(destination: &Path) -> io::Result<()> {
-    File::open(destination_parent(destination))?.sync_all()
-}
-
-struct StagingCleanup {
-    path: Option<PathBuf>,
-}
-
-impl StagingCleanup {
-    fn new(path: PathBuf) -> Self {
-        Self { path: Some(path) }
-    }
-
-    fn remove_now(&mut self) {
-        if let Some(path) = self.path.as_ref() {
-            match std::fs::remove_file(path) {
-                Ok(()) => self.path = None,
-                Err(error) if error.kind() == io::ErrorKind::NotFound => self.path = None,
-                Err(_) => {}
-            }
-        }
-    }
-
-    fn disarm(&mut self) {
-        self.path = None;
-    }
-}
-
-impl Drop for StagingCleanup {
-    fn drop(&mut self) {
-        self.remove_now();
-    }
-}
-
-#[cfg(test)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TestFault {
-    Flush,
-    BeforeCommit,
-}
-
-#[cfg(test)]
-fn inject_fault(selected: Option<TestFault>, current: TestFault) -> io::Result<()> {
-    if selected == Some(current) {
-        Err(io::Error::other(format!(
-            "injected {} failure",
-            match current {
-                TestFault::Flush => "flush",
-                TestFault::BeforeCommit => "pre-commit",
-            }
-        )))
-    } else {
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     static NEXT_TEST_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
@@ -591,30 +398,11 @@ mod tests {
         }
     }
 
-    fn assert_no_staging_files(directory: &Path) {
-        let staging_files: Vec<PathBuf> = std::fs::read_dir(directory)
-            .expect("read Python export test directory")
-            .map(|entry| entry.expect("read directory entry").path())
-            .filter(|path| path.to_string_lossy().contains(TEMP_MARKER))
-            .collect();
-        assert!(
-            staging_files.is_empty(),
-            "staging files were not cleaned: {staging_files:?}"
+    fn assert_no_staging_files(destination: &Path) {
+        assert_eq!(
+            rspice_output::stale_artifacts(destination).expect("inspect Python export stages"),
+            Vec::<PathBuf>::new()
         );
-    }
-
-    fn assert_old_or_absent(destination: &Path, preexisting: bool) {
-        if preexisting {
-            assert_eq!(
-                std::fs::read(destination).expect("read preserved result"),
-                b"old complete result"
-            );
-        } else {
-            assert!(
-                !destination.exists(),
-                "failed publication exposed a result artifact"
-            );
-        }
     }
 
     fn series(values: &[(f64, f64)]) -> Vec<Complex64> {
@@ -823,69 +611,6 @@ mod tests {
     }
 
     #[test]
-    fn atomic_write_failures_preserve_existing_or_absent_destination() {
-        for preexisting in [false, true] {
-            for (tag, partial) in [
-                ("header", b"time,V(out)\n".as_slice()),
-                ("values", b"time,V(out)\n0,1\n1,".as_slice()),
-            ] {
-                let directory = TestDirectory::new(tag);
-                let destination = directory.path().join("result.csv");
-                if preexisting {
-                    std::fs::write(&destination, b"old complete result")
-                        .expect("seed existing result");
-                }
-
-                let error = write_atomic_impl(
-                    &destination,
-                    |file| {
-                        file.write_all(partial)?;
-                        Err(io::Error::other("injected serializer failure"))
-                    },
-                    None,
-                )
-                .expect_err("injected writer failure must propagate");
-
-                assert!(error.to_string().contains("output write failed"));
-                assert_old_or_absent(&destination, preexisting);
-                assert_no_staging_files(directory.path());
-            }
-        }
-    }
-
-    #[test]
-    fn atomic_flush_and_commit_failures_preserve_destination() {
-        for preexisting in [false, true] {
-            for fault in [TestFault::Flush, TestFault::BeforeCommit] {
-                let directory = TestDirectory::new(match fault {
-                    TestFault::Flush => "flush",
-                    TestFault::BeforeCommit => "commit",
-                });
-                let destination = directory.path().join("result.raw");
-                if preexisting {
-                    std::fs::write(&destination, b"old complete result")
-                        .expect("seed existing result");
-                }
-
-                let error = write_atomic_impl(
-                    &destination,
-                    |file| file.write_all(b"new complete result"),
-                    Some(fault),
-                )
-                .expect_err("injected publication failure must propagate");
-
-                let expected_phase = match fault {
-                    TestFault::Flush => "output flush failed",
-                    TestFault::BeforeCommit => "output commit failed",
-                };
-                assert!(error.to_string().contains(expected_phase));
-                assert_old_or_absent(&destination, preexisting);
-                assert_no_staging_files(directory.path());
-            }
-        }
-    }
-
-    #[test]
     fn atomic_result_write_replaces_with_complete_bytes() {
         for preexisting in [false, true] {
             let directory = TestDirectory::new("success");
@@ -901,7 +626,7 @@ mod tests {
                 std::fs::read(&destination).expect("read committed result"),
                 b"new complete result"
             );
-            assert_no_staging_files(directory.path());
+            assert_no_staging_files(&destination);
         }
     }
 
@@ -934,6 +659,6 @@ mod tests {
             b"symlink target"
         );
         assert!(destination.is_symlink());
-        assert_no_staging_files(directory.path());
+        assert_no_staging_files(&destination);
     }
 }

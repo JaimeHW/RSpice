@@ -6,6 +6,7 @@ members = [
     "crates/rspice-veriloga-models",
     "crates/rspice-veriloga-models/models/*",
     "crates/rspice-core",
+    "crates/rspice-output",
     "crates/rspice-design-model",
     "crates/rspice-automation-protocol",
     "crates/rspice-automation-runtime",
@@ -124,6 +125,7 @@ rspice-cloud-domain = { path = "crates/rspice-cloud-domain", version = "0.1.0" }
 rspice-design-model = { path = "crates/rspice-design-model", version = "0.1.0" }
 rspice-engine-adapter = { path = "crates/rspice-engine-adapter", version = "0.1.0" }
 rspice-matrix = { path = "crates/rspice-matrix", version = "0.1.0" }
+rspice-output = { path = "crates/rspice-output", version = "0.1.0" }
 rspice-pack = { path = "crates/rspice-pack", version = "0.1.0" }
 rspice-publication-contract = { path = "crates/rspice-publication-contract", version = "0.1.0" }
 rspice-publish = { path = "crates/rspice-publish", version = "0.1.0" }

@@ -29,6 +29,7 @@ rustyhdf5 = "1.93"
 mimalloc = "0.1"
 ctrlc = "3.4"
 rayon.workspace = true
+rspice-output.workspace = true
 
 [target.'cfg(all(any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows)))'.dependencies]
 # The native Verilog-A backend is qualified on x64 and ARM64 desktop hosts.
