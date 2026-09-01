@@ -83,6 +83,7 @@ pub mod ast;
 mod canonical_compat;
 pub mod canonical_ir;
 pub mod codegen;
+pub mod connect;
 pub mod disciplines;
 pub mod error;
 pub mod expr_converter;

@@ -357,6 +357,15 @@ pub enum SemanticErrorKind {
 
     #[error("Array index out of bounds: {0}")]
     IndexOutOfBounds(String),
+
+    /// A `connectmodule` or `connectrules` block that does not hold together.
+    ///
+    /// The refusal carries its own Verilog-AMS clause, so it is passed through
+    /// rather than restated here. Boxed because it is the widest variant of
+    /// this enum by some way — several of its cases name four disciplines —
+    /// and this enum travels inside every compile result.
+    #[error(transparent)]
+    ConnectRules(#[from] Box<crate::connect::ConnectError>),
 }
 
 impl SemanticErrorKind {
@@ -383,6 +392,7 @@ impl SemanticErrorKind {
             Self::UnknownFunction(_) => "VA-SEM-UNKNOWN-FUNCTION",
             Self::UnsupportedFeature(_) => "VA-SEM-UNSUPPORTED-FEATURE",
             Self::IndexOutOfBounds(_) => "VA-SEM-INDEX-OUT-OF-BOUNDS",
+            Self::ConnectRules(_) => "VA-SEM-CONNECT-RULES",
         }
     }
 }

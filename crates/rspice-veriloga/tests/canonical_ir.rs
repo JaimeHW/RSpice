@@ -3036,6 +3036,7 @@ fn hir_lowering_preserves_laplace_operand_groups() {
     let analyzed = AnalyzedModule {
         name: "laplace_filter".into(),
         default_transition: 1.0e-9,
+        default_discipline: None,
         // No `noise()` site in this hand-built module, so the analyzer would
         // have allocated no process id.
         noise_process_count: 0,
@@ -3139,6 +3140,7 @@ fn hir_lowering_preserves_typed_analog_operator_slots() {
     let analyzed = AnalyzedModule {
         name: "typed_ops".into(),
         default_transition: 1.0e-9,
+        default_discipline: None,
         // No `noise()` site in this hand-built module, so the analyzer would
         // have allocated no process id.
         noise_process_count: 0,

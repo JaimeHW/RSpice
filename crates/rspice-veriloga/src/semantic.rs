@@ -215,10 +215,39 @@ impl SemanticAnalyzer {
         }
 
         // Second pass: analyze modules in declaration order while applying
-        // the file-scoped default-transition setting.
+        // the file-scoped default-transition and default-discipline settings.
         let mut default_transition = Self::SIMULATOR_DEFAULT_TRANSITION;
+        let mut default_discipline: Option<SmolStr> = None;
         for item in &source.items {
-            if let Item::DefaultTransition(directive) = item {
+            if let Item::DefaultDiscipline(directive) = item {
+                // Section 10.2 makes this "a default discrete discipline",
+                // and Annex F.2.1 step 4b only applies it where the net's
+                // domain matches, so a continuous one could never take effect.
+                if let Some(name) = &directive.discipline {
+                    match self.disciplines.get_discipline(name) {
+                        None => {
+                            return Err(CompileError::Semantic(SemanticError::new(
+                                SemanticErrorKind::UndefinedDiscipline(name.to_string()),
+                                directive.span,
+                            )));
+                        }
+                        Some(discipline)
+                            if discipline.domain != crate::disciplines::Domain::Discrete =>
+                        {
+                            return Err(CompileError::Semantic(SemanticError::new(
+                                SemanticErrorKind::UnsupportedFeature(format!(
+                                    "`default_discipline {name}` names a continuous discipline; \
+                                     Verilog-AMS LRM 2.4 section 10.2 makes the default a \
+                                     discrete discipline"
+                                )),
+                                directive.span,
+                            )));
+                        }
+                        Some(_) => {}
+                    }
+                }
+                default_discipline = directive.discipline.clone();
+            } else if let Item::DefaultTransition(directive) = item {
                 let Some(value) = Self::eval_const_with(&directive.value, &HashMap::new()) else {
                     return Err(CompileError::Semantic(SemanticError::new(
                         SemanticErrorKind::InvalidAnalogOperator(
@@ -265,7 +294,8 @@ impl SemanticAnalyzer {
                 self.next_noise_process = 0;
 
                 match self.analyze_module(module, default_transition) {
-                    Ok(analyzed) => {
+                    Ok(mut analyzed) => {
+                        analyzed.default_discipline = default_discipline.clone();
                         modules.insert(module.name.clone(), analyzed);
                     }
                     Err(e) => return Err(e),
@@ -273,11 +303,25 @@ impl SemanticAnalyzer {
             }
         }
 
+        // Third pass: the clause 7 connect specification. It runs after the
+        // discipline database is populated, because every check it makes is
+        // against a discipline, and after the modules because a `connect`
+        // statement's diagnostics are less useful than a broken module's.
+        let connect_rules = crate::connect::build_connect_rule_table(source, &self.disciplines)
+            .map_err(|error| {
+                let span = connect_rules_span(source);
+                CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::ConnectRules(Box::new(error)),
+                    span,
+                ))
+            })?;
+
         self.warnings.sort_by_key(|warning| warning.span.start);
         Ok(AnalyzedFile {
             source: source.clone(),
             modules,
             warnings: std::mem::take(&mut self.warnings),
+            connect_rules,
         })
     }
 
@@ -405,6 +449,7 @@ impl SemanticAnalyzer {
         let mut analyzed = AnalyzedModule {
             name: module.name.clone(),
             default_transition,
+            default_discipline: None,
             noise_process_count: 0,
             ports: Vec::new(),
             parameters: Vec::new(),
@@ -8794,6 +8839,25 @@ impl SemanticAnalyzer {
             .contains(&identifier.name)
             .then(|| identifier.name.clone())
     }
+}
+
+/// Where to point a connect specification refusal.
+///
+/// [`crate::connect::ConnectError`] carries a span on the variants that have
+/// one construct to blame, but several — an ambiguous rule, an excluded pair —
+/// are about a *relation* between two. The first connect construct in the file
+/// is the honest fallback: it is the block the reader has to look at either
+/// way, and it beats pointing at offset zero.
+fn connect_rules_span(source: &SourceFile) -> Span {
+    source
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Item::ConnectRules(block) => Some(block.span),
+            Item::ConnectModule(module) => Some(module.span),
+            _ => None,
+        })
+        .unwrap_or(source.span)
 }
 
 fn is_global_ground_name(name: &str) -> bool {
