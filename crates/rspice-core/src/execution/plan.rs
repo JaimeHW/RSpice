@@ -102,6 +102,107 @@ pub enum AxisKind {
     Temperature,
 }
 
+/// Typed target changed by one authored numeric `.STEP` dimension.
+///
+/// DATA-backed steps are represented by [`AxisKind::Data`] and coupled
+/// [`RunAxisValue::DataRow`] values instead because one row can bind several
+/// global parameters at once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum StepAxisTarget {
+    /// Global parameter changed by `.STEP PARAM name ...`.
+    Parameter {
+        /// Case-normalized parameter name.
+        name: String,
+    },
+    /// Device instance or device parameter changed by `.STEP`.
+    Device {
+        /// Case-normalized instance or hierarchical instance name.
+        name: String,
+        /// Optional case-normalized parameter; `None` selects the device's
+        /// primary authored value.
+        parameter: Option<String>,
+    },
+    /// Compact/passive model parameter changed by `.STEP MODEL`.
+    Model {
+        /// Case-normalized model name.
+        name: String,
+        /// Case-normalized model parameter name.
+        parameter: String,
+    },
+    /// Circuit temperature changed by `.STEP TEMP`.
+    Temperature,
+}
+
+impl StepAxisTarget {
+    fn from_command(command: &crate::netlist::StepCommand) -> Result<Self, DeckPlanError> {
+        use crate::netlist::StepTarget;
+
+        match command.target {
+            StepTarget::Param => Ok(Self::Parameter {
+                name: normalize_step_identifier(&command.name, "parameter")?,
+            }),
+            StepTarget::Device => Ok(Self::Device {
+                name: normalize_step_identifier(&command.name, "device")?,
+                parameter: command
+                    .param_name
+                    .as_deref()
+                    .map(|parameter| normalize_step_identifier(parameter, "device parameter"))
+                    .transpose()?,
+            }),
+            StepTarget::Model => Ok(Self::Model {
+                name: normalize_step_identifier(&command.name, "model")?,
+                parameter: normalize_step_identifier(
+                    command.param_name.as_deref().unwrap_or_default(),
+                    "model parameter",
+                )?,
+            }),
+            StepTarget::Temp => Ok(Self::Temperature),
+        }
+    }
+
+    fn axis_name(&self) -> String {
+        match self {
+            Self::Parameter { name } => format!("param:{name}"),
+            Self::Device {
+                name,
+                parameter: Some(parameter),
+            } => format!("device:{name}:{parameter}"),
+            Self::Device {
+                name,
+                parameter: None,
+            } => format!("device:{name}"),
+            Self::Model { name, parameter } => format!("model:{name}:{parameter}"),
+            Self::Temperature => "temperature".to_string(),
+        }
+    }
+
+    fn binding_name(&self) -> String {
+        match self {
+            Self::Parameter { name } => name.clone(),
+            Self::Temperature => "temperature".to_string(),
+            Self::Device { .. } | Self::Model { .. } => self.axis_name(),
+        }
+    }
+
+    fn retained_dynamic_bytes(&self) -> Result<usize, DeckPlanError> {
+        match self {
+            Self::Parameter { name } => Ok(name.len()),
+            Self::Device { name, parameter } => checked_resource_add(
+                name.len(),
+                parameter.as_ref().map_or(0, String::len),
+                ResourceKind::ExpandedSourceBytes,
+            ),
+            Self::Model { name, parameter } => checked_resource_add(
+                name.len(),
+                parameter.len(),
+                ResourceKind::ExpandedSourceBytes,
+            ),
+            Self::Temperature => Ok(0),
+        }
+    }
+}
+
 impl AxisKind {
     const fn tag(self) -> &'static str {
         match self {
@@ -275,6 +376,7 @@ pub struct RunAxis {
     kind: AxisKind,
     name: String,
     values: Vec<RunAxisValue>,
+    step_target: Option<StepAxisTarget>,
 }
 
 impl RunAxis {
@@ -327,7 +429,39 @@ impl RunAxis {
             kind,
             name: name.trim().to_string(),
             values,
+            step_target: None,
         })
+    }
+
+    fn from_step_command(
+        command: &crate::netlist::StepCommand,
+        limits: &ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, DeckPlanError> {
+        let target = StepAxisTarget::from_command(command)?;
+        let generated = command
+            .sweep
+            .values_bounded_with_abort(limits.max_batch_runs, abort)
+            .map_err(|error| match error {
+                crate::netlist::SweepPointGenerationError::Aborted => DeckPlanError::Aborted,
+                crate::netlist::SweepPointGenerationError::LimitExceeded { requested, limit } => {
+                    DeckPlanError::ResourceLimit(ResourceLimitError {
+                        resource: ResourceKind::BatchRuns,
+                        requested,
+                        limit,
+                    })
+                }
+            })?;
+        let mut values = try_vec_with_capacity(generated.len(), "STEP run-axis values")?;
+        values.extend(generated.into_iter().map(RunAxisValue::Numeric));
+        let kind = if target == StepAxisTarget::Temperature {
+            AxisKind::Temperature
+        } else {
+            AxisKind::Step
+        };
+        let mut axis = Self::new(kind, target.axis_name(), values)?;
+        axis.step_target = Some(target);
+        Ok(axis)
     }
 
     pub const fn kind(&self) -> AxisKind {
@@ -342,11 +476,23 @@ impl RunAxis {
         &self.values
     }
 
+    /// Return the typed `.STEP` target that authored this axis.
+    ///
+    /// This is `None` for `.TEMP`, `.ALTER`, and DATA-row axes. A `.STEP TEMP`
+    /// axis has [`AxisKind::Temperature`] and returns
+    /// [`StepAxisTarget::Temperature`].
+    pub const fn step_target(&self) -> Option<&StepAxisTarget> {
+        self.step_target.as_ref()
+    }
+
     fn identity(&self) -> (AxisKind, String) {
         (self.kind, self.name.to_ascii_lowercase())
     }
 
     fn binding_names(&self) -> BTreeSet<String> {
+        if let Some(target) = &self.step_target {
+            return [target.binding_name()].into_iter().collect();
+        }
         match self.kind {
             AxisKind::Alter => BTreeSet::new(),
             AxisKind::Data => self.values[0].data_binding_names().unwrap_or_default(),
@@ -362,6 +508,7 @@ pub struct AxisAssignment {
     name: String,
     value: RunAxisValue,
     value_index: usize,
+    step_target: Option<StepAxisTarget>,
 }
 
 impl AxisAssignment {
@@ -379,6 +526,12 @@ impl AxisAssignment {
 
     pub const fn value_index(&self) -> usize {
         self.value_index
+    }
+
+    /// Typed target for a coordinate produced from an authored numeric
+    /// `.STEP` dimension.
+    pub const fn step_target(&self) -> Option<&StepAxisTarget> {
+        self.step_target.as_ref()
     }
 }
 
@@ -498,45 +651,97 @@ struct CoordinateResourceEstimate {
 }
 
 impl DeckPlan {
-    /// Build the shared execution identity for an authored `.TEMP` axis.
+    /// Build the target-neutral run-axis plan for the typed meta-analyses in a
+    /// parsed deck.
     ///
-    /// This is deliberately a bounded bridge while the remaining meta-analysis
-    /// forms move onto `DeckPlan`: `.TEMP` is removed from the analysis list,
-    /// every authored physical analysis retains deck order and a stable
-    /// per-kind ordinal, and a deck without a physical analysis receives the
-    /// planner-owned implicit operating point. `.STEP` composition is rejected
-    /// until that axis is executed by the same adapter instead of being
-    /// accidentally evaluated as a second, unrelated sweep.
-    pub fn from_netlist_temperature_axis(
+    /// DATA rows are placed first, numeric `.STEP` dimensions remain in their
+    /// authored relative order, and temperature dimensions are placed last.
+    /// Physical analyses retain their authored order and per-kind ordinals.
+    /// Textual ALTER expansion and coordinate-dependent topology/schema
+    /// materialization happen in later planning stages and are intentionally
+    /// not inferred here.
+    pub fn from_netlist_run_axes(
         netlist: &crate::netlist::Netlist,
+        limits: &ResourceLimits,
     ) -> Result<Option<Self>, DeckPlanError> {
-        let mut axes = Vec::new();
-        let mut analyses = Vec::new();
+        Self::from_netlist_run_axes_with_abort(netlist, limits, &crate::NoAbort)
+    }
 
-        for command in &netlist.analyses {
+    /// Abort-aware form of [`Self::from_netlist_run_axes`].
+    pub fn from_netlist_run_axes_with_abort(
+        netlist: &crate::netlist::Netlist,
+        limits: &ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<Self>, DeckPlanError> {
+        use crate::netlist::{AnalysisCommand, StepSweep, StepTarget};
+
+        if abort.is_aborted() {
+            return Err(DeckPlanError::Aborted);
+        }
+
+        let data_axis_count = netlist
+            .analyses
+            .iter()
+            .filter(|command| {
+                matches!(command, AnalysisCommand::Step(step) if matches!(&step.sweep, StepSweep::Data { .. }))
+            })
+            .count();
+        let step_axis_count = netlist
+            .analyses
+            .iter()
+            .filter(|command| {
+                matches!(command, AnalysisCommand::Step(step) if !matches!(&step.sweep, StepSweep::Data { .. }) && step.target != StepTarget::Temp)
+            })
+            .count();
+        let temperature_axis_count = netlist
+            .analyses
+            .iter()
+            .filter(|command| {
+                matches!(command, AnalysisCommand::Temp { .. })
+                    || matches!(command, AnalysisCommand::Step(step) if !matches!(&step.sweep, StepSweep::Data { .. }) && step.target == StepTarget::Temp)
+            })
+            .count();
+        let meta_axis_count = data_axis_count
+            .checked_add(step_axis_count)
+            .and_then(|count| count.checked_add(temperature_axis_count))
+            .ok_or(DeckPlanError::CoordinateCountOverflow)?;
+        if meta_axis_count == 0 {
+            return Ok(None);
+        }
+
+        let mut data_axes = try_vec_with_capacity(data_axis_count, "DATA run axes")?;
+        let mut step_axes = try_vec_with_capacity(step_axis_count, "STEP run axes")?;
+        let mut temperature_axes =
+            try_vec_with_capacity(temperature_axis_count, "temperature run axes")?;
+        let mut analyses = try_vec_with_capacity(
+            netlist.analyses.len().saturating_sub(meta_axis_count),
+            "authored analysis requests",
+        )?;
+
+        for (command_index, command) in netlist.analyses.iter().enumerate() {
+            if command_index.is_multiple_of(64) && abort.is_aborted() {
+                return Err(DeckPlanError::Aborted);
+            }
             match command {
-                crate::netlist::AnalysisCommand::Temp { temperatures } => {
-                    axes.push(RunAxis::new(
-                        AxisKind::Temperature,
-                        "temperature",
-                        temperatures
-                            .iter()
-                            .copied()
-                            .map(RunAxisValue::Numeric)
-                            .collect(),
-                    )?);
-                }
-                crate::netlist::AnalysisCommand::Step(_) => {
-                    // A STEP without TEMP remains on the legacy path. With a
-                    // temperature axis, fail closed instead of producing two
-                    // independent OP sweeps or silently dropping one axis.
-                    if netlist.analyses.iter().any(|analysis| {
-                        matches!(analysis, crate::netlist::AnalysisCommand::Temp { .. })
-                    }) {
-                        return Err(DeckPlanError::TemperatureAxisWithStep);
+                AnalysisCommand::Step(step) => match &step.sweep {
+                    StepSweep::Data { table_name } => {
+                        data_axes.push(data_axis_from_table(netlist, table_name, limits, abort)?)
                     }
-                }
-                crate::netlist::AnalysisCommand::Four { .. } => {
+                    _ => {
+                        let axis = RunAxis::from_step_command(step, limits, abort)?;
+                        if axis.kind == AxisKind::Temperature {
+                            temperature_axes.push(axis);
+                        } else {
+                            step_axes.push(axis);
+                        }
+                    }
+                },
+                AnalysisCommand::Temp { temperatures } => temperature_axes.push(RunAxis::new(
+                    AxisKind::Temperature,
+                    "temperature",
+                    try_copy_numeric_axis_values(temperatures, "temperature", abort)?,
+                )?),
+                AnalysisCommand::Four { .. } => {
                     // FOUR is attached to a transient result by the executor;
                     // it is not a physical analysis that suppresses implicit
                     // OP when it appears alone.
@@ -544,11 +749,47 @@ impl DeckPlan {
                 command => analyses.push(AnalysisRequest::new(analysis_kind(command))),
             }
         }
+        if abort.is_aborted() {
+            return Err(DeckPlanError::Aborted);
+        }
 
-        if axes.is_empty() {
+        let mut axes = try_vec_with_capacity(meta_axis_count, "ordered run axes")?;
+        axes.extend(data_axes);
+        axes.extend(step_axes);
+        axes.extend(temperature_axes);
+        let plan = Self::new(axes, analyses)?;
+        plan.preflight_coordinates(limits)?;
+        if abort.is_aborted() {
+            return Err(DeckPlanError::Aborted);
+        }
+        Ok(Some(plan))
+    }
+
+    /// Compatibility bridge for the Python temperature-only executor.
+    ///
+    /// The canonical planner above composes `.STEP` and `.TEMP`. This bridge
+    /// remains fail-closed for that combination until the Python adapter
+    /// executes every coordinate through the canonical materializer; allowing
+    /// it through today would execute legacy `.STEP` again inside each
+    /// temperature coordinate.
+    pub fn from_netlist_temperature_axis(
+        netlist: &crate::netlist::Netlist,
+    ) -> Result<Option<Self>, DeckPlanError> {
+        let has_temperature = netlist
+            .analyses
+            .iter()
+            .any(|analysis| matches!(analysis, crate::netlist::AnalysisCommand::Temp { .. }));
+        if !has_temperature {
             return Ok(None);
         }
-        Self::new(axes, analyses).map(Some)
+        if netlist
+            .analyses
+            .iter()
+            .any(|analysis| matches!(analysis, crate::netlist::AnalysisCommand::Step(_)))
+        {
+            return Err(DeckPlanError::TemperatureAxisWithStep);
+        }
+        Self::from_netlist_run_axes(netlist, &ResourceLimits::unlimited())
     }
 
     pub fn new(
@@ -575,9 +816,7 @@ impl DeckPlan {
                 });
             }
             for binding in axis.binding_names() {
-                if let Some(first) = binding_owners.insert(binding.clone(), axis.kind)
-                    && first != axis.kind
-                {
+                if let Some(first) = binding_owners.insert(binding.clone(), axis.kind) {
                     return Err(DeckPlanError::BindingCollision {
                         binding,
                         first,
@@ -629,9 +868,19 @@ impl DeckPlan {
     fn coordinate_resource_estimate(&self) -> Result<CoordinateResourceEstimate, DeckPlanError> {
         let coordinate_count =
             checked_coordinate_count(self.axes.iter().map(|axis| axis.values.len()))?;
+        let bindings_per_coordinate = self.axes.iter().try_fold(0usize, |count, axis| {
+            let width = match axis.kind {
+                AxisKind::Data => match axis.values.first() {
+                    Some(RunAxisValue::DataRow(bindings)) => bindings.len(),
+                    _ => 0,
+                },
+                AxisKind::Alter | AxisKind::Step | AxisKind::Temperature => 1,
+            };
+            checked_resource_add(count, width, ResourceKind::ResultValues)
+        })?;
         let total_assignments = checked_resource_mul(
             coordinate_count,
-            self.axes.len(),
+            bindings_per_coordinate,
             ResourceKind::ResultValues,
         )?;
 
@@ -662,13 +911,26 @@ impl DeckPlan {
                     ResourceKind::ExpandedSourceBytes,
                 )
             })?;
+            let target_payloads = checked_resource_mul(
+                axis.values.len(),
+                axis.step_target
+                    .as_ref()
+                    .map(StepAxisTarget::retained_dynamic_bytes)
+                    .transpose()?
+                    .unwrap_or(0),
+                ResourceKind::ExpandedSourceBytes,
+            )?;
             let one_value_cycle = checked_resource_add(
                 checked_resource_add(
                     assignment_storage,
                     cloned_axis_names,
                     ResourceKind::ExpandedSourceBytes,
                 )?,
-                value_payloads,
+                checked_resource_add(
+                    value_payloads,
+                    target_payloads,
+                    ResourceKind::ExpandedSourceBytes,
+                )?,
                 ResourceKind::ExpandedSourceBytes,
             )?;
             retained_dynamic_bytes = checked_resource_add(
@@ -819,6 +1081,21 @@ pub enum DeckPlanError {
         axis: String,
         value: Value,
     },
+    InvalidStepTarget {
+        target: &'static str,
+    },
+    UnknownStepDataTable {
+        table: String,
+    },
+    AmbiguousStepDataTable {
+        table: String,
+    },
+    StepDataRowWidth {
+        table: String,
+        row: usize,
+        expected: usize,
+        actual: usize,
+    },
     DuplicateAxis {
         kind: AxisKind,
         axis: String,
@@ -889,6 +1166,25 @@ impl fmt::Display for DeckPlanError {
                     "run axis '{axis}' contains non-finite value {value}"
                 )
             }
+            Self::InvalidStepTarget { target } => {
+                write!(formatter, ".STEP {target} target must not be empty")
+            }
+            Self::UnknownStepDataTable { table } => {
+                write!(formatter, ".STEP DATA references unknown table '{table}'")
+            }
+            Self::AmbiguousStepDataTable { table } => write!(
+                formatter,
+                ".STEP DATA table name '{table}' is ambiguous under case-insensitive matching"
+            ),
+            Self::StepDataRowWidth {
+                table,
+                row,
+                expected,
+                actual,
+            } => write!(
+                formatter,
+                ".STEP DATA table '{table}' row {row} contains {actual} value(s); expected {expected}"
+            ),
             Self::DuplicateAxis { kind, axis } => {
                 write!(formatter, "duplicate {kind:?} run axis '{axis}'")
             }
@@ -907,8 +1203,9 @@ impl fmt::Display for DeckPlanError {
             Self::ExplicitImplicitOp => formatter.write_str(
                 "implicit operating point is planner-owned and cannot be authored explicitly",
             ),
-            Self::TemperatureAxisWithStep => formatter
-                .write_str(".TEMP and .STEP composition requires the shared STEP-axis executor"),
+            Self::TemperatureAxisWithStep => formatter.write_str(
+                "the legacy temperature-only execution adapter cannot compose .TEMP with .STEP; use the canonical run-axis plan",
+            ),
             Self::AnalysisCountOverflow(kind) => {
                 write!(
                     formatter,
@@ -964,6 +1261,111 @@ impl From<ResourceLimitError> for DeckPlanError {
     fn from(error: ResourceLimitError) -> Self {
         Self::ResourceLimit(error)
     }
+}
+
+fn normalize_step_identifier(value: &str, target: &'static str) -> Result<String, DeckPlanError> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(DeckPlanError::InvalidStepTarget { target });
+    }
+    let mut normalized = String::new();
+    normalized
+        .try_reserve_exact(value.len())
+        .map_err(|_| DeckPlanError::Allocation {
+            object: "normalized STEP target",
+        })?;
+    normalized.push_str(value);
+    normalized.make_ascii_lowercase();
+    Ok(normalized)
+}
+
+fn try_copy_numeric_axis_values(
+    values: &[Value],
+    axis: &str,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<RunAxisValue>, DeckPlanError> {
+    let mut copied = try_vec_with_capacity(values.len(), "numeric run-axis values")?;
+    for (index, value) in values.iter().copied().enumerate() {
+        if index.is_multiple_of(64) && abort.is_aborted() {
+            return Err(DeckPlanError::Aborted);
+        }
+        if !value.is_finite() {
+            return Err(DeckPlanError::NonFiniteAxisValue {
+                axis: axis.to_string(),
+                value,
+            });
+        }
+        copied.push(RunAxisValue::Numeric(if value == 0.0 {
+            0.0
+        } else {
+            value
+        }));
+    }
+    Ok(copied)
+}
+
+fn data_axis_from_table(
+    netlist: &crate::netlist::Netlist,
+    table_name: &str,
+    limits: &ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<RunAxis, DeckPlanError> {
+    let mut matching = netlist
+        .data_tables
+        .iter()
+        .filter(|table| table.name.eq_ignore_ascii_case(table_name));
+    let table = matching
+        .next()
+        .ok_or_else(|| DeckPlanError::UnknownStepDataTable {
+            table: table_name.to_string(),
+        })?;
+    if matching.next().is_some() {
+        return Err(DeckPlanError::AmbiguousStepDataTable {
+            table: table_name.to_string(),
+        });
+    }
+    ResourceLimitError::ensure(
+        ResourceKind::BatchRuns,
+        table.rows.len(),
+        limits.max_batch_runs,
+    )?;
+    let data_value_count = checked_resource_mul(
+        table.rows.len(),
+        table.params.len(),
+        ResourceKind::ResultValues,
+    )?;
+    ResourceLimitError::ensure(
+        ResourceKind::ResultValues,
+        data_value_count,
+        limits.max_result_values,
+    )?;
+
+    let mut values = try_vec_with_capacity(table.rows.len(), "STEP DATA rows")?;
+    for (row_index, row) in table.rows.iter().enumerate() {
+        if row_index.is_multiple_of(64) && abort.is_aborted() {
+            return Err(DeckPlanError::Aborted);
+        }
+        if row.len() != table.params.len() {
+            return Err(DeckPlanError::StepDataRowWidth {
+                table: table.name.clone(),
+                row: row_index + 1,
+                expected: table.params.len(),
+                actual: row.len(),
+            });
+        }
+        let mut bindings = try_vec_with_capacity(table.params.len(), "STEP DATA bindings")?;
+        for (column_index, (name, value)) in table.params.iter().zip(row).enumerate() {
+            if column_index.is_multiple_of(64) && abort.is_aborted() {
+                return Err(DeckPlanError::Aborted);
+            }
+            bindings.push(DataBinding::new(
+                try_clone_string(name, "STEP DATA column name")?,
+                *value,
+            )?);
+        }
+        values.push(RunAxisValue::DataRow(bindings));
+    }
+    RunAxis::new(AxisKind::Data, table.name.clone(), values)
 }
 
 fn checked_coordinate_count(
@@ -1039,6 +1441,26 @@ fn try_clone_axis_value(value: &RunAxisValue) -> Result<RunAxisValue, DeckPlanEr
     }
 }
 
+fn try_clone_step_target(target: &StepAxisTarget) -> Result<StepAxisTarget, DeckPlanError> {
+    match target {
+        StepAxisTarget::Parameter { name } => Ok(StepAxisTarget::Parameter {
+            name: try_clone_string(name, "STEP parameter target")?,
+        }),
+        StepAxisTarget::Device { name, parameter } => Ok(StepAxisTarget::Device {
+            name: try_clone_string(name, "STEP device target")?,
+            parameter: parameter
+                .as_deref()
+                .map(|parameter| try_clone_string(parameter, "STEP device parameter target"))
+                .transpose()?,
+        }),
+        StepAxisTarget::Model { name, parameter } => Ok(StepAxisTarget::Model {
+            name: try_clone_string(name, "STEP model target")?,
+            parameter: try_clone_string(parameter, "STEP model parameter target")?,
+        }),
+        StepAxisTarget::Temperature => Ok(StepAxisTarget::Temperature),
+    }
+}
+
 fn try_clone_assignment(
     axis: &RunAxis,
     value_index: usize,
@@ -1056,6 +1478,11 @@ fn try_clone_assignment(
         name: try_clone_string(&axis.name, "coordinate axis name")?,
         value: try_clone_axis_value(value)?,
         value_index,
+        step_target: axis
+            .step_target
+            .as_ref()
+            .map(try_clone_step_target)
+            .transpose()?,
     })
 }
 
@@ -1286,7 +1713,7 @@ mod tests {
         .expect("STEP axis");
         let plan = DeckPlan::new(vec![data, step], Vec::new()).expect("DATA/STEP plan");
         let coordinates = plan
-            .coordinates_with_abort(&coordinate_limits(4, 8), &crate::NoAbort)
+            .coordinates_with_abort(&coordinate_limits(4, 12), &crate::NoAbort)
             .expect("two DATA rows times two STEP values");
 
         assert_eq!(coordinates.len(), 4);
@@ -1460,5 +1887,245 @@ mod tests {
             .expect("temperature axis is present");
         assert_eq!(plan.analyses().len(), 1);
         assert_eq!(plan.analyses()[0].id().kind(), AnalysisKind::ImplicitOp);
+    }
+
+    fn numeric_values(axis: &RunAxis) -> Vec<Value> {
+        axis.values()
+            .iter()
+            .map(|value| match value {
+                RunAxisValue::Numeric(value) => *value,
+                other => panic!("expected numeric axis value, got {other:?}"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn authored_step_list_linear_decade_and_octave_become_ordered_axes() {
+        let netlist = crate::Netlist::parse(
+            "STEP sweep modes\n\
+             .step param listed list 3 1 4\n\
+             .step lin param linear 1 3 1\n\
+             .step dec param decade 1 100 1\n\
+             .step oct param octave 1 4 1\n\
+             .op\n\
+             .end\n",
+        )
+        .expect("all numeric STEP modes parse");
+        let plan = DeckPlan::from_netlist_run_axes(&netlist, &ResourceLimits::default())
+            .expect("numeric STEP axes plan")
+            .expect("STEP axes are present");
+
+        assert_eq!(
+            plan.axes().iter().map(RunAxis::name).collect::<Vec<_>>(),
+            [
+                "param:listed",
+                "param:linear",
+                "param:decade",
+                "param:octave",
+            ]
+        );
+        assert_eq!(numeric_values(&plan.axes()[0]), [3.0, 1.0, 4.0]);
+        assert_eq!(numeric_values(&plan.axes()[1]), [1.0, 2.0, 3.0]);
+        assert_eq!(numeric_values(&plan.axes()[2]), [1.0, 10.0, 100.0]);
+        assert_eq!(numeric_values(&plan.axes()[3]), [1.0, 2.0, 4.0]);
+        assert!(plan.axes().iter().all(|axis| axis.kind() == AxisKind::Step));
+    }
+
+    #[test]
+    fn authored_step_targets_remain_typed_on_axes_and_coordinates() {
+        let netlist = crate::Netlist::parse(
+            "STEP targets\n\
+             R1 out 0 1k\n\
+             .step param gain list 1 2\n\
+             .step R1:resistance list 1k 2k\n\
+             .step model RMOD r list 10 20\n\
+             .step temp list -40 125\n\
+             .op\n\
+             .end\n",
+        )
+        .expect("typed STEP targets parse");
+        let plan = DeckPlan::from_netlist_run_axes(&netlist, &ResourceLimits::default())
+            .expect("typed STEP targets plan")
+            .expect("STEP axes are present");
+
+        assert!(matches!(
+            plan.axes()[0].step_target(),
+            Some(StepAxisTarget::Parameter { name }) if name == "gain"
+        ));
+        assert!(matches!(
+            plan.axes()[1].step_target(),
+            Some(StepAxisTarget::Device {
+                name,
+                parameter: Some(parameter),
+            }) if name == "r1" && parameter == "resistance"
+        ));
+        assert!(matches!(
+            plan.axes()[2].step_target(),
+            Some(StepAxisTarget::Model { name, parameter })
+                if name == "rmod" && parameter == "r"
+        ));
+        assert_eq!(plan.axes()[3].kind(), AxisKind::Temperature);
+        assert_eq!(
+            plan.axes()[3].step_target(),
+            Some(&StepAxisTarget::Temperature)
+        );
+
+        let coordinates = plan
+            .coordinates_with_abort(&ResourceLimits::default(), &crate::NoAbort)
+            .expect("typed coordinates materialize");
+        assert_eq!(coordinates.len(), 16);
+        assert!(matches!(
+            coordinates[0].assignments()[2].step_target(),
+            Some(StepAxisTarget::Model { name, parameter })
+                if name == "rmod" && parameter == "r"
+        ));
+        assert_eq!(
+            coordinates[0].assignments()[3].step_target(),
+            Some(&StepAxisTarget::Temperature)
+        );
+    }
+
+    #[test]
+    fn data_step_numeric_step_and_temp_use_canonical_axis_order() {
+        let netlist = crate::Netlist::parse(
+            "axis ordering\n\
+             .step param gain list 1 2\n\
+             .temp -40 125\n\
+             .data corners\n\
+             + bias scale\n\
+             + 1 10\n\
+             + 2 20\n\
+             .enddata\n\
+             .step data=corners\n\
+             .op\n\
+             .end\n",
+        )
+        .expect("DATA, STEP, and TEMP deck parses");
+        let plan = DeckPlan::from_netlist_run_axes(&netlist, &ResourceLimits::default())
+            .expect("mixed axes plan")
+            .expect("mixed axes are present");
+
+        assert_eq!(
+            plan.axes().iter().map(RunAxis::kind).collect::<Vec<_>>(),
+            [AxisKind::Data, AxisKind::Step, AxisKind::Temperature]
+        );
+        let coordinates = plan
+            .coordinates_with_abort(&ResourceLimits::default(), &crate::NoAbort)
+            .expect("mixed coordinates materialize");
+        assert_eq!(coordinates.len(), 8);
+        assert_eq!(
+            coordinates[0]
+                .assignments()
+                .iter()
+                .map(AxisAssignment::kind)
+                .collect::<Vec<_>>(),
+            [AxisKind::Data, AxisKind::Step, AxisKind::Temperature]
+        );
+        assert_eq!(numeric_values(&plan.axes()[2]), [-40.0, 125.0]);
+    }
+
+    #[test]
+    fn canonical_temp_step_plan_is_cartesian_and_preserves_analysis_ordinals() {
+        let netlist = crate::Netlist::parse(
+            "TEMP by STEP\n\
+             .param resistance=1k\n\
+             R1 in out {resistance}\n\
+             V1 in 0 1\n\
+             .temp -40 25 125\n\
+             .step param resistance list 1k 2k\n\
+             .ac lin 2 1 2\n\
+             .tran 1u 2u\n\
+             .ac lin 2 10 20\n\
+             .end\n",
+        )
+        .expect("TEMP by STEP deck parses");
+        let plan = DeckPlan::from_netlist_run_axes(&netlist, &ResourceLimits::default())
+            .expect("TEMP and STEP compose")
+            .expect("run axes are present");
+
+        assert_eq!(
+            plan.axes().iter().map(RunAxis::kind).collect::<Vec<_>>(),
+            [AxisKind::Step, AxisKind::Temperature]
+        );
+        assert_eq!(
+            plan.analyses()
+                .iter()
+                .map(|analysis| analysis.id().tag())
+                .collect::<Vec<_>>(),
+            ["ac-001", "tran-001", "ac-002"]
+        );
+        let coordinates = plan
+            .coordinates_with_abort(&ResourceLimits::default(), &crate::NoAbort)
+            .expect("six Cartesian coordinates");
+        assert_eq!(coordinates.len(), 6);
+        assert_eq!(coordinates[0].assignments()[0].value_index(), 0);
+        assert_eq!(coordinates[0].assignments()[1].value_index(), 0);
+        assert_eq!(coordinates[1].assignments()[0].value_index(), 0);
+        assert_eq!(coordinates[1].assignments()[1].value_index(), 1);
+        assert_eq!(coordinates[3].assignments()[0].value_index(), 1);
+        assert_eq!(coordinates[3].assignments()[1].value_index(), 0);
+        assert_eq!(
+            coordinates,
+            plan.coordinates_with_abort(&ResourceLimits::default(), &crate::NoAbort)
+                .expect("coordinate IDs are deterministic")
+        );
+
+        assert!(matches!(
+            DeckPlan::from_netlist_temperature_axis(&netlist),
+            Err(DeckPlanError::TemperatureAxisWithStep)
+        ));
+    }
+
+    #[test]
+    fn netlist_axis_cardinality_and_scalar_bindings_are_preflighted() {
+        let netlist = crate::Netlist::parse(
+            "bounded TEMP by STEP\n\
+             .step param p list 1 2\n\
+             .temp -40 25 125\n\
+             .op\n\
+             .end\n",
+        )
+        .expect("bounded axis deck parses");
+        let mut limits = ResourceLimits::default();
+        limits.max_batch_runs = 5;
+        assert!(matches!(
+            DeckPlan::from_netlist_run_axes(&netlist, &limits),
+            Err(DeckPlanError::ResourceLimit(ResourceLimitError {
+                resource: ResourceKind::BatchRuns,
+                requested: 6,
+                limit: 5,
+            }))
+        ));
+
+        limits.max_batch_runs = 6;
+        limits.max_result_values = 11;
+        assert!(matches!(
+            DeckPlan::from_netlist_run_axes(&netlist, &limits),
+            Err(DeckPlanError::ResourceLimit(ResourceLimitError {
+                resource: ResourceKind::ResultValues,
+                requested: 12,
+                limit: 11,
+            }))
+        ));
+    }
+
+    #[test]
+    fn step_data_resolution_is_typed_and_fail_closed() {
+        let missing = crate::Netlist::parse("missing DATA\n.step data=absent\n.op\n.end\n")
+            .expect("unresolved DATA reference remains typed");
+        let error = DeckPlan::from_netlist_run_axes(&missing, &ResourceLimits::default())
+            .expect_err("unknown STEP DATA table must fail planning");
+        assert!(
+            matches!(&error, DeckPlanError::UnknownStepDataTable { table } if table.eq_ignore_ascii_case("absent")),
+            "unexpected planning error: {error:?}"
+        );
+
+        let abort = ImmediateAbort;
+        let list = crate::Netlist::parse("aborted STEP\n.step param p list 1 2\n.op\n.end\n")
+            .expect("STEP list parses");
+        assert!(matches!(
+            DeckPlan::from_netlist_run_axes_with_abort(&list, &ResourceLimits::default(), &abort,),
+            Err(DeckPlanError::Aborted)
+        ));
     }
 }

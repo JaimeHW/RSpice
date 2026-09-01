@@ -11,7 +11,7 @@ mod topology;
 pub use plan::{
     AnalysisInstanceId, AnalysisKind, AnalysisRequest, AxisAssignment, AxisKind, DataBinding,
     DeckPlan, DeckPlanError, PlannedAnalysis, RunAxis, RunAxisValue, RunCoordinate,
-    RunCoordinateId,
+    RunCoordinateId, StepAxisTarget,
 };
 pub use schema::{
     CoordinateSchema, SchemaUnion, SignalDescriptor, SignalKind, SignalOwner, SignalSchema,
