@@ -461,6 +461,86 @@ fn the_same_deck_shape_still_runs_when_the_module_is_analog_only() {
 }
 
 // ---------------------------------------------------------------------------
+// (e) A process sampling its module's own continuous net
+// ---------------------------------------------------------------------------
+
+/// Verilog-AMS LRM 2.4 section 7.3.3's sampler, in a deck.
+///
+/// The clause's own example is `always @(posedge clk) out = V(in);`, and this
+/// is it with a threshold: the process wakes on a clock edge that arrives
+/// across an A/D bridge and reads the module's own analog terminal. Nothing
+/// leaves the module to carry that value — there is no second X-card, no
+/// bridge on `p`, and no deck node between the two halves. The coupling is the
+/// language's.
+const SAMPLER: &str = r#"
+`include "disciplines.vams"
+module tracker(p, n, clk, q);
+    inout p, n;
+    electrical p, n;
+    input clk;
+    output q;
+    wire clk;
+    reg q;
+    initial q = 1'b0;
+    always @(posedge clk) q <= (V(p, n) > 1.0);
+    analog I(p, n) <+ V(p, n) / 1000000.0;
+endmodule
+"#;
+
+#[test]
+fn a_process_samples_its_modules_own_analog_terminal_at_the_edge_that_woke_it() {
+    let model = ModelFile::new("tracker", SAMPLER);
+    // A ramp from 0 V to 2 V over 100 ns, so the 1 V threshold is at 50 ns,
+    // and two clock edges that straddle it: one at 20 ns where the ramp is at
+    // 0.4 V, one at 60 ns where it is at 1.2 V.
+    let deck = format!(
+        "* a process sampling its own module's analog terminal\n\
+         vin p 0 pwl(0 0 100n 2.0)\n\
+         vclk clk 0 pulse(0 3.3 20n 0.1n 0.1n 10n 40n)\n\
+         x1 p 0 clk qs tracker\n\
+         rq qs 0 10k\n\
+         .va \"{}\" tracker\n\
+         .tran 0.2n 100n\n\
+         .end\n",
+        model.deck_path()
+    );
+
+    let result = run(&deck, 100.0e-9, 0.2e-9);
+
+    // One transition, and only one: the first edge sampled 0.4 V and wrote the
+    // zero `q` already held, the second sampled 1.2 V and wrote one. A probe
+    // that read a stale sample, or the same sample twice, would give a
+    // different count — zero if it never crossed, two if it crossed back.
+    assert_eq!(
+        digital_transitions(&result, "qs"),
+        1,
+        "the sampler crosses its threshold exactly once between the two clock edges"
+    );
+
+    let points = result
+        .digital_trace_named("qs")
+        .expect("the sampled output has a digital trace");
+    let transition = points.last().expect("the trace records the transition");
+
+    // The value the process read is the converged solution at the timepoint
+    // the edge was detected in, not the one before it — the host refreshes the
+    // probe bank from the same candidate its A/D bridges sample, and does it
+    // before publishing the transition that wakes the process. So the write
+    // lands in the clock edge's own tick.
+    //
+    // The clock crosses the A/D threshold of 1.65 V half way up a 0.1 ns rise
+    // that starts at 60 ns, so the edge is at 60.05 ns and its tick is 60 ns.
+    // A sample taken from the *previous* accepted timepoint instead would put
+    // this a whole clock period later, at 100 ns, which is what this bound
+    // separates.
+    assert!(
+        (transition.time - 60.0e-9).abs() < 1.0e-9,
+        "the sampled write must land at the clock edge that woke it, saw {:e} s",
+        transition.time
+    );
+}
+
+// ---------------------------------------------------------------------------
 // What the route still refuses, and by name
 // ---------------------------------------------------------------------------
 

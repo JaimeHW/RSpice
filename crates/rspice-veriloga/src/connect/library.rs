@@ -38,16 +38,16 @@
 //!   the analog side but cannot be *woken* by it;
 //! * a `d2a` written the other way — a discrete process setting a `real` that
 //!   an `analog` block contributes through `transition` — is refused because
-//!   "the continuous body and the discrete processes would both own the
-//!   variable and they advance on different clocks, which this compiler does
-//!   not resolve yet".
+//!   the analog body *reads* a variable the discrete half owns. Section 7.3
+//!   allows that read and section 7.3.6.5 fixes its value, so the refusal names
+//!   the seam rather than the program: the compiled analog body has no route to
+//!   the digital signal store.
 //!
-//! That second message is the whole mixed-signal boundary problem stated at
-//! the language level, and it is the same wall the engine hits: the host that
-//! could run a connect module's discrete half
-//! (`rspice_core`'s `xspice::verilog::MixedSignalHost`) refuses any trial time
-//! off its integer-nanosecond grid, and an LTE-controlled transient does not
-//! land there.
+//! Neither refusal is about time any more. The host that runs a connect
+//! module's discrete half (`rspice_core`'s
+//! `xspice::verilog::MixedSignalHost`) floors an LTE-controlled trial time onto
+//! its tick grid and runs both domains at it, so the two halves do meet — what
+//! they cannot yet do is hand each other a value in these two positions.
 //!
 //! # Where the behaviour is instead
 //!

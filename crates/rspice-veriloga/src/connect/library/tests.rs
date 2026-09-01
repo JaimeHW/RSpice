@@ -373,12 +373,16 @@ endmodule
 }
 
 /// A `d2a` written the other way — a discrete process setting a `real` that an
-/// `analog` block contributes — is refused for the reason that *is* the
-/// mixed-signal boundary problem: the two halves advance on different clocks.
+/// `analog` block contributes — is refused for what is now a much narrower
+/// reason, and one that names a clause rather than a wall.
 ///
-/// This is the front end's statement of the same wall the engine hits, where
-/// `rspice_core`'s `xspice::verilog::MixedSignalHost` refuses any trial time
-/// off its integer-nanosecond grid.
+/// Verilog-AMS LRM 2.4 section 7.3 makes the *program* legal: `vout` is written
+/// by the discrete domain and only by it, and section 7.3.6.5 fixes what the
+/// analog body reads — "the digital value calculated for the greatest digital
+/// time tick which is less than or equal to the analog time when the expression
+/// is evaluated", which is the zero-order hold the D/A bridge already is. What
+/// is missing is the seam: the compiled analog body has no route to the digital
+/// signal store. The refusal says so.
 #[test]
 fn a_cross_clock_variable_is_refused_by_name() {
     let error = analysis_error(
@@ -399,7 +403,85 @@ endmodule
 ",
     );
     assert!(
-        error.contains("they advance on different clocks"),
+        error.contains(
+            "is written by a discrete process and read by the analog body; Verilog-AMS LRM 2.4 \
+             section 7.3.6.5"
+        ),
         "unexpected error: {error}"
+    );
+}
+
+/// The same module with the analog body *writing* the shared variable is a
+/// different refusal, and a permanent one.
+///
+/// Verilog-AMS LRM 2.4 section 7.3: "Write operations of nets and variables are
+/// only allowed from the context of their domain." Two writers is not a
+/// synchronization problem waiting for a seam — it is a program the standard
+/// does not admit, so the message says which sentence rather than which wave.
+#[test]
+fn a_variable_both_domains_write_is_refused_permanently() {
+    let error = analysis_error(
+        "\
+module two_writers(d, a);
+    input d;
+    output a;
+    logic d;
+    electrical a;
+    parameter real vhi = 3.3;
+    real vout;
+    always @(d)
+        vout = vhi;
+    analog begin
+        vout = 0.0;
+        V(a) <+ vout;
+    end
+endmodule
+",
+    );
+    assert!(
+        error.contains("is written by both the analog body and a discrete process"),
+        "unexpected error: {error}"
+    );
+}
+
+/// And an analog body that neither reads nor writes the variable does not
+/// refuse at all.
+///
+/// This is the refusal that went away. The rule used to be about the *module* —
+/// any analog block disqualified every module-level `real` a process wrote —
+/// which refused a perfectly ordinary mixed module and refused it with a
+/// message about clocks that had nothing to do with the program. Section 7.3's
+/// rule is about the name.
+#[test]
+fn an_unrelated_analog_body_leaves_a_process_owned_real_alone() {
+    let file = parse(
+        "\
+module independent_halves(d, a);
+    input d;
+    inout a;
+    logic d;
+    electrical a;
+    real acc;
+    always @(d)
+        acc = acc + 1.0;
+    analog V(a) <+ 1.0;
+endmodule
+",
+    );
+    let mut analyzer = crate::semantic::SemanticAnalyzer::new();
+    let analyzed = analyzer
+        .analyze(&file)
+        .expect("an analog body that never names the variable is not a second owner");
+    let module = analyzed
+        .modules
+        .get("independent_halves")
+        .expect("module");
+    assert!(
+        module
+            .digital
+            .signals
+            .iter()
+            .any(|signal| signal.name == "acc"),
+        "the process's `real` moved into the discrete domain"
     );
 }

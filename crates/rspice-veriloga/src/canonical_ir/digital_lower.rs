@@ -49,19 +49,26 @@
 //! rather than read off the keyword. The rule, applied by
 //! `SemanticAnalyzer::promote_module_level_reals`, is:
 //!
+//! Verilog-AMS LRM 2.4 section 7.3: "Read operations of nets and variables in
+//! both domains are allowed from both contexts. Write operations of nets and
+//! variables are only allowed from the context of their domain." A variable
+//! belongs to whichever domain writes it, and that is the whole rule:
+//!
 //! * A `real` that some `always`, `initial` or continuous assignment **writes**
-//!   becomes a **digital-owned real variable** — an entry in
-//!   [`CanonicalDigitalPlan::signals`] with
+//!   and the analog body does **not** write becomes a **digital-owned real
+//!   variable** — an entry in [`CanonicalDigitalPlan::signals`] with
 //!   [`DigitalSignalKind::Real`] and `procedurally_assignable`, written
-//!   straight into the signal store and never through a driver — **provided the
-//!   module declares no analog block**.
-//! * A `real` in a module that *does* declare one is refused by name. That is
-//!   real mixed-signal coupling: the continuous body's variables are its state,
-//!   the two domains advance on different clocks, and which of them holds the
-//!   variable between two time points is not a question this compiler answers.
+//!   straight into the signal store and never through a driver.
+//! * A `real` **both** halves write is refused by name, citing section 7.3.
+//!   That is not a scheduling problem to be solved later; it is a program the
+//!   standard does not admit.
+//! * A `real` a process writes and the analog body **reads** is refused for a
+//!   reason that names what is missing: section 7.3.6.5 makes it the digital
+//!   value at the greatest tick at or before the analog time, and the compiled
+//!   analog body has no route to the digital signal store yet.
 //! * A `real` no process writes is left exactly where it was. So a pure-analog
-//!   module cannot be affected by either question — it has no processes to
-//!   satisfy the first and an analog block to fail the second.
+//!   module cannot be affected by any of it — it has no processes to satisfy
+//!   the first condition.
 //!
 //! A real variable is not a real net, and the difference is IEEE 1364-2005
 //! section 6.2's: a `wreal` is driven by continuous assignments and resolved

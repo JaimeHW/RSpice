@@ -620,41 +620,54 @@ impl SemanticAnalyzer {
     }
 
     /// Move a module-level `real` into the discrete domain when a process owns
-    /// it, and refuse the case where both halves would.
+    /// it, and refuse the case the standard forbids.
     ///
-    /// # The ownership rule
+    /// # The ownership rule is the standard's, not this compiler's
+    ///
+    /// Verilog-AMS LRM 2.4 section 7.3: "Read operations of nets and variables
+    /// in both domains are allowed from both contexts. **Write operations of
+    /// nets and variables are only allowed from the context of their domain.**"
+    /// So a variable belongs to whichever domain writes it, that domain is the
+    /// only one that may, and either domain may read it. That is a rule, not
+    /// an implementation-defined area, and it decides all three cases here.
     ///
     /// `real state;` at module level is the *continuous* domain's declaration —
     /// it is the same production a Verilog-A model writes, and every one of the
-    /// shipped analog models is full of them. It becomes a discrete-domain
-    /// variable exactly when both of these hold:
+    /// shipped analog models is full of them. What makes it a discrete-domain
+    /// variable is a process writing it, so it becomes one exactly when:
     ///
     /// 1. some `always`, `initial` or continuous assignment **writes** it, and
-    /// 2. the module declares **no** analog block — no `analog`, no `analog
-    ///    initial`, no `analog final`.
+    /// 2. the analog body does **not** write it.
     ///
     /// Condition 1 is what makes the promotion necessary: a variable no process
     /// writes has nothing to gain from moving, and leaving it where it was
-    /// keeps a module that merely *reads* one across the domain boundary
-    /// refused by name rather than silently rehoused.
+    /// keeps it the continuous body's own state.
     ///
-    /// Condition 2 is what makes it safe, and it is a statement about the
-    /// module rather than about the name. A module with an analog block is an
-    /// analog device: its `real` variables are the continuous body's state, and
-    /// taking one of them away would leave that body reading storage the
-    /// discrete half now writes — a wrong answer rather than a missing one.
-    /// A module with no analog block is not a device at all; its `real`s belong
-    /// to nobody until a process writes one.
+    /// Condition 2 is section 7.3's sentence. Both halves writing one variable
+    /// is not a synchronization problem to be solved with a rule about clocks —
+    /// it is a program the standard does not admit, so it is refused by name
+    /// and cited, permanently rather than "not yet".
     ///
-    /// So a pure-analog module is untouched by construction: condition 1 fails
-    /// (it has no processes) and condition 2 fails (it has an analog block).
-    /// Neither of the two questions this asks can change how one compiles.
+    /// This used to be a question about the *module* — any analog block at all
+    /// disqualified every module-level `real` — which refused a module whose
+    /// analog body never mentions the variable, and refused it with a message
+    /// about clocks that did not apply. The question is about the name.
     ///
-    /// A module that fails only condition 2 — analog block *and* a process
-    /// writing a module-level `real` — is refused by name. That is genuine
-    /// mixed-signal coupling: the two domains advance on different clocks, and
-    /// which of them holds the variable between two time points is a question
-    /// this compiler does not yet answer.
+    /// A pure-analog module is still untouched by construction: it has no
+    /// processes, so condition 1 fails for every one of its variables and
+    /// neither question can change how it compiles.
+    ///
+    /// # What is still refused, and what it is waiting for
+    ///
+    /// A variable a process writes and the **analog body reads**. Section 7.3
+    /// allows that read and section 7.3.6.5 fixes its value — "the digital
+    /// value calculated for the greatest digital time tick which is less than
+    /// or equal to the analog time when the expression is evaluated", which is
+    /// the same zero-order hold the D/A bridge already implements. What is
+    /// missing is the seam, not the semantics: the analog body is evaluated by
+    /// compiled code that has no route to the digital signal store, so the
+    /// refusal names the clause it is short of rather than the boundary in
+    /// general.
     ///
     /// An `output real` port does not come through here at all. It is an
     /// explicit discrete-domain declaration — IEEE 1364-2005 section 12.3.4's
@@ -684,6 +697,30 @@ impl SemanticAnalyzer {
             .as_ref()
             .or(module.analog_initial.as_ref())
             .or(module.analog_final.as_ref());
+        // What the continuous body does with each name, over every analog
+        // block the module declares rather than only the first: `analog
+        // initial x = 0;` beside `analog V(a) <+ x;` is two blocks and one
+        // variable, and asking only one of them would answer about half a
+        // module.
+        let mut analog_writes = std::collections::HashSet::new();
+        let mut analog_reads = std::collections::HashSet::new();
+        for block in [
+            module.analog_block.as_ref(),
+            module.analog_initial.as_ref(),
+            module.analog_final.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            for statement in &block.statements {
+                collect_analog_names(statement, &mut analog_writes, &mut analog_reads);
+            }
+        }
+        // One expression form the walk could not enumerate makes every name a
+        // possible read. Erring that way promotes nothing the analog body
+        // might still be using, which is the direction that cannot produce a
+        // wrong answer — only a refusal.
+        let opaque_read = analog_reads.contains(OPAQUE_ANALOG_READ);
 
         for declaration in &module.variables {
             if declaration.var_type != VarType::Real {
@@ -693,14 +730,35 @@ impl SemanticAnalyzer {
                 if !written.contains(&item.name) || seen.contains_key(&item.name) {
                     continue;
                 }
-                if let Some(block) = analog {
+                // Verilog-AMS LRM 2.4 section 7.3: a variable's own domain is
+                // the only one that may write it. Two writers is a program the
+                // standard does not admit, and no scheduling rule would make
+                // it one.
+                if analog_writes.contains(&item.name) {
+                    self.record_error_at(
+                        SemanticErrorKind::InvalidExpression(format!(
+                            "`{}` is written by both the analog body and a discrete process; \
+                             Verilog-AMS LRM 2.4 section 7.3 allows a write only from the \
+                             context of the variable's own domain, so one of the two writes \
+                             has to go",
+                            item.name
+                        )),
+                        item.span,
+                    );
+                    continue;
+                }
+                // Section 7.3 allows this read and section 7.3.6.5 fixes its
+                // value, so the refusal is about the seam rather than about
+                // the program.
+                if (opaque_read || analog_reads.contains(&item.name))
+                    && let Some(block) = analog
+                {
                     self.record_error_at(
                         SemanticErrorKind::UnsupportedFeature(format!(
-                            "`{}` is a module-level `real` that a process writes, in a module \
-                             that also has an analog block; the continuous body and the \
-                             discrete processes would both own the variable and they advance \
-                             on different clocks, which this compiler does not resolve yet — \
-                             declare it inside the process, or move the analog block out",
+                            "`{}` is written by a discrete process and read by the analog body; \
+                             Verilog-AMS LRM 2.4 section 7.3.6.5 makes that read the digital \
+                             value at the greatest tick at or before the analog time, and the \
+                             compiled analog body has no route to the digital signal store yet",
                             item.name
                         )),
                         block.span,
@@ -1942,6 +2000,208 @@ impl SemanticAnalyzer {
         match self.symbols.lookup(name) {
             Some(Symbol { kind, .. }) => Resolution::Analog(*kind),
             None => Resolution::Undeclared,
+        }
+    }
+}
+
+/// The name recorded for an expression form [`collect_analog_names`] cannot
+/// look inside.
+///
+/// Not a legal Verilog identifier, so it can never collide with one the author
+/// wrote. It exists so that "the analog body reads something this walk could
+/// not enumerate" is a fact the read set carries rather than a silence.
+const OPAQUE_ANALOG_READ: &str = "$opaque";
+
+/// What the continuous body does with each name it mentions.
+///
+/// Two sets and one walk, because the ownership rule asks two questions about
+/// the same name and walking twice would be two chances for the two answers to
+/// come from different traversals. `written` is assignment *targets* only;
+/// `read` is every identifier reached from an expression, including the
+/// right-hand side of an assignment whose target is also written — `x = x + 1`
+/// both writes and reads `x`, and saying so is what makes the write rule fire
+/// on it rather than the read refusal.
+///
+/// Over-approximating in one direction on purpose, the same way
+/// [`collect_written_names`] does: a name inside a branch that never runs still
+/// counts, because whether it runs is a question about a simulation and this is
+/// a question about a declaration.
+///
+/// A `read` entry that is not a variable at all — a parameter, a net inside a
+/// branch access, a function name — is harmless: the caller only ever asks
+/// about names it has already established are module-level `real` variables a
+/// process writes.
+fn collect_analog_names(
+    statement: &AnalogStatement,
+    written: &mut std::collections::HashSet<SmolStr>,
+    read: &mut std::collections::HashSet<SmolStr>,
+) {
+    match statement {
+        AnalogStatement::Null(_) | AnalogStatement::Disable(_) => {}
+        AnalogStatement::Contribution(contribution) => {
+            collect_expression_names(&contribution.value, read);
+        }
+        AnalogStatement::IndirectContribution(contribution) => {
+            collect_expression_names(&contribution.lhs, read);
+            collect_expression_names(&contribution.rhs, read);
+        }
+        AnalogStatement::Assignment(assignment) => {
+            written.insert(assignment.target_name().clone());
+            if let LValue::ArrayAccess { index, .. } = &assignment.target {
+                collect_expression_names(index, read);
+            }
+            collect_expression_names(&assignment.value, read);
+        }
+        AnalogStatement::Conditional(conditional) => {
+            collect_expression_names(&conditional.condition, read);
+            collect_analog_names(&conditional.then_branch, written, read);
+            if let Some(branch) = &conditional.else_branch {
+                collect_analog_names(branch, written, read);
+            }
+        }
+        AnalogStatement::Case(case) => {
+            collect_expression_names(&case.expr, read);
+            for item in &case.items {
+                for value in &item.matches {
+                    collect_expression_names(value, read);
+                }
+                collect_analog_names(&item.statement, written, read);
+            }
+            if let Some(default) = &case.default {
+                collect_analog_names(default, written, read);
+            }
+        }
+        AnalogStatement::For(statement) => {
+            // The loop variable is written by the header, and its initializer
+            // and update are ordinary expressions of the same body.
+            written.insert(statement.var.clone());
+            collect_expression_names(&statement.init, read);
+            collect_expression_names(&statement.condition, read);
+            collect_analog_names(
+                &AnalogStatement::Assignment((*statement.update).clone()),
+                written,
+                read,
+            );
+            collect_analog_names(&statement.body, written, read);
+        }
+        AnalogStatement::While(statement) => {
+            collect_expression_names(&statement.condition, read);
+            collect_analog_names(&statement.body, written, read);
+        }
+        AnalogStatement::Repeat(statement) => {
+            collect_expression_names(&statement.count, read);
+            collect_analog_names(&statement.body, written, read);
+        }
+        AnalogStatement::Block(block) => {
+            for statement in &block.statements {
+                collect_analog_names(statement, written, read);
+            }
+        }
+        AnalogStatement::EventControl(event) => {
+            collect_analog_names(&event.statement, written, read);
+        }
+        AnalogStatement::Call(call) => {
+            for argument in &call.args {
+                collect_expression_names(argument, read);
+            }
+        }
+    }
+}
+
+/// Every identifier an expression reads.
+///
+/// A branch access contributes its *net* names, which is deliberate: they can
+/// never collide with a module-level `real`, so including them costs nothing
+/// and leaving them out would mean one more shape to keep in step.
+fn collect_expression_names(
+    expression: &Expression,
+    read: &mut std::collections::HashSet<SmolStr>,
+) {
+    match expression {
+        Expression::Number(_) | Expression::StringLit(_) | Expression::NullArgument(_) => {}
+        Expression::Identifier(identifier) => {
+            read.insert(identifier.name.clone());
+        }
+        Expression::ArrayAccess(access) => {
+            read.insert(access.array.clone());
+            collect_expression_names(&access.index, read);
+        }
+        Expression::BranchAccess(access) => match access {
+            BranchAccess::Nodes { pos, neg, .. } => {
+                read.insert(pos.clone());
+                if let Some(neg) = neg {
+                    read.insert(neg.clone());
+                }
+            }
+            BranchAccess::Branch { name, .. } => {
+                read.insert(name.clone());
+            }
+        },
+        Expression::Binary(binary) => {
+            collect_expression_names(&binary.left, read);
+            collect_expression_names(&binary.right, read);
+        }
+        Expression::Unary(unary) => collect_expression_names(&unary.operand, read),
+        Expression::Conditional(conditional) => {
+            collect_expression_names(&conditional.condition, read);
+            collect_expression_names(&conditional.then_expr, read);
+            collect_expression_names(&conditional.else_expr, read);
+        }
+        Expression::Call(call) => {
+            for argument in &call.args {
+                collect_expression_names(argument, read);
+            }
+        }
+        Expression::SystemFunction(function) => {
+            for argument in &function.args {
+                collect_expression_names(argument, read);
+            }
+        }
+        // Never present in a parsed tree, which is the only kind this walks.
+        // `ddt(x)` and its siblings are `Call`s until `expr_converter` rewrites
+        // them, and that runs after this. Recording the sentinel means a name
+        // reachable only through one is treated as read rather than silently
+        // missed, which is the safe direction: the write rule's failure mode is
+        // promoting a variable the analog body still uses.
+        Expression::AnalogOperator(_) => {
+            read.insert(OPAQUE_ANALOG_READ.into());
+        }
+        Expression::NoiseSource(source) => match source {
+            NoiseSource::White { power, .. } => collect_expression_names(power, read),
+            NoiseSource::Flicker {
+                power, exponent, ..
+            } => {
+                collect_expression_names(power, read);
+                collect_expression_names(exponent, read);
+            }
+            NoiseSource::Table { data, .. } => {
+                for value in data {
+                    collect_expression_names(value, read);
+                }
+            }
+        },
+        Expression::Digital(digital) => {
+            if let Some(name) = digital.base_name() {
+                read.insert(name.clone());
+            }
+            for child in digital.children() {
+                collect_expression_names(child, read);
+            }
+        }
+        Expression::ArrayLiteral(literal) => {
+            for element in &literal.elements {
+                match element {
+                    ArrayLiteralElement::Value(value) => collect_expression_names(value, read),
+                    ArrayLiteralElement::Replication(replication) => {
+                        collect_expression_names(&replication.count, read);
+                        for inner in &replication.elements {
+                            if let ArrayLiteralElement::Value(value) = inner {
+                                collect_expression_names(value, read);
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
