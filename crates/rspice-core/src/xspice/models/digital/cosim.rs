@@ -9,11 +9,15 @@ use crate::xspice::{
 };
 use std::sync::{Arc, Mutex};
 
-/// External irreversible digital co-simulation code model.
+/// External digital co-simulation code model.
 #[derive(Debug, Default)]
 pub struct DigitalCosim;
 
-type DigitalCosimRuntimeResource = Mutex<Box<dyn DigitalCosimRuntime>>;
+struct DigitalCosimRuntimeResource {
+    runtime: Mutex<Box<dyn DigitalCosimRuntime>>,
+    reversible: bool,
+}
+
 type DigitalCosimInputScratchResource = DigitalCosimInputScratch;
 
 const RESOURCE_RUNTIME: &str = "d_cosim.runtime";
@@ -31,7 +35,7 @@ fn d_cosim_error(message: impl Into<String>) -> CmError {
     CmError::EvaluationError(format!("d_cosim: {}", message.into()))
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct DigitalCosimInputScratch {
     inputs: Vec<DigitalValue>,
     inouts: Vec<DigitalValue>,
@@ -135,7 +139,7 @@ fn with_input_scratch<R>(
 ) -> CmResult<R> {
     let mut scratch = {
         let scratch = ctx
-            .resource_mut::<DigitalCosimInputScratchResource>(RESOURCE_INPUT_SCRATCH)
+            .resource_make_mut::<DigitalCosimInputScratchResource>(RESOURCE_INPUT_SCRATCH)
             .ok_or_else(|| {
                 d_cosim_error("input scratch is not initialized or is not uniquely owned")
             })?;
@@ -143,7 +147,7 @@ fn with_input_scratch<R>(
     };
     let result = f(ctx, &mut scratch);
     let restore = ctx
-        .resource_mut::<DigitalCosimInputScratchResource>(RESOURCE_INPUT_SCRATCH)
+        .resource_make_mut::<DigitalCosimInputScratchResource>(RESOURCE_INPUT_SCRATCH)
         .ok_or_else(|| d_cosim_error("input scratch is not initialized or is not uniquely owned"))
         .map(|slot| {
             *slot = scratch;
@@ -187,6 +191,21 @@ fn official_cosim_integer(ctx: &CmContext, name: &str, default: Value) -> CmResu
         });
     }
     Ok(value as i64)
+}
+
+fn validate_runtime_rollback_contract(
+    irreversible: i64,
+    runtime: &dyn DigitalCosimRuntime,
+) -> CmResult<bool> {
+    let reversible = irreversible <= 0;
+    if reversible && !runtime.supports_rollback() {
+        return Err(CmError::InvalidParameter {
+            name: "irreversible".to_string(),
+            message: "reversible d_cosim execution requires a runtime provider that implements complete rollback capture and restore"
+                .to_string(),
+        });
+    }
+    Ok(reversible)
 }
 
 fn d_cosim_inout_port() -> PortSpec {
@@ -415,7 +434,7 @@ impl CodeModel for DigitalCosim {
     }
 
     fn description(&self) -> &str {
-        "Bridge to an irreversible digital co-simulation runtime"
+        "Bridge to a transactional or irreversible digital co-simulation runtime"
     }
 
     fn ports(&self) -> &[PortSpec] {
@@ -500,13 +519,8 @@ impl CodeModel for DigitalCosim {
             queue_size,
             irreversible: official_cosim_integer(ctx, "irreversible", 1.0)?,
         };
-        if spec.irreversible <= 0 {
-            return Err(CmError::InvalidParameter {
-                name: "irreversible".to_string(),
-                message: "reversible d_cosim rollback is not implemented; use irreversible > 0"
-                    .to_string(),
-            });
-        }
+        let runtime = start_digital_cosim_runtime(&spec)?;
+        let reversible = validate_runtime_rollback_contract(spec.irreversible, runtime.as_ref())?;
         if spec.queue_size == 0 {
             return Err(CmError::InvalidParameter {
                 name: "queue_size".to_string(),
@@ -514,8 +528,10 @@ impl CodeModel for DigitalCosim {
             });
         }
 
-        let runtime = start_digital_cosim_runtime(&spec)?;
-        let runtime: Arc<DigitalCosimRuntimeResource> = Arc::new(Mutex::new(runtime));
+        let runtime: Arc<DigitalCosimRuntimeResource> = Arc::new(DigitalCosimRuntimeResource {
+            runtime: Mutex::new(runtime),
+            reversible,
+        });
         ctx.set_resource(RESOURCE_RUNTIME, runtime);
         ctx.set_resource(
             RESOURCE_INPUT_SCRATCH,
@@ -531,7 +547,11 @@ impl CodeModel for DigitalCosim {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        if ctx.evaluation_phase() == EvaluationPhase::RollbackableProbe {
+        let evaluation_phase = ctx.evaluation_phase();
+        let runtime_resource = ctx
+            .resource::<DigitalCosimRuntimeResource>(RESOURCE_RUNTIME)
+            .ok_or_else(|| d_cosim_error("runtime is not initialized"))?;
+        if evaluation_phase == EvaluationPhase::RollbackableProbe && !runtime_resource.reversible {
             return Ok(());
         }
 
@@ -549,11 +569,9 @@ impl CodeModel for DigitalCosim {
             fill_sized_digital_vector(ctx, "d_in", input_width, inputs)?;
             fill_sized_digital_vector(ctx, "d_inout", inout_width, inouts)?;
 
-            let runtime = ctx
-                .resource::<DigitalCosimRuntimeResource>(RESOURCE_RUNTIME)
-                .ok_or_else(|| d_cosim_error("runtime is not initialized"))?;
             let input_event_limit = {
-                let runtime = runtime
+                let runtime = runtime_resource
+                    .runtime
                     .lock()
                     .map_err(|_| d_cosim_error("runtime lock is poisoned"))?;
                 runtime.input_event_limit()
@@ -567,16 +585,78 @@ impl CodeModel for DigitalCosim {
                 input_events,
             );
 
-            let mut runtime = runtime
+            let mut runtime = runtime_resource
+                .runtime
                 .lock()
                 .map_err(|_| d_cosim_error("runtime lock is poisoned"))?;
 
+            let rollback_state = runtime_resource
+                .reversible
+                .then(|| runtime.capture_rollback_state())
+                .transpose()?;
+
             results.clear();
-            if ctx.time == 0.0 {
+            let runtime_result = if ctx.time == 0.0 {
                 if ctx.int_state(STATE_TIME_ZERO_INITIALIZED) != COSIM_NOT_INITIALIZED {
                     return Ok(());
                 }
-                ctx.set_int_state(STATE_TIME_ZERO_INITIALIZED, COSIM_INPUTS_INITIALIZED);
+                runtime.initialize(ctx.time, inputs, inouts).map(|result| {
+                    results.push(result);
+                    COSIM_INPUTS_INITIALIZED
+                })
+            } else {
+                let mut initialized = ctx.int_state(STATE_TIME_ZERO_INITIALIZED);
+                if ctx.int_state(STATE_TIME_ZERO_INITIALIZED) == COSIM_INPUTS_INITIALIZED {
+                    match runtime.startup_step(0.0) {
+                        Ok(result) => {
+                            results.push(result);
+                            initialized = COSIM_STARTUP_STEP_DONE;
+                        }
+                        Err(error) => {
+                            if let Some(state) = rollback_state.as_deref() {
+                                runtime.restore_rollback_state(state).map_err(|restore| {
+                                    d_cosim_error(format!(
+                                        "startup failed ({error}); rollback restore also failed ({restore})"
+                                    ))
+                                })?;
+                            }
+                            return Err(error);
+                        }
+                    }
+                }
+                runtime
+                    .step(ctx.time, inputs, inouts, input_events)
+                    .map(|result| {
+                        results.push(result);
+                        initialized
+                    })
+            };
+
+            let initialized = match runtime_result {
+                Ok(initialized) => initialized,
+                Err(error) => {
+                    if let Some(state) = rollback_state.as_deref() {
+                        runtime.restore_rollback_state(state).map_err(|restore| {
+                            d_cosim_error(format!(
+                                "runtime evaluation failed ({error}); rollback restore also failed ({restore})"
+                            ))
+                        })?;
+                    }
+                    return Err(error);
+                }
+            };
+
+            if evaluation_phase == EvaluationPhase::RollbackableProbe
+                && let Some(state) = rollback_state.as_deref()
+            {
+                runtime.restore_rollback_state(state).map_err(|error| {
+                    d_cosim_error(format!("speculative runtime rollback failed: {error}"))
+                })?;
+            }
+            drop(runtime);
+
+            ctx.set_int_state(STATE_TIME_ZERO_INITIALIZED, initialized);
+            if ctx.time == 0.0 {
                 for index in 0..input_layout.connected_input_count {
                     ctx.set_state(index, 0.0);
                 }
@@ -592,15 +672,7 @@ impl CodeModel for DigitalCosim {
                         digital_value_code(value),
                     );
                 }
-                results.push(runtime.initialize(ctx.time, inputs, inouts)?);
-            } else {
-                if ctx.int_state(STATE_TIME_ZERO_INITIALIZED) == COSIM_INPUTS_INITIALIZED {
-                    results.push(runtime.startup_step(0.0)?);
-                    ctx.set_int_state(STATE_TIME_ZERO_INITIALIZED, COSIM_STARTUP_STEP_DONE);
-                }
-                results.push(runtime.step(ctx.time, inputs, inouts, input_events)?);
             }
-            drop(runtime);
             for event in input_events.iter() {
                 ctx.set_state(event.index, event.time);
                 ctx.set_int_state(
@@ -694,6 +766,187 @@ mod tests {
             Err(CmError::InvalidParameter { name, .. }) => assert_eq!(name, expected_name),
             other => panic!("expected InvalidParameter for {expected_name}, got {other:?}"),
         }
+    }
+
+    struct RollbackTestRuntime {
+        state: Arc<Mutex<u64>>,
+        fail_step: bool,
+    }
+
+    impl RollbackTestRuntime {
+        fn advance(&self, time: Value) -> DigitalCosimStep {
+            let mut state = self.state.lock().expect("test state lock");
+            *state += 1;
+            DigitalCosimStep {
+                vtime: time,
+                outputs: vec![if *state % 2 == 0 {
+                    DigitalValue::zero()
+                } else {
+                    DigitalValue::one()
+                }],
+                inouts: Vec::new(),
+            }
+        }
+    }
+
+    impl DigitalCosimRuntime for RollbackTestRuntime {
+        fn supports_rollback(&self) -> bool {
+            true
+        }
+
+        fn capture_rollback_state(&mut self) -> CmResult<Vec<u8>> {
+            Ok(self
+                .state
+                .lock()
+                .map_err(|_| d_cosim_error("test state lock is poisoned"))?
+                .to_le_bytes()
+                .to_vec())
+        }
+
+        fn restore_rollback_state(&mut self, state: &[u8]) -> CmResult<()> {
+            let bytes: [u8; std::mem::size_of::<u64>()] = state.try_into().map_err(|_| {
+                d_cosim_error(format!("invalid test rollback image size {}", state.len()))
+            })?;
+            *self
+                .state
+                .lock()
+                .map_err(|_| d_cosim_error("test state lock is poisoned"))? =
+                u64::from_le_bytes(bytes);
+            Ok(())
+        }
+
+        fn initialize(
+            &mut self,
+            time: Value,
+            _inputs: &[DigitalValue],
+            _inouts: &[DigitalValue],
+        ) -> CmResult<DigitalCosimStep> {
+            Ok(self.advance(time))
+        }
+
+        fn startup_step(&mut self, time: Value) -> CmResult<DigitalCosimStep> {
+            Ok(self.advance(time))
+        }
+
+        fn step(
+            &mut self,
+            time: Value,
+            _inputs: &[DigitalValue],
+            _inouts: &[DigitalValue],
+            _events: &[DigitalCosimInputEvent],
+        ) -> CmResult<DigitalCosimStep> {
+            let result = self.advance(time);
+            if self.fail_step {
+                Err(d_cosim_error("injected step failure"))
+            } else {
+                Ok(result)
+            }
+        }
+    }
+
+    fn rollback_test_context(state: Arc<Mutex<u64>>, fail_step: bool) -> CmResult<CmContext> {
+        let mut ctx = CmContext::new();
+        ctx.time = 1.0e-9;
+        ctx.set_port_width("d_in", 0);
+        ctx.set_port_width("d_out", 1);
+        ctx.set_port_width("d_inout", 0);
+        ctx.init_output_vector("d_out", PortType::Digital, 1);
+        let layout = digital_cosim_input_layout(0, 0)?;
+        ctx.allocate_states(layout.connected_input_count);
+        ctx.allocate_int_states(layout.int_state_count);
+        ctx.set_int_state(STATE_TIME_ZERO_INITIALIZED, COSIM_INPUTS_INITIALIZED);
+        ctx.set_resource(
+            RESOURCE_RUNTIME,
+            Arc::new(DigitalCosimRuntimeResource {
+                runtime: Mutex::new(Box::new(RollbackTestRuntime { state, fail_step })),
+                reversible: true,
+            }),
+        );
+        ctx.set_resource(
+            RESOURCE_INPUT_SCRATCH,
+            Arc::new(DigitalCosimInputScratch::with_capacities(0, 0, 1, 1)?),
+        );
+        Ok(ctx)
+    }
+
+    #[test]
+    fn reversible_d_cosim_restores_speculative_runtime_state_and_commits_accepted_state() {
+        let state = Arc::new(Mutex::new(0));
+        let mut probe = rollback_test_context(Arc::clone(&state), false).expect("probe context");
+        probe.set_evaluation_phase(EvaluationPhase::RollbackableProbe);
+        DigitalCosim
+            .evaluate(&mut probe)
+            .expect("rollbackable co-simulation probe");
+        assert_eq!(*state.lock().expect("test state lock"), 0);
+
+        let mut accepted =
+            rollback_test_context(Arc::clone(&state), false).expect("accepted context");
+        accepted.set_evaluation_phase(EvaluationPhase::AcceptedStep);
+        DigitalCosim
+            .evaluate(&mut accepted)
+            .expect("accepted co-simulation step");
+        assert_eq!(
+            *state.lock().expect("test state lock"),
+            2,
+            "startup and accepted-time advances must both commit"
+        );
+        assert_eq!(
+            accepted.int_state(STATE_TIME_ZERO_INITIALIZED),
+            COSIM_STARTUP_STEP_DONE
+        );
+    }
+
+    #[test]
+    fn reversible_d_cosim_restores_runtime_when_a_multi_advance_call_fails() {
+        let state = Arc::new(Mutex::new(0));
+        let mut ctx = rollback_test_context(Arc::clone(&state), true).expect("failure context");
+        ctx.set_evaluation_phase(EvaluationPhase::AcceptedStep);
+        let error = DigitalCosim
+            .evaluate(&mut ctx)
+            .expect_err("injected runtime failure must escape");
+        assert!(error.to_string().contains("injected step failure"));
+        assert_eq!(*state.lock().expect("test state lock"), 0);
+        assert_eq!(
+            ctx.int_state(STATE_TIME_ZERO_INITIALIZED),
+            COSIM_INPUTS_INITIALIZED,
+            "context commit marker must remain at the last accepted boundary"
+        );
+    }
+
+    #[test]
+    fn reversible_d_cosim_requires_an_explicit_runtime_rollback_contract() {
+        struct IrreversibleRuntime;
+        impl DigitalCosimRuntime for IrreversibleRuntime {
+            fn initialize(
+                &mut self,
+                time: Value,
+                _inputs: &[DigitalValue],
+                _inouts: &[DigitalValue],
+            ) -> CmResult<DigitalCosimStep> {
+                Ok(DigitalCosimStep {
+                    vtime: time,
+                    outputs: Vec::new(),
+                    inouts: Vec::new(),
+                })
+            }
+
+            fn step(
+                &mut self,
+                time: Value,
+                _inputs: &[DigitalValue],
+                _inouts: &[DigitalValue],
+                _events: &[DigitalCosimInputEvent],
+            ) -> CmResult<DigitalCosimStep> {
+                self.initialize(time, &[], &[])
+            }
+        }
+
+        let runtime = IrreversibleRuntime;
+        assert!(validate_runtime_rollback_contract(1, &runtime).is_ok());
+        assert_invalid_param(
+            validate_runtime_rollback_contract(0, &runtime),
+            "irreversible",
+        );
     }
 
     #[test]

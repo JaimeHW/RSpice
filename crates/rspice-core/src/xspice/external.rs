@@ -89,6 +89,36 @@ pub trait DigitalCosimRuntime: Send {
         None
     }
 
+    /// Whether this runtime can capture and restore its complete mutable
+    /// simulation state.
+    ///
+    /// RSpice requires this contract when a `d_cosim` model selects reversible
+    /// execution (`irreversible <= 0`). The snapshot must include every fact
+    /// that can affect a later output: simulation time, event queues, process
+    /// state, random state, and any provider-owned caches. Returning `true`
+    /// while omitting state is a provider contract violation.
+    fn supports_rollback(&self) -> bool {
+        false
+    }
+
+    /// Capture a complete opaque rollback image.
+    ///
+    /// Providers may choose any stable in-process representation. RSpice does
+    /// not persist these bytes in transient checkpoint files; they are used to
+    /// make one speculative co-simulation evaluation transactional.
+    fn capture_rollback_state(&mut self) -> CmResult<Vec<u8>> {
+        Err(CmError::EvaluationError(
+            "digital co-simulation runtime does not implement rollback capture".to_string(),
+        ))
+    }
+
+    /// Restore an image returned by [`Self::capture_rollback_state`].
+    fn restore_rollback_state(&mut self, _state: &[u8]) -> CmResult<()> {
+        Err(CmError::EvaluationError(
+            "digital co-simulation runtime does not implement rollback restore".to_string(),
+        ))
+    }
+
     /// Initialize co-simulator inputs at time zero.
     fn initialize(
         &mut self,
