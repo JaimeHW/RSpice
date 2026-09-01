@@ -105,11 +105,13 @@ fn settle_to_quiet(host: &mut MixedSignalHost, voltages: &[Value]) -> Result<(),
             return Ok(());
         }
     }
-    Err(SimulationError::Circuit(format!(
-        "mixed Verilog-AMS instance '{instance}': the analog/digital boundary did not settle \
-         within {MAX_BOUNDARY_SETTLE_PASSES} passes at one timepoint; a bridge is driving a \
-         signal that drives it back"
-    )))
+    // Named participants rather than a sentence about bridges in general. The
+    // host builds the diagnostic because the host is what knows which nets
+    // moved; this loop knows only that they kept moving.
+    Err(mixed_error(
+        &instance,
+        host.boundary_settle_oscillation(MAX_BOUNDARY_SETTLE_PASSES),
+    ))
 }
 
 impl CircuitData {

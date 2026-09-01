@@ -51,6 +51,140 @@ use crate::xspice::event_scheduler::{SchedulerLimits, TimeResolution};
 use crate::xspice::settle_cost;
 use crate::xspice::threshold_crossing::threshold_crossing_time;
 
+/// How many consecutive accepted timepoints may each move one boundary net
+/// before the interleave calls it feedback rather than signal.
+///
+/// A boundary net a resolved waveform drives moves at most once in several
+/// accepted timepoints. Both directions make that so, and neither is a
+/// coincidence: a D/A output's next activation is a breakpoint the stepper
+/// lands on exactly, and between two of them the LTE controller re-expands the
+/// step; an A/D input's threshold crossing is interpolated inside one accepted
+/// step, so resolving the crossing is what the controller is doing rather than
+/// something it does repeatedly.
+///
+/// A net that moves at *every* accepted timepoint for this long is therefore
+/// not a signal this stepper failed to resolve. It is a boundary the analog
+/// solution flips and that flips the analog solution: the comparator whose
+/// digital inverse drives its own reference, with no delay anywhere in the
+/// loop. Such a loop has no consistent value at one timepoint, so there is
+/// nothing for a smaller step to find, and the run would otherwise chatter to
+/// `tstop` and report a trace.
+///
+/// 128 rather than a smaller number because the cost of being wrong is
+/// asymmetric: a false positive refuses a deck that would have run, and a false
+/// negative costs the extra timepoints it takes to reach the ceiling.
+const MAX_CONSECUTIVE_BOUNDARY_FLIPS: u32 = 128;
+
+/// How many of a boundary net's most recent accepted values a diagnostic
+/// carries.
+///
+/// Eight, because the evidence a reader needs from a chattering net is the
+/// *pattern* — an alternation says feedback, a run of one value says the count
+/// is measuring something else — and eight values show a period-two or
+/// period-four alternation unambiguously. They are carried as two bits each in
+/// a `u16` so an accepted timepoint costs a shift rather than an allocation.
+const BOUNDARY_VALUE_HISTORY: u32 = 8;
+
+/// One boundary net's recent history at accepted timepoints.
+///
+/// Kept in the accepted state, so a rejected trial's chatter is not counted:
+/// the whole question this answers is whether the *committed* boundary keeps
+/// moving.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct BoundaryNetHistory {
+    /// Consecutive accepted timepoints whose trial moved this net.
+    run: u32,
+    /// The values it held at the last [`BOUNDARY_VALUE_HISTORY`] accepted
+    /// timepoints, two bits each, most recent in the low bits.
+    recent: u16,
+    /// How many of those slots have been written, so a young net does not
+    /// report seven zeroes it never held.
+    filled: u32,
+}
+
+impl BoundaryNetHistory {
+    fn code(bit: FourStateBit) -> u16 {
+        match bit {
+            FourStateBit::Zero => 0,
+            FourStateBit::One => 1,
+            FourStateBit::Unknown => 2,
+            FourStateBit::HighImpedance => 3,
+        }
+    }
+
+    fn spelling(code: u16) -> &'static str {
+        match code {
+            0 => "0",
+            1 => "1",
+            2 => "x",
+            _ => "z",
+        }
+    }
+
+    fn push(&mut self, bit: FourStateBit, moved: bool) {
+        self.recent = (self.recent << 2) | Self::code(bit);
+        self.filled = self.filled.saturating_add(1).min(BOUNDARY_VALUE_HISTORY);
+        self.run = if moved { self.run.saturating_add(1) } else { 0 };
+    }
+
+    /// The retained values, oldest first.
+    fn values(&self) -> Vec<String> {
+        (0..self.filled)
+            .rev()
+            .map(|slot| Self::spelling((self.recent >> (2 * slot)) & 0b11).to_string())
+            .collect()
+    }
+}
+
+/// One boundary net named in a [`MixedSignalError::BoundaryOscillation`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoundaryNetActivity {
+    /// The module's own name for the net.
+    pub signal: String,
+    /// Circuit node the deck attached it to; `0` is ground.
+    pub node: usize,
+    /// Whether the module reads this net across an A/D bridge (`true`) or
+    /// drives it across a D/A bridge.
+    pub read_by_module: bool,
+    /// How many times the net moved: consecutive accepted timepoints for
+    /// [`BoundaryOscillationCause::AcceptedFlipRun`], settle passes within one
+    /// trial for [`BoundaryOscillationCause::SettlePassLimit`].
+    pub moves: u32,
+    /// The values it took, oldest first.
+    pub recent: Vec<String>,
+}
+
+/// What made a boundary look like feedback rather than signal.
+///
+/// Mirrors [`OscillationCause`](crate::xspice::event_scheduler::OscillationCause),
+/// which answers the same shape of question one layer down and whose
+/// diagnostic this one is modelled on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoundaryOscillationCause {
+    /// One trial's boundary settle never reported itself quiet.
+    SettlePassLimit,
+    /// Consecutive accepted timepoints each moved the boundary.
+    AcceptedFlipRun,
+}
+
+/// Why a mixed module's boundary would not settle, and which nets were in it.
+///
+/// A cross-domain zero-delay loop is unbounded in the same way a same-tick
+/// digital one is, and it is diagnosed the same way: the ceiling exists to turn
+/// an unbounded process into evidence, and the evidence is the participants.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoundaryOscillation {
+    /// Which ceiling tripped.
+    pub cause: BoundaryOscillationCause,
+    /// Digital tick of the timepoint that tripped it.
+    pub tick: u64,
+    /// The ceiling's value.
+    pub limit: u32,
+    /// Boundary nets that moved, busiest first, then in wiring order so the
+    /// report is reproducible.
+    pub nets: Vec<BoundaryNetActivity>,
+}
+
 /// A failure at the mixed transient boundary.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MixedSignalError {
@@ -71,6 +205,9 @@ pub enum MixedSignalError {
     InvalidBridge { detail: String },
     /// Cross-domain feedback did not quiet within the scheduler's delta cap.
     BridgeIterationLimit { tick: u64, limit: u32 },
+    /// Cross-domain feedback the analog stepper cannot resolve, with the nets
+    /// that were in it.
+    BoundaryOscillation(BoundaryOscillation),
 }
 
 impl fmt::Display for MixedSignalError {
@@ -94,6 +231,38 @@ impl fmt::Display for MixedSignalError {
                 f,
                 "mixed-signal bridges at tick {tick} did not settle within {limit} iterations"
             ),
+            Self::BoundaryOscillation(oscillation) => {
+                let what = match oscillation.cause {
+                    BoundaryOscillationCause::SettlePassLimit => "settle passes at one timepoint",
+                    BoundaryOscillationCause::AcceptedFlipRun => "consecutive accepted timepoints",
+                };
+                write!(
+                    f,
+                    "the analog/digital boundary moved on {} {what} up to tick {}",
+                    oscillation.limit, oscillation.tick
+                )?;
+                for net in &oscillation.nets {
+                    let side = if net.read_by_module {
+                        "read by the module"
+                    } else {
+                        "driven by the module"
+                    };
+                    write!(
+                        f,
+                        "; net `{}` on circuit node {} ({side}) moved {} times and took {}",
+                        net.signal,
+                        net.node,
+                        net.moves,
+                        net.recent.join(" ")
+                    )?;
+                }
+                write!(
+                    f,
+                    ". A boundary the analog solution moves and that moves the analog solution has \
+                     no consistent value at one timepoint, so no smaller step resolves it; break \
+                     the loop with a delay, a `connectrules` transition time, or analog hysteresis"
+                )
+            }
         }
     }
 }
@@ -162,6 +331,11 @@ impl<T> std::ops::Deref for MixedCell<T> {
 #[derive(Clone)]
 struct AdcBridge {
     signal: DigitalSignalId,
+    /// The module's own name for the net, carried so a boundary diagnostic can
+    /// name it. `DacBridge` has carried one since it was written; this side
+    /// needed one for the first time when a boundary that would not settle had
+    /// to name its participants rather than only its instance.
+    signal_name: String,
     positive: usize,
     negative: usize,
     low: f64,
@@ -251,6 +425,12 @@ struct MixedState {
     /// candidate, because `settle_analog_bridges` refreshes the bank from it
     /// before publishing the transition that wakes the process.
     accepted_probe_values: Vec<f64>,
+    /// Recent accepted history of each A/D boundary net, parallel to
+    /// `bridges.adc`.
+    adc_history: Vec<BoundaryNetHistory>,
+    /// Recent accepted history of each D/A boundary net, parallel to
+    /// `bridges.dac`.
+    dac_history: Vec<BoundaryNetHistory>,
     accepted_tick: u64,
     accepted_time: f64,
     started: bool,
@@ -291,6 +471,12 @@ struct ActiveTrial {
     /// `MixedSignalHost::analog_probes`, folded into the accepted state on
     /// acceptance for the reason `sampled_adc_voltages` is.
     probe_values: Vec<f64>,
+    /// Whether any settle of this trial moved each A/D boundary net, parallel
+    /// to `bridges.adc`.
+    adc_moved: Vec<bool>,
+    /// Whether any settle of this trial moved each D/A boundary net, parallel
+    /// to `bridges.dac`.
+    dac_moved: Vec<bool>,
 }
 
 /// Opaque, exact restart image for a settled mixed module.
@@ -454,6 +640,8 @@ impl MixedSignalHost {
                 accepted_adc_voltages: Vec::new(),
                 accepted_adc_transition_times: Vec::new(),
                 accepted_probe_values: initial_probe_values,
+                adc_history: Vec::new(),
+                dac_history: Vec::new(),
                 accepted_tick: 0,
                 accepted_time: 0.0,
                 started: false,
@@ -561,6 +749,7 @@ impl MixedSignalHost {
         self.max_circuit_node = self.max_circuit_node.max(positive).max(negative);
         self.state.bridges.make_mut().adc.push(AdcBridge {
             signal: id,
+            signal_name: signal.into(),
             positive,
             negative,
             low: low_threshold,
@@ -568,6 +757,7 @@ impl MixedSignalHost {
         });
         self.state.accepted_adc_voltages.push(0.0);
         self.state.accepted_adc_transition_times.push(None);
+        self.state.adc_history.push(BoundaryNetHistory::default());
         Ok(())
     }
 
@@ -606,6 +796,7 @@ impl MixedSignalHost {
             high: high_level,
             resistance: output_resistance,
         });
+        self.state.dac_history.push(BoundaryNetHistory::default());
         Ok(())
     }
 
@@ -781,6 +972,8 @@ impl MixedSignalHost {
         let transition_times = self.state.accepted_adc_transition_times.clone();
         let sampled_adc_voltages = self.state.accepted_adc_voltages.clone();
         let probe_values = self.state.accepted_probe_values.clone();
+        let adc_moved = vec![false; self.state.bridges.adc.len()];
+        let dac_moved = vec![false; self.state.bridges.dac.len()];
         self.trial = Some(ActiveTrial {
             rollback,
             tick,
@@ -792,6 +985,8 @@ impl MixedSignalHost {
             transition_times,
             sampled_adc_voltages,
             probe_values,
+            adc_moved,
+            dac_moved,
         });
         Ok(())
     }
@@ -974,11 +1169,21 @@ impl MixedSignalHost {
             if let Some(trial) = self.trial.as_mut() {
                 for (index, crossing) in crossings {
                     trial.transition_times[index] = Some(crossing);
+                    trial.adc_moved[index] = true;
                 }
             }
         }
-        let changed = before != self.dac_values()?;
+        let after = self.dac_values()?;
+        let changed = before != after;
         if let Some(trial) = self.trial.as_mut() {
+            // Which D/A nets moved, not merely that one did. The boundary
+            // diagnostic names participants, and a `!=` on the whole vector
+            // knows only that the set moved.
+            for (index, (was, now)) in before.iter().zip(&after).enumerate() {
+                if was != now {
+                    trial.dac_moved[index] = true;
+                }
+            }
             trial.bridges_quiet = !changed;
             trial.sampled_adc_voltages = sampled;
             trial.probe_values = probe_values;
@@ -1021,6 +1226,17 @@ impl MixedSignalHost {
             return Err(analog_error(error));
         }
         let trial = self.trial.take().expect("checked above");
+        // Fold this timepoint into each boundary net's accepted history before
+        // anything is committed, so a boundary that has been moving at every
+        // accepted timepoint is refused with the analog integrator still where
+        // the trial found it.
+        let (adc_history, dac_history) = self.folded_boundary_histories(&trial);
+        if let Some(oscillation) = self.boundary_flip_run(&adc_history, &dac_history, trial.tick) {
+            self.state = trial.rollback;
+            return Err(MixedSignalError::BoundaryOscillation(oscillation));
+        }
+        self.state.adc_history = adc_history;
+        self.state.dac_history = dac_history;
         self.state.analog.make_mut().apply_validated_advance_state();
         self.state.accepted_tick = trial.tick;
         self.state.accepted_time = trial.time_seconds;
@@ -1138,6 +1354,163 @@ impl MixedSignalHost {
             .read(id)
             .map(FourStateValue::spelling)
             .unwrap_or_default())
+    }
+
+    /// The boundary histories this trial's acceptance would produce.
+    ///
+    /// Computed rather than applied, so the caller can refuse before anything
+    /// is committed. A net whose signal has disappeared from the store — which
+    /// `stamp` and `dac_values` both refuse on — is recorded as high impedance
+    /// rather than skipped, so the parallel indexing holds.
+    fn folded_boundary_histories(
+        &self,
+        trial: &ActiveTrial,
+    ) -> (Vec<BoundaryNetHistory>, Vec<BoundaryNetHistory>) {
+        let read_bit = |signal| {
+            self.state
+                .digital
+                .read(signal)
+                .map_or(FourStateBit::HighImpedance, |value| value.bit(0))
+        };
+        let mut adc = Vec::with_capacity(self.state.bridges.adc.len());
+        for (index, bridge) in self.state.bridges.adc.iter().enumerate() {
+            let mut entry = self
+                .state
+                .adc_history
+                .get(index)
+                .copied()
+                .unwrap_or_default();
+            entry.push(
+                read_bit(bridge.signal),
+                trial.adc_moved.get(index).copied().unwrap_or(false),
+            );
+            adc.push(entry);
+        }
+        let mut dac = Vec::with_capacity(self.state.bridges.dac.len());
+        for (index, bridge) in self.state.bridges.dac.iter().enumerate() {
+            let mut entry = self
+                .state
+                .dac_history
+                .get(index)
+                .copied()
+                .unwrap_or_default();
+            entry.push(
+                read_bit(bridge.signal),
+                trial.dac_moved.get(index).copied().unwrap_or(false),
+            );
+            dac.push(entry);
+        }
+        (adc, dac)
+    }
+
+    /// The diagnostic for a boundary that has moved at every accepted timepoint
+    /// for too long, or `None` when none has.
+    fn boundary_flip_run(
+        &self,
+        adc_history: &[BoundaryNetHistory],
+        dac_history: &[BoundaryNetHistory],
+        tick: u64,
+    ) -> Option<BoundaryOscillation> {
+        let tripped = adc_history
+            .iter()
+            .chain(dac_history)
+            .any(|entry| entry.run > MAX_CONSECUTIVE_BOUNDARY_FLIPS);
+        if !tripped {
+            return None;
+        }
+        let mut nets: Vec<BoundaryNetActivity> = self
+            .state
+            .bridges
+            .adc
+            .iter()
+            .zip(adc_history)
+            .map(|(bridge, entry)| BoundaryNetActivity {
+                signal: bridge.signal_name.clone(),
+                node: bridge.positive,
+                read_by_module: true,
+                moves: entry.run,
+                recent: entry.values(),
+            })
+            .chain(
+                self.state
+                    .bridges
+                    .dac
+                    .iter()
+                    .zip(dac_history)
+                    .map(|(bridge, entry)| BoundaryNetActivity {
+                        signal: bridge.signal_name.clone(),
+                        node: bridge.positive,
+                        read_by_module: false,
+                        moves: entry.run,
+                        recent: entry.values(),
+                    }),
+            )
+            .filter(|net| net.moves > 0)
+            .collect();
+        // Busiest first, and stable in wiring order under a tie, so two runs of
+        // one deck report the participants in one order.
+        nets.sort_by(|left, right| right.moves.cmp(&left.moves));
+        Some(BoundaryOscillation {
+            cause: BoundaryOscillationCause::AcceptedFlipRun,
+            tick,
+            limit: MAX_CONSECUTIVE_BOUNDARY_FLIPS,
+            nets,
+        })
+    }
+
+    /// The diagnostic for a trial whose boundary settle never reported quiet.
+    ///
+    /// Reached from the engine's own settle loop
+    /// (`circuit::mixed_signal::settle_to_quiet`), which owns that ceiling
+    /// because it owns the Newton pass a moving boundary owes. The nets are the
+    /// ones this trial's settles moved, with the values they currently hold —
+    /// within one trial there is no history to show, because a settle pass is
+    /// not a timepoint.
+    pub(crate) fn boundary_settle_oscillation(&self, limit: u32) -> MixedSignalError {
+        let Some(trial) = self.trial.as_ref() else {
+            return MixedSignalError::TrialProtocol {
+                detail: "there is no active trial whose boundary could be unsettled".into(),
+            };
+        };
+        let read = |signal| {
+            self.state
+                .digital
+                .read(signal)
+                .map_or(FourStateBit::HighImpedance, |value| value.bit(0))
+        };
+        let spelling =
+            |bit| BoundaryNetHistory::spelling(BoundaryNetHistory::code(bit)).to_string();
+        let mut nets: Vec<BoundaryNetActivity> =
+            self.state
+                .bridges
+                .adc
+                .iter()
+                .zip(&trial.adc_moved)
+                .map(|(bridge, moved)| BoundaryNetActivity {
+                    signal: bridge.signal_name.clone(),
+                    node: bridge.positive,
+                    read_by_module: true,
+                    moves: u32::from(*moved),
+                    recent: vec![spelling(read(bridge.signal))],
+                })
+                .chain(self.state.bridges.dac.iter().zip(&trial.dac_moved).map(
+                    |(bridge, moved)| BoundaryNetActivity {
+                        signal: bridge.signal_name.clone(),
+                        node: bridge.positive,
+                        read_by_module: false,
+                        moves: u32::from(*moved),
+                        recent: vec![spelling(read(bridge.signal))],
+                    },
+                ))
+                .filter(|net| net.moves > 0)
+                .collect();
+        nets.sort_by(|left, right| right.moves.cmp(&left.moves));
+        MixedSignalError::BoundaryOscillation(BoundaryOscillation {
+            cause: BoundaryOscillationCause::SettlePassLimit,
+            tick: trial.tick,
+            limit,
+            nets,
+        })
     }
 
     fn active_tick(&self) -> Result<u64, MixedSignalError> {
