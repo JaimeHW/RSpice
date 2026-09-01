@@ -54,7 +54,7 @@ iin 0 out dc 0
 }
 
 #[test]
-fn direct_pac_applies_hb_local_options_and_rejects_invalid_modes() {
+fn direct_pac_applies_hb_local_options_and_accepts_typed_initializers() {
     let base = "\
 * PAC HB-local option gate
 iin 0 out dc 0
@@ -68,12 +68,11 @@ r1 out 0 1k
         .expect_err("a zero NONLIN-HB MAXSTEP must fail at the PAC boundary");
     assert!(error.to_string().contains("MAXSTEP must be at least 1"));
 
-    let unsupported_tahb = Netlist::parse(&base.replace(".end", ".options hbint tahb=1\n.end"))
+    let transient_tahb = Netlist::parse(&base.replace(".end", ".options hbint tahb=1\n.end"))
         .expect("typed TAHB deck parses");
-    let error = Engine::new(SimulationConfig::default())
-        .run_pac(&unsupported_tahb, one_point_pac_config("iin", "out"))
-        .expect_err("an unsupported TAHB mode must fail at the PAC boundary");
-    assert!(error.to_string().contains("TAHB=1"));
+    Engine::new(SimulationConfig::default())
+        .run_pac(&transient_tahb, one_point_pac_config("iin", "out"))
+        .expect("a supported HB initializer remains analysis-local for direct PAC");
 }
 
 #[test]

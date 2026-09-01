@@ -1,4 +1,14 @@
 use super::*;
+use faer::Mat;
+use faer::linalg::solvers::Solve;
+
+/// Maximum dense real APFT interpolation matrix retained by one source
+/// projection.  The matrix has one row and column for every signed frequency
+/// (plus DC), so qualifying the square before allocation is essential: the
+/// public HB harmonic ceiling is intentionally much larger than a practical
+/// dense APFT factorization.
+const MAX_HB_APFT_MATRIX_VALUES: usize = 4_194_304;
+const MAX_HB_APFT_LATTICE_WORK: usize = 16_777_216;
 
 impl Engine {
     pub(in crate::engine::hb) fn hb_source_spectrum(
@@ -370,11 +380,7 @@ impl Engine {
 
         if spice_dialect == crate::engine::SpiceDialect::Xyce {
             if config.tones.len() > 1 {
-                return Err(HbError::InvalidConfig(
-                    "Xyce-compatible multi-tone PULSE projection requires the nonuniform APFT collocation transform, which is not implemented"
-                        .to_string(),
-                )
-                .into());
+                return Self::hb_xyce_apft_pulse_source_spectrum(pulse_spec, config);
             }
             return Self::hb_xyce_collocated_pulse_source_spectrum(pulse_spec, config);
         }
@@ -414,6 +420,339 @@ impl Engine {
             let phasor = 2.0 * coefficient;
             let amplitude = phasor.norm();
             if amplitude != 0.0 {
+                harmonics.push((harmonic, amplitude, phasor.arg()));
+            }
+        }
+        Ok(HbSourceSpectrum { dc, harmonics })
+    }
+
+    /// Project a real multi-tone source through a deterministic APFT
+    /// collocation system.
+    ///
+    /// RSpice's current multi-tone nonlinear kernel stores its spectrum on a
+    /// common-frequency basis.  Consequently its exact bilateral APFT grid is
+    /// `[-H, ..., 0, ..., H] * fundamental_freq`.  We still construct and
+    /// solve the real APFT system explicitly instead of applying a uniform
+    /// FFT: the nonuniform time points make the source projection agree with
+    /// the finite multi-tone collocation representation, including authored
+    /// PULSE delay and edge phase.  Frequencies are retained as signed values
+    /// until the real conjugate pair is converted to the solver's one-sided
+    /// cosine-reference phasor.
+    fn hb_xyce_apft_pulse_source_spectrum(
+        pulse_spec: &SourceSpec,
+        config: &HbConfig,
+    ) -> Result<HbSourceSpectrum, SimulationError> {
+        config
+            .validate()
+            .map_err(|error| HbError::InvalidConfig(error.to_string()))?;
+        if config.tones.len() < 2 {
+            return Err(HbError::InvalidConfig(
+                "multi-tone APFT projection requires at least two authored tones".to_string(),
+            )
+            .into());
+        }
+
+        // Prove that the authored tones really alias the common solver grid.
+        // HbConfig accepts a small frequency tolerance for interoperability;
+        // an APFT projection cannot silently round two physically distinct
+        // tones onto one signed frequency, because that changes phase over
+        // time.  Exact duplicates are also ambiguous (two authored axes with
+        // one physical frequency) and are rejected explicitly.
+        let mut authored_harmonics = std::collections::BTreeMap::<usize, Value>::new();
+        let mut authored_axes = Vec::new();
+        authored_axes
+            .try_reserve_exact(config.tones.len())
+            .map_err(|error| {
+                HbError::InvalidConfig(format!(
+                    "Xyce APFT authored-axis allocation failed: {error}"
+                ))
+            })?;
+        for (tone_index, tone) in config.tones.iter().enumerate() {
+            let ratio = tone.frequency / config.fundamental_freq;
+            let rounded = ratio.round();
+            let harmonic = rounded as usize;
+            let represented = harmonic as Value * config.fundamental_freq;
+            let scale = tone.frequency.abs().max(represented.abs()).max(1.0);
+            let exact_tolerance = 128.0 * Value::EPSILON * scale;
+            if !ratio.is_finite()
+                || rounded < 1.0
+                || harmonic > config.num_harmonics
+                || (tone.frequency - represented).abs() > exact_tolerance
+            {
+                return Err(HbError::InvalidConfig(format!(
+                    "Xyce APFT tone {tone_index} at {:.16e} Hz cannot be represented exactly on the authored common grid {:.16e} Hz",
+                    tone.frequency, config.fundamental_freq
+                ))
+                .into());
+            }
+            if let Some(previous) = authored_harmonics.insert(harmonic, tone.frequency) {
+                return Err(HbError::InvalidConfig(format!(
+                    "Xyce APFT tones alias common-grid harmonic {harmonic} ({previous:.16e} Hz and {:.16e} Hz)",
+                    tone.frequency
+                ))
+                .into());
+            }
+            authored_axes.push((harmonic, tone.num_harmonics));
+        }
+
+        // Reconstruct Xyce's authored hybrid APFT lattice in integer common-
+        // basis coordinates.  RSpice's nonlinear kernel is presently a dense
+        // one-dimensional common-frequency basis, so it can preserve the
+        // authored APFT identity only when the hybrid lattice contains every
+        // positive common harmonic through `num_harmonics`, with no holes or
+        // out-of-band combinations.  A sparse (or wider) authored lattice is
+        // rejected instead of being silently densified into a different HB
+        // problem.
+        let largest_axis_order = authored_axes
+            .iter()
+            .map(|(_, order)| *order)
+            .max()
+            .unwrap_or(1);
+        let mixing_order = config.max_mixing_order.min(largest_axis_order);
+        let mut lattice = std::collections::BTreeMap::<i64, usize>::from([(0, 0)]);
+        let mut lattice_work = 0usize;
+        for (axis_harmonic, authored_order) in &authored_axes {
+            let retained_axis_order = (*authored_order).min(mixing_order);
+            let axis_harmonic = i64::try_from(*axis_harmonic).map_err(|_| {
+                HbError::InvalidConfig(
+                    "Xyce APFT authored harmonic exceeds signed lattice coordinates".to_string(),
+                )
+            })?;
+            let mut expanded = std::collections::BTreeMap::<i64, usize>::new();
+            for (frequency, accumulated_order) in &lattice {
+                for coefficient in -(retained_axis_order as i64)..=(retained_axis_order as i64) {
+                    lattice_work = lattice_work.checked_add(1).ok_or_else(|| {
+                        HbError::InvalidConfig(
+                            "Xyce APFT lattice-construction work exceeds this platform".to_string(),
+                        )
+                    })?;
+                    if lattice_work > MAX_HB_APFT_LATTICE_WORK {
+                        return Err(HbError::InvalidConfig(format!(
+                            "Xyce APFT lattice construction exceeds the production work bound {MAX_HB_APFT_LATTICE_WORK}"
+                        ))
+                        .into());
+                    }
+                    let order = accumulated_order
+                        .checked_add(coefficient.unsigned_abs() as usize)
+                        .ok_or_else(|| {
+                            HbError::InvalidConfig(
+                                "Xyce APFT intermodulation order exceeds this platform".to_string(),
+                            )
+                        })?;
+                    if order > mixing_order {
+                        continue;
+                    }
+                    let frequency = frequency
+                        .checked_add(coefficient.checked_mul(axis_harmonic).ok_or_else(|| {
+                            HbError::InvalidConfig(
+                                "Xyce APFT signed-frequency coordinate overflows".to_string(),
+                            )
+                        })?)
+                        .ok_or_else(|| {
+                            HbError::InvalidConfig(
+                                "Xyce APFT signed-frequency coordinate overflows".to_string(),
+                            )
+                        })?;
+                    expanded
+                        .entry(frequency)
+                        .and_modify(|known_order| *known_order = (*known_order).min(order))
+                        .or_insert(order);
+                }
+            }
+            lattice = expanded;
+        }
+        let mut authored_positive_harmonics = std::collections::BTreeSet::<usize>::new();
+        for frequency in lattice.keys().copied().filter(|frequency| *frequency != 0) {
+            authored_positive_harmonics.insert(frequency.unsigned_abs() as usize);
+        }
+        // Xyce's HYBRID truncation retains higher-order single-tone axes even
+        // when INTMODMAX is below an authored per-tone order.
+        for (axis_harmonic, authored_order) in &authored_axes {
+            for order in mixing_order.saturating_add(1)..=*authored_order {
+                let harmonic = axis_harmonic.checked_mul(order).ok_or_else(|| {
+                    HbError::InvalidConfig(
+                        "Xyce APFT retained-axis harmonic exceeds this platform".to_string(),
+                    )
+                })?;
+                authored_positive_harmonics.insert(harmonic);
+            }
+        }
+        let first_grid_mismatch = (1..=config.num_harmonics)
+            .find(|harmonic| !authored_positive_harmonics.contains(harmonic))
+            .map(|harmonic| format!("missing common harmonic {harmonic}"))
+            .or_else(|| {
+                authored_positive_harmonics
+                    .iter()
+                    .copied()
+                    .find(|harmonic| *harmonic > config.num_harmonics)
+                    .map(|harmonic| format!("contains out-of-band common harmonic {harmonic}"))
+            });
+        if authored_positive_harmonics.len() != config.num_harmonics
+            || first_grid_mismatch.is_some()
+        {
+            let detail = first_grid_mismatch.unwrap_or_else(|| {
+                format!(
+                    "contains {} positive coordinates instead of {}",
+                    authored_positive_harmonics.len(),
+                    config.num_harmonics
+                )
+            });
+            return Err(HbError::InvalidConfig(format!(
+                "Xyce APFT cannot preserve the authored signed-frequency grid in the dense common-frequency HB kernel: {detail}"
+            ))
+            .into());
+        }
+
+        let basis_size = config
+            .num_harmonics
+            .checked_mul(2)
+            .and_then(|count| count.checked_add(1))
+            .ok_or_else(|| {
+                HbError::InvalidConfig(
+                    "Xyce APFT signed-frequency cardinality exceeds this platform".to_string(),
+                )
+            })?;
+        if let Some(points) = config.collocation_points
+            && points != basis_size
+        {
+            return Err(HbError::InvalidConfig(format!(
+                "Xyce APFT requires one collocation point for each of its {basis_size} signed frequency coordinates; the authored grid requests {points}"
+            ))
+            .into());
+        }
+        let matrix_values = basis_size.checked_mul(basis_size).ok_or_else(|| {
+            HbError::InvalidConfig(
+                "Xyce APFT interpolation-matrix size exceeds this platform".to_string(),
+            )
+        })?;
+        if matrix_values > MAX_HB_APFT_MATRIX_VALUES {
+            return Err(HbError::InvalidConfig(format!(
+                "Xyce APFT interpolation matrix requires {matrix_values} values, above the production bound {MAX_HB_APFT_MATRIX_VALUES}"
+            ))
+            .into());
+        }
+
+        let signed_frequencies = (-(config.num_harmonics as i64)..=(config.num_harmonics as i64))
+            .map(|harmonic| harmonic as Value * config.fundamental_freq)
+            .collect::<Vec<_>>();
+        if signed_frequencies.len() != basis_size
+            || signed_frequencies[config.num_harmonics] != 0.0
+            || signed_frequencies
+                .windows(2)
+                .any(|pair| !pair[0].is_finite() || pair[0] >= pair[1])
+            || !signed_frequencies
+                .last()
+                .copied()
+                .unwrap_or(Value::NAN)
+                .is_finite()
+        {
+            return Err(HbError::InvalidConfig(
+                "Xyce APFT signed-frequency grid is malformed or aliased".to_string(),
+            )
+            .into());
+        }
+
+        let period = config.fundamental_freq.recip();
+        // An irrational rotation gives a deterministic, nonuniform set of
+        // distinct points.  Sorting keeps transient/source evaluation order
+        // stable, while the half-step offset avoids sampling every edge at
+        // time zero.  This replaces Xyce's process-random candidate selection
+        // with a reproducible commercial-result contract.
+        let rotation = 0.5 * (5.0_f64.sqrt() - 1.0);
+        let mut time_points = (0..basis_size)
+            .map(|index| (((index as Value + 0.5) * rotation).fract()) * period)
+            .collect::<Vec<_>>();
+        time_points.sort_by(Value::total_cmp);
+        if time_points
+            .windows(2)
+            .any(|pair| pair[0] < 0.0 || pair[0] >= pair[1])
+            || time_points.last().is_none_or(|time| *time >= period)
+        {
+            return Err(HbError::InvalidConfig(
+                "Xyce APFT could not construct a distinct nonuniform collocation grid".to_string(),
+            )
+            .into());
+        }
+
+        let nominal_step = period / basis_size as Value;
+        let samples = Mat::from_fn(basis_size, 1, |row, _| {
+            crate::circuit::VoltageSources::evaluate_source_spec_at_time_with_dialect(
+                pulse_spec,
+                time_points[row],
+                nominal_step,
+                period,
+                crate::engine::SpiceDialect::Xyce,
+            )
+        });
+        if (0..basis_size).any(|row| !samples[(row, 0)].is_finite()) {
+            return Err(HbError::InvalidConfig(
+                "Xyce APFT PULSE evaluation produced a non-finite sample".to_string(),
+            )
+            .into());
+        }
+
+        // Real APFT coordinates are [DC, cos(f1), sin(f1), ...].  The
+        // bilateral signed-frequency vector above authenticates ordering and
+        // conjugate symmetry; positive frequencies form the independent real
+        // coordinates solved here.
+        let inverse_transform = Mat::from_fn(basis_size, basis_size, |row, column| {
+            if column == 0 {
+                1.0
+            } else {
+                let harmonic = (column + 1) / 2;
+                let frequency = signed_frequencies[config.num_harmonics + harmonic];
+                let angle = std::f64::consts::TAU * frequency * time_points[row];
+                if column % 2 == 1 {
+                    angle.cos()
+                } else {
+                    angle.sin()
+                }
+            }
+        });
+        let coordinates = inverse_transform.full_piv_lu().solve(&samples);
+        if (0..basis_size).any(|row| !coordinates[(row, 0)].is_finite()) {
+            return Err(HbError::InvalidConfig(
+                "Xyce APFT source transform is singular for the constructed collocation grid"
+                    .to_string(),
+            )
+            .into());
+        }
+
+        let sample_scale = (0..basis_size)
+            .map(|row| samples[(row, 0)].abs())
+            .fold(1.0, Value::max);
+        let maximum_residual = (0..basis_size)
+            .map(|row| {
+                let reconstructed = (0..basis_size)
+                    .map(|column| inverse_transform[(row, column)] * coordinates[(column, 0)])
+                    .sum::<Value>();
+                (reconstructed - samples[(row, 0)]).abs()
+            })
+            .fold(0.0, Value::max);
+        let residual_limit = 4096.0 * Value::EPSILON * basis_size as Value * sample_scale;
+        if !maximum_residual.is_finite() || maximum_residual > residual_limit {
+            return Err(HbError::InvalidConfig(format!(
+                "Xyce APFT source transform failed numerical certification (residual {maximum_residual:.3e}, limit {residual_limit:.3e})"
+            ))
+            .into());
+        }
+
+        let dc = coordinates[(0, 0)];
+        let mut harmonics = Vec::new();
+        harmonics
+            .try_reserve_exact(config.num_harmonics)
+            .map_err(|error| {
+                HbError::InvalidConfig(format!(
+                    "Xyce APFT source-spectrum allocation failed: {error}"
+                ))
+            })?;
+        for harmonic in 1..=config.num_harmonics {
+            let cosine = coordinates[(2 * harmonic - 1, 0)];
+            let sine = coordinates[(2 * harmonic, 0)];
+            // a*cos(wt) + b*sin(wt) = A*cos(wt + phase).
+            let phasor = Complex64::new(cosine, -sine);
+            let amplitude = phasor.norm();
+            if amplitude > 64.0 * Value::EPSILON * sample_scale {
                 harmonics.push((harmonic, amplitude, phasor.arg()));
             }
         }

@@ -18,13 +18,13 @@
 //!    - Nonlinear part: FFT ↔ time-domain evaluation ↔ IFFT
 //! 4. **Result construction**: Build HbResult with spectral voltages and harmonics
 
-use super::{Engine, SimulationError};
+use super::{Engine, SimulationError, TransientStartupMode};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::harmonic_balance::{ExactPeriodicNetwork, HbDcSeedPolicy, HbFft};
 use crate::analysis::{HbConfig, HbResult, HbSolver, HbSolverState};
 use crate::circuit::CircuitData;
 use crate::engine::transient::netlist_checkpoint_identity;
-use crate::netlist::{SourceSpec, XyceHbTimeDomainMode};
+use crate::netlist::SourceSpec;
 use crate::{Netlist, Value};
 use num_complex::Complex64;
 use std::collections::BTreeSet;
@@ -885,6 +885,19 @@ struct HbSourceSpectrum {
     harmonics: Vec<(usize, Value, Value)>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HbInitialStateStrategy {
+    /// Historical RSpice behavior for an omitted Xyce package: use the HB
+    /// kernel's best-effort DC seed and retain its continuation fallback.
+    DefaultDcSeed,
+    /// Xyce `TAHB=0`: enter HB from the caller-supplied zero spectrum.
+    Direct,
+    /// Xyce `TAHB=1`: transform one accepted first-tone transient period.
+    TransientAssisted,
+    /// Xyce `TAHB=2`: repeat the exact DC operating point over the HB grid.
+    DcOperatingPoint,
+}
+
 impl HbDriveTone {
     fn broadcast(harmonic: usize) -> Self {
         Self {
@@ -1060,16 +1073,259 @@ impl Engine {
         Ok(config)
     }
 
-    fn hb_dc_seed_policy(netlist: &Netlist) -> Result<HbDcSeedPolicy, SimulationError> {
-        match netlist.options.hb_time_domain_mode {
-            None => Ok(HbDcSeedPolicy::Enabled),
-            Some(XyceHbTimeDomainMode::Direct) => Ok(HbDcSeedPolicy::Disabled),
-            Some(mode) => Err(HbError::InvalidConfig(format!(
-                ".OPTIONS HBINT TAHB={} requests a Xyce initial-state construction that RSpice HB does not implement",
-                mode.xyce_value()
-            ))
-            .into()),
+    fn hb_initial_state_strategy(netlist: &Netlist) -> HbInitialStateStrategy {
+        let Some(mode) = netlist.options.hb_time_domain_mode else {
+            return HbInitialStateStrategy::DefaultDcSeed;
+        };
+        match mode.xyce_value() {
+            0 => HbInitialStateStrategy::Direct,
+            1 => HbInitialStateStrategy::TransientAssisted,
+            2 => HbInitialStateStrategy::DcOperatingPoint,
+            _ => unreachable!("typed Xyce TAHB mode has no accepted integer spelling"),
         }
+    }
+
+    fn hb_dc_seed_policy(netlist: &Netlist) -> Result<HbDcSeedPolicy, SimulationError> {
+        Ok(match Self::hb_initial_state_strategy(netlist) {
+            HbInitialStateStrategy::DefaultDcSeed => HbDcSeedPolicy::Enabled,
+            HbInitialStateStrategy::Direct
+            | HbInitialStateStrategy::TransientAssisted
+            | HbInitialStateStrategy::DcOperatingPoint => HbDcSeedPolicy::Disabled,
+        })
+    }
+
+    fn hb_seed_dc_operating_point(
+        &self,
+        netlist: &Netlist,
+        state: &mut HbSolverState,
+        node_names: &[String],
+        branch_names: &[String],
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        let dc = self
+            .run_dc_op_with_abort(netlist, abort)
+            .map_err(|error| match error {
+                SimulationError::Aborted => SimulationError::Aborted,
+                other => SimulationError::Circuit(format!(
+                    "TAHB=2 DC operating-point initial-state construction failed: {other}"
+                )),
+            })?;
+        for (node_index, node_name) in node_names.iter().enumerate() {
+            let source_index = dc
+                .node_names
+                .iter()
+                .position(|candidate| candidate.eq_ignore_ascii_case(node_name))
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "TAHB=2 DC operating point has no value for HB node '{node_name}'"
+                    ))
+                })?;
+            let value = dc.node_voltages.get(source_index).copied().ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "TAHB=2 DC operating point lost the value for HB node '{node_name}'"
+                ))
+            })?;
+            if !value.is_finite() {
+                return Err(SimulationError::Circuit(format!(
+                    "TAHB=2 DC operating point produced a non-finite value for HB node '{node_name}'"
+                )));
+            }
+            state.x[node_index][0] = Complex64::new(value, 0.0);
+        }
+        for (branch_index, branch_name) in branch_names.iter().enumerate() {
+            let source_index = dc
+                .branch_names
+                .iter()
+                .position(|candidate| candidate.eq_ignore_ascii_case(branch_name))
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "TAHB=2 cannot represent periodic branch '{branch_name}' from the retained DC operating point"
+                    ))
+                })?;
+            let value = dc
+                .branch_currents
+                .get(source_index)
+                .copied()
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "TAHB=2 DC operating point lost periodic branch '{branch_name}'"
+                    ))
+                })?;
+            if !value.is_finite() {
+                return Err(SimulationError::Circuit(format!(
+                    "TAHB=2 DC operating point produced a non-finite current for periodic branch '{branch_name}'"
+                )));
+            }
+            state.mna_branch_currents[branch_index][0] = Complex64::new(value, 0.0);
+        }
+        Ok(())
+    }
+
+    fn hb_interpolate_transient_value(
+        times: &[Value],
+        values: &[Value],
+        time: Value,
+        context: &str,
+    ) -> Result<Value, SimulationError> {
+        if times.len() < 2 || values.len() != times.len() {
+            return Err(SimulationError::Circuit(format!(
+                "{context} has {} values on a {}-point transient grid",
+                values.len(),
+                times.len()
+            )));
+        }
+        if !time.is_finite()
+            || times
+                .windows(2)
+                .any(|pair| !pair[0].is_finite() || pair[0] >= pair[1])
+            || !times.last().copied().unwrap_or(Value::NAN).is_finite()
+        {
+            return Err(SimulationError::Circuit(format!(
+                "{context} has an invalid interpolation grid"
+            )));
+        }
+        match times.binary_search_by(|candidate| candidate.total_cmp(&time)) {
+            Ok(index) => Ok(values[index]),
+            Err(0) => Err(SimulationError::Circuit(format!(
+                "{context} does not cover requested time {time:.16e} s"
+            ))),
+            Err(index) if index >= times.len() => Err(SimulationError::Circuit(format!(
+                "{context} does not cover requested time {time:.16e} s"
+            ))),
+            Err(index) => {
+                let t0 = times[index - 1];
+                let t1 = times[index];
+                let fraction = (time - t0) / (t1 - t0);
+                let value = values[index - 1] + fraction * (values[index] - values[index - 1]);
+                if value.is_finite() {
+                    Ok(value)
+                } else {
+                    Err(SimulationError::Circuit(format!(
+                        "{context} interpolation produced a non-finite value"
+                    )))
+                }
+            }
+        }
+    }
+
+    fn hb_seed_transient_assisted(
+        &self,
+        netlist: &Netlist,
+        config: &HbConfig,
+        state: &mut HbSolverState,
+        node_names: &[String],
+        branch_names: &[String],
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        let first_tone_frequency = config
+            .tones
+            .first()
+            .map(|tone| tone.frequency)
+            .unwrap_or(config.fundamental_freq);
+        if !first_tone_frequency.is_finite() || first_tone_frequency <= 0.0 {
+            return Err(HbError::InvalidConfig(
+                "TAHB=1 first authored tone must be finite and positive".to_string(),
+            )
+            .into());
+        }
+        let transient_period = first_tone_frequency.recip();
+        let collocation_points = config
+            .checked_fft_size()
+            .map_err(|error| HbError::InvalidConfig(error.to_string()))?;
+        let integration_intervals = collocation_points.checked_mul(4).ok_or_else(|| {
+            HbError::InvalidConfig(
+                "TAHB=1 transient integration-point count exceeds this platform".to_string(),
+            )
+        })?;
+        self.ensure_analysis_points(integration_intervals.saturating_add(1))?;
+        let max_step = transient_period / integration_intervals as Value;
+        if !transient_period.is_finite() || !max_step.is_finite() || max_step <= 0.0 {
+            return Err(HbError::InvalidConfig(
+                "TAHB=1 first-tone transient period or timestep is not representable".to_string(),
+            )
+            .into());
+        }
+        let transient = self
+            .run_tran_with_startup_mode_and_abort(
+                netlist,
+                transient_period,
+                max_step,
+                TransientStartupMode::OperatingPoint,
+                abort,
+            )
+            .map_err(|error| match error {
+                SimulationError::Aborted => SimulationError::Aborted,
+                other => SimulationError::Circuit(format!(
+                    "TAHB=1 first-tone transient initial-state construction failed: {other}"
+                )),
+            })?;
+        let hb_period = config.fundamental_freq.recip();
+        let sample_times = (0..collocation_points)
+            .map(|sample| {
+                (hb_period * sample as Value / collocation_points as Value)
+                    .rem_euclid(transient_period)
+            })
+            .collect::<Vec<_>>();
+        let mut fft = HbFft::try_with_size(config.num_harmonics, collocation_points)
+            .map_err(|error| HbError::InvalidConfig(error.to_string()))?;
+
+        for (node_index, node_name) in node_names.iter().enumerate() {
+            let source_index = transient
+                .node_names
+                .iter()
+                .position(|candidate| candidate.eq_ignore_ascii_case(node_name))
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "TAHB=1 transient has no retained waveform for HB node '{node_name}'"
+                    ))
+                })?;
+            let waveform = transient.voltages.get(source_index).ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "TAHB=1 transient lost the waveform for HB node '{node_name}'"
+                ))
+            })?;
+            let samples = sample_times
+                .iter()
+                .map(|time| {
+                    Self::hb_interpolate_transient_value(
+                        &transient.time,
+                        waveform,
+                        *time,
+                        &format!("TAHB=1 node '{node_name}'"),
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            state.x[node_index] = fft.to_frequency_domain(&samples);
+        }
+        for (branch_index, branch_name) in branch_names.iter().enumerate() {
+            let source_index = transient
+                .branch_names
+                .iter()
+                .position(|candidate| candidate.eq_ignore_ascii_case(branch_name))
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "TAHB=1 cannot represent periodic branch '{branch_name}' from the retained transient state"
+                    ))
+                })?;
+            let waveform = transient.branch_currents.get(source_index).ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "TAHB=1 transient lost periodic branch '{branch_name}'"
+                ))
+            })?;
+            let samples = sample_times
+                .iter()
+                .map(|time| {
+                    Self::hb_interpolate_transient_value(
+                        &transient.time,
+                        waveform,
+                        *time,
+                        &format!("TAHB=1 branch '{branch_name}'"),
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            state.mna_branch_currents[branch_index] = fft.to_frequency_domain(&samples);
+        }
+        Ok(())
     }
 
     fn hb_validate_config(&self, config: &HbConfig) -> Result<(), SimulationError> {
@@ -1163,6 +1419,7 @@ impl Engine {
             )
         })?;
         self.ensure_result_values(retained_scalar_values)?;
+        let initial_state_strategy = Self::hb_initial_state_strategy(netlist);
         let dc_seed_policy = Self::hb_dc_seed_policy(netlist)?;
         let drive_tones = Self::hb_collect_drive_tones(&config)?;
         Self::hb_validate_drive_tone_sources(&circuit, &drive_tones)?;
@@ -1174,7 +1431,7 @@ impl Engine {
 
         // Set node names from circuit's node map
         let node_names = self.hb_build_node_names(&circuit, num_nodes);
-        solver.set_node_names(node_names);
+        solver.set_node_names(node_names.clone());
 
         // Stamp linear circuit elements into HB solver
         self.hb_stamp_resistors(&circuit, &mut solver);
@@ -1185,6 +1442,11 @@ impl Engine {
         if has_supported_nonlinear {
             self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes);
         }
+        let periodic_branch_names = solver.try_periodic_mna_branch_names().map_err(|error| {
+            SimulationError::Circuit(format!(
+                "HB initial-state branch metadata construction failed: {error}"
+            ))
+        })?;
 
         // Create solver state
         let mut state = HbSolverState::new(num_nodes, config.num_harmonics);
@@ -1211,31 +1473,48 @@ impl Engine {
             )));
         }
 
-        // Seed harmonic 0 with the DC operating point: Newton starts on the
-        // bias trajectory instead of from zero, which is the difference
-        // between converging and wandering for strongly biased circuits. A
-        // failed OP falls back to the zero seed with a warning — HB's own
-        // continuation may still succeed.
-        if has_supported_nonlinear && dc_seed_policy == HbDcSeedPolicy::Enabled {
-            if abort.is_aborted() {
-                return Err(SimulationError::Aborted);
-            }
-            match self.run_dc_op(netlist) {
-                Ok(dc) => {
-                    for node in 0..num_nodes {
-                        if node < state.x.len() && !state.x[node].is_empty() {
-                            let v = dc.node_voltages.get(node + 1).copied().unwrap_or(0.0);
-                            state.x[node][0] = Complex64::new(v, 0.0);
+        // Construct the authored initial trajectory before Newton.  Explicit
+        // Xyce modes are strict: TAHB=1/2 either produce the complete retained
+        // node/branch spectrum or fail closed.  Only the omitted historical
+        // RSpice policy keeps its best-effort DC fallback.
+        match initial_state_strategy {
+            HbInitialStateStrategy::TransientAssisted => self.hb_seed_transient_assisted(
+                netlist,
+                &config,
+                &mut state,
+                &node_names,
+                &periodic_branch_names,
+                abort,
+            )?,
+            HbInitialStateStrategy::DcOperatingPoint => self.hb_seed_dc_operating_point(
+                netlist,
+                &mut state,
+                &node_names,
+                &periodic_branch_names,
+                abort,
+            )?,
+            HbInitialStateStrategy::DefaultDcSeed if has_supported_nonlinear => {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                match self.run_dc_op_with_abort(netlist, abort) {
+                    Ok(dc) => {
+                        for node in 0..num_nodes {
+                            if node < state.x.len() && !state.x[node].is_empty() {
+                                let v = dc.node_voltages.get(node + 1).copied().unwrap_or(0.0);
+                                state.x[node][0] = Complex64::new(v, 0.0);
+                            }
                         }
                     }
-                }
-                Err(err) => {
-                    log::warn!(
-                        "HB: DC operating point for the harmonic-0 seed failed ({err}); \
-                         starting from zero"
-                    );
+                    Err(err) => {
+                        log::warn!(
+                            "HB: DC operating point for the harmonic-0 seed failed ({err}); \
+                             starting from zero"
+                        );
+                    }
                 }
             }
+            HbInitialStateStrategy::DefaultDcSeed | HbInitialStateStrategy::Direct => {}
         }
 
         if has_supported_nonlinear {
@@ -1286,15 +1565,7 @@ impl Engine {
         })?;
         self.hb_attach_periodic_state(&circuit, &mut result)?;
 
-        let mna_branch_names = if solver.exact_mna_branches().is_empty() {
-            Vec::new()
-        } else {
-            solver.try_periodic_mna_branch_names().map_err(|error| {
-                SimulationError::Circuit(format!(
-                    "HB operating-point branch metadata construction failed: {error}"
-                ))
-            })?
-        };
+        let mna_branch_names = periodic_branch_names;
         let operating_point = if let Some(producer) = producer_inputs {
             if producer != HbOperatingPointIdentity::capture(netlist, &self.config, &config)? {
                 return Err(SimulationError::Circuit(
@@ -1444,6 +1715,110 @@ mod tests {
     }
 
     #[test]
+    fn tahb_initializers_construct_exact_frequency_domain_seed_shapes() {
+        let transient_netlist = Netlist::parse(
+            "transient-assisted seed\n\
+             V1 in 0 SIN(0 1 2k)\n\
+             R1 in 0 1k\n\
+             .options hbint tahb=1\n\
+             .hb 2k 3k\n\
+             .end\n",
+        )
+        .expect("TAHB=1 deck parses");
+        let config = HbConfig::multi_tone(vec![
+            crate::analysis::harmonic_balance::HbTone::new(2.0e3, 2),
+            crate::analysis::harmonic_balance::HbTone::new(3.0e3, 2),
+        ])
+        .with_collocation_points(13);
+        let engine = Engine::new(SimulationConfig::default());
+        let mut transient_seed = HbSolverState::new(1, config.num_harmonics);
+        engine
+            .hb_seed_transient_assisted(
+                &transient_netlist,
+                &config,
+                &mut transient_seed,
+                &["in".to_string()],
+                &[],
+                &NoAbort,
+            )
+            .expect("TAHB=1 transforms the accepted first-tone trajectory");
+        assert!(transient_seed.x[0][2].norm() > 0.45);
+        assert!(
+            transient_seed.x[0][1].norm() < 1.0e-6,
+            "first-tone trajectory leaked onto the common-grid fundamental: {:?}",
+            transient_seed.x[0]
+        );
+
+        let dc_netlist = Netlist::parse(
+            "DC trajectory seed\nV1 out 0 1.25\nR1 out 0 1k\n.options hbint tahb=2\n.hb 1k\n.end\n",
+        )
+        .expect("TAHB=2 deck parses");
+        let mut dc_seed = HbSolverState::new(1, 3);
+        engine
+            .hb_seed_dc_operating_point(
+                &dc_netlist,
+                &mut dc_seed,
+                &["out".to_string()],
+                &[],
+                &NoAbort,
+            )
+            .expect("TAHB=2 repeats the converged DC point");
+        assert!((dc_seed.x[0][0].re - 1.25).abs() < 1.0e-12);
+        assert_eq!(dc_seed.x[0][0].im, 0.0);
+        assert!(
+            dc_seed.x[0][1..]
+                .iter()
+                .all(|value| *value == Complex64::new(0.0, 0.0))
+        );
+    }
+
+    #[test]
+    fn parsed_xyce_multitone_pulse_reaches_the_engine_apft_path() {
+        let netlist = Netlist::parse(
+            "parsed APFT integration\n\
+             VDRIVE in 0 PULSE(-0.2 0.8 17n 23n 31n 400n 500n)\n\
+             R1 in 0 1k\n\
+             .options hbint numfreq=2 numfreq2=2 tahb=1\n\
+             .hb 2Meg 3Meg\n\
+             .end\n",
+        )
+        .expect("typed multi-tone Xyce deck parses");
+        let frequencies = match &netlist.analyses[0] {
+            crate::netlist::AnalysisCommand::Hb { frequencies } => frequencies,
+            other => panic!("expected parsed HB command, got {other:?}"),
+        };
+        assert_eq!(frequencies, &[2.0e6, 3.0e6]);
+        assert_eq!(netlist.options.hb_num_frequencies, [2, 2]);
+        assert_eq!(
+            netlist.options.hb_time_domain_mode,
+            Some(crate::netlist::XyceHbTimeDomainMode::TransientAssisted)
+        );
+        let config = HbConfig::multi_tone(
+            frequencies
+                .iter()
+                .zip(&netlist.options.hb_num_frequencies)
+                .map(|(frequency, order)| {
+                    crate::analysis::harmonic_balance::HbTone::new(*frequency, *order)
+                })
+                .collect(),
+        )
+        .with_collocation_points(13);
+        let mut simulation = SimulationConfig::default();
+        simulation.spice_dialect = SpiceDialect::Xyce;
+        let analysis = Engine::new(simulation)
+            .run_hb(&netlist, config)
+            .expect("parser-authored TAHB/APFT deck runs through the production engine");
+        let input = analysis
+            .result
+            .spectral_voltages
+            .iter()
+            .find(|spectrum| spectrum.node_name.eq_ignore_ascii_case("in"))
+            .expect("input spectrum is retained");
+        assert!(input.coefficients[2].norm() > 0.1);
+        assert!(input.coefficients.iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
     fn retained_inductor_state_requires_a_complete_exact_mna_spectrum() {
         let netlist = Netlist::parse(
             "retained exact inductor state\n\
@@ -1490,10 +1865,10 @@ mod tests {
     }
 
     #[test]
-    fn explicit_unsupported_tahb_modes_are_hb_local_and_fail_closed() {
+    fn explicit_tahb_modes_are_hb_local_and_execute_the_authored_initializer() {
         for mode in [1, 2] {
             let netlist = Netlist::parse(&format!(
-                "unsupported TAHB mode\nV1 out 0 1\nR1 out 0 1k\n.options hbint tahb={mode}\n.options nonlin-hb maxstep=2\n.hb 1k\n.end\n"
+                "supported TAHB mode\nV1 out 0 PULSE(0 1 0 10u 10u 480u 1m)\nR1 out 0 1k\n.options hbint tahb={mode}\n.options nonlin-hb maxstep=2\n.hb 1k\n.end\n"
             ))
             .expect("known Xyce TAHB modes remain typed");
             let engine = Engine::new(SimulationConfig::default());
@@ -1501,15 +1876,18 @@ mod tests {
             let dc = engine
                 .run_dc_op(&netlist)
                 .expect("HB-local options must not affect DC");
-            assert!((dc.node_voltages[1] - 1.0).abs() < 1.0e-12);
+            assert!(dc.node_voltages[1].abs() < 1.0e-12);
 
-            let error = engine
-                .run_hb(&netlist, HbConfig::new(1.0e3))
-                .expect_err("unsupported explicit TAHB mode must fail before HB");
-            assert!(
-                error.to_string().contains(&format!("TAHB={mode}")),
-                "unexpected error: {error}"
+            assert_eq!(
+                Engine::hb_dc_seed_policy(&netlist).expect("typed policy resolves"),
+                HbDcSeedPolicy::Disabled,
+                "an explicit initializer must not be overwritten by the legacy kernel DC seed"
             );
+            let analysis = engine
+                .run_hb(&netlist, HbConfig::new(1.0e3).with_harmonics(3))
+                .unwrap_or_else(|error| panic!("TAHB={mode} failed: {error}"));
+            assert!(analysis.converged);
+            assert!(analysis.result.is_valid());
         }
     }
 
@@ -1647,12 +2025,73 @@ mod tests {
     }
 
     #[test]
-    fn xyce_multi_tone_pulse_requires_the_nonuniform_apft_transform() {
+    fn xyce_multi_tone_pulse_uses_a_certified_nonuniform_apft_transform() {
         let config = HbConfig::multi_tone(vec![
             crate::analysis::harmonic_balance::HbTone::new(2.0e6, 2),
             crate::analysis::harmonic_balance::HbTone::new(3.0e6, 2),
         ])
         .with_collocation_points(13);
+        let pulse = SourceSpec::Pulse {
+            v1: 0.0,
+            v2: 1.0,
+            delay: 17.0e-9,
+            rise: 23.0e-9,
+            fall: 31.0e-9,
+            width: 0.40e-6,
+            period: 0.5e-6,
+            pulse_count: 0.0,
+            width_defaults_to_zero: false,
+        };
+
+        let spectrum = Engine::hb_source_spectrum(
+            0.0,
+            0.0,
+            0.0,
+            Some(&pulse),
+            &config,
+            &[2],
+            SpiceDialect::Xyce,
+        )
+        .expect("multi-tone PULSE has an exact finite APFT projection");
+
+        let period = config.fundamental_freq.recip();
+        let rotation = 0.5 * (5.0_f64.sqrt() - 1.0);
+        let mut time_points = (0..13)
+            .map(|index| (((index as Value + 0.5) * rotation).fract()) * period)
+            .collect::<Vec<_>>();
+        time_points.sort_by(Value::total_cmp);
+        for time in time_points {
+            let expected =
+                crate::circuit::VoltageSources::evaluate_source_spec_at_time_with_dialect(
+                    &pulse,
+                    time,
+                    period / 13.0,
+                    period,
+                    SpiceDialect::Xyce,
+                );
+            let reconstructed = spectrum.dc
+                + spectrum
+                    .harmonics
+                    .iter()
+                    .map(|(harmonic, amplitude, phase)| {
+                        amplitude
+                            * (std::f64::consts::TAU
+                                * *harmonic as Value
+                                * config.fundamental_freq
+                                * time
+                                + *phase)
+                                .cos()
+                    })
+                    .sum::<Value>();
+            assert!(
+                (reconstructed - expected).abs() < 1.0e-10,
+                "APFT reconstruction at {time:.16e}: {reconstructed:.16e} != {expected:.16e}"
+            );
+        }
+    }
+
+    #[test]
+    fn xyce_apft_rejects_aliased_inexact_and_mismatched_grids() {
         let pulse = SourceSpec::Pulse {
             v1: 0.0,
             v2: 1.0,
@@ -1664,23 +2103,70 @@ mod tests {
             pulse_count: 0.0,
             width_defaults_to_zero: false,
         };
-
+        let aliased = HbConfig::multi_tone(vec![
+            crate::analysis::harmonic_balance::HbTone::new(2.0e6, 2),
+            crate::analysis::harmonic_balance::HbTone::new(2.0e6, 2),
+        ])
+        .with_collocation_points(9);
         let error = Engine::hb_source_spectrum(
             0.0,
             0.0,
             0.0,
             Some(&pulse),
-            &config,
+            &aliased,
+            &[1],
+            SpiceDialect::Xyce,
+        )
+        .expect_err("duplicate authored APFT axes must not collapse silently");
+        assert!(error.to_string().contains("alias common-grid harmonic"));
+
+        let exact = HbConfig::multi_tone(vec![
+            crate::analysis::harmonic_balance::HbTone::new(2.0e6, 2),
+            crate::analysis::harmonic_balance::HbTone::new(3.0e6, 2),
+        ])
+        .with_collocation_points(13);
+        let mut inexact = exact.clone();
+        inexact.tones[0].frequency += 1.0e-4;
+        let error = Engine::hb_source_spectrum(
+            0.0,
+            0.0,
+            0.0,
+            Some(&pulse),
+            &inexact,
             &[2],
             SpiceDialect::Xyce,
         )
-        .expect_err("uniform FFT projection must not impersonate Xyce multi-tone APFT");
-        assert!(
-            error
-                .to_string()
-                .contains("nonuniform APFT collocation transform"),
-            "unexpected error: {error}"
-        );
+        .expect_err("nearby but distinct tones must not be rounded onto the APFT grid");
+        assert!(error.to_string().contains("cannot be represented exactly"));
+
+        let sparse_authored_grid = HbConfig::multi_tone(vec![
+            crate::analysis::harmonic_balance::HbTone::new(2.0e6, 2),
+            crate::analysis::harmonic_balance::HbTone::new(5.0e6, 2),
+        ]);
+        let error = Engine::hb_source_spectrum(
+            0.0,
+            0.0,
+            0.0,
+            Some(&pulse),
+            &sparse_authored_grid,
+            &[2],
+            SpiceDialect::Xyce,
+        )
+        .expect_err("a sparse authored APFT lattice must not be silently densified");
+        assert!(error.to_string().contains("authored signed-frequency grid"));
+
+        let mismatched = exact.with_collocation_points(15);
+        let error = Engine::hb_source_spectrum(
+            0.0,
+            0.0,
+            0.0,
+            Some(&pulse),
+            &mismatched,
+            &[2],
+            SpiceDialect::Xyce,
+        )
+        .expect_err("an authored APFT grid cannot be silently resized");
+        assert!(error.to_string().contains("authored grid requests 15"));
     }
 
     #[test]

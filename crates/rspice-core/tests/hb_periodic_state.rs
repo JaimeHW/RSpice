@@ -431,7 +431,7 @@ fn hb_envelope_artifact_rejects_every_identity_mismatch() {
 }
 
 #[test]
-fn hb_envelope_resolves_nonlin_hb_identity_and_rejects_unsupported_tahb() {
+fn hb_envelope_resolves_nonlin_hb_and_tahb_identity() {
     let netlist = envelope_deck_with_options(".options hbint tahb=0\n.options nonlin-hb maxstep=2");
     let caller_config = envelope_hb_config().with_max_iterations(17);
     let engine = Engine::new(SimulationConfig::default());
@@ -470,28 +470,31 @@ fn hb_envelope_resolves_nonlin_hb_identity_and_rejects_unsupported_tahb() {
         "unexpected MAXSTEP identity error: {budget_error}"
     );
 
-    let unsupported =
+    let transient_assisted =
         envelope_deck_with_options(".options hbint tahb=1\n.options nonlin-hb maxstep=2");
-    let creation_error = engine
+    engine
         .run_hb_envelope_continuation_state(
-            &unsupported,
+            &transient_assisted,
             caller_config.clone(),
             &["Vmod".to_string()],
         )
-        .expect_err("unsupported TAHB must reject envelope creation");
-    assert!(creation_error.to_string().contains("TAHB=1"));
+        .expect("supported TAHB must construct envelope state");
 
     let resume_error = engine
         .run_tran_from_hb_envelope_state(
-            &unsupported,
+            &transient_assisted,
             &caller_config,
             &["Vmod".to_string()],
             &state,
             20.0e-9,
             10.0e-9,
         )
-        .expect_err("unsupported TAHB must reject envelope resume before identity reuse");
-    assert!(resume_error.to_string().contains("TAHB=1"));
+        .expect_err("a state created with TAHB=0 must not authenticate under TAHB=1");
+    assert!(
+        resume_error
+            .to_string()
+            .contains("different original netlist")
+    );
 }
 
 #[test]
