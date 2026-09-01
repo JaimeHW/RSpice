@@ -170,7 +170,7 @@ impl MixedSignalHost {
         }
 
         #[cfg(any(feature = "veriloga-native", feature = "veriloga-wasm-jit"))]
-        let mut analog = VerilogADevice::try_new_with_canonical_ir(
+        let analog = VerilogADevice::try_new_with_canonical_ir(
             instance,
             runtime.model,
             &runtime.canonical_ir,
