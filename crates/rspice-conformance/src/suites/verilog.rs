@@ -116,6 +116,10 @@ pub mod ams;
 #[cfg(feature = "verilog-digital")]
 pub mod ams_semantics;
 pub mod corpus;
+/// The mixed-versus-all-analog exit-gate benchmarks. Behind `verilog-digital`
+/// for the reason [`ams_semantics`] is: half of each benchmark is a mixed deck.
+#[cfg(feature = "verilog-digital")]
+pub mod mixed_benchmarks;
 pub mod oracle;
 /// The dual-representation reference blocks. Behind `verilog-digital` because
 /// the RNM half of every block is a call into the digital host, and a module

@@ -198,11 +198,34 @@ jobs:
         # Its sibling target `verilog_rnm_performance` is deliberately *not*
         # named here — it is a wall-clock measurement, which belongs in nightly
         # and in release.
+        #
+        # `verilog_ams_semantics` is the LRM-clause-tagged semantics suite:
+        # eleven cases over nine clauses, each deriving its expected answer from
+        # the clause it cites rather than from a recorded run. Half of them are
+        # discrete-domain designs and half are mixed decks; none simulates for
+        # longer than a microsecond, so the whole target is a fifth of a second.
+        #
+        # `verilog_mixed_benchmarks` is P4's exit gate: three mixed-signal
+        # circuits — a successive-approximation converter, a phase-locked loop
+        # and a sigma-delta modulator — each simulated once with its digital
+        # half on the event wheel and once with every part of it analog, held to
+        # bounds derived from each circuit's own physics. About eight seconds in
+        # this debug build, dominated by the modulator's two thousand clock
+        # periods. It belongs here rather than in nightly for the reason
+        # `verilog_rnm_agreement`'s flash converter does: it is a correctness
+        # gate, and it is specifically the precondition of the wall-clock
+        # measurement below, since a ratio between two representations that
+        # disagree is not a speedup. If it grows past a minute the modulator is
+        # the case to move, not the suite.
+        #
+        # Its own sibling `verilog_mixed_performance` is likewise *not* named
+        # here, for the reason `verilog_rnm_performance` is not.
         run: >-
           cargo test --locked -p rspice-conformance --lib
           --test ngspice_oracle_audit --test y_device_policy
           --test verilog_oracles --test verilog_scale --test verilog_ams
-          --test verilog_rnm_agreement
+          --test verilog_ams_semantics
+          --test verilog_rnm_agreement --test verilog_mixed_benchmarks
       - name: Oracle-free corpora (routine tier)
         # The execution corpora are cheap here only because the expensive
         # decks opt out: every ISCAS85 deck is marked `!extended` and is

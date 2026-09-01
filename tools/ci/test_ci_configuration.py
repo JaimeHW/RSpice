@@ -495,18 +495,22 @@ class CiConfigurationTests(unittest.TestCase):
 
         The conformance step names its test targets explicitly rather than
         using `--tests`, so a new target that nobody adds here is a suite that
-        exists and never runs. Four of them are digital: `verilog_oracles` is
-        the IEEE 1364-2005 language corpus, `verilog_scale` is the gate-level
-        scale suite, `verilog_ams` is the Verilog-AMS real-net corpus, and
-        `verilog_rnm_agreement` holds each reference block's analog and
-        real-number representations to one another.
+        exists and never runs. Six of them are digital or mixed:
+        `verilog_oracles` is the IEEE 1364-2005 language corpus, `verilog_scale`
+        is the gate-level scale suite, `verilog_ams` is the Verilog-AMS real-net
+        corpus, `verilog_ams_semantics` derives one case per LRM clause from the
+        clause's own requirement, `verilog_rnm_agreement` holds each reference
+        block's analog and real-number representations to one another, and
+        `verilog_mixed_benchmarks` holds three mixed-signal circuits against
+        all-analog versions of themselves.
 
         None needs an external simulator installed to be worth running. The
         first two check their designs against expectations derived without one;
-        the last two have no oracle arm at all, because neither Icarus nor
+        the rest have no oracle arm at all, because neither Icarus nor
         Verilator implements `wreal` in a form the harness could hold to an
-        answer — so one is RSpice against reference models and the other is
-        RSpice against itself through two representations that share no code.
+        answer — so they are RSpice against the standard's text, against
+        reference models, and against itself through representations that share
+        no code below the harness.
         """
         workflow = read_text(".github/workflows/ci.yml")
         step = workflow.split("- name: Conformance suite unit tests", 1)[1].split(
@@ -517,12 +521,18 @@ class CiConfigurationTests(unittest.TestCase):
             "--test verilog_oracles",
             "--test verilog_scale",
             "--test verilog_ams",
+            "--test verilog_ams_semantics",
             "--test verilog_rnm_agreement",
+            "--test verilog_mixed_benchmarks",
         ):
             self.assertIn(target, step)
         self.assertEqual(step.count("--test verilog_scale"), 1)
-        self.assertEqual(step.count("--test verilog_ams"), 1)
+        # `verilog_ams` is a prefix of `verilog_ams_semantics`, so count the
+        # selector with its trailing boundary rather than the bare name.
+        self.assertEqual(step.count("--test verilog_ams\n"), 1)
+        self.assertEqual(step.count("--test verilog_ams_semantics"), 1)
         self.assertEqual(step.count("--test verilog_rnm_agreement"), 1)
+        self.assertEqual(step.count("--test verilog_mixed_benchmarks"), 1)
 
     def test_rnm_performance_is_a_nightly_release_measurement_only(self) -> None:
         """The wall-clock leg runs in nightly, in release, and never on push.
@@ -549,6 +559,34 @@ class CiConfigurationTests(unittest.TestCase):
             1
         ].split("- name:", 1)[0]
         self.assertIn("--test verilog_rnm_performance", step)
+        self.assertIn("--release", step)
+        self.assertIn("--nocapture", step)
+
+    def test_mixed_performance_is_a_nightly_release_measurement_only(self) -> None:
+        """P4's runtime leg runs in nightly, in release, and never on push.
+
+        The same rule as the RNM measurement above and for the same two
+        reasons, and it is a separate test rather than a second loop inside
+        that one because the two measure different things: that one compares a
+        real-number model against simulating a block, this one compares
+        executing a circuit's digital half on an event wheel against simulating
+        the same circuit entirely in the analog domain.
+
+        Its correctness half, `verilog_mixed_benchmarks`, *is* in the fast tier
+        and is checked by the test above — which is what makes this a
+        measurement rather than a gate: a ratio between two representations
+        that disagree means nothing, so agreement is proven on every push and
+        only the timing waits for nightly.
+        """
+        ci_workflow = read_text(".github/workflows/ci.yml")
+        nightly_workflow = read_text(".github/workflows/nightly.yml")
+
+        self.assertNotIn("--test verilog_mixed_performance", ci_workflow)
+
+        step = nightly_workflow.split(
+            "- name: Mixed against all-analog wall clock", 1
+        )[1].split("- name:", 1)[0]
+        self.assertIn("--test verilog_mixed_performance", step)
         self.assertIn("--release", step)
         self.assertIn("--nocapture", step)
 
