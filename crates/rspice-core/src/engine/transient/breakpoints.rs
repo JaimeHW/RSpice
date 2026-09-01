@@ -620,17 +620,36 @@ impl Engine {
                 ));
             }
         }
+        let accurate_fft_points = if super::fft::uses_accurate_sampling(netlist) {
+            netlist
+                .fft_analyses
+                .iter()
+                .map(|analysis| {
+                    analysis
+                        .points
+                        .saturating_sub(usize::from(analysis.start.unwrap_or(0.0) == 0.0))
+                })
+                .fold(0usize, usize::saturating_add)
+        } else {
+            0
+        };
         let requested = netlist
             .options
             .output_time_points
             .len()
-            .saturating_add(netlist.options.timeint_breakpoints.len());
+            .saturating_add(netlist.options.timeint_breakpoints.len())
+            .saturating_add(accurate_fft_points);
         crate::resource::ResourceLimitError::ensure(
             crate::resource::ResourceKind::AnalysisPoints,
             requested,
             max_points,
         )?;
-        let mut retained = Vec::with_capacity(requested);
+        let mut retained = Vec::new();
+        retained.try_reserve_exact(requested).map_err(|_| {
+            crate::engine::SimulationError::Circuit(
+                "transient user-breakpoint schedule allocation failed".to_string(),
+            )
+        })?;
         for (index, time) in netlist
             .options
             .output_time_points
@@ -649,6 +668,21 @@ impl Engine {
             }
             if time <= tstop {
                 retained.push(if time == 0.0 { 0.0 } else { time });
+            }
+        }
+        if super::fft::uses_accurate_sampling(netlist) {
+            let mut authored_sample = 0usize;
+            for analysis in &netlist.fft_analyses {
+                for sample in 0..analysis.points {
+                    if authored_sample.is_multiple_of(256) && abort.is_aborted() {
+                        return Err(crate::engine::SimulationError::Aborted);
+                    }
+                    authored_sample = authored_sample.saturating_add(1);
+                    let time = super::fft::sample_time(analysis, tstop, sample);
+                    if time > 0.0 && time <= tstop {
+                        retained.push(time);
+                    }
+                }
             }
         }
         retained.sort_by(Value::total_cmp);

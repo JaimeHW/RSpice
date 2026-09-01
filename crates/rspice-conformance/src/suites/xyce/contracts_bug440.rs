@@ -1451,6 +1451,7 @@ mod tests {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
         }
     }
 

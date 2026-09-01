@@ -161,6 +161,7 @@ impl PyCompressedTransientResult {
             num_nodes,
             node_names,
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
             compression_ratio,
             input_points,
         })

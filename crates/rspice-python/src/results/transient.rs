@@ -688,6 +688,7 @@ impl PyTransientResult {
                 .into_iter()
                 .map(|(name, values)| rspice_core::engine::TransientStoreTrace { name, values })
                 .collect(),
+            fft_results: Vec::new(),
         })
     }
 

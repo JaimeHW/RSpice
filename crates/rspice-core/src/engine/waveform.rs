@@ -357,6 +357,10 @@ pub struct TransientResultCompressed {
     /// Typed non-solution device store waveforms.
     pub store_traces: Vec<super::TransientStoreTrace>,
 
+    /// `.FFT` post-processing is computed before waveform decimation and is
+    /// retained losslessly alongside the compressed time-domain channels.
+    pub fft_results: Vec<super::TransientFftResult>,
+
     /// Compression ratio achieved
     pub compression_ratio: Value,
 
@@ -541,6 +545,7 @@ mod tests {
             num_nodes: 1,
             node_names: vec!["out".to_string()],
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
             compression_ratio: 1.0,
             input_points: 3,
         }

@@ -8,9 +8,9 @@
 //! topology reduction or device stamping occurs.
 
 use super::{
-    AnalysisCommand, Element, ElementKind, Flattener, FlattenerConfig, MeasureStatement, Netlist,
-    NetlistSourceLocation, ParseError, ParseWithAbortError, ensure_parse_not_aborted,
-    poll_parse_abort, poll_parse_text,
+    AnalysisCommand, Element, ElementKind, FftAnalysis, FftOutput, Flattener, FlattenerConfig,
+    MeasureStatement, Netlist, NetlistSourceLocation, ParseError, ParseWithAbortError,
+    ensure_parse_not_aborted, poll_parse_abort, poll_parse_text,
 };
 use crate::abort_signal::AbortSignal;
 use std::collections::{HashMap, HashSet};
@@ -24,6 +24,7 @@ pub enum OutputDirectiveKind {
     Plot,
     Measure,
     Four,
+    Fft,
 }
 
 impl OutputDirectiveKind {
@@ -41,6 +42,7 @@ impl std::fmt::Display for OutputDirectiveKind {
             Self::Plot => ".PLOT",
             Self::Measure => ".MEASURE",
             Self::Four => ".FOUR",
+            Self::Fft => ".FFT",
         })
     }
 }
@@ -443,6 +445,46 @@ impl OutputRequest {
                 .flat_map(|output| extract_output_expressions(output))
                 .collect(),
             dependencies,
+        }
+    }
+
+    /// Build the semantic request that keeps a typed `.FFT` operand alive
+    /// through transient output projection and validates its circuit symbols
+    /// before integration begins.
+    pub(crate) fn from_fft(analysis: &FftAnalysis, origin: NetlistSourceLocation) -> Self {
+        let (authored, kind, expressions) = match &analysis.output {
+            FftOutput::Expression(body) => (
+                format!("{{{body}}}"),
+                OutputOperandKind::Expression { body: body.clone() },
+                vec![body.clone()],
+            ),
+            FftOutput::Probe(probe) => {
+                let kind = match super::parse_save_probe(probe) {
+                    Some(
+                        signal @ (super::SaveSignal::Voltage(_)
+                        | super::SaveSignal::VoltageDiff(_, _)
+                        | super::SaveSignal::Current(_)
+                        | super::SaveSignal::DeviceParam { .. }),
+                    ) => OutputOperandKind::Probe(signal),
+                    _ => OutputOperandKind::Expression {
+                        body: probe.clone(),
+                    },
+                };
+                (probe.clone(), kind, Vec::new())
+            }
+        };
+        Self {
+            directive: OutputDirectiveKind::Fft,
+            origin,
+            analysis: Some(OutputAnalysisKind::Tran),
+            name: None,
+            print_delimiter: None,
+            print_precision: None,
+            print_width: None,
+            operands: vec![authored.clone()],
+            operand_kinds: vec![kind],
+            expressions,
+            dependencies: extract_output_dependencies(&authored),
         }
     }
 
@@ -1405,7 +1447,7 @@ fn analysis_owned_output_vector_exists(
             request.analysis == Some(OutputAnalysisKind::Noise)
         }
         OutputDirectiveKind::Save | OutputDirectiveKind::Probe => true,
-        OutputDirectiveKind::Four => false,
+        OutputDirectiveKind::Four | OutputDirectiveKind::Fft => false,
     }
 }
 

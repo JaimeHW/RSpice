@@ -7,6 +7,7 @@
 //! - Cooperative abort for responsive cancellation
 
 #![allow(clippy::too_many_arguments)]
+mod fft;
 use super::{Engine, SimulationError, SpiceDialect, TransientResult};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::device::semiconductor::{
@@ -1297,6 +1298,29 @@ impl Engine {
                     .real_traces
                     .iter()
                     .map(|trace| trace.points.len().saturating_mul(2))
+                    .fold(0usize, usize::saturating_add),
+            )
+            .saturating_add(
+                result
+                    .fft_results
+                    .iter()
+                    .map(|spectrum| {
+                        let bin_values = spectrum
+                            .bins
+                            .len()
+                            .saturating_mul(fft::FFT_RETAINED_VALUES_PER_BIN);
+                        let metric_values = spectrum.metrics.as_ref().map_or(0, |metrics| {
+                            7usize
+                                .saturating_add(usize::from(metrics.sfdr_spur_frequency.is_some()))
+                                .saturating_add(
+                                    metrics
+                                        .largest_harmonics
+                                        .len()
+                                        .saturating_mul(fft::FFT_RETAINED_VALUES_PER_HARMONIC),
+                                )
+                        });
+                        bin_values.saturating_add(metric_values)
+                    })
                     .fold(0usize, usize::saturating_add),
             )
     }
@@ -2766,11 +2790,7 @@ impl Engine {
         ),
         SimulationError,
     > {
-        if !netlist.fft_analyses.is_empty() {
-            return Err(SimulationError::Circuit(
-                "transient .FFT post-processing is parsed but not yet implemented".to_string(),
-            ));
-        }
+        fft::preflight(self, netlist, tstop, abort)?;
         let trapezoidal_xmu = if self.config.spice_dialect == SpiceDialect::Xyce {
             0.5
         } else {
@@ -2812,7 +2832,7 @@ impl Engine {
         let record_device_op_traces = Self::should_record_transient_device_op_traces(netlist);
         let mut circuit = self.build_circuit_with_abort(netlist, abort)?;
         if circuit.num_nodes() == 0 && circuit.num_branches() == 0 {
-            let result = TransientResult {
+            let mut result = TransientResult {
                 time: vec![0.0],
                 step_sizes: vec![0.0],
                 voltages: Vec::new(),
@@ -2824,6 +2844,7 @@ impl Engine {
                 real_traces: Vec::new(),
                 device_op_traces: Vec::new(),
                 store_traces: Vec::new(),
+                fft_results: Vec::new(),
             };
             if scheduled_checkpoint_times.iter().any(|time| *time != 0.0) {
                 return Err(SimulationError::Circuit(
@@ -2902,6 +2923,7 @@ impl Engine {
             } else {
                 None
             };
+            result.fft_results = fft::evaluate(self, netlist, &result, tstop, abort)?;
             self.ensure_result_values(
                 Self::transient_result_value_count(&result)
                     .saturating_add(retained_scheduled_checkpoint_values)
@@ -3680,6 +3702,7 @@ impl Engine {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces,
+            fft_results: Vec::new(),
         };
         if record_device_op_traces {
             result.record_device_op_sample(
@@ -8607,6 +8630,8 @@ impl Engine {
         } else {
             None
         };
+        result.fft_results = fft::evaluate(self, netlist, &result, tstop, abort)?;
+        retained_result_values = Self::transient_result_value_count(&result);
         self.ensure_result_values(
             retained_result_values
                 .saturating_add(retained_scheduled_checkpoint_values)
@@ -8683,6 +8708,7 @@ impl Engine {
                 num_nodes: result.num_nodes,
                 node_names: result.node_names.clone(),
                 store_traces: result.store_traces.clone(),
+                fft_results: result.fft_results.clone(),
                 compression_ratio: 1.0,
                 input_points: 0,
             });
@@ -8737,6 +8763,7 @@ fn compress_transient_result(
             num_nodes: result.num_nodes,
             node_names: result.node_names.clone(),
             store_traces: result.store_traces.clone(),
+            fft_results: result.fft_results.clone(),
             compression_ratio: 1.0,
             input_points: point_count,
         });
@@ -8862,6 +8889,7 @@ fn compress_transient_result(
                 values: indices.iter().map(|&index| trace.values[index]).collect(),
             })
             .collect(),
+        fft_results: result.fft_results.clone(),
         compression_ratio: point_count as Value / stored_points as Value,
         input_points: point_count,
     })
@@ -10695,23 +10723,159 @@ D1 D 0 DMOD
     }
 
     #[test]
-    fn transient_fft_fails_closed_until_postprocessing_is_implemented() {
+    fn transient_fft_returns_typed_calibrated_spectra_in_source_order() {
         let netlist = Netlist::parse(
             "transient fft activation\n\
-             V1 out 0 1\n\
-             .tran 1n 10n\n\
-             .fft v(out) np=8\n\
+             V1 out 0 SIN(0 1 1k)\n\
+             R1 out 0 1k\n\
+             .save i(V1)\n\
+             .tran 1u 1m\n\
+             .fft v(out) np=128 format=unorm window=rect freq=2.1k fmin=1.3k fmax=4.1k\n\
+             .fft {2*v(out)} np=128 window=hann\n\
              .end\n",
         )
         .expect("valid transient .FFT parses");
 
+        let result = Engine::new(SimulationConfig::default())
+            .run_tran(&netlist, 1.0e-3, 1.0e-6)
+            .expect("typed transient .FFT executes");
+        assert_eq!(result.fft_results.len(), 2);
+        let unnormalized = &result.fft_results[0];
+        assert_eq!(unnormalized.output_name, "V(OUT)");
+        assert_eq!(unnormalized.physical_type, "voltage");
+        assert_eq!(unnormalized.point_count, 128);
+        assert!(unnormalized.accurate_sampling);
+        assert_eq!(unnormalized.bins.len(), 65);
+        assert_eq!(unnormalized.format, crate::netlist::FftFormat::Unnormalized);
+        assert_eq!(
+            unnormalized.mode,
+            crate::netlist::XyceFftMode::HspiceCompatible
+        );
+        assert_eq!(unnormalized.frequency_resolution, 1.0e3);
+        assert_eq!(unnormalized.fundamental_bin, 2);
+        assert_eq!(unnormalized.minimum_metric_bin, 1);
+        assert_eq!(unnormalized.maximum_metric_bin, 4);
+        assert!((unnormalized.bins[1].magnitude - 1.0).abs() < 2.0e-4);
+        assert!((unnormalized.bins[1].phase_degrees + 90.0).abs() < 0.1);
+        let authored_sample_time = unnormalized.start_time + 37.0 * unnormalized.sample_interval;
+        assert!(
+            result
+                .time
+                .iter()
+                .any(|time| time.to_bits() == authored_sample_time.to_bits()),
+            "FFT_ACCURATE default must make every uniform sample a solver stop"
+        );
+
+        let normalized_expression = &result.fft_results[1];
+        assert_eq!(normalized_expression.output_name, "{2*v(out)}");
+        assert_eq!(normalized_expression.physical_type, "parameter");
+        assert_eq!(
+            normalized_expression.format,
+            crate::netlist::FftFormat::Normalized
+        );
+        let maximum = normalized_expression
+            .bins
+            .iter()
+            .map(|bin| bin.magnitude)
+            .fold(0.0, Value::max);
+        assert!((maximum - 1.0).abs() < 1.0e-12);
+        assert!(normalized_expression.coherent_gain > 0.49);
+        assert!(normalized_expression.coherent_gain < 0.5);
+
+        let compressed = Engine::new(SimulationConfig::default())
+            .run_tran_compressed(&netlist, 1.0e-3, 1.0e-6, CompressionConfig::default())
+            .expect("compressed transient retains pre-decimation FFT results");
+        assert_eq!(compressed.fft_results, result.fft_results);
+        let expanded = TransientResult::from(compressed);
+        assert_eq!(expanded.fft_results, result.fft_results);
+    }
+
+    #[test]
+    fn transient_fft_mode_one_selects_periodic_windows_and_unorm_default() {
+        let netlist = Netlist::parse(
+            "spectre-compatible fft mode\n\
+             V1 out 0 SIN(0 1 1k)\n\
+             R1 out 0 1k\n\
+             .options fft fft_mode=1 fft_accurate=0 fftout=1\n\
+             .tran 1u 1m\n\
+             .fft v(out) np=128 window=hann\n\
+             .end\n",
+        )
+        .expect("FFT_MODE=1 transient deck parses");
+
+        let result = Engine::new(SimulationConfig::default())
+            .run_tran(&netlist, 1.0e-3, 1.0e-6)
+            .expect("FFT_MODE=1 transient executes");
+        let spectrum = &result.fft_results[0];
+        assert_eq!(
+            spectrum.mode,
+            crate::netlist::XyceFftMode::SpectreCompatible
+        );
+        assert!(!spectrum.accurate_sampling);
+        assert_eq!(spectrum.format, crate::netlist::FftFormat::Unnormalized);
+        assert!((spectrum.coherent_gain - 0.5).abs() < 1.0e-14);
+        assert!((spectrum.bins[1].magnitude - 1.0).abs() < 2.0e-4);
+        let metrics = spectrum
+            .metrics
+            .as_ref()
+            .expect("FFTOUT=1 emits typed metrics");
+        assert!((metrics.fundamental_magnitude - 1.0).abs() < 2.0e-4);
+        assert!((metrics.thd_ratio - 0.5).abs() < 2.0e-4);
+        assert!((metrics.sfdr_db - 20.0 * 2.0_f64.log10()).abs() < 1.0e-3);
+        assert_eq!(metrics.sfdr_spur_bin, Some(2));
+        assert_eq!(metrics.largest_harmonics.len(), 30);
+        assert_eq!(metrics.largest_harmonics[0].bin, 1);
+        assert_eq!(metrics.largest_harmonics[0].rank, 1);
+    }
+
+    #[test]
+    fn transient_fft_preflights_window_and_resource_contracts() {
+        let invalid_window = Netlist::parse(
+            "invalid fft window\nV1 out 0 1\nR1 out 0 1k\n.tran 1u 1m\n.fft v(out) np=8 start=900u stop=800u\n.end\n",
+        )
+        .expect("typed invalid runtime window parses");
         let error = Engine::new(SimulationConfig::default())
-            .run_tran(&netlist, 10.0e-9, 1.0e-9)
-            .expect_err("transient .FFT must not be silently ignored");
+            .run_tran(&invalid_window, 1.0e-3, 1.0e-6)
+            .expect_err("reversed FFT windows fail before simulation");
         assert!(
             error
                 .to_string()
-                .contains("transient .FFT post-processing is parsed but not yet implemented")
+                .contains("STOP must be finite and greater than START")
+        );
+
+        let oversized = Netlist::parse(
+            "oversized fft\nV1 out 0 1\nR1 out 0 1k\n.tran 1u 1m\n.fft v(out) np=128\n.end\n",
+        )
+        .expect("bounded FFT deck parses");
+        let mut config = SimulationConfig::default();
+        config.resource_limits.max_analysis_points = 64;
+        let error = Engine::new(config)
+            .run_tran(&oversized, 1.0e-3, 1.0e-6)
+            .expect_err("FFT point limit must be enforced");
+        assert!(matches!(error, SimulationError::ResourceLimit(_)));
+
+        let cumulative = Netlist::parse(
+            "cumulative fft limit\nV1 out 0 1\nR1 out 0 1k\n.tran 1u 1m\n.fft v(out) np=8\n.fft i(V1) np=8\n.end\n",
+        )
+        .expect("multiple bounded FFT directives parse");
+        let mut config = SimulationConfig::default();
+        config.resource_limits.max_result_values = 49;
+        let error = Engine::new(config)
+            .run_tran(&cumulative, 1.0e-3, 1.0e-6)
+            .expect_err("FFT result preflight must account for all spectra cumulatively");
+        assert!(matches!(error, SimulationError::ResourceLimit(_)));
+
+        let constant = Netlist::parse(
+            "constant fft metrics\nV1 out 0 1\nR1 out 0 1k\n.options fft fftout=1\n.tran 1u 1m\n.fft v(out) np=8\n.end\n",
+        )
+        .expect("constant FFT deck parses");
+        let error = Engine::new(SimulationConfig::default())
+            .run_tran(&constant, 1.0e-3, 1.0e-6)
+            .expect_err("undefined constant-signal FFTOUT metrics fail closed");
+        assert!(
+            error
+                .to_string()
+                .contains("FFTOUT metrics require a finite first-harmonic magnitude")
         );
     }
 
@@ -10736,6 +10900,7 @@ D1 D 0 DMOD
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
         };
         let config = CompressionConfig {
             abs_tol: 1e-6,

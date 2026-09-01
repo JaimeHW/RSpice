@@ -1498,6 +1498,90 @@ pub fn evaluate_tran_output_requests_with_abort(
         .map_err(frontend_output_error)
 }
 
+/// Resolve and evaluate one typed `.FFT` operand over the accepted transient
+/// history. The source request is used rather than reparsing the probe so
+/// hierarchy aliases, lead-current accessors, expressions, user functions,
+/// cancellation, and allocation limits exactly match ordered output cards.
+pub(crate) fn evaluate_tran_fft_output_with_abort(
+    netlist: &Netlist,
+    result: &TransientResult,
+    fft_index: usize,
+    limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<(String, &'static str, Vec<Value>), SimulationError> {
+    let request = netlist
+        .output_requests
+        .iter()
+        .filter(|request| request.directive == OutputDirectiveKind::Fft)
+        .nth(fft_index)
+        .ok_or_else(|| {
+            SimulationError::Netlist(format!(
+                ".FFT request {} has no typed output operand",
+                fft_index + 1
+            ))
+        })?;
+    let requests = [request];
+    let projection = preflight_real_output_requests(
+        &requests,
+        OutputAnalysisKind::Tran,
+        result.time.len(),
+        Some((&result.node_names, result.voltages.len())),
+        netlist,
+        limits,
+        abort,
+    )
+    .map_err(frontend_output_error)?;
+    if projection.column_count != 1 {
+        return Err(SimulationError::Netlist(format!(
+            ".FFT request {} resolved to {} output columns; exactly one is required",
+            fft_index + 1,
+            projection.column_count
+        )));
+    }
+    let alias_projection = InterfaceNodeAliasProjection::new_with_abort(
+        netlist,
+        OutputAnalysisKind::Tran,
+        result.time.len(),
+        abort,
+    )
+    .map_err(|error| match error {
+        InterfaceNodeAliasProjectionError::Aborted => SimulationError::Aborted,
+        InterfaceNodeAliasProjectionError::Detail(detail) => SimulationError::Netlist(format!(
+            ".FFT request {} alias resolution failed: {detail}",
+            fft_index + 1
+        )),
+    })?;
+    let mut signals = transient_signal_map(result);
+    alias_projection.augment(&mut signals).map_err(|detail| {
+        SimulationError::Netlist(format!(
+            ".FFT request {} alias resolution failed: {detail}",
+            fft_index + 1
+        ))
+    })?;
+    let mut columns = evaluate_real_output_requests(
+        &requests,
+        OutputAnalysisKind::Tran,
+        &result.time,
+        &signals,
+        &netlist.params,
+        &projection,
+        abort,
+    )
+    .map_err(frontend_output_error)?;
+    let column = columns.pop().ok_or_else(|| {
+        SimulationError::Netlist(format!(
+            ".FFT request {} produced no output column",
+            fft_index + 1
+        ))
+    })?;
+    let physical_type = match column.kind {
+        OutputColumnKind::Voltage => "voltage",
+        OutputColumnKind::Current => "current",
+        OutputColumnKind::Scalar => "parameter",
+    };
+    Ok((column.name, physical_type, column.values))
+}
+
 #[cfg(test)]
 pub(crate) fn evaluate_tran_output_requests(
     netlist: &Netlist,
@@ -5709,6 +5793,7 @@ mod tests {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
         }
     }
 
@@ -5726,6 +5811,7 @@ mod tests {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
         }
     }
 
@@ -5907,6 +5993,7 @@ mod tests {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
         };
         assert!(
             evaluate_tran_output_requests(&netlist, &empty_result)
@@ -6262,6 +6349,7 @@ mod tests {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
         };
 
         let measurements = evaluate_tran_measurements(&netlist, &result);
@@ -6313,6 +6401,7 @@ mod tests {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
         };
 
         let measurements = evaluate_tran_measurements(&netlist, &result);
@@ -6355,6 +6444,7 @@ mod tests {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
         };
         let results = evaluate_tran_measurements(&frac_netlist, &frac_result);
         assert_eq!(results[0].value, Some(0.5));
@@ -6386,6 +6476,7 @@ mod tests {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
         };
         let results = evaluate_tran_measurements(&window_netlist, &window_result);
         assert_eq!(results[0].value, Some(0.0));
@@ -6427,6 +6518,7 @@ mod tests {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
         };
         let traces = evaluate_equation_measurements(
             &netlist,
@@ -6618,6 +6710,7 @@ mod tests {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
         };
 
         let measurements = evaluate_tran_measurements(&netlist, &result);
@@ -6717,6 +6810,7 @@ mod tests {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
         };
 
         let traces = evaluate_tran_equation_measurements(&netlist, &result)
@@ -7067,6 +7161,7 @@ mod tests {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
         };
 
         let traces = evaluate_equation_measurements(
@@ -7162,6 +7257,7 @@ mod tests {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
         };
 
         let traces = evaluate_equation_measurements(
@@ -7270,6 +7366,7 @@ mod tests {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
         };
 
         let traces = evaluate_equation_measurements(
@@ -7357,6 +7454,7 @@ mod tests {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
         };
 
         let traces = evaluate_equation_measurements(
@@ -7420,6 +7518,7 @@ mod tests {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
         };
 
         let traces = evaluate_equation_measurements(
@@ -7484,6 +7583,7 @@ mod tests {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
         };
 
         let traces = evaluate_equation_measurements(
@@ -7906,6 +8006,7 @@ mod tests {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
         };
 
         let traces = evaluate_equation_measurements(
@@ -7988,6 +8089,7 @@ mod tests {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
         };
 
         let results = evaluate_tran_measurements(&netlist, &result);
@@ -8478,6 +8580,7 @@ mod tests {
                 },
             ],
             store_traces: Vec::new(),
+            fft_results: Vec::new(),
         };
 
         let traces = evaluate_tran_equation_measurements(&netlist, &result)

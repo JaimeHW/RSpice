@@ -183,7 +183,13 @@ use rspice_core::analysis::harmonic_balance::{
 /// declare — the store itself, the resolution table, the process scheduler — is
 /// `pub(crate)`, as is the time-unit ruling, which the refusal prints rather
 /// than a caller reading.
-const MAX_PUBLIC_ITEMS: usize = 4279;
+///
+/// The FFT result contract adds +5 deliberate frontend-facing types:
+/// `XyceFftMode` retains the authored compatibility selection, while
+/// `TransientFftBin`, `TransientFftHarmonic`, `TransientFftMetrics`, and
+/// `TransientFftResult` expose calibrated spectra and optional `FFTOUT`
+/// figures without requiring a frontend to parse an engine text report.
+const MAX_PUBLIC_ITEMS: usize = 4284;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
