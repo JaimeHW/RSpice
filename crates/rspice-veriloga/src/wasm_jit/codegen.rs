@@ -506,7 +506,10 @@ fn emit_block_region(
             return Ok(());
         }
         let block = ssa.block(current).map_err(verifier)?;
-        let header_of = loops.iter().find(|range| range.header() == current).copied();
+        let header_of = loops
+            .iter()
+            .find(|range| range.header() == current)
+            .copied();
         if let Some(range) = header_of {
             emit_loop(body, ssa, block, range, loops, labels, scratch_base)?;
             let Terminator::Branch {
@@ -694,10 +697,14 @@ fn emit_edge_arguments(
     if aliases {
         for (slot, argument) in edge.arguments().iter().enumerate() {
             body.instruction(&WasmInstruction::LocalGet(value_local(argument.index())?));
-            body.instruction(&WasmInstruction::LocalSet(value_local(scratch_base + slot)?));
+            body.instruction(&WasmInstruction::LocalSet(value_local(
+                scratch_base + slot,
+            )?));
         }
         for (slot, parameter) in parameters.iter().enumerate() {
-            body.instruction(&WasmInstruction::LocalGet(value_local(scratch_base + slot)?));
+            body.instruction(&WasmInstruction::LocalGet(value_local(
+                scratch_base + slot,
+            )?));
             body.instruction(&WasmInstruction::LocalSet(value_local(
                 parameter.value().index(),
             )?));
@@ -3534,8 +3541,7 @@ mod tests {
             (1.0, 1.0, 0.25, 0.75),
             (-1.0, 3.0, 6.0, 9.0),
         ] {
-            let ssa =
-                Program::loop_fixture_for_test(limit, scale).expect("build the loop program");
+            let ssa = Program::loop_fixture_for_test(limit, scale).expect("build the loop program");
             let body = encode_value_body_from_ssa(&ssa).expect("encode the loop body");
             let bytes = encode_value_module(body).expect("assemble the module");
             Validator::new()

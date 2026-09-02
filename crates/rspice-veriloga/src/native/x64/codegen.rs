@@ -4800,9 +4800,9 @@ mod tests {
         TableHelper, VECTOR_LITERAL_ALIGNMENT, VOLTAGES_OFFSET, X64Encoder, X64SsaProgram,
         XMM_STACK, Xmm, assignment_uses_helper_calls, call_result_disp,
         compile_assignment_function, compile_assignment_pass_function, compile_value_function,
-        compile_value_function_artifact_from_ssa, entry_ctx_arg_reg,
-        entry_vars_arg_reg, native_op_reads_entry_args, native_op_uses_helper_call,
-        program_uses_helper_calls, rspice_exp, value_program_needs_saved_entry_args,
+        compile_value_function_artifact_from_ssa, entry_ctx_arg_reg, entry_vars_arg_reg,
+        native_op_reads_entry_args, native_op_uses_helper_call, program_uses_helper_calls,
+        rspice_exp, value_program_needs_saved_entry_args,
     };
     use crate::codegen::{BytecodeProgram, Instruction, LookupTable};
     use crate::laplace::StateSpaceFilter;
@@ -5153,8 +5153,7 @@ mod tests {
                 unsafe { std::mem::transmute(entry) };
             let params = [first, second];
             let context = eval_context(&params, &[], &[], &[]);
-            let expected =
-                X64SsaProgram::loop_fixture_expectation(limit, scale, first, second);
+            let expected = X64SsaProgram::loop_fixture_expectation(limit, scale, first, second);
             assert_eq!(
                 function(&context, std::ptr::null()).to_bits(),
                 expected.to_bits(),

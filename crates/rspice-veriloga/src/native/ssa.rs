@@ -399,12 +399,8 @@ impl Program {
     /// * header parameters read *after* the loop, in the exit block.
     #[cfg(test)]
     pub(crate) fn loop_fixture_for_test(limit: f64, k: f64) -> JitResult<Self> {
-        let mut builder = ProgramBuilder::new(&[
-            Vec::new(),
-            vec![ValueType::F64; 3],
-            Vec::new(),
-            Vec::new(),
-        ])?;
+        let mut builder =
+            ProgramBuilder::new(&[Vec::new(), vec![ValueType::F64; 3], Vec::new(), Vec::new()])?;
         let entry = BlockId::new(0)?;
         let header = BlockId::new(1)?;
         let body = BlockId::new(2)?;
@@ -725,7 +721,7 @@ impl Program {
         let loops = self.natural_loops(&dominance, &predecessors)?;
         self.validate_reaches_exit(&predecessors)?;
         self.validate_dominance(&dominance)?;
-        self.validate_structured_regions(&idom)?;
+        self.validate_structured_regions(&dominance)?;
         self.validate_effect_discipline(&dominance, &loops)
     }
 
@@ -776,11 +772,9 @@ impl Program {
                 }
                 let body = self.natural_loop_body(edge.target, block.id, predecessors);
                 let range = edge.target.index()..=block.id.index();
-                if let Some(stranger) = body
-                    .iter()
-                    .enumerate()
-                    .find_map(|(index, member)| (*member != range.contains(&index)).then_some(index))
-                {
+                if let Some(stranger) = body.iter().enumerate().find_map(|(index, member)| {
+                    (*member != range.contains(&index)).then_some(index)
+                }) {
                     return Err(verifier(format!(
                         "SSA block {stranger} puts the loop headed by block {} out of step with its layout range, which ends at its latch, block {}; the loop is not laid out contiguously",
                         edge.target.index(),
@@ -911,26 +905,52 @@ impl Program {
     /// a relooper, and it costs nothing, because structured Verilog-A control
     /// flow is the only thing that lowers here. The check is that nothing
     /// outside a branch's region enters it, which is exactly that every block
-    /// strictly inside is dominated by the branch.
-    fn validate_structured_regions(&self, idom: &[Option<BlockId>]) -> JitResult<()> {
-        for block in &self.blocks {
+    /// the branch reaches before its join is dominated by the branch: a block
+    /// with a predecessor outside the region could not be dominated by the
+    /// block the region starts at.
+    fn validate_structured_regions(&self, dominance: &DominatorTree) -> JitResult<()> {
+        // The region is what the branch *reaches* before its join, not what
+        // the layout happens to place between the two. The distinction is
+        // real: the CFG level splices out empty blocks, which collapses an
+        // inner conditional's join into the enclosing one, and the enclosing
+        // conditional's other arm then sits between the inner branch and the
+        // join they now share. That arm is not in the inner branch's region,
+        // and the structural walk never enters it from there.
+        let mut visited = vec![u32::MAX; self.blocks.len()];
+        let mut stack: Vec<BlockId> = Vec::new();
+        for (stamp, block) in self.blocks.iter().enumerate() {
             if !matches!(block.terminator, Terminator::Branch { .. }) {
                 continue;
             }
+            let stamp = u32::try_from(stamp).map_err(|_| JitError::Verifier {
+                model: MODEL.into(),
+                detail: "SSA block count exceeds the region-walk stamp space".into(),
+            })?;
             let join = self.branch_join(block)?;
-            let first_inside = block.id.index() + 1;
-            for (offset, dominator) in idom[first_inside..join.index()].iter().enumerate() {
-                if dominator.is_none_or(|dominator| dominator < block.id) {
+            stack.clear();
+            stack.extend(block.terminator.edges().map(|edge| edge.target));
+            while let Some(inside) = stack.pop() {
+                if inside == join || visited[inside.index()] == stamp {
+                    continue;
+                }
+                visited[inside.index()] = stamp;
+                if !dominance.dominates(block.id, inside) {
                     return Err(JitError::Verifier {
                         model: MODEL.into(),
                         detail: format!(
                             "SSA block {} is entered from outside the region branching from block {}",
-                            first_inside + offset,
+                            inside.index(),
                             block.id.index()
                         )
                         .into(),
                     });
                 }
+                stack.extend(
+                    self.blocks[inside.index()]
+                        .terminator
+                        .edges()
+                        .map(|edge| edge.target),
+                );
             }
         }
         Ok(())
@@ -1096,11 +1116,8 @@ impl Program {
         {
             return Err(JitError::Verifier {
                 model: MODEL.into(),
-                detail: format!(
-                    "SSA block {} cannot reach the exit block",
-                    block.id.index()
-                )
-                .into(),
+                detail: format!("SSA block {} cannot reach the exit block", block.id.index())
+                    .into(),
             });
         }
         Ok(())
@@ -1212,19 +1229,17 @@ impl Program {
     ///
     /// Loops make "at least once" insufficient, so a state write inside one is
     /// refused as well — including in a loop header, which dominates the exit
-    /// and still runs once per iteration. That refusal is not a limitation of
-    /// this verifier but the shape of the language and of the state layout.
-    /// Verilog-AMS LRM 2.4 section 4.4.1 admits an analog operator inside a
-    /// loop only when the loop's iteration count is a constant expression, and
-    /// then each iteration's instance of the operator is a *distinct* operator
-    /// with its own history — the elaborated form is the unrolled one. This IR
-    /// does not unroll: a `ddt` inside a loop is one
-    /// [`CfgValueKind::Ddt`](crate::canonical_ir::CfgValueKind::Ddt) owning one
-    /// record in [`CanonicalStateLayout`](crate::canonical_ir::CanonicalStateLayout),
-    /// which is the wrong number of records for every trip count but one. A
-    /// front end that unrolls a constant-trip loop before this level produces
-    /// distinct operator sites and no loop, and reaches here admitted; anything
-    /// else is refused by name.
+    /// and still runs once per iteration. The reason is the state layout, not
+    /// this verifier: `CanonicalStateLayout` gives one record to each analog
+    /// operator *site*, so a `ddt` inside a loop is one operator holding one
+    /// history for every trip the loop takes, which is the right number of
+    /// records for exactly one trip and the wrong number for every other. The
+    /// language agrees — Verilog-AMS LRM 2.4 section 4.4.1 admits an analog
+    /// operator inside a loop only where the iteration count is a constant
+    /// expression, whose elaborated form is unrolled into distinct operator
+    /// sites. A front end that unrolls such a loop before this level therefore
+    /// reaches here with distinct sites and no loop, and is admitted; anything
+    /// else is refused by name rather than silently sharing one history.
     fn validate_effect_discipline(
         &self,
         dominance: &DominatorTree,
@@ -2166,10 +2181,13 @@ impl ProgramBuilder {
             .iter()
             .enumerate()
             .map(|(index, block)| {
-                let terminator = block.terminator.as_ref().ok_or_else(|| JitError::Verifier {
-                    model: MODEL.into(),
-                    detail: format!("SSA builder block {index} was never terminated").into(),
-                })?;
+                let terminator = block
+                    .terminator
+                    .as_ref()
+                    .ok_or_else(|| JitError::Verifier {
+                        model: MODEL.into(),
+                        detail: format!("SSA builder block {index} was never terminated").into(),
+                    })?;
                 Ok(BasicBlock {
                     id: BlockId::new(index)?,
                     parameter_start: block.parameter_start,
@@ -2509,11 +2527,14 @@ fn realize_edge_moves(steps: &[MoveStep], scratch: Option<usize>) -> JitResult<B
         .iter()
         .map(|step| {
             let scratch = || {
-                scratch.map(ValueLocation::Spill).ok_or(JitError::RegisterAllocation {
-                    model: MODEL.into(),
-                    detail: "SSA edge move needs a cycle break but no scratch slot was reserved"
-                        .into(),
-                })
+                scratch
+                    .map(ValueLocation::Spill)
+                    .ok_or(JitError::RegisterAllocation {
+                        model: MODEL.into(),
+                        detail:
+                            "SSA edge move needs a cycle break but no scratch slot was reserved"
+                                .into(),
+                    })
             };
             match *step {
                 MoveStep::Move { from, to } => Ok(EdgeMove { from, to }),
@@ -3421,11 +3442,11 @@ fn unary_math_uses_helper(op: UnaryMathOp) -> bool {
 mod tests {
     use super::{
         ALLOCATABLE_VALUE_REGISTERS, AllocatedInstruction, AssignmentProgram, BlockId,
-        BuilderTerminator, BuilderValue, Edge, Effects, Instruction, MoveStep, Program,
-        ProgramBuilder, RegisterAllocation, RegisterBank, Terminator, ValueId, ValueLocation,
-        ValueType, plan_shared_outputs, required_register_count, sequence_parallel_move,
+        BuilderTerminator, Edge, Effects, Instruction, MoveStep, Program, ProgramBuilder,
+        RegisterAllocation, RegisterBank, Terminator, ValueId, ValueLocation, ValueType,
+        plan_shared_outputs, required_register_count, sequence_parallel_move,
     };
-    use crate::jit::expr::{CompareOp, NativeOp, NativeProgram, native_op_stack_effect};
+    use crate::jit::expr::{NativeOp, NativeProgram, native_op_stack_effect};
     use std::collections::HashMap;
 
     /// The bank as a backend that preserves no floating-point register sees
@@ -4275,13 +4296,8 @@ mod tests {
     fn an_irreducible_back_edge_is_refused_by_name() {
         // Two entries into one cycle: block 1 and block 2 each branch into the
         // other, and neither dominates the other.
-        let mut builder = ProgramBuilder::new(&[
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-        ])
-        .expect("builder");
+        let mut builder = ProgramBuilder::new(&[Vec::new(), Vec::new(), Vec::new(), Vec::new()])
+            .expect("builder");
         let entry = BlockId::new(0).expect("entry");
         let left = BlockId::new(1).expect("left");
         let right = BlockId::new(2).expect("right");
@@ -4331,8 +4347,8 @@ mod tests {
 
     #[test]
     fn a_state_write_inside_a_loop_is_refused_by_name() {
-        let mut builder =
-            ProgramBuilder::new(&[Vec::new(), Vec::new(), Vec::new(), Vec::new()]).expect("builder");
+        let mut builder = ProgramBuilder::new(&[Vec::new(), Vec::new(), Vec::new(), Vec::new()])
+            .expect("builder");
         let entry = BlockId::new(0).expect("entry");
         let header = BlockId::new(1).expect("header");
         let body = BlockId::new(2).expect("body");
@@ -4388,7 +4404,10 @@ mod tests {
         assert!(super::needs_scratch(&cycle));
         let moves = super::realize_edge_moves(&cycle, Some(7)).expect("realized swap");
         assert_eq!(
-            moves.iter().map(|step| (step.from(), step.to())).collect::<Vec<_>>(),
+            moves
+                .iter()
+                .map(|step| (step.from(), step.to()))
+                .collect::<Vec<_>>(),
             vec![
                 (register(0), ValueLocation::Spill(7)),
                 (register(1), register(0)),
