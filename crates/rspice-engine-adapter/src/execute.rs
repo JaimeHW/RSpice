@@ -2,6 +2,7 @@
 //! extraction, and bounded result-artifact emission.
 
 use std::collections::BTreeMap;
+use std::io::Write;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -11,6 +12,7 @@ use rspice_core::engine::{SimulationConfig, SpiceDialect};
 use rspice_core::netlist::{AnalysisCommand, DcSweepSpec, ElementKind};
 use rspice_core::solver::SimulationResult;
 use rspice_core::{Engine, Netlist, SimulationError};
+use rspice_output::{AtomicArtifactError, AtomicArtifactOptions, Durability, write_atomic};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -1431,14 +1433,137 @@ fn failure_execution(error: &SimulationError) -> Execution {
     Execution::failed(&code, &error.to_string())
 }
 
-/// Writes every staged artifact under the pre-created `results/` directory.
-/// A write failure here is a sandbox-authority fault, surfaced as a process
-/// error rather than a customer outcome.
+/// Atomically publishes every staged artifact under the pre-created
+/// `results/` directory. A publication failure here is a sandbox-authority
+/// fault, surfaced as a process error rather than a customer outcome.
 pub fn write_artifacts(results_dir: &Path, artifacts: &[PendingArtifact]) -> Result<(), String> {
     for artifact in artifacts {
         let path = results_dir.join(&artifact.file_name);
-        std::fs::write(&path, artifact.content.as_bytes())
-            .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+        publish_artifact(&path, |writer| {
+            writer.write_all(artifact.content.as_bytes())
+        })
+        .map_err(|error| format!("failed to publish {}: {error}", path.display()))?;
     }
     Ok(())
+}
+
+fn publish_artifact<E>(
+    destination: &Path,
+    write: impl FnOnce(&mut dyn Write) -> Result<(), E>,
+) -> Result<(), AtomicArtifactError<E>>
+where
+    E: std::error::Error + 'static,
+{
+    write_atomic(
+        destination,
+        AtomicArtifactOptions::new(Durability::SyncFileAndParent),
+        write,
+    )
+}
+
+#[cfg(test)]
+mod artifact_publication_tests {
+    use super::*;
+    use rspice_output::stale_artifacts;
+    use std::io;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_TEST_DIRECTORY: AtomicU64 = AtomicU64::new(0);
+
+    struct TestDirectory(PathBuf);
+
+    impl TestDirectory {
+        fn new(tag: &str) -> Self {
+            let serial = NEXT_TEST_DIRECTORY.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "rspice-engine-adapter-{tag}-{}-{serial}",
+                std::process::id()
+            ));
+            std::fs::create_dir(&path).expect("create adapter publication test directory");
+            Self(path)
+        }
+
+        fn destination(&self) -> PathBuf {
+            self.0.join("result.json")
+        }
+    }
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn seed(destination: &Path, preexisting: bool) {
+        if preexisting {
+            std::fs::write(destination, b"old complete artifact")
+                .expect("seed existing adapter artifact");
+        }
+    }
+
+    fn assert_old_or_absent(destination: &Path, preexisting: bool) {
+        if preexisting {
+            assert_eq!(
+                std::fs::read(destination).expect("read preserved adapter artifact"),
+                b"old complete artifact"
+            );
+        } else {
+            assert!(
+                !destination.exists(),
+                "failed publication created a destination"
+            );
+        }
+        assert!(
+            stale_artifacts(destination)
+                .expect("inspect adapter staging artifacts")
+                .is_empty(),
+            "failed publication left a staging artifact"
+        );
+    }
+
+    #[test]
+    fn artifact_write_failure_preserves_existing_or_absent_destination() {
+        for preexisting in [false, true] {
+            let directory = TestDirectory::new("failure");
+            let destination = directory.destination();
+            seed(&destination, preexisting);
+
+            let error = publish_artifact(&destination, |writer| -> io::Result<()> {
+                writer.write_all(b"partial replacement")?;
+                Err(io::Error::other("injected adapter serialization failure"))
+            })
+            .expect_err("injected artifact write must fail");
+
+            assert!(matches!(error, AtomicArtifactError::Write(_)));
+            assert_old_or_absent(&destination, preexisting);
+        }
+    }
+
+    #[test]
+    fn artifact_success_replaces_existing_or_absent_destination() {
+        for preexisting in [false, true] {
+            let directory = TestDirectory::new("success");
+            let destination = directory.destination();
+            seed(&destination, preexisting);
+            let artifact = PendingArtifact {
+                file_name: "result.json".to_string(),
+                content_type: "application/json",
+                content: "{\"complete\":true}\n".to_string(),
+            };
+
+            write_artifacts(&directory.0, &[artifact]).expect("publish adapter artifact");
+
+            assert_eq!(
+                std::fs::read(&destination).expect("read published adapter artifact"),
+                b"{\"complete\":true}\n"
+            );
+            assert!(
+                stale_artifacts(&destination)
+                    .expect("inspect adapter staging artifacts")
+                    .is_empty(),
+                "successful publication left a staging artifact"
+            );
+        }
+    }
 }
