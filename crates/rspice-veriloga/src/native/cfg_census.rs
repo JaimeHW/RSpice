@@ -24,14 +24,15 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use crate::canonical_ir::cfg_lower::CfgModel;
+use crate::canonical_ir::cfg_lower::{CfgModel, CfgNoiseProcess};
 use crate::canonical_ir::{
-    AdSeed, CanonicalStateFamily, CfgEvalInputs, CfgEvalSnapshot, CfgScalar, CfgStateAllocation,
-    CfgValueKind, ComplexStep, MirModel, ValueId, differentiate, evaluate_cfg,
+    AdFunction, AdSeed, CanonicalNoiseSourceKind, CanonicalStateFamily, CanonicalStateLayout,
+    CfgEvalInputs, CfgEvalSnapshot, CfgFunction, CfgScalar, CfgStateAllocation, CfgValueKind,
+    ComplexStep, EmissionCensus, MirModel, ValueId, differentiate, evaluate_cfg,
     prune_cfg_to_outputs,
 };
-use crate::codegen::ColumnAxis;
-use crate::jit::cfg_lanes::scalarize_lanes;
+use crate::codegen::{AssignmentStep, BytecodeProgram, ColumnAxis, CompiledModel, Instruction};
+use crate::jit::cfg_lanes::{ScalarLanes, scalarize_lanes};
 use crate::jit::cfg_program::{CfgRuntimeBindings, lower_cfg_function};
 use crate::jit::expr::BranchUnknownRuntimeMapping;
 use crate::jit::plan_builder::canonical_branch_unknown_runtime_map;
@@ -39,6 +40,7 @@ use crate::native::abi::EvalContext;
 use crate::native::model::NativeRequiredStorage;
 use crate::native::runtime::ExecutableMemory;
 use crate::native::x64::codegen::compile_value_function_artifact_from_ssa;
+use crate::rust_backend::canonical::{noise_plan_decline, stored_charges};
 use crate::rust_backend::discover_veriloga_sources;
 use crate::{CompilerOptions, VerilogACompiler};
 
@@ -1150,24 +1152,245 @@ fn the_cfg_jacobian_route_agrees_with_the_interpreter_and_the_oracles() {
     );
 }
 
-/// Which shipped modules the two state-slot numberings disagree about.
+/// Which context of the bytecode generator emitted each integration state
+/// slot, in the order `generate_from_ir` compiles them.
+///
+/// The generator's slot allocator is one monotonic counter, so the emission
+/// numbering *is* this sequence. Recovering it context by context — rather than
+/// reading the largest slot the model addresses — is what turns "the two
+/// numberings differ by ten slots" into "the extra ten are the noise-assignment
+/// replay and they sit in front of every contribution's slot", which is the
+/// difference between W-F's move being a shrink and being a renumbering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EmissionContext {
+    /// A parameter default, bound, or exclude program. Compiled first, and
+    /// therefore able to displace everything after it.
+    Parameter,
+    /// `ir.assignments`: the module's statements plus the derivative shadow
+    /// assignments the front end appends to them.
+    Assignment,
+    /// `ir.noise_assignments`, the clone carrying noise shadows.
+    NoiseAssignment,
+    /// An equation's own value program or peeled static condition — the
+    /// contribution-borne sites, at the position the per-site layout gives
+    /// them.
+    EquationPrimal,
+    /// An equation's resistive or reactive derivative program. A re-emission:
+    /// `d(l*r) = dl*r + l*dr` keeps the primal factors.
+    EquationDerivative,
+    /// A noise source's PSD, exponent, or injection-gain program.
+    NoiseSource,
+}
+
+/// Which operator took an integration slot.
+///
+/// The five spellings that share `limit_state_count`. Reported per context
+/// because it is what names the mechanism behind a re-emission: a `ddt`
+/// reappearing in a derivative program is the product rule keeping a primal
+/// factor, while a `$limit` reappearing there would be something else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EmittedOperator {
+    Ddt,
+    Idt,
+    IdtMod,
+    Limit,
+    CanonicalLimit,
+}
+
+/// One slot the generator's integration counter handed out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Emission {
+    context: EmissionContext,
+    operator: EmittedOperator,
+}
+
+/// Which integration-family slots one bytecode program allocates, in order.
+fn integration_emissions(program: &BytecodeProgram) -> impl Iterator<Item = EmittedOperator> + '_ {
+    program
+        .instructions
+        .iter()
+        .filter_map(|instruction| match instruction {
+            Instruction::DdtState(_) => Some(EmittedOperator::Ddt),
+            Instruction::IdtState(_) => Some(EmittedOperator::Idt),
+            Instruction::IdtModState(_) => Some(EmittedOperator::IdtMod),
+            Instruction::LimitState(_) => Some(EmittedOperator::Limit),
+            Instruction::CanonicalLimitState(_) => Some(EmittedOperator::CanonicalLimit),
+            _ => None,
+        })
+}
+
+fn tag_program(tags: &mut Vec<Emission>, program: &BytecodeProgram, context: EmissionContext) {
+    tags.extend(integration_emissions(program).map(|operator| Emission { context, operator }));
+}
+
+fn tag_assignment_steps(
+    tags: &mut Vec<Emission>,
+    steps: &[AssignmentStep],
+    context: EmissionContext,
+) {
+    for step in steps {
+        match step {
+            AssignmentStep::Assign(assignment) => tag_program(tags, &assignment.program, context),
+            // The *value* first: `compile_assignment_items` binds the value
+            // program before it compiles the index expression.
+            AssignmentStep::AssignIndexed { index, value, .. } => {
+                tag_program(tags, value, context);
+                tag_program(tags, index, context);
+            }
+            AssignmentStep::Loop { condition, body } => {
+                tag_program(tags, condition, context);
+                tag_assignment_steps(tags, body, context);
+            }
+        }
+    }
+}
+
+/// Every integration-family slot the compiled model allocates, tagged with the
+/// context that allocated it, in generator order.
+///
+/// Mirrors `CodeGenerator::generate_from_ir` exactly, including the ordering
+/// detail that decides the answer: a current contribution's
+/// `jacobian_programs` holds **two entries per compiled derivative** — the
+/// positive and negative KCL rows share one `compile_expr` result by `clone()`
+/// — so scanning both would count every re-emission twice.
+fn integration_emission_contexts(model: &CompiledModel) -> Vec<Emission> {
+    let mut tags = Vec::new();
+
+    for parameter in &model.parameters {
+        for program in parameter
+            .default_program
+            .iter()
+            .chain(parameter.min_program.iter())
+            .chain(parameter.max_program.iter())
+            .chain(parameter.exclude_programs.iter())
+        {
+            tag_program(&mut tags, program, EmissionContext::Parameter);
+        }
+    }
+
+    tag_assignment_steps(
+        &mut tags,
+        &model.assignment_steps,
+        EmissionContext::Assignment,
+    );
+    tag_assignment_steps(
+        &mut tags,
+        &model.noise_assignment_steps,
+        EmissionContext::NoiseAssignment,
+    );
+
+    for stamp in &model.stamp_programs {
+        tag_program(
+            &mut tags,
+            &stamp.value_program,
+            EmissionContext::EquationPrimal,
+        );
+        if let Some(condition) = &stamp.static_condition {
+            tag_program(&mut tags, condition, EmissionContext::EquationPrimal);
+        }
+        // One `compile_expr` per *pair* of entries on a current contribution,
+        // one per entry on a branch row.
+        let stride = if stamp.branch_ordinal.is_none() { 2 } else { 1 };
+        for entry in stamp.jacobian_programs.iter().step_by(stride) {
+            tag_program(
+                &mut tags,
+                &entry.program,
+                EmissionContext::EquationDerivative,
+            );
+        }
+        for entry in stamp.reactive_jacobians.iter().step_by(stride) {
+            tag_program(
+                &mut tags,
+                &entry.program,
+                EmissionContext::EquationDerivative,
+            );
+        }
+    }
+
+    for source in &model.noise_sources {
+        tag_program(&mut tags, &source.psd_program, EmissionContext::NoiseSource);
+        if let Some(program) = &source.exponent_program {
+            tag_program(&mut tags, program, EmissionContext::NoiseSource);
+        }
+        for injection in &source.injections {
+            tag_program(
+                &mut tags,
+                &injection.gain_program,
+                EmissionContext::NoiseSource,
+            );
+        }
+    }
+
+    tags
+}
+
+/// What the emission sequence does to the per-site numbering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PrefixShape {
+    /// The two numberings are the same length and the same order.
+    Identical,
+    /// Slots `0..per_site` mean the same thing under both numberings and the
+    /// extra emissions sit after them. Adopting the per-site numbering shrinks
+    /// the state vector and moves nothing.
+    Append,
+    /// A re-emission sits in front of a site's own slot, so adopting the
+    /// per-site numbering permutes the array. This is the case that moves
+    /// `RUNTIME_CHECKPOINT_STATE_VERSION`.
+    Interleave,
+}
+
+/// Whether the first `statements + contributions` emissions are exactly the
+/// per-site sequence.
+///
+/// The per-site numbering walks statements then contributions; the generator
+/// walks parameters, assignments, the noise-assignment clone, then each
+/// equation's value program followed immediately by that equation's own
+/// derivatives. The prefix therefore survives exactly when the first
+/// `statements` emissions all come from the assignment pass and the next
+/// `contributions` all come from an equation's own value program — which is
+/// what this checks, tag by tag, rather than inferring it from the counts.
+fn prefix_shape(tags: &[Emission], statements: usize, contributions: usize) -> PrefixShape {
+    let sites = statements + contributions;
+    let prefix_holds = tags.len() >= sites
+        && tags[..statements]
+            .iter()
+            .all(|emission| emission.context == EmissionContext::Assignment)
+        && tags[statements..sites]
+            .iter()
+            .all(|emission| emission.context == EmissionContext::EquationPrimal);
+    match (prefix_holds, tags.len() == sites) {
+        (true, true) => PrefixShape::Identical,
+        (true, false) => PrefixShape::Append,
+        (false, _) => PrefixShape::Interleave,
+    }
+}
+
+/// Which shipped modules the two state-slot numberings disagree about, why, and
+/// whether the difference is a shrink or a renumbering.
 ///
 /// [`CfgStateAllocation`] numbers analog-operator records per *site*; the
-/// bytecode generator numbers them per *emission*, and a module with noise in
-/// an assignment is emitted twice, so one canonical `ddt` can own two slots.
-/// `CfgStateAllocation`'s own documentation names the two spaces and says the
-/// second is not proven to agree; this measures how many modules actually
-/// differ and by how many slots, which is what decides whether moving the JIT
-/// runtime to per-site numbering is a shipped-behaviour change at all.
+/// bytecode generator numbers them per *emission*, with one monotonic counter
+/// running across every context `generate_from_ir` compiles. This census reads
+/// that counter's sequence back off the compiled model
+/// ([`integration_emission_contexts`]) and answers three questions per module:
 ///
-/// The measurement is direct rather than inferred:
-/// [`NativeRequiredStorage::for_model`] reports how many integration slots the
-/// *compiled* model addresses — the per-emission count, read off the emitted
-/// instruction stream — against
-/// [`CfgStateAllocation::family_len`]'s per-site count for the same family.
-/// `agrees_with_emission_allocation` is reported alongside, because it is the
-/// sufficient condition callers actually consult and a divergence between the
-/// two would mean that predicate is answering the wrong question.
+/// 1. **How many.** The per-site count from [`CfgStateAllocation::family_len`]
+///    against the emission count, and against
+///    [`NativeRequiredStorage::for_model`]'s figure — which scans a *subset* of
+///    the contexts, deliberately, because it sizes storage for the programs the
+///    native plan lowers and the plan lowers no noise-assignment step and no
+///    injection gain. The two figures differing is expected; the census reports
+///    both so that a change to either is read rather than absorbed.
+/// 2. **Where from.** The per-context breakdown, which is what says whether the
+///    extra slots are the noise-assignment replay, the derivative programs, or
+///    the PSD programs.
+/// 3. **Append or interleave.** [`prefix_shape`], which is what decides whether
+///    W-F's move is a shrink or a renumbering that moves
+///    `RUNTIME_CHECKPOINT_STATE_VERSION`.
+///
+/// [`CfgStateAllocation::agrees_with_emission_allocation`] is checked against
+/// the measurement on every module: a `true` that does not coincide is an
+/// unsound licence and fails the test.
 #[test]
 #[ignore = "release qualification; run with --release --features native -- --ignored --nocapture"]
 fn the_two_state_slot_numberings_are_censused_over_the_shipped_corpus() {
@@ -1176,8 +1399,11 @@ fn the_two_state_slot_numberings_are_censused_over_the_shipped_corpus() {
     let mut models = 0_usize;
     let mut with_state = 0_usize;
     let mut with_noise = 0_usize;
-    let mut disagreeing_predicate = 0_usize;
+    let mut unsound_predicate = 0_usize;
+    let mut imprecise_predicate = 0_usize;
     let mut differing_counts = 0_usize;
+    let mut appending = 0_usize;
+    let mut interleaving = 0_usize;
     let filter = std::env::var("RSPICE_CFG_CENSUS_FILTER").ok();
     for candidate in candidates {
         for module in &candidate.modules {
@@ -1200,15 +1426,47 @@ fn the_two_state_slot_numberings_are_censused_over_the_shipped_corpus() {
             let artifact = &runtime.canonical_ir;
             models += 1;
             let Ok(cfg) = CfgModel::from_hir(&artifact.hir, &artifact.mir) else {
+                println!("state-slots model={module} refused=cfg-lowering");
                 continue;
             };
             let Ok(state) = CfgStateAllocation::build(&artifact.hir, &cfg.function) else {
+                println!("state-slots model={module} refused=state-allocation");
                 continue;
             };
             let per_site = state.family_len(CanonicalStateFamily::Integration);
-            let per_emission = NativeRequiredStorage::for_model(&runtime.model).state_values;
+            let native_storage = NativeRequiredStorage::for_model(&runtime.model).state_values;
             let agrees = state.agrees_with_emission_allocation(&artifact.hir);
+            let contexts = EmissionCensus::of(&artifact.hir);
             let noise = !runtime.model.noise_sources.is_empty();
+
+            // Where the module's sites fall across the generator's
+            // assignments/equations boundary.
+            let statement_sites = CanonicalStateLayout::statement_prefix(&artifact.hir)
+                .family_len(CanonicalStateFamily::Integration);
+            let contribution_sites = per_site.saturating_sub(statement_sites);
+
+            let tags = integration_emission_contexts(&runtime.model);
+            let per_emission = tags.len();
+            let breakdown = |wanted: EmissionContext| {
+                tags.iter()
+                    .filter(|emission| emission.context == wanted)
+                    .count()
+            };
+            // Which operator each re-emission is, which is what names the
+            // mechanism rather than just its size.
+            let reemitted = |wanted: EmittedOperator| {
+                tags.iter()
+                    .filter(|emission| {
+                        emission.operator == wanted
+                            && !matches!(
+                                emission.context,
+                                EmissionContext::Assignment | EmissionContext::EquationPrimal
+                            )
+                    })
+                    .count()
+            };
+            let shape = prefix_shape(&tags, statement_sites, contribution_sites);
+
             if per_site > 0 {
                 with_state += 1;
             }
@@ -1217,38 +1475,1078 @@ fn the_two_state_slot_numberings_are_censused_over_the_shipped_corpus() {
             }
             if per_site != per_emission {
                 differing_counts += 1;
+                match shape {
+                    PrefixShape::Append | PrefixShape::Identical => appending += 1,
+                    PrefixShape::Interleave => interleaving += 1,
+                }
             }
-            // `agrees_with_emission_allocation` is documented as a sufficient
-            // condition for the two spaces coinciding, so this combination —
-            // the predicate saying they agree while the counts differ — is the
-            // one that says the condition is not sufficient. It is not zero:
-            // see the census's own documentation.
             if agrees && per_site != per_emission {
-                disagreeing_predicate += 1;
+                unsound_predicate += 1;
             }
-            if per_site != per_emission || (!agrees && noise) {
-                println!(
-                    "state-slots model={module} per_site={per_site} per_emission={per_emission} \
-                     agrees_with_emission_allocation={agrees} noise_sources={}",
-                    runtime.model.noise_sources.len()
-                );
+            if !agrees && per_site == per_emission {
+                imprecise_predicate += 1;
             }
+            println!(
+                "state-slots model={module} per_site={per_site} per_emission={per_emission} \
+                 native_required={native_storage} predicate={agrees} shape={shape:?} \
+                 sites[statements={statement_sites} contributions={contribution_sites}] \
+                 contexts[parameters={} assignments={} noise_assignments={} equation_primal={} \
+                 equation_derivative={} noise_sources={}] \
+                 reemitted[ddt={} idt={} idtmod={} limit={} canonical_limit={}] \
+                 hir[parameters={} statements={} contributions={} noise={}] noise_sources={}",
+                breakdown(EmissionContext::Parameter),
+                breakdown(EmissionContext::Assignment),
+                breakdown(EmissionContext::NoiseAssignment),
+                breakdown(EmissionContext::EquationPrimal),
+                breakdown(EmissionContext::EquationDerivative),
+                breakdown(EmissionContext::NoiseSource),
+                reemitted(EmittedOperator::Ddt),
+                reemitted(EmittedOperator::Idt),
+                reemitted(EmittedOperator::IdtMod),
+                reemitted(EmittedOperator::Limit),
+                reemitted(EmittedOperator::CanonicalLimit),
+                contexts.parameters,
+                contexts.statements,
+                contexts.contributions,
+                contexts.has_noise,
+                runtime.model.noise_sources.len(),
+            );
         }
     }
     println!(
         "state-slots models={models} with_integration_state={with_state} with_noise={with_noise} \
-         differing_counts={differing_counts} predicate_wrong={disagreeing_predicate}"
+         differing_counts={differing_counts} append={appending} interleave={interleaving} \
+         unsound_predicate={unsound_predicate} imprecise_predicate={imprecise_predicate}"
+    );
+    // The soundness direction is an assertion, because a caller resuming a
+    // foreign checkpoint acts on it: the predicate saying the two spaces
+    // coincide while the measurement says they do not is an unsound licence.
+    assert_eq!(
+        unsound_predicate, 0,
+        "agrees_with_emission_allocation licensed a module whose two state-slot numberings \
+         measurably differ"
     );
     // Deliberately not an equality assertion on the counts. This is a census:
-    // what it establishes is *that* the two spaces differ and on which modules,
-    // and pinning a number here would freeze a measurement of the bytecode
-    // generator that this lane does not own. What it does assert is the shape
-    // of the finding, so that a change making the two numberings agree — or
-    // making the predicate detect the difference — fails here and is read
-    // rather than absorbed.
+    // what it establishes is *that* the two spaces differ, on which modules,
+    // and whether the extra slots append or interleave. Pinning a number here
+    // would freeze a measurement of the bytecode generator that this lane does
+    // not own. What it does assert is the shape of the finding, so that a
+    // change making the two numberings agree fails here and is read rather than
+    // absorbed.
     assert!(
-        differing_counts > 0 && disagreeing_predicate > 0,
-        "the two state-slot numberings now agree, or the predicate now detects where they do \
-         not; either is a change to the ruling recorded on CfgStateAllocation and wants reading"
+        differing_counts > 0,
+        "the two state-slot numberings now agree on every shipped module; that is a change to \
+         the ruling recorded on CfgStateAllocation and wants reading"
+    );
+    if filter.is_none() {
+        assert_eq!(models, 43, "the shipped census is 43 modules");
+    }
+}
+
+/// What a complex-step probe of one set of `(equation, unknown)` pairs found.
+#[derive(Default)]
+struct ChargeProbe {
+    /// Pairs whose `d(charge)/d(unknown)` is measurably nonzero at the drawn
+    /// bias.
+    nonzero: usize,
+    /// Pairs no oracle can be asked about: a lane outside the seed list, or an
+    /// equation this route found no charge for at all.
+    unmapped: usize,
+    worst: f64,
+    case: Option<String>,
+}
+
+/// Ask the complex-step oracle whether each pair's charge derivative is zero.
+///
+/// Grouped by lane, because one complex-step evaluation perturbs one unknown
+/// and answers for *every* charge at once: on a compact model that is the
+/// difference between one interpretation per pair and one per distinct unknown.
+#[allow(clippy::too_many_arguments)]
+fn probe_charge_pairs(
+    mut pairs: Vec<(usize, usize)>,
+    charges: &[Option<ValueId>],
+    seeds: &[AdSeed],
+    differentiated: &CfgFunction,
+    point: &OperatingPoint,
+    node_count: usize,
+    branch_count: usize,
+    found: &mut ChargeProbe,
+) {
+    pairs.sort_unstable_by_key(|(equation, lane)| (*lane, *equation));
+    let mut current: Option<(usize, CfgEvalSnapshot<ComplexStep>)> = None;
+    for (equation, lane) in pairs {
+        let Some(seed) = seeds.get(lane).copied() else {
+            found.unmapped += 1;
+            continue;
+        };
+        let Some(charge) = charges.get(equation).copied().flatten() else {
+            found.unmapped += 1;
+            continue;
+        };
+        if current.as_ref().is_none_or(|(held, _)| *held != lane) {
+            let complex = point.complex_inputs(node_count, branch_count, seed);
+            current = evaluate_cfg(differentiated, &complex)
+                .ok()
+                .map(|snapshot| (lane, snapshot));
+        }
+        let Some((_, snapshot)) = current.as_ref() else {
+            continue;
+        };
+        let Some(value) = snapshot.value(charge) else {
+            continue;
+        };
+        let derivative = value.derivative();
+        // Scaled against the charge it belongs to, and bounded above for the
+        // reason `tests/cfg_derivatives.rs` gives: a reading twelve orders
+        // above its own primal is the perturbed evaluation overflowing rather
+        // than a statement about a derivative.
+        let scale = value.real().abs().max(f64::MIN_POSITIVE);
+        if derivative.abs() > scale * ORACLE_SIGNIFICANCE
+            && derivative.abs() < scale * ORACLE_DIVERGENCE_FACTOR
+        {
+            found.nonzero += 1;
+            if derivative.abs() > found.worst {
+                found.worst = derivative.abs();
+                found.case = Some(format!(
+                    "d(charge {equation})/d(lane {lane})={derivative:.6e} charge={:.6e}",
+                    value.real()
+                ));
+            }
+        }
+    }
+}
+
+#[derive(Default)]
+struct ReactiveTally {
+    models: usize,
+    /// Pairs the CFG route stamps, the shipped route does not, and whose
+    /// complex-step derivative is nonzero — a capacitance missing from the
+    /// shipped AC matrix. Reported, not asserted: it is a defect in the route
+    /// this lane is replacing, not in the one it is building.
+    cfg_only_nonzero: usize,
+    /// Models whose CFG carries no stored charge at all, so there is no
+    /// reactive matrix to lower.
+    resistive_models: usize,
+    charged_equations: usize,
+    reactive_programs: usize,
+    refused_programs: usize,
+    lowered_instructions: usize,
+    executed: usize,
+    comparisons: usize,
+    runtime_errors: usize,
+    oracle_comparisons: usize,
+    sparsity: SparsityTally,
+    sparsity_unpaired: usize,
+}
+
+/// Reactive Jacobians from CFG-level AD, lowered on the block route and checked
+/// against everything that can answer.
+///
+/// # What a reactive Jacobian is, and why it is a second program set
+///
+/// The shipped route keeps `dQ/dx` apart from `dI/dx` because the two are
+/// stamped by different callers at different times: the conduction matrix goes
+/// into every Newton iteration, while `StampProgram::reactive_jacobians` is
+/// read only by `VerilogADevice::stamp_reactive`, whose caller multiplies each
+/// entry by `jω`. Transient does not use it at all — there the `ddt` operator
+/// carries its own companion coefficient inside the residual, and its
+/// derivative is `ddt_companion`, which is already in the conduction matrix. So
+/// this is the small-signal capacitance matrix and nothing else.
+///
+/// # Where the charge comes from on this route
+///
+/// [`stored_charges`] — the CFG-level extraction the generated backend already
+/// ships — rather than a fourth copy of the peel. It resolves the charge
+/// through block parameters, which is what a guarded contribution reaches its
+/// equation as; the `IrExpr` and MIR peels the other two routes use see a
+/// `Conditional` node instead and cannot follow one. The sparsity table below
+/// is where that difference shows up, in the `cfg_only` column.
+///
+/// Three questions, and they are different:
+///
+/// 1. **Totality.** Does every entry of every charge row lower onto the block
+///    model, and if not, which construct stopped it?
+/// 2. **Value.** Does the compiled entry agree with the reference interpreter
+///    evaluating the same scalarized function, and with a complex-step
+///    derivative of the *primal charge* — an oracle containing no chain rule?
+/// 3. **Sparsity.** Does the set of `(equation, unknown)` pairs match the one
+///    the shipped planner enumerates in `reactive_jacobians`? A pair the
+///    shipped route stamps and this one does not is a dropped capacitance
+///    unless its complex-step derivative is zero, and
+///    [`SparsityTally::shipped_only_nonzero`] is what decides which.
+#[test]
+#[ignore = "release qualification; run with --release --features native -- --ignored --nocapture"]
+fn the_cfg_reactive_jacobian_route_agrees_with_the_interpreter_and_the_oracles() {
+    let root = shipped_model_root();
+    let candidates = discover_veriloga_sources(&root).expect("discover shipped Verilog-A sources");
+    let mut tally = ReactiveTally::default();
+    let mut worst_overall = 0.0_f64;
+    let mut worst_oracle_overall = 0.0_f64;
+    let filter = std::env::var("RSPICE_CFG_CENSUS_FILTER").ok();
+    for candidate in candidates {
+        for module in &candidate.modules {
+            if filter
+                .as_deref()
+                .is_some_and(|filter| !module.contains(filter))
+            {
+                continue;
+            }
+            let started = std::time::Instant::now();
+            let mut options = CompilerOptions::default();
+            options.include_paths.push(root.clone());
+            options.defines = candidate.compile_profile.defines.clone();
+            options.undefines = candidate.compile_profile.undefines.clone();
+            let compiler = VerilogACompiler::new(options);
+            let runtime = compiler
+                .compile_file_runtime_with_metadata(&candidate.path, Some(module))
+                .unwrap_or_else(|error| {
+                    panic!("compile {} :: {module}: {error}", candidate.path.display())
+                });
+            let artifact = &runtime.canonical_ir;
+            tally.models += 1;
+            let Ok(mut cfg) = CfgModel::from_hir(&artifact.hir, &artifact.mir) else {
+                println!("cfg-reactive model={module} refused=cfg-lowering");
+                continue;
+            };
+
+            // Charges first: the extraction *builds* the values a scaled or
+            // summed charge needs (`k * ddt(q)` stores `k * q`, which exists
+            // nowhere until it is spliced in), so it has to run before the
+            // state allocation is read off the function and before anything is
+            // differentiated.
+            let charges = stored_charges(&mut cfg.function, &cfg.residuals);
+            let Ok(state) = CfgStateAllocation::build(&artifact.hir, &cfg.function) else {
+                println!("cfg-reactive model={module} refused=state-allocation");
+                continue;
+            };
+
+            let (seeds, correction_lane) = derivative_seeds(&cfg, &artifact.mir);
+            let mut differentiated = match differentiate(&cfg.function, &seeds) {
+                Ok(differentiated) => differentiated,
+                Err(error) => {
+                    println!("cfg-reactive model={module} refused=differentiate detail={error:?}");
+                    continue;
+                }
+            };
+            // Every read-out before anything evaluates or lowers: taking one
+            // appends an instruction, so a function captured earlier would not
+            // contain the later ones.
+            let rows: Vec<Vec<Option<ValueId>>> = charges
+                .iter()
+                .map(|charge| match charge {
+                    Some(charge) => differentiated.derivative_row(*charge),
+                    None => Vec::new(),
+                })
+                .collect();
+            let scalarized = match scalarize_lanes(&differentiated.function) {
+                Ok(scalarized) => scalarized,
+                Err(error) => {
+                    println!("cfg-reactive model={module} refused=scalarize detail={error}");
+                    continue;
+                }
+            };
+
+            let branch_unknowns =
+                canonical_branch_unknown_runtime_map(&runtime.model, &artifact.mir)
+                    .unwrap_or_else(|error| panic!("{module}: branch unknown map: {error}"));
+            let event_state_variables: Vec<Option<usize>> = artifact
+                .hir
+                .variables
+                .iter()
+                .filter(|variable| variable.is_state)
+                .map(|variable| {
+                    runtime
+                        .model
+                        .variable_names
+                        .iter()
+                        .position(|name| *name == variable.name)
+                })
+                .collect();
+            let bindings = CfgRuntimeBindings::from_mir(
+                module.as_str(),
+                &artifact.mir,
+                branch_unknowns,
+                event_state_variables,
+            );
+            let state_len = state.family_len(CanonicalStateFamily::Integration) + 8;
+            let parameter_defaults: Vec<Option<f64>> = artifact
+                .mir
+                .parameters
+                .iter()
+                .map(|parameter| parameter.default)
+                .collect();
+            let mut points: Vec<OperatingPoint> =
+                [(0x0005_EED1_u64, 0_u8), (0x00C0_FFEE, 2), (0x0000_BEEF, 0)]
+                    .into_iter()
+                    .map(|(seed, analysis)| {
+                        OperatingPoint::new(
+                            seed,
+                            analysis,
+                            &parameter_defaults,
+                            bindings.terminal_count,
+                            bindings.internal_node_count,
+                            &bindings.branch_unknowns,
+                            state_len,
+                            cfg.event_state_candidates.len(),
+                        )
+                    })
+                    .collect();
+            let variables = vec![0.0_f64; runtime.model.num_variables + 8];
+
+            let charged_equations = charges.iter().filter(|charge| charge.is_some()).count();
+            tally.charged_equations += charged_equations;
+            if charged_equations == 0 {
+                tally.resistive_models += 1;
+            }
+
+            // ---- sparsity ---------------------------------------------------
+            let node_count = artifact.mir.nodes.len();
+            let mut cfg_pairs: HashSet<(usize, usize)> = HashSet::new();
+            for (equation, row) in rows.iter().enumerate() {
+                for (lane, entry) in row.iter().enumerate() {
+                    if entry.is_some() && Some(lane) != correction_lane {
+                        cfg_pairs.insert((equation, lane));
+                    }
+                }
+            }
+            let mut shipped_pairs: HashSet<(usize, usize)> = HashSet::new();
+            for (equation, program) in runtime.model.stamp_programs.iter().enumerate() {
+                for entry in &program.reactive_jacobians {
+                    shipped_pairs
+                        .insert((equation, shipped_entry_lane(&entry.col_axis, node_count)));
+                }
+            }
+            let paired = runtime.model.stamp_programs.len() == cfg.residuals.len();
+            let (shared, cfg_only, shipped_only) = if paired {
+                (
+                    cfg_pairs.intersection(&shipped_pairs).count(),
+                    cfg_pairs.difference(&shipped_pairs).count(),
+                    shipped_pairs.difference(&cfg_pairs).count(),
+                )
+            } else {
+                tally.sparsity_unpaired += 1;
+                (0, 0, 0)
+            };
+            tally.sparsity.shared += shared;
+            tally.sparsity.cfg_only += cfg_only;
+            tally.sparsity.shipped_only += shipped_only;
+
+            // Both directions get asked the same question, because for the
+            // reactive matrix both are findings and they are different ones.
+            //
+            // * A **shipped-only** pair with a nonzero `d(charge)/d(unknown)`
+            //   is a capacitance *this* route drops.
+            // * A **cfg-only** pair with a nonzero one is a capacitance the
+            //   *shipped* route drops — `DeviceIR::extract_charge` refuses a
+            //   `ddt` in a shape it does not know and logs a warning rather
+            //   than failing, so a whole reactive row can be missing from the
+            //   AC matrix with nothing but a log line to say so.
+            let probe = |pairs: Vec<(usize, usize)>, sink: &mut ChargeProbe| {
+                probe_charge_pairs(
+                    pairs,
+                    &charges,
+                    &seeds,
+                    &differentiated.function,
+                    &points[0],
+                    artifact.mir.nodes.len(),
+                    artifact.mir.branches.len(),
+                    sink,
+                );
+            };
+            let mut shipped_only_probe = ChargeProbe::default();
+            let mut cfg_only_probe = ChargeProbe::default();
+            if paired {
+                if shipped_only > 0 {
+                    probe(
+                        shipped_pairs.difference(&cfg_pairs).copied().collect(),
+                        &mut shipped_only_probe,
+                    );
+                }
+                if cfg_only > 0 {
+                    probe(
+                        cfg_pairs.difference(&shipped_pairs).copied().collect(),
+                        &mut cfg_only_probe,
+                    );
+                }
+            }
+            tally.sparsity.shipped_only_nonzero += shipped_only_probe.nonzero;
+            tally.sparsity.shipped_only_unmapped += shipped_only_probe.unmapped;
+            tally.cfg_only_nonzero += cfg_only_probe.nonzero;
+
+            // ---- lowering, execution and comparison -------------------------
+            let mut reactive_programs = 0_usize;
+            let mut refused = 0_usize;
+            let mut instructions = 0_usize;
+            let mut executed = 0_usize;
+            let mut oracle_checks = 0_usize;
+            let mut worst = 0.0_f64;
+            let mut worst_case: Option<String> = None;
+            let mut worst_oracle = 0.0_f64;
+            let mut oracle_case: Option<String> = None;
+            let mut first_refusal: Option<String> = None;
+
+            for (equation, charge) in charges.iter().enumerate() {
+                let Some(charge) = *charge else { continue };
+                let mut outputs: Vec<(usize, ValueId)> = Vec::new();
+                for (lane, entry) in rows[equation].iter().enumerate() {
+                    if Some(lane) == correction_lane {
+                        continue;
+                    }
+                    if let Some(entry) = entry
+                        && let Some(scalar) = scalarized.scalar(*entry)
+                    {
+                        outputs.push((lane, scalar));
+                    }
+                }
+
+                // Sliced to the whole row once, then to each entry within it,
+                // for the reason the conduction census gives: pruning is linear
+                // in the function, so slicing the model per entry would be the
+                // equation count times the lane count passes over the whole
+                // body.
+                let row_outputs: Vec<ValueId> = outputs.iter().map(|(_, output)| *output).collect();
+                let (row_function, row_mapped) =
+                    prune_cfg_to_outputs(&scalarized.function, &row_outputs);
+                let outputs: Vec<(usize, ValueId)> = outputs
+                    .into_iter()
+                    .zip(row_mapped)
+                    .map(|((lane, _), mapped)| (lane, mapped))
+                    .collect();
+
+                for (lane, output) in outputs {
+                    let (pruned, pruned_outputs) = prune_cfg_to_outputs(&row_function, &[output]);
+                    let program =
+                        match lower_cfg_function(&pruned, pruned_outputs[0], &state, &bindings) {
+                            Ok(program) => program,
+                            Err(error) => {
+                                refused += 1;
+                                first_refusal.get_or_insert_with(|| error.to_string());
+                                continue;
+                            }
+                        };
+                    reactive_programs += 1;
+                    instructions += program.instructions().len();
+
+                    if executed >= EXECUTED_JACOBIAN_ENTRIES_PER_MODEL {
+                        continue;
+                    }
+                    let image = compile_value_function_artifact_from_ssa(&program)
+                        .unwrap_or_else(|error| panic!("{module} dQ{equation}/d{lane}: {error}"));
+                    let memory = ExecutableMemory::allocate(image.bytes())
+                        .unwrap_or_else(|error| panic!("{module} dQ{equation}/d{lane}: {error}"));
+                    let entry_point = memory.ptr_at(0).expect("entry inside published image");
+                    let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                        unsafe { std::mem::transmute(entry_point) };
+                    executed += 1;
+
+                    for (index, point) in points.iter_mut().enumerate() {
+                        let interpreter_inputs = point.interpreter_inputs(
+                            artifact.mir.nodes.len(),
+                            artifact.mir.branches.len(),
+                        );
+                        let Ok(snapshot) = evaluate_cfg(&pruned, &interpreter_inputs) else {
+                            continue;
+                        };
+                        let Some(reference) = snapshot.value(pruned_outputs[0]) else {
+                            continue;
+                        };
+                        let context = point.context();
+                        context.clear_runtime_error();
+                        let actual = function(&context, variables.as_ptr());
+                        if context.take_runtime_error().is_some() {
+                            tally.runtime_errors += 1;
+                            continue;
+                        }
+                        tally.comparisons += 1;
+                        if let Some(delta) = deviation(reference, actual)
+                            && delta > worst
+                        {
+                            worst = delta;
+                            worst_case = Some(format!(
+                                "d(charge {equation})/d(lane {lane}) point={index} \
+                                 interpreter={reference:.17e} block_program={actual:.17e}"
+                            ));
+                        }
+
+                        if index == 0 && oracle_checks < ORACLE_ENTRIES_PER_MODEL {
+                            oracle_checks += 1;
+                            let complex = point.complex_inputs(
+                                artifact.mir.nodes.len(),
+                                artifact.mir.branches.len(),
+                                seeds[lane],
+                            );
+                            if let Ok(snapshot) = evaluate_cfg(&differentiated.function, &complex)
+                                && let Some(value) = snapshot.value(charge)
+                            {
+                                let oracle = value.derivative();
+                                tally.oracle_comparisons += 1;
+                                let scale = oracle.abs().max(actual.abs());
+                                if scale > 1.0e-30
+                                    && let Some(delta) = deviation(oracle, actual)
+                                    && delta > worst_oracle
+                                {
+                                    worst_oracle = delta;
+                                    oracle_case = Some(format!(
+                                        "d(charge {equation})/d(lane {lane}) \
+                                         complex_step={oracle:.17e} block_program={actual:.17e}"
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            tally.reactive_programs += reactive_programs;
+            tally.refused_programs += refused;
+            tally.lowered_instructions += instructions;
+            tally.executed += executed;
+            worst_overall = worst_overall.max(worst);
+            worst_oracle_overall = worst_oracle_overall.max(worst_oracle);
+            println!(
+                "cfg-reactive model={module} equations={} charged={charged_equations} \
+                 shipped_reactive_rows={} reactive_programs={reactive_programs} refused={refused} \
+                 instructions={instructions} executed={executed} \
+                 max_relative_deviation={worst:.3e} oracle_deviation={worst_oracle:.3e} \
+                 sparsity[shared={shared} cfg_only={cfg_only} shipped_only={shipped_only} \
+                 cfg_only_nonzero={} shipped_only_nonzero={}{}] \
+                 seconds={:.1}{}{}{}{}{}",
+                cfg.residuals.len(),
+                runtime
+                    .model
+                    .stamp_programs
+                    .iter()
+                    .filter(|stamp| !stamp.reactive_jacobians.is_empty())
+                    .count(),
+                cfg_only_probe.nonzero,
+                shipped_only_probe.nonzero,
+                if paired { "" } else { " UNPAIRED" },
+                started.elapsed().as_secs_f64(),
+                shipped_only_probe
+                    .case
+                    .map(|case| format!(" SHIPPED_ONLY_NONZERO[{case}]"))
+                    .unwrap_or_default(),
+                cfg_only_probe
+                    .case
+                    .map(|case| format!(" SHIPPED_DROPS_CAPACITANCE[{case}]"))
+                    .unwrap_or_default(),
+                worst_case
+                    .map(|case| format!(" worst_case[{case}]"))
+                    .unwrap_or_default(),
+                oracle_case
+                    .map(|case| format!(" oracle_case[{case}]"))
+                    .unwrap_or_default(),
+                first_refusal
+                    .map(|refusal| format!(" first_refusal={refusal}"))
+                    .unwrap_or_default(),
+            );
+        }
+    }
+    println!(
+        "cfg-reactive models={} resistive_models={} charged_equations={} reactive_programs={} \
+         refused_programs={} lowered_instructions={} executed={} comparisons={} runtime_errors={} \
+         oracle_comparisons={} sparsity[shared={} cfg_only={} shipped_only={} \
+         cfg_only_nonzero={} shipped_only_nonzero={} shipped_only_unmapped={} \
+         unpaired_models={}] \
+         max_relative_deviation={worst_overall:.3e} max_oracle_deviation={worst_oracle_overall:.3e}",
+        tally.models,
+        tally.resistive_models,
+        tally.charged_equations,
+        tally.reactive_programs,
+        tally.refused_programs,
+        tally.lowered_instructions,
+        tally.executed,
+        tally.comparisons,
+        tally.runtime_errors,
+        tally.oracle_comparisons,
+        tally.sparsity.shared,
+        tally.sparsity.cfg_only,
+        tally.sparsity.shipped_only,
+        tally.cfg_only_nonzero,
+        tally.sparsity.shipped_only_nonzero,
+        tally.sparsity.shipped_only_unmapped,
+        tally.sparsity_unpaired,
+    );
+    assert_eq!(
+        tally.sparsity.shipped_only_nonzero, 0,
+        "the CFG route drops a reactive Jacobian entry the shipped route stamps and the primal \
+         charge's own complex-step derivative says is nonzero"
+    );
+    if filter.is_none() {
+        assert_eq!(tally.models, 43, "the shipped census is 43 modules");
+    }
+    assert!(
+        tally.comparisons > 0,
+        "the census must actually execute the lowered reactive Jacobian programs"
+    );
+}
+
+/// How many noise values per model are compiled and executed.
+///
+/// The same argument the residual census makes: a noise power shares nearly all
+/// of its cone with the operating point the same body computes, so machine code
+/// for every magnitude in a compact model measures nothing the first few do
+/// not.
+const EXECUTED_NOISE_VALUES_PER_MODEL: usize = 6;
+
+#[derive(Default)]
+struct NoiseTally {
+    models: usize,
+    /// Models the body lowers no noise process for. A silent model is not a
+    /// refusal: most compact models declare no noise at all.
+    silent_models: usize,
+    processes: usize,
+    shipped_sources: usize,
+    /// Processes the two routes agree exist, by process id and by shape.
+    paired: usize,
+    /// Processes one route carries and the other does not, or that disagree
+    /// about kind, exponent, or table width.
+    unpaired: usize,
+    values: usize,
+    lowered_primal: usize,
+    lowered_differentiated: usize,
+    refused: usize,
+    lowered_instructions: usize,
+    executed: usize,
+    comparisons: usize,
+    runtime_errors: usize,
+    /// Models whose noise slice the generated backend declines, so the flat
+    /// HIR-driven emitter carries them.
+    flat_fallback_models: usize,
+}
+
+/// What one noise process asks the body for, named.
+fn noise_process_values(process: &CfgNoiseProcess) -> Vec<(String, ValueId)> {
+    let mut values = vec![
+        ("active".to_string(), process.active),
+        ("psd".to_string(), process.psd),
+    ];
+    if let Some(exponent) = process.exponent {
+        values.push(("exponent".to_string(), exponent));
+    }
+    for (index, entry) in process.table.iter().enumerate() {
+        values.push((format!("table[{index}]"), *entry));
+    }
+    values
+}
+
+/// Noise magnitudes lowered on the block route and checked against the
+/// interpreter, with the correspondence to the shipped noise programs censused
+/// alongside.
+///
+/// # What a noise program is on each route, and why they are compared this way
+///
+/// The bytecode route compiles one `psd_program` and one optional
+/// `exponent_program` per `CompiledNoiseSource`, out of the flat `IrExpr` the
+/// front end extracted, and the native plan lowers exactly those two. The CFG
+/// route has the same magnitudes as ordinary values of the body — a
+/// `CfgNoiseProcess` names them — and `NoiseProcess` itself lowers to the
+/// constant zero, because a noise source contributes nothing large-signal.
+/// Everything a magnitude needs is therefore already covered by the block
+/// lowering, and what this census establishes is that it *is* covered: that
+/// every magnitude the shipped route compiles has a block program, that the two
+/// routes name the same processes, and that the block program agrees with the
+/// reference interpreter.
+///
+/// The oracle is the interpreter rather than the shipped bytecode, deliberately
+/// and for a reason that is not convenience: a shipped `psd_program` reads
+/// variable slots that only the shipped assignment pass fills, so executing one
+/// at an operating point means replaying `assignment_steps` and
+/// `noise_assignment_steps` with the runtime's own event-state and activation
+/// rules. A census that reimplemented that replay would be measuring its own
+/// copy of the runtime. `evaluate_cfg` is the semantic authority every other
+/// backend is checked against, and it needs no replay.
+///
+/// # The two-pass rule, kept
+///
+/// `plan_noise` cuts its slice from the primal body first and from the
+/// differentiated one only if that fails, because six shipped models read a
+/// `ddx` inside a noise power and only the AD pass resolves one. This census
+/// keeps the same rule per value and reports which pass carried it, so a model
+/// moving between the two is visible.
+#[test]
+#[ignore = "release qualification; run with --release --features native -- --ignored --nocapture"]
+fn the_cfg_noise_route_agrees_with_the_interpreter_and_the_shipped_plan() {
+    let root = shipped_model_root();
+    let candidates = discover_veriloga_sources(&root).expect("discover shipped Verilog-A sources");
+    let mut tally = NoiseTally::default();
+    let mut worst_overall = 0.0_f64;
+    let filter = std::env::var("RSPICE_CFG_CENSUS_FILTER").ok();
+    for candidate in candidates {
+        for module in &candidate.modules {
+            if filter
+                .as_deref()
+                .is_some_and(|filter| !module.contains(filter))
+            {
+                continue;
+            }
+            let started = std::time::Instant::now();
+            let mut options = CompilerOptions::default();
+            options.include_paths.push(root.clone());
+            options.defines = candidate.compile_profile.defines.clone();
+            options.undefines = candidate.compile_profile.undefines.clone();
+            let compiler = VerilogACompiler::new(options);
+            let runtime = compiler
+                .compile_file_runtime_with_metadata(&candidate.path, Some(module))
+                .unwrap_or_else(|error| {
+                    panic!("compile {} :: {module}: {error}", candidate.path.display())
+                });
+            let artifact = &runtime.canonical_ir;
+            tally.models += 1;
+            let Ok(cfg) = CfgModel::from_hir(&artifact.hir, &artifact.mir) else {
+                println!("cfg-noise model={module} refused=cfg-lowering");
+                continue;
+            };
+            let Ok(state) = CfgStateAllocation::build(&artifact.hir, &cfg.function) else {
+                println!("cfg-noise model={module} refused=state-allocation");
+                continue;
+            };
+
+            tally.processes += cfg.noise_processes.len();
+            tally.shipped_sources += runtime.model.noise_sources.len();
+            if cfg.noise_processes.is_empty() && runtime.model.noise_sources.is_empty() {
+                tally.silent_models += 1;
+            }
+
+            // ---- correspondence with the shipped noise programs -------------
+            //
+            // Keyed by `process_id`, which is the one name the two routes
+            // share: `DeviceIR` takes it from the front end's noise-site
+            // ordinal and the CFG lowering carries the same number on every
+            // `CfgNoiseProcess`.
+            let mut paired = 0_usize;
+            let mut unpaired = 0_usize;
+            let mut mismatch: Option<String> = None;
+            for source in &runtime.model.noise_sources {
+                let Some(process) = cfg
+                    .noise_processes
+                    .iter()
+                    .find(|process| usize::try_from(process.process_id) == Ok(source.process_id))
+                else {
+                    unpaired += 1;
+                    mismatch.get_or_insert_with(|| {
+                        format!("shipped process {} has no CFG process", source.process_id)
+                    });
+                    continue;
+                };
+                let shipped_table = source.table.as_ref().map_or(0, |(points, _)| points.len());
+                let kind_agrees = match process.kind {
+                    CanonicalNoiseSourceKind::White => {
+                        source.exponent_program.is_none() && source.table.is_none()
+                    }
+                    CanonicalNoiseSourceKind::Flicker => {
+                        source.exponent_program.is_some() && source.table.is_none()
+                    }
+                    CanonicalNoiseSourceKind::Table => source.table.is_some(),
+                };
+                if !kind_agrees || process.exponent.is_some() != source.exponent_program.is_some() {
+                    unpaired += 1;
+                    mismatch.get_or_insert_with(|| {
+                        format!(
+                            "process {} kind={:?} exponent={} against shipped exponent={} table={}",
+                            source.process_id,
+                            process.kind,
+                            process.exponent.is_some(),
+                            source.exponent_program.is_some(),
+                            shipped_table,
+                        )
+                    });
+                    continue;
+                }
+                paired += 1;
+            }
+            // A CFG process the shipped model has no source for is the other
+            // direction of the same finding.
+            for process in &cfg.noise_processes {
+                if !runtime
+                    .model
+                    .noise_sources
+                    .iter()
+                    .any(|source| usize::try_from(process.process_id) == Ok(source.process_id))
+                {
+                    unpaired += 1;
+                    mismatch.get_or_insert_with(|| {
+                        format!("CFG process {} has no shipped source", process.process_id)
+                    });
+                }
+            }
+            tally.paired += paired;
+            tally.unpaired += unpaired;
+
+            // ---- which emitter the generated backend uses -------------------
+            //
+            // The emitter's own rule, kept: the slice is cut from the primal
+            // body first and from the differentiated one only if that fails, so
+            // a model that declines on the primal has *not* fallen back until
+            // the second attempt declines too.
+            let seeds = derivative_seeds(&cfg, &artifact.mir).0;
+            let primal_decline = noise_plan_decline(artifact, &cfg, &cfg.function);
+            let mut differentiated: Option<AdFunction> = None;
+            let decline = match primal_decline {
+                None => None,
+                Some(primal) => {
+                    differentiated = differentiate(&cfg.function, &seeds).ok();
+                    match &differentiated {
+                        Some(resolved) => noise_plan_decline(artifact, &cfg, &resolved.function),
+                        None => Some(primal),
+                    }
+                }
+            };
+            if decline.is_some() {
+                tally.flat_fallback_models += 1;
+            }
+
+            if cfg.noise_processes.is_empty() {
+                println!(
+                    "cfg-noise model={module} processes=0 shipped_sources={} \
+                     plan_decline={decline:?} primal_decline={primal_decline:?} seconds={:.1}",
+                    runtime.model.noise_sources.len(),
+                    started.elapsed().as_secs_f64(),
+                );
+                continue;
+            }
+
+            // ---- lowering, execution and comparison -------------------------
+            let branch_unknowns =
+                canonical_branch_unknown_runtime_map(&runtime.model, &artifact.mir)
+                    .unwrap_or_else(|error| panic!("{module}: branch unknown map: {error}"));
+            let event_state_variables: Vec<Option<usize>> = artifact
+                .hir
+                .variables
+                .iter()
+                .filter(|variable| variable.is_state)
+                .map(|variable| {
+                    runtime
+                        .model
+                        .variable_names
+                        .iter()
+                        .position(|name| *name == variable.name)
+                })
+                .collect();
+            let bindings = CfgRuntimeBindings::from_mir(
+                module.as_str(),
+                &artifact.mir,
+                branch_unknowns,
+                event_state_variables,
+            );
+            let state_len = state.family_len(CanonicalStateFamily::Integration) + 8;
+            let parameter_defaults: Vec<Option<f64>> = artifact
+                .mir
+                .parameters
+                .iter()
+                .map(|parameter| parameter.default)
+                .collect();
+            // Noise first, because that is the analysis these magnitudes are
+            // evaluated in; a DC point alongside it so a `$analysis` guard
+            // inside a power is exercised both ways.
+            let mut points: Vec<OperatingPoint> = [(0x0000_5E15_u64, 3_u8), (0x0005_EED1, 0)]
+                .into_iter()
+                .map(|(seed, analysis)| {
+                    OperatingPoint::new(
+                        seed,
+                        analysis,
+                        &parameter_defaults,
+                        bindings.terminal_count,
+                        bindings.internal_node_count,
+                        &bindings.branch_unknowns,
+                        state_len,
+                        cfg.event_state_candidates.len(),
+                    )
+                })
+                .collect();
+            let variables = vec![0.0_f64; runtime.model.num_variables + 8];
+
+            // The scalarized differentiated body, cut once and only if a
+            // magnitude needs it: a `ddx` inside a noise power has no value
+            // until the AD pass resolves it, and running that pass on a model
+            // whose magnitudes lower from the primal would cost only time.
+            let mut resolved: Option<Option<ScalarLanes>> = None;
+
+            let mut lowered_primal = 0_usize;
+            let mut lowered_differentiated = 0_usize;
+            let mut refused = 0_usize;
+            let mut instructions = 0_usize;
+            let mut executed = 0_usize;
+            let mut worst = 0.0_f64;
+            let mut worst_case: Option<String> = None;
+            let mut first_refusal: Option<String> = None;
+
+            for process in &cfg.noise_processes {
+                for (name, value) in noise_process_values(process) {
+                    tally.values += 1;
+                    let (pruned, pruned_outputs) = prune_cfg_to_outputs(&cfg.function, &[value]);
+                    let mut program =
+                        lower_cfg_function(&pruned, pruned_outputs[0], &state, &bindings)
+                            .map(|program| (program, pruned, pruned_outputs[0], false));
+                    if program.is_err() {
+                        if resolved.is_none() {
+                            if differentiated.is_none() {
+                                differentiated = differentiate(&cfg.function, &seeds).ok();
+                            }
+                            resolved = Some(
+                                differentiated
+                                    .as_ref()
+                                    .and_then(|body| scalarize_lanes(&body.function).ok()),
+                            );
+                        }
+                        let scalarized = resolved.as_ref().expect("just filled");
+                        if let Some(scalarized) = scalarized.as_ref()
+                            && let Some(scalar) = scalarized.scalar(value)
+                        {
+                            let (pruned, outputs) =
+                                prune_cfg_to_outputs(&scalarized.function, &[scalar]);
+                            program = lower_cfg_function(&pruned, outputs[0], &state, &bindings)
+                                .map(|program| (program, pruned, outputs[0], true));
+                        }
+                    }
+                    let (program, pruned, output, differentiated) = match program {
+                        Ok(lowered) => lowered,
+                        Err(error) => {
+                            refused += 1;
+                            tally.refused += 1;
+                            first_refusal.get_or_insert_with(|| format!("{name}: {error}"));
+                            continue;
+                        }
+                    };
+                    if differentiated {
+                        lowered_differentiated += 1;
+                        tally.lowered_differentiated += 1;
+                    } else {
+                        lowered_primal += 1;
+                        tally.lowered_primal += 1;
+                    }
+                    instructions += program.instructions().len();
+
+                    if executed >= EXECUTED_NOISE_VALUES_PER_MODEL {
+                        continue;
+                    }
+                    let image = compile_value_function_artifact_from_ssa(&program).unwrap_or_else(
+                        |error| panic!("{module} process {} {name}: {error}", process.process_id),
+                    );
+                    let memory =
+                        ExecutableMemory::allocate(image.bytes()).unwrap_or_else(|error| {
+                            panic!("{module} process {} {name}: {error}", process.process_id)
+                        });
+                    let entry_point = memory.ptr_at(0).expect("entry inside published image");
+                    let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                        unsafe { std::mem::transmute(entry_point) };
+                    executed += 1;
+                    tally.executed += 1;
+
+                    for (index, point) in points.iter_mut().enumerate() {
+                        let interpreter_inputs = point.interpreter_inputs(
+                            artifact.mir.nodes.len(),
+                            artifact.mir.branches.len(),
+                        );
+                        let Ok(snapshot) = evaluate_cfg(&pruned, &interpreter_inputs) else {
+                            continue;
+                        };
+                        let Some(reference) = snapshot.value(output) else {
+                            continue;
+                        };
+                        let context = point.context();
+                        context.clear_runtime_error();
+                        let actual = function(&context, variables.as_ptr());
+                        if context.take_runtime_error().is_some() {
+                            tally.runtime_errors += 1;
+                            continue;
+                        }
+                        tally.comparisons += 1;
+                        if let Some(delta) = deviation(reference, actual)
+                            && delta > worst
+                        {
+                            worst = delta;
+                            worst_case = Some(format!(
+                                "process={} {name} point={index} interpreter={reference:.17e} \
+                                 block_program={actual:.17e}",
+                                process.process_id
+                            ));
+                        }
+                    }
+                }
+            }
+
+            tally.lowered_instructions += instructions;
+            worst_overall = worst_overall.max(worst);
+            println!(
+                "cfg-noise model={module} processes={} shipped_sources={} paired={paired} \
+                 unpaired={unpaired} primal={lowered_primal} differentiated={lowered_differentiated} \
+                 refused={refused} instructions={instructions} executed={executed} \
+                 max_relative_deviation={worst:.3e} plan_decline={decline:?} \
+                 primal_decline={primal_decline:?} seconds={:.1}{}{}{}",
+                cfg.noise_processes.len(),
+                runtime.model.noise_sources.len(),
+                started.elapsed().as_secs_f64(),
+                mismatch
+                    .map(|case| format!(" MISMATCH[{case}]"))
+                    .unwrap_or_default(),
+                worst_case
+                    .map(|case| format!(" worst_case[{case}]"))
+                    .unwrap_or_default(),
+                first_refusal
+                    .map(|refusal| format!(" first_refusal={refusal}"))
+                    .unwrap_or_default(),
+            );
+        }
+    }
+    println!(
+        "cfg-noise models={} silent_models={} processes={} shipped_sources={} paired={} \
+         unpaired={} values={} lowered_primal={} lowered_differentiated={} refused={} \
+         lowered_instructions={} executed={} comparisons={} runtime_errors={} \
+         flat_fallback_models={} max_relative_deviation={worst_overall:.3e}",
+        tally.models,
+        tally.silent_models,
+        tally.processes,
+        tally.shipped_sources,
+        tally.paired,
+        tally.unpaired,
+        tally.values,
+        tally.lowered_primal,
+        tally.lowered_differentiated,
+        tally.refused,
+        tally.lowered_instructions,
+        tally.executed,
+        tally.comparisons,
+        tally.runtime_errors,
+        tally.flat_fallback_models,
+    );
+    assert_eq!(
+        tally.unpaired, 0,
+        "the CFG body and the shipped noise programs disagree about which noise processes a \
+         module has, or about one's kind"
+    );
+    assert_eq!(
+        tally.refused, 0,
+        "the block route refuses a noise magnitude the shipped route compiles"
+    );
+    if filter.is_none() {
+        assert_eq!(tally.models, 43, "the shipped census is 43 modules");
+        // The flat fallback's whole remaining reach, pinned. Both models are
+        // silent — `EPFL_HEMT_10a` and `vbic_4T_et_cf` declare no noise source
+        // at all — so `plan_noise` declines on `NoPlannedSources` and there is
+        // nothing to plan. Every other module is carried by the CFG slice, on
+        // the primal body or on the differentiated one.
+        //
+        // Deliberately not *closed*. Making `plan_noise` accept an empty plan
+        // would route those two through the canonical emitter, and the two
+        // emitters do not write the same file for a silent model: the flat one
+        // opens with `#![allow(dead_code, non_snake_case, unused_assignments,
+        // unused_parens, unused_variables)]` and defines `LIMEXP_MAX` and
+        // `THERMAL_VOLTAGE_PER_K`, the canonical one omits `unused_assignments`
+        // and both constants. That is a change to the shipped bundle, which
+        // this lane does not make.
+        assert_eq!(
+            tally.silent_models, 2,
+            "the shipped corpus has two noise-free modules"
+        );
+        assert_eq!(
+            tally.flat_fallback_models, tally.silent_models,
+            "a module with noise sources now takes the flat noise emitter, or a silent one no \
+             longer does; either is a change to which emitter the generated bundle uses"
+        );
+    }
+    assert!(
+        tally.comparisons > 0,
+        "the census must actually execute the lowered noise programs"
     );
 }
