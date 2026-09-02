@@ -955,16 +955,22 @@ impl CodeGenerator {
         first_transition: &IrExpr,
         emit_ctx: &EmitContext,
     ) -> CompileResult<usize> {
-        let scalar_count = |definition: &crate::ir::ZiPolynomialDefinition| match definition {
-            crate::ir::ZiPolynomialDefinition::Coefficients(values) => Some(values.len()),
-            crate::ir::ZiPolynomialDefinition::Roots(values) => values.len().checked_mul(2),
+        let polynomial_layout = |definition: &crate::ir::ZiPolynomialDefinition| match definition {
+            crate::ir::ZiPolynomialDefinition::Coefficients(values) => {
+                ZiPolynomialLayout::Coefficients { len: values.len() }
+            }
+            crate::ir::ZiPolynomialDefinition::Roots(values) => {
+                ZiPolynomialLayout::Roots { len: values.len() }
+            }
         };
-        let numerator_scalars = scalar_count(numerator).ok_or_else(|| {
+        let numerator_layout = polynomial_layout(numerator);
+        let denominator_layout = polynomial_layout(denominator);
+        let numerator_scalars = numerator_layout.checked_value_count().ok_or_else(|| {
             CodeGenError::new(CodeGenErrorKind::InvalidExpression(
                 "Zi numerator root scalar count overflows usize".into(),
             ))
         })?;
-        let denominator_scalars = scalar_count(denominator).ok_or_else(|| {
+        let denominator_scalars = denominator_layout.checked_value_count().ok_or_else(|| {
             CodeGenError::new(CodeGenErrorKind::InvalidExpression(
                 "Zi denominator root scalar count overflows usize".into(),
             ))
@@ -988,13 +994,19 @@ impl CodeGenerator {
         };
         let slot = self.zi_filter_definitions.borrow().len();
         self.zi_filter_definitions.borrow_mut().push(definition);
-        let mut placeholder =
-            crate::zfilter::ZiFilter::new(vec![1.0], vec![1.0], 1.0).map_err(|error| {
-                CodeGenError::new(CodeGenErrorKind::Internal(format!(
-                    "failed to create internal Zi placeholder: {error}"
-                )))
-            })?;
-        placeholder.invalidate_definition();
+        // The placeholder carries the site's declared coefficient widths so a
+        // compiled model's Zi shape is the same before and after the first
+        // evaluation freezes the per-instance values. A resume validates a
+        // checkpoint against a rebuilt device that has not evaluated yet.
+        let placeholder = crate::zfilter::ZiFilter::unfrozen_placeholder(
+            numerator_layout.coefficient_count(),
+            denominator_layout.coefficient_count(),
+        )
+        .map_err(|error| {
+            CodeGenError::new(CodeGenErrorKind::Internal(format!(
+                "failed to create internal Zi placeholder: {error}"
+            )))
+        })?;
         self.zi_filters.borrow_mut().push(placeholder);
         self.zi_sites.borrow_mut().insert(site, slot);
         Ok(slot)
