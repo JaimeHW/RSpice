@@ -455,6 +455,8 @@ pub(super) fn parse_line(
     measurements: &mut Vec<MeasureStatement>,
     context: ParseLineContext<'_>,
 ) -> Result<(), ParseError> {
+    let defer_simple_param_refs =
+        defer_simple_param_refs || params.expression_references_spectre_statistics(line);
     let ParseLineContext {
         analyses,
         lin_analysis,

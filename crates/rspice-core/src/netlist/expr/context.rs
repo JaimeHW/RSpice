@@ -14,6 +14,7 @@
 
 use super::*;
 use crate::config::ExpressionDialect;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -241,6 +242,10 @@ pub struct ParamContext {
     random: RandomState,
     /// Statistical-function evaluation policy for this parse/evaluation scope.
     statistical_mode: StatisticalParamMode,
+    /// Parameter identities whose values are supplied by a native Spectre
+    /// process/mismatch plan during elaboration.  Parsers consult this set to
+    /// retain dependent expressions instead of freezing them at nominal.
+    spectre_statistical_parameters: BTreeSet<String>,
     /// Dialect-specific expression-function behavior.
     expression_dialect: ExpressionDialect,
     /// Repeated-definition behavior selected for this parse/elaboration.
@@ -564,6 +569,37 @@ impl ParamContext {
         self.statistical_mode
     }
 
+    pub(crate) fn set_spectre_statistical_parameters(
+        &mut self,
+        parameters: impl IntoIterator<Item = String>,
+    ) {
+        self.spectre_statistical_parameters = parameters
+            .into_iter()
+            .map(|parameter| parameter.to_ascii_uppercase())
+            .collect();
+    }
+
+    pub(crate) fn mark_spectre_statistical_parameter(&mut self, parameter: &str) {
+        self.spectre_statistical_parameters
+            .insert(parameter.to_ascii_uppercase());
+    }
+
+    pub(crate) fn spectre_statistical_parameter_names(&self) -> Vec<String> {
+        self.spectre_statistical_parameters
+            .iter()
+            .cloned()
+            .collect()
+    }
+
+    pub(crate) fn expression_references_spectre_statistics(&self, expression: &str) -> bool {
+        expression
+            .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+            .any(|identifier| {
+                self.spectre_statistical_parameters
+                    .contains(&identifier.to_ascii_uppercase())
+            })
+    }
+
     /// Set dialect-specific expression-function semantics.
     pub fn set_expression_dialect(&mut self, dialect: ExpressionDialect) {
         self.expression_dialect = dialect;
@@ -786,9 +822,10 @@ impl ParamContext {
         let mut functions = self.functions.values().cloned().collect::<Vec<_>>();
         functions.sort_unstable_by(|left, right| left.name.cmp(&right.name));
         format!(
-            "numeric={numeric:?}\ncomplex={complex:?}\nstrings={strings:?}\nparameter_expressions={parameter_expressions:?}\nglobal_numeric={global_numeric:?}\nglobal_complex={global_complex:?}\nglobal_strings={global_strings:?}\nglobal_expressions={globals:?}\nfunctions={functions:?}\nrandom_seed={}\nstatistical_mode={:?}\nexpression_dialect={:?}\nparameter_redefinition_policy={:?}\n",
+            "numeric={numeric:?}\ncomplex={complex:?}\nstrings={strings:?}\nparameter_expressions={parameter_expressions:?}\nglobal_numeric={global_numeric:?}\nglobal_complex={global_complex:?}\nglobal_strings={global_strings:?}\nglobal_expressions={globals:?}\nfunctions={functions:?}\nrandom_seed={}\nstatistical_mode={:?}\nspectre_statistical_parameters={:?}\nexpression_dialect={:?}\nparameter_redefinition_policy={:?}\n",
             self.random.seed,
             self.statistical_mode,
+            self.spectre_statistical_parameters,
             self.expression_dialect,
             self.parameter_redefinition_policy,
         )

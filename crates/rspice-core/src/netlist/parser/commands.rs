@@ -239,6 +239,13 @@ pub(super) fn parse_command(
         ".RSPICE_AUTO_BRIDGE_FAMILY" => {
             parse_rspice_auto_bridge_family_command(stream, line_num, params, options)?;
         }
+        ".RSPICE_SPECTRE_STAT" => {
+            // The versioned payload is decoded in a whole-source prescan so
+            // declarations apply independent of library statement order.
+            // Reaching this branch proves it was lexically consumed; trailing
+            // payload validation belongs to that prescan's strict decoder.
+            stream.skip_to_eol();
+        }
         ".CODEMODEL" | ".RSPICE_UNSUPPORTED_CODEMODEL" => {
             parse_xspice_codemodel_command(stream, line_num, &cmd)?;
         }

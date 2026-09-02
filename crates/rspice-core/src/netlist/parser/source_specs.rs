@@ -283,7 +283,7 @@ pub(super) fn parse_source_spec(
     })
 }
 
-pub(in crate::netlist) fn parse_source_spec_text(
+pub(crate) fn parse_source_spec_text(
     raw: &str,
     line_num: usize,
     params: &ParamContext,

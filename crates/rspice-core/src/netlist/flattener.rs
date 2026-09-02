@@ -1671,7 +1671,7 @@ impl<'a> Flattener<'a> {
         element_path: &str,
         model_scope_path: &str,
     ) -> Result<Element, ParseError> {
-        let new_kind = match &element.kind {
+        let mut new_kind = match &element.kind {
             // Passive components
             ElementKind::Resistor {
                 value,
@@ -2165,6 +2165,12 @@ impl<'a> Flattener<'a> {
             // All other element types - clone as-is
             other => other.clone(),
         };
+        self.restore_spectre_statistical_expressions(
+            &element.kind,
+            &mut new_kind,
+            scope,
+            element_path,
+        )?;
 
         Ok(Element {
             name: element.name.clone(),
@@ -2172,6 +2178,244 @@ impl<'a> Flattener<'a> {
             nodes: element.nodes.clone(),
             provenance: element.provenance.clone(),
         })
+    }
+
+    fn restore_spectre_statistical_expressions(
+        &self,
+        authored: &ElementKind,
+        lowered: &mut ElementKind,
+        scope: &ParamContext,
+        element_path: &str,
+    ) -> Result<(), ParseError> {
+        let prepare = |expression: &str| {
+            self.prepare_spectre_statistical_expression(expression, scope, element_path)
+        };
+        match (authored, lowered) {
+            (
+                ElementKind::Resistor {
+                    value_expr: authored_value,
+                    deferred_params: authored_deferred,
+                    ..
+                },
+                ElementKind::Resistor {
+                    value_expr,
+                    instance_params,
+                    deferred_params,
+                    ..
+                },
+            )
+            | (
+                ElementKind::Capacitor {
+                    value_expr: authored_value,
+                    deferred_params: authored_deferred,
+                    ..
+                },
+                ElementKind::Capacitor {
+                    value_expr,
+                    instance_params,
+                    deferred_params,
+                    ..
+                },
+            )
+            | (
+                ElementKind::Inductor {
+                    value_expr: authored_value,
+                    deferred_params: authored_deferred,
+                    ..
+                },
+                ElementKind::Inductor {
+                    value_expr,
+                    instance_params,
+                    deferred_params,
+                    ..
+                },
+            ) => {
+                if let Some(expression) = authored_value
+                    && scope.expression_references_spectre_statistics(expression)
+                {
+                    *value_expr = Some(prepare(expression)?);
+                }
+                restore_statistical_deferred_params(
+                    authored_deferred,
+                    instance_params,
+                    deferred_params,
+                    scope,
+                    &prepare,
+                )?;
+            }
+            (
+                ElementKind::Diode {
+                    deferred_params: authored_deferred,
+                    ..
+                }
+                | ElementKind::Bjt {
+                    deferred_params: authored_deferred,
+                    ..
+                }
+                | ElementKind::Mosfet {
+                    deferred_params: authored_deferred,
+                    ..
+                }
+                | ElementKind::Jfet {
+                    deferred_params: authored_deferred,
+                    ..
+                }
+                | ElementKind::Mesfet {
+                    deferred_params: authored_deferred,
+                    ..
+                }
+                | ElementKind::XyceMemristor {
+                    deferred_params: authored_deferred,
+                    ..
+                },
+                ElementKind::Diode {
+                    instance_params,
+                    deferred_params,
+                    ..
+                }
+                | ElementKind::Bjt {
+                    instance_params,
+                    deferred_params,
+                    ..
+                }
+                | ElementKind::Mosfet {
+                    instance_params,
+                    deferred_params,
+                    ..
+                }
+                | ElementKind::Jfet {
+                    instance_params,
+                    deferred_params,
+                    ..
+                }
+                | ElementKind::Mesfet {
+                    instance_params,
+                    deferred_params,
+                    ..
+                }
+                | ElementKind::XyceMemristor {
+                    instance_params,
+                    deferred_params,
+                    ..
+                },
+            ) => restore_statistical_deferred_params(
+                authored_deferred,
+                instance_params,
+                deferred_params,
+                scope,
+                &prepare,
+            )?,
+            (
+                ElementKind::Vcvs {
+                    gain_expr: Some(expression),
+                    ..
+                }
+                | ElementKind::Cccs {
+                    gain_expr: Some(expression),
+                    ..
+                },
+                ElementKind::Vcvs { gain_expr, .. } | ElementKind::Cccs { gain_expr, .. },
+            ) if scope.expression_references_spectre_statistics(expression) => {
+                *gain_expr = Some(prepare(expression)?);
+            }
+            (
+                ElementKind::Vccs {
+                    transconductance_expr: Some(expression),
+                    ..
+                },
+                ElementKind::Vccs {
+                    transconductance_expr,
+                    ..
+                },
+            ) if scope.expression_references_spectre_statistics(expression) => {
+                *transconductance_expr = Some(prepare(expression)?);
+            }
+            (
+                ElementKind::Ccvs {
+                    transresistance_expr: Some(expression),
+                    ..
+                },
+                ElementKind::Ccvs {
+                    transresistance_expr,
+                    ..
+                },
+            ) if scope.expression_references_spectre_statistics(expression) => {
+                *transresistance_expr = Some(prepare(expression)?);
+            }
+            (
+                ElementKind::BehavioralVoltage { expression, .. },
+                ElementKind::BehavioralVoltage {
+                    expression: lowered,
+                    ..
+                },
+            )
+            | (
+                ElementKind::BehavioralCurrent { expression, .. },
+                ElementKind::BehavioralCurrent {
+                    expression: lowered,
+                    ..
+                },
+            ) if scope.expression_references_spectre_statistics(expression) => {
+                *lowered = prepare(expression)?;
+            }
+            (
+                ElementKind::GenericSwitch {
+                    control_expression, ..
+                },
+                ElementKind::GenericSwitch {
+                    control_expression: lowered,
+                    ..
+                },
+            ) if scope.expression_references_spectre_statistics(control_expression) => {
+                *lowered = prepare(control_expression)?;
+            }
+            (ElementKind::VoltageSourceDeferred(raw), lowered)
+                if scope.expression_references_spectre_statistics(raw) =>
+            {
+                *lowered = ElementKind::VoltageSourceDeferred(raw.clone());
+            }
+            (ElementKind::CurrentSourceDeferred(raw), lowered)
+                if scope.expression_references_spectre_statistics(raw) =>
+            {
+                *lowered = ElementKind::CurrentSourceDeferred(raw.clone());
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn prepare_spectre_statistical_expression(
+        &self,
+        expression: &str,
+        scope: &ParamContext,
+        element_path: &str,
+    ) -> Result<String, ParseError> {
+        let mut protected = scope.clone();
+        let mut replacements = Vec::new();
+        for (index, name) in scope
+            .spectre_statistical_parameter_names()
+            .into_iter()
+            .filter(|name| scope.get_parameter_expression(name).is_none())
+            .enumerate()
+        {
+            let marker = Value::from_bits(0x5f00_0000_0000_0000_u64 + index as u64);
+            protected.set(&name, marker);
+            let spelling = prepare_behavioral_expression(&name, &protected).map_err(|error| {
+                ParseError::InvalidValue(format!(
+                    "statistical expression for element '{element_path}' could not protect parameter '{name}': {error}"
+                ))
+            })?;
+            replacements.push((spelling, name));
+        }
+        let mut prepared = prepare_behavioral_expression(expression, &protected).map_err(|error| {
+            ParseError::InvalidValue(format!(
+                "statistical expression for element '{element_path}' could not be prepared: {error}"
+            ))
+        })?;
+        for (marker, name) in replacements {
+            prepared = prepared.replace(&marker, &name);
+        }
+        Ok(prepared)
     }
 
     /// Resolve a deferred value expression, or keep the parse-time value.
@@ -2732,6 +2976,14 @@ impl<'a> Flattener<'a> {
         scoped_model.real_vector_expr_params.clear();
 
         for (name, expr) in &model_def.expr_params {
+            if scope.expression_references_spectre_statistics(expr) {
+                replace_model_param(&mut scoped_model, name);
+                scoped_model.expr_params.push((
+                    name.clone(),
+                    self.prepare_spectre_statistical_expression(expr, scope, element_path)?,
+                ));
+                continue;
+            }
             if let Some((real_expr, imag_expr)) = super::parse_deferred_xspice_complex(expr) {
                 let value = self.resolve_deferred_xspice_model_complex_string(
                     model_name,
@@ -2850,6 +3102,24 @@ impl<'a> Flattener<'a> {
         self.scoped_model_sources.push(source_model_index);
         Ok(scoped_name)
     }
+}
+
+fn restore_statistical_deferred_params(
+    authored: &[(String, String)],
+    numeric: &mut Vec<(String, Value)>,
+    deferred: &mut Vec<(String, String)>,
+    scope: &ParamContext,
+    prepare: &impl Fn(&str) -> Result<String, ParseError>,
+) -> Result<(), ParseError> {
+    for (name, expression) in authored {
+        if !scope.expression_references_spectre_statistics(expression) {
+            continue;
+        }
+        numeric.retain(|(existing, _)| !existing.eq_ignore_ascii_case(name));
+        deferred.retain(|(existing, _)| !existing.eq_ignore_ascii_case(name));
+        deferred.push((name.clone(), prepare(expression)?));
+    }
+    Ok(())
 }
 
 fn apply_device_initial_conditions(
@@ -3115,6 +3385,9 @@ fn build_subcircuit_param_scope(
         scope.set(&name, value);
     }
     for (name, expression) in instance_expressions {
+        if scope.expression_references_spectre_statistics(&expression) {
+            scope.mark_spectre_statistical_parameter(&name);
+        }
         scope.define_parameter_expression(&name, expression, None);
     }
     let formal_expr_params = subckt
@@ -3188,6 +3461,12 @@ fn resolve_deferred_param_expressions(
 
         for (definition_index, (name, expr)) in pending.into_iter().enumerate() {
             poll_parse_abort(abort, definition_index)?;
+            if scope.expression_references_spectre_statistics(&expr) {
+                scope.define_parameter_expression(&name, expr, None);
+                scope.mark_spectre_statistical_parameter(&name);
+                progress = true;
+                continue;
+            }
             if scope.expression_dialect() == ExpressionDialect::Xyce {
                 match prepare_behavioral_expression(&expr, scope) {
                     Ok(prepared) => {
@@ -3332,6 +3611,15 @@ fn resolve_subcircuit_instance_params(
                     }
                 }
             } else {
+                if let ParametricValue::Expression(expression) = &value
+                    && instance_scope.expression_references_spectre_statistics(expression)
+                {
+                    instance_scope.define_parameter_expression(&name, expression.clone(), None);
+                    instance_scope.mark_spectre_statistical_parameter(&name);
+                    upsert_expression_param_value(&mut expressions, name, expression.clone());
+                    progress = true;
+                    continue;
+                }
                 if instance_scope.expression_dialect() == ExpressionDialect::Xyce
                     && let ParametricValue::Expression(expression) = &value
                 {

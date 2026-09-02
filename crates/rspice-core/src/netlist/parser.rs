@@ -32,11 +32,11 @@ use super::{
     PoleZeroAnalysisType, PoleZeroTransferType, PrintDelimiter, PspiceChebyshevKind, PspiceUTiming,
     PspiceUTimingMode, RemoveUnusedDeviceType, RemoveUnusedPolicy, SaveSet, SaveSignal,
     SensitivityAcSweep, SimulationOptions, SourceMultiplicity, SourceRfPort, SourceSpec,
-    StartupDiagnosticCode, StartupDirectiveDisposition, StartupDirectiveEntry,
-    StartupDirectiveKind, StartupDirectiveRecord, StartupDirectiveScope, StatisticalParamMode,
-    StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState, VerilogAInclude,
-    XyceAddResistorMode, XyceAddResistorSpec, XyceAddResistorsPolicy, ensure_parse_not_aborted,
-    finish_non_aborting_parse, poll_parse_abort, poll_parse_text,
+    SpectreStatisticsPlan, StartupDiagnosticCode, StartupDirectiveDisposition,
+    StartupDirectiveEntry, StartupDirectiveKind, StartupDirectiveRecord, StartupDirectiveScope,
+    StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState,
+    VerilogAInclude, XyceAddResistorMode, XyceAddResistorSpec, XyceAddResistorsPolicy,
+    ensure_parse_not_aborted, finish_non_aborting_parse, poll_parse_abort, poll_parse_text,
     validate_startup_directives_with_abort,
 };
 use crate::Value;
@@ -70,7 +70,7 @@ use line::*;
 use pspice_stim::*;
 use scoping::*;
 use source_specs::parse_source_spec;
-pub(in crate::netlist) use source_specs::parse_source_spec_text;
+pub(crate) use source_specs::parse_source_spec_text;
 use state::*;
 use tlines::*;
 use values::*;
@@ -480,6 +480,19 @@ fn parse_netlist_impl(
     state.params.set_parameter_redefinition_diagnostic_policy(
         options.parameter_redefinition_diagnostic_policy,
     );
+    state.spectre_statistics = prescan_spectre_statistics_with_abort(
+        &lines,
+        allow_non_semicolon_comments,
+        xyce_syntax,
+        abort,
+    )?;
+    state.params.set_spectre_statistical_parameters(
+        state
+            .spectre_statistics
+            .variations
+            .iter()
+            .map(|variation| variation.parameter.clone()),
+    );
     state.options.replace_ground = preprocess.replace_ground;
     state.options.remove_unused = preprocess.remove_unused;
     state.options.add_resistors = preprocess.add_resistors;
@@ -763,6 +776,59 @@ fn parse_netlist_impl(
         abort,
     )?;
     Ok(netlist)
+}
+
+fn prescan_spectre_statistics_with_abort(
+    lines: &[&str],
+    allow_non_semicolon_comments: bool,
+    xyce_syntax: bool,
+    abort: &dyn AbortSignal,
+) -> Result<SpectreStatisticsPlan, ParseWithAbortError> {
+    let mut combined = SpectreStatisticsPlan::default();
+    for (index, raw) in lines.iter().enumerate().skip(1) {
+        poll_parse_abort(abort, index)?;
+        if xyce_syntax && xyce_physical_line_is_comment(raw) {
+            continue;
+        }
+        let line = strip_inline_semicolon_comment_with_non_semicolon_comments(
+            raw,
+            allow_non_semicolon_comments,
+        )
+        .trim();
+        let mut command_fields = line.splitn(2, char::is_whitespace);
+        let command = command_fields.next().unwrap_or_default();
+        if !command.eq_ignore_ascii_case(".RSPICE_SPECTRE_STAT") {
+            continue;
+        }
+        let payload = command_fields.next().unwrap_or_default();
+        let mut fields = payload.split_whitespace();
+        let encoded = fields.next().ok_or_else(|| ParseError::Syntax {
+            line: index + 1,
+            message: ".RSPICE_SPECTRE_STAT requires one versioned payload".to_owned(),
+        })?;
+        if fields.next().is_some() {
+            return Err(ParseError::Syntax {
+                line: index + 1,
+                message: ".RSPICE_SPECTRE_STAT accepts exactly one versioned payload".to_owned(),
+            }
+            .into());
+        }
+        let decoded = SpectreStatisticsPlan::decode_internal(encoded).map_err(|error| {
+            ParseError::Syntax {
+                line: index + 1,
+                message: error.to_string(),
+            }
+        })?;
+        combined.variations.extend(decoded.variations);
+        combined.correlations.extend(decoded.correlations);
+    }
+    combined
+        .validate_structure()
+        .map_err(|error| ParseError::Syntax {
+            line: 0,
+            message: error.to_string(),
+        })?;
+    Ok(combined)
 }
 
 fn validate_timeint_option_aggregate(
@@ -2720,14 +2786,22 @@ fn resolve_top_level_deferred_source_specs_with_abort(
     for (index, element) in elements.iter_mut().enumerate() {
         poll_parse_abort(abort, index)?;
         let replacement = match &element.kind {
-            ElementKind::VoltageSourceDeferred(raw_spec) => Some(
-                resolve_top_level_source_kind(&element.name, raw_spec, params, true)
-                    .map_err(ParseWithAbortError::from)?,
-            ),
-            ElementKind::CurrentSourceDeferred(raw_spec) => Some(
-                resolve_top_level_source_kind(&element.name, raw_spec, params, false)
-                    .map_err(ParseWithAbortError::from)?,
-            ),
+            ElementKind::VoltageSourceDeferred(raw_spec)
+                if !params.expression_references_spectre_statistics(raw_spec) =>
+            {
+                Some(
+                    resolve_top_level_source_kind(&element.name, raw_spec, params, true)
+                        .map_err(ParseWithAbortError::from)?,
+                )
+            }
+            ElementKind::CurrentSourceDeferred(raw_spec)
+                if !params.expression_references_spectre_statistics(raw_spec) =>
+            {
+                Some(
+                    resolve_top_level_source_kind(&element.name, raw_spec, params, false)
+                        .map_err(ParseWithAbortError::from)?,
+                )
+            }
             _ => None,
         };
 
@@ -3543,7 +3617,8 @@ fn resolve_static_model_expression_params_with_abort(
                 // a model parameter before the active operating point exists.
                 if crate::netlist::expr::behavioral_expression_references_runtime_quantity(
                     &expression,
-                ) {
+                ) || state.spectre_statistics.references_parameter(&expression)
+                {
                     unresolved.push((name, expression));
                     continue;
                 }

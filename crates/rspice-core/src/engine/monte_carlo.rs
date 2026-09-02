@@ -222,13 +222,24 @@ impl Engine {
                 Some(normalized)
             }
         });
+        let has_spectre_statistics = !netlist.spectre_statistics.variations.is_empty();
+        if has_spectre_statistics && normalized_filter.is_some() {
+            return Err(SimulationError::Circuit(
+                "A generic Monte Carlo parameter filter cannot be combined with native Spectre statistics; declare every varied parameter in the Spectre statistics block"
+                    .to_owned(),
+            ));
+        }
 
-        let mut all_eligible_params: Vec<(String, Value)> = netlist
-            .params
-            .all_params()
-            .into_iter()
-            .filter(|(_, value)| value.is_finite() && value.abs() > 0.0)
-            .collect();
+        let mut all_eligible_params: Vec<(String, Value)> = if has_spectre_statistics {
+            Vec::new()
+        } else {
+            netlist
+                .params
+                .all_params()
+                .into_iter()
+                .filter(|(_, value)| value.is_finite() && value.abs() > 0.0)
+                .collect()
+        };
         all_eligible_params.sort_by(|a, b| a.0.cmp(&b.0));
 
         if let Some(filter) = &normalized_filter {
@@ -321,14 +332,37 @@ impl Engine {
         }
 
         let resource_limits = self.config.resource_limits;
+        let inherited_statistical_axes = netlist
+            .spectre_statistical_coordinate
+            .as_ref()
+            .map(|coordinate| coordinate.axes.clone())
+            .unwrap_or_default();
         let materialize_run =
             |run_index: usize| -> Result<std::borrow::Cow<'_, Netlist>, SimulationError> {
                 if monte_params.is_empty() {
-                    let Some(environment) = environment.as_ref() else {
+                    if environment.is_none() && !has_spectre_statistics {
                         return Ok(std::borrow::Cow::Borrowed(netlist));
-                    };
+                    }
                     let mut materialized = netlist.clone();
-                    Self::apply_monte_carlo_environment(&mut materialized, environment, abort)?;
+                    if let Some(environment) = environment.as_ref() {
+                        Self::apply_monte_carlo_environment(&mut materialized, environment, abort)?;
+                    }
+                    if has_spectre_statistics {
+                        let temperature_celsius = environment
+                            .as_ref()
+                            .map(|environment| environment.temperature_celsius)
+                            .or(materialized.options.temp)
+                            .unwrap_or_else(|| {
+                                crate::constants::kelvin_to_celsius(self.config.temperature)
+                            });
+                        materialized.spectre_statistical_coordinate =
+                            Some(crate::netlist::SpectreStatisticalCoordinate {
+                                seed,
+                                monte_carlo_run: run_index as u64,
+                                temperature_celsius,
+                                axes: inherited_statistical_axes.clone(),
+                            });
+                    }
                     return Ok(std::borrow::Cow::Owned(materialized));
                 }
                 let overrides = monte_params
@@ -345,6 +379,22 @@ impl Engine {
                     )?;
                 if let Some(environment) = environment.as_ref() {
                     Self::apply_monte_carlo_environment(&mut perturbed, environment, abort)?;
+                }
+                if has_spectre_statistics {
+                    let temperature_celsius = environment
+                        .as_ref()
+                        .map(|environment| environment.temperature_celsius)
+                        .or(perturbed.options.temp)
+                        .unwrap_or_else(|| {
+                            crate::constants::kelvin_to_celsius(self.config.temperature)
+                        });
+                    perturbed.spectre_statistical_coordinate =
+                        Some(crate::netlist::SpectreStatisticalCoordinate {
+                            seed,
+                            monte_carlo_run: run_index as u64,
+                            temperature_celsius,
+                            axes: inherited_statistical_axes.clone(),
+                        });
                 }
                 Ok(std::borrow::Cow::Owned(perturbed))
             };
@@ -640,6 +690,7 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SimulationConfig;
     use crate::abort_signal::{AbortSignal, NoAbort};
 
     fn dc_sources(netlist: &Netlist) -> Vec<Value> {
@@ -730,5 +781,82 @@ mod tests {
             ),
             Err(SimulationError::Aborted)
         ));
+    }
+
+    #[test]
+    fn native_spectre_monte_carlo_is_seeded_and_parallel_order_independent() {
+        let plan = crate::netlist::SpectreStatisticsPlan {
+            variations: vec![crate::netlist::SpectreVariation {
+                line: 3,
+                scope: crate::netlist::SpectreVariationScope::Process,
+                parameter: "rtop".to_owned(),
+                distribution: crate::netlist::SpectreDistribution::Gaussian,
+                spread: crate::netlist::SpectreSpread::StandardDeviation("100".to_owned()),
+                percent: false,
+            }],
+            correlations: vec![],
+        };
+        let deck = Netlist::parse(&format!(
+            "native Spectre Monte Carlo\n.param rtop=1k\n.RSPICE_SPECTRE_STAT {}\nV1 in 0 1\nR1 in out {{rtop}}\nR2 out 0 1k\n.end\n",
+            plan.encode_internal()
+        ))
+        .expect("statistical divider parses");
+
+        let mut serial_config = SimulationConfig::default();
+        serial_config.resource_limits.max_parallel_workers = 1;
+        let mut parallel_config = serial_config.clone();
+        parallel_config.resource_limits.max_parallel_workers = 4;
+        let serial = Engine::new(serial_config)
+            .run_monte_carlo(&deck, 24, 0x1234_5678)
+            .expect("serial Monte Carlo converges");
+        let replay = Engine::new(parallel_config.clone())
+            .run_monte_carlo(&deck, 24, 0x1234_5678)
+            .expect("parallel Monte Carlo converges");
+        let mut unrelated = deck.clone();
+        unrelated.params.set("UNRELATED_NOMINAL", 999.0);
+        let unrelated_replay = Engine::new(parallel_config.clone())
+            .run_monte_carlo(&unrelated, 24, 0x1234_5678)
+            .expect("unrelated nominal parameter does not alter the run coordinate");
+        let mut outer_axis_one = deck.clone();
+        outer_axis_one.spectre_statistical_coordinate =
+            Some(crate::netlist::SpectreStatisticalCoordinate {
+                axes: vec![("outer_step".into(), 1.0)],
+                ..Default::default()
+            });
+        let mut outer_axis_two = outer_axis_one.clone();
+        outer_axis_two
+            .spectre_statistical_coordinate
+            .as_mut()
+            .expect("outer coordinate exists")
+            .axes[0]
+            .1 = 2.0;
+        let axis_one = Engine::new(parallel_config.clone())
+            .run_monte_carlo(&outer_axis_one, 24, 0x1234_5678)
+            .expect("first composed outer coordinate converges");
+        let axis_two = Engine::new(parallel_config.clone())
+            .run_monte_carlo(&outer_axis_two, 24, 0x1234_5678)
+            .expect("second composed outer coordinate converges");
+        let changed_seed = Engine::new(parallel_config)
+            .run_monte_carlo(&deck, 24, 0x1234_5679)
+            .expect("changed-seed Monte Carlo converges");
+
+        let bits = |result: &MonteCarloResult| {
+            result
+                .variables
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("V(out)"))
+                .expect("named output node is reported")
+                .1
+                .samples
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(serial.num_runs, 24);
+        assert_eq!(serial.num_failures, 0);
+        assert_eq!(bits(&serial), bits(&replay));
+        assert_eq!(bits(&serial), bits(&unrelated_replay));
+        assert_ne!(bits(&axis_one), bits(&axis_two));
+        assert_ne!(bits(&serial), bits(&changed_seed));
     }
 }

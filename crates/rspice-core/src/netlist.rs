@@ -32,6 +32,7 @@ mod parser;
 mod remove_unused;
 pub mod source_map;
 pub(crate) mod spectre_adapter;
+mod spectre_statistics;
 pub mod spef;
 mod startup;
 mod topology;
@@ -80,6 +81,7 @@ pub use output_symbols::{
 pub use param_scope::{ParamResolver, ParamScope, ScopedParam};
 pub use parser::*;
 pub use source_map::*;
+pub use spectre_statistics::*;
 pub use startup::{validate_startup_directives, validate_startup_directives_with_abort};
 pub(crate) use topology::analyze_dc_ground_paths_with_capacitor_ic_mode;
 pub use topology::{
@@ -885,6 +887,13 @@ pub struct Netlist {
     pub subcircuits: Vec<SubcircuitDef>,
     /// Parameter definitions from .PARAM statements
     pub params: ParamContext,
+    /// Native Spectre process/mismatch distributions retained as an
+    /// executable, validated statistical plan.
+    pub spectre_statistics: SpectreStatisticsPlan,
+    /// Optional explicit statistical run coordinate.  Monte Carlo drivers set
+    /// this per trial; ordinary STEP/TEMP builds derive their coordinate from
+    /// the effective parameter environment when it is absent.
+    pub spectre_statistical_coordinate: Option<SpectreStatisticalCoordinate>,
     /// Initial conditions from .IC statements
     pub initial_conditions: Vec<InitialCondition>,
     /// Netlist-wide device `IC=` overrides from Xyce's `.INITCOND` directive.
@@ -3121,6 +3130,8 @@ impl Default for Netlist {
             models: Vec::new(),
             subcircuits: Vec::new(),
             params: ParamContext::new(),
+            spectre_statistics: SpectreStatisticsPlan::default(),
+            spectre_statistical_coordinate: None,
             initial_conditions: Vec::new(),
             device_initial_conditions: None,
             node_sets: Vec::new(),

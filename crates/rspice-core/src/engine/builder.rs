@@ -103,6 +103,431 @@ fn map_build_parse_error(context: &str, error: ParseWithAbortError) -> Simulatio
     }
 }
 
+fn spectre_statistical_coordinate_for_build(
+    netlist: &Netlist,
+) -> Option<crate::netlist::SpectreStatisticalCoordinate> {
+    netlist.spectre_statistical_coordinate.clone()
+}
+
+fn statistical_expression_context(
+    netlist: &Netlist,
+    mismatch: &BTreeMap<String, Value>,
+    temperature_kelvin: Value,
+) -> crate::netlist::ParamContext {
+    let mut context = netlist.params.clone();
+    for (name, value) in mismatch {
+        context.set(name, *value);
+    }
+    let temperature_celsius = crate::constants::kelvin_to_celsius(temperature_kelvin);
+    context.set("TEMP", temperature_celsius);
+    context.set("TEMPER", temperature_celsius);
+    context.set("TNOM", netlist.options.tnom.unwrap_or(27.0));
+    context.set("VT", crate::constants::thermal_voltage(temperature_kelvin));
+    context.set(
+        "GMIN",
+        netlist.options.gmin.unwrap_or(crate::constants::GMIN),
+    );
+    crate::netlist::expr::materialize_available_parameter_expressions(&mut context);
+    context
+}
+
+fn upsert_numeric_parameter(parameters: &mut Vec<(String, Value)>, name: String, value: Value) {
+    parameters.retain(|(existing, _)| !existing.eq_ignore_ascii_case(&name));
+    parameters.push((name, value));
+}
+
+fn resolve_statistical_deferred_parameters(
+    numeric: &mut Vec<(String, Value)>,
+    deferred: &mut Vec<(String, String)>,
+    context: &crate::netlist::ParamContext,
+    plan: &crate::netlist::SpectreStatisticsPlan,
+    owner: &str,
+) -> Result<(), SimulationError> {
+    let mut retained = Vec::new();
+    for (name, expression) in std::mem::take(deferred) {
+        if !plan.references_parameter(&expression) {
+            retained.push((name, expression));
+            continue;
+        }
+        let value = crate::netlist::expr::eval_expression(&expression, context).map_err(|error| {
+            SimulationError::Circuit(format!(
+                "Spectre statistical expression for {owner} parameter '{name}' could not be resolved: {error}"
+            ))
+        })?;
+        if !value.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "Spectre statistical expression for {owner} parameter '{name}' produced a non-finite value"
+            )));
+        }
+        upsert_numeric_parameter(numeric, name, value);
+    }
+    *deferred = retained;
+    Ok(())
+}
+
+fn resolve_statistical_scalar_expression(
+    value: &mut Value,
+    expression: &mut Option<String>,
+    context: &crate::netlist::ParamContext,
+    plan: &crate::netlist::SpectreStatisticsPlan,
+    owner: &str,
+) -> Result<(), SimulationError> {
+    let Some(source) = expression.as_ref() else {
+        return Ok(());
+    };
+    if !plan.references_parameter(source) {
+        return Ok(());
+    }
+    let resolved = crate::netlist::expr::eval_expression(source, context).map_err(|error| {
+        SimulationError::Circuit(format!(
+            "Spectre statistical expression for {owner} could not be resolved: {error}"
+        ))
+    })?;
+    if !resolved.is_finite() {
+        return Err(SimulationError::Circuit(format!(
+            "Spectre statistical expression for {owner} produced a non-finite value"
+        )));
+    }
+    *value = resolved;
+    *expression = None;
+    Ok(())
+}
+
+fn materialize_statistical_element(
+    element: &mut Element,
+    context: &crate::netlist::ParamContext,
+    plan: &crate::netlist::SpectreStatisticsPlan,
+) -> Result<(), SimulationError> {
+    let owner = element.name.clone();
+    let mut replacement = None;
+    match &mut element.kind {
+        ElementKind::Resistor {
+            value,
+            value_expr,
+            instance_params,
+            deferred_params,
+            ..
+        }
+        | ElementKind::Capacitor {
+            value,
+            value_expr,
+            instance_params,
+            deferred_params,
+            ..
+        }
+        | ElementKind::Inductor {
+            value,
+            value_expr,
+            instance_params,
+            deferred_params,
+            ..
+        } => {
+            resolve_statistical_scalar_expression(
+                value,
+                value_expr,
+                context,
+                plan,
+                &format!("element '{owner}' value"),
+            )?;
+            resolve_statistical_deferred_parameters(
+                instance_params,
+                deferred_params,
+                context,
+                plan,
+                &format!("element '{owner}'"),
+            )?;
+        }
+        ElementKind::Diode {
+            instance_params,
+            deferred_params,
+            ..
+        }
+        | ElementKind::Bjt {
+            instance_params,
+            deferred_params,
+            ..
+        }
+        | ElementKind::Mosfet {
+            instance_params,
+            deferred_params,
+            ..
+        }
+        | ElementKind::Jfet {
+            instance_params,
+            deferred_params,
+            ..
+        }
+        | ElementKind::Mesfet {
+            instance_params,
+            deferred_params,
+            ..
+        }
+        | ElementKind::XyceMemristor {
+            instance_params,
+            deferred_params,
+            ..
+        } => resolve_statistical_deferred_parameters(
+            instance_params,
+            deferred_params,
+            context,
+            plan,
+            &format!("element '{owner}'"),
+        )?,
+        ElementKind::Vcvs {
+            gain, gain_expr, ..
+        }
+        | ElementKind::Cccs {
+            gain, gain_expr, ..
+        } => resolve_statistical_scalar_expression(
+            gain,
+            gain_expr,
+            context,
+            plan,
+            &format!("element '{owner}' gain"),
+        )?,
+        ElementKind::Vccs {
+            transconductance,
+            transconductance_expr,
+            ..
+        } => resolve_statistical_scalar_expression(
+            transconductance,
+            transconductance_expr,
+            context,
+            plan,
+            &format!("element '{owner}' transconductance"),
+        )?,
+        ElementKind::Ccvs {
+            transresistance,
+            transresistance_expr,
+            ..
+        } => resolve_statistical_scalar_expression(
+            transresistance,
+            transresistance_expr,
+            context,
+            plan,
+            &format!("element '{owner}' transresistance"),
+        )?,
+        ElementKind::BehavioralVoltage { expression, .. }
+        | ElementKind::BehavioralCurrent { expression, .. }
+        | ElementKind::GenericSwitch {
+            control_expression: expression,
+            ..
+        } if plan.references_parameter(expression) => {
+            *expression = prepare_behavioral_expression(expression, context).map_err(|error| {
+                SimulationError::Circuit(format!(
+                    "Spectre statistical expression for element '{owner}' could not be prepared: {error}"
+                ))
+            })?;
+        }
+        ElementKind::VoltageSourceDeferred(source) if plan.references_parameter(source) => {
+            let spec = crate::netlist::parse_source_spec_text(source, 0, context).map_err(|error| {
+                SimulationError::Circuit(format!(
+                    "Spectre statistical source expression for element '{owner}' could not be materialized: {error}"
+                ))
+            })?;
+            replacement = Some(ElementKind::VoltageSource(spec));
+        }
+        ElementKind::CurrentSourceDeferred(source) if plan.references_parameter(source) => {
+            let spec = crate::netlist::parse_source_spec_text(source, 0, context).map_err(|error| {
+                SimulationError::Circuit(format!(
+                    "Spectre statistical source expression for element '{owner}' could not be materialized: {error}"
+                ))
+            })?;
+            replacement = Some(ElementKind::CurrentSource(spec));
+        }
+        _ => {}
+    }
+    if let Some(replacement) = replacement {
+        element.kind = replacement;
+    }
+    Ok(())
+}
+
+fn element_model_name_mut(kind: &mut ElementKind) -> Option<&mut String> {
+    match kind {
+        ElementKind::Resistor { model, .. }
+        | ElementKind::Capacitor { model, .. }
+        | ElementKind::Inductor { model, .. }
+        | ElementKind::TransmissionLine { model, .. }
+        | ElementKind::Coupling { model, .. } => model.as_mut(),
+        ElementKind::JilesAthertonInductor { model, .. }
+        | ElementKind::Diode { model, .. }
+        | ElementKind::Bjt { model, .. }
+        | ElementKind::Mosfet { model, .. }
+        | ElementKind::Jfet { model, .. }
+        | ElementKind::Mesfet { model, .. }
+        | ElementKind::XyceMemristor { model, .. }
+        | ElementKind::VSwitch { model, .. }
+        | ElementKind::ISwitch { model, .. }
+        | ElementKind::GenericSwitch { model, .. } => Some(model),
+        _ => None,
+    }
+}
+
+fn model_depends_on_statistics(
+    model: &crate::netlist::ModelDef,
+    plan: &crate::netlist::SpectreStatisticsPlan,
+) -> bool {
+    let mut affected = plan
+        .variations
+        .iter()
+        .map(|variation| variation.parameter.to_ascii_uppercase())
+        .collect::<BTreeSet<_>>();
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for (name, expression) in &model.expr_params {
+            if expression
+                .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+                .any(|identifier| affected.contains(&identifier.to_ascii_uppercase()))
+                && affected.insert(name.to_ascii_uppercase())
+            {
+                changed = true;
+            }
+        }
+    }
+    model
+        .expr_params
+        .iter()
+        .any(|(name, _)| affected.contains(&name.to_ascii_uppercase()))
+}
+
+fn materialize_statistical_model(
+    model: &crate::netlist::ModelDef,
+    context: &crate::netlist::ParamContext,
+    generated_name: String,
+) -> Result<crate::netlist::ModelDef, SimulationError> {
+    let mut materialized = model.clone();
+    materialized.name = generated_name;
+    let mut evaluation = context.clone();
+    for (name, value) in &materialized.params {
+        evaluation.set(name, *value);
+    }
+    let mut pending = std::mem::take(&mut materialized.expr_params);
+    loop {
+        let mut retained = Vec::new();
+        let mut progressed = false;
+        for (name, expression) in pending {
+            match crate::netlist::expr::eval_expression(&expression, &evaluation) {
+                Ok(value) if value.is_finite() => {
+                    upsert_numeric_parameter(&mut materialized.params, name.clone(), value);
+                    evaluation.set(&name, value);
+                    progressed = true;
+                }
+                _ => retained.push((name, expression)),
+            }
+        }
+        pending = retained;
+        if pending.is_empty() || !progressed {
+            break;
+        }
+    }
+    materialized.expr_params = pending;
+    Ok(materialized)
+}
+
+fn materialize_spectre_statistics_after_flattening(
+    netlist: &mut Netlist,
+    elements: &mut [Element],
+    process: &BTreeMap<String, Value>,
+    coordinate: Option<&crate::netlist::SpectreStatisticalCoordinate>,
+    temperature_kelvin: Value,
+    abort: &dyn AbortSignal,
+) -> Result<(), SimulationError> {
+    check_build_abort(abort)?;
+    let plan = netlist.spectre_statistics.clone();
+    let has_mismatch = coordinate.is_some()
+        && plan
+            .variations
+            .iter()
+            .any(|variation| variation.scope == crate::netlist::SpectreVariationScope::Mismatch);
+    let mut mismatch_cache = BTreeMap::<String, BTreeMap<String, Value>>::new();
+    let mut model_cache = BTreeMap::<(String, String), String>::new();
+    for element in elements {
+        check_build_abort(abort)?;
+        // Spectre mismatch variables belong to the concrete subcircuit
+        // instance.  All primitive elements inside that instance therefore
+        // share one draw.  A top-level primitive is its own instance scope.
+        let mismatch_identity = element
+            .name
+            .rsplit_once('.')
+            .map_or(element.name.as_str(), |(parent, _)| parent);
+        let canonical_mismatch_identity = mismatch_identity.to_ascii_uppercase();
+        let empty_mismatch = BTreeMap::new();
+        let mismatch = if has_mismatch {
+            match mismatch_cache.entry(canonical_mismatch_identity.clone()) {
+                std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    let coordinate = coordinate.ok_or_else(|| {
+                        SimulationError::Circuit(
+                            "Spectre mismatch materialization requires an active statistical coordinate"
+                                .to_owned(),
+                        )
+                    })?;
+                    let mismatch = plan
+                        .sample_mismatch(&netlist.params, process, mismatch_identity, coordinate)
+                        .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                    entry.insert(mismatch)
+                }
+            }
+        } else {
+            &empty_mismatch
+        };
+        let context = statistical_expression_context(netlist, mismatch, temperature_kelvin);
+        materialize_statistical_element(element, &context, &plan)?;
+        let Some(model_name) = element_model_name_mut(&mut element.kind) else {
+            continue;
+        };
+        let Some(source_model) = netlist
+            .models
+            .iter()
+            .rev()
+            .find(|model| model.name.eq_ignore_ascii_case(model_name))
+            .cloned()
+        else {
+            continue;
+        };
+        if !model_depends_on_statistics(&source_model, &plan) {
+            continue;
+        }
+        let context_identity = if has_mismatch {
+            canonical_mismatch_identity
+        } else {
+            "__PROCESS__".to_owned()
+        };
+        let model_key = (
+            context_identity.clone(),
+            source_model.name.to_ascii_uppercase(),
+        );
+        if let Some(generated_name) = model_cache.get(&model_key) {
+            *model_name = generated_name.clone();
+            continue;
+        }
+        let identity = context_identity.bytes().fold(0_u64, |state, byte| {
+            state
+                .wrapping_mul(0x100_0000_01B3)
+                .wrapping_add(u64::from(byte.to_ascii_uppercase()))
+        });
+        let generated_name = format!("{}.__rspice_stat_{identity:016x}", source_model.name);
+        let materialized =
+            materialize_statistical_model(&source_model, &context, generated_name.clone())?;
+        if materialized
+            .expr_params
+            .iter()
+            .any(|(_, expression)| plan.references_parameter(expression))
+        {
+            return Err(SimulationError::Circuit(format!(
+                "Spectre statistical model '{}' for instance '{}' retains an unresolved statistical expression",
+                source_model.name, element.name
+            )));
+        }
+        *model_name = generated_name;
+        netlist.models.push(materialized);
+        model_cache.insert(model_key, model_name.clone());
+    }
+    Ok(())
+}
+
 fn validate_voltage_switch_physical_parameters(
     switch: &crate::device::VoltageSwitch,
     model_name: &str,
@@ -4474,6 +4899,357 @@ mod tests {
         );
     }
 
+    #[test]
+    fn native_spectre_process_sample_materializes_the_authored_element_expression() {
+        let plan = crate::netlist::SpectreStatisticsPlan {
+            variations: vec![crate::netlist::SpectreVariation {
+                line: 3,
+                scope: crate::netlist::SpectreVariationScope::Process,
+                parameter: "rv".to_owned(),
+                distribution: crate::netlist::SpectreDistribution::Gaussian,
+                spread: crate::netlist::SpectreSpread::StandardDeviation("5".to_owned()),
+                percent: false,
+            }],
+            correlations: vec![],
+        };
+        let coordinate = crate::netlist::SpectreStatisticalCoordinate {
+            seed: 41,
+            monte_carlo_run: 9,
+            temperature_celsius: 27.0,
+            axes: vec![("corner".into(), 2.0)],
+        };
+        let deck = format!(
+            "native process materialization\n.param rv=100\n.RSPICE_SPECTRE_STAT {}\nR1 in 0 {{rv}}\nV1 in 0 1\n.end\n",
+            plan.encode_internal()
+        );
+        let mut netlist = Netlist::parse(&deck).expect("statistical deck parses");
+        netlist.spectre_statistical_coordinate = Some(coordinate.clone());
+        let expected = plan
+            .sample_process(&netlist.params, &coordinate)
+            .expect("process sample")["RV"];
+        let circuit = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect("statistical circuit builds");
+        let resistance = circuit.resistors.conductances[0].recip();
+        assert_eq!(resistance.to_bits(), expected.to_bits());
+        assert_ne!(resistance.to_bits(), 100.0_f64.to_bits());
+    }
+
+    #[test]
+    fn native_spectre_plan_is_nominal_until_a_monte_carlo_coordinate_activates_it() {
+        let plan = crate::netlist::SpectreStatisticsPlan {
+            variations: vec![crate::netlist::SpectreVariation {
+                line: 3,
+                scope: crate::netlist::SpectreVariationScope::Process,
+                parameter: "rv".to_owned(),
+                distribution: crate::netlist::SpectreDistribution::Gaussian,
+                spread: crate::netlist::SpectreSpread::StandardDeviation("5".to_owned()),
+                percent: false,
+            }],
+            correlations: vec![],
+        };
+        let deck = format!(
+            "nominal statistical declaration\n.param rv=100\n.RSPICE_SPECTRE_STAT {}\nR1 in 0 {{rv}}\nV1 in 0 1\n.end\n",
+            plan.encode_internal()
+        );
+        let netlist = Netlist::parse(&deck).expect("statistical deck parses");
+        assert!(netlist.spectre_statistical_coordinate.is_none());
+        let circuit = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect("ordinary build remains nominal");
+        assert_eq!(
+            circuit.resistors.conductances[0].recip().to_bits(),
+            100.0_f64.to_bits()
+        );
+    }
+
+    #[test]
+    fn native_spectre_sample_reaches_a_deferred_compact_model_parameter() {
+        let plan = crate::netlist::SpectreStatisticsPlan {
+            variations: vec![crate::netlist::SpectreVariation {
+                line: 3,
+                scope: crate::netlist::SpectreVariationScope::Process,
+                parameter: "factor".to_owned(),
+                distribution: crate::netlist::SpectreDistribution::Gaussian,
+                spread: crate::netlist::SpectreSpread::StandardDeviation("0.2".to_owned()),
+                percent: false,
+            }],
+            correlations: vec![],
+        };
+        let coordinate = crate::netlist::SpectreStatisticalCoordinate {
+            seed: 8,
+            monte_carlo_run: 12,
+            temperature_celsius: 27.0,
+            axes: vec![],
+        };
+        let deck = format!(
+            "statistical model parameter\n.param factor=3\n.RSPICE_SPECTRE_STAT {}\nV1 in 0 1\nR1 in 0 8 RMOD\n.model RMOD R (R={{factor}})\n.end\n",
+            plan.encode_internal()
+        );
+        let mut netlist = Netlist::parse(&deck).expect("statistical model deck parses");
+        let nominal_circuit = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect("nominal statistical model deck builds");
+        assert_eq!(
+            nominal_circuit.resistors.conductances[0].recip().to_bits(),
+            24.0_f64.to_bits()
+        );
+        let expected_factor = plan
+            .sample_process(&netlist.params, &coordinate)
+            .expect("model factor samples")["FACTOR"];
+        netlist.spectre_statistical_coordinate = Some(coordinate);
+        let circuit = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect("statistical model deck builds");
+        let actual = circuit.resistors.conductances[0].recip();
+        let expected = 8.0 * expected_factor;
+        assert!((actual - expected).abs() <= expected.abs() * 4.0 * Value::EPSILON);
+    }
+
+    #[test]
+    fn native_spectre_sample_materializes_a_deferred_independent_source() {
+        let plan = crate::netlist::SpectreStatisticsPlan {
+            variations: vec![crate::netlist::SpectreVariation {
+                line: 3,
+                scope: crate::netlist::SpectreVariationScope::Process,
+                parameter: "bias".to_owned(),
+                distribution: crate::netlist::SpectreDistribution::Uniform,
+                spread: crate::netlist::SpectreSpread::HalfRange("0.25".to_owned()),
+                percent: false,
+            }],
+            correlations: vec![],
+        };
+        let coordinate = crate::netlist::SpectreStatisticalCoordinate {
+            seed: 81,
+            monte_carlo_run: 2,
+            temperature_celsius: 27.0,
+            axes: vec![],
+        };
+        let deck = format!(
+            "statistical source\n.param bias=1\n.RSPICE_SPECTRE_STAT {}\nV1 out 0 {{bias}}\nR1 out 0 1k\n.end\n",
+            plan.encode_internal()
+        );
+        let mut netlist = Netlist::parse(&deck).expect("statistical source deck parses");
+        assert!(
+            matches!(
+                netlist.elements[0].kind,
+                crate::netlist::ElementKind::VoltageSourceDeferred(_)
+            ),
+            "statistical source must remain deferred, got {:?}",
+            netlist.elements[0].kind
+        );
+        let nominal_circuit = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect("nominal statistical source deck builds");
+        assert_eq!(
+            nominal_circuit.voltage_sources.dc_values[0].to_bits(),
+            1.0_f64.to_bits()
+        );
+        let expected = plan
+            .sample_process(&netlist.params, &coordinate)
+            .expect("source bias samples")["BIAS"];
+        netlist.spectre_statistical_coordinate = Some(coordinate);
+        let circuit = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect("statistical source deck builds");
+        assert_eq!(
+            circuit.voltage_sources.dc_values[0].to_bits(),
+            expected.to_bits()
+        );
+    }
+
+    #[test]
+    fn native_spectre_process_model_is_materialized_once_for_repeated_devices() {
+        let plan = crate::netlist::SpectreStatisticsPlan {
+            variations: vec![crate::netlist::SpectreVariation {
+                line: 3,
+                scope: crate::netlist::SpectreVariationScope::Process,
+                parameter: "factor".to_owned(),
+                distribution: crate::netlist::SpectreDistribution::Gaussian,
+                spread: crate::netlist::SpectreSpread::StandardDeviation("0.2".to_owned()),
+                percent: false,
+            }],
+            correlations: vec![],
+        };
+        let coordinate = crate::netlist::SpectreStatisticalCoordinate {
+            seed: 64,
+            monte_carlo_run: 9,
+            temperature_celsius: 27.0,
+            axes: vec![],
+        };
+        let deck = format!(
+            "process model cache\n.param factor=3\n.RSPICE_SPECTRE_STAT {}\nV1 in 0 1\nR1 in mid 8 RMOD\nR2 mid 0 8 RMOD\n.model RMOD R (R={{factor}})\n.end\n",
+            plan.encode_internal()
+        );
+        let mut netlist = Netlist::parse(&deck).expect("process model cache deck parses");
+        let process = plan
+            .sample_process(&netlist.params, &coordinate)
+            .expect("process model factor samples");
+        for (name, value) in &process {
+            netlist.params.set(name, *value);
+        }
+        let mut elements = netlist.elements.clone();
+        let initial_model_count = netlist.models.len();
+        materialize_spectre_statistics_after_flattening(
+            &mut netlist,
+            &mut elements,
+            &process,
+            Some(&coordinate),
+            crate::constants::celsius_to_kelvin(coordinate.temperature_celsius),
+            &NoAbort,
+        )
+        .expect("process models materialize");
+
+        assert_eq!(netlist.models.len(), initial_model_count + 1);
+        let generated = elements
+            .iter()
+            .filter_map(|element| match &element.kind {
+                ElementKind::Resistor { model, .. } => model.clone(),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(generated.len(), 2);
+        assert_eq!(generated[0], generated[1]);
+    }
+
+    #[test]
+    fn native_spectre_mismatch_model_is_materialized_once_per_hierarchy_identity() {
+        let plan = crate::netlist::SpectreStatisticsPlan {
+            variations: vec![crate::netlist::SpectreVariation {
+                line: 3,
+                scope: crate::netlist::SpectreVariationScope::Mismatch,
+                parameter: "factor".to_owned(),
+                distribution: crate::netlist::SpectreDistribution::Gaussian,
+                spread: crate::netlist::SpectreSpread::StandardDeviation("0.2".to_owned()),
+                percent: false,
+            }],
+            correlations: vec![],
+        };
+        let coordinate = crate::netlist::SpectreStatisticalCoordinate {
+            seed: 65,
+            monte_carlo_run: 10,
+            temperature_celsius: 27.0,
+            axes: vec![],
+        };
+        let deck = format!(
+            "mismatch model cache\n.param factor=3\n.RSPICE_SPECTRE_STAT {}\n.subckt pair a b\nR1 a mid 8 RMOD\nR2 mid b 8 RMOD\n.ends\n.model RMOD R (R={{factor}})\nV1 in 0 1\nX1 in 0 pair\n.end\n",
+            plan.encode_internal()
+        );
+        let mut netlist = Netlist::parse(&deck).expect("mismatch model cache deck parses");
+        let process = plan
+            .sample_process(&netlist.params, &coordinate)
+            .expect("empty process sample");
+        let expected = plan
+            .sample_mismatch(&netlist.params, &process, "X1", &coordinate)
+            .expect("X1 mismatch factor")["FACTOR"];
+        let flattened = flatten_netlist_with_models(&netlist).expect("hierarchy flattens");
+        let mut elements = flattened.elements;
+        netlist.models.extend(flattened.scoped_models);
+        let initial_model_count = netlist.models.len();
+        materialize_spectre_statistics_after_flattening(
+            &mut netlist,
+            &mut elements,
+            &process,
+            Some(&coordinate),
+            crate::constants::celsius_to_kelvin(coordinate.temperature_celsius),
+            &NoAbort,
+        )
+        .expect("mismatch models materialize");
+
+        assert_eq!(netlist.models.len(), initial_model_count + 1);
+        let generated_names = elements
+            .iter_mut()
+            .filter_map(|element| element_model_name_mut(&mut element.kind).cloned())
+            .collect::<Vec<_>>();
+        assert_eq!(generated_names.len(), 2);
+        assert_eq!(generated_names[0], generated_names[1]);
+        let generated_model = netlist
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case(&generated_names[0]))
+            .expect("generated mismatch model exists");
+        let resistance_multiplier = generated_model
+            .params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("R"))
+            .map(|(_, value)| *value)
+            .expect("generated model has materialized R");
+        assert_eq!(resistance_multiplier.to_bits(), expected.to_bits());
+    }
+
+    #[test]
+    fn spectre_post_flatten_materialization_honors_preexisting_abort() {
+        let mut netlist = Netlist::default();
+        let coordinate = crate::netlist::SpectreStatisticalCoordinate::default();
+        let mut elements = Vec::new();
+        assert!(matches!(
+            materialize_spectre_statistics_after_flattening(
+                &mut netlist,
+                &mut elements,
+                &BTreeMap::new(),
+                Some(&coordinate),
+                crate::constants::TEMP_REFERENCE,
+                &crate::abort_signal::ImmediateAbort,
+            ),
+            Err(SimulationError::Aborted)
+        ));
+    }
+
+    #[test]
+    fn native_spectre_mismatch_is_shared_per_subcircuit_and_reaches_derived_locals() {
+        let plan = crate::netlist::SpectreStatisticsPlan {
+            variations: vec![crate::netlist::SpectreVariation {
+                line: 3,
+                scope: crate::netlist::SpectreVariationScope::Mismatch,
+                parameter: "rv".to_owned(),
+                distribution: crate::netlist::SpectreDistribution::Gaussian,
+                spread: crate::netlist::SpectreSpread::StandardDeviation("5".to_owned()),
+                percent: false,
+            }],
+            correlations: vec![],
+        };
+        let coordinate = crate::netlist::SpectreStatisticalCoordinate {
+            seed: 72,
+            monte_carlo_run: 4,
+            temperature_celsius: -40.0,
+            axes: vec![],
+        };
+        let deck = format!(
+            "native mismatch materialization\n.param rv=100\n.RSPICE_SPECTRE_STAT {}\n.subckt pair a b\n.param local={{rv*2}}\nR1 a mid {{local}}\nR2 mid b {{local}}\n.ends\nV1 in 0 1\nX1 in 0 pair\nX2 in 0 pair\n.end\n",
+            plan.encode_internal()
+        );
+        let mut netlist = Netlist::parse(&deck).expect("statistical hierarchy parses");
+        netlist.spectre_statistical_coordinate = Some(coordinate.clone());
+        let process = plan
+            .sample_process(&netlist.params, &coordinate)
+            .expect("empty process sample");
+        let expected_x1 = 2.0
+            * plan
+                .sample_mismatch(&netlist.params, &process, "X1", &coordinate)
+                .expect("X1 mismatch")["RV"];
+        let expected_x2 = 2.0
+            * plan
+                .sample_mismatch(&netlist.params, &process, "X2", &coordinate)
+                .expect("X2 mismatch")["RV"];
+        let circuit = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect("statistical hierarchy builds");
+        let resistance = |name: &str| {
+            let index = circuit
+                .resistors
+                .names
+                .iter()
+                .position(|candidate| candidate.eq_ignore_ascii_case(name))
+                .expect("flattened resistor exists");
+            circuit.resistors.conductances[index].recip()
+        };
+        assert_eq!(resistance("X1.R1").to_bits(), expected_x1.to_bits());
+        assert_eq!(resistance("X1.R2").to_bits(), expected_x1.to_bits());
+        assert_eq!(resistance("X2.R1").to_bits(), expected_x2.to_bits());
+        assert_eq!(resistance("X2.R2").to_bits(), expected_x2.to_bits());
+        assert_ne!(expected_x1.to_bits(), expected_x2.to_bits());
+    }
+
     /// LEVEL=3 derives AREA and PJ from the drawn rectangle, and must land on
     /// the same junction an explicit `AREA`/`PJ` instance would.
     ///
@@ -5888,6 +6664,28 @@ impl Engine {
         self.ensure_valid_configuration()?;
         check_build_abort(abort)?;
         check_netlist_source_resource_limits(self, netlist, abort)?;
+        let mut statistical_base;
+        let mut statistical_process = BTreeMap::new();
+        let mut statistical_coordinate = None;
+        let requested_coordinate = spectre_statistical_coordinate_for_build(netlist);
+        let netlist = if netlist.spectre_statistics.variations.is_empty() {
+            netlist
+        } else if let Some(coordinate) = requested_coordinate {
+            check_build_abort(abort)?;
+            statistical_process = netlist
+                .spectre_statistics
+                .sample_process(&netlist.params, &coordinate)
+                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+            check_build_abort(abort)?;
+            statistical_base = netlist.clone();
+            for (name, value) in &statistical_process {
+                statistical_base.params.set(name, *value);
+            }
+            statistical_coordinate = Some(coordinate);
+            &statistical_base
+        } else {
+            netlist
+        };
         // One elaboration, one statistical sequence. Subcircuit `.param`s that
         // call `agauss`/`unif` are evaluated during flattening below, so
         // without this a netlist built twice draws different mismatch offsets
@@ -5926,17 +6724,36 @@ impl Engine {
             abort,
         )
         .map_err(|error| map_build_parse_error("subcircuit flattening", error))?;
+        let mut flat_elements = flattened.elements;
+        let requires_statistical_materialization =
+            !netlist.spectre_statistics.variations.is_empty();
         let mut effective_model_netlist;
-        let netlist = if flattened.scoped_models.is_empty() {
+        let netlist = if flattened.scoped_models.is_empty() && !requires_statistical_materialization
+        {
             netlist
         } else {
             effective_model_netlist = netlist.clone();
             effective_model_netlist
                 .models
                 .extend(flattened.scoped_models);
+            if requires_statistical_materialization {
+                let temperature_kelvin =
+                    statistical_coordinate
+                        .as_ref()
+                        .map_or(self.config.temperature, |coordinate| {
+                            crate::constants::celsius_to_kelvin(coordinate.temperature_celsius)
+                        });
+                materialize_spectre_statistics_after_flattening(
+                    &mut effective_model_netlist,
+                    &mut flat_elements,
+                    &statistical_process,
+                    statistical_coordinate.as_ref(),
+                    temperature_kelvin,
+                    abort,
+                )?;
+            }
             &effective_model_netlist
         };
-        let mut flat_elements = flattened.elements;
         if !self.config.device_voltage_limiting {
             for element in &flat_elements {
                 let family = match &element.kind {

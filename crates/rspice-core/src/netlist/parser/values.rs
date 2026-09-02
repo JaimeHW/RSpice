@@ -444,6 +444,9 @@ pub(super) fn parse_model_params(
                                 name,
                                 value,
                             );
+                        } else if params.expression_references_spectre_statistics(&value) {
+                            stream.advance();
+                            expr_params.push((name, value));
                         } else if let Some(value) = try_signed_model_value(stream, params) {
                             numeric_params.push((name, value));
                         } else {
@@ -499,6 +502,7 @@ pub(super) fn parse_model_params(
                             stream.advance();
                             if defer_expression_params
                                 || model_expression_references_temperature(&expr)
+                                || params.expression_references_spectre_statistics(&expr)
                             {
                                 expr_params.push((name, expr));
                             } else if let Ok(value) = eval_expression(&expr, params) {
@@ -765,7 +769,10 @@ fn try_xspice_model_scalar_expression(
     if let Some(value) = parse_boolean_literal(&expr) {
         return Some(ParsedModelScalarExpression::Resolved(value));
     }
-    if defer_expression_params || model_expression_references_temperature(&expr) {
+    if defer_expression_params
+        || model_expression_references_temperature(&expr)
+        || params.expression_references_spectre_statistics(&expr)
+    {
         return Some(ParsedModelScalarExpression::Deferred(expr));
     }
 

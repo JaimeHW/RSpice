@@ -67,7 +67,7 @@ struct SpectreInstance {
     parameters: Vec<SpectreModelAssignment>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum SpectreVariationScope {
     Process,
     Mismatch,
@@ -483,6 +483,15 @@ fn parse_statistics_block(
                     ));
                 }
                 let mut attributes = parse_spectre_model_assignments(rest, line)?;
+                if let Some(selection) = take_assignment(&mut attributes, "dev") {
+                    return Err(error(
+                        line,
+                        format!(
+                            "Spectre correlate dev={} device-selection semantics are not represented; use param=[...] for parameter correlation",
+                            selection.value
+                        ),
+                    ));
+                }
                 let parameters = take_assignment(&mut attributes, "param").ok_or_else(|| {
                     error(line, "Spectre correlate declaration has no param= list")
                 })?;
@@ -557,6 +566,7 @@ fn parse_statistics_block(
     }
     let declared = variations
         .iter()
+        .filter(|variation| variation.scope == SpectreVariationScope::Process)
         .map(|variation| variation.parameter.to_ascii_lowercase())
         .collect::<HashSet<_>>();
     for correlation in &correlations {
@@ -564,7 +574,9 @@ fn parse_statistics_block(
             if !declared.contains(&parameter.to_ascii_lowercase()) {
                 return Err(error(
                     correlation.line,
-                    format!("Spectre correlation references undeclared variation '{parameter}'"),
+                    format!(
+                        "Spectre correlation references undeclared process variation '{parameter}'"
+                    ),
                 ));
             }
         }
@@ -687,25 +699,9 @@ fn strip_spectre_comments_from_line(
 fn lower_statistics(
     statistics: &SpectreStatisticsBlock,
 ) -> Result<String, SpectreModelAdapterError> {
-    if let Some(correlation) = statistics.correlations.first() {
-        return Err(error(
-            correlation.line,
-            "Spectre statistical correlation cannot be represented by RSpice's independent deck-statistical sampler",
-        ));
-    }
-
-    let mut assignments = Vec::with_capacity(statistics.variations.len());
+    let mut plan = super::SpectreStatisticsPlan::default();
     let mut names = HashSet::with_capacity(statistics.variations.len());
     for variation in &statistics.variations {
-        if variation.scope == SpectreVariationScope::Mismatch {
-            return Err(error(
-                variation.line,
-                format!(
-                    "Spectre mismatch variation '{}' requires independent per-instance draws, which this model-library adapter cannot represent",
-                    variation.parameter
-                ),
-            ));
-        }
         if !valid_spice_identifier(&variation.parameter) {
             return Err(error(
                 variation.line,
@@ -715,7 +711,7 @@ fn lower_statistics(
                 ),
             ));
         }
-        if !names.insert(variation.parameter.to_ascii_lowercase()) {
+        if !names.insert((variation.scope, variation.parameter.to_ascii_lowercase())) {
             return Err(error(
                 variation.line,
                 format!(
@@ -726,32 +722,40 @@ fn lower_statistics(
         }
 
         let mut attributes = variation.attributes.clone();
-        let mean = take_assignment(&mut attributes, "mean")
-            .map(|assignment| assignment.value)
-            .unwrap_or_else(|| "0".to_owned());
-        let std = take_assignment(&mut attributes, "std")
-            .ok_or_else(|| {
-                error(
-                    variation.line,
-                    format!(
-                        "Spectre variation '{}' must declare std= for executable lowering",
-                        variation.parameter
-                    ),
-                )
-            })?
-            .value;
-        if let Some(percent) = take_assignment(&mut attributes, "percent") {
-            let value = percent.value.trim_matches(['\'', '"']).to_ascii_lowercase();
-            if !matches!(value.as_str(), "no" | "false" | "0") {
-                return Err(error(
-                    variation.line,
-                    format!(
-                        "Spectre variation '{}' uses percent={}, whose nominal-relative semantics are not available at this global process-variable boundary",
-                        variation.parameter, percent.value
-                    ),
-                ));
-            }
+        if let Some(mean) = take_assignment(&mut attributes, "mean") {
+            return Err(error(
+                variation.line,
+                format!(
+                    "Spectre variation '{}' uses nonstandard mean={}; the executable Spectre contract takes the current parameter value as its nominal mean",
+                    variation.parameter, mean.value
+                ),
+            ));
         }
+        let std = take_assignment(&mut attributes, "std")
+            .or_else(|| take_assignment(&mut attributes, "sigma"));
+        let half_range = take_assignment(&mut attributes, "N");
+        let has_std = std.is_some();
+        let has_half_range = half_range.is_some();
+        let percent = take_assignment(&mut attributes, "percent")
+            .map(|assignment| {
+                let value = assignment
+                    .value
+                    .trim_matches(['\'', '"'])
+                    .to_ascii_lowercase();
+                match value.as_str() {
+                    "yes" | "true" | "1" => Ok(true),
+                    "no" | "false" | "0" => Ok(false),
+                    _ => Err(error(
+                        variation.line,
+                        format!(
+                            "Spectre variation '{}' percent= must be yes or no, found {}",
+                            variation.parameter, assignment.value
+                        ),
+                    )),
+                }
+            })
+            .transpose()?
+            .unwrap_or(false);
         if !attributes.is_empty() {
             return Err(error(
                 variation.line,
@@ -767,37 +771,95 @@ fn lower_statistics(
             ));
         }
 
-        let expression = match variation.distribution.as_str() {
-            "gauss" | "gaussian" | "normal" => {
-                format!("agauss(({mean}),({std}),1)")
-            }
-            "unif" | "uniform" => {
-                // Spectre's std= is a standard deviation. RSpice's aunif
-                // second operand is a half-range, which is sqrt(3) * sigma.
-                format!("aunif(({mean}),1.7320508075688772935*({std}))")
-            }
-            "lnorm" | "lognormal" => {
-                return Err(error(
-                    variation.line,
-                    format!(
-                        "Spectre lognormal variation '{}' is not supported by the executable deck-statistical sampler",
-                        variation.parameter
-                    ),
-                ));
-            }
+        let (distribution, spread) = match variation.distribution.as_str() {
+            "gauss" | "gaussian" | "normal" => (
+                super::SpectreDistribution::Gaussian,
+                super::SpectreSpread::StandardDeviation(
+                    std.ok_or_else(|| {
+                        error(
+                            variation.line,
+                            format!(
+                                "Spectre Gaussian variation '{}' requires std=",
+                                variation.parameter
+                            ),
+                        )
+                    })?
+                    .value,
+                ),
+            ),
+            "unif" | "uniform" => (
+                super::SpectreDistribution::Uniform,
+                super::SpectreSpread::HalfRange(
+                    half_range
+                        .ok_or_else(|| {
+                            error(
+                                variation.line,
+                                format!(
+                                    "Spectre uniform variation '{}' requires N= (half range)",
+                                    variation.parameter
+                                ),
+                            )
+                        })?
+                        .value,
+                ),
+            ),
+            "lnorm" | "lognormal" => (
+                super::SpectreDistribution::Lognormal,
+                super::SpectreSpread::StandardDeviation(
+                    std.ok_or_else(|| {
+                        error(
+                            variation.line,
+                            format!(
+                                "Spectre lognormal variation '{}' requires std=",
+                                variation.parameter
+                            ),
+                        )
+                    })?
+                    .value,
+                ),
+            ),
             distribution => {
                 return Err(error(
                     variation.line,
                     format!(
                         "Spectre variation '{}' uses unsupported executable distribution '{distribution}'",
-                        variation.parameter
+                        variation.parameter,
                     ),
                 ));
             }
         };
-        assignments.push(format!("{}={{{expression}}}", variation.parameter));
+        if has_std && has_half_range {
+            return Err(error(
+                variation.line,
+                format!(
+                    "Spectre variation '{}' cannot declare both std= and N=",
+                    variation.parameter
+                ),
+            ));
+        }
+        plan.variations.push(super::SpectreVariation {
+            line: variation.line,
+            scope: match variation.scope {
+                SpectreVariationScope::Process => super::SpectreVariationScope::Process,
+                SpectreVariationScope::Mismatch => super::SpectreVariationScope::Mismatch,
+            },
+            parameter: variation.parameter.clone(),
+            distribution,
+            spread,
+            percent,
+        });
     }
-    Ok(format!(".param {}", assignments.join(" ")))
+    for correlation in &statistics.correlations {
+        plan.correlations.push(super::SpectreCorrelation {
+            line: correlation.line,
+            scope: super::SpectreVariationScope::Process,
+            parameters: correlation.parameters.clone(),
+            coefficient: correlation.coefficient.clone(),
+        });
+    }
+    plan.validate_structure()
+        .map_err(|failure| error(0, failure.to_string()))?;
+    Ok(format!(".RSPICE_SPECTRE_STAT {}", plan.encode_internal()))
 }
 
 fn valid_spice_identifier(value: &str) -> bool {
@@ -1890,51 +1952,116 @@ mod tests {
     }
 
     #[test]
-    fn process_statistics_lower_to_executable_deck_statistical_parameters() {
-        let source = "simulator lang=spectre\nstatistics {\n process {\n  vary d1 dist=gauss mean=2 std=1\n  vary d2 dist=uniform std=2\n }\n}\nmodel junction diode is=2e-14\n";
+    fn process_statistics_lower_to_an_executable_native_plan() {
+        let source = "simulator lang=spectre\nparameters d1=2 d2=20\nstatistics {\n process {\n  vary d1 dist=gauss std=1\n  vary d2 dist=uniform N=2 percent=yes\n }\n}\nmodel junction diode is=2e-14\n";
         let adapted = adapt_spectre_model_library(Path::new("statistics.scs"), source)
             .expect("representable Spectre process statistics lower");
         assert_eq!(adapted.lines().count(), source.lines().count());
-        assert!(adapted.contains("d1={agauss((2),(1),1)}"), "{adapted}");
-        assert!(
-            adapted.contains("d2={aunif((0),1.7320508075688772935*(2))}"),
-            "{adapted}"
-        );
+        assert!(adapted.contains(".RSPICE_SPECTRE_STAT S1~"), "{adapted}");
         assert!(adapted.contains(".model junction D"), "{adapted}");
 
         let deck = format!("statistics nominal\n{adapted}.end\n");
-        let nominal = crate::Netlist::parse_with_options(
-            &deck,
-            crate::netlist::NetlistParseOptions {
-                statistical_mode: crate::netlist::StatisticalParamMode::Nominal,
-                ..Default::default()
-            },
-        )
-        .expect("lowered statistics are valid executable SPICE");
+        let nominal =
+            crate::Netlist::parse(&deck).expect("lowered statistics are valid executable SPICE");
         assert_eq!(nominal.params.get("d1"), Some(2.0));
-        assert_eq!(nominal.params.get("d2"), Some(0.0));
+        assert_eq!(nominal.params.get("d2"), Some(20.0));
+        assert_eq!(nominal.spectre_statistics.variations.len(), 2, "{adapted}");
+        assert!(nominal.spectre_statistics.variations[1].percent);
+        let sample = nominal
+            .spectre_statistics
+            .sample_process(
+                &nominal.params,
+                &super::super::SpectreStatisticalCoordinate {
+                    seed: 8,
+                    monte_carlo_run: 2,
+                    temperature_celsius: 27.0,
+                    axes: vec![],
+                },
+            )
+            .expect("native process plan samples");
+        assert!(sample["D1"].is_finite());
+        assert!((18.0..=22.0).contains(&sample["D2"]));
     }
 
     #[test]
-    fn statistics_semantics_that_cannot_be_preserved_fail_closed() {
+    fn mismatch_correlation_and_lognormal_statistics_are_executable() {
+        let source = "parameters d1=2 d2=3 d3=4 dvth=0\nstatistics {\n process {\n  vary d1 dist=gauss std=1\n  vary d2 dist=uniform N=0.5\n  vary d3 dist=lnorm std=0.1\n }\n mismatch {\n  vary dvth dist=gauss std=0.02 percent=no\n }\n correlate param=[d1 d2 d3] cc=0.25\n}\n";
+        let adapted = adapt_spectre_model_library(Path::new("statistics.scs"), source)
+            .expect("native statistical semantics lower");
+        let deck = crate::Netlist::parse(&format!("native statistics\n{adapted}.end\n"))
+            .expect("native statistical plan parses");
+        assert_eq!(deck.spectre_statistics.variations.len(), 4, "{adapted}");
+        assert_eq!(deck.spectre_statistics.correlations.len(), 1);
+        let coordinate = super::super::SpectreStatisticalCoordinate {
+            seed: 99,
+            monte_carlo_run: 11,
+            temperature_celsius: 125.0,
+            axes: vec![("corner".into(), 1.0)],
+        };
+        let process = deck
+            .spectre_statistics
+            .sample_process(&deck.params, &coordinate)
+            .expect("correlated process variables sample");
+        let mismatch = deck
+            .spectre_statistics
+            .sample_mismatch(&deck.params, &process, "X1", &coordinate)
+            .expect("per-instance mismatch samples");
+        assert_eq!(process.len(), 3);
+        assert_eq!(mismatch.len(), 1);
+        assert!(process["D3"] > 0.0);
+        assert!(mismatch["DVTH"].is_finite());
+    }
+
+    #[test]
+    fn same_parameter_can_have_process_and_mismatch_variation() {
+        let source = "parameters x=10 y=20\nstatistics {\n process {\n  vary x dist=gauss std=1\n  vary y dist=gauss std=2\n }\n mismatch {\n  vary x dist=gauss std=0.5\n  vary y dist=gauss std=1\n }\n correlate param=[x y] cc=0.2\n}\n";
+        let adapted = adapt_spectre_model_library(Path::new("statistics.scs"), source)
+            .expect("same parameter may vary in both statistical scopes");
+        let deck = crate::Netlist::parse(&format!("scoped correlations\n{adapted}.end\n"))
+            .expect("scoped correlation plan parses");
+        assert_eq!(deck.spectre_statistics.variations.len(), 4);
+        assert_eq!(deck.spectre_statistics.correlations.len(), 1);
+        assert_eq!(
+            deck.spectre_statistics.correlations[0].scope,
+            super::super::SpectreVariationScope::Process
+        );
+    }
+
+    #[test]
+    fn malformed_or_unrepresented_statistics_fail_closed() {
         for (source, expected) in [
             (
-                "statistics {\n mismatch {\n  vary dvth dist=gauss std=1\n }\n}\n",
-                "per-instance draws",
+                "statistics {\n process {\n  vary d1 dist=uniform std=1\n }\n}\n",
+                "requires N=",
             ),
             (
-                "statistics {\n process {\n  vary d1 dist=gauss std=1\n  vary d2 dist=gauss std=1\n }\n correlate param=[d1 d2] cc=0.5\n}\n",
-                "correlation cannot be represented",
+                "statistics {\n process {\n  vary d1 dist=gauss N=1\n }\n}\n",
+                "requires std=",
             ),
             (
-                "statistics {\n process {\n  vary d1 dist=lnorm std=1\n }\n}\n",
-                "lognormal variation",
+                "statistics {\n process {\n  vary d1 dist=gauss mean=2 std=1\n }\n}\n",
+                "current parameter value",
             ),
         ] {
             let error = adapt_spectre_model_library(Path::new("statistics.scs"), source)
-                .expect_err("unrepresentable statistics must not become inert metadata");
+                .expect_err("invalid statistics must not become inert metadata");
             assert!(error.message.contains(expected), "{error}");
         }
+
+        let device_correlation = adapt_spectre_model_library(
+            Path::new("statistics.scs"),
+            "statistics {\n mismatch {\n  vary x dist=gauss std=1\n }\n correlate dev=[M1 M2] param=[x] cc=0.5\n}\n",
+        )
+        .expect_err("device-selection correlation must not be reinterpreted as parameter correlation");
+        assert!(device_correlation.message.contains("dev="));
+        assert!(device_correlation.message.contains("not represented"));
+
+        let scoped_correlation = adapt_spectre_model_library(
+            Path::new("statistics.scs"),
+            "statistics {\n process {\n  vary x dist=gauss std=1\n  vary y dist=gauss std=1\n  correlate param=[x y] cc=0.5\n }\n}\n",
+        )
+        .expect_err("parameter correlation grammar belongs at statistics-block scope");
+        assert!(scoped_correlation.message.contains("must be outside"));
     }
 
     #[test]
@@ -1945,7 +2072,11 @@ mod tests {
         )
         .expect_err("a correlation cannot target an undeclared variation");
         assert_eq!(error.line, 5);
-        assert!(error.message.contains("undeclared variation 'missing'"));
+        assert!(
+            error
+                .message
+                .contains("undeclared process variation 'missing'")
+        );
     }
 
     #[test]
