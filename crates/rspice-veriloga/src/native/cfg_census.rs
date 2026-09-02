@@ -353,7 +353,7 @@ fn the_cfg_block_lowering_agrees_with_the_reference_interpreter() {
                 .map(|parameter| parameter.default)
                 .collect();
             let mut points: Vec<OperatingPoint> =
-                [(0x5EED_1_u64, 0_u8), (0xC0FF_EE, 2), (0xBEEF, 0)]
+                [(0x0005_EED1_u64, 0_u8), (0x00C0_FFEE, 2), (0x0000_BEEF, 0)]
                     .into_iter()
                     .map(|(seed, analysis)| {
                         OperatingPoint::new(
