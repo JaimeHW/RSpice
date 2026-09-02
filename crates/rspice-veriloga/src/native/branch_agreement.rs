@@ -20,8 +20,7 @@
 //! `#[ignore]`d: this is release-qualification work. Run it with
 //! `--release --features native -- --ignored --nocapture`.
 
-use std::path::{Path, PathBuf};
-
+use super::census_models::shipped_census_models;
 use crate::jit::expr::{NativeOp, NativeProgram};
 use crate::jit::plan_builder::build_model_plan_with_canonical_ir;
 use crate::jit::ssa::Program;
@@ -31,16 +30,6 @@ use crate::native::runtime::ExecutableMemory;
 use crate::native::x64::codegen::{
     compile_value_function_artifact, compile_value_function_artifact_from_ssa,
 };
-use crate::rust_backend::discover_veriloga_sources;
-use crate::{CompilerOptions, VerilogACompiler};
-
-fn shipped_model_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("models")
-        .join("veriloga")
-}
 
 /// Whether every operand of a program reads storage this harness sizes.
 ///
@@ -321,46 +310,46 @@ fn compare_program(
 #[test]
 #[ignore = "release qualification; run with --release --features native -- --ignored --nocapture"]
 fn branch_lowering_agrees_with_the_select_form_across_the_shipped_census() {
-    let root = shipped_model_root();
-    let candidates = discover_veriloga_sources(&root).expect("discover shipped Verilog-A sources");
     let mut tally = Tally::default();
-    for candidate in candidates {
-        for module in &candidate.modules {
-            let mut options = CompilerOptions::default();
-            options.include_paths.push(root.clone());
-            options.defines = candidate.compile_profile.defines.clone();
-            options.undefines = candidate.compile_profile.undefines.clone();
-            let compiler = VerilogACompiler::new(options);
-            let runtime = compiler
-                .compile_file_runtime_with_metadata(&candidate.path, Some(module))
-                .unwrap_or_else(|error| {
-                    panic!("compile {} :: {module}: {error}", candidate.path.display())
-                });
-            let plan = build_model_plan_with_canonical_ir(&runtime.model, &runtime.canonical_ir)
-                .unwrap_or_else(|error| panic!("{module}: native plan: {error}"));
-            tally.models += 1;
-            let before = tally.programs;
-            let started = std::time::Instant::now();
-            let storages = [
-                (HostStorage::for_model(&runtime.model, 0.0), 0_u8),
-                (HostStorage::for_model(&runtime.model, 0.7), 0),
-                (HostStorage::for_model(&runtime.model, -0.4), 2),
-            ];
-            let programs = value_programs(&plan);
-            let ops = programs
-                .iter()
-                .map(|program| program.ops().len())
-                .sum::<usize>();
-            for (index, program) in programs.into_iter().enumerate() {
-                compare_program(module, index, program, &storages, &mut tally);
-            }
-            eprintln!(
-                "branch-agreement model={module} programs={} ops={ops} seconds={:.1}",
-                tally.programs - before,
-                started.elapsed().as_secs_f64()
-            );
+    let mut total_compile_seconds = 0.0_f64;
+    let mut total_census_seconds = 0.0_f64;
+    for shipped in shipped_census_models() {
+        let module = &shipped.name;
+        let census_started = std::time::Instant::now();
+        let plan = build_model_plan_with_canonical_ir(&shipped.model, &shipped.canonical_ir)
+            .unwrap_or_else(|error| panic!("{module}: native plan: {error}"));
+        tally.models += 1;
+        let before = tally.programs;
+        let started = std::time::Instant::now();
+        let storages = [
+            (HostStorage::for_model(&shipped.model, 0.0), 0_u8),
+            (HostStorage::for_model(&shipped.model, 0.7), 0),
+            (HostStorage::for_model(&shipped.model, -0.4), 2),
+        ];
+        let programs = value_programs(&plan);
+        let ops = programs
+            .iter()
+            .map(|program| program.ops().len())
+            .sum::<usize>();
+        for (index, program) in programs.into_iter().enumerate() {
+            compare_program(module, index, program, &storages, &mut tally);
         }
+        eprintln!(
+            "branch-agreement model={module} programs={} ops={ops} seconds={:.1}",
+            tally.programs - before,
+            started.elapsed().as_secs_f64()
+        );
+        let census_seconds = census_started.elapsed().as_secs_f64();
+        eprintln!(
+            "branch-agreement model={module} compile_seconds={:.1} census_seconds={census_seconds:.1} cached={}",
+            shipped.compile_seconds, shipped.from_cache
+        );
+        total_compile_seconds += shipped.compile_seconds;
+        total_census_seconds += census_seconds;
     }
+    eprintln!(
+        "branch-agreement total_compile_seconds={total_compile_seconds:.1} total_census_seconds={total_census_seconds:.1}"
+    );
 
     eprintln!(
         "branch-agreement models={} programs={} conditional_programs={} split_conditionals={} sunk_failing_operands={} executed_programs={} executions={} select_only_failures={}",

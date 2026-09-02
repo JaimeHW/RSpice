@@ -10,18 +10,7 @@
 //! release-qualification work, not a per-commit gate. Run it with
 //! `--release --features native -- --ignored --nocapture`.
 
-use std::path::{Path, PathBuf};
-
-use crate::rust_backend::discover_veriloga_sources;
-use crate::{CompilerOptions, VerilogACompiler};
-
-fn shipped_model_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("models")
-        .join("veriloga")
-}
+use super::census_models::shipped_census_models;
 
 /// One shipped module's compiled machine-code digest.
 struct ModelImageDigest {
@@ -73,44 +62,44 @@ fn normalize_host_addresses(image: &[u8]) -> (Vec<u8>, usize) {
 }
 
 fn census() -> Vec<ModelImageDigest> {
-    let root = shipped_model_root();
-    let candidates = discover_veriloga_sources(&root).expect("discover shipped Verilog-A sources");
     let mut digests = Vec::new();
-    for candidate in candidates {
-        for module in &candidate.modules {
-            let mut options = CompilerOptions::default();
-            options.include_paths.push(root.clone());
-            options.defines = candidate.compile_profile.defines.clone();
-            options.undefines = candidate.compile_profile.undefines.clone();
-            let compiler = VerilogACompiler::new(options);
-            let started = std::time::Instant::now();
-            let runtime = compiler
-                .compile_file_runtime_with_metadata(&candidate.path, Some(module))
-                .unwrap_or_else(|error| {
-                    panic!("compile {} :: {module}: {error}", candidate.path.display())
-                });
-            let native = crate::native::x64::compile_model_with_canonical_ir(
-                &runtime.model,
-                &runtime.canonical_ir,
+    let mut total_compile_seconds = 0.0_f64;
+    let mut total_census_seconds = 0.0_f64;
+    for shipped in shipped_census_models() {
+        let module = &shipped.name;
+        let started = std::time::Instant::now();
+        let native = crate::native::x64::compile_model_with_canonical_ir(
+            &shipped.model,
+            &shipped.canonical_ir,
+        )
+        .unwrap_or_else(|error| {
+            panic!(
+                "native compile {} :: {module}: {error}",
+                shipped.path.display()
             )
-            .unwrap_or_else(|error| {
-                panic!(
-                    "native compile {} :: {module}: {error}",
-                    candidate.path.display()
-                )
-            });
-            let seconds = started.elapsed().as_secs_f64();
-            let image = native.image_bytes();
-            let (normalized, helper_calls) = normalize_host_addresses(image);
-            digests.push(ModelImageDigest {
-                name: module.to_string(),
-                digest: blake3::hash(&normalized).to_hex().to_string(),
-                bytes: image.len(),
-                helper_calls,
-                seconds,
-            });
-        }
+        });
+        let image = native.image_bytes();
+        let (normalized, helper_calls) = normalize_host_addresses(image);
+        let census_seconds = started.elapsed().as_secs_f64();
+        // The front end is shared with the other two censuses and the native
+        // compile is not, so a run that slows down says which half slowed.
+        eprintln!(
+            "code-identity model={module} compile_seconds={:.1} census_seconds={census_seconds:.1} cached={}",
+            shipped.compile_seconds, shipped.from_cache
+        );
+        total_compile_seconds += shipped.compile_seconds;
+        total_census_seconds += census_seconds;
+        digests.push(ModelImageDigest {
+            name: module.to_string(),
+            digest: blake3::hash(&normalized).to_hex().to_string(),
+            bytes: image.len(),
+            helper_calls,
+            seconds: shipped.compile_seconds + census_seconds,
+        });
     }
+    eprintln!(
+        "code-identity total_compile_seconds={total_compile_seconds:.1} total_census_seconds={total_census_seconds:.1}"
+    );
     digests.sort_by(|left, right| left.name.cmp(&right.name));
     digests
 }

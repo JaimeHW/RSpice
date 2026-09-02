@@ -22,8 +22,8 @@
 //! `--release --features native -- --ignored --nocapture`.
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
 
+use super::census_models::shipped_census_models_matching;
 use crate::canonical_ir::cfg_lower::{CfgModel, CfgNoiseProcess};
 use crate::canonical_ir::{
     AdFunction, AdSeed, CanonicalNoiseSourceKind, CanonicalStateFamily, CanonicalStateLayout,
@@ -311,14 +311,6 @@ fn analysis_names(analysis: u8) -> std::collections::HashSet<smol_str::SmolStr> 
     names.iter().map(|name| (*name).into()).collect()
 }
 
-fn shipped_model_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("models")
-        .join("veriloga")
-}
-
 #[derive(Default)]
 struct Tally {
     models: usize,
@@ -431,217 +423,226 @@ struct SparsityTally {
 #[test]
 #[ignore = "release qualification; run with --release --features native -- --ignored --nocapture"]
 fn the_cfg_block_lowering_agrees_with_the_reference_interpreter() {
-    let root = shipped_model_root();
-    let candidates = discover_veriloga_sources(&root).expect("discover shipped Verilog-A sources");
     let mut tally = Tally::default();
     let mut worst_overall = 0.0_f64;
     // The same affordance the emitted-code benchmark carries: a substring that
     // narrows repeated runs to one model while it is being investigated. The
     // corpus assertion below is skipped whenever it is set, so a filtered run
-    // cannot be mistaken for a full one.
+    // cannot be mistaken for a full one. It narrows the shared provider rather
+    // than its output, so a filtered run does not compile the models it skips.
     let filter = std::env::var("RSPICE_CFG_CENSUS_FILTER").ok();
-    for candidate in candidates {
-        for module in &candidate.modules {
-            if filter
-                .as_deref()
-                .is_some_and(|filter| !module.contains(filter))
-            {
+    let mut total_compile_seconds = 0.0_f64;
+    let mut total_census_seconds = 0.0_f64;
+    // Declared once so every exit from a model's body reports the same split,
+    // including the two that refuse the model before it is compared.
+    let mut note_split = |module: &str, compile_seconds: f64, census_seconds: f64, cached: bool| {
+        println!(
+            "cfg-census model={module} compile_seconds={compile_seconds:.1} census_seconds={census_seconds:.1} cached={cached}"
+        );
+        total_compile_seconds += compile_seconds;
+        total_census_seconds += census_seconds;
+    };
+    for shipped in shipped_census_models_matching(filter.as_deref()) {
+        let module = &shipped.name;
+        let started = std::time::Instant::now();
+        let runtime = &shipped;
+        let artifact = &runtime.canonical_ir;
+        tally.models += 1;
+        let cfg = match CfgModel::from_hir(&artifact.hir, &artifact.mir) {
+            Ok(cfg) => cfg,
+            Err(diagnostics) => {
+                println!(
+                    "cfg-census model={module} refused=cfg-lowering detail={}",
+                    diagnostics
+                        .first()
+                        .map_or_else(|| "unknown".to_string(), |first| first.message.to_string())
+                );
+                note_split(
+                    module,
+                    shipped.compile_seconds,
+                    started.elapsed().as_secs_f64(),
+                    shipped.from_cache,
+                );
                 continue;
             }
-            let started = std::time::Instant::now();
-            let mut options = CompilerOptions::default();
-            options.include_paths.push(root.clone());
-            options.defines = candidate.compile_profile.defines.clone();
-            options.undefines = candidate.compile_profile.undefines.clone();
-            let compiler = VerilogACompiler::new(options);
-            let runtime = compiler
-                .compile_file_runtime_with_metadata(&candidate.path, Some(module))
-                .unwrap_or_else(|error| {
-                    panic!("compile {} :: {module}: {error}", candidate.path.display())
-                });
-            let artifact = &runtime.canonical_ir;
-            tally.models += 1;
-            let cfg = match CfgModel::from_hir(&artifact.hir, &artifact.mir) {
-                Ok(cfg) => cfg,
-                Err(diagnostics) => {
-                    println!(
-                        "cfg-census model={module} refused=cfg-lowering detail={}",
-                        diagnostics.first().map_or_else(
-                            || "unknown".to_string(),
-                            |first| first.message.to_string()
-                        )
-                    );
-                    continue;
-                }
-            };
-            let state = match CfgStateAllocation::build(&artifact.hir, &cfg.function) {
-                Ok(state) => state,
-                Err(errors) => {
-                    println!(
-                        "cfg-census model={module} refused=state-allocation detail={}",
-                        errors
-                            .first()
-                            .map_or_else(|| "unknown".to_string(), ToString::to_string)
-                    );
-                    continue;
-                }
-            };
-            let branch_unknowns =
-                canonical_branch_unknown_runtime_map(&runtime.model, &artifact.mir)
-                    .unwrap_or_else(|error| panic!("{module}: branch unknown map: {error}"));
-            // The CFG numbers event-controlled state in HIR declaration order;
-            // the runtime numbers every variable the model has. Names are what
-            // the two spaces share.
-            let event_state_variables: Vec<Option<usize>> = artifact
-                .hir
-                .variables
-                .iter()
-                .filter(|variable| variable.is_state)
-                .map(|variable| {
-                    runtime
-                        .model
-                        .variable_names
-                        .iter()
-                        .position(|name| *name == variable.name)
+        };
+        let state = match CfgStateAllocation::build(&artifact.hir, &cfg.function) {
+            Ok(state) => state,
+            Err(errors) => {
+                println!(
+                    "cfg-census model={module} refused=state-allocation detail={}",
+                    errors
+                        .first()
+                        .map_or_else(|| "unknown".to_string(), ToString::to_string)
+                );
+                note_split(
+                    module,
+                    shipped.compile_seconds,
+                    started.elapsed().as_secs_f64(),
+                    shipped.from_cache,
+                );
+                continue;
+            }
+        };
+        let branch_unknowns = canonical_branch_unknown_runtime_map(&runtime.model, &artifact.mir)
+            .unwrap_or_else(|error| panic!("{module}: branch unknown map: {error}"));
+        // The CFG numbers event-controlled state in HIR declaration order;
+        // the runtime numbers every variable the model has. Names are what
+        // the two spaces share.
+        let event_state_variables: Vec<Option<usize>> = artifact
+            .hir
+            .variables
+            .iter()
+            .filter(|variable| variable.is_state)
+            .map(|variable| {
+                runtime
+                    .model
+                    .variable_names
+                    .iter()
+                    .position(|name| *name == variable.name)
+            })
+            .collect();
+        let bindings = CfgRuntimeBindings::from_mir(
+            module.as_str(),
+            &artifact.mir,
+            branch_unknowns,
+            event_state_variables,
+        );
+
+        // Only the integration family is addressable from a program this
+        // lowering emits — `ddt` and `idt` are the two state-bearing kinds
+        // it covers — and its records are the parallel scalar lanes the
+        // context exposes. The slack keeps a stray slot inside the
+        // allocation rather than deciding whether this process survives.
+        let state_len = state.family_len(CanonicalStateFamily::Integration) + 8;
+        let parameter_defaults: Vec<Option<f64>> = artifact
+            .mir
+            .parameters
+            .iter()
+            .map(|parameter| parameter.default)
+            .collect();
+        let mut points: Vec<OperatingPoint> =
+            [(0x0005_EED1_u64, 0_u8), (0x00C0_FFEE, 2), (0x0000_BEEF, 0)]
+                .into_iter()
+                .map(|(seed, analysis)| {
+                    OperatingPoint::new(
+                        seed,
+                        analysis,
+                        &parameter_defaults,
+                        bindings.terminal_count,
+                        bindings.internal_node_count,
+                        &bindings.branch_unknowns,
+                        state_len,
+                        cfg.event_state_candidates.len(),
+                    )
                 })
                 .collect();
-            let bindings = CfgRuntimeBindings::from_mir(
-                module.as_str(),
-                &artifact.mir,
-                branch_unknowns,
-                event_state_variables,
-            );
 
-            // Only the integration family is addressable from a program this
-            // lowering emits — `ddt` and `idt` are the two state-bearing kinds
-            // it covers — and its records are the parallel scalar lanes the
-            // context exposes. The slack keeps a stray slot inside the
-            // allocation rather than deciding whether this process survives.
-            let state_len = state.family_len(CanonicalStateFamily::Integration) + 8;
-            let parameter_defaults: Vec<Option<f64>> = artifact
-                .mir
-                .parameters
-                .iter()
-                .map(|parameter| parameter.default)
-                .collect();
-            let mut points: Vec<OperatingPoint> =
-                [(0x0005_EED1_u64, 0_u8), (0x00C0_FFEE, 2), (0x0000_BEEF, 0)]
-                    .into_iter()
-                    .map(|(seed, analysis)| {
-                        OperatingPoint::new(
-                            seed,
-                            analysis,
-                            &parameter_defaults,
-                            bindings.terminal_count,
-                            bindings.internal_node_count,
-                            &bindings.branch_unknowns,
-                            state_len,
-                            cfg.event_state_candidates.len(),
-                        )
-                    })
-                    .collect();
+        // Zeroed, and the interpreter's accepted event state is zero too:
+        // the only variable slot a CFG-lowered residual reads is the
+        // accepted value of an event-controlled state variable, and a
+        // static evaluation has no accepted history.
+        let variables = vec![0.0_f64; runtime.model.num_variables + 8];
 
-            // Zeroed, and the interpreter's accepted event state is zero too:
-            // the only variable slot a CFG-lowered residual reads is the
-            // accepted value of an event-controlled state variable, and a
-            // static evaluation has no accepted history.
-            let variables = vec![0.0_f64; runtime.model.num_variables + 8];
-
-            let mut lowered = 0_usize;
-            let mut first_refusal: Option<String> = None;
-            let mut oracle_refusal: Option<String> = None;
-            let mut executed = 0_usize;
-            let mut worst = 0.0_f64;
-            let mut worst_case: Option<String> = None;
-            for (ordinal, residual) in cfg.residuals.iter().copied().enumerate() {
-                let (pruned, outputs) = prune_cfg_to_outputs(&cfg.function, &[residual]);
-                let output = outputs[0];
-                let program = match lower_cfg_function(&pruned, output, &state, &bindings) {
-                    Ok(program) => {
-                        lowered += 1;
-                        program
-                    }
+        let mut lowered = 0_usize;
+        let mut first_refusal: Option<String> = None;
+        let mut oracle_refusal: Option<String> = None;
+        let mut executed = 0_usize;
+        let mut worst = 0.0_f64;
+        let mut worst_case: Option<String> = None;
+        for (ordinal, residual) in cfg.residuals.iter().copied().enumerate() {
+            let (pruned, outputs) = prune_cfg_to_outputs(&cfg.function, &[residual]);
+            let output = outputs[0];
+            let program = match lower_cfg_function(&pruned, output, &state, &bindings) {
+                Ok(program) => {
+                    lowered += 1;
+                    program
+                }
+                Err(error) => {
+                    tally.refused_outputs += 1;
+                    first_refusal.get_or_insert_with(|| error.to_string());
+                    continue;
+                }
+            };
+            if executed >= EXECUTED_OUTPUTS_PER_MODEL {
+                continue;
+            }
+            let artifact_image =
+                compile_value_function_artifact_from_ssa(&program).unwrap_or_else(|error| {
+                    panic!("{module} residual {ordinal}: x64 codegen: {error}")
+                });
+            let memory = ExecutableMemory::allocate(artifact_image.bytes())
+                .unwrap_or_else(|error| panic!("{module} residual {ordinal}: publish: {error}"));
+            let entry = memory.ptr_at(0).expect("entry inside published image");
+            let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            executed += 1;
+            // The oracle runs on the *pruned* function, one output at a
+            // time. Interpreting the whole body instead would report a
+            // refusal for the whole model whenever any residual reads an
+            // undifferentiated `ddx`, including for the residuals that do
+            // not, which is most of them.
+            for (index, point) in points.iter_mut().enumerate() {
+                let snapshot = match evaluate_cfg(
+                    &pruned,
+                    &point
+                        .interpreter_inputs(artifact.mir.nodes.len(), artifact.mir.branches.len()),
+                ) {
+                    Ok(snapshot) => snapshot,
                     Err(error) => {
-                        tally.refused_outputs += 1;
-                        first_refusal.get_or_insert_with(|| error.to_string());
+                        tally.oracle_refusals += 1;
+                        oracle_refusal.get_or_insert_with(|| format!("{error:?}"));
                         continue;
                     }
                 };
-                if executed >= EXECUTED_OUTPUTS_PER_MODEL {
+                let Some(reference) = snapshot.value(output) else {
+                    continue;
+                };
+                let context = point.context();
+                context.clear_runtime_error();
+                let actual = function(&context, variables.as_ptr());
+                if context.take_runtime_error().is_some() {
+                    tally.runtime_errors += 1;
                     continue;
                 }
-                let artifact_image = compile_value_function_artifact_from_ssa(&program)
-                    .unwrap_or_else(|error| {
-                        panic!("{module} residual {ordinal}: x64 codegen: {error}")
-                    });
-                let memory =
-                    ExecutableMemory::allocate(artifact_image.bytes()).unwrap_or_else(|error| {
-                        panic!("{module} residual {ordinal}: publish: {error}")
-                    });
-                let entry = memory.ptr_at(0).expect("entry inside published image");
-                let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
-                    unsafe { std::mem::transmute(entry) };
-                executed += 1;
-                // The oracle runs on the *pruned* function, one output at a
-                // time. Interpreting the whole body instead would report a
-                // refusal for the whole model whenever any residual reads an
-                // undifferentiated `ddx`, including for the residuals that do
-                // not, which is most of them.
-                for (index, point) in points.iter_mut().enumerate() {
-                    let snapshot = match evaluate_cfg(
-                        &pruned,
-                        &point.interpreter_inputs(
-                            artifact.mir.nodes.len(),
-                            artifact.mir.branches.len(),
-                        ),
-                    ) {
-                        Ok(snapshot) => snapshot,
-                        Err(error) => {
-                            tally.oracle_refusals += 1;
-                            oracle_refusal.get_or_insert_with(|| format!("{error:?}"));
-                            continue;
-                        }
-                    };
-                    let Some(reference) = snapshot.value(output) else {
-                        continue;
-                    };
-                    let context = point.context();
-                    context.clear_runtime_error();
-                    let actual = function(&context, variables.as_ptr());
-                    if context.take_runtime_error().is_some() {
-                        tally.runtime_errors += 1;
-                        continue;
-                    }
-                    tally.comparisons += 1;
-                    if let Some(delta) = deviation(reference, actual)
-                        && delta > worst
-                    {
-                        worst = delta;
-                        worst_case = Some(format!(
-                            "residual={ordinal} point={index} interpreter={reference:.17e} block_program={actual:.17e}"
-                        ));
-                    }
+                tally.comparisons += 1;
+                if let Some(delta) = deviation(reference, actual)
+                    && delta > worst
+                {
+                    worst = delta;
+                    worst_case = Some(format!(
+                        "residual={ordinal} point={index} interpreter={reference:.17e} block_program={actual:.17e}"
+                    ));
                 }
             }
-            tally.lowered_outputs += lowered;
-            tally.executed_outputs += executed;
-            worst_overall = worst_overall.max(worst);
-            println!(
-                "cfg-census model={module} outputs={} lowered={lowered} executed={executed} max_relative_deviation={worst:.3e} seconds={:.1}{}{}{}",
-                cfg.residuals.len(),
-                started.elapsed().as_secs_f64(),
-                worst_case
-                    .map(|case| format!(" worst_case[{case}]"))
-                    .unwrap_or_default(),
-                oracle_refusal
-                    .map(|refusal| format!(" oracle_refused={refusal}"))
-                    .unwrap_or_default(),
-                first_refusal
-                    .map(|refusal| format!(" first_refusal={refusal}"))
-                    .unwrap_or_default(),
-            );
         }
+        tally.lowered_outputs += lowered;
+        tally.executed_outputs += executed;
+        worst_overall = worst_overall.max(worst);
+        println!(
+            "cfg-census model={module} outputs={} lowered={lowered} executed={executed} max_relative_deviation={worst:.3e} seconds={:.1}{}{}{}",
+            cfg.residuals.len(),
+            shipped.compile_seconds + started.elapsed().as_secs_f64(),
+            worst_case
+                .map(|case| format!(" worst_case[{case}]"))
+                .unwrap_or_default(),
+            oracle_refusal
+                .map(|refusal| format!(" oracle_refused={refusal}"))
+                .unwrap_or_default(),
+            first_refusal
+                .map(|refusal| format!(" first_refusal={refusal}"))
+                .unwrap_or_default(),
+        );
+        note_split(
+            module,
+            shipped.compile_seconds,
+            started.elapsed().as_secs_f64(),
+            shipped.from_cache,
+        );
     }
+    println!(
+        "cfg-census total_compile_seconds={total_compile_seconds:.1} total_census_seconds={total_census_seconds:.1}"
+    );
     println!(
         "cfg-census models={} lowered_outputs={} refused_outputs={} executed_outputs={} comparisons={} runtime_errors={} oracle_refusals={} max_relative_deviation={worst_overall:.3e}",
         tally.models,
