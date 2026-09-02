@@ -14,6 +14,8 @@ use std::sync::{
 };
 use std::thread::JoinHandle;
 
+use serde::{Deserialize, Serialize};
+
 use super::config::AnalysisConfig;
 use super::execution::{ResolvedExecutionDependencies, ResolvedTaskDispatch};
 use super::multi_run::AnalysisSpec;
@@ -948,6 +950,26 @@ pub enum SimulationError {
     /// Solver error
     SolverError(String),
 
+    /// A well-formed output request the finished analysis does not carry.
+    ///
+    /// The signal is the spelling that was authored, not the registry's
+    /// canonical form: what a person has to fix is the request they wrote,
+    /// and naming it back to them in another spelling would not identify it.
+    RequestedSignalUnavailable {
+        signal: String,
+        analysis: String,
+        coordinate: Option<String>,
+    },
+
+    /// A result whose signal registry and numeric payload disagree with the
+    /// schema its own result type promises.
+    ///
+    /// Nothing in the design is at fault and no edit fixes it, so the detail
+    /// exists to be reported rather than acted on. Boxed because the payload
+    /// is wider than every other variant and this enum is the error half of
+    /// `Result` throughout the crate.
+    ResultSchemaMismatch(Box<ResultSchemaMismatch>),
+
     /// Convergence failure
     ConvergenceFailed { iterations: usize, message: String },
 
@@ -998,6 +1020,21 @@ impl std::fmt::Display for SimulationError {
             ),
             SimulationError::CircuitError(msg) => write!(f, "Circuit error: {}", msg),
             SimulationError::SolverError(msg) => write!(f, "Solver error: {}", msg),
+            SimulationError::RequestedSignalUnavailable {
+                signal,
+                analysis,
+                coordinate,
+            } => {
+                write!(
+                    f,
+                    "Requested signal '{signal}' is unavailable for {analysis} analysis"
+                )?;
+                match coordinate {
+                    Some(coordinate) => write!(f, " at {coordinate}"),
+                    None => Ok(()),
+                }
+            }
+            SimulationError::ResultSchemaMismatch(mismatch) => write!(f, "{mismatch}"),
             SimulationError::ConvergenceFailed {
                 iterations,
                 message,
@@ -1041,6 +1078,45 @@ impl SimulationError {
 }
 
 impl std::error::Error for SimulationError {}
+
+/// The detail behind [`SimulationError::ResultSchemaMismatch`].
+///
+/// Serialized rather than mirrored into a separate worker-side type: a result
+/// that fails its own schema is the same report on both sides of the browser
+/// worker boundary, and the two registries are what a report consists of.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResultSchemaMismatch {
+    /// The analysis whose result failed its schema.
+    pub analysis: String,
+    /// The sweep, frequency, or time point, where the failure has one.
+    pub coordinate: Option<String>,
+    /// The family of signals whose registry and payload disagree.
+    pub signal_family: String,
+    /// Both registries in their original order, because the order is part of
+    /// the contract that was broken.
+    pub expected_names: Vec<String>,
+    pub actual_names: Vec<String>,
+    pub expected_value_count: usize,
+    pub actual_value_count: usize,
+}
+
+impl std::fmt::Display for ResultSchemaMismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Result schema mismatch for {} analysis", self.analysis)?;
+        if let Some(coordinate) = &self.coordinate {
+            write!(f, " at {coordinate}")?;
+        }
+        write!(
+            f,
+            " in {}: expected names {:?} with {} value(s), got names {:?} with {} value(s)",
+            self.signal_family,
+            self.expected_names,
+            self.expected_value_count,
+            self.actual_names,
+            self.actual_value_count
+        )
+    }
+}
 
 //=============================================================================
 // Tests

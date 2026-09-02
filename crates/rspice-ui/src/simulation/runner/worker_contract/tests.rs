@@ -66,6 +66,33 @@ fn behavioral_reference_error_round_trips_through_worker_contract() {
     assert_eq!(SimulationError::from(decoded), expected);
 }
 
+#[test]
+fn output_failures_round_trip_through_worker_contract() {
+    for expected in [
+        SimulationError::RequestedSignalUnavailable {
+            signal: "@Mdriver[Id]".to_string(),
+            analysis: "DC".to_string(),
+            coordinate: Some("v1 = 1".to_string()),
+        },
+        SimulationError::ResultSchemaMismatch(Box::new(ResultSchemaMismatch {
+            analysis: "TRAN".to_string(),
+            coordinate: None,
+            signal_family: "node voltages".to_string(),
+            expected_names: vec!["V(in)".to_string(), "V(out)".to_string()],
+            actual_names: vec!["V(in)".to_string()],
+            expected_value_count: 2,
+            actual_value_count: 1,
+        })),
+    ] {
+        let worker = WorkerSimulationError::from(expected.clone());
+        let encoded = serde_json::to_string(&worker).expect("worker error serializes");
+        let decoded: WorkerSimulationError =
+            serde_json::from_str(&encoded).expect("worker error deserializes");
+
+        assert_eq!(SimulationError::from(decoded), expected);
+    }
+}
+
 pub(super) fn retained_pss_operating_point() -> rspice_core::engine::PssOperatingPoint {
     let config = rspice_core::analysis::PssConfig::new(1.0)
         .with_harmonics(4)

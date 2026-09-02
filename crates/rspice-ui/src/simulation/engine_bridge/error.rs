@@ -4,7 +4,7 @@
 //! back onto the design objects a user can act on.
 
 use super::EngineBridge;
-use crate::simulation::runner::SimulationError;
+use crate::simulation::runner::{ResultSchemaMismatch, SimulationError};
 
 impl EngineBridge {
     /// Translate core engine error to UI error.
@@ -71,24 +71,30 @@ impl EngineBridge {
                 SimulationError::SolverError(solver_err.to_string())
             }
             rspice_core::SimulationError::Netlist(msg) => SimulationError::ParseError(msg),
+            rspice_core::SimulationError::RequestedSignalUnavailable(error) => {
+                SimulationError::RequestedSignalUnavailable {
+                    signal: error.signal,
+                    analysis: error.analysis,
+                    coordinate: error.coordinate,
+                }
+            }
+            rspice_core::SimulationError::ResultSchemaMismatch(error) => {
+                let error = *error;
+                SimulationError::ResultSchemaMismatch(Box::new(ResultSchemaMismatch {
+                    analysis: error.analysis,
+                    coordinate: error.coordinate,
+                    signal_family: error.signal_family,
+                    expected_names: error.expected_names,
+                    actual_names: error.actual_names,
+                    expected_value_count: error.expected_value_count,
+                    actual_value_count: error.actual_value_count,
+                }))
+            }
             rspice_core::SimulationError::ConvergenceFailed(iterations) => {
                 SimulationError::ConvergenceFailed {
                     iterations,
                     message: "Newton-Raphson iteration limit exceeded".to_string(),
                 }
-            }
-            // A run asked for an output symbol the analysis does not publish.
-            // The request is the thing a person can correct, so it lands in
-            // the same bucket as the engine's other configuration refusals.
-            rspice_core::SimulationError::RequestedSignalUnavailable(error) => {
-                SimulationError::InvalidConfig(error.to_string())
-            }
-            // An engine-internal invariant: a result the engine produced does
-            // not satisfy its own published schema. Nothing about the design
-            // or the run configuration causes it, so it is reported as an
-            // engine fault rather than as something to correct in the sheet.
-            rspice_core::SimulationError::ResultSchemaMismatch(error) => {
-                SimulationError::SolverError(error.to_string())
             }
             rspice_core::SimulationError::Aborted => SimulationError::Aborted,
         }
@@ -138,6 +144,62 @@ mod tests {
             translated.to_string(),
             "Device instance B2: Problem with value for B1 in B2 \
              (lead_current_not_solution_variable)"
+        );
+    }
+
+    #[test]
+    fn an_unavailable_output_request_keeps_its_authored_spelling() {
+        let core_error = rspice_core::SimulationError::requested_signal_unavailable(
+            "@Mdriver[Id]",
+            "DC",
+            Some("v1 = 1".to_string()),
+        );
+
+        let translated = EngineBridge::new().translate_error(core_error);
+
+        assert_eq!(
+            translated,
+            SimulationError::RequestedSignalUnavailable {
+                signal: "@Mdriver[Id]".to_string(),
+                analysis: "DC".to_string(),
+                coordinate: Some("v1 = 1".to_string()),
+            },
+            "the request a person has to fix must survive translation verbatim"
+        );
+        assert_eq!(
+            translated.to_string(),
+            "Requested signal '@Mdriver[Id]' is unavailable for DC analysis at v1 = 1"
+        );
+    }
+
+    #[test]
+    fn a_result_that_fails_its_own_schema_reports_both_registries() {
+        let core_error = rspice_core::SimulationError::result_schema_mismatch(
+            "TRAN",
+            None,
+            "node voltages",
+            vec!["V(in)".to_string(), "V(out)".to_string()],
+            vec!["V(in)".to_string()],
+            2,
+            1,
+        );
+
+        let translated = EngineBridge::new().translate_error(core_error);
+
+        let SimulationError::ResultSchemaMismatch(mismatch) = &translated else {
+            panic!("expected a schema mismatch, got {translated:?}");
+        };
+        assert_eq!(mismatch.expected_names, ["V(in)", "V(out)"]);
+        assert_eq!(mismatch.actual_names, ["V(in)"]);
+        assert_eq!(
+            (mismatch.expected_value_count, mismatch.actual_value_count),
+            (2, 1)
+        );
+        assert_eq!(
+            translated.to_string(),
+            "Result schema mismatch for TRAN analysis in node voltages: \
+             expected names [\"V(in)\", \"V(out)\"] with 2 value(s), \
+             got names [\"V(in)\"] with 1 value(s)"
         );
     }
 

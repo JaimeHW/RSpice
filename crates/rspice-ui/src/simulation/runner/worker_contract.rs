@@ -21,7 +21,9 @@ use std::sync::{Arc, Mutex, atomic::AtomicBool};
 
 use serde::{Deserialize, Serialize};
 
-use super::{NetlistInput, SimulationError, SimulationRequest, SpecExecutionOptions};
+use super::{
+    NetlistInput, ResultSchemaMismatch, SimulationError, SimulationRequest, SpecExecutionOptions,
+};
 use crate::services::safety::{
     SoAEvaluation, SoAParameter, SoARuleVerdict, SoAViolation, ViolationSeverity,
 };
@@ -645,6 +647,12 @@ pub(crate) enum WorkerSimulationError {
     },
     CircuitError(String),
     SolverError(String),
+    RequestedSignalUnavailable {
+        signal: String,
+        analysis: String,
+        coordinate: Option<String>,
+    },
+    ResultSchemaMismatch(Box<ResultSchemaMismatch>),
     ConvergenceFailed {
         iterations: usize,
         message: String,
@@ -686,6 +694,16 @@ impl From<SimulationError> for WorkerSimulationError {
             },
             SimulationError::CircuitError(message) => Self::CircuitError(message),
             SimulationError::SolverError(message) => Self::SolverError(message),
+            SimulationError::RequestedSignalUnavailable {
+                signal,
+                analysis,
+                coordinate,
+            } => Self::RequestedSignalUnavailable {
+                signal,
+                analysis,
+                coordinate,
+            },
+            SimulationError::ResultSchemaMismatch(mismatch) => Self::ResultSchemaMismatch(mismatch),
             SimulationError::ConvergenceFailed {
                 iterations,
                 message,
@@ -736,6 +754,18 @@ impl From<WorkerSimulationError> for SimulationError {
             },
             WorkerSimulationError::CircuitError(message) => Self::CircuitError(message),
             WorkerSimulationError::SolverError(message) => Self::SolverError(message),
+            WorkerSimulationError::RequestedSignalUnavailable {
+                signal,
+                analysis,
+                coordinate,
+            } => Self::RequestedSignalUnavailable {
+                signal,
+                analysis,
+                coordinate,
+            },
+            WorkerSimulationError::ResultSchemaMismatch(mismatch) => {
+                Self::ResultSchemaMismatch(mismatch)
+            }
             WorkerSimulationError::ConvergenceFailed {
                 iterations,
                 message,
