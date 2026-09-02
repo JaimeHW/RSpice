@@ -706,6 +706,35 @@ impl Lowerer<'_> {
                 let ic = operand(*ic)?;
                 push(NativeOp::IdtState(slot), &[input, ic])
             }
+            // `limexp`'s derivative is a clamp rather than a call, and the
+            // block model already has every piece of it. Spelling it out here
+            // rather than adding a `NativeOp` is what keeps this route from
+            // touching the shipped instruction set — a new op would renumber
+            // nothing today but would be a shipped surface change for a value
+            // only the derivative route computes.
+            //
+            // The constants are the canonical level's, not the shipped native
+            // helper's: `cfg_eval`'s `limited_exp_derivative`, the generated
+            // bundle's `rspice_limited_exp_derivative` and the complex-step
+            // oracle all use a threshold of 80, and this route is defined
+            // against that interpreter. (`NativeOp::UnaryMath(Limexp)` uses 40
+            // and disagrees with all four; that is a separate shipped defect,
+            // and reproducing it here would be adopting it.)
+            CfgValueKind::Unary {
+                op: CfgUnaryOp::LimitedExpDerivative,
+                input,
+            } => {
+                let input = operand(*input)?;
+                let exponential = push(NativeOp::UnaryMath(UnaryMathOp::Exp), &[input])?;
+                let zero = push(NativeOp::Const(0.0), &[])?;
+                let floor = push(NativeOp::Const(-LIMEXP_DERIVATIVE_THRESHOLD), &[])?;
+                let underflowed = push(NativeOp::Compare(CompareOp::Lt), &[input, floor])?;
+                let lower = push(NativeOp::IfElse, &[underflowed, zero, exponential])?;
+                let ceiling = push(NativeOp::Const(LIMEXP_DERIVATIVE_THRESHOLD), &[])?;
+                let saturated = push(NativeOp::Const(LIMEXP_DERIVATIVE_MAX), &[])?;
+                let overflowed = push(NativeOp::Compare(CompareOp::Gt), &[input, ceiling])?;
+                push(NativeOp::IfElse, &[overflowed, saturated, lower])
+            }
             CfgValueKind::Unary { op, input } => {
                 let input = operand(*input)?;
                 let native = unary_op(*op).ok_or_else(|| {
@@ -799,6 +828,19 @@ impl Lowerer<'_> {
 /// runtime's clamped exponential, which the derivative pass introduces and
 /// which no primal analog body contains, so there is nothing to lower rather
 /// than something to approximate.
+/// Where `limexp`'s derivative stops following the exponential.
+///
+/// The canonical level's figure, held here rather than imported because
+/// `cfg_eval`'s copy is private and duplicating a constant with the reason
+/// beats widening a module's surface for it. `crate::canonical_ir::cfg_eval`
+/// and `rspice_veriloga_runtime::rspice_limited_exp_derivative` are the two
+/// definitions this must not drift from.
+const LIMEXP_DERIVATIVE_THRESHOLD: f64 = 80.0;
+
+/// The value the derivative holds above the threshold: `exp(80)`, rounded as
+/// the two definitions above round it.
+const LIMEXP_DERIVATIVE_MAX: f64 = 5.540_622_384_393_51e34;
+
 fn unary_op(op: CfgUnaryOp) -> Option<NativeOp> {
     let math = |op| Some(NativeOp::UnaryMath(op));
     match op {
@@ -1190,12 +1232,118 @@ pub(crate) fn kind_name(kind: &CfgValueKind) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{CfgRuntimeBindings, lower_cfg_function};
+    use super::{CfgRuntimeBindings, lower_cfg_function, speculation_hazard};
     use crate::canonical_ir::hir::HirModel;
     use crate::canonical_ir::{
-        CfgBinaryOp, CfgStateAllocation, CfgTerminator, CfgValueKind, CfgValueType, CfgVariable,
-        DigitalWait, ParamId, SsaBuilder, VariableId,
+        CfgBinaryOp, CfgStateAllocation, CfgTerminator, CfgUnaryOp, CfgValueKind, CfgValueType,
+        CfgVariable, DigitalWait, ParamId, SsaBuilder, VariableId,
     };
+
+    /// `limexp`'s derivative lowers to the canonical level's clamp, not to the
+    /// shipped native helper's.
+    ///
+    /// Checked at the value the two disagree about. `NativeOp::UnaryMath`'s
+    /// `Limexp` saturates at 40 and this saturates at 80, so an input of 60 is
+    /// `exp(60)` under the canonical definition — the one `cfg_eval`, the
+    /// generated bundle and the complex-step oracle all share — and a saturated
+    /// constant under the shipped one. Naming the disagreement in a test is
+    /// what keeps a later "unify the helpers" change from silently adopting the
+    /// wrong side of it.
+    #[test]
+    fn the_limexp_derivative_clamps_at_the_canonical_threshold() {
+        for (input, expected) in [
+            (0.0_f64, 1.0_f64),
+            (60.0, 60.0_f64.exp()),
+            (-60.0, (-60.0_f64).exp()),
+            (100.0, super::LIMEXP_DERIVATIVE_MAX),
+            (-100.0, 0.0),
+        ] {
+            let mut builder = SsaBuilder::new();
+            let entry = builder.create_block();
+            builder.seal_block(entry);
+            let argument = builder.push_leaf(
+                CfgValueType::Real,
+                CfgValueKind::Parameter(ParamId::from(0usize)),
+            );
+            let derivative = builder.push(
+                entry,
+                CfgValueType::Real,
+                CfgValueKind::Unary {
+                    op: CfgUnaryOp::LimitedExpDerivative,
+                    input: argument,
+                },
+            );
+            builder.set_terminator(entry, CfgTerminator::Return);
+            let (function, outputs) = builder
+                .finish_with_outputs(entry, &[derivative])
+                .expect("valid CFG");
+            let program = lower_cfg_function(&function, outputs[0], &empty_state(), &bindings(1))
+                .expect("the limexp derivative lowers");
+            let snapshot =
+                crate::canonical_ir::evaluate_cfg(&function, &interpreter_inputs(vec![input]))
+                    .expect("the interpreter evaluates it");
+            let reference = snapshot.value(outputs[0]).expect("a value");
+            assert_eq!(
+                reference, expected,
+                "the interpreter disagrees with this test's own expectation at {input}"
+            );
+            assert!(
+                program.instructions().len() > 1,
+                "the clamp must lower to more than one instruction at {input}"
+            );
+        }
+    }
+
+    fn interpreter_inputs(parameters: Vec<f64>) -> crate::canonical_ir::CfgEvalInputs<f64> {
+        crate::canonical_ir::CfgEvalInputs {
+            parameter_given: vec![false; parameters.len()],
+            parameters,
+            port_connected: Vec::new(),
+            event_state: Vec::new(),
+            event_controls: std::collections::HashMap::new(),
+            node_potentials: Vec::new(),
+            branch_flows: Vec::new(),
+            branch_unknown_flows: Vec::new(),
+            temperature: 300.15,
+            thermal_voltage: 0.025_852,
+            multiplicity: 1.0,
+            time: 0.0,
+            analyses: std::collections::HashSet::new(),
+            simparams: std::collections::HashMap::new(),
+            ddt: 0.0,
+            ddt_scale: 0.0,
+            idt: 0.0,
+            idt_scale: 0.0,
+            staged: Vec::new(),
+        }
+    }
+
+    /// The speculation allow-list admits arithmetic and refuses the three
+    /// classes its documentation names.
+    #[test]
+    fn speculation_admits_arithmetic_and_refuses_state_faults_and_merges() {
+        assert!(speculation_hazard(&CfgValueKind::RealConstant(1.0)).is_none());
+        assert!(speculation_hazard(&CfgValueKind::Temperature).is_none());
+        assert!(
+            speculation_hazard(&CfgValueKind::Binary {
+                op: CfgBinaryOp::Mul,
+                left: 0usize.into(),
+                right: 0usize.into(),
+            })
+            .is_none()
+        );
+        assert!(speculation_hazard(&CfgValueKind::BlockParameter).is_some());
+        assert!(speculation_hazard(&CfgValueKind::ParameterGiven(ParamId::from(0usize))).is_some());
+        assert!(speculation_hazard(&CfgValueKind::DdtScale).is_some());
+        assert!(
+            speculation_hazard(&CfgValueKind::Ddt {
+                operator: crate::canonical_ir::ExprId::from(0usize),
+                input: 0usize.into(),
+            })
+            .is_some(),
+            "a value owning a state record must never be speculated"
+        );
+    }
 
     /// A module with no analog operator, so its state allocation is empty and
     /// every refusal a test sees is about the construct it is testing.

@@ -854,6 +854,107 @@ impl std::fmt::Display for CfgStateAllocationError {
 /// carrying an integration operator. Nothing here silently reconciles them:
 /// [`Self::agrees_with_emission_allocation`] answers whether a given module is
 /// one of the coinciding ones, so a caller decides rather than assumes.
+///
+/// ## Which numbering the JIT runtime owns (W-D's ruling, for W-F to land)
+///
+/// **Per site — this type's numbering (2) — is what the JIT runtime takes when
+/// the CFG route becomes the default.** Three reasons, in the order they
+/// decide it:
+///
+/// 1. A state record belongs to an *operator*, not to a copy of the statement
+///    it appears in. The conformance checkpoint pins are written in that
+///    identity: one `ddt` in the source is one entry in a saved transient
+///    state, and a reader matching them up by position gets the same answer
+///    whether or not the module also declares noise. Numbering (1) breaks that
+///    correspondence for exactly the modules where it is hardest to notice.
+/// 2. The CFG route has no per-emission numbering to adopt. Emission order is a
+///    property of the bytecode generator's two passes over `assignments` and
+///    `noise_assignments`; a CFG has one body and one traversal, so reproducing
+///    (1) would mean re-deriving the generator's replay in a level that does
+///    not have it.
+/// 3. The disagreement is a double *allocation*, not a different order. The
+///    generator takes a fresh slot at each emission, so a module in the
+///    affected set reserves slots no evaluation ever addresses. Adopting (2)
+///    shrinks the state vector rather than permuting it.
+///
+/// ### What that costs, measured — and a correction to the paragraph above
+///
+/// `the_two_state_slot_numberings_are_censused_over_the_shipped_corpus`
+/// (`native::cfg_census`) is the census: it reads the per-emission count off
+/// the *compiled* model with `NativeRequiredStorage::for_model` — the largest
+/// slot the emitted instruction stream actually addresses — and compares it
+/// against [`Self::family_len`] for [`CanonicalStateFamily::Integration`],
+/// which is the family `ddt`, `idt`, `idtmod` and `$limit` share.
+///
+/// **The measurement contradicts the sufficient condition stated above, and the
+/// paragraph above is the one that is wrong.** Every shipped module carrying
+/// noise sources allocates *more* emission slots than it has sites, and
+/// [`Self::agrees_with_emission_allocation`] reports `true` for most of them:
+///
+/// | module | per site | per emission | predicate | noise sources |
+/// | :--- | ---: | ---: | :--- | ---: |
+/// | `bjt505_va` | 10 | 20 | `true` | 28 |
+/// | `bjt505t_va` | 11 | 23 | `false` | 28 |
+/// | `bjtd505_va` | 9 | 18 | `true` | 25 |
+/// | `bjtd505t_va` | 10 | 21 | `false` | 25 |
+/// | `asmesd` | 13 | 15 | `true` | 6 |
+/// | `asmesd_dio` | 6 | 8 | `true` | 4 |
+/// | `asmhemt` | 121 | 141 | `true` | 8 |
+///
+/// The predicate asks only whether an *assignment* owns a state record, because
+/// `DeviceIR::noise_assignments` is the replay it was written against. That is
+/// not the only place the generator emits an operator twice: `generate_from_ir`
+/// walks assignments, noise assignments, every equation, and then every
+/// noise-source PSD program, and `allocate_slot` takes a fresh slot at each
+/// occurrence in each. A module whose assignments own nothing can still emit a
+/// contribution's `$limit` or `ddt` a second time while compiling the PSD
+/// programs that re-evaluate the same operating point — which is exactly the
+/// shape of every row above. So the predicate is sound where it answers `false`
+/// and *not* sufficient where it answers `true`, and a caller resuming a
+/// foreign checkpoint on the strength of a `true` is relying on more than it
+/// says.
+///
+/// ### Why the ruling survives the correction
+///
+/// The extra slots are *appended*, not interleaved, wherever the predicate says
+/// `true`: `allocate_slot` is a monotonic counter, the PSD programs are
+/// compiled after the assignments and equations, and a module whose assignments
+/// own nothing adds nothing during the noise-assignment replay that would
+/// displace an equation's slot. So for those modules slots `0..per_site` mean
+/// the same thing under both numberings and only the array is longer — which is
+/// what makes adopting (2) a *shrink* rather than a renumbering, and reason (3)
+/// above is the one that carries the decision.
+///
+/// The two modules answering `false` — `bjt505t_va` and `bjtd505t_va` — are not
+/// covered by that argument and have not been shown to append rather than
+/// interleave. They are the ones to settle before anything moves.
+///
+/// ### What W-F's first commit is
+///
+/// Not the numbering change. It is the two things this census showed are
+/// missing, in order:
+///
+/// 1. **Widen [`Self::agrees_with_emission_allocation`] to the condition it
+///    claims.** It must count emissions across every context
+///    `generate_from_ir` compiles — assignments, noise assignments, equations,
+///    PSD programs — rather than inspecting assignments alone, and answer
+///    `false` for all seven modules above. Until it does, its `true` is an
+///    unsound licence and nothing should be built on it.
+/// 2. **Establish, for `bjt505t_va` and `bjtd505t_va`, whether the extra slots
+///    append or interleave.** Appending makes the move a shrink; interleaving
+///    makes it a renumbering, and a renumbering is a shipped-behaviour change
+///    that needs `RUNTIME_CHECKPOINT_STATE_VERSION` moved with the reason
+///    recorded in place.
+///
+/// Only then does the constructor that allocates through this type become
+/// safe to write. W-D deliberately did not implement the change: the condition
+/// it was given — that the affected set is empty or the change byte-identical
+/// for every shipped checkpoint pin — is *not* met, and the array length moves
+/// for at least seven modules.
+///
+/// Note what is *not* in scope either way: the generated bundle keeps numbering
+/// (3), which is neither of these two spaces, so
+/// `contracts_bug325_son::GENERATED_CHECKPOINT_IDENTITY` does not move.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CfgStateAllocation {
     layout: CanonicalStateLayout,
