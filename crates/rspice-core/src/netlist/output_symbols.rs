@@ -1589,7 +1589,10 @@ pub(crate) fn collect_output_node_namespace_with_limits_and_abort(
     authored_top_level.insert("0".to_string());
     for (index, element) in replay.elements.iter().enumerate() {
         poll_parse_abort(abort, index)?;
-        if !matches!(element.provenance, super::ElementProvenance::Authored) {
+        if !matches!(
+            element.provenance,
+            super::ElementProvenance::Authored | super::ElementProvenance::ImportedSpef { .. }
+        ) {
             continue;
         }
         for node in &element.nodes {

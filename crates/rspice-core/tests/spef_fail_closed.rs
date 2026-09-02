@@ -283,7 +283,7 @@ fn invalid_parasitic_values_are_rejected_instead_of_dropped() {
         ("negative-induc", "*INDUC", "1 in in:1 -1", "-1"),
     ] {
         let spef = format!(
-            "*SPEF \"IEEE 1481-2009\"\n*C_UNIT 1 PF\n*R_UNIT 1 OHM\n*D_NET in 0\n{section}\n{record}\n*END\n"
+            "*SPEF \"IEEE 1481-2009\"\n*C_UNIT 1 PF\n*R_UNIT 1 OHM\n*L_UNIT 1 HENRY\n*D_NET in 0\n{section}\n{record}\n*END\n"
         );
         assert_path_backed_spef_error(label, &spef, expected);
     }
@@ -479,8 +479,12 @@ CSPEF6 spare 0 1p
             .find(|element| element.name.eq_ignore_ascii_case(generated))
             .unwrap_or_else(|| panic!("expected deterministic element `{generated}`"));
         assert!(matches!(
-            element.provenance,
-            rspice_core::netlist::ElementProvenance::Authored
+            &element.provenance,
+            rspice_core::netlist::ElementProvenance::ImportedSpef {
+                net,
+                record_id: None,
+                line: 4,
+            } if net == "in"
         ));
     }
     let load_node = netlist
@@ -656,6 +660,14 @@ I1 0 in DC 0 AC 1
         panic!("LSPEF element did not lower to an inductor: {inductor:?}");
     };
     assert_eq!(*value, 2.0e-6);
+    assert!(matches!(
+        &inductor.provenance,
+        rspice_core::netlist::ElementProvenance::ImportedSpef {
+            net,
+            record_id: Some(1),
+            ..
+        } if net == "in"
+    ));
 
     let frequency = 100.0e3;
     let point = Engine::default()
@@ -730,4 +742,142 @@ V1 in 0 PULSE(0 1 1u 1u 1u 1 2)
         max_error < 8.0e-3,
         "SPEF RL transient differs from the analytical response by {max_error:.3e} V"
     );
+}
+
+fn detailed_series_rlc_spef() -> &'static str {
+    "\
+*SPEF \"IEEE 1481-2009\"
+*C_UNIT 1 UF
+*R_UNIT 1 OHM
+*L_UNIT 1 MH
+*D_NET in 1
+*CAP
+1 in:2 1
+*RES
+1 in in:1 63.245553203367585
+*INDUC
+1 in:1 in:2 1
+*END
+"
+}
+
+#[test]
+fn detailed_rlc_spef_matches_analytical_impedance_and_admittance_over_frequency() {
+    let fixture = SpefFixture::new("rlc-ac", detailed_series_rlc_spef());
+    let deck = "\
+SPEF detailed RLC impedance
+I1 0 in DC 0 AC 1
+.spef_include \"parasitics.spef\"
+.ac dec 10 100 1meg
+.end
+";
+    let netlist = Netlist::parse_with_path(deck, &fixture.deck_path)
+        .expect("supported detailed RLC SPEF imports");
+    let resistance = 63.245553203367585;
+    let inductance = 1.0e-3;
+    let capacitance = 1.0e-6;
+
+    for frequency in [100.0, 1.0e3, 5.0e3, 50.0e3, 1.0e6] {
+        let impedance = ac_voltage(&netlist, frequency, "in");
+        let omega = 2.0 * std::f64::consts::PI * frequency;
+        let expected = rspice_core::Complex64::new(
+            resistance,
+            omega * inductance - 1.0 / (omega * capacitance),
+        );
+        let tolerance = 2.0e-10 * expected.norm().max(1.0);
+        assert!(
+            (impedance - expected).norm() <= tolerance,
+            "RLC impedance mismatch at {frequency:.3e} Hz: actual={impedance:?}, expected={expected:?}"
+        );
+        let admittance = rspice_core::Complex64::new(1.0, 0.0) / impedance;
+        let expected_admittance = rspice_core::Complex64::new(1.0, 0.0) / expected;
+        assert!(
+            (admittance - expected_admittance).norm()
+                <= 2.0e-10 * expected_admittance.norm().max(1.0),
+            "RLC admittance mismatch at {frequency:.3e} Hz"
+        );
+    }
+}
+
+#[test]
+fn detailed_rlc_spef_matches_critical_step_response() {
+    let fixture = SpefFixture::new("rlc-tran", detailed_series_rlc_spef());
+    let deck = "\
+SPEF detailed RLC critical step
+V1 in 0 PULSE(0 1 1u 1n 1n 1 2)
+.spef_include \"parasitics.spef\"
+.tran 250n 300u
+.end
+";
+    let netlist = Netlist::parse_with_path(deck, &fixture.deck_path)
+        .expect("supported detailed RLC SPEF imports");
+    let result = Engine::default()
+        .run_tran(&netlist, 300.0e-6, 250.0e-9)
+        .expect("annotated RLC transient converges");
+    let node = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("in__2"))
+        .expect("RLC capacitor node is present");
+    let omega0 = 1.0 / (1.0e-3_f64 * 1.0e-6).sqrt();
+    let edge_midpoint = 1.0005e-6;
+    let mut maximum_error = 0.0_f64;
+    for (&time, &actual) in result.time.iter().zip(&result.voltages[node]) {
+        assert!(
+            actual.is_finite(),
+            "non-finite RLC response at {time:.3e} s"
+        );
+        if time >= 2.0e-6 {
+            let elapsed = time - edge_midpoint;
+            let expected = 1.0 - (-omega0 * elapsed).exp() * (1.0 + omega0 * elapsed);
+            maximum_error = maximum_error.max((actual - expected).abs());
+        }
+    }
+    assert!(
+        maximum_error < 2.0e-3,
+        "SPEF RLC transient differs from the critical closed form by {maximum_error:.3e} V"
+    );
+}
+
+#[test]
+fn hierarchical_spef_identity_survives_generated_node_collisions_and_provenance() {
+    let spef = "\
+*SPEF \"IEEE 1481-2009\"
+*L_UNIT 1 UH
+*D_NET top/block/net[3] 0
+*INDUC
+9 top/block/net[3] top/block/net[3]:1 2
+*END
+";
+    let fixture = SpefFixture::new("hierarchical-identity", spef);
+    let deck = "\
+SPEF hierarchical identity
+I1 0 top/block/net[3] DC 0 AC 1
+RKEEP TOP_BLOCK_NET_3___1 0 1meg
+.spef_include \"parasitics.spef\"
+.ac lin 1 1k 1k
+.end
+";
+    let netlist = Netlist::parse_with_path(deck, &fixture.deck_path)
+        .expect("hierarchical SPEF identity imports");
+    let inductor = netlist
+        .elements
+        .iter()
+        .find(|element| element.name.starts_with("LSPEF"))
+        .expect("hierarchical SPEF inductor materialized");
+    assert_eq!(inductor.nodes[0], "TOP/BLOCK/NET[3]");
+    assert_ne!(
+        inductor.nodes[1].to_ascii_uppercase(),
+        "TOP_BLOCK_NET_3___1",
+        "lossy sanitization must not capture an authored deck node"
+    );
+    assert!(inductor.nodes[1].starts_with("__SPEF_NODE__"));
+    assert!(matches!(
+        &inductor.provenance,
+        rspice_core::netlist::ElementProvenance::ImportedSpef {
+            net,
+            record_id: Some(9),
+            line: 5,
+        } if net == "top/block/net[3]"
+    ));
 }

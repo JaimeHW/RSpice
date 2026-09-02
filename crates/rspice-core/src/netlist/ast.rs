@@ -170,6 +170,20 @@ pub struct Element {
 pub enum ElementProvenance {
     #[default]
     Authored,
+    /// Physical parasitic imported from one SPEF detailed or reduced-net
+    /// record.  SPEF is authored circuit input, but retaining its source net,
+    /// record identifier, and source line separately from a generated SPICE
+    /// element name makes diagnostics and exported topology auditable.
+    ImportedSpef {
+        /// SPEF net name after `*NAME_MAP` resolution, preserving hierarchy.
+        net: String,
+        /// Positive record identifier for detailed R/L/C records.  Reduced
+        /// models synthesize physical elements from a net-level record and
+        /// therefore have no element record identifier.
+        record_id: Option<u64>,
+        /// One-based line of the owning detailed record or reduced-net header.
+        line: usize,
+    },
     GeneratedPassiveHelper {
         /// Name of the authored passive that owns this helper in the same
         /// hierarchy scope.

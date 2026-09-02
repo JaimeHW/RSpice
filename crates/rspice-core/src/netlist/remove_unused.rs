@@ -46,7 +46,7 @@ pub(crate) fn filter_elements_with_abort(
             elements.len().saturating_mul(2).saturating_add(index),
         )?;
         let rejected = match &element.provenance {
-            ElementProvenance::Authored => {
+            ElementProvenance::Authored | ElementProvenance::ImportedSpef { .. } => {
                 rejected_owners.contains(&element.name.to_ascii_uppercase())
             }
             // A realization's states are meaningless without the source they
@@ -82,7 +82,10 @@ pub(crate) fn designator_type(designator: char) -> Option<(RemoveUnusedDeviceTyp
 }
 
 fn rejects_element(element: &Element, policy: &RemoveUnusedPolicy) -> bool {
-    if !matches!(element.provenance, ElementProvenance::Authored) {
+    if !matches!(
+        element.provenance,
+        ElementProvenance::Authored | ElementProvenance::ImportedSpef { .. }
+    ) {
         return false;
     }
     let Some((device_type, compared_nodes)) = element_device_type(element) else {
@@ -106,7 +109,10 @@ fn rejects_series_rewritten_passive(
     series_helpers_by_owner: &HashMap<String, usize>,
     policy: &RemoveUnusedPolicy,
 ) -> bool {
-    if !matches!(element.provenance, ElementProvenance::Authored) {
+    if !matches!(
+        element.provenance,
+        ElementProvenance::Authored | ElementProvenance::ImportedSpef { .. }
+    ) {
         return false;
     }
     let Some((device_type, compared_nodes)) = element_device_type(element) else {

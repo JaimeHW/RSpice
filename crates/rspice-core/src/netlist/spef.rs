@@ -38,7 +38,7 @@ use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
 
 /// One parsed SPEF node reference.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum NodeRef {
     /// Bare net or port name.
     Net(String),
@@ -54,11 +54,14 @@ struct Conn {
     node: NodeRef,
     /// `*P` (port) vs `*I` (instance pin).
     is_port: bool,
+    /// Explicit `*L` capacitive load in farads, when present.
+    load_farads: Option<Value>,
     line: usize,
 }
 
 #[derive(Debug, Clone)]
 struct Cap {
+    id: u64,
     a: NodeRef,
     /// `None` for a grounded capacitance.
     b: Option<NodeRef>,
@@ -68,6 +71,7 @@ struct Cap {
 
 #[derive(Debug, Clone)]
 struct Res {
+    id: u64,
     a: NodeRef,
     b: NodeRef,
     ohms: Value,
@@ -76,6 +80,7 @@ struct Res {
 
 #[derive(Debug, Clone)]
 struct Induc {
+    id: u64,
     a: NodeRef,
     b: NodeRef,
     henries: Value,
@@ -85,11 +90,15 @@ struct Induc {
 #[derive(Debug, Clone)]
 struct DNet {
     name: String,
+    total_capacitance: Value,
     line: usize,
     conns: Vec<Conn>,
     caps: Vec<Cap>,
     ress: Vec<Res>,
     inductors: Vec<Induc>,
+    cap_ids: HashSet<u64>,
+    res_ids: HashSet<u64>,
+    inductor_ids: HashSet<u64>,
 }
 
 /// One load timing descriptor in an IEEE reduced-net driver view.
@@ -256,6 +265,7 @@ impl SpefFile {
         let mut parasitic_seq = 0_usize;
         let mut occupied_element_names: HashSet<String> = element_index.keys().cloned().collect();
         let mut occupied_nodes = original_nodes.clone();
+        let mut generated_node_names: HashMap<NodeRef, String> = HashMap::new();
         let declared_nets: HashSet<String> = self
             .nets
             .iter()
@@ -283,18 +293,7 @@ impl SpefFile {
             report.nets += 1;
             let mut net_parasitics = 0usize;
             let mut net_is_anchored = original_nodes.contains(&net.name.to_ascii_uppercase());
-
-            // Bare references (ports are referenced by name, which already
-            // is a deck node) pass through; subnodes and pins get generated
-            // names. Everything is uppercased to match the parser's node
-            // normalization, so parasitics land on the deck's actual nodes.
-            let node_name = |reference: &NodeRef| -> String {
-                match reference {
-                    NodeRef::Net(name) => name.to_ascii_uppercase(),
-                    NodeRef::SubNode(net, idx) => sanitize(&format!("{net}__{idx}")),
-                    NodeRef::Pin(inst, pin) => sanitize(&format!("{inst}__{pin}")),
-                }
-            };
+            let mut resolved_connections = HashSet::new();
 
             // Rewire instance pins onto their SPEF subnodes.
             for (conn_index, conn) in net.conns.iter().enumerate() {
@@ -321,6 +320,7 @@ impl SpefFile {
                         }
                         net_is_anchored = true;
                     }
+                    resolved_connections.insert(conn.node.clone());
                     continue;
                 }
                 let NodeRef::Pin(inst, pin) = &conn.node else {
@@ -332,6 +332,11 @@ impl SpefFile {
                     }
                     continue;
                 };
+                let pin_node = resolve_spef_node_name(
+                    &conn.node,
+                    &mut generated_node_names,
+                    &mut occupied_nodes,
+                )?;
                 match rewire_pin(
                     netlist,
                     &element_index,
@@ -339,11 +344,12 @@ impl SpefFile {
                     inst,
                     pin,
                     &net.name,
-                    &node_name(&conn.node),
+                    &pin_node,
                 ) {
                     Ok(()) => {
                         report.rewired_pins += 1;
                         net_is_anchored = true;
+                        resolved_connections.insert(conn.node.clone());
                     }
                     Err(reason) => {
                         if strict {
@@ -359,6 +365,42 @@ impl SpefFile {
                         );
                     }
                 }
+            }
+
+            // A connection `*L` attribute is an explicit capacitive load in
+            // C_UNIT, and IEEE total_cap includes it even though it does not
+            // appear in *CAP. Materialize it on the resolved port/pin node;
+            // do not double count the net-level total when a *CAP section is
+            // present.
+            for (connection_index, connection) in net.conns.iter().enumerate() {
+                poll_parse_abort(abort, connection_index)?;
+                if net.caps.is_empty() {
+                    // With no *CAP section, total_cap is already the one
+                    // complete lumped capacitance, including connection load.
+                    continue;
+                }
+                let Some(load_farads) = connection.load_farads else {
+                    continue;
+                };
+                if load_farads == 0.0 || !resolved_connections.contains(&connection.node) {
+                    continue;
+                }
+                let node = resolve_spef_node_name(
+                    &connection.node,
+                    &mut generated_node_names,
+                    &mut occupied_nodes,
+                )?;
+                let name =
+                    next_parasitic_name("CSPEF", &mut parasitic_seq, &mut occupied_element_names)?;
+                new_elements.push(spef_capacitor(
+                    name,
+                    node,
+                    "0".to_owned(),
+                    load_farads,
+                    spef_provenance(&net.name, None, connection.line),
+                ));
+                report.capacitors += 1;
+                net_parasitics += 1;
             }
 
             for (cap_index, cap) in net.caps.iter().enumerate() {
@@ -393,12 +435,26 @@ impl SpefFile {
                         )?;
                     }
                 }
-                let n1 = node_name(&cap.a);
-                let n2 = cap
-                    .b
-                    .as_ref()
-                    .map(&node_name)
-                    .unwrap_or_else(|| "0".to_owned());
+                let n1 =
+                    resolve_spef_node_name(&cap.a, &mut generated_node_names, &mut occupied_nodes)?;
+                let n2 = if let Some(reference) = &cap.b {
+                    resolve_spef_node_name(
+                        reference,
+                        &mut generated_node_names,
+                        &mut occupied_nodes,
+                    )?
+                } else {
+                    "0".to_owned()
+                };
+                if strict && n1.eq_ignore_ascii_case(&n2) {
+                    return Err(spef_annotation_error(
+                        cap.line,
+                        format!(
+                            "capacitance record {} on net `{}` collapses to one node `{n1}`",
+                            cap.id, net.name
+                        ),
+                    ));
+                }
                 let name =
                     next_parasitic_name("CSPEF", &mut parasitic_seq, &mut occupied_element_names)?;
                 new_elements.push(Element {
@@ -412,7 +468,7 @@ impl SpefFile {
                         deferred_params: Vec::new(),
                     },
                     nodes: vec![n1, n2],
-                    provenance: crate::netlist::ElementProvenance::Authored,
+                    provenance: spef_provenance(&net.name, Some(cap.id), cap.line),
                 });
                 report.capacitors += 1;
                 net_parasitics += 1;
@@ -450,6 +506,19 @@ impl SpefFile {
                 }
                 let name =
                     next_parasitic_name("RSPEF", &mut parasitic_seq, &mut occupied_element_names)?;
+                let n1 =
+                    resolve_spef_node_name(&res.a, &mut generated_node_names, &mut occupied_nodes)?;
+                let n2 =
+                    resolve_spef_node_name(&res.b, &mut generated_node_names, &mut occupied_nodes)?;
+                if strict && n1.eq_ignore_ascii_case(&n2) {
+                    return Err(spef_annotation_error(
+                        res.line,
+                        format!(
+                            "resistance record {} on net `{}` collapses to one node `{n1}`",
+                            res.id, net.name
+                        ),
+                    ));
+                }
                 new_elements.push(Element {
                     name,
                     kind: ElementKind::Resistor {
@@ -459,8 +528,8 @@ impl SpefFile {
                         instance_params: Vec::new(),
                         deferred_params: Vec::new(),
                     },
-                    nodes: vec![node_name(&res.a), node_name(&res.b)],
-                    provenance: crate::netlist::ElementProvenance::Authored,
+                    nodes: vec![n1, n2],
+                    provenance: spef_provenance(&net.name, Some(res.id), res.line),
                 });
                 report.resistors += 1;
                 net_parasitics += 1;
@@ -468,6 +537,12 @@ impl SpefFile {
 
             for (inductor_index, inductor) in net.inductors.iter().enumerate() {
                 poll_parse_abort(abort, inductor_index)?;
+                // IEEE 1481 induc_elem carries exactly two nodes and one self
+                // inductance.  It carries neither a second winding reference
+                // nor dot polarity, so inferring a K card would invent physics.
+                // Materialize the specified physical branch as an ordinary L;
+                // any future mutual-inductance extension must provide an
+                // explicit coupling matrix and polarity before it can lower.
                 if !(inductor.henries.is_finite() && inductor.henries > 0.0) {
                     if strict {
                         return Err(spef_annotation_error(
@@ -498,6 +573,25 @@ impl SpefFile {
                 }
                 let name =
                     next_parasitic_name("LSPEF", &mut parasitic_seq, &mut occupied_element_names)?;
+                let n1 = resolve_spef_node_name(
+                    &inductor.a,
+                    &mut generated_node_names,
+                    &mut occupied_nodes,
+                )?;
+                let n2 = resolve_spef_node_name(
+                    &inductor.b,
+                    &mut generated_node_names,
+                    &mut occupied_nodes,
+                )?;
+                if strict && n1.eq_ignore_ascii_case(&n2) {
+                    return Err(spef_annotation_error(
+                        inductor.line,
+                        format!(
+                            "inductance record {} on net `{}` collapses to one node `{n1}`",
+                            inductor.id, net.name
+                        ),
+                    ));
+                }
                 new_elements.push(Element {
                     name,
                     kind: ElementKind::Inductor {
@@ -508,10 +602,24 @@ impl SpefFile {
                         instance_params: Vec::new(),
                         deferred_params: Vec::new(),
                     },
-                    nodes: vec![node_name(&inductor.a), node_name(&inductor.b)],
-                    provenance: crate::netlist::ElementProvenance::Authored,
+                    nodes: vec![n1, n2],
+                    provenance: spef_provenance(&net.name, Some(inductor.id), inductor.line),
                 });
                 report.inductors += 1;
+                net_parasitics += 1;
+            }
+
+            if net.caps.is_empty() && net.total_capacitance > 0.0 {
+                let name =
+                    next_parasitic_name("CSPEF", &mut parasitic_seq, &mut occupied_element_names)?;
+                new_elements.push(spef_capacitor(
+                    name,
+                    net.name.to_ascii_uppercase(),
+                    "0".to_owned(),
+                    net.total_capacitance,
+                    spef_provenance(&net.name, None, net.line),
+                ));
+                report.capacitors += 1;
                 net_parasitics += 1;
             }
 
@@ -565,6 +673,7 @@ impl SpefFile {
                     canonical_net,
                     "0".to_owned(),
                     net.total_capacitance,
+                    spef_provenance(&net.name, None, net.line),
                 ));
                 report.capacitors += 1;
                 continue;
@@ -693,6 +802,7 @@ impl SpefFile {
                 canonical_net.clone(),
                 "0".to_owned(),
                 driver.c2_farads,
+                spef_provenance(&net.name, None, net.line),
             ));
             let resistor_name =
                 next_parasitic_name("RSPEF", &mut parasitic_seq, &mut occupied_element_names)?;
@@ -701,6 +811,7 @@ impl SpefFile {
                 canonical_net,
                 far_node.clone(),
                 driver.r1_ohms,
+                spef_provenance(&net.name, None, net.line),
             ));
             let c1_name =
                 next_parasitic_name("CSPEF", &mut parasitic_seq, &mut occupied_element_names)?;
@@ -709,6 +820,7 @@ impl SpefFile {
                 far_node,
                 "0".to_owned(),
                 driver.c1_farads,
+                spef_provenance(&net.name, None, net.line),
             ));
             report.rewired_pins += rewired_loads;
             report.resistors += 1;
@@ -724,7 +836,13 @@ impl SpefFile {
     }
 }
 
-fn spef_capacitor(name: String, a: String, b: String, farads: Value) -> Element {
+fn spef_capacitor(
+    name: String,
+    a: String,
+    b: String,
+    farads: Value,
+    provenance: crate::netlist::ElementProvenance,
+) -> Element {
     Element {
         name,
         kind: ElementKind::Capacitor {
@@ -736,14 +854,17 @@ fn spef_capacitor(name: String, a: String, b: String, farads: Value) -> Element 
             deferred_params: Vec::new(),
         },
         nodes: vec![a, b],
-        // SPEF is authored circuit input. The deterministic CSPEF/RSPEF name
-        // and reduced far-node spelling retain its source identity without
-        // misclassifying it as a helper owned by a SPICE element.
-        provenance: crate::netlist::ElementProvenance::Authored,
+        provenance,
     }
 }
 
-fn spef_resistor(name: String, a: String, b: String, ohms: Value) -> Element {
+fn spef_resistor(
+    name: String,
+    a: String,
+    b: String,
+    ohms: Value,
+    provenance: crate::netlist::ElementProvenance,
+) -> Element {
     Element {
         name,
         kind: ElementKind::Resistor {
@@ -754,8 +875,85 @@ fn spef_resistor(name: String, a: String, b: String, ohms: Value) -> Element {
             deferred_params: Vec::new(),
         },
         nodes: vec![a, b],
-        provenance: crate::netlist::ElementProvenance::Authored,
+        provenance,
     }
+}
+
+fn spef_provenance(
+    net: &str,
+    record_id: Option<u64>,
+    line: usize,
+) -> crate::netlist::ElementProvenance {
+    crate::netlist::ElementProvenance::ImportedSpef {
+        net: net.to_owned(),
+        record_id,
+        line,
+    }
+}
+
+/// Resolve a SPEF topology reference to an execution node without allowing
+/// lossy punctuation normalization to merge distinct extracted conductors.
+/// The historic readable spelling remains the first choice; a reversible
+/// byte encoding is appended only when that spelling is already occupied.
+fn resolve_spef_node_name(
+    reference: &NodeRef,
+    assigned: &mut HashMap<NodeRef, String>,
+    occupied: &mut HashSet<String>,
+) -> Result<String, ParseWithAbortError> {
+    if let NodeRef::Net(name) = reference {
+        return Ok(name.to_ascii_uppercase());
+    }
+    if let Some(name) = assigned.get(reference) {
+        return Ok(name.clone());
+    }
+
+    let readable = match reference {
+        NodeRef::Net(_) => unreachable!("bare nodes returned above"),
+        NodeRef::SubNode(net, index) => sanitize(&format!("{net}__{index}")),
+        NodeRef::Pin(instance, pin) => sanitize(&format!("{instance}__{pin}")),
+    };
+    let encoded = match reference {
+        NodeRef::Net(_) => unreachable!("bare nodes returned above"),
+        NodeRef::SubNode(net, index) => format!(
+            "__SPEF_NODE__{}__{}",
+            encode_spef_identifier(net),
+            encode_spef_identifier(index)
+        ),
+        NodeRef::Pin(instance, pin) => format!(
+            "__SPEF_PIN__{}__{}",
+            encode_spef_identifier(instance),
+            encode_spef_identifier(pin)
+        ),
+    };
+    let mut candidate = readable;
+    let mut suffix = 0usize;
+    loop {
+        if occupied.insert(candidate.to_ascii_uppercase()) {
+            assigned.insert(reference.clone(), candidate.clone());
+            return Ok(candidate);
+        }
+        candidate = if suffix == 0 {
+            encoded.clone()
+        } else {
+            format!("{encoded}__{suffix}")
+        };
+        suffix = suffix.checked_add(1).ok_or_else(|| {
+            spef_annotation_error(0, "too many SPEF node-name collisions to resolve")
+        })?;
+    }
+}
+
+fn encode_spef_identifier(raw: &str) -> String {
+    let mut encoded = String::with_capacity(raw.len());
+    for byte in raw.to_ascii_uppercase().bytes() {
+        if byte.is_ascii_alphanumeric() {
+            encoded.push(char::from(byte));
+        } else {
+            use std::fmt::Write as _;
+            write!(&mut encoded, "_{byte:02X}").expect("writing to String cannot fail");
+        }
+    }
+    encoded
 }
 
 fn next_reduced_node_name(
@@ -992,6 +1190,10 @@ struct Parser<'a> {
     cap_scale: Value,
     res_scale: Value,
     induc_scale: Value,
+    cap_unit_seen: bool,
+    res_unit_seen: bool,
+    induc_unit_seen: bool,
+    nets_started: bool,
 }
 
 /// Sections within a `*D_NET`.
@@ -1002,6 +1204,28 @@ enum NetSection {
     Cap,
     Res,
     Induc,
+}
+
+impl NetSection {
+    fn rank(self) -> u8 {
+        match self {
+            Self::None => 0,
+            Self::Conn => 1,
+            Self::Cap => 2,
+            Self::Res => 3,
+            Self::Induc => 4,
+        }
+    }
+
+    fn keyword(self) -> &'static str {
+        match self {
+            Self::None => "detailed net",
+            Self::Conn => "*CONN",
+            Self::Cap => "*CAP",
+            Self::Res => "*RES",
+            Self::Induc => "*INDUC",
+        }
+    }
 }
 
 struct ReducedDriverBuilder {
@@ -1032,6 +1256,10 @@ impl<'a> Parser<'a> {
             cap_scale: 1e-12, // SPEF default exchange unit is PF / OHM
             res_scale: 1.0,
             induc_scale: 1.0,
+            cap_unit_seen: false,
+            res_unit_seen: false,
+            induc_unit_seen: false,
+            nets_started: false,
         }
     }
 
@@ -1054,6 +1282,8 @@ impl<'a> Parser<'a> {
         let mut current_reduced: Option<ReducedNetBuilder> = None;
         let mut declared_net_names = HashSet::new();
         let mut section = NetSection::None;
+        let mut seen_sections = 0_u8;
+        let mut section_entries = 0_usize;
 
         while let Some(raw) = self.lines.next() {
             self.line_num += 1;
@@ -1294,6 +1524,14 @@ impl<'a> Parser<'a> {
                 }
                 "*C_UNIT" => {
                     in_name_map = false;
+                    if self.nets_started {
+                        return Err(self
+                            .error("*C_UNIT must appear before the first net definition")
+                            .into());
+                    }
+                    if std::mem::replace(&mut self.cap_unit_seen, true) {
+                        return Err(self.error("duplicate *C_UNIT statement").into());
+                    }
                     self.cap_scale = self
                         .parse_unit(
                             &fields,
@@ -1309,12 +1547,28 @@ impl<'a> Parser<'a> {
                 }
                 "*R_UNIT" => {
                     in_name_map = false;
+                    if self.nets_started {
+                        return Err(self
+                            .error("*R_UNIT must appear before the first net definition")
+                            .into());
+                    }
+                    if std::mem::replace(&mut self.res_unit_seen, true) {
+                        return Err(self.error("duplicate *R_UNIT statement").into());
+                    }
                     self.res_scale = self
                         .parse_unit(&fields, &[("OHM", 1.0), ("KOHM", 1e3), ("MOHM", 1e6)])
                         .map_err(ParseWithAbortError::from)?;
                 }
                 "*L_UNIT" => {
                     in_name_map = false;
+                    if self.nets_started {
+                        return Err(self
+                            .error("*L_UNIT must appear before the first net definition")
+                            .into());
+                    }
+                    if std::mem::replace(&mut self.induc_unit_seen, true) {
+                        return Err(self.error("duplicate *L_UNIT statement").into());
+                    }
                     self.induc_scale = self
                         .parse_unit(&fields, &[("HENRY", 1.0), ("MH", 1e-3), ("UH", 1e-6)])
                         .map_err(ParseWithAbortError::from)?;
@@ -1323,8 +1577,14 @@ impl<'a> Parser<'a> {
                 "*PORTS" | "*PHYSICAL_PORTS" => in_name_map = false,
                 "*D_NET" => {
                     in_name_map = false;
-                    if let Some(net) = current.take() {
-                        nets.push(net);
+                    self.nets_started = true;
+                    if let Some(net) = current.as_ref() {
+                        return Err(self
+                            .error(format!(
+                                "detailed net `{}` is missing its terminating *END",
+                                net.name
+                            ))
+                            .into());
                     }
                     if fields.len() != 3 && fields.len() != 5 {
                         return Err(self
@@ -1341,13 +1601,14 @@ impl<'a> Parser<'a> {
                         .get(2)
                         .ok_or_else(|| self.error("*D_NET without a total capacitance"))
                         .map_err(ParseWithAbortError::from)?;
-                    self.parse_scaled_value(
-                        total_capacitance,
-                        self.cap_scale,
-                        "*D_NET total capacitance",
-                        true,
-                    )
-                    .map_err(ParseWithAbortError::from)?;
+                    let total_capacitance = self
+                        .parse_scaled_value(
+                            total_capacitance,
+                            self.cap_scale,
+                            "*D_NET total capacitance",
+                            true,
+                        )
+                        .map_err(ParseWithAbortError::from)?;
                     let name = self
                         .resolve_name(name_field)
                         .map_err(ParseWithAbortError::from)?;
@@ -1358,18 +1619,30 @@ impl<'a> Parser<'a> {
                     }
                     current = Some(DNet {
                         name,
+                        total_capacitance,
                         line: self.line_num,
                         conns: Vec::new(),
                         caps: Vec::new(),
                         ress: Vec::new(),
                         inductors: Vec::new(),
+                        cap_ids: HashSet::new(),
+                        res_ids: HashSet::new(),
+                        inductor_ids: HashSet::new(),
                     });
                     section = NetSection::None;
+                    seen_sections = 0;
+                    section_entries = 0;
                 }
                 "*R_NET" | "*C_NET" => {
                     in_name_map = false;
-                    if let Some(net) = current.take() {
-                        nets.push(net);
+                    self.nets_started = true;
+                    if let Some(net) = current.as_ref() {
+                        return Err(self
+                            .error(format!(
+                                "detailed net `{}` is missing its terminating *END",
+                                net.name
+                            ))
+                            .into());
                     }
                     if fields.len() != 3 && fields.len() != 5 {
                         return Err(self
@@ -1411,36 +1684,145 @@ impl<'a> Parser<'a> {
                     });
                     section = NetSection::None;
                 }
-                "*CONN" => section = NetSection::Conn,
-                "*CAP" => section = NetSection::Cap,
-                "*RES" => section = NetSection::Res,
-                "*INDUC" => section = NetSection::Induc,
-                "*END" => {
-                    if let Some(net) = current.take() {
-                        nets.push(net);
+                "*CONN" | "*CAP" | "*RES" | "*INDUC" => {
+                    let net = current
+                        .as_ref()
+                        .ok_or_else(|| self.error(format!("{keyword} section outside *D_NET")))
+                        .map_err(ParseWithAbortError::from)?;
+                    if fields.len() != 1 {
+                        return Err(self
+                            .error(format!("{keyword} section marker accepts no arguments"))
+                            .into());
                     }
+                    let next = match keyword.as_str() {
+                        "*CONN" => NetSection::Conn,
+                        "*CAP" => NetSection::Cap,
+                        "*RES" => NetSection::Res,
+                        "*INDUC" => {
+                            if !self.induc_unit_seen {
+                                return Err(self
+                                    .error(format!(
+                                        "*INDUC on net `{}` requires an explicit *L_UNIT header",
+                                        net.name
+                                    ))
+                                    .into());
+                            }
+                            NetSection::Induc
+                        }
+                        _ => unreachable!("matched detailed section keyword"),
+                    };
+                    let bit = 1_u8 << (next.rank() - 1);
+                    if seen_sections & bit != 0 {
+                        return Err(self
+                            .error(format!(
+                                "duplicate {} section on net `{}`",
+                                next.keyword(),
+                                net.name
+                            ))
+                            .into());
+                    }
+                    if next.rank() < section.rank() {
+                        return Err(self
+                            .error(format!(
+                                "{} section on net `{}` is out of order after {}",
+                                next.keyword(),
+                                net.name,
+                                section.keyword()
+                            ))
+                            .into());
+                    }
+                    if section != NetSection::None && section_entries == 0 {
+                        return Err(self
+                            .error(format!(
+                                "{} section on net `{}` must contain at least one record",
+                                section.keyword(),
+                                net.name
+                            ))
+                            .into());
+                    }
+                    seen_sections |= bit;
+                    section = next;
+                    section_entries = 0;
+                }
+                "*END" => {
+                    let net = current.take().ok_or_else(|| {
+                        self.error("*END appears without an active detailed or reduced net")
+                    })?;
+                    if section != NetSection::None && section_entries == 0 {
+                        return Err(self
+                            .error(format!(
+                                "{} section on net `{}` must contain at least one record",
+                                section.keyword(),
+                                net.name
+                            ))
+                            .into());
+                    }
+                    nets.push(net);
                     section = NetSection::None;
+                    seen_sections = 0;
+                    section_entries = 0;
                 }
                 "*P" | "*I" if section == NetSection::Conn => {
                     let net = current
                         .as_mut()
                         .ok_or_else(|| self.error("connection entry outside *D_NET"))
                         .map_err(ParseWithAbortError::from)?;
+                    if fields.len() < 3 {
+                        return Err(self
+                            .error(format!(
+                                "malformed {keyword} connection `{line}` (expected node and direction)"
+                            ))
+                            .into());
+                    }
+                    if !matches!(fields[2].to_ascii_uppercase().as_str(), "I" | "O" | "B") {
+                        return Err(self
+                            .error(format!(
+                                "connection direction `{}` must be I, O, or B",
+                                fields[2]
+                            ))
+                            .into());
+                    }
+                    let load_farads = self
+                        .validate_connection_attributes(&fields[3..])
+                        .map_err(ParseWithAbortError::from)?;
                     let node_field = fields
                         .get(1)
                         .ok_or_else(|| self.error("connection entry without a node"))
                         .map_err(ParseWithAbortError::from)?;
-                    let node = self
-                        .parse_node_ref(node_field)
-                        .map_err(ParseWithAbortError::from)?;
+                    let node = if keyword == "*I" {
+                        self.parse_pin_ref(node_field)
+                    } else {
+                        self.resolve_name(node_field).map(NodeRef::Net)
+                    }
+                    .map_err(ParseWithAbortError::from)?;
                     net.conns.push(Conn {
                         node,
                         is_port: keyword == "*P",
+                        load_farads,
                         line: self.line_num,
                     });
+                    section_entries += 1;
                 }
                 "*N" if section == NetSection::Conn => {
-                    // Internal-node coordinates: topology only, no action.
+                    if fields.len() != 4 {
+                        return Err(self
+                            .error("malformed *N coordinate (expected node, x, and y)")
+                            .into());
+                    }
+                    let net = current
+                        .as_ref()
+                        .ok_or_else(|| self.error("*N coordinate outside *D_NET"))
+                        .map_err(ParseWithAbortError::from)?;
+                    let node = self
+                        .parse_parasitic_node_ref(fields[1], net)
+                        .map_err(ParseWithAbortError::from)?;
+                    if !matches!(node, NodeRef::SubNode(_, _)) {
+                        return Err(self.error("*N must name an internal net subnode").into());
+                    }
+                    self.parse_value(fields[2])
+                        .and_then(|_| self.parse_value(fields[3]))
+                        .map_err(ParseWithAbortError::from)?;
+                    section_entries += 1;
                 }
                 _ if section == NetSection::Cap => {
                     let net = current
@@ -1450,13 +1832,25 @@ impl<'a> Parser<'a> {
                     // `id node value` (ground) or `id node node value`.
                     match fields.len() {
                         3 => {
+                            let id = self
+                                .parse_positive_id(fields[0], "capacitance")
+                                .map_err(ParseWithAbortError::from)?;
+                            if !net.cap_ids.insert(id) {
+                                return Err(self
+                                    .error(format!(
+                                        "duplicate capacitance id {id} on net `{}`",
+                                        net.name
+                                    ))
+                                    .into());
+                            }
                             let farads = self
                                 .parse_scaled_value(fields[2], self.cap_scale, "capacitance", false)
                                 .map_err(ParseWithAbortError::from)?;
                             let a = self
-                                .parse_node_ref(fields[1])
+                                .parse_parasitic_node_ref(fields[1], net)
                                 .map_err(ParseWithAbortError::from)?;
                             net.caps.push(Cap {
+                                id,
                                 a,
                                 b: None,
                                 farads,
@@ -1464,16 +1858,28 @@ impl<'a> Parser<'a> {
                             });
                         }
                         4 => {
+                            let id = self
+                                .parse_positive_id(fields[0], "capacitance")
+                                .map_err(ParseWithAbortError::from)?;
+                            if !net.cap_ids.insert(id) {
+                                return Err(self
+                                    .error(format!(
+                                        "duplicate capacitance id {id} on net `{}`",
+                                        net.name
+                                    ))
+                                    .into());
+                            }
                             let farads = self
                                 .parse_scaled_value(fields[3], self.cap_scale, "capacitance", false)
                                 .map_err(ParseWithAbortError::from)?;
                             let a = self
-                                .parse_node_ref(fields[1])
+                                .parse_parasitic_node_ref(fields[1], net)
                                 .map_err(ParseWithAbortError::from)?;
                             let b = self
-                                .parse_node_ref(fields[2])
+                                .parse_parasitic_node_ref(fields[2], net)
                                 .map_err(ParseWithAbortError::from)?;
                             net.caps.push(Cap {
+                                id,
                                 a,
                                 b: Some(b),
                                 farads,
@@ -1488,6 +1894,7 @@ impl<'a> Parser<'a> {
                                 .into());
                         }
                     }
+                    section_entries += 1;
                 }
                 _ if section == NetSection::Res => {
                     let net = current
@@ -1499,21 +1906,34 @@ impl<'a> Parser<'a> {
                             .error(format!("malformed *RES entry `{line}` (expected 4 fields)"))
                             .into());
                     }
+                    let id = self
+                        .parse_positive_id(fields[0], "resistance")
+                        .map_err(ParseWithAbortError::from)?;
+                    if !net.res_ids.insert(id) {
+                        return Err(self
+                            .error(format!(
+                                "duplicate resistance id {id} on net `{}`",
+                                net.name
+                            ))
+                            .into());
+                    }
                     let ohms = self
                         .parse_scaled_value(fields[3], self.res_scale, "resistance", false)
                         .map_err(ParseWithAbortError::from)?;
                     let a = self
-                        .parse_node_ref(fields[1])
+                        .parse_parasitic_node_ref(fields[1], net)
                         .map_err(ParseWithAbortError::from)?;
                     let b = self
-                        .parse_node_ref(fields[2])
+                        .parse_parasitic_node_ref(fields[2], net)
                         .map_err(ParseWithAbortError::from)?;
                     net.ress.push(Res {
+                        id,
                         a,
                         b,
                         ohms,
                         line: self.line_num,
                     });
+                    section_entries += 1;
                 }
                 _ if section == NetSection::Induc => {
                     let net = current
@@ -1527,21 +1947,42 @@ impl<'a> Parser<'a> {
                             ))
                             .into());
                     }
+                    let id = self
+                        .parse_positive_id(fields[0], "inductance")
+                        .map_err(ParseWithAbortError::from)?;
+                    if !net.inductor_ids.insert(id) {
+                        return Err(self
+                            .error(format!(
+                                "duplicate inductance id {id} on net `{}`",
+                                net.name
+                            ))
+                            .into());
+                    }
                     let henries = self
                         .parse_scaled_value(fields[3], self.induc_scale, "inductance", false)
                         .map_err(ParseWithAbortError::from)?;
                     let a = self
-                        .parse_node_ref(fields[1])
+                        .parse_parasitic_node_ref(fields[1], net)
                         .map_err(ParseWithAbortError::from)?;
                     let b = self
-                        .parse_node_ref(fields[2])
+                        .parse_parasitic_node_ref(fields[2], net)
                         .map_err(ParseWithAbortError::from)?;
                     net.inductors.push(Induc {
+                        id,
                         a,
                         b,
                         henries,
                         line: self.line_num,
                     });
+                    section_entries += 1;
+                }
+                _ if current.is_some() => {
+                    return Err(self
+                        .error(format!(
+                            "unexpected record `{}` inside detailed net",
+                            fields[0]
+                        ))
+                        .into());
                 }
                 _ => {}
             }
@@ -1555,8 +1996,13 @@ impl<'a> Parser<'a> {
                 ))
                 .into());
         }
-        if let Some(net) = current.take() {
-            nets.push(net);
+        if let Some(net) = current {
+            return Err(self
+                .error(format!(
+                    "detailed net `{}` is missing its terminating *END",
+                    net.name
+                ))
+                .into());
         }
         ensure_parse_not_aborted(abort)?;
         Ok(SpefFile { nets, reduced_nets })
@@ -1576,6 +2022,116 @@ impl<'a> Parser<'a> {
             return Err(self.error("routing confidence must be a positive integer"));
         }
         Ok(())
+    }
+
+    fn validate_connection_attributes(&self, fields: &[&str]) -> Result<Option<Value>, ParseError> {
+        let mut index = 0usize;
+        let mut seen = HashSet::new();
+        let mut load_farads = None;
+        while index < fields.len() {
+            let attribute = fields[index].to_ascii_uppercase();
+            if !seen.insert(attribute.clone()) {
+                return Err(self.error(format!(
+                    "duplicate connection attribute `{}`",
+                    fields[index]
+                )));
+            }
+            let remaining = &fields[index + 1..];
+            match attribute.as_str() {
+                "*C" => {
+                    if remaining.len() < 2 {
+                        return Err(self.error("*C connection attribute requires x and y"));
+                    }
+                    self.parse_value(remaining[0])?;
+                    self.parse_value(remaining[1])?;
+                    index += 3;
+                }
+                "*L" => {
+                    let value = remaining
+                        .first()
+                        .ok_or_else(|| self.error("*L connection attribute requires a load"))?;
+                    let loads = self.parse_par_value(value, "connection load")?;
+                    for &load in &loads {
+                        if load < 0.0 {
+                            return Err(self.error("connection load must be non-negative"));
+                        }
+                        let scaled = load * self.cap_scale;
+                        if !scaled.is_finite() {
+                            return Err(self.error("scaled connection load is non-finite"));
+                        }
+                    }
+                    let nominal = if loads.len() == 3 { loads[1] } else { loads[0] };
+                    load_farads = Some(nominal * self.cap_scale);
+                    index += 2;
+                }
+                "*S" => {
+                    if remaining.len() < 2 {
+                        return Err(
+                            self.error("*S connection attribute requires rise and fall slew")
+                        );
+                    }
+                    for field in &remaining[..2] {
+                        if self
+                            .parse_par_value(field, "connection slew")?
+                            .into_iter()
+                            .any(|value| value < 0.0)
+                        {
+                            return Err(self.error("connection slew must be non-negative"));
+                        }
+                    }
+                    index += 3;
+                    if fields
+                        .get(index)
+                        .is_some_and(|field| !field.starts_with('*'))
+                    {
+                        if fields.get(index + 1).is_none() || fields[index + 1].starts_with('*') {
+                            return Err(self.error(
+                                "*S connection thresholds require both low and high values",
+                            ));
+                        }
+                        for field in &fields[index..index + 2] {
+                            if self
+                                .parse_par_value(field, "slew threshold")?
+                                .into_iter()
+                                .any(|value| !(value > 0.0 && value < 1.0))
+                            {
+                                return Err(self.error(
+                                    "slew thresholds must be strictly between zero and one",
+                                ));
+                            }
+                        }
+                        index += 2;
+                    }
+                }
+                "*D" => {
+                    let cell = remaining
+                        .first()
+                        .ok_or_else(|| self.error("*D connection attribute requires a cell"))?;
+                    self.resolve_name(cell)?;
+                    index += 2;
+                }
+                _ => {
+                    return Err(self.error(format!(
+                        "unsupported connection attribute `{}`",
+                        fields[index]
+                    )));
+                }
+            }
+        }
+        Ok(load_farads)
+    }
+
+    fn parse_par_value(&self, field: &str, quantity: &str) -> Result<Vec<Value>, ParseError> {
+        let parts: Vec<_> = field.split(':').collect();
+        if parts.len() != 1 && parts.len() != 3 {
+            return Err(self.error(format!(
+                "{quantity} `{field}` must be one value or a min:typ:max triplet"
+            )));
+        }
+        parts
+            .into_iter()
+            .map(|part| self.parse_value(part))
+            .collect()
     }
 
     fn finish_reduced_driver(
@@ -1664,6 +2220,20 @@ impl<'a> Parser<'a> {
         Ok(value)
     }
 
+    fn parse_positive_id(&self, field: &str, quantity: &str) -> Result<u64, ParseError> {
+        let id: u64 = field.parse().map_err(|_| {
+            self.error(format!(
+                "{quantity} id `{field}` must be a positive integer"
+            ))
+        })?;
+        if id == 0 {
+            return Err(self.error(format!(
+                "{quantity} id `{field}` must be a positive integer"
+            )));
+        }
+        Ok(id)
+    }
+
     fn parse_scaled_value(
         &self,
         field: &str,
@@ -1722,6 +2292,25 @@ impl<'a> Parser<'a> {
                     Ok(NodeRef::Pin(base, sub.to_owned()))
                 }
             }
+        }
+    }
+
+    fn parse_parasitic_node_ref(&self, field: &str, net: &DNet) -> Result<NodeRef, ParseError> {
+        let parsed = self.parse_node_ref(field)?;
+        let NodeRef::SubNode(base, suffix) = parsed else {
+            return Ok(parsed);
+        };
+        if net.conns.iter().any(|connection| {
+            matches!(
+                &connection.node,
+                NodeRef::Pin(instance, pin)
+                    if instance.eq_ignore_ascii_case(&base)
+                        && pin.eq_ignore_ascii_case(&suffix)
+            )
+        }) {
+            Ok(NodeRef::Pin(base, suffix))
+        } else {
+            Ok(NodeRef::SubNode(base, suffix))
         }
     }
 
@@ -2042,6 +2631,129 @@ mod tests {
             assert_eq!(spef.nets[0].inductors.len(), 1);
             assert_eq!(spef.nets[0].inductors[0].henries, expected, "{unit}");
         }
+    }
+
+    #[test]
+    fn detailed_inductance_grammar_requires_units_positive_unique_ids_and_order() {
+        let cases = [
+            (
+                "missing unit",
+                "*SPEF \"IEEE 1481-2009\"\n*D_NET in 0\n*INDUC\n1 in in:1 2\n*END\n",
+                "requires an explicit *L_UNIT",
+            ),
+            (
+                "zero id",
+                "*SPEF \"IEEE 1481-2009\"\n*L_UNIT 1 UH\n*D_NET in 0\n*INDUC\n0 in in:1 2\n*END\n",
+                "positive integer",
+            ),
+            (
+                "duplicate id",
+                "*SPEF \"IEEE 1481-2009\"\n*L_UNIT 1 UH\n*D_NET in 0\n*INDUC\n1 in in:1 2\n1 in:1 in:2 3\n*END\n",
+                "duplicate inductance id",
+            ),
+            (
+                "duplicate section",
+                "*SPEF \"IEEE 1481-2009\"\n*L_UNIT 1 UH\n*D_NET in 0\n*INDUC\n1 in in:1 2\n*INDUC\n2 in:1 in:2 3\n*END\n",
+                "duplicate *INDUC section",
+            ),
+            (
+                "empty section",
+                "*SPEF \"IEEE 1481-2009\"\n*L_UNIT 1 UH\n*D_NET in 0\n*INDUC\n*END\n",
+                "at least one record",
+            ),
+            (
+                "out of order",
+                "*SPEF \"IEEE 1481-2009\"\n*R_UNIT 1 OHM\n*L_UNIT 1 UH\n*D_NET in 0\n*INDUC\n1 in in:1 2\n*RES\n1 in:1 in:2 3\n*END\n",
+                "out of order",
+            ),
+            (
+                "missing end",
+                "*SPEF \"IEEE 1481-2009\"\n*L_UNIT 1 UH\n*D_NET in 0\n*INDUC\n1 in in:1 2\n",
+                "terminating *END",
+            ),
+            (
+                "duplicate unit",
+                "*SPEF \"IEEE 1481-2009\"\n*L_UNIT 1 UH\n*L_UNIT 1 MH\n*D_NET in 0\n*INDUC\n1 in in:1 2\n*END\n",
+                "duplicate *L_UNIT",
+            ),
+        ];
+
+        for (label, source, expected) in cases {
+            let error = match SpefFile::parse(source) {
+                Ok(_) => panic!("{label}: malformed grammar was accepted"),
+                Err(error) => error,
+            };
+            assert!(
+                error.to_string().contains(expected),
+                "{label}: expected `{expected}`, got `{error}`"
+            );
+        }
+    }
+
+    #[test]
+    fn detailed_inductance_grammar_diagnostics_are_stable() {
+        let source = "*SPEF \"IEEE 1481-2009\"\n*L_UNIT 1 UH\n*D_NET in 0\n*INDUC\n1 in in:1 2\n1 in:1 in:2 3\n*END\n";
+        let error = SpefFile::parse(source).expect_err("duplicate id is rejected");
+        assert!(error.to_string().contains("duplicate inductance id"));
+    }
+
+    #[test]
+    fn numeric_instance_pins_remain_pins_in_inductance_topology() {
+        let source = "*SPEF \"IEEE 1481-2009\"\n*L_UNIT 1 UH\n*D_NET in 0\n*CONN\n*I R1:1 I\n*INDUC\n7 in R1:1 2\n*END\n";
+        let spef = SpefFile::parse(source).expect("numeric pin SPEF parses");
+        assert!(matches!(
+            &spef.nets[0].conns[0].node,
+            NodeRef::Pin(instance, pin) if instance == "R1" && pin == "1"
+        ));
+        assert!(matches!(
+            &spef.nets[0].inductors[0].b,
+            NodeRef::Pin(instance, pin) if instance == "R1" && pin == "1"
+        ));
+    }
+
+    #[test]
+    fn detailed_net_without_cap_section_materializes_its_lumped_total() {
+        let lumped = SpefFile::parse("*SPEF \"IEEE 1481-2009\"\n*C_UNIT 1 PF\n*D_NET in 2\n*END\n")
+            .expect("lumped detailed net parses");
+        let mut netlist = Netlist::parse("lumped\nI1 0 in DC 0\n.end\n").expect("deck parses");
+        let report = lumped.apply(&mut netlist);
+        assert_eq!(report.capacitors, 1);
+        let imported = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.starts_with("CSPEF"))
+            .expect("lumped capacitor materialized");
+        assert!(matches!(
+            &imported.provenance,
+            crate::netlist::ElementProvenance::ImportedSpef {
+                net,
+                record_id: None,
+                ..
+            } if net == "in"
+        ));
+    }
+
+    #[test]
+    fn detailed_total_may_include_an_explicit_connection_load_outside_cap_section() {
+        let spef = SpefFile::parse(
+            "*SPEF \"IEEE 1481-2009\"\n*C_UNIT 1 PF\n*D_NET in 3\n*CONN\n*P in O *L 2\n*CAP\n1 in 1\n*END\n",
+        )
+        .expect("connection load contributes to total_cap outside *CAP");
+        let mut netlist = Netlist::parse("loaded\nI1 0 in DC 0\n.end\n").expect("deck parses");
+
+        let report = spef.apply(&mut netlist);
+
+        assert_eq!(report.capacitors, 2);
+        let mut values: Vec<_> = netlist
+            .elements
+            .iter()
+            .filter_map(|element| match &element.kind {
+                ElementKind::Capacitor { value, .. } => Some(*value),
+                _ => None,
+            })
+            .collect();
+        values.sort_by(Value::total_cmp);
+        assert_eq!(values, vec![1.0e-12, 2.0e-12]);
     }
 
     #[test]

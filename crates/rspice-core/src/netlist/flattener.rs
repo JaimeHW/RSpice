@@ -1433,6 +1433,15 @@ impl<'a> Flattener<'a> {
             nodes: new_nodes,
             provenance: match &element.provenance {
                 super::ElementProvenance::Authored => super::ElementProvenance::Authored,
+                super::ElementProvenance::ImportedSpef {
+                    net,
+                    record_id,
+                    line,
+                } => super::ElementProvenance::ImportedSpef {
+                    net: net.clone(),
+                    record_id: *record_id,
+                    line: *line,
+                },
                 super::ElementProvenance::GeneratedPassiveHelper { owner, role } => {
                     super::ElementProvenance::GeneratedPassiveHelper {
                         owner: self.remap_local_element_reference(owner, prefix),
