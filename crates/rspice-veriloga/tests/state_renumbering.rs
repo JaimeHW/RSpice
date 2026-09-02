@@ -190,18 +190,31 @@ fn renumbering_leaves_the_integrated_history_unchanged() {
             .collect::<Vec<_>>(),
         "renumbered {renumbered_trajectory:?} vs emitted {emitted_trajectory:?}"
     );
-    assert!(
-        renumbered_trajectory.iter().all(|value| value.is_finite()),
-        "the trajectory must be a real integration: {renumbered_trajectory:?}"
-    );
-    assert!(
+    // The ramp is uniform, so `ddt(V)` is exactly `RAMP_VOLTS / TIMESTEP` at
+    // every accepted step and the stamped current is exactly `V` times that.
+    // Both are powers of two here, so the expectation is exact in binary
+    // floating point and identical for every backend: this is the assertion
+    // that makes the VM run and the JIT run of this file comparable to each
+    // other rather than only to their own twins.
+    let expected = (0..RAMP_STEPS)
+        .map(|step| f64::from(step) * RAMP_VOLTS * (RAMP_VOLTS / TIMESTEP))
+        .collect::<Vec<_>>();
+    assert_eq!(
         renumbered_trajectory
             .iter()
-            .any(|value| *value != renumbered_trajectory[0]),
-        "a constant trajectory would pass this test without integrating anything: \
-         {renumbered_trajectory:?}"
+            .map(|value| value.to_bits())
+            .collect::<Vec<_>>(),
+        expected
+            .iter()
+            .map(|value| value.to_bits())
+            .collect::<Vec<_>>(),
+        "trajectory {renumbered_trajectory:?} is not the exact ramp {expected:?}"
     );
 }
+
+const TIMESTEP: f64 = 0.5;
+const RAMP_VOLTS: f64 = 1.0;
+const RAMP_STEPS: u32 = 5;
 
 /// Drive one device through a uniform voltage ramp, one accepted step per
 /// point.
@@ -210,13 +223,12 @@ fn ramp(model: &CompiledModel, artifact: &CanonicalIrArtifact) -> Vec<f64> {
         VerilogADevice::try_new_with_canonical_ir("A1", Arc::new(model.clone()), artifact, &[1, 0])
             .expect("device constructs");
     device.set_analysis_type(2);
-    device.set_timestep(0.5);
+    device.set_timestep(TIMESTEP);
 
     let mut trajectory = Vec::new();
-    for step in 0..5_u32 {
-        let time = f64::from(step) * 0.5;
-        device.set_time(time);
-        device.update_voltages(&[f64::from(step)]);
+    for step in 0..RAMP_STEPS {
+        device.set_time(f64::from(step) * TIMESTEP);
+        device.update_voltages(&[f64::from(step) * RAMP_VOLTS]);
         let stamped = device.try_evaluate().expect("evaluation succeeds");
         trajectory.push(stamped[0]);
         device.advance_state();
