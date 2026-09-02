@@ -437,13 +437,103 @@ fn lock_shared_table3d_cache() -> MutexGuard<'static, TableDataCache<Table3DData
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+#[cfg(test)]
+thread_local! {
+    /// One test's private table caches, installed by [`TableCacheScope`].
+    ///
+    /// # Why thread-local, and not the shared caches
+    ///
+    /// `cargo test` runs a binary's tests concurrently in one process, so a
+    /// test that asserts what a table cache retains is really asserting over
+    /// every other test's table activity as well. A sibling that clears a
+    /// cache, or that loads through a smaller shared-cache budget, evicts the
+    /// entry under assertion, and the test then fails on the scheduler instead
+    /// of on the retention policy it exists to pin. A thread-local cache is
+    /// private to the test that installed it, under both `--test-threads=1`
+    /// and the default.
+    ///
+    /// The policy under test is the same code either way — [`TableDataCache`]
+    /// and the [`crate::resource::BoundedCache`] beneath it — and only the
+    /// storage differs, so scoping costs no coverage. The shared caches' locks
+    /// keep their own test in `table_cache_locks_recover_after_poison`.
+    static SCOPED_TABLE2D_CACHE: std::cell::RefCell<Option<TableDataCache<Table2DData>>> =
+        const { std::cell::RefCell::new(None) };
+
+    /// The 3-D half of [`SCOPED_TABLE2D_CACHE`]; one [`TableCacheScope`]
+    /// installs both, because a table test can load through either loader.
+    static SCOPED_TABLE3D_CACHE: std::cell::RefCell<Option<TableDataCache<Table3DData>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Table caches private to one test, for the lifetime of the returned value.
+/// Loads on this thread retain into them and never touch the shared caches.
+#[cfg(test)]
+struct TableCacheScope;
+
+#[cfg(test)]
+impl TableCacheScope {
+    fn install() -> Self {
+        SCOPED_TABLE2D_CACHE.with(install_scoped_table_cache);
+        SCOPED_TABLE3D_CACHE.with(install_scoped_table_cache);
+        Self
+    }
+}
+
+#[cfg(test)]
+impl Drop for TableCacheScope {
+    fn drop(&mut self) {
+        SCOPED_TABLE2D_CACHE.with(|scope| *scope.borrow_mut() = None);
+        SCOPED_TABLE3D_CACHE.with(|scope| *scope.borrow_mut() = None);
+    }
+}
+
+#[cfg(test)]
+fn install_scoped_table_cache<T>(scope: &std::cell::RefCell<Option<TableDataCache<T>>>) {
+    let mut scope = scope.borrow_mut();
+    assert!(
+        scope.is_none(),
+        "one table cache scope per test: this thread already installed one"
+    );
+    let mut cache = TableDataCache::default();
+    cache.clear();
+    *scope = Some(cache);
+}
+
 /// Run `operation` against the 2-D table cache this thread loads through.
 fn with_table2d_cache<R>(operation: impl FnOnce(&mut TableDataCache<Table2DData>) -> R) -> R {
+    #[cfg(test)]
+    {
+        if SCOPED_TABLE2D_CACHE.with(|scope| scope.borrow().is_some()) {
+            return SCOPED_TABLE2D_CACHE.with(|scope| {
+                operation(
+                    scope
+                        .borrow_mut()
+                        .as_mut()
+                        .expect("a scoped table cache stays installed for its whole scope"),
+                )
+            });
+        }
+    }
+
     operation(&mut lock_shared_table2d_cache())
 }
 
 /// Run `operation` against the 3-D table cache this thread loads through.
 fn with_table3d_cache<R>(operation: impl FnOnce(&mut TableDataCache<Table3DData>) -> R) -> R {
+    #[cfg(test)]
+    {
+        if SCOPED_TABLE3D_CACHE.with(|scope| scope.borrow().is_some()) {
+            return SCOPED_TABLE3D_CACHE.with(|scope| {
+                operation(
+                    scope
+                        .borrow_mut()
+                        .as_mut()
+                        .expect("a scoped table cache stays installed for its whole scope"),
+                )
+            });
+        }
+    }
+
     operation(&mut lock_shared_table3d_cache())
 }
 
@@ -2122,6 +2212,10 @@ mod tests {
         assert!(result.is_err(), "recovery test must poison the mutex");
     }
 
+    /// This is the one test that must reach the shared caches: the locks it
+    /// recovers are the shared caches' own. Clearing them is safe because
+    /// every test that asserts over cache contents installs a
+    /// [`TableCacheScope`] instead of sharing these.
     #[test]
     fn table_cache_locks_recover_after_poison() {
         poison_table2d_cache_lock();
@@ -2614,6 +2708,7 @@ mod tests {
     #[test]
     fn table_loader_honors_zero_shared_cache_retention() {
         let _guard = data_file_test_guard();
+        let _cache_scope = TableCacheScope::install();
         let file = "virtual://table2d/zero-cache-retention";
         let _ = data_file::unregister_data_file(file);
         data_file::register_data_file(
@@ -2644,11 +2739,11 @@ mod tests {
     #[test]
     fn table_cache_retains_current_entry_across_unrelated_virtual_file_changes() {
         let _guard = data_file_test_guard();
+        let _cache_scope = TableCacheScope::install();
         let retained_file = "virtual://table2d/retained-across-unrelated-change";
         let unrelated_file = "virtual://table2d/unrelated-change";
         let _ = data_file::unregister_data_file(retained_file);
         let _ = data_file::unregister_data_file(unrelated_file);
-        lock_shared_table2d_cache().clear();
 
         let contents = "\
 2
@@ -2899,12 +2994,11 @@ mod tests {
     #[test]
     fn table_caches_retire_replaced_virtual_file_entries() {
         let _guard = data_file_test_guard();
+        let _cache_scope = TableCacheScope::install();
         let table2d_file = "virtual://table2d/cache-retention";
         let table3d_file = "virtual://table3d/cache-retention";
         let _ = data_file::unregister_data_file(table2d_file);
         let _ = data_file::unregister_data_file(table3d_file);
-        lock_shared_table2d_cache().clear();
-        lock_shared_table3d_cache().clear();
 
         data_file::register_data_file(
             table2d_file,
