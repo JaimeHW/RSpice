@@ -1085,6 +1085,67 @@ fn transient_step_checkpoints_are_coordinate_local_and_resumable() {
 }
 
 #[test]
+fn repeated_transient_checkpoints_compose_analysis_and_coordinate_ids() {
+    let dir = test_dir("repeated_transient_checkpoints");
+    let deck = dir.join("repeated_transient_step.sp");
+    let checkpoint = dir.join("state.chk");
+    std::fs::write(
+        &deck,
+        "* coordinate and analysis-local transient checkpoints\n\
+         .param r=1k\n\
+         V1 in 0 PULSE(0 1 0 10p 10p 500p 1n)\n\
+         R1 in 0 {r}\n\
+         .step param r list 1k 2k\n\
+         .tran 100p 1n\n\
+         .tran 50p 1n\n\
+         .end\n",
+    )
+    .expect("write repeated transient STEP deck");
+
+    let initial = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "--checkpoint",
+        checkpoint.to_str().unwrap(),
+    ]);
+    assert!(
+        initial.status.success(),
+        "repeated transient checkpoints must save; stderr: {}",
+        String::from_utf8_lossy(&initial.stderr)
+    );
+    for coordinate in 1..=2 {
+        let coordinate_path = tagged_output(&checkpoint, &format!("step_{coordinate:06}"));
+        for analysis in 1..=2 {
+            let path = tagged_output(&coordinate_path, &format!("tran-{analysis:03}"));
+            assert!(path.exists(), "missing checkpoint {}", path.display());
+        }
+        assert!(
+            !coordinate_path.exists(),
+            "coordinate-only checkpoint path would collide"
+        );
+    }
+    assert!(!checkpoint.exists());
+
+    let resumed = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "--resume",
+        checkpoint.to_str().unwrap(),
+        "--tran-stop",
+        "2n",
+    ]);
+    assert!(
+        resumed.status.success(),
+        "every transient must resume from its matching analysis/coordinate state; stderr: {}",
+        String::from_utf8_lossy(&resumed.stderr)
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn step_batch_limit_retains_typed_resource_metadata() {
     let dir = test_dir("batch_limit");
     let deck = dir.join("bounded.sp");

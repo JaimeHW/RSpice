@@ -293,6 +293,26 @@ impl<'a> RunContext<'a> {
         Some(resolved)
     }
 
+    /// Resolve the checkpoint namespace of the transient currently entering
+    /// the dispatcher. The dispatcher advances `next_transient_ordinal`
+    /// before calling the transient executor, so its value is the one-based
+    /// external ordinal used here.
+    fn transient_checkpoint_path(
+        &self,
+        path: Option<&std::path::Path>,
+    ) -> Option<std::path::PathBuf> {
+        let path = path?.to_path_buf();
+        if self
+            .output_tag_multiplicities
+            .get("tran")
+            .is_none_or(|count| *count <= 1)
+        {
+            return Some(path);
+        }
+        let ordinal = self.next_transient_ordinal.get();
+        Some(tag_output_path(&path, &format!("tran-{ordinal:03}")))
+    }
+
     fn run_analysis(&self, analysis: &AnalysisCommand) -> Result<(), CliError> {
         match analysis {
             AnalysisCommand::Op => basic::run_dc_op(self)?,
@@ -1335,10 +1355,10 @@ fn validate_step_frontend_compatibility(netlist: &Netlist, args: &RunArgs) -> Re
     let signature = step_analysis_signature(netlist)?;
     if (args.checkpoint.is_some() || args.resume.is_some()) && !signature.contains(&"tran") {
         return Err(CliError::InvalidArgument {
-            message: ".STEP --checkpoint/--resume requires one authored .TRAN child analysis"
+            message: ".STEP --checkpoint/--resume requires an authored .TRAN child analysis"
                 .to_string(),
             suggestion: Some(
-                "add one .TRAN card or remove the transient checkpoint option".to_string(),
+                "add at least one .TRAN card or remove the transient checkpoint option".to_string(),
             ),
         });
     }

@@ -525,7 +525,9 @@ pub(super) fn run_transient(
     };
 
     let authored_restart = ctx.netlist.options.restart.as_ref();
-    if authored_restart.is_some() && (ctx.checkpoint.is_some() || ctx.resume.is_some()) {
+    let checkpoint_path = ctx.transient_checkpoint_path(ctx.checkpoint.as_deref());
+    let resume_path = ctx.transient_checkpoint_path(ctx.resume.as_deref());
+    if authored_restart.is_some() && (checkpoint_path.is_some() || resume_path.is_some()) {
         return Err(restart_cli_error(
             ".OPTIONS RESTART cannot be combined with --checkpoint or --resume; choose one restart control plane",
         ));
@@ -538,7 +540,7 @@ pub(super) fn run_transient(
         });
     }
 
-    let checkpointing = ctx.checkpoint.is_some() || ctx.resume.is_some();
+    let checkpointing = checkpoint_path.is_some() || resume_path.is_some();
     let startup_mode = rspice_core::engine::TransientStartupMode::from_uic(uic);
     if ctx.compress && ctx.netlist.options.output_interval_schedule.is_some() {
         return Err(CliError::InvalidArgument {
@@ -572,7 +574,7 @@ pub(super) fn run_transient(
         }
 
         let progress_abort = crate::abort::ProgressAbort::new(&pb);
-        let run = if let Some(ref resume_path) = ctx.resume {
+        let run = if let Some(ref resume_path) = resume_path {
             let checkpoint_limit = ctx.engine.config().resource_limits.max_external_data_bytes;
             let checkpoint = rspice_core::engine::TransientCheckpoint::load_with_limit_and_abort(
                 resume_path,
@@ -664,7 +666,7 @@ pub(super) fn run_transient(
                         })?
                     }
                 };
-                if let Some(ref checkpoint_path) = ctx.checkpoint {
+                if let Some(ref checkpoint_path) = checkpoint_path {
                     checkpoint
                         .save_with_abort(checkpoint_path, &progress_abort)
                         .map_err(|source| CliError::CoreSimulationError {
