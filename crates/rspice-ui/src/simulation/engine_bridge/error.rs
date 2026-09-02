@@ -77,6 +77,19 @@ impl EngineBridge {
                     message: "Newton-Raphson iteration limit exceeded".to_string(),
                 }
             }
+            // A run asked for an output symbol the analysis does not publish.
+            // The request is the thing a person can correct, so it lands in
+            // the same bucket as the engine's other configuration refusals.
+            rspice_core::SimulationError::RequestedSignalUnavailable(error) => {
+                SimulationError::InvalidConfig(error.to_string())
+            }
+            // An engine-internal invariant: a result the engine produced does
+            // not satisfy its own published schema. Nothing about the design
+            // or the run configuration causes it, so it is reported as an
+            // engine fault rather than as something to correct in the sheet.
+            rspice_core::SimulationError::ResultSchemaMismatch(error) => {
+                SimulationError::SolverError(error.to_string())
+            }
             rspice_core::SimulationError::Aborted => SimulationError::Aborted,
         }
     }
