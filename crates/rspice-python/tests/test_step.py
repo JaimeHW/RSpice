@@ -156,6 +156,67 @@ R1 in 0 {rval}
             [2e3, 100],
         ]
 
+    def test_multiple_axes_without_an_authored_analysis_run_only_implicit_op(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* implicit OP over a Cartesian product
+.param rval=1k
+V1 in 0 1
+R1 in 0 {rval}
+.step param rval list 1k 2k
+.temp 25 100
+.end
+"""
+        )
+
+        report = engine.run(netlist)
+
+        assert report.step is None
+        assert report.temperature is None
+        assert len(report.all_op) == 4
+        assert report.analyses_run == ["op"] * 4
+        assert [record.analysis_id for record in report.records] == [
+            "implicit-op-001"
+        ] * 4
+        assert [
+            [assignment.value for assignment in record.coordinate.assignments]
+            for record in report.records
+        ] == [
+            [1e3, 25],
+            [2e3, 25],
+            [1e3, 100],
+            [2e3, 100],
+        ]
+
+    def test_conditional_topology_keeps_coordinate_local_result_schemas(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* coordinate-local topology and schema
+.param mode=0
+V1 in 0 1
+R1 in out 1k
+.if (mode==1)
+R2 out extra 1k
+R3 extra 0 1k
+.else
+R4 out 0 1k
+.endif
+.step param mode list 0 1
+.end
+"""
+        )
+
+        report = engine.run(netlist)
+
+        assert len(report.all_op) == 2
+        without_extra, with_extra = report.all_op
+        assert "extra" not in [name.casefold() for name in without_extra.node_names]
+        assert "extra" in [name.casefold() for name in with_extra.node_names]
+        with pytest.raises(KeyError, match="extra"):
+            without_extra.voltage("extra")
+        assert with_extra.voltage("extra") == pytest.approx(1 / 3)
+        assert [result.voltage("out") for result in report.all_op] == pytest.approx(
+            [0.5, 2 / 3]
+        )
+
     def test_scalar_run_records_repeated_analysis_ordinals(self, engine):
         netlist = rspice.Netlist.parse(
             """* repeated scalar analyses

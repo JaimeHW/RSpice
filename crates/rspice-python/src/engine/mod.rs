@@ -27,7 +27,7 @@ use rspice_core::analysis::stb::{StbConfig, StbSweepType};
 use rspice_core::analysis::{AcSensitivityOutput, Distribution};
 use rspice_core::netlist::{
     AnalysisCommand, DcSecondSweep, DcSweepMode, DcSweepSpec, FreqVariation, PoleZeroAnalysisType,
-    PoleZeroTransferType, StepCommand, StepSweep, StepTarget,
+    PoleZeroTransferType,
 };
 use rspice_core::{
     AbortSignal, Engine, SimulationConfig, SimulationConfigOverrides, resolve_simulation_config,

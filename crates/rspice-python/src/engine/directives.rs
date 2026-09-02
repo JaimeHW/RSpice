@@ -232,32 +232,107 @@ fn run_directives(
                 analysis_id,
                 coordinate: planned_run.coordinate.cloned(),
             });
-        let records_before = out.records.len();
-        if let Err(error) = execute(py_engine, py, netlist, analysis, context.as_ref(), out) {
-            if !continue_on_error {
-                return Err(error);
-            }
-            // Drop any partial records the failed directive pushed so the
-            // report never claims a half-executed analysis succeeded.
-            out.records.truncate(records_before);
-            let mut record = PyAnalysisRecord::skipped(
-                analysis_record_kind(analysis),
-                describe_analysis(analysis),
-                &crate::errors::describe_pyerr(py, &error),
-            );
-            if let Some(context) = &context {
-                record
-                    .set_execution_context(context.analysis_id.clone(), context.coordinate.clone());
-            }
-            out.records.push(record);
-        } else if let Some(context) = &context {
-            for record in &mut out.records[records_before..] {
-                record
-                    .set_execution_context(context.analysis_id.clone(), context.coordinate.clone());
-            }
-            if matches!(analysis, AnalysisCommand::Tran { .. }) {
-                out.tran_context = Some(context.clone());
-            }
+        execute_directive(
+            py_engine,
+            py,
+            netlist,
+            analysis,
+            context.as_ref(),
+            continue_on_error,
+            out,
+        )?;
+    }
+    Ok(())
+}
+
+fn run_materialized_directives(
+    py_engine: &PyEngine,
+    py: Python<'_>,
+    netlist: &PyNetlist,
+    analyses: &[rspice_core::execution::MaterializedAnalysis],
+    coordinate: &PyRunCoordinate,
+    continue_on_error: bool,
+    out: &mut DirectiveOutcomes,
+) -> PyResult<()> {
+    for analysis in analyses {
+        let command = analysis.command().ok_or_else(|| {
+            crate::errors::SimulationError::new_err(format!(
+                "canonical materializer omitted the command for {}",
+                analysis.id()
+            ))
+        })?;
+        let context = ExecutionContext {
+            analysis_id: Some(analysis.output_namespace().analysis_component()),
+            coordinate: Some(coordinate.clone()),
+        };
+        execute_directive(
+            py_engine,
+            py,
+            netlist,
+            command,
+            Some(&context),
+            continue_on_error,
+            out,
+        )?;
+    }
+
+    // FOUR is intentionally absent from `MaterializedAnalysis`: it remains
+    // attached to the coordinate-local netlist and is evaluated against that
+    // coordinate's final transient after every physical analysis has run.
+    let mut next_fourier_ordinal = 1usize;
+    for command in &netlist.inner.analyses {
+        if matches!(command, AnalysisCommand::Four { .. }) {
+            let context = ExecutionContext {
+                analysis_id: Some(format!("four-{next_fourier_ordinal:03}")),
+                coordinate: Some(coordinate.clone()),
+            };
+            next_fourier_ordinal += 1;
+            execute_directive(
+                py_engine,
+                py,
+                netlist,
+                command,
+                Some(&context),
+                continue_on_error,
+                out,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn execute_directive(
+    py_engine: &PyEngine,
+    py: Python<'_>,
+    netlist: &PyNetlist,
+    analysis: &AnalysisCommand,
+    context: Option<&ExecutionContext>,
+    continue_on_error: bool,
+    out: &mut DirectiveOutcomes,
+) -> PyResult<()> {
+    let records_before = out.records.len();
+    if let Err(error) = execute(py_engine, py, netlist, analysis, context, out) {
+        if !continue_on_error {
+            return Err(error);
+        }
+        // Drop any partial records the failed directive pushed so the report
+        // never claims a half-executed analysis succeeded.
+        out.records.truncate(records_before);
+        let mut record = PyAnalysisRecord::skipped(
+            analysis_record_kind(analysis),
+            describe_analysis(analysis),
+            &crate::errors::describe_pyerr(py, &error),
+        );
+        if let Some(context) = context {
+            record.set_execution_context(context.analysis_id.clone(), context.coordinate.clone());
+        }
+        out.records.push(record);
+    } else if let Some(context) = context {
+        for record in &mut out.records[records_before..] {
+            record.set_execution_context(context.analysis_id.clone(), context.coordinate.clone());
+        }
+        if matches!(analysis, AnalysisCommand::Tran { .. }) {
+            out.tran_context = Some(context.clone());
         }
     }
     Ok(())
@@ -271,33 +346,12 @@ fn run_axis_plan(
     continue_on_error: bool,
     out: &mut DirectiveOutcomes,
 ) -> PyResult<Vec<PyMeasurement>> {
-    let coordinates = run_interruptible(py, &py_engine.active_runs, |abort| {
-        plan.coordinates_with_abort(&netlist.resource_limits, abort)
-            .map_err(deck_plan_simulation_error)
-    })?;
-    let axis_steps = canonical_axis_step_commands(&netlist.inner);
-    if axis_steps.len() != plan.axes().len() {
-        return Err(crate::errors::SimulationError::new_err(format!(
-            "canonical deck plan has {} axis/axes but the materializer resolved {}",
-            plan.axes().len(),
-            axis_steps.len()
-        )));
-    }
     let core_engine = py_engine.engine_for_netlist(&netlist.inner);
-    let step_limits =
-        rspice_core::engine::StepPlanLimits::from_resource_limits(netlist.resource_limits);
-    let materialization_plan = run_interruptible(py, &py_engine.active_runs, |abort| {
+    let materializer = run_interruptible(py, &py_engine.active_runs, |abort| {
         core_engine
-            .plan_step_commands_with_abort(&netlist.inner, &axis_steps, step_limits, abort)
-            .map(rspice_core::engine::StepPlan::into_owned)
+            .prepare_deck_plan_materializer_with_abort(&netlist.inner, plan, abort)
+            .map_err(materialized_run_simulation_error)
     })?;
-    if materialization_plan.total_runs() != coordinates.len() {
-        return Err(crate::errors::SimulationError::new_err(format!(
-            "canonical deck plan produced {} coordinate(s), but the materializer planned {} run(s)",
-            coordinates.len(),
-            materialization_plan.total_runs()
-        )));
-    }
     let implicit_op = plan.analyses().len() == 1
         && plan.analyses()[0].id().kind() == rspice_core::execution::AnalysisKind::ImplicitOp;
     let compatibility_axis = implicit_op.then(|| single_legacy_axis(plan)).flatten();
@@ -305,11 +359,15 @@ fn run_axis_plan(
     let mut compatibility_complete = compatibility_axis.is_some();
     let mut measurements = Vec::new();
 
-    for (run_index, core_coordinate) in coordinates.into_iter().enumerate() {
+    for run_index in 0..materializer.len() {
         let materialized_run = run_interruptible(py, &py_engine.active_runs, |abort| {
-            core_engine.materialize_step_run_with_abort(&materialization_plan, run_index, abort)
+            materializer
+                .materialize_run_with_abort(run_index, abort)
+                .map_err(materialized_run_simulation_error)
         })?;
-        if materialized_run.run_index() != run_index {
+        let (core_coordinate, materialized_netlist, _topology, materialized_analyses) =
+            materialized_run.into_parts();
+        if core_coordinate.ordinal() != run_index {
             return Err(crate::errors::SimulationError::new_err(
                 "axis materializer returned a mismatched run index",
             ));
@@ -318,7 +376,6 @@ fn run_axis_plan(
         let compatibility_value = compatibility_axis
             .as_ref()
             .and_then(|_| legacy_coordinate_value(&core_coordinate));
-        let (_, materialized_netlist) = materialized_run.into_parts();
         let materialized = PyNetlist {
             inner: materialized_netlist,
             resource_limits: netlist.resource_limits,
@@ -326,8 +383,19 @@ fn run_axis_plan(
         let mut coordinate_out = DirectiveOutcomes::default();
 
         if implicit_op {
+            let [implicit_analysis] = materialized_analyses.as_slice() else {
+                return Err(crate::errors::SimulationError::new_err(format!(
+                    "canonical materializer returned {} analyses for an implicit operating point; expected exactly one",
+                    materialized_analyses.len()
+                )));
+            };
+            if implicit_analysis.command().is_some() {
+                return Err(crate::errors::SimulationError::new_err(
+                    "canonical materializer attached an authored command to implicit OP",
+                ));
+            }
             let context = ExecutionContext {
-                analysis_id: Some(plan.analyses()[0].id().tag()),
+                analysis_id: Some(implicit_analysis.output_namespace().analysis_component()),
                 coordinate: Some(coordinate.clone()),
             };
             match py_engine.run_dc_op(py, &materialized) {
@@ -358,16 +426,13 @@ fn run_axis_plan(
                 Err(error) => return Err(error),
             }
         } else {
-            run_directives(
+            run_materialized_directives(
                 py_engine,
                 py,
                 &materialized,
-                &materialized.inner.analyses,
+                &materialized_analyses,
+                &coordinate,
                 continue_on_error,
-                PlannedDirectiveRun {
-                    coordinate: Some(&coordinate),
-                    analyses: plan.analyses(),
-                },
                 &mut coordinate_out,
             )?;
         }
@@ -381,7 +446,7 @@ fn run_axis_plan(
     }
 
     if compatibility_complete
-        && compatibility_operating_points.len() == materialization_plan.total_runs()
+        && compatibility_operating_points.len() == materializer.len()
         && let Some((kind, name)) = compatibility_axis
     {
         let result = PyDcSweepResult::new_named(compatibility_operating_points, &name);
@@ -397,6 +462,23 @@ fn run_axis_plan(
     Ok(measurements)
 }
 
+fn materialized_run_simulation_error(
+    error: rspice_core::execution::MaterializedRunError,
+) -> rspice_core::engine::SimulationError {
+    match error {
+        rspice_core::execution::MaterializedRunError::Aborted => {
+            rspice_core::engine::SimulationError::Aborted
+        }
+        rspice_core::execution::MaterializedRunError::DeckPlan(error) => {
+            deck_plan_simulation_error(error)
+        }
+        rspice_core::execution::MaterializedRunError::Simulation(error) => error,
+        other => rspice_core::engine::SimulationError::Circuit(format!(
+            "canonical deck materialization failed: {other}"
+        )),
+    }
+}
+
 fn deck_plan_simulation_error(
     error: rspice_core::execution::DeckPlanError,
 ) -> rspice_core::engine::SimulationError {
@@ -407,33 +489,6 @@ fn deck_plan_simulation_error(
         rspice_core::execution::DeckPlanError::ResourceLimit(error) => error.into(),
         other => rspice_core::engine::SimulationError::Circuit(other.to_string()),
     }
-}
-
-fn canonical_axis_step_commands(netlist: &rspice_core::Netlist) -> Vec<StepCommand> {
-    let mut data = Vec::new();
-    let mut step = Vec::new();
-    let mut temperature = Vec::new();
-    for command in &netlist.analyses {
-        match command {
-            AnalysisCommand::Step(command) if matches!(&command.sweep, StepSweep::Data { .. }) => {
-                data.push(command.clone())
-            }
-            AnalysisCommand::Step(command) if command.target == StepTarget::Temp => {
-                temperature.push(command.clone())
-            }
-            AnalysisCommand::Step(command) => step.push(command.clone()),
-            AnalysisCommand::Temp { temperatures } => temperature.push(StepCommand {
-                target: StepTarget::Temp,
-                name: "TEMP".to_string(),
-                param_name: None,
-                sweep: StepSweep::List(temperatures.clone()),
-            }),
-            _ => {}
-        }
-    }
-    data.extend(step);
-    data.extend(temperature);
-    data
 }
 
 fn single_legacy_axis(
@@ -916,33 +971,9 @@ fn execute(
                 describe_analysis(analysis),
             ));
         }
-        AnalysisCommand::Step(command) => {
-            let values = command.sweep.values();
-            let engine = py_engine.engine_for_netlist(net);
-            let results = run_interruptible(py, &py_engine.active_runs, |abort| {
-                engine.run_step_command_with_abort(net, command, &values, abort)
-            })?;
-            out.step_result = Some(PyDcSweepResult::new_named(results, &command.name));
-            out.records.push(PyAnalysisRecord::executed(
-                "step",
-                describe_analysis(analysis),
-            ));
-        }
-        AnalysisCommand::Temp { temperatures } => {
-            let command = StepCommand {
-                target: StepTarget::Temp,
-                name: "TEMP".to_string(),
-                param_name: None,
-                sweep: StepSweep::List(temperatures.clone()),
-            };
-            let engine = py_engine.engine_for_netlist(net);
-            let results = run_interruptible(py, &py_engine.active_runs, |abort| {
-                engine.run_step_command_with_abort(net, &command, temperatures, abort)
-            })?;
-            out.temperature = Some(PyDcSweepResult::new_named(results, "TEMP"));
-            out.records.push(PyAnalysisRecord::executed(
-                "temp",
-                describe_analysis(analysis),
+        AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. } => {
+            return Err(crate::errors::SimulationError::new_err(
+                "run-axis directives must be executed through the canonical deck materializer",
             ));
         }
         AnalysisCommand::Sensitivity {
