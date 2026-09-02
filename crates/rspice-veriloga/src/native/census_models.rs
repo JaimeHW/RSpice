@@ -53,15 +53,18 @@
 //!
 //! # This module requires `serde_json`'s `float_roundtrip` feature
 //!
-//! It is declared in this crate's `[dev-dependencies]` and must stay there.
-//! `serde_json`'s default float parser is *not* correctly rounded, and the
+//! The feature is enabled on the workspace `serde_json` entry and must stay
+//! there. `serde_json`'s default float parser is *not* correctly rounded, and the
 //! shipped models are full of constants it reads back wrong by one unit in the
 //! last place: `1.3806505e-23` returns as `1.3806504999999999e-23`. That is
 //! enough to move the canonical IR's own HIR digest, so without the feature
 //! this cache hands back artifacts that are not what the compiler produced and
 //! the censuses fail on the first cache hit. The feature pulls in no crate and
-//! does not move `Cargo.lock`. `finite_floats_survive_the_encoding_the_cache_uses`
-//! fails without it, so it cannot be dropped as unused silently.
+//! does not move `Cargo.lock`. It is not this module's alone: the same inexact
+//! parse reached production through `PreparedVerilogARuntime`, which is why the
+//! feature sits on the workspace entry rather than on one crate's tests.
+//! `finite_floats_survive_the_encoding_the_cache_uses` fails without it, so it
+//! cannot be dropped as unused silently.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};

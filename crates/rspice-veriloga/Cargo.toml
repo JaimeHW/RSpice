@@ -50,14 +50,6 @@ cc = "1.2"
 # independent WebAssembly engine. This is test-only and cannot inflate either
 # browser code image.
 wasmi = { version = "1.1.0", default-features = false, features = ["std", "extra-checks", "prefer-btree-collections"] }
-# `serde_json`'s default float parser is fast but not correctly rounded: it
-# reads `1.3806505e-23` back as `1.3806504999999999e-23`. The whole-corpus
-# census cache stores front-end artifacts as JSON and is only allowed to answer
-# with exactly what the compiler produced, so its parse has to be exact. The
-# feature adds no crate and does not move `Cargo.lock`; declared here rather
-# than under `[dependencies]` so it is scoped to this crate's own test build
-# and changes nothing about how anything ships.
-serde_json = { workspace = true, features = ["float_roundtrip"] }
 
 [features]
 default = []
