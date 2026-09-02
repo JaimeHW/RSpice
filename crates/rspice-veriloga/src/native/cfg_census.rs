@@ -101,17 +101,29 @@ impl OperatingPoint {
     fn new(
         seed: u64,
         analysis: u8,
-        parameter_count: usize,
+        parameter_defaults: &[Option<f64>],
         terminal_count: usize,
         internal_count: usize,
         branch_unknown_count: usize,
         state_len: usize,
         event_state_slots: usize,
     ) -> Self {
+        let parameter_count = parameter_defaults.len();
         let mut rng = Rng::new(seed);
         let mut fill = |count: usize| (0..count).map(|_| rng.next()).collect::<Vec<f64>>();
+        // A compact model's parameters are not interchangeable numbers: a
+        // random oxide thickness makes half the body compute a logarithm of
+        // something negative, and a comparison that both routes refuse proves
+        // nothing. Declared defaults are the operating point the model was
+        // written for; only a parameter with no default gets a number from the
+        // sequence.
+        let parameters = parameter_defaults
+            .iter()
+            .zip(fill(parameter_count))
+            .map(|(default, sampled)| default.unwrap_or(sampled))
+            .collect();
         Self {
-            parameters: fill(parameter_count),
+            parameters,
             parameter_given: vec![1; parameter_count],
             port_connected: vec![1; terminal_count],
             terminal_voltages: fill(terminal_count),
@@ -334,6 +346,12 @@ fn the_cfg_block_lowering_agrees_with_the_reference_interpreter() {
             // context exposes. The slack keeps a stray slot inside the
             // allocation rather than deciding whether this process survives.
             let state_len = state.family_len(CanonicalStateFamily::Integration) + 8;
+            let parameter_defaults: Vec<Option<f64>> = artifact
+                .mir
+                .parameters
+                .iter()
+                .map(|parameter| parameter.default)
+                .collect();
             let mut points: Vec<OperatingPoint> =
                 [(0x5EED_1_u64, 0_u8), (0xC0FF_EE, 2), (0xBEEF, 0)]
                     .into_iter()
@@ -341,7 +359,7 @@ fn the_cfg_block_lowering_agrees_with_the_reference_interpreter() {
                         OperatingPoint::new(
                             seed,
                             analysis,
-                            bindings.parameter_count,
+                            &parameter_defaults,
                             bindings.terminal_count,
                             bindings.internal_node_count,
                             artifact.mir.branch_unknowns.len(),

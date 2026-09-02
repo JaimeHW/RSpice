@@ -137,8 +137,6 @@ pub(crate) struct CfgRuntimeBindings {
     /// rather than dropped: dropping one would renumber every slot after it,
     /// and a renumbered event state reads another variable's history.
     pub(crate) event_state_variables: Vec<Option<usize>>,
-    /// External-terminal names in canonical port order, for `$port_connected`.
-    pub(crate) terminal_names: Vec<SmolStr>,
 }
 
 impl CfgRuntimeBindings {
@@ -153,20 +151,14 @@ impl CfgRuntimeBindings {
         branch_unknowns: Vec<BranchUnknownRuntimeMapping>,
         event_state_variables: Vec<Option<usize>>,
     ) -> Self {
-        let terminal_names: Vec<SmolStr> = mir
-            .nodes
-            .iter()
-            .filter(|node| node.is_external)
-            .map(|node| node.name.clone())
-            .collect();
+        let terminal_count = mir.nodes.iter().filter(|node| node.is_external).count();
         Self {
             model: model.into(),
-            terminal_count: terminal_names.len(),
-            internal_node_count: mir.nodes.len() - terminal_names.len(),
+            terminal_count,
+            internal_node_count: mir.nodes.len() - terminal_count,
             parameter_count: mir.parameters.len(),
             branch_unknowns,
             event_state_variables,
-            terminal_names,
         }
     }
 }
@@ -254,16 +246,7 @@ impl Lowerer<'_> {
             builder.end_block(terminator)?;
         }
 
-        let exit = order
-            .iter()
-            .position(|block| {
-                matches!(
-                    self.function.block(*block).terminator,
-                    CfgTerminator::Return
-                )
-            })
-            .ok_or_else(|| self.refuse("CFG function has no Return terminator".to_string()))?;
-        builder.finish(BlockId::new(0)?, BlockId::new(exit)?)
+        builder.finish(BlockId::new(0)?, BlockId::new(position[layout.exit])?)
     }
 
     /// Where each analog operator that owns a state record is emitted, indexed
@@ -284,13 +267,17 @@ impl Lowerer<'_> {
     /// on the path the source did not take, which is what the shipped route
     /// already does.
     ///
-    /// When no such block exists — an operator whose operand is itself
-    /// computed inside the conditional — this refuses by name rather than
-    /// speculating the operand's whole cone. Verilog-AMS LRM 2.4 section 4.4.1
-    /// does not admit an analog operator under a non-constant condition at all,
-    /// so hoisting what can be hoisted is already a compatibility extension;
-    /// extending it to arbitrary speculation is a decision about the
-    /// compatibility contract rather than about this lowering.
+    /// When no such block exists — an operator whose operand is itself computed
+    /// inside the conditional — this refuses by name rather than speculating
+    /// the operand's whole cone. Speculating it would mean evaluating
+    /// everything the conditional guards, including a bounds-checked read the
+    /// guard exists to prevent, on a path the source did not take. The select
+    /// form does exactly that, which is one of the costs the block model exists
+    /// to remove; reproducing it here would be a decision about how far the
+    /// unconditional-advance extension reaches, not about this lowering.
+    /// (Verilog-AMS LRM 2.4 section 4.4.1 restricts where an analog operator
+    /// may appear at all, and a model that puts one under a bias-dependent
+    /// condition is already outside it.)
     fn hoisted_state_operators(&self, layout: &Layout) -> JitResult<Vec<Vec<CfgValueId>>> {
         let mut definition: Vec<Option<usize>> = vec![None; self.function.values.len()];
         for block in &self.function.blocks {
@@ -549,10 +536,10 @@ impl Lowerer<'_> {
             // known divergence between the two backends; this route matches
             // the CFG reference interpreter given no simulator override, which
             // is the semantics the CFG carries.
-            CfgValueKind::SimParam { fallback, .. } => {
-                let fallback = operand(*fallback)?;
-                push(NativeOp::AddConst(0.0), &[fallback])
-            }
+            // An alias rather than an instruction: the two values are the same
+            // number, and the obvious identity instruction is not one — adding
+            // zero to negative zero gives positive zero.
+            CfgValueKind::SimParam { fallback, .. } => operand(*fallback),
             CfgValueKind::NodePotential(node) => {
                 let pos = self.voltage_node(Some(*node))?;
                 push(
@@ -769,6 +756,16 @@ fn analysis_code(name: &str) -> Option<u8> {
     }
 }
 
+/// What [`layout_order`] settles about one CFG: the order its blocks are laid
+/// out in, and the dominance the lowering reads back from that walk.
+struct Layout {
+    order: Vec<CfgBlockId>,
+    /// Immediate dominators over the CFG, indexed by raw block index.
+    idom: Vec<Option<usize>>,
+    /// The block that returns.
+    exit: usize,
+}
+
 /// A layout order for `function`'s blocks that satisfies the block model.
 ///
 /// Three properties have to hold at once, and a CFG's creation order gives
@@ -790,14 +787,6 @@ fn analysis_code(name: &str) -> Option<u8> {
 /// unless its target dominates its source, and an irreducible graph — which
 /// Verilog-A cannot express, having no `goto` and no `break` — is refused by
 /// name.
-struct Layout {
-    order: Vec<CfgBlockId>,
-    /// Immediate dominators over the CFG, indexed by raw block index.
-    idom: Vec<Option<usize>>,
-    /// The block that returns.
-    exit: usize,
-}
-
 fn layout_order(function: &CfgFunction) -> JitResult<Layout> {
     let count = function.blocks.len();
     let refuse = |detail: String| JitError::InvalidCanonicalIr {
@@ -1118,7 +1107,6 @@ mod tests {
             parameter_count,
             branch_unknowns: Vec::new(),
             event_state_variables: Vec::new(),
-            terminal_names: vec!["a".into(), "b".into()],
         }
     }
 

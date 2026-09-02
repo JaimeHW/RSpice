@@ -29,6 +29,9 @@ struct ModelImageDigest {
     digest: String,
     bytes: usize,
     helper_calls: usize,
+    /// Front end plus native compilation, so a run that slows down says which
+    /// module it slowed down on rather than only that the census took longer.
+    seconds: f64,
 }
 
 /// Blank the host addresses an image embeds, so its digest survives ASLR.
@@ -80,6 +83,7 @@ fn census() -> Vec<ModelImageDigest> {
             options.defines = candidate.compile_profile.defines.clone();
             options.undefines = candidate.compile_profile.undefines.clone();
             let compiler = VerilogACompiler::new(options);
+            let started = std::time::Instant::now();
             let runtime = compiler
                 .compile_file_runtime_with_metadata(&candidate.path, Some(module))
                 .unwrap_or_else(|error| {
@@ -95,6 +99,7 @@ fn census() -> Vec<ModelImageDigest> {
                     candidate.path.display()
                 )
             });
+            let seconds = started.elapsed().as_secs_f64();
             let image = native.image_bytes();
             let (normalized, helper_calls) = normalize_host_addresses(image);
             digests.push(ModelImageDigest {
@@ -102,6 +107,7 @@ fn census() -> Vec<ModelImageDigest> {
                 digest: blake3::hash(&normalized).to_hex().to_string(),
                 bytes: image.len(),
                 helper_calls,
+                seconds,
             });
         }
     }
@@ -120,8 +126,8 @@ fn shipped_model_machine_code_census_digest() {
     let mut combined = blake3::Hasher::new();
     for entry in &census {
         eprintln!(
-            "code-identity model={} bytes={} helper_calls={} digest={}",
-            entry.name, entry.bytes, entry.helper_calls, entry.digest
+            "code-identity model={} bytes={} helper_calls={} seconds={:.1} digest={}",
+            entry.name, entry.bytes, entry.helper_calls, entry.seconds, entry.digest
         );
         combined.update(entry.name.as_bytes());
         combined.update(entry.digest.as_bytes());
