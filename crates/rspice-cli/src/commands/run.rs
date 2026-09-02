@@ -63,6 +63,12 @@ struct RunContext<'a> {
     format: OutputFormat,
     /// Resolved output path; relative paths land in config `output.output_directory`.
     output: Option<std::path::PathBuf>,
+    /// Coordinate-local checkpoint output path. Multi-run labels are inserted
+    /// before the extension so independent runs can never overwrite state.
+    checkpoint: Option<std::path::PathBuf>,
+    /// Coordinate-local checkpoint input path, using the same namespace rule
+    /// as checkpoint output.
+    resume: Option<std::path::PathBuf>,
     /// CLI `--progress` or config `output.show_progress`.
     show_progress: bool,
     /// CLI `--compress` or config `simulation.compress_waveforms`.
@@ -112,10 +118,21 @@ impl<'a> RunContext<'a> {
             None => parse_format_name(&config.output.format)?,
         };
         let mut output = resolve_output_path(args.output.clone(), config)?;
+        let mut checkpoint = args.checkpoint.clone();
+        let mut resume = args.resume.clone();
         // Multi-run decks tag each run's output so later runs cannot
         // silently overwrite earlier ones: `out.csv` -> `out.hot.csv`.
-        if let (Some(label), Some(path)) = (run_label, output.as_mut()) {
-            *path = tag_output_path(path, &sanitize_run_tag(label));
+        if let Some(label) = run_label {
+            let tag = sanitize_run_tag(label);
+            if let Some(path) = output.as_mut() {
+                *path = tag_output_path(path, &tag);
+            }
+            if let Some(path) = checkpoint.as_mut() {
+                *path = tag_output_path(path, &tag);
+            }
+            if let Some(path) = resume.as_mut() {
+                *path = tag_output_path(path, &tag);
+            }
         }
 
         Ok(Self {
@@ -124,6 +141,8 @@ impl<'a> RunContext<'a> {
             args,
             format,
             output,
+            checkpoint,
+            resume,
             show_progress: args.progress || config.output.show_progress,
             compress: args.compress || config.simulation.compress_waveforms,
             compress_tol: args
@@ -1250,13 +1269,6 @@ fn validate_step_frontend_compatibility(netlist: &Netlist, args: &RunArgs) -> Re
             ),
         });
     }
-    if args.checkpoint.is_some() || args.resume.is_some() {
-        return Err(CliError::InvalidArgument {
-            message: ".STEP cannot share one --checkpoint/--resume path across several coordinates"
-                .to_string(),
-            suggestion: Some("run one materialized coordinate per checkpoint file".to_string()),
-        });
-    }
     if netlist
         .options
         .add_resistors
@@ -1277,6 +1289,15 @@ fn validate_step_frontend_compatibility(netlist: &Netlist, args: &RunArgs) -> Re
         shared::validate_step_sweep(&step.sweep)?;
     }
     let signature = step_analysis_signature(netlist)?;
+    if (args.checkpoint.is_some() || args.resume.is_some()) && !signature.contains(&"tran") {
+        return Err(CliError::InvalidArgument {
+            message: ".STEP --checkpoint/--resume requires one authored .TRAN child analysis"
+                .to_string(),
+            suggestion: Some(
+                "add one .TRAN card or remove the transient checkpoint option".to_string(),
+            ),
+        });
+    }
     if signature.is_empty() && steps.len() != 1 {
         return Err(CliError::InvalidArgument {
             message: "a multi-dimensional .STEP deck requires an explicit child analysis"

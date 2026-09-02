@@ -908,6 +908,70 @@ fn outer_alter_step_cross_product_obeys_one_global_batch_budget() {
 }
 
 #[test]
+fn transient_step_checkpoints_are_coordinate_local_and_resumable() {
+    let dir = test_dir("coordinate_checkpoints");
+    let deck = dir.join("checkpoint_step.sp");
+    let checkpoint = dir.join("state.chk");
+    std::fs::write(
+        &deck,
+        "* coordinate-local transient checkpoints\n\
+         .param r=1k\n\
+         V1 in 0 PULSE(0 1 0 10p 10p 1n 2n)\n\
+         R1 in 0 {r}\n\
+         .step param r list 1k 2k\n\
+         .tran 100p 2n\n\
+         .end\n",
+    )
+    .expect("write checkpoint STEP deck");
+
+    let initial = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "--checkpoint",
+        checkpoint.to_str().unwrap(),
+    ]);
+    assert!(
+        initial.status.success(),
+        "coordinate checkpoints must save; stderr: {}",
+        String::from_utf8_lossy(&initial.stderr)
+    );
+    let first = tagged_output(&checkpoint, "step_000001");
+    let second = tagged_output(&checkpoint, "step_000002");
+    assert!(
+        first.exists(),
+        "missing first checkpoint {}",
+        first.display()
+    );
+    assert!(
+        second.exists(),
+        "missing second checkpoint {}",
+        second.display()
+    );
+    assert!(
+        !checkpoint.exists(),
+        "the unqualified path must not be shared"
+    );
+
+    let resumed = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "--resume",
+        checkpoint.to_str().unwrap(),
+        "--tran-stop",
+        "3n",
+    ]);
+    assert!(
+        resumed.status.success(),
+        "every coordinate must resume from its matching state; stderr: {}",
+        String::from_utf8_lossy(&resumed.stderr)
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn step_batch_limit_retains_typed_resource_metadata() {
     let dir = test_dir("batch_limit");
     let deck = dir.join("bounded.sp");

@@ -110,6 +110,12 @@ invalid in the bitmap; it is never inferred from the first coordinate or
 fabricated as zero. This policy applies to every selected output format; the
 companion manifest is JSON.
 
+For a stepped transient, `--checkpoint state.chk` and `--resume state.chk`
+resolve one state file per coordinate (`state.step_000001.chk`, and so on).
+Outer `.ALTER`/textual-`.DATA` labels are composed into the same filename, so
+no run can overwrite or resume another run's solver state. Checkpoint options
+on a `.STEP` deck without an authored `.TRAN` are rejected before execution.
+
 TF, pole-zero, and sensitivity tables have no natural HDF5 section and reject `-f hdf5` with a clear error; use `csv`, `json`, or `raw`.
 
 `.FOUR` and `.TEMP` are harmonic and sweep tables rather than waveforms, so they do not use the waveform writers. `.FOUR` honors `csv`/`tsv` and writes JSON for every other format; `.TEMP` honors `csv` and `json`, and writes a plain-text dump otherwise. Ask for `csv` or `json` explicitly with these two.
