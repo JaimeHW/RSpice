@@ -6,4 +6,5 @@
 pub mod document;
 pub mod execute;
 pub mod measure;
+pub mod result_document;
 pub mod wire;

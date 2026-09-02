@@ -5339,6 +5339,7 @@ dependencies = [
 name = "rspice-engine-adapter"
 version = "0.1.0"
 dependencies = [
+ "num-complex",
  "rayon",
  "rspice-core",
  "serde",

@@ -1,18 +1,26 @@
 //! Deck execution: analysis-kind gating, engine invocation, measurement
 //! extraction, and bounded result-artifact emission.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
 use rspice_core::abort_signal::AbortSignal;
+use rspice_core::circuit::DeviceOpReport;
 use rspice_core::engine::{SimulationConfig, SpiceDialect};
-use rspice_core::netlist::AnalysisCommand;
+use rspice_core::netlist::{AnalysisCommand, DcSweepSpec, ElementKind};
+use rspice_core::solver::SimulationResult;
 use rspice_core::{Engine, Netlist, SimulationError};
 use serde::Deserialize;
 use serde_json::Value;
 
 use crate::document::CircuitContent;
 use crate::measure::{Measurement, canonical_decimal, finalize_measurements, measurement_name};
+use crate::result_document::{
+    AnalogAnalysisKind, AnalogResultDocument, AnalogSignalKind, AxisDocument, ComplexSample,
+    DeviceStateSeries, RESULT_DOCUMENT_CONTENT_TYPE, RESULT_DOCUMENT_SCHEMA,
+    RESULT_DOCUMENT_VERSION, SignalDocument, SignalOwner, SignalUnit, SignalValues,
+};
 use crate::wire::{EngineResponse, EngineResultArtifactDescriptor};
 
 /// Wall-clock ceiling for all engine work in one request. The worker holds
@@ -216,6 +224,9 @@ pub fn execute(analysis: &Value, content: &CircuitContent, engine_build: &str) -
                      shorten the window or relax the timestep.",
                 );
             }
+            Err(DirectiveFailure::ResultDocument(detail)) => {
+                return Execution::failed("results.schema_mismatch", &detail);
+            }
         }
     }
 
@@ -248,11 +259,522 @@ enum DirectiveFailure {
     Engine(SimulationError),
     NonFinite,
     SeriesBudget,
+    ResultDocument(String),
 }
 
 impl From<SimulationError> for DirectiveFailure {
     fn from(error: SimulationError) -> Self {
         Self::Engine(error)
+    }
+}
+
+fn analog_document(kind: AnalysisKind, ordinal: usize) -> Option<AnalogResultDocument> {
+    let analog_kind = match kind {
+        AnalysisKind::OperatingPoint => AnalogAnalysisKind::OperatingPoint,
+        AnalysisKind::DcSweep => AnalogAnalysisKind::DcSweep,
+        AnalysisKind::Transient => AnalogAnalysisKind::Transient,
+        AnalysisKind::AcSmallSignal => AnalogAnalysisKind::AcSmallSignal,
+        AnalysisKind::Noise => AnalogAnalysisKind::Noise,
+        AnalysisKind::MixedSignal => return None,
+    };
+    Some(AnalogResultDocument::new(
+        analog_kind,
+        kind.as_str(),
+        ordinal + 1,
+    ))
+}
+
+fn add_typed_artifact(
+    outcome: &mut DirectiveOutcome,
+    kind: AnalysisKind,
+    ordinal: usize,
+    document: AnalogResultDocument,
+) -> Result<(), DirectiveFailure> {
+    let content = document
+        .to_json()
+        .map_err(|error| DirectiveFailure::ResultDocument(error.to_string()))?;
+    outcome.artifacts.push(PendingArtifact {
+        file_name: format!("{}-{}.result.json", kind.as_str(), ordinal + 1),
+        content_type: RESULT_DOCUMENT_CONTENT_TYPE,
+        content,
+    });
+    Ok(())
+}
+
+struct RealSolutionPoint<'a> {
+    result: &'a SimulationResult,
+    report: Option<&'a DeviceOpReport>,
+}
+
+struct ComplexSolutionPoint<'a> {
+    node_names: &'a [String],
+    voltages: &'a [num_complex::Complex64],
+    branch_names: &'a [String],
+    currents: &'a [num_complex::Complex64],
+}
+
+fn append_complex_solution<'a>(
+    document: &mut AnalogResultDocument,
+    points: impl IntoIterator<Item = ComplexSolutionPoint<'a>>,
+) -> Result<(), DirectiveFailure> {
+    let points: Vec<_> = points.into_iter().collect();
+    let mut nodes = BTreeMap::<String, String>::new();
+    let mut branches = BTreeMap::<String, String>::new();
+    for point in &points {
+        validate_pair(
+            "complex node voltage",
+            point.node_names.len(),
+            point.voltages.len(),
+        )?;
+        validate_pair(
+            "complex branch current",
+            point.branch_names.len(),
+            point.currents.len(),
+        )?;
+        extend_name_union(&mut nodes, point.node_names);
+        extend_name_union(&mut branches, point.branch_names);
+    }
+    for (canonical, display) in nodes {
+        let samples = points
+            .iter()
+            .map(|point| named_complex(point.node_names, point.voltages, &canonical))
+            .collect();
+        document.signals.push(SignalDocument {
+            canonical_name: format!("v({canonical})"),
+            display_name: format!("V({display})"),
+            kind: AnalogSignalKind::Voltage,
+            owner: SignalOwner::Node { name: display },
+            unit: Some(SignalUnit::Volt),
+            values: SignalValues::Complex { samples },
+        });
+    }
+    for (canonical, display) in branches {
+        let samples = points
+            .iter()
+            .map(|point| named_complex(point.branch_names, point.currents, &canonical))
+            .collect();
+        document.signals.push(SignalDocument {
+            canonical_name: format!("i({canonical})"),
+            display_name: format!("I({display})"),
+            kind: AnalogSignalKind::BranchCurrent,
+            owner: SignalOwner::Branch { name: display },
+            unit: Some(SignalUnit::Ampere),
+            values: SignalValues::Complex { samples },
+        });
+    }
+    Ok(())
+}
+
+fn named_complex(
+    names: &[String],
+    values: &[num_complex::Complex64],
+    canonical: &str,
+) -> Option<ComplexSample> {
+    names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case(canonical))
+        .and_then(|index| values.get(index))
+        .map(|value| ComplexSample {
+            real: value.re,
+            imaginary: value.im,
+        })
+}
+
+/// Append the union of all real node/branch solution columns. A name absent at
+/// a particular point is retained as an explicit missing sample.
+fn append_real_solution(
+    document: &mut AnalogResultDocument,
+    points: &[RealSolutionPoint<'_>],
+) -> Result<(), DirectiveFailure> {
+    let mut nodes = BTreeMap::<String, String>::new();
+    let mut branches = BTreeMap::<String, String>::new();
+    for point in points {
+        validate_pair(
+            "node voltage",
+            point.result.node_names.len(),
+            point.result.node_voltages.len(),
+        )?;
+        validate_pair(
+            "branch current",
+            point.result.branch_names.len(),
+            point.result.branch_currents.len(),
+        )?;
+        extend_name_union(&mut nodes, &point.result.node_names);
+        extend_name_union(&mut branches, &point.result.branch_names);
+    }
+
+    for (canonical, display) in nodes {
+        let samples = points
+            .iter()
+            .map(|point| {
+                named_real(
+                    &point.result.node_names,
+                    &point.result.node_voltages,
+                    &canonical,
+                )
+            })
+            .collect();
+        document.signals.push(SignalDocument {
+            canonical_name: format!("v({canonical})"),
+            display_name: format!("V({display})"),
+            kind: AnalogSignalKind::Voltage,
+            owner: SignalOwner::Node { name: display },
+            unit: Some(SignalUnit::Volt),
+            values: SignalValues::Real { samples },
+        });
+    }
+    for (canonical, display) in branches {
+        let samples = points
+            .iter()
+            .map(|point| {
+                named_real(
+                    &point.result.branch_names,
+                    &point.result.branch_currents,
+                    &canonical,
+                )
+            })
+            .collect();
+        document.signals.push(SignalDocument {
+            canonical_name: format!("i({canonical})"),
+            display_name: format!("I({display})"),
+            kind: AnalogSignalKind::BranchCurrent,
+            owner: SignalOwner::Branch { name: display },
+            unit: Some(SignalUnit::Ampere),
+            values: SignalValues::Real { samples },
+        });
+    }
+    append_device_reports(document, points);
+    append_dc_observables(document, points);
+    Ok(())
+}
+
+fn append_dc_observables(document: &mut AnalogResultDocument, points: &[RealSolutionPoint<'_>]) {
+    let mut observables = BTreeMap::<String, String>::new();
+    for point in points {
+        for (name, _) in &point.result.dc_observables {
+            observables
+                .entry(name.to_ascii_lowercase())
+                .or_insert_with(|| name.clone());
+        }
+    }
+    for (canonical, display) in observables {
+        if has_signal(document, &canonical) {
+            continue;
+        }
+        let samples = points
+            .iter()
+            .map(|point| {
+                point
+                    .result
+                    .dc_observables
+                    .iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case(&canonical))
+                    .map(|(_, value)| *value)
+            })
+            .collect();
+        let (device, parameter) = observable_owner(&display);
+        document.signals.push(SignalDocument {
+            canonical_name: canonical.clone(),
+            display_name: display,
+            kind: AnalogSignalKind::DeviceObservable,
+            owner: SignalOwner::Device {
+                device,
+                parameter,
+                device_kind: None,
+            },
+            unit: observable_unit(&canonical),
+            values: SignalValues::Real { samples },
+        });
+    }
+}
+
+fn append_device_reports(document: &mut AnalogResultDocument, points: &[RealSolutionPoint<'_>]) {
+    let mut devices = BTreeMap::<String, (String, String)>::new();
+    let mut parameters = BTreeMap::<String, (String, String, String)>::new();
+    for point in points {
+        let Some(report) = point.report else {
+            continue;
+        };
+        for entry in &report.entries {
+            let device_key = entry.name.to_ascii_lowercase();
+            devices
+                .entry(device_key.clone())
+                .or_insert_with(|| (entry.name.clone(), entry.device_kind.to_owned()));
+            for (parameter, _) in &entry.params {
+                let canonical = format!("@{}[{}]", device_key, parameter.to_ascii_lowercase());
+                parameters.entry(canonical).or_insert_with(|| {
+                    (
+                        entry.name.clone(),
+                        (*parameter).to_owned(),
+                        entry.device_kind.to_owned(),
+                    )
+                });
+            }
+        }
+    }
+
+    for (device_key, (display, device_kind)) in devices {
+        let regions = points
+            .iter()
+            .map(|point| {
+                point.report.and_then(|report| {
+                    report
+                        .entries
+                        .iter()
+                        .find(|entry| entry.name.eq_ignore_ascii_case(&device_key))
+                        .and_then(|entry| entry.region.map(str::to_owned))
+                })
+            })
+            .collect();
+        document.device_states.push(DeviceStateSeries {
+            device_name: display,
+            device_kind: Some(device_kind),
+            regions,
+        });
+    }
+    for (canonical, (device, parameter, device_kind)) in parameters {
+        if has_signal(document, &canonical) {
+            continue;
+        }
+        let samples = points
+            .iter()
+            .map(|point| {
+                point.report.and_then(|report| {
+                    report
+                        .entries
+                        .iter()
+                        .find(|entry| entry.name.eq_ignore_ascii_case(&device))
+                        .and_then(|entry| {
+                            entry
+                                .params
+                                .iter()
+                                .find(|(name, _)| name.eq_ignore_ascii_case(&parameter))
+                                .map(|(_, value)| *value)
+                        })
+                })
+            })
+            .collect();
+        document.signals.push(SignalDocument {
+            canonical_name: canonical.clone(),
+            display_name: format!("@{device}[{parameter}]"),
+            kind: AnalogSignalKind::DeviceObservable,
+            owner: SignalOwner::Device {
+                device: Some(device),
+                parameter: Some(parameter.clone()),
+                device_kind: Some(device_kind),
+            },
+            unit: device_parameter_unit(&parameter),
+            values: SignalValues::Real { samples },
+        });
+    }
+}
+
+fn has_signal(document: &AnalogResultDocument, canonical_name: &str) -> bool {
+    document
+        .signals
+        .iter()
+        .any(|signal| signal.canonical_name.eq_ignore_ascii_case(canonical_name))
+}
+
+fn validate_pair(label: &str, names: usize, values: usize) -> Result<(), DirectiveFailure> {
+    if names == values {
+        Ok(())
+    } else {
+        Err(DirectiveFailure::ResultDocument(format!(
+            "{label} result has {names} names but {values} values"
+        )))
+    }
+}
+
+fn extend_name_union(union: &mut BTreeMap<String, String>, names: &[String]) {
+    for name in names {
+        union
+            .entry(name.to_ascii_lowercase())
+            .or_insert_with(|| name.clone());
+    }
+}
+
+fn named_real(names: &[String], values: &[f64], canonical: &str) -> Option<f64> {
+    names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case(canonical))
+        .and_then(|index| values.get(index).copied())
+}
+
+fn observable_owner(name: &str) -> (Option<String>, Option<String>) {
+    if let Some((device, parameter)) = name
+        .strip_prefix('@')
+        .and_then(|tail| tail.strip_suffix(']'))
+        .and_then(|tail| tail.split_once('['))
+    {
+        return (Some(device.to_owned()), Some(parameter.to_owned()));
+    }
+    if let Some((device, parameter)) = name.split_once(':') {
+        return (Some(device.to_owned()), Some(parameter.to_owned()));
+    }
+    let argument = name
+        .split_once('(')
+        .and_then(|(_, tail)| tail.strip_suffix(')'));
+    (argument.map(str::to_owned), None)
+}
+
+fn observable_unit(name: &str) -> Option<SignalUnit> {
+    let lower = name.to_ascii_lowercase();
+    if lower.starts_with("i(") {
+        Some(SignalUnit::Ampere)
+    } else if lower.starts_with("p(") {
+        Some(SignalUnit::Watt)
+    } else if let Some((_, parameter)) = lower.rsplit_once(':') {
+        device_parameter_unit(parameter)
+    } else {
+        None
+    }
+}
+
+fn device_parameter_unit(parameter: &str) -> Option<SignalUnit> {
+    match parameter.to_ascii_lowercase().as_str() {
+        "v" | "vd" | "vds" | "vgs" | "vbs" | "vbe" | "vbc" | "vce" | "vth" | "vdsat" => {
+            Some(SignalUnit::Volt)
+        }
+        "i" | "id" | "ig" | "is" | "ib" | "ic" | "ie" => Some(SignalUnit::Ampere),
+        "gm" | "gds" | "gmb" | "gd" | "go" => Some(SignalUnit::Siemens),
+        "r" | "rd" | "rs" | "rb" | "rc" | "ro" => Some(SignalUnit::Ohm),
+        "c" | "cgs" | "cgd" | "cgb" | "cbs" | "cbd" => Some(SignalUnit::Farad),
+        "p" | "power" | "pd" => Some(SignalUnit::Watt),
+        "q" | "qg" | "qd" | "qs" | "qb" => Some(SignalUnit::Coulomb),
+        "l" | "w" => Some(SignalUnit::Meter),
+        "m" | "nf" | "beta" => Some(SignalUnit::Dimensionless),
+        _ => None,
+    }
+}
+
+fn dc_axis_unit(netlist: &Netlist, source: &str) -> Option<SignalUnit> {
+    if source.eq_ignore_ascii_case("temp") || source.eq_ignore_ascii_case("temper") {
+        return Some(SignalUnit::DegreeCelsius);
+    }
+    netlist
+        .elements
+        .iter()
+        .find(|element| element.name.eq_ignore_ascii_case(source))
+        .and_then(|element| match &element.kind {
+            ElementKind::VoltageSource(_) | ElementKind::VoltageSourceDeferred(_) => {
+                Some(SignalUnit::Volt)
+            }
+            ElementKind::CurrentSource(_) | ElementKind::CurrentSourceDeferred(_) => {
+                Some(SignalUnit::Ampere)
+            }
+            _ => None,
+        })
+}
+
+fn analysis_scalar_signal(
+    canonical_name: &str,
+    display_name: &str,
+    unit: Option<SignalUnit>,
+    samples: Vec<Option<f64>>,
+) -> SignalDocument {
+    SignalDocument {
+        canonical_name: canonical_name.to_owned(),
+        display_name: display_name.to_owned(),
+        kind: AnalogSignalKind::Scalar,
+        owner: SignalOwner::Analysis,
+        unit,
+        values: SignalValues::Real { samples },
+    }
+}
+
+fn append_noise_contributions(
+    document: &mut AnalogResultDocument,
+    points: &[rspice_core::analysis::noise::NoiseResult],
+) {
+    let mut identities = BTreeMap::<String, (String, Option<String>)>::new();
+    for point in points {
+        for identity in point.contribution_catalog.iter().chain(
+            point
+                .contributions
+                .iter()
+                .map(|contribution| &contribution.identity),
+        ) {
+            let key = noise_identity_key(&identity.device, identity.mechanism.as_deref());
+            identities
+                .entry(key)
+                .or_insert_with(|| (identity.device.clone(), identity.mechanism.clone()));
+        }
+    }
+    for (key, (device, mechanism)) in identities {
+        let values = |select: fn(&rspice_core::analysis::noise::NoiseContribution) -> f64| {
+            points
+                .iter()
+                .map(|point| {
+                    let matching: Vec<_> = point
+                        .contributions
+                        .iter()
+                        .filter(|contribution| {
+                            contribution.identity.device.eq_ignore_ascii_case(&device)
+                                && match (
+                                    contribution.identity.mechanism.as_deref(),
+                                    mechanism.as_deref(),
+                                ) {
+                                    (Some(actual), Some(expected)) => {
+                                        actual.eq_ignore_ascii_case(expected)
+                                    }
+                                    (None, None) => true,
+                                    _ => false,
+                                }
+                        })
+                        .collect();
+                    (!matching.is_empty()).then(|| matching.into_iter().map(select).sum::<f64>())
+                })
+                .collect::<Vec<_>>()
+        };
+        let owner = || SignalOwner::Device {
+            device: Some(device.clone()),
+            parameter: mechanism.clone(),
+            device_kind: None,
+        };
+        document.signals.extend([
+            SignalDocument {
+                canonical_name: format!("noise({key}).output_density"),
+                display_name: format!("Noise({key}) output density"),
+                kind: AnalogSignalKind::Scalar,
+                owner: owner(),
+                unit: Some(SignalUnit::VoltSquaredPerHertz),
+                values: SignalValues::Real {
+                    samples: values(|contribution| contribution.output_contribution),
+                },
+            },
+            SignalDocument {
+                canonical_name: format!("noise({key}).input_density"),
+                display_name: format!("Noise({key}) input density"),
+                kind: AnalogSignalKind::Scalar,
+                owner: owner(),
+                unit: Some(SignalUnit::VoltSquaredPerHertz),
+                values: SignalValues::Real {
+                    samples: values(|contribution| contribution.input_contribution),
+                },
+            },
+            SignalDocument {
+                canonical_name: format!("noise({key}).percentage"),
+                display_name: format!("Noise({key}) percentage"),
+                kind: AnalogSignalKind::Scalar,
+                owner: owner(),
+                unit: Some(SignalUnit::Dimensionless),
+                values: SignalValues::Real {
+                    samples: values(|contribution| contribution.percentage),
+                },
+            },
+        ]);
+    }
+}
+
+fn noise_identity_key(device: &str, mechanism: Option<&str>) -> String {
+    match mechanism {
+        Some(mechanism) => format!(
+            "{},{}",
+            device.to_ascii_lowercase(),
+            mechanism.to_ascii_lowercase()
+        ),
+        None => device.to_ascii_lowercase(),
     }
 }
 
@@ -266,7 +788,17 @@ fn run_directive(
 ) -> Result<DirectiveOutcome, DirectiveFailure> {
     match directive {
         AnalysisCommand::Op => {
-            let result = engine.run_dc_op_with_abort(netlist, deadline)?;
+            let (result, report) = engine.run_dc_op_with_report_and_abort(netlist, deadline)?;
+            validate_pair(
+                "node voltage",
+                result.node_names.len(),
+                result.node_voltages.len(),
+            )?;
+            validate_pair(
+                "branch current",
+                result.branch_names.len(),
+                result.branch_currents.len(),
+            )?;
             let mut measurements = Vec::new();
             for (index, name) in result.node_names.iter().enumerate().skip(1) {
                 let value = result.node_voltages[index];
@@ -297,58 +829,132 @@ fn run_directive(
                 content_type: "text/csv",
                 content,
             }];
-            Ok(DirectiveOutcome {
+            let mut outcome = DirectiveOutcome {
                 measurements,
                 artifacts,
-            })
+            };
+            let mut document = analog_document(kind, ordinal).expect("OP is analog");
+            document.point_count = 1;
+            append_real_solution(
+                &mut document,
+                &[RealSolutionPoint {
+                    result: &result,
+                    report: Some(&report),
+                }],
+            )?;
+            add_typed_artifact(&mut outcome, kind, ordinal, document)?;
+            Ok(outcome)
         }
         AnalysisCommand::Dc {
             source,
             start,
             stop,
             step,
+            mode,
             sweep2,
-            ..
         } => {
-            let points = match sweep2 {
-                None => engine
-                    .run_dc_sweep_with_abort(netlist, source, *start, *stop, *step, deadline)?,
-                Some(outer) => engine.run_dc_sweep2_with_abort(
-                    netlist,
-                    source,
-                    *start,
-                    *stop,
-                    *step,
-                    Some(outer),
-                    deadline,
-                )?,
+            let primary = DcSweepSpec {
+                start: *start,
+                stop: *stop,
+                step: *step,
+                mode: mode.clone(),
             };
+            let points = engine.run_dc_sweep2_spec_with_report_and_abort(
+                netlist,
+                source,
+                &primary,
+                sweep2.as_ref(),
+                deadline,
+            )?;
             if points.is_empty() {
                 return Err(DirectiveFailure::NonFinite);
             }
-            let sweep: Vec<f64> = points.iter().map(|(value, _)| *value).collect();
-            let first = &points[0].1;
+            for point in &points {
+                validate_pair(
+                    "DC node voltage",
+                    point.result.node_names.len(),
+                    point.result.node_voltages.len(),
+                )?;
+                validate_pair(
+                    "DC branch current",
+                    point.result.branch_names.len(),
+                    point.result.branch_currents.len(),
+                )?;
+            }
+            let sweep: Vec<f64> = points.iter().map(|point| point.sweep_value).collect();
+            let first = &points[0].result;
             let mut columns: Vec<(String, &'static str, Vec<f64>)> = Vec::new();
             columns.push((
                 format!("sweep({})", source.to_ascii_lowercase()),
-                "V",
+                match dc_axis_unit(netlist, source) {
+                    Some(SignalUnit::Ampere) => "A",
+                    Some(SignalUnit::DegreeCelsius) => "degC",
+                    _ => "V",
+                },
                 sweep,
             ));
-            for (index, name) in first.node_names.iter().enumerate().skip(1) {
-                let series: Vec<f64> = points
+            for name in first.node_names.iter().skip(1) {
+                let series: Option<Vec<f64>> = points
                     .iter()
-                    .map(|(_, result)| result.node_voltages[index])
+                    .map(|point| {
+                        named_real(&point.result.node_names, &point.result.node_voltages, name)
+                    })
                     .collect();
-                columns.push((measurement_name("v", name), "V", series));
+                if let Some(series) = series {
+                    columns.push((measurement_name("v", name), "V", series));
+                }
             }
-            for (index, name) in first.branch_names.iter().enumerate() {
-                let series: Vec<f64> = points
+            for name in &first.branch_names {
+                let series: Option<Vec<f64>> = points
                     .iter()
-                    .map(|(_, result)| result.branch_currents[index])
+                    .map(|point| {
+                        named_real(
+                            &point.result.branch_names,
+                            &point.result.branch_currents,
+                            name,
+                        )
+                    })
                     .collect();
-                columns.push((measurement_name("i", name), "A", series));
+                if let Some(series) = series {
+                    columns.push((measurement_name("i", name), "A", series));
+                }
             }
-            columns_outcome(kind, ordinal, columns)
+            let mut outcome = columns_outcome(kind, ordinal, columns)?;
+            let mut document = analog_document(kind, ordinal).expect("DC is analog");
+            document.point_count = points.len();
+            document.axes.push(AxisDocument {
+                name: source.clone(),
+                unit: dc_axis_unit(netlist, source),
+                values: points.iter().map(|point| Some(point.sweep_value)).collect(),
+            });
+            if let Some(outer) = sweep2 {
+                let outer_points = outer.spec().points();
+                let inner_count = primary.points().len();
+                let values: Vec<Option<f64>> = outer_points
+                    .into_iter()
+                    .flat_map(|value| std::iter::repeat_n(Some(value), inner_count))
+                    .collect();
+                if values.len() != points.len() {
+                    return Err(DirectiveFailure::ResultDocument(
+                        "nested DC result shape does not match its declared sweep grid".to_owned(),
+                    ));
+                }
+                document.axes.push(AxisDocument {
+                    name: outer.source.clone(),
+                    unit: dc_axis_unit(netlist, &outer.source),
+                    values,
+                });
+            }
+            let solution_points: Vec<RealSolutionPoint<'_>> = points
+                .iter()
+                .map(|point| RealSolutionPoint {
+                    result: &point.result,
+                    report: Some(&point.device_op_report),
+                })
+                .collect();
+            append_real_solution(&mut document, &solution_points)?;
+            add_typed_artifact(&mut outcome, kind, ordinal, document)?;
+            Ok(outcome)
         }
         AnalysisCommand::Tran {
             step,
@@ -376,20 +982,126 @@ fn run_directive(
             let mut columns: Vec<(String, &'static str, Vec<f64>)> = Vec::new();
             columns.push(("time".to_owned(), "s", result.time.clone()));
             for (index, name) in result.node_names.iter().enumerate() {
-                columns.push((
-                    measurement_name("v", name),
-                    "V",
-                    result.voltages[index].clone(),
-                ));
+                let waveform = result.voltages.get(index).ok_or_else(|| {
+                    DirectiveFailure::ResultDocument(
+                        "transient node names and voltage waveforms are misaligned".to_owned(),
+                    )
+                })?;
+                if waveform.len() == result.time.len() {
+                    columns.push((measurement_name("v", name), "V", waveform.clone()));
+                } else if !waveform.is_empty() {
+                    return Err(DirectiveFailure::ResultDocument(format!(
+                        "transient voltage {name:?} has {} samples for {} times",
+                        waveform.len(),
+                        result.time.len()
+                    )));
+                }
             }
             for (index, name) in result.branch_names.iter().enumerate() {
-                columns.push((
-                    measurement_name("i", name),
-                    "A",
-                    result.branch_currents[index].clone(),
-                ));
+                let waveform = result.branch_currents.get(index).ok_or_else(|| {
+                    DirectiveFailure::ResultDocument(
+                        "transient branch names and current waveforms are misaligned".to_owned(),
+                    )
+                })?;
+                if waveform.len() == result.time.len() {
+                    columns.push((measurement_name("i", name), "A", waveform.clone()));
+                } else if !waveform.is_empty() {
+                    return Err(DirectiveFailure::ResultDocument(format!(
+                        "transient branch current {name:?} has {} samples for {} times",
+                        waveform.len(),
+                        result.time.len()
+                    )));
+                }
             }
-            columns_outcome(kind, ordinal, columns)
+            let mut outcome = columns_outcome(kind, ordinal, columns)?;
+            if let Some(mut document) = analog_document(kind, ordinal) {
+                document.point_count = result.time.len();
+                document.axes.push(AxisDocument {
+                    name: "time".to_owned(),
+                    unit: Some(SignalUnit::Second),
+                    values: result.time.iter().copied().map(Some).collect(),
+                });
+                for (index, name) in result.node_names.iter().enumerate() {
+                    let waveform = &result.voltages[index];
+                    let samples = if waveform.is_empty() {
+                        vec![None; result.time.len()]
+                    } else {
+                        waveform.iter().copied().map(Some).collect()
+                    };
+                    document.signals.push(SignalDocument {
+                        canonical_name: format!("v({})", name.to_ascii_lowercase()),
+                        display_name: format!("V({name})"),
+                        kind: AnalogSignalKind::Voltage,
+                        owner: SignalOwner::Node { name: name.clone() },
+                        unit: Some(SignalUnit::Volt),
+                        values: SignalValues::Real { samples },
+                    });
+                }
+                for (index, name) in result.branch_names.iter().enumerate() {
+                    let waveform = &result.branch_currents[index];
+                    let samples = if waveform.is_empty() {
+                        vec![None; result.time.len()]
+                    } else {
+                        waveform.iter().copied().map(Some).collect()
+                    };
+                    document.signals.push(SignalDocument {
+                        canonical_name: format!("i({})", name.to_ascii_lowercase()),
+                        display_name: format!("I({name})"),
+                        kind: AnalogSignalKind::BranchCurrent,
+                        owner: SignalOwner::Branch { name: name.clone() },
+                        unit: Some(SignalUnit::Ampere),
+                        values: SignalValues::Real { samples },
+                    });
+                }
+                for trace in &result.device_op_traces {
+                    validate_pair(
+                        "transient device observable",
+                        result.time.len(),
+                        trace.values.len(),
+                    )?;
+                    document.signals.push(SignalDocument {
+                        canonical_name: format!(
+                            "@{}[{}]",
+                            trace.device_name.to_ascii_lowercase(),
+                            trace.parameter.to_ascii_lowercase()
+                        ),
+                        display_name: format!("@{}[{}]", trace.device_name, trace.parameter),
+                        kind: AnalogSignalKind::DeviceObservable,
+                        owner: SignalOwner::Device {
+                            device: Some(trace.device_name.clone()),
+                            parameter: Some(trace.parameter.clone()),
+                            device_kind: None,
+                        },
+                        unit: device_parameter_unit(&trace.parameter),
+                        values: SignalValues::Real {
+                            samples: trace.values.iter().copied().map(Some).collect(),
+                        },
+                    });
+                }
+                for trace in &result.store_traces {
+                    validate_pair(
+                        "transient device store",
+                        result.time.len(),
+                        trace.values.len(),
+                    )?;
+                    document.signals.push(SignalDocument {
+                        canonical_name: trace.name.to_ascii_lowercase(),
+                        display_name: trace.name.clone(),
+                        kind: AnalogSignalKind::DeviceObservable,
+                        owner: SignalOwner::Device {
+                            device: None,
+                            parameter: Some(trace.name.clone()),
+                            device_kind: None,
+                        },
+                        unit: None,
+                        values: SignalValues::Real {
+                            samples: trace.values.iter().copied().map(Some).collect(),
+                        },
+                    });
+                }
+                add_typed_artifact(&mut outcome, kind, ordinal, document)?;
+            }
+            Ok(outcome)
         }
         AnalysisCommand::Ac {
             variation,
@@ -413,6 +1125,18 @@ fn run_directive(
             if results.is_empty() {
                 return Err(DirectiveFailure::NonFinite);
             }
+            for point in &results {
+                validate_pair(
+                    "AC node voltage",
+                    point.node_names.len(),
+                    point.voltages.len(),
+                )?;
+                validate_pair(
+                    "AC branch current",
+                    point.branch_names.len(),
+                    point.currents.len(),
+                )?;
+            }
             let mut columns: Vec<(String, &'static str, Vec<f64>)> = Vec::new();
             columns.push((
                 "frequency".to_owned(),
@@ -420,19 +1144,75 @@ fn run_directive(
                 results.iter().map(|point| point.frequency).collect(),
             ));
             let first = &results[0];
-            for (index, name) in first.node_names.iter().enumerate() {
-                let magnitude: Vec<f64> = results
-                    .iter()
-                    .map(|point| point.voltages[index].norm())
-                    .collect();
-                let phase: Vec<f64> = results
-                    .iter()
-                    .map(|point| point.voltages[index].arg().to_degrees())
-                    .collect();
-                columns.push((measurement_name("vm", name), "V", magnitude));
-                columns.push((measurement_name("vp", name), "deg", phase));
+            for name in &first.node_names {
+                let values = results.iter().map(|point| {
+                    point
+                        .node_names
+                        .iter()
+                        .position(|candidate| candidate.eq_ignore_ascii_case(name))
+                        .and_then(|index| point.voltages.get(index))
+                });
+                let complex: Option<Vec<_>> = values.collect();
+                if let Some(complex) = complex {
+                    columns.push((
+                        measurement_name("vm", name),
+                        "V",
+                        complex.iter().map(|value| value.norm()).collect(),
+                    ));
+                    columns.push((
+                        measurement_name("vp", name),
+                        "deg",
+                        complex
+                            .iter()
+                            .map(|value| value.arg().to_degrees())
+                            .collect(),
+                    ));
+                }
             }
-            columns_outcome(kind, ordinal, columns)
+            for name in &first.branch_names {
+                let values = results.iter().map(|point| {
+                    point
+                        .branch_names
+                        .iter()
+                        .position(|candidate| candidate.eq_ignore_ascii_case(name))
+                        .and_then(|index| point.currents.get(index))
+                });
+                let complex: Option<Vec<_>> = values.collect();
+                if let Some(complex) = complex {
+                    columns.push((
+                        measurement_name("im", name),
+                        "A",
+                        complex.iter().map(|value| value.norm()).collect(),
+                    ));
+                    columns.push((
+                        measurement_name("ip", name),
+                        "deg",
+                        complex
+                            .iter()
+                            .map(|value| value.arg().to_degrees())
+                            .collect(),
+                    ));
+                }
+            }
+            let mut outcome = columns_outcome(kind, ordinal, columns)?;
+            let mut document = analog_document(kind, ordinal).expect("AC is analog");
+            document.point_count = results.len();
+            document.axes.push(AxisDocument {
+                name: "frequency".to_owned(),
+                unit: Some(SignalUnit::Hertz),
+                values: results.iter().map(|point| Some(point.frequency)).collect(),
+            });
+            append_complex_solution(
+                &mut document,
+                results.iter().map(|point| ComplexSolutionPoint {
+                    node_names: &point.node_names,
+                    voltages: &point.voltages,
+                    branch_names: &point.branch_names,
+                    currents: &point.currents,
+                }),
+            )?;
+            add_typed_artifact(&mut outcome, kind, ordinal, document)?;
+            Ok(outcome)
         }
         AnalysisCommand::Noise {
             output_node,
@@ -467,6 +1247,18 @@ fn run_directive(
             if results.is_empty() {
                 return Err(DirectiveFailure::NonFinite);
             }
+            for point in &results {
+                validate_pair(
+                    "noise node voltage",
+                    point.node_names.len(),
+                    point.voltages.len(),
+                )?;
+                validate_pair(
+                    "noise branch current",
+                    point.branch_names.len(),
+                    point.currents.len(),
+                )?;
+            }
             let columns: Vec<(String, &'static str, Vec<f64>)> = vec![
                 (
                     "frequency".to_owned(),
@@ -485,7 +1277,55 @@ fn run_directive(
                         .collect(),
                 ),
             ];
-            columns_outcome(kind, ordinal, columns)
+            let mut outcome = columns_outcome(kind, ordinal, columns)?;
+            let mut document = analog_document(kind, ordinal).expect("noise is analog");
+            document.point_count = results.len();
+            document.axes.push(AxisDocument {
+                name: "frequency".to_owned(),
+                unit: Some(SignalUnit::Hertz),
+                values: results.iter().map(|point| Some(point.frequency)).collect(),
+            });
+            append_complex_solution(
+                &mut document,
+                results.iter().map(|point| ComplexSolutionPoint {
+                    node_names: &point.node_names,
+                    voltages: &point.voltages,
+                    branch_names: &point.branch_names,
+                    currents: &point.currents,
+                }),
+            )?;
+            document.signals.extend([
+                analysis_scalar_signal(
+                    "output_noise_density",
+                    "Output noise density",
+                    Some(SignalUnit::VoltSquaredPerHertz),
+                    results
+                        .iter()
+                        .map(|point| Some(point.output_noise_density))
+                        .collect(),
+                ),
+                analysis_scalar_signal(
+                    "input_referred_noise_density",
+                    "Input-referred noise density",
+                    Some(SignalUnit::VoltSquaredPerHertz),
+                    results
+                        .iter()
+                        .map(|point| Some(point.input_referred_density))
+                        .collect(),
+                ),
+                analysis_scalar_signal(
+                    "input_gain_squared",
+                    "Input gain squared",
+                    Some(SignalUnit::Dimensionless),
+                    results
+                        .iter()
+                        .map(|point| Some(point.input_gain_squared))
+                        .collect(),
+                ),
+            ]);
+            append_noise_contributions(&mut document, &results);
+            add_typed_artifact(&mut outcome, kind, ordinal, document)?;
+            Ok(outcome)
         }
         // Directive classes are filtered before dispatch, so any other
         // variant reaching here is an executor logic error, not deck content.
@@ -510,6 +1350,11 @@ fn columns_outcome(
     }
 
     let rows = columns.first().map_or(0, |(_, _, series)| series.len());
+    if columns.iter().any(|(_, _, series)| series.len() != rows) {
+        return Err(DirectiveFailure::ResultDocument(
+            "legacy result columns do not share a common point count".to_owned(),
+        ));
+    }
     let mut content = String::new();
     for (index, (name, _, _)) in columns.iter().enumerate() {
         if index > 0 {
@@ -549,6 +1394,10 @@ fn succeeded(
         "format": "rspice-result-v1",
         "analysis_kind": kind.as_str(),
         "engine": {"name": "rspice", "build": engine_build},
+        "typed_result_schema": {
+            "name": RESULT_DOCUMENT_SCHEMA,
+            "version": RESULT_DOCUMENT_VERSION,
+        },
         "directives": directive_count,
         "measurements": measurements
             .iter()

@@ -55,6 +55,7 @@ fn main() -> ExitCode {
                     "runtime_mode": "self_contained",
                     "protocol_versions": [3],
                     "document_schemas": ["rspice-circuit-v1"],
+                    "result_schemas": ["rspice-analog-result-v1"],
                 })
             );
             ExitCode::SUCCESS

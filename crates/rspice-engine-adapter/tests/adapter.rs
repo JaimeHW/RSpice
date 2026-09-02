@@ -6,6 +6,10 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
+use rspice_engine_adapter::result_document::{
+    AnalogAnalysisKind, AnalogResultDocument, AnalogSignalKind, RESULT_DOCUMENT_CONTENT_TYPE,
+    SignalUnit, SignalValues,
+};
 use rspice_engine_adapter::wire::{
     EngineArtifact, EngineRequest, EngineRevision, digest_hex, revision_content_digest,
     simulation_request_digest,
@@ -161,6 +165,30 @@ fn measurement<'a>(response: &'a Value, name: &str) -> &'a Value {
         .unwrap_or_else(|| panic!("measurement {name} missing"))
 }
 
+fn typed_result(job: &Job, response: &Value, file_name: &str) -> AnalogResultDocument {
+    let path = format!("results/{file_name}");
+    let descriptor = response["result_artifacts"]
+        .as_array()
+        .expect("declared result artifacts")
+        .iter()
+        .find(|artifact| artifact["path"] == path)
+        .unwrap_or_else(|| panic!("typed result descriptor {path} missing"));
+    assert_eq!(descriptor["content_type"], RESULT_DOCUMENT_CONTENT_TYPE);
+    let content = std::fs::read_to_string(job.root.join(&path)).expect("read typed result");
+    AnalogResultDocument::from_json(&content).expect("typed result validates")
+}
+
+fn signal<'a>(
+    document: &'a AnalogResultDocument,
+    canonical_name: &str,
+) -> &'a rspice_engine_adapter::result_document::SignalDocument {
+    document
+        .signals
+        .iter()
+        .find(|signal| signal.canonical_name.eq_ignore_ascii_case(canonical_name))
+        .unwrap_or_else(|| panic!("signal {canonical_name} missing"))
+}
+
 #[test]
 fn the_release_smoke_request_succeeds_deterministically() {
     let job = Job::new("release-smoke");
@@ -211,6 +239,23 @@ fn a_resistive_divider_operating_point_reports_exact_measurements() {
         .parse()
         .expect("decimal parses");
     assert!((value - 5.0).abs() < 1e-9, "v(out) was {value}");
+
+    let document = typed_result(&job, &response, "operating_point-1.result.json");
+    assert_eq!(document.analysis.kind, AnalogAnalysisKind::OperatingPoint);
+    assert_eq!(document.analysis.id, "op-001");
+    assert_eq!(document.point_count, 1);
+    assert_eq!(signal(&document, "v(out)").unit, Some(SignalUnit::Volt));
+    assert_eq!(
+        signal(&document, "i(v1)").kind,
+        AnalogSignalKind::BranchCurrent
+    );
+    assert!(
+        document
+            .signals
+            .iter()
+            .any(|signal| signal.kind == AnalogSignalKind::DeviceObservable),
+        "core DC observables must not be dropped"
+    );
 }
 
 #[test]
@@ -261,7 +306,7 @@ fn a_transient_run_declares_and_writes_its_waveform_artifact() {
     let artifacts = response["result_artifacts"]
         .as_array()
         .expect("declared result artifacts");
-    assert_eq!(artifacts.len(), 1);
+    assert_eq!(artifacts.len(), 2);
     assert_eq!(artifacts[0]["path"], "results/transient-1.csv");
     assert_eq!(artifacts[0]["content_type"], "text/csv");
     let written = job.root.join("results").join("transient-1.csv");
@@ -275,6 +320,101 @@ fn a_transient_run_declares_and_writes_its_waveform_artifact() {
     let out = measurement(&response, "v(out)");
     assert!(out["sample_count"].as_u64().expect("sample count") > 10);
     assert!(out["series_sha256"].is_string());
+
+    let document = typed_result(&job, &response, "transient-1.result.json");
+    assert_eq!(document.analysis.kind, AnalogAnalysisKind::Transient);
+    assert_eq!(document.axes[0].unit, Some(SignalUnit::Second));
+    assert_eq!(
+        signal(&document, "i(v1)").kind,
+        AnalogSignalKind::BranchCurrent
+    );
+}
+
+#[test]
+fn dc_result_preserves_axis_voltage_current_and_device_observables() {
+    let job = Job::new("divider-dc");
+    let deck = "divider sweep\nV1 in 0 DC 0\nR1 in out 1k\nR2 out 0 1k\n.dc V1 0 1 0.5\n.end\n";
+    let request = build_request(
+        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
+        json!({"kind": "dc_sweep"}),
+        Vec::new(),
+    );
+    let response = parse_stdout(&job.run(&request));
+    assert_eq!(response["status"], "succeeded", "response: {response}");
+    let document = typed_result(&job, &response, "dc_sweep-1.result.json");
+    assert_eq!(document.analysis.kind, AnalogAnalysisKind::DcSweep);
+    assert_eq!(document.point_count, 3);
+    assert_eq!(document.axes[0].unit, Some(SignalUnit::Volt));
+    assert!(matches!(
+        signal(&document, "v(out)").values,
+        SignalValues::Real { .. }
+    ));
+    assert_eq!(signal(&document, "i(v1)").unit, Some(SignalUnit::Ampere));
+    assert!(
+        document
+            .signals
+            .iter()
+            .any(|signal| signal.kind == AnalogSignalKind::DeviceObservable)
+    );
+}
+
+#[test]
+fn ac_result_preserves_complex_voltage_and_branch_current() {
+    let job = Job::new("rc-ac");
+    let deck = "rc ac\nV1 in 0 DC 0 AC 1\nR1 in out 1k\nC1 out 0 1u\n.ac LIN 2 1k 2k\n.end\n";
+    let request = build_request(
+        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
+        json!({"kind": "ac_small_signal"}),
+        Vec::new(),
+    );
+    let response = parse_stdout(&job.run(&request));
+    assert_eq!(response["status"], "succeeded", "response: {response}");
+    let document = typed_result(&job, &response, "ac_small_signal-1.result.json");
+    assert_eq!(document.analysis.kind, AnalogAnalysisKind::AcSmallSignal);
+    assert!(matches!(
+        signal(&document, "v(out)").values,
+        SignalValues::Complex { .. }
+    ));
+    assert!(matches!(
+        signal(&document, "i(v1)").values,
+        SignalValues::Complex { .. }
+    ));
+    let SignalValues::Complex { samples } = &signal(&document, "v(out)").values else {
+        unreachable!()
+    };
+    assert!(
+        samples
+            .iter()
+            .flatten()
+            .any(|sample| sample.imaginary != 0.0)
+    );
+}
+
+#[test]
+fn noise_result_preserves_complex_solution_densities_and_contributors() {
+    let job = Job::new("divider-noise");
+    let deck = "divider noise\nV1 in 0 DC 0 AC 1\nR1 in out 1k\nR2 out 0 1k\n.noise V(out) V1 LIN 2 1k 2k\n.end\n";
+    let request = build_request(
+        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
+        json!({"kind": "noise"}),
+        Vec::new(),
+    );
+    let response = parse_stdout(&job.run(&request));
+    assert_eq!(response["status"], "succeeded", "response: {response}");
+    let document = typed_result(&job, &response, "noise-1.result.json");
+    assert_eq!(document.analysis.kind, AnalogAnalysisKind::Noise);
+    assert!(matches!(
+        signal(&document, "v(out)").values,
+        SignalValues::Complex { .. }
+    ));
+    assert_eq!(
+        signal(&document, "output_noise_density").unit,
+        Some(SignalUnit::VoltSquaredPerHertz)
+    );
+    assert!(document.signals.iter().any(|signal| {
+        signal.canonical_name.starts_with("noise(r1)")
+            && signal.canonical_name.ends_with("output_density")
+    }));
 }
 
 #[test]
@@ -386,4 +526,5 @@ fn component_info_states_the_reviewed_identity() {
     assert_eq!(info["engine_name"], "rspice");
     assert_eq!(info["runtime_mode"], "self_contained");
     assert_eq!(info["protocol_versions"], json!([3]));
+    assert_eq!(info["result_schemas"], json!(["rspice-analog-result-v1"]));
 }

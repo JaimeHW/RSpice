@@ -228,8 +228,6 @@ const PY_AXIS_UNAVAILABLE: &str =
 const WASM_UNAVAILABLE: &str = "browser API has no result adapter for this family";
 const WASM_AXIS_UNAVAILABLE: &str = "browser API does not consume DeckPlan axes";
 const ADAPTER_UNAVAILABLE: &str = "protocol-3 adapter has no result mapping for this family";
-const ADAPTER_ARTIFACT: &str =
-    "CSV artifact and scalar summaries exist, but the wire response has no typed result document";
 const ADAPTER_AXIS_UNAVAILABLE: &str = "protocol-3 adapter does not consume DeckPlan axes";
 
 const fn cli_artifact_axes() -> SurfaceCapability {
@@ -272,9 +270,9 @@ const fn wasm_direct_only() -> SurfaceCapability {
     )
 }
 
-const fn adapter_artifact_only() -> SurfaceCapability {
+const fn adapter_typed_scalar_only() -> SurfaceCapability {
     SurfaceCapability::new(
-        MappingStatus::Partial(ADAPTER_ARTIFACT),
+        MappingStatus::Mapped,
         MappingStatus::Unsupported(ADAPTER_AXIS_UNAVAILABLE),
         MappingStatus::Unsupported(ADAPTER_AXIS_UNAVAILABLE),
     )
@@ -290,35 +288,35 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
         wasm: wasm_direct_only(),
-        engine_adapter: adapter_artifact_only(),
+        engine_adapter: adapter_typed_scalar_only(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::DcSweep,
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
         wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
-        engine_adapter: adapter_artifact_only(),
+        engine_adapter: adapter_typed_scalar_only(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Ac,
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
         wasm: wasm_direct_only(),
-        engine_adapter: adapter_artifact_only(),
+        engine_adapter: adapter_typed_scalar_only(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Transient,
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
         wasm: wasm_direct_only(),
-        engine_adapter: adapter_artifact_only(),
+        engine_adapter: adapter_typed_scalar_only(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Noise,
         cli: cli_artifact_scalar_only(),
         python: python_mapped_axes(),
         wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
-        engine_adapter: adapter_artifact_only(),
+        engine_adapter: adapter_typed_scalar_only(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::SParameters,
@@ -513,34 +511,28 @@ pub const SIGNAL_CAPABILITY_MATRIX: &[SignalCapability] = &[
         cli: MappingStatus::Partial(SIGNAL_ARTIFACT),
         python: MappingStatus::Mapped,
         wasm: MappingStatus::Partial(ADVANCED_SIGNAL_SUBSET),
-        engine_adapter: MappingStatus::Partial(SIGNAL_ARTIFACT),
+        engine_adapter: MappingStatus::Mapped,
     },
     SignalCapability {
         signal: SignalKind::Current,
         cli: MappingStatus::Partial(SIGNAL_ARTIFACT),
         python: MappingStatus::Mapped,
         wasm: MappingStatus::Partial(ADVANCED_SIGNAL_SUBSET),
-        engine_adapter: MappingStatus::Partial(
-            "OP/DC/TRAN currents are exported, but AC currents and a typed descriptor are absent",
-        ),
+        engine_adapter: MappingStatus::Mapped,
     },
     SignalCapability {
         signal: SignalKind::DeviceObservable,
         cli: MappingStatus::Partial(ADVANCED_SIGNAL_SUBSET),
         python: MappingStatus::Partial(ADVANCED_SIGNAL_SUBSET),
         wasm: MappingStatus::Partial("mapped for requested transient device traces only"),
-        engine_adapter: MappingStatus::Unsupported(
-            "protocol-3 adapter does not export device observables",
-        ),
+        engine_adapter: MappingStatus::Mapped,
     },
     SignalCapability {
         signal: SignalKind::Scalar,
         cli: MappingStatus::Partial(SIGNAL_ARTIFACT),
         python: MappingStatus::Partial(ADVANCED_SIGNAL_SUBSET),
         wasm: MappingStatus::Partial("only family-specific scalar metadata is exposed"),
-        engine_adapter: MappingStatus::Partial(
-            "measurement summaries exist, but no typed scalar descriptor is emitted",
-        ),
+        engine_adapter: MappingStatus::Mapped,
     },
     SignalCapability {
         signal: SignalKind::Digital,

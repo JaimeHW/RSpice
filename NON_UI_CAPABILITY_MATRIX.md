@@ -8,11 +8,11 @@ This is an adapter inventory, not a claim of numerical qualification. `mapped` m
 
 | Result | CLI | Python | WASM | Engine adapter |
 |---|---|---|---|---|
-| `op` | partial / partial / partial | mapped / mapped / mapped | mapped / unsupported / unsupported | partial / unsupported / unsupported |
-| `dc` | partial / partial / partial | mapped / mapped / mapped | unsupported / unsupported / unsupported | partial / unsupported / unsupported |
-| `ac` | partial / partial / partial | mapped / mapped / mapped | mapped / unsupported / unsupported | partial / unsupported / unsupported |
-| `tran` | partial / partial / partial | mapped / mapped / mapped | mapped / unsupported / unsupported | partial / unsupported / unsupported |
-| `noise` | partial / unsupported / unsupported | mapped / mapped / mapped | unsupported / unsupported / unsupported | partial / unsupported / unsupported |
+| `op` | partial / partial / partial | mapped / mapped / mapped | mapped / unsupported / unsupported | mapped / unsupported / unsupported |
+| `dc` | partial / partial / partial | mapped / mapped / mapped | unsupported / unsupported / unsupported | mapped / unsupported / unsupported |
+| `ac` | partial / partial / partial | mapped / mapped / mapped | mapped / unsupported / unsupported | mapped / unsupported / unsupported |
+| `tran` | partial / partial / partial | mapped / mapped / mapped | mapped / unsupported / unsupported | mapped / unsupported / unsupported |
+| `noise` | partial / unsupported / unsupported | mapped / mapped / mapped | unsupported / unsupported / unsupported | mapped / unsupported / unsupported |
 | `sp` | partial / unsupported / unsupported | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
 | `port-noise` | partial / unsupported / unsupported | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
 | `distortion` | partial / unsupported / unsupported | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
@@ -38,27 +38,22 @@ Repeated forms with the same declaration are grouped. Every non-mapped declarati
 | `op` | CLI | scalar | partial | CSV/text artifact exists, but no shared typed result document |
 | `op` | CLI | STEP, TEMP | partial | shared deck axes execute, but the CLI artifact does not retain a typed coordinate document |
 | `op` | WASM | STEP, TEMP | unsupported | browser API does not consume DeckPlan axes |
-| `op` | Engine adapter | scalar | partial | CSV artifact and scalar summaries exist, but the wire response has no typed result document |
 | `op` | Engine adapter | STEP, TEMP | unsupported | protocol-3 adapter does not consume DeckPlan axes |
 | `dc` | CLI | scalar | partial | CSV/text artifact exists, but no shared typed result document |
 | `dc` | CLI | STEP, TEMP | partial | shared deck axes execute, but the CLI artifact does not retain a typed coordinate document |
 | `dc` | WASM | scalar, STEP, TEMP | unsupported | browser API has no result adapter for this family |
-| `dc` | Engine adapter | scalar | partial | CSV artifact and scalar summaries exist, but the wire response has no typed result document |
 | `dc` | Engine adapter | STEP, TEMP | unsupported | protocol-3 adapter does not consume DeckPlan axes |
 | `ac` | CLI | scalar | partial | CSV/text artifact exists, but no shared typed result document |
 | `ac` | CLI | STEP, TEMP | partial | shared deck axes execute, but the CLI artifact does not retain a typed coordinate document |
 | `ac` | WASM | STEP, TEMP | unsupported | browser API does not consume DeckPlan axes |
-| `ac` | Engine adapter | scalar | partial | CSV artifact and scalar summaries exist, but the wire response has no typed result document |
 | `ac` | Engine adapter | STEP, TEMP | unsupported | protocol-3 adapter does not consume DeckPlan axes |
 | `tran` | CLI | scalar | partial | CSV/text artifact exists, but no shared typed result document |
 | `tran` | CLI | STEP, TEMP | partial | shared deck axes execute, but the CLI artifact does not retain a typed coordinate document |
 | `tran` | WASM | STEP, TEMP | unsupported | browser API does not consume DeckPlan axes |
-| `tran` | Engine adapter | scalar | partial | CSV artifact and scalar summaries exist, but the wire response has no typed result document |
 | `tran` | Engine adapter | STEP, TEMP | unsupported | protocol-3 adapter does not consume DeckPlan axes |
 | `noise` | CLI | scalar | partial | CSV/text artifact exists, but no shared typed result document |
 | `noise` | CLI | STEP, TEMP | unsupported | CLI deck-axis preflight accepts only authored OP, DC, AC, TRAN, and HB child analyses |
 | `noise` | WASM | scalar, STEP, TEMP | unsupported | browser API has no result adapter for this family |
-| `noise` | Engine adapter | scalar | partial | CSV artifact and scalar summaries exist, but the wire response has no typed result document |
 | `noise` | Engine adapter | STEP, TEMP | unsupported | protocol-3 adapter does not consume DeckPlan axes |
 | `sp` | CLI | scalar | partial | CSV/text artifact exists, but no shared typed result document |
 | `sp` | CLI | STEP, TEMP | unsupported | CLI deck-axis preflight accepts only authored OP, DC, AC, TRAN, and HB child analyses |
@@ -130,10 +125,10 @@ Repeated forms with the same declaration are grouped. Every non-mapped declarati
 
 | Signal | CLI | Python | WASM | Engine adapter |
 |---|---|---|---|---|
-| `voltage` | partial — export exists, but it is not a shared SignalDescriptor document | mapped | partial — mapped for a subset of result families only | partial — export exists, but it is not a shared SignalDescriptor document |
-| `current` | partial — export exists, but it is not a shared SignalDescriptor document | mapped | partial — mapped for a subset of result families only | partial — OP/DC/TRAN currents are exported, but AC currents and a typed descriptor are absent |
-| `device-observable` | partial — mapped for a subset of result families only | partial — mapped for a subset of result families only | partial — mapped for requested transient device traces only | unsupported — protocol-3 adapter does not export device observables |
-| `scalar` | partial — export exists, but it is not a shared SignalDescriptor document | partial — mapped for a subset of result families only | partial — only family-specific scalar metadata is exposed | partial — measurement summaries exist, but no typed scalar descriptor is emitted |
+| `voltage` | partial — export exists, but it is not a shared SignalDescriptor document | mapped | partial — mapped for a subset of result families only | mapped |
+| `current` | partial — export exists, but it is not a shared SignalDescriptor document | mapped | partial — mapped for a subset of result families only | mapped |
+| `device-observable` | partial — mapped for a subset of result families only | partial — mapped for a subset of result families only | partial — mapped for requested transient device traces only | mapped |
+| `scalar` | partial — export exists, but it is not a shared SignalDescriptor document | partial — mapped for a subset of result families only | partial — only family-specific scalar metadata is exposed | mapped |
 | `digital` | unsupported — digital/AMS surface work is owned by the separate digital effort | unsupported — digital/AMS surface work is owned by the separate digital effort | unsupported — digital/AMS surface work is owned by the separate digital effort | unsupported — digital/AMS surface work is owned by the separate digital effort |
 
 ## Declared signal boundaries
@@ -142,18 +137,14 @@ Repeated forms with the same declaration are grouped. Every non-mapped declarati
 |---|---|---|---|
 | `voltage` | CLI | partial | export exists, but it is not a shared SignalDescriptor document |
 | `voltage` | WASM | partial | mapped for a subset of result families only |
-| `voltage` | Engine adapter | partial | export exists, but it is not a shared SignalDescriptor document |
 | `current` | CLI | partial | export exists, but it is not a shared SignalDescriptor document |
 | `current` | WASM | partial | mapped for a subset of result families only |
-| `current` | Engine adapter | partial | OP/DC/TRAN currents are exported, but AC currents and a typed descriptor are absent |
 | `device-observable` | CLI | partial | mapped for a subset of result families only |
 | `device-observable` | Python | partial | mapped for a subset of result families only |
 | `device-observable` | WASM | partial | mapped for requested transient device traces only |
-| `device-observable` | Engine adapter | unsupported | protocol-3 adapter does not export device observables |
 | `scalar` | CLI | partial | export exists, but it is not a shared SignalDescriptor document |
 | `scalar` | Python | partial | mapped for a subset of result families only |
 | `scalar` | WASM | partial | only family-specific scalar metadata is exposed |
-| `scalar` | Engine adapter | partial | measurement summaries exist, but no typed scalar descriptor is emitted |
 | `digital` | CLI | unsupported | digital/AMS surface work is owned by the separate digital effort |
 | `digital` | Python | unsupported | digital/AMS surface work is owned by the separate digital effort |
 | `digital` | WASM | unsupported | digital/AMS surface work is owned by the separate digital effort |
