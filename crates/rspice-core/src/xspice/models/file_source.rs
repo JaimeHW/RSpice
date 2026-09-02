@@ -166,15 +166,20 @@ impl FileSourceCache {
     }
 }
 
-fn filesource_cache() -> &'static Mutex<FileSourceCache> {
+fn shared_filesource_cache() -> &'static Mutex<FileSourceCache> {
     static CACHE: OnceLock<Mutex<FileSourceCache>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(FileSourceCache::default()))
 }
 
-fn lock_filesource_cache() -> MutexGuard<'static, FileSourceCache> {
-    filesource_cache()
+fn lock_shared_filesource_cache() -> MutexGuard<'static, FileSourceCache> {
+    shared_filesource_cache()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Run `operation` against the filesource cache this thread loads through.
+fn with_filesource_cache<R>(operation: impl FnOnce(&mut FileSourceCache) -> R) -> R {
+    operation(&mut lock_shared_filesource_cache())
 }
 
 fn filesource_cache_entry_bytes(
@@ -461,25 +466,24 @@ fn load_filesource_limited(
             .map_err(|err| filesource_error(file, err))?;
     let virtual_stamp = data_file::loaded_virtual_data_file_stamp(stamp);
     let key = cache_key(file, width, stamp);
-    {
-        let mut guard = lock_filesource_cache();
-        let cached = guard.with_entries(|entries, snapshot| {
+    let cached = with_filesource_cache(|cache| {
+        cache.with_entries(|entries, snapshot| {
             entries.enforce_limit(resource_limits.max_shared_cache_bytes);
             if key.virtual_file && !snapshot.contains(&key.file, key.stamp()) {
                 None
             } else {
                 entries.get_cloned(&key)
             }
-        });
-        if let Some(fields) = cached {
-            crate::resource::ResourceLimitError::ensure(
-                crate::resource::ResourceKind::ExternalDataValues,
-                fields.len(),
-                resource_limits.max_external_data_values,
-            )
-            .map_err(|error| filesource_error(file, error.to_string()))?;
-            return Ok((fields, virtual_stamp));
-        }
+        })
+    });
+    if let Some(fields) = cached {
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::ExternalDataValues,
+            fields.len(),
+            resource_limits.max_external_data_values,
+        )
+        .map_err(|error| filesource_error(file, error.to_string()))?;
+        return Ok((fields, virtual_stamp));
     }
 
     let fields = Arc::new(parse_filesource_contents_limited(
@@ -488,19 +492,20 @@ fn load_filesource_limited(
         &contents,
         resource_limits.max_external_data_values,
     )?);
-    let mut guard = lock_filesource_cache();
     let retained_bytes = filesource_cache_entry_bytes(&key, &fields);
-    let fields = guard.with_entries(|entries, snapshot| {
-        if key.virtual_file && !snapshot.contains(&key.file, key.stamp()) {
-            fields
-        } else {
-            entries.insert_or_get(
-                key,
-                fields,
-                retained_bytes,
-                resource_limits.max_shared_cache_bytes,
-            )
-        }
+    let fields = with_filesource_cache(|cache| {
+        cache.with_entries(|entries, snapshot| {
+            if key.virtual_file && !snapshot.contains(&key.file, key.stamp()) {
+                fields
+            } else {
+                entries.insert_or_get(
+                    key,
+                    fields,
+                    retained_bytes,
+                    resource_limits.max_shared_cache_bytes,
+                )
+            }
+        })
     });
     Ok((fields, virtual_stamp))
 }
@@ -1083,7 +1088,7 @@ mod tests {
 
     fn poison_filesource_cache_lock() {
         let result = std::panic::catch_unwind(|| {
-            let _guard = lock_filesource_cache();
+            let _guard = lock_shared_filesource_cache();
             panic!("poison filesource cache lock for recovery test");
         });
         assert!(result.is_err(), "recovery test must poison the mutex");
@@ -1092,7 +1097,7 @@ mod tests {
     #[test]
     fn filesource_cache_lock_recovers_after_poison() {
         poison_filesource_cache_lock();
-        lock_filesource_cache().clear();
+        lock_shared_filesource_cache().clear();
     }
 
     #[test]
@@ -1130,8 +1135,9 @@ mod tests {
         let (fields, _) = load_filesource_limited(file, 1, limits)
             .expect("zero-retention policy still returns parsed fields");
         assert_eq!(fields.len(), 4);
-        let cache = lock_filesource_cache();
-        assert!(cache.entries.keys().all(|key| key.file != file));
+        with_filesource_cache(|cache| {
+            assert!(cache.entries.keys().all(|key| key.file != file));
+        });
 
         data_file::unregister_data_file(file).expect("unregister filesource data");
     }
@@ -1143,7 +1149,7 @@ mod tests {
         let unrelated_file = "virtual://filesource/unrelated-change";
         let _ = data_file::unregister_data_file(retained_file);
         let _ = data_file::unregister_data_file(unrelated_file);
-        lock_filesource_cache().clear();
+        lock_shared_filesource_cache().clear();
 
         data_file::register_data_file(retained_file, "0 1\n1e-9 2\n")
             .expect("register retained virtual filesource data");
@@ -1153,16 +1159,16 @@ mod tests {
             .expect("register unrelated virtual filesource data");
         load_filesource(unrelated_file, 1).expect("cache unrelated virtual filesource data");
 
-        let cache = lock_filesource_cache();
-        assert_eq!(
-            cache
-                .entries
-                .keys()
-                .filter(|key| key.file == retained_file)
-                .count(),
-            1
-        );
-        drop(cache);
+        with_filesource_cache(|cache| {
+            assert_eq!(
+                cache
+                    .entries
+                    .keys()
+                    .filter(|key| key.file == retained_file)
+                    .count(),
+                1
+            );
+        });
 
         let _ = data_file::unregister_data_file(retained_file);
         let _ = data_file::unregister_data_file(unrelated_file);
@@ -1404,7 +1410,7 @@ mod tests {
         let _guard = data_file_test_guard();
         let file = "virtual://filesource/transformed-row-cache";
         let _ = data_file::unregister_data_file(file);
-        lock_filesource_cache().clear();
+        lock_shared_filesource_cache().clear();
         data_file::register_data_file(file, "0 1\n1e-9 3\n").expect("register filesource data");
 
         let mut ctx = CmContext::new();
@@ -1444,7 +1450,7 @@ mod tests {
         let _guard = data_file_test_guard();
         let file = "virtual://filesource/cache-retention";
         let _ = data_file::unregister_data_file(file);
-        lock_filesource_cache().clear();
+        lock_shared_filesource_cache().clear();
 
         data_file::register_data_file(file, "0 1\n1e-9 2\n")
             .expect("register first virtual filesource data");
@@ -1465,10 +1471,9 @@ mod tests {
         let second_rows = transform_rows(&ctx, &second, 1).expect("transform replaced rows");
         assert_eq!(second_rows.row_values(1), &[20.0]);
 
-        let cached_for_file = {
-            let guard = lock_filesource_cache();
-            guard.entries.keys().filter(|key| key.file == file).count()
-        };
+        let cached_for_file = with_filesource_cache(|cache| {
+            cache.entries.keys().filter(|key| key.file == file).count()
+        });
         assert_eq!(cached_for_file, 1);
 
         let _ = data_file::unregister_data_file(file);
