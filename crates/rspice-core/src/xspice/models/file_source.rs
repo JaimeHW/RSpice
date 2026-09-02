@@ -177,8 +177,74 @@ fn lock_shared_filesource_cache() -> MutexGuard<'static, FileSourceCache> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+#[cfg(test)]
+thread_local! {
+    /// One test's private filesource cache, installed by [`FilesourceCacheScope`].
+    ///
+    /// # Why thread-local, and not the shared cache
+    ///
+    /// `cargo test` runs a binary's tests concurrently in one process, so a
+    /// test that asserts what the cache retains is really asserting over every
+    /// other test's filesource activity as well. A sibling that clears the
+    /// cache, or that loads through a smaller shared-cache budget, evicts the
+    /// entry under assertion, and the test then fails on the scheduler instead
+    /// of on the retention policy it exists to pin. A thread-local cache is
+    /// private to the test that installed it, under both `--test-threads=1`
+    /// and the default.
+    ///
+    /// The policy under test is the same code either way — [`FileSourceCache`]
+    /// and the [`crate::resource::BoundedCache`] beneath it — and only the
+    /// storage differs, so scoping costs no coverage. The shared cache's lock
+    /// keeps its own test in `filesource_cache_lock_recovers_after_poison`.
+    static SCOPED_FILESOURCE_CACHE: std::cell::RefCell<Option<FileSourceCache>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// A filesource cache private to one test, for the lifetime of the returned
+/// value. Loads on this thread retain into it and never touch the shared cache.
+#[cfg(test)]
+struct FilesourceCacheScope;
+
+#[cfg(test)]
+impl FilesourceCacheScope {
+    fn install() -> Self {
+        SCOPED_FILESOURCE_CACHE.with(|scope| {
+            let mut scope = scope.borrow_mut();
+            assert!(
+                scope.is_none(),
+                "one filesource cache scope per test: this thread already installed one"
+            );
+            let mut cache = FileSourceCache::default();
+            cache.clear();
+            *scope = Some(cache);
+        });
+        Self
+    }
+}
+
+#[cfg(test)]
+impl Drop for FilesourceCacheScope {
+    fn drop(&mut self) {
+        SCOPED_FILESOURCE_CACHE.with(|scope| *scope.borrow_mut() = None);
+    }
+}
+
 /// Run `operation` against the filesource cache this thread loads through.
 fn with_filesource_cache<R>(operation: impl FnOnce(&mut FileSourceCache) -> R) -> R {
+    #[cfg(test)]
+    {
+        if SCOPED_FILESOURCE_CACHE.with(|scope| scope.borrow().is_some()) {
+            return SCOPED_FILESOURCE_CACHE.with(|scope| {
+                operation(
+                    scope
+                        .borrow_mut()
+                        .as_mut()
+                        .expect("a scoped filesource cache stays installed for its whole scope"),
+                )
+            });
+        }
+    }
+
     operation(&mut lock_shared_filesource_cache())
 }
 
@@ -1094,6 +1160,10 @@ mod tests {
         assert!(result.is_err(), "recovery test must poison the mutex");
     }
 
+    /// This is the one test that must reach the shared cache: the lock it
+    /// recovers is the shared cache's own. Clearing it is safe because every
+    /// test that asserts over cache contents installs a
+    /// [`FilesourceCacheScope`] instead of sharing this one.
     #[test]
     fn filesource_cache_lock_recovers_after_poison() {
         poison_filesource_cache_lock();
@@ -1126,6 +1196,7 @@ mod tests {
     #[test]
     fn filesource_loader_honors_zero_shared_cache_retention() {
         let _guard = data_file_test_guard();
+        let _cache_scope = FilesourceCacheScope::install();
         let file = "virtual://filesource/zero-cache-retention";
         let _ = data_file::unregister_data_file(file);
         data_file::register_data_file(file, "0 1\n1 2\n").expect("register filesource data");
@@ -1145,11 +1216,11 @@ mod tests {
     #[test]
     fn filesource_cache_retains_current_entry_across_unrelated_virtual_file_changes() {
         let _guard = data_file_test_guard();
+        let _cache_scope = FilesourceCacheScope::install();
         let retained_file = "virtual://filesource/retained-across-unrelated-change";
         let unrelated_file = "virtual://filesource/unrelated-change";
         let _ = data_file::unregister_data_file(retained_file);
         let _ = data_file::unregister_data_file(unrelated_file);
-        lock_shared_filesource_cache().clear();
 
         data_file::register_data_file(retained_file, "0 1\n1e-9 2\n")
             .expect("register retained virtual filesource data");
@@ -1408,9 +1479,9 @@ mod tests {
     #[test]
     fn filesource_transformed_rows_cache_reloads_when_transform_params_change() {
         let _guard = data_file_test_guard();
+        let _cache_scope = FilesourceCacheScope::install();
         let file = "virtual://filesource/transformed-row-cache";
         let _ = data_file::unregister_data_file(file);
-        lock_shared_filesource_cache().clear();
         data_file::register_data_file(file, "0 1\n1e-9 3\n").expect("register filesource data");
 
         let mut ctx = CmContext::new();
@@ -1448,9 +1519,9 @@ mod tests {
     #[test]
     fn filesource_cache_retires_replaced_virtual_file_entries() {
         let _guard = data_file_test_guard();
+        let _cache_scope = FilesourceCacheScope::install();
         let file = "virtual://filesource/cache-retention";
         let _ = data_file::unregister_data_file(file);
-        lock_shared_filesource_cache().clear();
 
         data_file::register_data_file(file, "0 1\n1e-9 2\n")
             .expect("register first virtual filesource data");
