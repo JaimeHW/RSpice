@@ -1247,7 +1247,7 @@ impl fmt::Display for DeckPlanError {
 
 impl std::error::Error for DeckPlanError {}
 
-fn analysis_kind(command: &crate::netlist::AnalysisCommand) -> AnalysisKind {
+pub(super) fn analysis_kind(command: &crate::netlist::AnalysisCommand) -> AnalysisKind {
     use crate::netlist::AnalysisCommand;
 
     match command {

@@ -163,6 +163,41 @@ impl StepPlan<'_> {
         })
     }
 
+    /// Compare the exact zero-based value index selected from every dimension
+    /// with one canonical deck-plan coordinate.
+    ///
+    /// This crate-private identity bridge lets the shared deck materializer
+    /// prove that its semantic [`RunCoordinate`](crate::execution::RunCoordinate)
+    /// and the legacy reparse machinery selected the same Cartesian member.
+    /// Unlike `step_values`, DATA row indices never pass through `f64`. The
+    /// comparison allocates nothing and observes cancellation per dimension.
+    pub(crate) fn coordinate_indices_match(
+        &self,
+        run_index: usize,
+        coordinate: &crate::execution::RunCoordinate,
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<bool>, SimulationError> {
+        if run_index >= self.total_runs {
+            return Ok(None);
+        }
+        if coordinate.assignments().len() != self.dimensions.len() {
+            return Ok(Some(false));
+        }
+
+        let mut quotient = run_index;
+        for (dimension, assignment) in self.dimensions.iter().zip(coordinate.assignments()) {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let index = quotient % dimension.len();
+            quotient /= dimension.len();
+            if index != assignment.value_index() {
+                return Ok(Some(false));
+            }
+        }
+        Ok(Some(true))
+    }
+
     fn bindings_for_run(&self, run_index: usize) -> Option<Vec<StepPlanBindingValue>> {
         if run_index >= self.total_runs {
             return None;

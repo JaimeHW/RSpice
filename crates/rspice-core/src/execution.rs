@@ -5,6 +5,7 @@
 //! signal that is absent at one coordinate is represented.
 
 mod capability;
+mod materialized;
 mod plan;
 mod schema;
 mod topology;
@@ -14,6 +15,10 @@ pub use capability::{
     NonUiSurface, SIGNAL_CAPABILITY_MATRIX, SignalCapability, SurfaceCapability,
     analysis_result_capability, analysis_result_kind, render_non_ui_capability_matrix,
     signal_capability,
+};
+pub use materialized::{
+    ArtifactNamespace, DeckPlanMaterializer, MaterializedAnalysis, MaterializedRun,
+    MaterializedRunError,
 };
 pub use plan::{
     AnalysisInstanceId, AnalysisKind, AnalysisRequest, AxisAssignment, AxisKind, DataBinding,
