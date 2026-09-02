@@ -409,7 +409,20 @@ fn encode_value_body(program: &NativeProgram) -> WasmJitResult<Function> {
 /// this encoder through the same locals, helpers and module validator as the
 /// shipped select form.
 fn encode_value_body_from_ssa(ssa: &Program) -> WasmJitResult<Function> {
-    let local_count = u32::try_from(ssa.value_count())
+    let verifier = |error: crate::jit::JitError| WasmJitError::Encoding(error.to_string());
+    let loops = ssa.loop_ranges().map_err(verifier)?;
+    // One scratch local per block parameter of the widest merge, used only to
+    // stage a back edge's arguments. See `emit_edge_arguments`.
+    let scratch = if loops.is_empty() {
+        0
+    } else {
+        ssa.blocks()
+            .iter()
+            .map(|block| ssa.parameters(block).len())
+            .max()
+            .unwrap_or(0)
+    };
+    let local_count = u32::try_from(ssa.value_count() + scratch)
         .map_err(|_| WasmJitError::Encoding("SSA local count exceeds u32".into()))?;
     let locals = (local_count != 0)
         .then_some((local_count, ValType::F64))
@@ -417,10 +430,31 @@ fn encode_value_body_from_ssa(ssa: &Program) -> WasmJitResult<Function> {
     let mut body = Function::new(locals);
     emit_frame_guard(&mut body);
     emit_clear_error_status(&mut body);
-    emit_block_region(&mut body, ssa, ssa.entry(), None)?;
+    let mut labels = Vec::new();
+    emit_block_region(
+        &mut body,
+        ssa,
+        ssa.entry(),
+        None,
+        &loops,
+        &mut labels,
+        ssa.value_count(),
+    )?;
     body.instruction(&WasmInstruction::I32Const(WASM_JIT_STATUS_OK));
     body.instruction(&WasmInstruction::End);
     Ok(body)
+}
+
+/// One entry of the WebAssembly label stack, innermost last.
+///
+/// `br` counts labels outwards from zero, so a jump back to a loop header has
+/// to know how many `if` and `loop` labels have opened since that loop's own.
+/// Tracking them explicitly is what keeps a nested `if` inside a loop body
+/// from silently shifting the branch depth.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WasmLabel {
+    Loop(crate::jit::ssa::BlockId),
+    Structured,
 }
 
 /// Emit the straight-line chain of blocks starting at `start`, stopping when
@@ -431,11 +465,34 @@ fn encode_value_body_from_ssa(ssa: &Program) -> WasmJitResult<Function> {
 /// continues at the block where they reconverge. The SSA verifier already
 /// requires every branch's arms to be single-entry regions that reconverge at
 /// exactly one block, which is what makes this total without a relooper.
+///
+/// A loop is the one shape that is not a reconverging diamond, and it gets the
+/// only other structure WebAssembly has. A natural loop headed by `H` and
+/// exited on one of `H`'s two edges becomes
+///
+/// ```text
+/// loop
+///   <H's instructions>
+///   <condition>
+///   if
+///     <body region, ending in `br` back to this loop>
+///   end          ;; falling out of the `if` leaves the loop
+/// end
+/// <exit edge's arguments>
+/// ```
+///
+/// which needs no `block` wrapper and no `br_if`, because a `loop` label
+/// repeats only when something branches to it. The verifier has already proved
+/// the loop occupies one contiguous layout range with a single entry, so the
+/// body region is exactly the blocks between the header and the latch.
 fn emit_block_region(
     body: &mut Function,
     ssa: &Program,
     start: crate::jit::ssa::BlockId,
     stop: Option<crate::jit::ssa::BlockId>,
+    loops: &[crate::jit::ssa::LoopRange],
+    labels: &mut Vec<WasmLabel>,
+    scratch_base: usize,
 ) -> WasmJitResult<()> {
     let verifier = |error: crate::jit::JitError| WasmJitError::Encoding(error.to_string());
     let mut current = start;
@@ -443,7 +500,35 @@ fn emit_block_region(
         if Some(current) == stop {
             return Ok(());
         }
+        // A jump to a header whose `loop` is still open is the back edge.
+        if let Some(depth) = branch_depth(labels, current) {
+            body.instruction(&WasmInstruction::Br(depth));
+            return Ok(());
+        }
         let block = ssa.block(current).map_err(verifier)?;
+        let header_of = loops.iter().find(|range| range.header() == current).copied();
+        if let Some(range) = header_of {
+            emit_loop(body, ssa, block, range, loops, labels, scratch_base)?;
+            let Terminator::Branch {
+                then_edge,
+                else_edge,
+                ..
+            } = block.terminator()
+            else {
+                return Err(WasmJitError::Encoding(format!(
+                    "SSA loop header {} does not end in a two-way branch",
+                    current.index()
+                )));
+            };
+            let exit = if range.contains_layout(then_edge.target()) {
+                else_edge
+            } else {
+                then_edge
+            };
+            emit_edge_arguments(body, ssa, exit, scratch_base)?;
+            current = exit.target();
+            continue;
+        }
         for instruction in &ssa.instructions()[block.instruction_start()..block.instruction_end()] {
             emit_instruction(body, instruction)?;
             body.instruction(&WasmInstruction::LocalSet(value_local(
@@ -458,7 +543,7 @@ fn emit_block_region(
                 return Ok(());
             }
             Terminator::Jump(edge) => {
-                emit_edge_arguments(body, ssa, edge)?;
+                emit_edge_arguments(body, ssa, edge, scratch_base)?;
                 current = edge.target();
             }
             Terminator::Branch {
@@ -474,33 +559,152 @@ fn emit_block_region(
                 body.instruction(&WasmInstruction::F64Const(0.0.into()));
                 body.instruction(&WasmInstruction::F64Ne);
                 body.instruction(&WasmInstruction::If(BlockType::Empty));
-                emit_edge_arguments(body, ssa, then_edge)?;
-                emit_block_region(body, ssa, then_edge.target(), Some(join))?;
+                labels.push(WasmLabel::Structured);
+                emit_edge_arguments(body, ssa, then_edge, scratch_base)?;
+                emit_block_region(
+                    body,
+                    ssa,
+                    then_edge.target(),
+                    Some(join),
+                    loops,
+                    labels,
+                    scratch_base,
+                )?;
                 body.instruction(&WasmInstruction::Else);
-                emit_edge_arguments(body, ssa, else_edge)?;
-                emit_block_region(body, ssa, else_edge.target(), Some(join))?;
+                emit_edge_arguments(body, ssa, else_edge, scratch_base)?;
+                emit_block_region(
+                    body,
+                    ssa,
+                    else_edge.target(),
+                    Some(join),
+                    loops,
+                    labels,
+                    scratch_base,
+                )?;
                 body.instruction(&WasmInstruction::End);
+                labels.pop();
                 current = join;
             }
         }
     }
 }
 
+/// Emit one natural loop's `loop ... end`, leaving the exit edge to the caller.
+fn emit_loop(
+    body: &mut Function,
+    ssa: &Program,
+    header: &crate::jit::ssa::BasicBlock,
+    range: crate::jit::ssa::LoopRange,
+    loops: &[crate::jit::ssa::LoopRange],
+    labels: &mut Vec<WasmLabel>,
+    scratch_base: usize,
+) -> WasmJitResult<()> {
+    let Terminator::Branch {
+        condition,
+        then_edge,
+        else_edge,
+    } = header.terminator()
+    else {
+        return Err(WasmJitError::Encoding(format!(
+            "SSA loop header {} does not end in a two-way branch",
+            header.id().index()
+        )));
+    };
+    let (into_body, continues_when_true) = if range.contains_layout(then_edge.target()) {
+        (then_edge, true)
+    } else if range.contains_layout(else_edge.target()) {
+        (else_edge, false)
+    } else {
+        return Err(WasmJitError::Encoding(format!(
+            "SSA loop headed by block {} has no edge into its own body",
+            header.id().index()
+        )));
+    };
+
+    body.instruction(&WasmInstruction::Loop(BlockType::Empty));
+    labels.push(WasmLabel::Loop(header.id()));
+    for instruction in &ssa.instructions()[header.instruction_start()..header.instruction_end()] {
+        emit_instruction(body, instruction)?;
+        body.instruction(&WasmInstruction::LocalSet(value_local(
+            instruction.result().index(),
+        )?));
+    }
+    body.instruction(&WasmInstruction::LocalGet(value_local(condition.index())?));
+    body.instruction(&WasmInstruction::F64Const(0.0.into()));
+    if continues_when_true {
+        body.instruction(&WasmInstruction::F64Ne);
+    } else {
+        body.instruction(&WasmInstruction::F64Eq);
+    }
+    body.instruction(&WasmInstruction::If(BlockType::Empty));
+    labels.push(WasmLabel::Structured);
+    emit_edge_arguments(body, ssa, into_body, scratch_base)?;
+    emit_block_region(
+        body,
+        ssa,
+        into_body.target(),
+        None,
+        loops,
+        labels,
+        scratch_base,
+    )?;
+    body.instruction(&WasmInstruction::End);
+    labels.pop();
+    body.instruction(&WasmInstruction::End);
+    labels.pop();
+    Ok(())
+}
+
+/// How many labels out the still-open `loop` for `header` sits, or `None` when
+/// no such loop is open.
+fn branch_depth(labels: &[WasmLabel], header: crate::jit::ssa::BlockId) -> Option<u32> {
+    labels
+        .iter()
+        .rev()
+        .position(|label| *label == WasmLabel::Loop(header))
+        .and_then(|depth| u32::try_from(depth).ok())
+}
+
 /// Bind one edge's arguments to its target's block parameters.
 ///
-/// Every SSA value owns a distinct local here, so a parameter can never
-/// already hold an argument and the assignments need no sequencing: the
-/// swap hazard the machine backends sequence away cannot arise when nothing
-/// shares storage.
+/// Every SSA value owns a distinct local, so on a forward edge no parameter
+/// can already hold an argument and the assignments need no sequencing. A loop
+/// back edge is where that stops being true: the header's parameters are
+/// exactly what the latch passes back, so `x, y = y, x` around one is a
+/// permutation of the locals and a straight sequence of `local.set` would
+/// lose a value. The machine backends break such a cycle with one reserved
+/// spill slot; here the equivalent is a reserved band of locals, and staging
+/// every argument through it costs one extra copy per parameter on the edges
+/// that need it and nothing anywhere else.
 fn emit_edge_arguments(
     body: &mut Function,
     ssa: &Program,
     edge: &crate::jit::ssa::Edge,
+    scratch_base: usize,
 ) -> WasmJitResult<()> {
     let target = ssa
         .block(edge.target())
         .map_err(|error| WasmJitError::Encoding(error.to_string()))?;
-    for (argument, parameter) in edge.arguments().iter().zip(ssa.parameters(target)) {
+    let parameters = ssa.parameters(target);
+    let aliases = parameters.iter().any(|parameter| {
+        edge.arguments()
+            .iter()
+            .any(|argument| *argument == parameter.value())
+    });
+    if aliases {
+        for (slot, argument) in edge.arguments().iter().enumerate() {
+            body.instruction(&WasmInstruction::LocalGet(value_local(argument.index())?));
+            body.instruction(&WasmInstruction::LocalSet(value_local(scratch_base + slot)?));
+        }
+        for (slot, parameter) in parameters.iter().enumerate() {
+            body.instruction(&WasmInstruction::LocalGet(value_local(scratch_base + slot)?));
+            body.instruction(&WasmInstruction::LocalSet(value_local(
+                parameter.value().index(),
+            )?));
+        }
+        return Ok(());
+    }
+    for (argument, parameter) in edge.arguments().iter().zip(parameters) {
         body.instruction(&WasmInstruction::LocalGet(value_local(argument.index())?));
         body.instruction(&WasmInstruction::LocalSet(value_local(
             parameter.value().index(),
@@ -3310,6 +3514,40 @@ mod tests {
                     "structured branch and select disagree at outer={outer} inner={inner}"
                 );
             }
+        }
+    }
+
+    /// A loop, structurized into `loop`/`if`/`end` and executed.
+    ///
+    /// WebAssembly has no branch to an arbitrary label, so this is the one
+    /// backend where a back edge changes the shape of the emitted code rather
+    /// than the direction of a jump. Running the same fixture the machine
+    /// backends run is what proves the structurizer put the `br` at the right
+    /// depth and staged the swapping edge through its scratch locals: both
+    /// mistakes produce a number, and only the wrong one.
+    #[test]
+    fn a_loop_is_structurized_and_computes_what_it_says() {
+        let engine = Engine::default();
+        for (limit, scale, first, second) in [
+            (20.0_f64, 3.0_f64, 1.0_f64, 2.0_f64),
+            (100.0, 0.5, -4.0, 7.5),
+            (1.0, 1.0, 0.25, 0.75),
+            (-1.0, 3.0, 6.0, 9.0),
+        ] {
+            let ssa =
+                Program::loop_fixture_for_test(limit, scale).expect("build the loop program");
+            let body = encode_value_body_from_ssa(&ssa).expect("encode the loop body");
+            let bytes = encode_value_module(body).expect("assemble the module");
+            Validator::new()
+                .validate_all(&bytes)
+                .expect("the loop module is valid WebAssembly");
+            let (mut store, memory, instance) = instantiate_value_module(&engine, &bytes);
+            let expected = Program::loop_fixture_expectation(limit, scale, first, second);
+            assert_eq!(
+                call_value_entry(&mut store, &memory, &instance, &[first, second]).to_bits(),
+                expected.to_bits(),
+                "loop with limit={limit} scale={scale} first={first} second={second}"
+            );
         }
     }
 
