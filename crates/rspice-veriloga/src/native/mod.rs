@@ -21,7 +21,7 @@ mod state_pairing_census;
 mod target;
 pub mod x64;
 
-pub(crate) use crate::jit::{assignment, expr, model_plan, ssa, value_cache};
+pub(crate) use crate::jit::{assignment, expr, model_plan, plan_program, ssa, value_cache};
 
 pub use crate::jit::{JitError, JitResult};
 pub use abi::{
