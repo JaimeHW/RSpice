@@ -77,6 +77,11 @@ struct RunContext<'a> {
     compress_tol: f64,
     /// More than one analysis card runs; output files get per-analysis tags.
     multi_analysis: bool,
+    /// Number of authored analysis instances that publish under each output
+    /// tag. Repeated kinds receive stable one-based ordinal suffixes.
+    output_tag_multiplicities: std::collections::HashMap<&'static str, usize>,
+    /// Next output ordinal for every repeated analysis tag.
+    next_output_tag_ordinal: std::cell::RefCell<std::collections::HashMap<&'static str, usize>>,
     verbose: bool,
     quiet: bool,
     /// .MEAS results collected while analyses run, for CI/CD reporting
@@ -149,6 +154,8 @@ impl<'a> RunContext<'a> {
                 .compress_tol
                 .unwrap_or(config.simulation.compression_tolerance),
             multi_analysis: netlist.analyses.len() > 1,
+            output_tag_multiplicities: analysis_output_tag_multiplicities(netlist),
+            next_output_tag_ordinal: std::cell::RefCell::new(std::collections::HashMap::new()),
             verbose,
             quiet,
             measurements: std::cell::RefCell::new(Vec::new()),
@@ -255,6 +262,19 @@ impl<'a> RunContext<'a> {
     /// Every resolved path is remembered for the `--summary` manifest.
     fn output_path_for(&self, tag: &str) -> Option<std::path::PathBuf> {
         let path = self.output.clone()?;
+        let repeated_tag = self
+            .output_tag_multiplicities
+            .get_key_value(tag)
+            .and_then(|(registered_tag, count)| (*count > 1).then_some(*registered_tag));
+        let qualified_tag = repeated_tag.map_or_else(
+            || tag.to_string(),
+            |registered_tag| {
+                let mut ordinals = self.next_output_tag_ordinal.borrow_mut();
+                let ordinal = ordinals.entry(registered_tag).or_default();
+                *ordinal = ordinal.saturating_add(1);
+                format!("{tag}-{:03}", *ordinal)
+            },
+        );
         let resolved = if !self.multi_analysis {
             path
         } else {
@@ -262,7 +282,7 @@ impl<'a> RunContext<'a> {
                 .file_stem()
                 .map(|stem| stem.to_os_string())
                 .unwrap_or_default();
-            file_name.push(format!(".{tag}"));
+            file_name.push(format!(".{qualified_tag}"));
             if let Some(ext) = path.extension() {
                 file_name.push(".");
                 file_name.push(ext);
@@ -456,6 +476,37 @@ impl<'a> RunContext<'a> {
 
         Ok(())
     }
+}
+
+fn analysis_output_tag(analysis: &AnalysisCommand) -> Option<&'static str> {
+    match analysis {
+        AnalysisCommand::Op => Some("op"),
+        AnalysisCommand::Dc { .. } => Some("dc"),
+        AnalysisCommand::Ac { .. } | AnalysisCommand::AcData { .. } => Some("ac"),
+        AnalysisCommand::Tran { .. } => Some("tran"),
+        AnalysisCommand::Noise { .. } | AnalysisCommand::NoiseData { .. } => Some("noise"),
+        AnalysisCommand::Sp { .. } => Some("sp"),
+        AnalysisCommand::Stb { .. } => Some("stb"),
+        AnalysisCommand::Disto { .. } => Some("disto"),
+        AnalysisCommand::PoleZero { .. } => Some("pz"),
+        AnalysisCommand::Sensitivity { .. } => Some("sens"),
+        AnalysisCommand::Tf { .. } => Some("tf"),
+        AnalysisCommand::Hb { .. } => Some("hb"),
+        AnalysisCommand::MonteCarlo(_) => Some("mc"),
+        AnalysisCommand::Temp { .. } => Some("temp"),
+        AnalysisCommand::Step(_) | AnalysisCommand::Four { .. } => None,
+    }
+}
+
+fn analysis_output_tag_multiplicities(
+    netlist: &Netlist,
+) -> std::collections::HashMap<&'static str, usize> {
+    let mut counts = std::collections::HashMap::new();
+    for tag in netlist.analyses.iter().filter_map(analysis_output_tag) {
+        let count = counts.entry(tag).or_insert(0usize);
+        *count = count.saturating_add(1);
+    }
+    counts
 }
 
 fn cancellation_cli_error(timeout_seconds: Option<f64>) -> CliError {
@@ -1146,15 +1197,22 @@ fn physical_step_analysis_kind(
         AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. } => Ok(None),
         AnalysisCommand::Op => Ok(Some("op")),
         AnalysisCommand::Dc { .. } => Ok(Some("dc")),
-        AnalysisCommand::Ac { .. } => Ok(Some("ac")),
+        AnalysisCommand::Ac { .. } | AnalysisCommand::AcData { .. } => Ok(Some("ac")),
         AnalysisCommand::Tran { .. } => Ok(Some("tran")),
         AnalysisCommand::Hb { .. } => Ok(Some("hb")),
-        unsupported => Err(CliError::InvalidArgument {
-            message: format!(
-                ".STEP cannot yet wrap the authored analysis {unsupported:?} without ambiguous nested-run or output semantics"
-            ),
+        AnalysisCommand::Sp { .. } => Ok(Some("sp")),
+        AnalysisCommand::Stb { .. } => Ok(Some("stb")),
+        AnalysisCommand::Disto { .. } => Ok(Some("disto")),
+        AnalysisCommand::Noise { .. } | AnalysisCommand::NoiseData { .. } => Ok(Some("noise")),
+        AnalysisCommand::Sensitivity { .. } => Ok(Some("sens")),
+        AnalysisCommand::Tf { .. } => Ok(Some("tf")),
+        AnalysisCommand::PoleZero { .. } => Ok(Some("pz")),
+        AnalysisCommand::Four { .. } => Ok(Some("four")),
+        AnalysisCommand::MonteCarlo(_) => Err(CliError::InvalidArgument {
+            message: ".STEP cannot wrap authored Monte Carlo until deterministic nested seed/substream derivation is configured"
+                .to_string(),
             suggestion: Some(
-                "use an authored .OP, .DC, .AC, .TRAN, or .HB child analysis for this stepped run"
+                "run the parameter coordinates or Monte Carlo campaign as the outer experiment, but not both in one deck"
                     .to_string(),
             ),
         }),
@@ -1233,23 +1291,10 @@ fn normalize_temperature_axis(netlist: &Netlist) -> Result<Option<Netlist>, CliE
 
 fn step_analysis_signature(netlist: &Netlist) -> Result<Vec<&'static str>, CliError> {
     let mut signature = Vec::new();
-    let mut seen = std::collections::HashSet::new();
     for analysis in &netlist.analyses {
         let Some(kind) = physical_step_analysis_kind(analysis)? else {
             continue;
         };
-        if !seen.insert(kind) {
-            return Err(CliError::InvalidArgument {
-                message: format!(
-                    ".STEP deck contains more than one .{} analysis; their output paths would collide",
-                    kind.to_ascii_uppercase()
-                ),
-                suggestion: Some(
-                    "split repeated analysis cards into separate decks until ordinal output namespaces are configured"
-                        .to_string(),
-                ),
-            });
-        }
         signature.push(kind);
     }
     Ok(signature)
@@ -1264,8 +1309,7 @@ fn validate_step_frontend_compatibility(netlist: &Netlist, args: &RunArgs) -> Re
         return Err(CliError::InvalidArgument {
             message: format!("{mode} cannot be combined with an authored .STEP deck"),
             suggestion: Some(
-                "encode the desired .OP, .DC, .AC, .TRAN, or .HB child analysis in the deck"
-                    .to_string(),
+                "encode the desired supported physical child analysis in the deck".to_string(),
             ),
         });
     }
@@ -1302,7 +1346,7 @@ fn validate_step_frontend_compatibility(netlist: &Netlist, args: &RunArgs) -> Re
         return Err(CliError::InvalidArgument {
             message: "a multi-dimensional .STEP deck requires an explicit child analysis"
                 .to_string(),
-            suggestion: Some("add .OP, .DC, .AC, .TRAN, or .HB to the deck".to_string()),
+            suggestion: Some("add a supported physical analysis to the deck".to_string()),
         });
     }
     Ok(())
@@ -1633,7 +1677,7 @@ fn preflight_step_coordinates(
                     signature
                 ),
                 suggestion: Some(
-                    "keep the authored .OP, .DC, .AC, .TRAN, or .HB card set unconditional across every coordinate"
+                    "keep the authored physical-analysis and post-processing card set unconditional across every coordinate"
                         .to_string(),
                 ),
             });

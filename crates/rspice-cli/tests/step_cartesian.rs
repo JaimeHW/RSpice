@@ -32,6 +32,21 @@ fn step_output(base: &Path, one_based_index: usize) -> PathBuf {
     ))
 }
 
+fn step_analysis_output(base: &Path, one_based_index: usize, analysis_id: &str) -> PathBuf {
+    let coordinate = step_output(base, one_based_index);
+    let stem = coordinate
+        .file_stem()
+        .expect("coordinate output stem")
+        .to_string_lossy();
+    coordinate.with_file_name(format!(
+        "{stem}.{analysis_id}.{}",
+        coordinate
+            .extension()
+            .expect("coordinate output extension")
+            .to_string_lossy()
+    ))
+}
+
 fn csv_column(csv: &str, name: &str) -> Vec<f64> {
     let mut lines = csv.lines();
     let header = lines.next().expect("CSV header");
@@ -594,6 +609,104 @@ fn authored_hb_runs_once_per_step_coordinate_with_distinct_spectra() {
         !step_output(&output_path, 3).exists(),
         "the bounded plan must contain exactly two HB coordinates"
     );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn repeated_ac_cards_use_analysis_ordinals_inside_each_step_coordinate() {
+    let dir = test_dir("repeated_ac");
+    let deck = dir.join("repeated_ac.sp");
+    let output_path = dir.join("response.csv");
+    std::fs::write(
+        &deck,
+        "* Repeated analyses need coordinate and analysis identities\n\
+         .param resistance=1k\n\
+         V1 in 0 AC 1\n\
+         R1 in out {resistance}\n\
+         C1 out 0 1n\n\
+         .step param resistance list 1k 2k\n\
+         .ac lin 1 1k 1k\n\
+         .ac lin 1 10k 10k\n\
+         .print ac V(out)\n\
+         .end\n",
+    )
+    .expect("write repeated-AC deck");
+
+    let run = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "-o",
+        output_path.to_str().unwrap(),
+        "-f",
+        "csv",
+    ]);
+    assert!(
+        run.status.success(),
+        "stdout: {}; stderr: {}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+
+    for coordinate in 1..=2 {
+        let first = step_analysis_output(&output_path, coordinate, "ac-001");
+        let second = step_analysis_output(&output_path, coordinate, "ac-002");
+        let first_csv = std::fs::read_to_string(&first)
+            .unwrap_or_else(|error| panic!("read {}: {error}", first.display()));
+        let second_csv = std::fs::read_to_string(&second)
+            .unwrap_or_else(|error| panic!("read {}: {error}", second.display()));
+        assert_eq!(csv_column(&first_csv, "frequency"), vec![1.0e3]);
+        assert_eq!(csv_column(&second_csv, "frequency"), vec![1.0e4]);
+    }
+    assert!(!step_output(&output_path, 1).exists());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn authored_noise_runs_once_per_step_coordinate() {
+    let dir = test_dir("noise");
+    let deck = dir.join("noise.sp");
+    let output_path = dir.join("noise.csv");
+    std::fs::write(
+        &deck,
+        "* STEP around authored noise analysis\n\
+         .param resistance=1k\n\
+         V1 in 0 DC 0 AC 1\n\
+         R1 in out {resistance}\n\
+         C1 out 0 1n\n\
+         .step param resistance list 1k 2k\n\
+         .noise V(out) V1 lin 1 1k 1k\n\
+         .end\n",
+    )
+    .expect("write stepped-noise deck");
+
+    let run = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "-o",
+        output_path.to_str().unwrap(),
+        "-f",
+        "csv",
+    ]);
+    assert!(
+        run.status.success(),
+        "stdout: {}; stderr: {}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+
+    for coordinate in 1..=2 {
+        let path = step_output(&output_path, coordinate);
+        let csv = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        assert_eq!(csv_column(&csv, "frequency"), vec![1.0e3]);
+        let onoise = csv_column(&csv, "onoise_spectrum");
+        assert_eq!(onoise.len(), 1);
+        assert!(onoise[0].is_finite() && onoise[0] > 0.0, "{csv}");
+    }
 
     let _ = std::fs::remove_dir_all(&dir);
 }
