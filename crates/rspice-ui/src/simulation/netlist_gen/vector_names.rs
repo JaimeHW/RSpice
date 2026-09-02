@@ -127,15 +127,22 @@ mod tests {
         let ports = nodes_of_xspice(&netlist, "A1");
         assert_eq!(ports.first(), Some(&XspicePort::Analog("A#3".to_owned())));
 
-        // Both probe directives keep the bit name whole; the engine lower-cases
-        // a probe operand and drops nothing else.
+        // Both probe directives keep the bit name whole, and keep the case it
+        // was authored in: a probe operand reaches the engine in the deck's own
+        // spelling, so a frontend can name a failing request back to a designer
+        // without reversing a canonicalization. That does not fork the
+        // namespace — the saved-vector contract matches a probe to a node
+        // case-insensitively, so the retained spelling still selects the very
+        // bit the element cards above folded to upper case.
         assert_eq!(
             netlist.saves.signals,
             vec![
-                SaveSignal::Voltage("a#3".to_owned()),
-                SaveSignal::Voltage("a#3".to_owned()),
+                SaveSignal::Voltage("A#3".to_owned()),
+                SaveSignal::Voltage("A#3".to_owned()),
             ]
         );
+        assert!(netlist.saves.retains_voltage_operand("a#3"));
+        assert!(netlist.saves.selects("v(a#3)"));
     }
 
     fn nodes_of_xspice(netlist: &Netlist, element: &str) -> Vec<XspicePort> {
@@ -209,24 +216,24 @@ mod tests {
             assert_eq!(nodes_of(&netlist, "R1"), [node, "0"]);
         }
 
-        // A probe operand is reassembled from its source-contiguous tokens,
-        // so a delimited spelling reaches the engine verbatim, lower-cased:
-        // `V(A<3>)` probes `a<3>`, a node distinct from the `a3` the plain
-        // spelling names. The probe path carries every spelling whole; the
-        // deck still emits `#` because the XSPICE path below refuses the
-        // authored delimiters.
+        // A probe operand is reassembled from its source-contiguous tokens, so
+        // a delimited spelling reaches the engine verbatim, in the case it was
+        // authored in: `V(A<3>)` probes `A<3>`, a node distinct from the `A3`
+        // the plain spelling names. The probe path carries every spelling
+        // whole; the deck still emits `#` because the XSPICE path below refuses
+        // the authored delimiters.
         for (probe, expected) in [
-            ("V(A#3)", "a#3"),
-            ("V(A<3>)", "a<3>"),
-            ("V(A[3])", "a[3]"),
-            ("V(A3)", "a3"),
+            ("V(A#3)", "A#3"),
+            ("V(A<3>)", "A<3>"),
+            ("V(A[3])", "A[3]"),
+            ("V(A3)", "A3"),
         ] {
             let deck = format!("probe\nR1 A 0 1k\n.PRINT TRAN {probe}\n.TRAN 1n 10n\n.END\n");
             let netlist = Netlist::parse(&deck).expect("the probe deck parses");
             assert_eq!(
                 netlist.saves.signals,
                 vec![SaveSignal::Voltage(expected.to_owned())],
-                "{probe} did not reach the engine as v({expected})"
+                "{probe} did not reach the engine as V({expected})"
             );
         }
 
