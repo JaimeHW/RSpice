@@ -4,6 +4,16 @@
 //! serializable snapshots that mirror stable simulator concepts while delegating
 //! all numerical work to `rspice-core`.
 
+mod result_document;
+
+pub use result_document::{
+    ANALOG_RESULT_SCHEMA, ANALOG_RESULT_VERSION, AnalogAnalysisKind, AnalogResultDocument,
+    AnalogResultMetadata, AnalogResultWindow, AnalogSignalKind, AnalysisIdentity, AxisDescriptor,
+    AxisSeries, AxisWindow, ComplexSample, DeviceStateDescriptor, DeviceStateSeries,
+    SignalDescriptor, SignalOwner, SignalSeries, SignalUnit, SignalValueType, SignalValues,
+    SignalWindow, SignalWindowValues,
+};
+
 use rspice_core::{
     AbortSignal, Engine, Netlist, NoAbort, ResourceKind, ResourceLimitError, ResourceLimits,
     SimulationConfig,
@@ -23,6 +33,7 @@ type DetailedWasmResult<T> = Result<T, Box<WasmError>>;
 
 const MEBIBYTE: usize = 1024 * 1024;
 const MAX_TIMEOUT_MILLISECONDS: u32 = 86_400_000;
+const DEFAULT_MAX_TRANSFER_VALUES: usize = 262_144;
 
 fn browser_resource_limits() -> ResourceLimits {
     let mut limits = ResourceLimits::default();
@@ -593,6 +604,12 @@ pub struct TransientFftMetricsSnapshot {
 /// Complete browser representation of one core `TransientFftResult`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TransientFftSnapshot {
+    /// Stable source-order identity for this transient post-process result.
+    pub analysis_id: String,
+    /// Stable identity of the direct transient result consumed by this FFT.
+    pub parent_analysis_id: String,
+    /// One-based source-order ordinal among FFT directives.
+    pub ordinal: usize,
     /// `probe` or `expression`, allowing consumers to interpret `source_text`
     /// without parsing it heuristically.
     pub source_kind: String,
@@ -622,6 +639,104 @@ pub struct TransientFftSnapshot {
     pub bins: TransientFftBinsSnapshot,
     /// `null` in JavaScript when `FFTOUT` was not requested.
     pub metrics: Option<TransientFftMetricsSnapshot>,
+}
+
+/// A versioned analog result retained in WebAssembly memory.
+///
+/// JavaScript reads the descriptor-only metadata once, then calls
+/// `readWindow(start, count)` to transfer a bounded slice of every aligned
+/// numeric column as typed arrays. This avoids serializing a second full copy
+/// of a large result into ordinary JavaScript arrays.
+#[derive(Debug)]
+#[wasm_bindgen]
+pub struct WasmAnalogResultHandle {
+    document: AnalogResultDocument,
+    maximum_window_values: usize,
+}
+
+impl WasmAnalogResultHandle {
+    fn new(
+        document: AnalogResultDocument,
+        resource_limits: ResourceLimits,
+    ) -> DetailedWasmResult<Self> {
+        document.validate().map_err(|message| {
+            Box::new(WasmError::new(
+                message,
+                "invalid_result_document",
+                "result_validation",
+            ))
+        })?;
+        let retained_values = document.retained_numeric_value_count();
+        if retained_values > resource_limits.max_result_values {
+            return Err(resource_limit_error(
+                ResourceKind::ResultValues,
+                retained_values,
+                resource_limits.max_result_values,
+            ));
+        }
+        Ok(Self {
+            document,
+            maximum_window_values: resource_limits
+                .max_result_values
+                .min(DEFAULT_MAX_TRANSFER_VALUES),
+        })
+    }
+
+    /// Access the canonical Rust document without crossing the JS boundary.
+    pub fn document(&self) -> &AnalogResultDocument {
+        &self.document
+    }
+
+    fn metadata_snapshot(&self) -> AnalogResultMetadata {
+        self.document.metadata(self.maximum_window_values)
+    }
+
+    fn window_snapshot(
+        &self,
+        start: usize,
+        count: usize,
+    ) -> DetailedWasmResult<AnalogResultWindow> {
+        self.document
+            .window(start, count, self.maximum_window_values)
+            .map_err(|message| {
+                Box::new(WasmError::new(
+                    message,
+                    "invalid_result_window",
+                    "result_transfer",
+                ))
+            })
+    }
+}
+
+#[wasm_bindgen]
+impl WasmAnalogResultHandle {
+    #[wasm_bindgen(getter, js_name = pointCount)]
+    pub fn point_count(&self) -> usize {
+        self.document.point_count
+    }
+
+    #[wasm_bindgen(getter, js_name = analysisId)]
+    pub fn analysis_id(&self) -> String {
+        self.document.analysis.id.clone()
+    }
+
+    /// Return descriptors, units, identity, explicit coordinate absence, and
+    /// the transfer ceiling without copying result samples.
+    #[wasm_bindgen(js_name = metadata)]
+    pub fn metadata_js(&self) -> Result<JsValue, JsValue> {
+        serialize_to_js(&self.metadata_snapshot())
+    }
+
+    /// Transfer one bounded, half-open point range as typed numeric and
+    /// validity arrays. Missing samples carry validity zero; their numeric
+    /// slots are placeholders and must not be interpreted.
+    #[wasm_bindgen(js_name = readWindow)]
+    pub fn read_window_js(&self, start: usize, count: usize) -> Result<JsValue, JsValue> {
+        let window = self
+            .window_snapshot(start, count)
+            .map_err(|error| wasm_error_to_js(*error))?;
+        serialize_result_window_to_js(&window)
+    }
 }
 
 /// Browser-facing parser-to-solver readiness result.
@@ -1330,6 +1445,17 @@ fn set_uint32_array(object: &JsValue, name: &str, values: &[usize]) -> Result<()
         })
 }
 
+fn set_uint8_array(object: &JsValue, name: &str, values: &[u8]) -> Result<(), JsValue> {
+    let values = js_sys::Uint8Array::from(values);
+    js_sys::Reflect::set(object, &JsValue::from_str(name), values.as_ref())
+        .map(|_| ())
+        .map_err(|_| {
+            JsValue::from_str(&format!(
+                "serialization failed: cannot publish typed validity array `{name}`"
+            ))
+        })
+}
+
 fn publish_fft_bins_as_typed_arrays(
     object: &JsValue,
     bins: &TransientFftBinsSnapshot,
@@ -1398,6 +1524,50 @@ fn serialize_transient_to_js(snapshot: &TransientSnapshot) -> Result<JsValue, Js
         }
     }
 
+    Ok(serialized)
+}
+
+/// Serialize only a bounded analog-result window, replacing every numeric
+/// Serde array with its compact JavaScript typed-array representation.
+fn serialize_result_window_to_js(window: &AnalogResultWindow) -> Result<JsValue, JsValue> {
+    let serializer = serde_wasm_bindgen::Serializer::new().serialize_missing_as_null(true);
+    let serialized = window
+        .serialize(&serializer)
+        .map_err(|error| JsValue::from_str(&format!("serialization failed: {error}")))?;
+
+    let axes = js_array_property(&serialized, "axes")?;
+    for (index, axis) in window.axes.iter().enumerate() {
+        let object = axes.get(u32::try_from(index).map_err(|_| {
+            JsValue::from_str("serialization failed: result axis index exceeds JavaScript bounds")
+        })?);
+        set_float64_array(&object, "values", &axis.values)?;
+    }
+
+    let signals = js_array_property(&serialized, "signals")?;
+    for (index, signal) in window.signals.iter().enumerate() {
+        let object = signals.get(u32::try_from(index).map_err(|_| {
+            JsValue::from_str("serialization failed: result signal index exceeds JavaScript bounds")
+        })?);
+        let values = js_property(&object, "values")?;
+        match &signal.values {
+            SignalWindowValues::Real {
+                values: samples,
+                validity,
+            } => {
+                set_float64_array(&values, "values", samples)?;
+                set_uint8_array(&values, "validity", validity)?;
+            }
+            SignalWindowValues::Complex {
+                real,
+                imaginary,
+                validity,
+            } => {
+                set_float64_array(&values, "real", real)?;
+                set_float64_array(&values, "imaginary", imaginary)?;
+                set_uint8_array(&values, "validity", validity)?;
+            }
+        }
+    }
     Ok(serialized)
 }
 
@@ -1634,9 +1804,16 @@ fn fft_metrics_snapshot(metrics: &TransientFftMetrics) -> TransientFftMetricsSna
     }
 }
 
-fn fft_snapshot(result: &TransientFftResult) -> TransientFftSnapshot {
+fn fft_snapshot(
+    result: &TransientFftResult,
+    ordinal: usize,
+    parent_analysis_id: &str,
+) -> TransientFftSnapshot {
     let (source_kind, source_text, authored_output) = fft_output_identity(&result.output);
     TransientFftSnapshot {
+        analysis_id: format!("fft-{ordinal:03}"),
+        parent_analysis_id: parent_analysis_id.to_owned(),
+        ordinal,
         source_kind: source_kind.to_string(),
         source_text: source_text.to_string(),
         authored_output,
@@ -1806,7 +1983,12 @@ pub fn transient_snapshot_from_result(
         &result.store_traces,
     )?;
     let point_count = result.time.len();
-    let fft_results = result.fft_results.iter().map(fft_snapshot).collect();
+    let fft_results = result
+        .fft_results
+        .iter()
+        .enumerate()
+        .map(|(index, result)| fft_snapshot(result, index + 1, "tran-001"))
+        .collect();
     Ok(TransientSnapshot {
         time: result.time,
         step_sizes: result.step_sizes,
@@ -1840,7 +2022,12 @@ pub fn transient_snapshot_from_compressed_result(
         &result.store_traces,
     )?;
     let point_count = result.time.len();
-    let fft_results = result.fft_results.iter().map(fft_snapshot).collect();
+    let fft_results = result
+        .fft_results
+        .iter()
+        .enumerate()
+        .map(|(index, result)| fft_snapshot(result, index + 1, "tran-001"))
+        .collect();
     Ok(TransientSnapshot {
         time: result.time,
         step_sizes: result.step_sizes,
@@ -1967,6 +2154,119 @@ pub fn run_dc_operating_point(source: &str) -> WasmResult<DcOperatingPoint> {
     run_dc_operating_point_detailed(source).map_err(|error| error.message)
 }
 
+fn validate_analysis_ordinal(ordinal: usize) -> DetailedWasmResult<()> {
+    if ordinal == 0 {
+        return Err(Box::new(WasmError::invalid_argument(
+            "analysis ordinal must be one-based".to_owned(),
+        )));
+    }
+    Ok(())
+}
+
+/// Run OP into the versioned, loss-aware analog document. Unlike the legacy
+/// compatibility DTO, this retains engine-owned device observables and device
+/// operating regions in addition to node voltages and branch currents.
+pub fn run_operating_point_document_with_options_and_abort_detailed(
+    source: &str,
+    ordinal: usize,
+    options: &WasmExecutionOptions,
+    external_abort: &dyn AbortSignal,
+) -> DetailedWasmResult<AnalogResultDocument> {
+    validate_analysis_ordinal(ordinal)?;
+    ensure_not_aborted(external_abort)?;
+    let resource_limits = options.resource_limits.to_core();
+    let netlist = parse_netlist_detailed(source, resource_limits, external_abort)?;
+    let (result, report) = engine_with_resource_limits(resource_limits)?
+        .run_dc_op_with_report_and_abort(&netlist, external_abort)
+        .map_err(|error| Box::new(WasmError::from_simulation_error(error)))?;
+    ensure_not_aborted(external_abort)?;
+    result_document::operating_point_document(result, report, ordinal).map_err(|message| {
+        Box::new(WasmError::new(
+            message,
+            "invalid_result_document",
+            "result_validation",
+        ))
+    })
+}
+
+pub fn run_operating_point_document_detailed(
+    source: &str,
+) -> DetailedWasmResult<AnalogResultDocument> {
+    run_operating_point_document_with_options_and_abort_detailed(
+        source,
+        1,
+        &WasmExecutionOptions::default(),
+        &NoAbort,
+    )
+}
+
+/// Run a scalar-deck DC sweep into one typed document. The adapter unions
+/// device observables across points and marks coordinate-local absence
+/// explicitly instead of zero-filling it.
+#[allow(clippy::too_many_arguments)]
+pub fn run_dc_sweep_document_with_options_and_abort_detailed(
+    source: &str,
+    source_name: &str,
+    start: f64,
+    stop: f64,
+    step: f64,
+    ordinal: usize,
+    options: &WasmExecutionOptions,
+    external_abort: &dyn AbortSignal,
+) -> DetailedWasmResult<AnalogResultDocument> {
+    validate_analysis_ordinal(ordinal)?;
+    ensure_not_aborted(external_abort)?;
+    if source_name.trim().is_empty() {
+        return Err(Box::new(WasmError::invalid_argument(
+            "DC sweep source name must not be empty".to_owned(),
+        )));
+    }
+    if !start.is_finite() || !stop.is_finite() || !step.is_finite() || step == 0.0 {
+        return Err(Box::new(WasmError::invalid_argument(
+            "DC sweep start/stop must be finite and step must be finite and nonzero".to_owned(),
+        )));
+    }
+    let resource_limits = options.resource_limits.to_core();
+    let netlist = parse_netlist_detailed(source, resource_limits, external_abort)?;
+    let points = engine_with_resource_limits(resource_limits)?
+        .run_dc_sweep_with_report_and_abort(
+            &netlist,
+            source_name,
+            start,
+            stop,
+            step,
+            external_abort,
+        )
+        .map_err(|error| Box::new(WasmError::from_simulation_error(error)))?;
+    ensure_not_aborted(external_abort)?;
+    result_document::dc_sweep_document(source_name, points, ordinal).map_err(|message| {
+        Box::new(WasmError::new(
+            message,
+            "invalid_result_document",
+            "result_validation",
+        ))
+    })
+}
+
+pub fn run_dc_sweep_document_detailed(
+    source: &str,
+    source_name: &str,
+    start: f64,
+    stop: f64,
+    step: f64,
+) -> DetailedWasmResult<AnalogResultDocument> {
+    run_dc_sweep_document_with_options_and_abort_detailed(
+        source,
+        source_name,
+        start,
+        stop,
+        step,
+        1,
+        &WasmExecutionOptions::default(),
+        &NoAbort,
+    )
+}
+
 /// Run AC analysis after strict semantic validation.
 pub fn run_ac_analysis_detailed(
     source: &str,
@@ -2039,6 +2339,44 @@ pub fn run_ac_analysis_with_options_and_abort_detailed(
 /// Backward-compatible string-error AC API.
 pub fn run_ac_analysis(source: &str, frequencies: &[f64]) -> WasmResult<Vec<AcPointSnapshot>> {
     run_ac_analysis_detailed(source, frequencies).map_err(|error| error.message)
+}
+
+/// Run AC into the common versioned analog document, preserving complex node
+/// voltages and branch currents as aligned series.
+pub fn run_ac_document_with_options_and_abort_detailed(
+    source: &str,
+    frequencies: &[f64],
+    ordinal: usize,
+    options: &WasmExecutionOptions,
+    external_abort: &dyn AbortSignal,
+) -> DetailedWasmResult<AnalogResultDocument> {
+    validate_analysis_ordinal(ordinal)?;
+    let points = run_ac_analysis_with_options_and_abort_detailed(
+        source,
+        frequencies,
+        options,
+        external_abort,
+    )?;
+    result_document::ac_document(points, ordinal).map_err(|message| {
+        Box::new(WasmError::new(
+            message,
+            "invalid_result_document",
+            "result_validation",
+        ))
+    })
+}
+
+pub fn run_ac_document_detailed(
+    source: &str,
+    frequencies: &[f64],
+) -> DetailedWasmResult<AnalogResultDocument> {
+    run_ac_document_with_options_and_abort_detailed(
+        source,
+        frequencies,
+        1,
+        &WasmExecutionOptions::default(),
+        &NoAbort,
+    )
 }
 
 /// Run transient analysis after strict semantic validation.
@@ -2209,6 +2547,136 @@ pub fn run_transient_analysis(
     run_transient_analysis_detailed(source, tstop, max_step).map_err(|error| error.message)
 }
 
+/// Run transient into the common result document. Projected-out solution
+/// channels remain present with `None` samples, while device OP/store traces
+/// retain explicit owners and unknown units.
+#[allow(clippy::too_many_arguments)]
+pub fn run_transient_document_with_options_and_abort_detailed(
+    source: &str,
+    tstop: f64,
+    max_step: f64,
+    ordinal: usize,
+    options: &WasmExecutionOptions,
+    external_abort: &dyn AbortSignal,
+) -> DetailedWasmResult<AnalogResultDocument> {
+    validate_analysis_ordinal(ordinal)?;
+    let snapshot = run_transient_analysis_with_options_and_abort_detailed(
+        source,
+        tstop,
+        max_step,
+        options,
+        external_abort,
+    )?;
+    result_document::transient_document(snapshot, ordinal).map_err(|message| {
+        Box::new(WasmError::new(
+            message,
+            "invalid_result_document",
+            "result_validation",
+        ))
+    })
+}
+
+pub fn run_transient_document_detailed(
+    source: &str,
+    tstop: f64,
+    max_step: f64,
+) -> DetailedWasmResult<AnalogResultDocument> {
+    run_transient_document_with_options_and_abort_detailed(
+        source,
+        tstop,
+        max_step,
+        1,
+        &WasmExecutionOptions::default(),
+        &NoAbort,
+    )
+}
+
+/// Run scalar-deck input-referred noise into the common typed result document.
+/// It preserves complex small-signal voltages/currents, total densities, gain,
+/// and sparse per-device contribution identities with explicit validity.
+#[allow(clippy::too_many_arguments)]
+pub fn run_noise_document_with_options_and_abort_detailed(
+    source: &str,
+    output_node: &str,
+    reference_node: Option<&str>,
+    input_source: &str,
+    frequencies: &[f64],
+    ordinal: usize,
+    options: &WasmExecutionOptions,
+    external_abort: &dyn AbortSignal,
+) -> DetailedWasmResult<AnalogResultDocument> {
+    validate_analysis_ordinal(ordinal)?;
+    ensure_not_aborted(external_abort)?;
+    if output_node.trim().is_empty() || input_source.trim().is_empty() {
+        return Err(Box::new(WasmError::invalid_argument(
+            "noise output node and input source must not be empty".to_owned(),
+        )));
+    }
+    if frequencies.is_empty() {
+        return Err(Box::new(WasmError::invalid_argument(
+            "noise analysis requires at least one frequency".to_owned(),
+        )));
+    }
+    let resource_limits = options.resource_limits.to_core();
+    if frequencies.len() > resource_limits.max_analysis_points {
+        return Err(resource_limit_error(
+            ResourceKind::AnalysisPoints,
+            frequencies.len(),
+            resource_limits.max_analysis_points,
+        ));
+    }
+    if let Some((index, frequency)) = frequencies
+        .iter()
+        .copied()
+        .enumerate()
+        .find(|(_, frequency)| !frequency.is_finite() || *frequency <= 0.0)
+    {
+        return Err(Box::new(WasmError::invalid_argument(format!(
+            "noise frequency at index {index} must be finite and positive, got {frequency}"
+        ))));
+    }
+    let netlist = parse_netlist_detailed(source, resource_limits, external_abort)?;
+    let engine = engine_with_resource_limits(resource_limits)?;
+    let points = engine
+        .run_noise_named_with_input_source_and_abort(
+            &netlist,
+            output_node,
+            reference_node,
+            input_source,
+            frequencies,
+            engine.config().temperature,
+            external_abort,
+        )
+        .map_err(|error| Box::new(WasmError::from_simulation_error(error)))?;
+    ensure_not_aborted(external_abort)?;
+    result_document::noise_document(points, ordinal).map_err(|message| {
+        Box::new(WasmError::new(
+            message,
+            "invalid_result_document",
+            "result_validation",
+        ))
+    })
+}
+
+pub fn run_noise_document_detailed(
+    source: &str,
+    output_node: &str,
+    reference_node: Option<&str>,
+    input_source: &str,
+    frequencies: &[f64],
+) -> DetailedWasmResult<AnalogResultDocument> {
+    run_noise_document_with_options_and_abort_detailed(
+        source,
+        output_node,
+        reference_node,
+        input_source,
+        frequencies,
+        1,
+        &WasmExecutionOptions::default(),
+        &NoAbort,
+    )
+}
+
 /// Exercise the configured browser parser-to-solver path without I/O.
 pub fn health_check_with_options_detailed(
     options: &WasmExecutionOptions,
@@ -2372,6 +2840,160 @@ pub fn run_transient_analysis_compressed_js(
     )
     .map_err(|error| wasm_error_to_js(*error))?;
     serialize_transient_to_js(&result)
+}
+
+#[wasm_bindgen(js_name = runOperatingPointDocument)]
+pub fn run_operating_point_document_js(
+    source: &str,
+    ordinal: usize,
+    options: JsValue,
+) -> Result<WasmAnalogResultHandle, JsValue> {
+    let request = execution_request_from_js(options).map_err(|error| wasm_error_to_js(*error))?;
+    let cancellation_enabled = request.cancellation.is_some();
+    let _guard = ActiveSharedCancellationGuard::install(request.cancellation)
+        .map_err(|error| wasm_error_to_js(*error))?;
+    let shared_abort = JsSharedAbortSignal {
+        enabled: cancellation_enabled,
+    };
+    let abort = ConfiguredAbort::new(request.timeout_milliseconds, &shared_abort)
+        .map_err(|error| wasm_error_to_js(*error))?;
+    let document = run_operating_point_document_with_options_and_abort_detailed(
+        source,
+        ordinal,
+        &request.options,
+        &abort,
+    )
+    .map_err(|error| wasm_error_to_js(*error))?;
+    WasmAnalogResultHandle::new(document, request.options.resource_limits.to_core())
+        .map_err(|error| wasm_error_to_js(*error))
+}
+
+#[wasm_bindgen(js_name = runDcSweepDocument)]
+#[allow(clippy::too_many_arguments)]
+pub fn run_dc_sweep_document_js(
+    source: &str,
+    source_name: &str,
+    start: f64,
+    stop: f64,
+    step: f64,
+    ordinal: usize,
+    options: JsValue,
+) -> Result<WasmAnalogResultHandle, JsValue> {
+    let request = execution_request_from_js(options).map_err(|error| wasm_error_to_js(*error))?;
+    let cancellation_enabled = request.cancellation.is_some();
+    let _guard = ActiveSharedCancellationGuard::install(request.cancellation)
+        .map_err(|error| wasm_error_to_js(*error))?;
+    let shared_abort = JsSharedAbortSignal {
+        enabled: cancellation_enabled,
+    };
+    let abort = ConfiguredAbort::new(request.timeout_milliseconds, &shared_abort)
+        .map_err(|error| wasm_error_to_js(*error))?;
+    let document = run_dc_sweep_document_with_options_and_abort_detailed(
+        source,
+        source_name,
+        start,
+        stop,
+        step,
+        ordinal,
+        &request.options,
+        &abort,
+    )
+    .map_err(|error| wasm_error_to_js(*error))?;
+    WasmAnalogResultHandle::new(document, request.options.resource_limits.to_core())
+        .map_err(|error| wasm_error_to_js(*error))
+}
+
+#[wasm_bindgen(js_name = runAcAnalysisDocument)]
+pub fn run_ac_document_js(
+    source: &str,
+    frequencies: Vec<f64>,
+    ordinal: usize,
+    options: JsValue,
+) -> Result<WasmAnalogResultHandle, JsValue> {
+    let request = execution_request_from_js(options).map_err(|error| wasm_error_to_js(*error))?;
+    let cancellation_enabled = request.cancellation.is_some();
+    let _guard = ActiveSharedCancellationGuard::install(request.cancellation)
+        .map_err(|error| wasm_error_to_js(*error))?;
+    let shared_abort = JsSharedAbortSignal {
+        enabled: cancellation_enabled,
+    };
+    let abort = ConfiguredAbort::new(request.timeout_milliseconds, &shared_abort)
+        .map_err(|error| wasm_error_to_js(*error))?;
+    let document = run_ac_document_with_options_and_abort_detailed(
+        source,
+        &frequencies,
+        ordinal,
+        &request.options,
+        &abort,
+    )
+    .map_err(|error| wasm_error_to_js(*error))?;
+    WasmAnalogResultHandle::new(document, request.options.resource_limits.to_core())
+        .map_err(|error| wasm_error_to_js(*error))
+}
+
+#[wasm_bindgen(js_name = runTransientAnalysisDocument)]
+pub fn run_transient_document_js(
+    source: &str,
+    tstop: f64,
+    max_step: f64,
+    ordinal: usize,
+    options: JsValue,
+) -> Result<WasmAnalogResultHandle, JsValue> {
+    let request = execution_request_from_js(options).map_err(|error| wasm_error_to_js(*error))?;
+    let cancellation_enabled = request.cancellation.is_some();
+    let _guard = ActiveSharedCancellationGuard::install(request.cancellation)
+        .map_err(|error| wasm_error_to_js(*error))?;
+    let shared_abort = JsSharedAbortSignal {
+        enabled: cancellation_enabled,
+    };
+    let abort = ConfiguredAbort::new(request.timeout_milliseconds, &shared_abort)
+        .map_err(|error| wasm_error_to_js(*error))?;
+    let document = run_transient_document_with_options_and_abort_detailed(
+        source,
+        tstop,
+        max_step,
+        ordinal,
+        &request.options,
+        &abort,
+    )
+    .map_err(|error| wasm_error_to_js(*error))?;
+    WasmAnalogResultHandle::new(document, request.options.resource_limits.to_core())
+        .map_err(|error| wasm_error_to_js(*error))
+}
+
+#[wasm_bindgen(js_name = runNoiseAnalysisDocument)]
+#[allow(clippy::too_many_arguments)]
+pub fn run_noise_document_js(
+    source: &str,
+    output_node: &str,
+    reference_node: Option<String>,
+    input_source: &str,
+    frequencies: Vec<f64>,
+    ordinal: usize,
+    options: JsValue,
+) -> Result<WasmAnalogResultHandle, JsValue> {
+    let request = execution_request_from_js(options).map_err(|error| wasm_error_to_js(*error))?;
+    let cancellation_enabled = request.cancellation.is_some();
+    let _guard = ActiveSharedCancellationGuard::install(request.cancellation)
+        .map_err(|error| wasm_error_to_js(*error))?;
+    let shared_abort = JsSharedAbortSignal {
+        enabled: cancellation_enabled,
+    };
+    let abort = ConfiguredAbort::new(request.timeout_milliseconds, &shared_abort)
+        .map_err(|error| wasm_error_to_js(*error))?;
+    let document = run_noise_document_with_options_and_abort_detailed(
+        source,
+        output_node,
+        reference_node.as_deref(),
+        input_source,
+        &frequencies,
+        ordinal,
+        &request.options,
+        &abort,
+    )
+    .map_err(|error| wasm_error_to_js(*error))?;
+    WasmAnalogResultHandle::new(document, request.options.resource_limits.to_core())
+        .map_err(|error| wasm_error_to_js(*error))
 }
 
 #[cfg(test)]
@@ -2716,6 +3338,139 @@ mod tests {
             )
             .expect_err("compressed TRAN must observe the frontend abort source"),
         );
+        assert_cancelled(
+            run_operating_point_document_with_options_and_abort_detailed(
+                CANCELLATION_DECK,
+                1,
+                &options,
+                &abort,
+            )
+            .expect_err("typed OP must observe the frontend abort source"),
+        );
+        assert_cancelled(
+            run_dc_sweep_document_with_options_and_abort_detailed(
+                CANCELLATION_DECK,
+                "V1",
+                0.0,
+                1.0,
+                0.5,
+                1,
+                &options,
+                &abort,
+            )
+            .expect_err("typed DC must observe the frontend abort source"),
+        );
+        assert_cancelled(
+            run_ac_document_with_options_and_abort_detailed(
+                CANCELLATION_DECK,
+                &[1.0, 10.0],
+                1,
+                &options,
+                &abort,
+            )
+            .expect_err("typed AC must observe the frontend abort source"),
+        );
+        assert_cancelled(
+            run_transient_document_with_options_and_abort_detailed(
+                CANCELLATION_DECK,
+                10.0e-6,
+                1.0e-9,
+                1,
+                &options,
+                &abort,
+            )
+            .expect_err("typed TRAN must observe the frontend abort source"),
+        );
+        assert_cancelled(
+            run_noise_document_with_options_and_abort_detailed(
+                CANCELLATION_DECK,
+                "out",
+                None,
+                "V1",
+                &[1.0, 10.0],
+                1,
+                &options,
+                &abort,
+            )
+            .expect_err("typed noise must observe the frontend abort source"),
+        );
+    }
+
+    const TYPED_DOCUMENT_DECK: &str = "browser typed analog document\n\
+        V1 in 0 DC 0 AC 1 PULSE(0 1 0 1n 1n 1u 2u)\n\
+        R1 in out 1k\n\
+        R2 out 0 1k\n\
+        .save V(out) I(V1)\n\
+        .end\n";
+
+    #[test]
+    fn typed_documents_cover_scalar_op_dc_ac_tran_and_noise_without_schema_loss() {
+        let op = run_operating_point_document_detailed(TYPED_DOCUMENT_DECK)
+            .expect("typed OP document executes");
+        assert_eq!(op.analysis.id, "op-001");
+        assert_eq!(op.coordinate_id, None);
+        assert!(
+            op.signals
+                .iter()
+                .any(|signal| signal.kind == AnalogSignalKind::BranchCurrent)
+        );
+
+        let dc = run_dc_sweep_document_detailed(TYPED_DOCUMENT_DECK, "V1", -1.0, 1.0, 1.0)
+            .expect("typed DC document executes");
+        assert_eq!(dc.point_count, 3);
+        assert_eq!(dc.axes[0].values, [-1.0, 0.0, 1.0]);
+        assert!(
+            dc.signals
+                .iter()
+                .any(|signal| signal.kind == AnalogSignalKind::DeviceObservable)
+        );
+
+        let ac = run_ac_document_detailed(TYPED_DOCUMENT_DECK, &[1.0, 10.0])
+            .expect("typed AC document executes");
+        assert_eq!(ac.analysis.id, "ac-001");
+        assert!(ac.signals.iter().any(|signal| {
+            signal.kind == AnalogSignalKind::BranchCurrent
+                && matches!(signal.values, SignalValues::Complex { .. })
+        }));
+
+        let tran = run_transient_document_detailed(TYPED_DOCUMENT_DECK, 2.0e-6, 20.0e-9)
+            .expect("typed transient document executes");
+        assert_eq!(tran.axes[0].unit, Some(SignalUnit::Second));
+        assert!(tran.signals.iter().any(|signal| {
+            signal.canonical_name == "i(v1)" && matches!(signal.values, SignalValues::Real { .. })
+        }));
+
+        let noise =
+            run_noise_document_detailed(TYPED_DOCUMENT_DECK, "out", None, "V1", &[1.0, 10.0])
+                .expect("typed noise document executes");
+        assert_eq!(noise.analysis.id, "noise-001");
+        assert!(noise.signals.iter().any(|signal| {
+            signal.canonical_name == "output_noise_density"
+                && signal.unit == Some(SignalUnit::VoltSquaredPerHertz)
+        }));
+        assert!(noise.signals.iter().any(|signal| {
+            signal.kind == AnalogSignalKind::BranchCurrent
+                && matches!(signal.values, SignalValues::Complex { .. })
+        }));
+    }
+
+    #[test]
+    fn retained_result_handle_enforces_bounded_windows_and_exposes_descriptors_only() {
+        let document = run_ac_document_detailed(TYPED_DOCUMENT_DECK, &[1.0, 10.0, 100.0])
+            .expect("typed AC document executes");
+        let mut handle =
+            WasmAnalogResultHandle::new(document, ResourceLimits::default()).expect("valid handle");
+        handle.maximum_window_values = 20;
+        let metadata = handle.metadata_snapshot();
+        assert_eq!(metadata.point_count, 3);
+        assert_eq!(metadata.coordinate_id, None);
+        assert!(metadata.maximum_window_values <= 20);
+        assert!(handle.window_snapshot(0, 1).is_ok());
+        let error = handle
+            .window_snapshot(0, 3)
+            .expect_err("oversized transfer must fail closed");
+        assert_eq!(error.code, "invalid_result_window");
+        assert_eq!(error.category, "result_transfer");
     }
 
     #[test]
@@ -2894,6 +3649,9 @@ mod tests {
                 assert_eq!(wasm.authored_output, format!("{{{expression}}}"));
             }
         }
+        assert!(wasm.analysis_id.starts_with("fft-"));
+        assert_eq!(wasm.parent_analysis_id, "tran-001");
+        assert!(wasm.ordinal > 0);
         assert_eq!(wasm.output_name, core.output_name);
         assert_eq!(wasm.physical_type, core.physical_type);
         assert_eq!(wasm.start_time, core.start_time);
@@ -2982,6 +3740,10 @@ mod tests {
         for (core, wasm) in core.fft_results.iter().zip(&wasm.fft_results) {
             assert_fft_parity(core, wasm);
         }
+        assert_eq!(wasm.fft_results[0].analysis_id, "fft-001");
+        assert_eq!(wasm.fft_results[0].ordinal, 1);
+        assert_eq!(wasm.fft_results[1].analysis_id, "fft-002");
+        assert_eq!(wasm.fft_results[1].ordinal, 2);
         assert_eq!(wasm.fft_results[0].output_name, "V(OUT)");
         assert_eq!(wasm.fft_results[1].output_name, "{2*v(out)}");
     }
@@ -3269,6 +4031,9 @@ mod tests {
             "compression",
         ];
         const FFT_FIELDS: &[&str] = &[
+            "analysis_id",
+            "parent_analysis_id",
+            "ordinal",
             "source_kind",
             "source_text",
             "authored_output",
@@ -3446,6 +4211,39 @@ mod tests {
                 options(),
             )
             .expect_err("pre-set shared flag cancels compressed TRAN"),
+            "aborted",
+        );
+        assert_js_error_code(
+            run_operating_point_document_js(CANCELLATION_DECK, 1, options())
+                .expect_err("pre-set shared flag cancels typed OP"),
+            "aborted",
+        );
+        assert_js_error_code(
+            run_dc_sweep_document_js(CANCELLATION_DECK, "V1", 0.0, 1.0, 0.5, 1, options())
+                .expect_err("pre-set shared flag cancels typed DC"),
+            "aborted",
+        );
+        assert_js_error_code(
+            run_ac_document_js(CANCELLATION_DECK, vec![1.0, 10.0], 1, options())
+                .expect_err("pre-set shared flag cancels typed AC"),
+            "aborted",
+        );
+        assert_js_error_code(
+            run_transient_document_js(CANCELLATION_DECK, 10.0e-6, 1.0e-9, 1, options())
+                .expect_err("pre-set shared flag cancels typed TRAN"),
+            "aborted",
+        );
+        assert_js_error_code(
+            run_noise_document_js(
+                CANCELLATION_DECK,
+                "out",
+                None,
+                "V1",
+                vec![1.0, 10.0],
+                1,
+                options(),
+            )
+            .expect_err("pre-set shared flag cancels typed noise"),
             "aborted",
         );
     }
@@ -3679,5 +4477,39 @@ mod tests {
         let decoded: TransientSnapshot = serde_wasm_bindgen::from_value(serialized)
             .expect("typed-array FFT contract round-trips to its Rust DTO");
         assert_eq!(decoded, snapshot);
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    fn result_document_windows_use_typed_numeric_and_validity_columns() {
+        let document = run_ac_document_detailed(TYPED_DOCUMENT_DECK, &[1.0, 10.0])
+            .expect("typed AC document executes under wasm32");
+        let window = document.window(0, 2, 128).expect("bounded window exists");
+        let serialized =
+            serialize_result_window_to_js(&window).expect("serialize typed result window");
+
+        let axes = js_array_property(&serialized, "axes").expect("axis collection exists");
+        assert!(
+            js_property(&axes.get(0), "values")
+                .expect("axis values exist")
+                .is_instance_of::<js_sys::Float64Array>()
+        );
+        let signals = js_array_property(&serialized, "signals").expect("signal collection exists");
+        let values = js_property(&signals.get(0), "values").expect("signal values exist");
+        assert!(
+            js_property(&values, "real")
+                .expect("complex real values exist")
+                .is_instance_of::<js_sys::Float64Array>()
+        );
+        assert!(
+            js_property(&values, "imaginary")
+                .expect("complex imaginary values exist")
+                .is_instance_of::<js_sys::Float64Array>()
+        );
+        assert!(
+            js_property(&values, "validity")
+                .expect("validity values exist")
+                .is_instance_of::<js_sys::Uint8Array>()
+        );
     }
 }

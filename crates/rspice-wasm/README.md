@@ -4,7 +4,8 @@ WebAssembly bindings for the RSpice simulation engine. The crate is
 deliberately thin: a single `src/lib.rs` exposes serializable snapshots,
 structured errors, and browser-safe execution policies over `rspice-core`, so
 a browser can parse a netlist and run DC operating-point, AC, and transient
-analyses entirely client-side. All numerical work happens in `rspice-core`;
+analyses entirely client-side. The versioned result-document API additionally
+maps scalar-deck DC sweeps and input-referred noise. All numerical work happens in `rspice-core`;
 this crate adapts inputs and serializes results across the JS boundary.
 
 This is what powers the "run it in your browser" demo on the project site.
@@ -27,6 +28,31 @@ by throwing an `RSpiceError` with stable structured fields.
 | `runAcAnalysis(source, frequencies[, options])` | netlist text, `Float64Array`/array of Hz values (non-empty, finite, and non-negative), and optional options | array of `{frequency, node_names, branch_names, voltages: {real, imag}, currents: {real, imag}}`, one entry per frequency |
 | `runTransientAnalysis(source, tstop, max_step[, options])` | netlist text, positive finite stop/max-step values, and optional options | complete analog transient inventory: accepted `time`/`step_sizes`, node and branch identities/waveforms, device operating-point and typed store traces, FFT products, and explicit compression provenance |
 | `runTransientAnalysisCompressed(source, tstop, max_step, compression[, options])` | the transient inputs plus a fail-closed compression object | the same complete transient DTO on a bounded decimated grid, with non-null compression provenance |
+| `runOperatingPointDocument(source, ordinal[, options])` | netlist and one-based analysis ordinal | retained version-1 typed analog result handle |
+| `runDcSweepDocument(source, sourceName, start, stop, step, ordinal[, options])` | scalar-deck linear source sweep | retained version-1 typed analog result handle |
+| `runAcAnalysisDocument(source, frequencies, ordinal[, options])` | explicit frequency grid | retained version-1 typed analog result handle |
+| `runTransientAnalysisDocument(source, tstop, maxStep, ordinal[, options])` | explicit transient interval | retained version-1 typed analog result handle |
+| `runNoiseAnalysisDocument(source, outputNode, referenceNode, inputSource, frequencies, ordinal[, options])` | named output/input and explicit positive frequency grid | retained version-1 typed analog result handle |
+
+The five `*Document` calls share the schema identity `rspice-analog-result`
+and schema version `1`. Each document retains a stable kind/ordinal ID such as
+`dc-002`, explicit `coordinateId: null` for these scalar-only calls, physical
+units where the engine has sound metadata, node/branch/device/analysis owners,
+real versus complex value types, branch currents, device observables, and
+device operating regions. Unknown device-observable units are `null`; they are
+not guessed from probe spelling.
+
+Document calls return a `WasmAnalogResultHandle`, not a full JavaScript sample
+tree. `handle.metadata()` copies only descriptors and reports `pointCount` and
+`maximumWindowValues`. `handle.readWindow(start, count)` returns a half-open
+aligned slice. Axis and real/complex sample columns are `Float64Array`; each
+signal carries a `Uint8Array` validity mask. A zero validity entry is an
+explicitly unavailable sample, so the same-position numeric placeholder must
+not be interpreted. Empty, out-of-range, overflowing, and over-budget windows
+fail with `code: "invalid_result_window"`. The default transfer ceiling is
+262,144 numeric/validity values and is further reduced by `maxResultValues`.
+This retained-handle contract avoids constructing a second full ordinary JS
+array copy of a large result.
 
 Transient numeric columns cross the JavaScript boundary as typed arrays:
 `time`, `step_sizes`, each retained voltage or branch-current waveform, and
@@ -44,7 +70,8 @@ and interval values must be finite and non-negative, and unknown fields are
 rejected. `maximumInterval: 0` disables the time-axis gap ceiling.
 
 Each transient FFT entry exposes the complete authored and resolved identity
-(`source_kind`, `source_text`, `authored_output`, `output_name`,
+(`analysis_id`, `parent_analysis_id`, one-based `ordinal`, `source_kind`,
+`source_text`, `authored_output`, `output_name`,
 `physical_type`), sampling/calibration metadata (`start_time`, `stop_time`,
 `sample_interval`, `point_count`, `accurate_sampling`, `coherent_gain`,
 `frequency_resolution`), mode selection (`format`, `mode`, `window`,
@@ -82,7 +109,7 @@ the browser build is single-threaded.
 
 ### Cancellation and deadlines
 
-Every OP, AC, TRAN, and compressed-TRAN browser export calls the corresponding
+Every OP, DC, AC, TRAN, noise, and compressed-TRAN browser export calls the corresponding
 abort-aware `rspice-core` entrypoint. Parsing uses the core abort-aware parser
 as well. There are two supported controls:
 
@@ -161,6 +188,8 @@ There are no submodules — `src/lib.rs` contains:
   (parallel real/imag vectors), `AcPointSnapshot`, the complete analog
   `TransientSnapshot`/device-op/store/compression family, and the complete
   `TransientFftSnapshot`/bins/metrics/harmonics DTO family
+- Versioned typed analog result documents for scalar OP, DC, AC, TRAN, and
+  noise, plus a retained handle that publishes bounded typed-array windows
 - Browser-safe resource defaults, typed per-call options, and input validation
 - Structured error conversion with stable machine-readable resource details
 - The `#[wasm_bindgen]` export shims
@@ -181,9 +210,11 @@ inside a dedicated module Web Worker so long solves do not block the page's
 UI event loop. Inside that worker the solve is still single-threaded; Verilog-A
 is not enabled here.
 
-Not exposed through these bindings: `.MEAS` evaluation, DC/parameter
-sweeps, noise, Monte Carlo, and every other advanced analysis — the
-binding surface is op/ac/tran only. The full application surface is the
+Not exposed through these bindings: authored `DeckPlan` STEP/TEMP axes,
+`.MEAS` evaluation, SP/port-noise, distortion, TF, STB, sensitivity,
+pole-zero, Fourier, Monte Carlo, PSS/PAC/PNoise, HB, and envelope. These remain
+explicitly unsupported in the generated non-UI capability matrix rather than
+being coerced into an OP/AC/TRAN shape. The full application surface is the
 [CLI](../rspice-cli/README.md), the
 [Python bindings](../rspice-python/README.md), and the
 [GUI](../rspice-ui/README.md).
@@ -213,12 +244,15 @@ defaults, option decoding, fail-closed field handling, structured error
 contracts, abort propagation across all four analog paths, and the analysis
 adapters. Transient tests compare the complete
 full and compressed analog inventories against `rspice-core`, exercise
-authored projection missingness and stable trace ordering, and run the real
+authored projection missingness and stable trace ordering, run the real
 compressed solver path under Node. FFT tests compare every DTO field and
 source-order position with `rspice-core`, round-trip the serializable records,
 and ratchet the documented field inventory. Wasm32 tests additionally assert
 that time-domain, bin, and ranked-harmonic columns use JavaScript typed arrays
-and that optional fields are explicit `null`. Node wasm-bindgen tests exercise
+and that optional fields are explicit `null`. Typed document tests execute all
+five mapped scalar analysis families, round-trip the versioned Serde document,
+reject a forward version, preserve complex/current/device data, and enforce
+bounded windows with explicit validity. Node wasm-bindgen tests exercise
 pre-set shared control words, zero deadlines, unsupported mechanisms, and
 ordinary-buffer rejection through the actual JavaScript exports. CI also builds the real
 `wasm32-unknown-unknown` artifact. The static browser contract is guarded by

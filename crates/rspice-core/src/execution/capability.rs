@@ -222,7 +222,7 @@ const CLI_ARTIFACT: &str = "CSV/text artifact exists, but no shared typed result
 const CLI_AXIS: &str =
     "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document";
 const CLI_AXIS_UNAVAILABLE: &str =
-    "CLI deck-axis preflight accepts only authored OP, DC, AC, TRAN, and HB child analyses";
+    "CLI has no authored deck-axis route for this analysis family";
 const PY_AXIS_UNAVAILABLE: &str =
     "typed direct API exists, but Engine.run has no authored axis route";
 const WASM_UNAVAILABLE: &str = "browser API has no result adapter for this family";
@@ -294,7 +294,7 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
         result: AnalysisResultKind::DcSweep,
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
-        wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
+        wasm: wasm_direct_only(),
         engine_adapter: adapter_typed_scalar_only(),
     },
     AnalysisResultCapability {
@@ -313,63 +313,63 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Noise,
-        cli: cli_artifact_scalar_only(),
+        cli: cli_artifact_axes(),
         python: python_mapped_axes(),
-        wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
+        wasm: wasm_direct_only(),
         engine_adapter: adapter_typed_scalar_only(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::SParameters,
-        cli: cli_artifact_scalar_only(),
+        cli: cli_artifact_axes(),
         python: python_mapped_axes(),
         wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::PortNoise,
-        cli: cli_artifact_scalar_only(),
+        cli: cli_artifact_axes(),
         python: python_mapped_axes(),
         wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Distortion,
-        cli: cli_artifact_scalar_only(),
+        cli: cli_artifact_axes(),
         python: python_mapped_axes(),
         wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::TransferFunction,
-        cli: cli_artifact_scalar_only(),
+        cli: cli_artifact_axes(),
         python: python_mapped_axes(),
         wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Stability,
-        cli: cli_artifact_scalar_only(),
+        cli: cli_artifact_axes(),
         python: python_mapped_axes(),
         wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Sensitivity,
-        cli: cli_artifact_scalar_only(),
+        cli: cli_artifact_axes(),
         python: python_mapped_axes(),
         wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::PoleZero,
-        cli: cli_artifact_scalar_only(),
+        cli: cli_artifact_axes(),
         python: python_mapped_axes(),
         wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Fourier,
-        cli: cli_artifact_scalar_only(),
+        cli: cli_artifact_axes(),
         python: python_mapped_axes(),
         wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
@@ -524,14 +524,18 @@ pub const SIGNAL_CAPABILITY_MATRIX: &[SignalCapability] = &[
         signal: SignalKind::DeviceObservable,
         cli: MappingStatus::Partial(ADVANCED_SIGNAL_SUBSET),
         python: MappingStatus::Partial(ADVANCED_SIGNAL_SUBSET),
-        wasm: MappingStatus::Partial("mapped for requested transient device traces only"),
+        wasm: MappingStatus::Partial(
+            "mapped for OP, DC, transient, and noise result documents",
+        ),
         engine_adapter: MappingStatus::Mapped,
     },
     SignalCapability {
         signal: SignalKind::Scalar,
         cli: MappingStatus::Partial(SIGNAL_ARTIFACT),
         python: MappingStatus::Partial(ADVANCED_SIGNAL_SUBSET),
-        wasm: MappingStatus::Partial("only family-specific scalar metadata is exposed"),
+        wasm: MappingStatus::Partial(
+            "mapped for transient integration and noise scalars; other result families remain unavailable",
+        ),
         engine_adapter: MappingStatus::Mapped,
     },
     SignalCapability {

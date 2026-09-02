@@ -9,18 +9,18 @@ This is an adapter inventory, not a claim of numerical qualification. `mapped` m
 | Result | CLI | Python | WASM | Engine adapter |
 |---|---|---|---|---|
 | `op` | partial / partial / partial | mapped / mapped / mapped | mapped / unsupported / unsupported | mapped / unsupported / unsupported |
-| `dc` | partial / partial / partial | mapped / mapped / mapped | unsupported / unsupported / unsupported | mapped / unsupported / unsupported |
+| `dc` | partial / partial / partial | mapped / mapped / mapped | mapped / unsupported / unsupported | mapped / unsupported / unsupported |
 | `ac` | partial / partial / partial | mapped / mapped / mapped | mapped / unsupported / unsupported | mapped / unsupported / unsupported |
 | `tran` | partial / partial / partial | mapped / mapped / mapped | mapped / unsupported / unsupported | mapped / unsupported / unsupported |
-| `noise` | partial / unsupported / unsupported | mapped / mapped / mapped | unsupported / unsupported / unsupported | mapped / unsupported / unsupported |
-| `sp` | partial / unsupported / unsupported | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
-| `port-noise` | partial / unsupported / unsupported | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
-| `distortion` | partial / unsupported / unsupported | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
-| `tf` | partial / unsupported / unsupported | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
-| `stb` | partial / unsupported / unsupported | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
-| `sensitivity` | partial / unsupported / unsupported | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
-| `pole-zero` | partial / unsupported / unsupported | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
-| `fourier` | partial / unsupported / unsupported | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
+| `noise` | partial / partial / partial | mapped / mapped / mapped | mapped / unsupported / unsupported | mapped / unsupported / unsupported |
+| `sp` | partial / partial / partial | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
+| `port-noise` | partial / partial / partial | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
+| `distortion` | partial / partial / partial | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
+| `tf` | partial / partial / partial | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
+| `stb` | partial / partial / partial | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
+| `sensitivity` | partial / partial / partial | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
+| `pole-zero` | partial / partial / partial | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
+| `fourier` | partial / partial / partial | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
 | `fft` | partial / partial / partial | mapped / mapped / mapped | mapped / unsupported / unsupported | unsupported / unsupported / unsupported |
 | `monte-carlo` | partial / unsupported / unsupported | mapped / partial / partial | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
 | `pss` | partial / unsupported / unsupported | mapped / unsupported / unsupported | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
@@ -41,7 +41,7 @@ Repeated forms with the same declaration are grouped. Every non-mapped declarati
 | `op` | Engine adapter | STEP, TEMP | unsupported | protocol-3 adapter does not consume DeckPlan axes |
 | `dc` | CLI | scalar | partial | CSV/text artifact exists, but no shared typed result document |
 | `dc` | CLI | STEP, TEMP | partial | shared deck axes execute, but the CLI artifact does not retain a typed coordinate document |
-| `dc` | WASM | scalar, STEP, TEMP | unsupported | browser API has no result adapter for this family |
+| `dc` | WASM | STEP, TEMP | unsupported | browser API does not consume DeckPlan axes |
 | `dc` | Engine adapter | STEP, TEMP | unsupported | protocol-3 adapter does not consume DeckPlan axes |
 | `ac` | CLI | scalar | partial | CSV/text artifact exists, but no shared typed result document |
 | `ac` | CLI | STEP, TEMP | partial | shared deck axes execute, but the CLI artifact does not retain a typed coordinate document |
@@ -52,39 +52,39 @@ Repeated forms with the same declaration are grouped. Every non-mapped declarati
 | `tran` | WASM | STEP, TEMP | unsupported | browser API does not consume DeckPlan axes |
 | `tran` | Engine adapter | STEP, TEMP | unsupported | protocol-3 adapter does not consume DeckPlan axes |
 | `noise` | CLI | scalar | partial | CSV/text artifact exists, but no shared typed result document |
-| `noise` | CLI | STEP, TEMP | unsupported | CLI deck-axis preflight accepts only authored OP, DC, AC, TRAN, and HB child analyses |
-| `noise` | WASM | scalar, STEP, TEMP | unsupported | browser API has no result adapter for this family |
+| `noise` | CLI | STEP, TEMP | partial | shared deck axes execute, but the CLI artifact does not retain a typed coordinate document |
+| `noise` | WASM | STEP, TEMP | unsupported | browser API does not consume DeckPlan axes |
 | `noise` | Engine adapter | STEP, TEMP | unsupported | protocol-3 adapter does not consume DeckPlan axes |
 | `sp` | CLI | scalar | partial | CSV/text artifact exists, but no shared typed result document |
-| `sp` | CLI | STEP, TEMP | unsupported | CLI deck-axis preflight accepts only authored OP, DC, AC, TRAN, and HB child analyses |
+| `sp` | CLI | STEP, TEMP | partial | shared deck axes execute, but the CLI artifact does not retain a typed coordinate document |
 | `sp` | WASM | scalar, STEP, TEMP | unsupported | browser API has no result adapter for this family |
 | `sp` | Engine adapter | scalar, STEP, TEMP | unsupported | protocol-3 adapter has no result mapping for this family |
 | `port-noise` | CLI | scalar | partial | CSV/text artifact exists, but no shared typed result document |
-| `port-noise` | CLI | STEP, TEMP | unsupported | CLI deck-axis preflight accepts only authored OP, DC, AC, TRAN, and HB child analyses |
+| `port-noise` | CLI | STEP, TEMP | partial | shared deck axes execute, but the CLI artifact does not retain a typed coordinate document |
 | `port-noise` | WASM | scalar, STEP, TEMP | unsupported | browser API has no result adapter for this family |
 | `port-noise` | Engine adapter | scalar, STEP, TEMP | unsupported | protocol-3 adapter has no result mapping for this family |
 | `distortion` | CLI | scalar | partial | CSV/text artifact exists, but no shared typed result document |
-| `distortion` | CLI | STEP, TEMP | unsupported | CLI deck-axis preflight accepts only authored OP, DC, AC, TRAN, and HB child analyses |
+| `distortion` | CLI | STEP, TEMP | partial | shared deck axes execute, but the CLI artifact does not retain a typed coordinate document |
 | `distortion` | WASM | scalar, STEP, TEMP | unsupported | browser API has no result adapter for this family |
 | `distortion` | Engine adapter | scalar, STEP, TEMP | unsupported | protocol-3 adapter has no result mapping for this family |
 | `tf` | CLI | scalar | partial | CSV/text artifact exists, but no shared typed result document |
-| `tf` | CLI | STEP, TEMP | unsupported | CLI deck-axis preflight accepts only authored OP, DC, AC, TRAN, and HB child analyses |
+| `tf` | CLI | STEP, TEMP | partial | shared deck axes execute, but the CLI artifact does not retain a typed coordinate document |
 | `tf` | WASM | scalar, STEP, TEMP | unsupported | browser API has no result adapter for this family |
 | `tf` | Engine adapter | scalar, STEP, TEMP | unsupported | protocol-3 adapter has no result mapping for this family |
 | `stb` | CLI | scalar | partial | CSV/text artifact exists, but no shared typed result document |
-| `stb` | CLI | STEP, TEMP | unsupported | CLI deck-axis preflight accepts only authored OP, DC, AC, TRAN, and HB child analyses |
+| `stb` | CLI | STEP, TEMP | partial | shared deck axes execute, but the CLI artifact does not retain a typed coordinate document |
 | `stb` | WASM | scalar, STEP, TEMP | unsupported | browser API has no result adapter for this family |
 | `stb` | Engine adapter | scalar, STEP, TEMP | unsupported | protocol-3 adapter has no result mapping for this family |
 | `sensitivity` | CLI | scalar | partial | CSV/text artifact exists, but no shared typed result document |
-| `sensitivity` | CLI | STEP, TEMP | unsupported | CLI deck-axis preflight accepts only authored OP, DC, AC, TRAN, and HB child analyses |
+| `sensitivity` | CLI | STEP, TEMP | partial | shared deck axes execute, but the CLI artifact does not retain a typed coordinate document |
 | `sensitivity` | WASM | scalar, STEP, TEMP | unsupported | browser API has no result adapter for this family |
 | `sensitivity` | Engine adapter | scalar, STEP, TEMP | unsupported | protocol-3 adapter has no result mapping for this family |
 | `pole-zero` | CLI | scalar | partial | CSV/text artifact exists, but no shared typed result document |
-| `pole-zero` | CLI | STEP, TEMP | unsupported | CLI deck-axis preflight accepts only authored OP, DC, AC, TRAN, and HB child analyses |
+| `pole-zero` | CLI | STEP, TEMP | partial | shared deck axes execute, but the CLI artifact does not retain a typed coordinate document |
 | `pole-zero` | WASM | scalar, STEP, TEMP | unsupported | browser API has no result adapter for this family |
 | `pole-zero` | Engine adapter | scalar, STEP, TEMP | unsupported | protocol-3 adapter has no result mapping for this family |
 | `fourier` | CLI | scalar | partial | CSV/text artifact exists, but no shared typed result document |
-| `fourier` | CLI | STEP, TEMP | unsupported | CLI deck-axis preflight accepts only authored OP, DC, AC, TRAN, and HB child analyses |
+| `fourier` | CLI | STEP, TEMP | partial | shared deck axes execute, but the CLI artifact does not retain a typed coordinate document |
 | `fourier` | WASM | scalar, STEP, TEMP | unsupported | browser API has no result adapter for this family |
 | `fourier` | Engine adapter | scalar, STEP, TEMP | unsupported | protocol-3 adapter has no result mapping for this family |
 | `fft` | CLI | scalar | partial | transient computes FFT results, but the CLI exporter does not publish them |
@@ -93,13 +93,13 @@ Repeated forms with the same declaration are grouped. Every non-mapped declarati
 | `fft` | WASM | STEP, TEMP | unsupported | browser API does not consume DeckPlan axes |
 | `fft` | Engine adapter | scalar, STEP, TEMP | unsupported | protocol-3 adapter has no result mapping for this family |
 | `monte-carlo` | CLI | scalar | partial | CSV/text artifact exists, but no shared typed result document |
-| `monte-carlo` | CLI | STEP, TEMP | unsupported | CLI deck-axis preflight accepts only authored OP, DC, AC, TRAN, and HB child analyses |
+| `monte-carlo` | CLI | STEP, TEMP | unsupported | CLI has no authored deck-axis route for this analysis family |
 | `monte-carlo` | Python | STEP | partial | nested STEP executes, but coordinate-derived Monte Carlo seed semantics are undefined |
 | `monte-carlo` | Python | TEMP | partial | nested TEMP executes, but coordinate-derived Monte Carlo seed semantics are undefined |
 | `monte-carlo` | WASM | scalar, STEP, TEMP | unsupported | browser API has no result adapter for this family |
 | `monte-carlo` | Engine adapter | scalar, STEP, TEMP | unsupported | protocol-3 adapter has no result mapping for this family |
 | `pss` | CLI | scalar | partial | CSV/text artifact exists, but no shared typed result document |
-| `pss` | CLI | STEP, TEMP | unsupported | CLI deck-axis preflight accepts only authored OP, DC, AC, TRAN, and HB child analyses |
+| `pss` | CLI | STEP, TEMP | unsupported | CLI has no authored deck-axis route for this analysis family |
 | `pss` | Python | STEP, TEMP | unsupported | typed direct API exists, but Engine.run has no authored axis route |
 | `pss` | WASM | scalar, STEP, TEMP | unsupported | browser API has no result adapter for this family |
 | `pss` | Engine adapter | scalar, STEP, TEMP | unsupported | protocol-3 adapter has no result mapping for this family |
@@ -127,8 +127,8 @@ Repeated forms with the same declaration are grouped. Every non-mapped declarati
 |---|---|---|---|---|
 | `voltage` | partial — export exists, but it is not a shared SignalDescriptor document | mapped | partial — mapped for a subset of result families only | mapped |
 | `current` | partial — export exists, but it is not a shared SignalDescriptor document | mapped | partial — mapped for a subset of result families only | mapped |
-| `device-observable` | partial — mapped for a subset of result families only | partial — mapped for a subset of result families only | partial — mapped for requested transient device traces only | mapped |
-| `scalar` | partial — export exists, but it is not a shared SignalDescriptor document | partial — mapped for a subset of result families only | partial — only family-specific scalar metadata is exposed | mapped |
+| `device-observable` | partial — mapped for a subset of result families only | partial — mapped for a subset of result families only | partial — mapped for OP, DC, transient, and noise result documents | mapped |
+| `scalar` | partial — export exists, but it is not a shared SignalDescriptor document | partial — mapped for a subset of result families only | partial — mapped for transient integration and noise scalars; other result families remain unavailable | mapped |
 | `digital` | unsupported — digital/AMS surface work is owned by the separate digital effort | unsupported — digital/AMS surface work is owned by the separate digital effort | unsupported — digital/AMS surface work is owned by the separate digital effort | unsupported — digital/AMS surface work is owned by the separate digital effort |
 
 ## Declared signal boundaries
@@ -141,10 +141,10 @@ Repeated forms with the same declaration are grouped. Every non-mapped declarati
 | `current` | WASM | partial | mapped for a subset of result families only |
 | `device-observable` | CLI | partial | mapped for a subset of result families only |
 | `device-observable` | Python | partial | mapped for a subset of result families only |
-| `device-observable` | WASM | partial | mapped for requested transient device traces only |
+| `device-observable` | WASM | partial | mapped for OP, DC, transient, and noise result documents |
 | `scalar` | CLI | partial | export exists, but it is not a shared SignalDescriptor document |
 | `scalar` | Python | partial | mapped for a subset of result families only |
-| `scalar` | WASM | partial | only family-specific scalar metadata is exposed |
+| `scalar` | WASM | partial | mapped for transient integration and noise scalars; other result families remain unavailable |
 | `digital` | CLI | unsupported | digital/AMS surface work is owned by the separate digital effort |
 | `digital` | Python | unsupported | digital/AMS surface work is owned by the separate digital effort |
 | `digital` | WASM | unsupported | digital/AMS surface work is owned by the separate digital effort |
