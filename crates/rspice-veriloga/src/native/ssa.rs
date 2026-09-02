@@ -25,8 +25,31 @@ use crate::jit::expr::{
 use crate::jit::value_cache::{native_op_hash, native_ops_are_codegen_identical};
 use crate::jit::{JitError, JitResult};
 use std::collections::HashMap;
+use std::fmt::Debug;
+use std::hash::{Hash, Hasher};
 
 const MODEL: &str = "native-ssa";
+
+/// Hash a value through its `Debug` rendering.
+///
+/// Used for the few key components that are exhaustively enumerated but not
+/// `Hash` — effect sets, value types, terminators. Their `Debug` output is
+/// derived and therefore total: two values render the same string exactly when
+/// they are equal.
+fn hash_debug<H: Hasher>(value: &impl Debug, hasher: &mut H) {
+    use std::fmt::Write as _;
+
+    struct HashWriter<'a, H: Hasher>(&'a mut H);
+
+    impl<H: Hasher> std::fmt::Write for HashWriter<'_, H> {
+        fn write_str(&mut self, value: &str) -> std::fmt::Result {
+            self.0.write(value.as_bytes());
+            Ok(())
+        }
+    }
+
+    write!(&mut HashWriter(hasher), "{value:?};").expect("hash writer cannot fail");
+}
 pub(crate) const INLINE_DYNAMIC_LOWER_ABS_LIMIT: i64 = 1_i64 << 51;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -558,6 +581,84 @@ impl Program {
 
     pub(crate) fn maximum_stack_depth(&self) -> usize {
         self.maximum_stack_depth
+    }
+
+    /// Feed this program's complete code-generation identity to `hasher`.
+    ///
+    /// A flat postfix program is keyed by its operation sequence because that
+    /// sequence is the whole of it. A block program is not: two programs can
+    /// carry the same instructions in the same order and still compile to
+    /// different code because a terminator sends control somewhere else, or
+    /// because a merge binds different arguments to its block parameters. So
+    /// the key walks every field the emitters read — blocks in layout order,
+    /// each block's parameters, its instructions, and its terminator — and
+    /// hashes operations through [`native_op_hash`], which is what keeps
+    /// `+0.0` and `-0.0` apart.
+    ///
+    /// Paired with [`Self::is_codegen_identical_to`]: the hash selects a
+    /// bucket and that comparison decides membership, so the hash may collide
+    /// but must never separate two programs the comparison calls identical.
+    pub(crate) fn codegen_identity_hash<H: Hasher>(&self, hasher: &mut H) {
+        self.entry.hash(hasher);
+        self.exit.hash(hasher);
+        self.maximum_stack_depth.hash(hasher);
+        self.blocks.len().hash(hasher);
+        for block in &self.blocks {
+            block.id.hash(hasher);
+            for parameter in &self.block_parameters[block.parameter_start..block.parameter_end] {
+                parameter.value.hash(hasher);
+                hash_debug(&parameter.value_type, hasher);
+            }
+            hash_debug(&block.terminator, hasher);
+            for instruction in &self.instructions[block.instruction_start..block.instruction_end] {
+                instruction.result.hash(hasher);
+                hash_debug(&instruction.value_type, hasher);
+                hash_debug(&instruction.effects, hasher);
+                native_op_hash(
+                    instruction.op,
+                    instruction.operands.iter().map(|operand| operand.index()),
+                )
+                .hash(hasher);
+            }
+        }
+    }
+
+    /// Whether two block programs compile to the same code.
+    ///
+    /// Structural equality with one deliberate departure from the derived
+    /// `PartialEq`: operations compare through
+    /// [`native_ops_are_codegen_identical`], so two programs that differ only
+    /// in the *bits* of a constant are different here even where `f64`
+    /// equality would call them the same, and two carrying the same NaN
+    /// payload are the same even where it would not.
+    pub(crate) fn is_codegen_identical_to(&self, other: &Self) -> bool {
+        if self.entry != other.entry
+            || self.exit != other.exit
+            || self.maximum_stack_depth != other.maximum_stack_depth
+            || self.blocks.len() != other.blocks.len()
+            || self.block_parameters != other.block_parameters
+            || self.instructions.len() != other.instructions.len()
+        {
+            return false;
+        }
+        if self
+            .blocks
+            .iter()
+            .zip(&other.blocks)
+            .any(|(left, right)| left != right)
+        {
+            return false;
+        }
+        self.instructions
+            .iter()
+            .zip(&other.instructions)
+            .all(|(left, right)| {
+                left.result == right.result
+                    && left.value_type == right.value_type
+                    && left.effects == right.effects
+                    && left.operands == right.operands
+                    && native_ops_are_codegen_identical(left.op, right.op)
+            })
     }
 
     pub(crate) fn uses_helper_calls(&self) -> bool {

@@ -2389,10 +2389,71 @@ impl NativeProgram {
     }
 }
 
+/// Which runtime read-set, if any, one operation contributes to.
+///
+/// The single place that decides this. Both program forms carry the same
+/// operations, so a flat postfix program and a block program have to agree
+/// about what an operation reads: a plan entry dispatched against one read-set
+/// and executed against another reads a value nothing published.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OpDependency {
+    /// A contribution current published by this same evaluation pass.
+    CurrentPair(usize),
+    /// A contribution current published by an earlier pass.
+    PriorCurrent(usize),
+    /// A branch unknown carried by the runtime's unknown vector.
+    BranchUnknown(usize),
+}
+
+pub(crate) fn op_dependency(op: NativeOp) -> Option<OpDependency> {
+    match op {
+        NativeOp::LoadCurrent(index) => Some(OpDependency::CurrentPair(index)),
+        NativeOp::LoadPriorCurrent(index) => Some(OpDependency::PriorCurrent(index)),
+        NativeOp::LoadBranchUnknown(index) => Some(OpDependency::BranchUnknown(index)),
+        _ => None,
+    }
+}
+
+/// The three read-sets an operation stream implies, in first-appearance order.
+///
+/// Order is part of the contract, not an accident of collection: recorded
+/// metadata is compared against these lists literally, so the same members in
+/// another order read as a mismatch.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct OpDependencies {
+    pub(crate) current_pairs: Vec<usize>,
+    pub(crate) prior_currents: Vec<usize>,
+    pub(crate) branch_unknowns: Vec<usize>,
+}
+
+/// Collect all three read-sets in one pass over an operation stream.
+///
+/// Takes an iterator rather than a slice because a block program's operations
+/// are not contiguous: they sit inside its instructions, and the traversal that
+/// visits them in layout order is the block program's own.
+pub(crate) fn collect_op_dependencies(ops: impl IntoIterator<Item = NativeOp>) -> OpDependencies {
+    let mut collected = OpDependencies::default();
+    for op in ops {
+        match op_dependency(op) {
+            Some(OpDependency::CurrentPair(index)) => {
+                push_unique_dependency(&mut collected.current_pairs, index);
+            }
+            Some(OpDependency::PriorCurrent(index)) => {
+                push_unique_dependency(&mut collected.prior_currents, index);
+            }
+            Some(OpDependency::BranchUnknown(index)) => {
+                push_unique_dependency(&mut collected.branch_unknowns, index);
+            }
+            None => {}
+        }
+    }
+    collected
+}
+
 fn collect_current_pair_dependencies(ops: &[NativeOp]) -> Vec<usize> {
     let mut dependencies = Vec::new();
     for op in ops {
-        if let NativeOp::LoadCurrent(index) = *op {
+        if let Some(OpDependency::CurrentPair(index)) = op_dependency(*op) {
             push_unique_dependency(&mut dependencies, index);
         }
     }
@@ -2402,7 +2463,7 @@ fn collect_current_pair_dependencies(ops: &[NativeOp]) -> Vec<usize> {
 fn collect_prior_current_dependencies(ops: &[NativeOp]) -> Vec<usize> {
     let mut dependencies = Vec::new();
     for op in ops {
-        if let NativeOp::LoadPriorCurrent(index) = *op {
+        if let Some(OpDependency::PriorCurrent(index)) = op_dependency(*op) {
             push_unique_dependency(&mut dependencies, index);
         }
     }
@@ -2412,7 +2473,7 @@ fn collect_prior_current_dependencies(ops: &[NativeOp]) -> Vec<usize> {
 fn collect_branch_unknown_dependencies(ops: &[NativeOp]) -> Vec<usize> {
     let mut dependencies = Vec::new();
     for op in ops {
-        if let NativeOp::LoadBranchUnknown(index) = *op {
+        if let Some(OpDependency::BranchUnknown(index)) = op_dependency(*op) {
             push_unique_dependency(&mut dependencies, index);
         }
     }
