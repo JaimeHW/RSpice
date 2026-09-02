@@ -196,6 +196,101 @@ pub enum TransientCheckpointEncoding {
     Packed,
 }
 
+/// State owner that prevents a transient checkpoint from being resumed.
+///
+/// Frontends may use this stable, typed classification for diagnostics and
+/// capability reporting without parsing the human-readable blocker text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[non_exhaustive]
+pub enum TransientCheckpointBlockerSource {
+    /// Required checkpoint provenance or continuation metadata is absent.
+    Structural,
+    /// A scalar or distributed transmission-line history is incomplete.
+    TransmissionLine,
+    /// Accepted native diode/BJT limiter or evaluation state is incomplete.
+    NativeNonlinearState,
+    /// Engine-owned accepted diode/BJT charge or predictor history is incomplete.
+    JunctionHistory,
+    /// Accepted solver, controller, or device-integration runtime is incomplete.
+    IntegrationRuntime,
+    /// XSPICE, Verilog-A, or another extension runtime owns incomplete state.
+    ExtensionState,
+}
+
+impl TransientCheckpointBlockerSource {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Structural => "structural checkpoint state",
+            Self::TransmissionLine => "transmission-line state",
+            Self::NativeNonlinearState => "accepted native diode/BJT state",
+            Self::JunctionHistory => "accepted BJT/diode transient history",
+            Self::IntegrationRuntime => "accepted integration runtime",
+            Self::ExtensionState => "extension state",
+        }
+    }
+}
+
+/// One deterministic reason a transient checkpoint cannot be resumed.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct TransientCheckpointBlocker {
+    pub source: TransientCheckpointBlockerSource,
+    pub message: String,
+}
+
+impl TransientCheckpointBlocker {
+    pub(crate) fn new(
+        source: TransientCheckpointBlockerSource,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            source,
+            message: message.into(),
+        }
+    }
+}
+
+/// Core-owned result of checkpoint capability preflight.
+///
+/// An empty blocker inventory is the only state that permits a resumable
+/// checkpoint to be published. Blockers are sorted and duplicate-free so the
+/// result is deterministic across native surfaces.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TransientCheckpointCapability {
+    blockers: Vec<TransientCheckpointBlocker>,
+}
+
+impl TransientCheckpointCapability {
+    pub(crate) fn from_blockers(mut blockers: Vec<TransientCheckpointBlocker>) -> Self {
+        blockers.sort_unstable();
+        blockers.dedup();
+        Self { blockers }
+    }
+
+    /// Whether core can publish this state as a resumable checkpoint.
+    pub fn is_resumable(&self) -> bool {
+        self.blockers.is_empty()
+    }
+
+    /// Complete deterministic blocker inventory.
+    pub fn blockers(&self) -> &[TransientCheckpointBlocker] {
+        &self.blockers
+    }
+
+    pub(crate) fn require_resumable(&self) -> Result<(), String> {
+        if self.is_resumable() {
+            return Ok(());
+        }
+        Err(format!(
+            "transient checkpoint capability preflight failed: {}",
+            self.blockers
+                .iter()
+                .map(|blocker| format!("{}: {}", blocker.source.as_str(), blocker.message))
+                .collect::<Vec<_>>()
+                .join("; ")
+        ))
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum IntegrationContinuation {
     /// Legacy formats omitted or incompletely recorded the accepted
@@ -4653,51 +4748,109 @@ fn accepted_integration_runtime_retained_value_count(
 }
 
 impl TransientCheckpoint {
+    /// Return the typed capability of this captured checkpoint image.
+    ///
+    /// This reports both explicit capture-time blockers and incomplete legacy
+    /// metadata that guarantees the normal resume path will reject the image.
+    /// It does not replace exact netlist/configuration identity validation,
+    /// which is performed again when a checkpoint is captured or resumed.
+    pub fn capability(&self) -> TransientCheckpointCapability {
+        let mut blockers = Vec::new();
+        let mut push = |source, message: String| {
+            blockers.push(TransientCheckpointBlocker::new(source, message));
+        };
+
+        for blocker in &self.accepted_junction_history.resume_blockers {
+            push(
+                TransientCheckpointBlockerSource::JunctionHistory,
+                blocker.clone(),
+            );
+        }
+        for blocker in &self.accepted_nonlinear_states.resume_blockers {
+            push(
+                TransientCheckpointBlockerSource::NativeNonlinearState,
+                blocker.clone(),
+            );
+        }
+        for blocker in &self.tline_resume_blockers {
+            push(
+                TransientCheckpointBlockerSource::TransmissionLine,
+                blocker.clone(),
+            );
+        }
+        for blocker in &self.xspice_resume_blockers {
+            push(
+                TransientCheckpointBlockerSource::ExtensionState,
+                blocker.clone(),
+            );
+        }
+        match &self.accepted_integration_runtime {
+            AcceptedIntegrationRuntime::UnavailableLegacy => push(
+                TransientCheckpointBlockerSource::Structural,
+                "accepted integration runtime is unavailable".to_string(),
+            ),
+            AcceptedIntegrationRuntime::RestartNormalized(runtime) => {
+                for blocker in &runtime.resume_blockers {
+                    push(
+                        TransientCheckpointBlockerSource::IntegrationRuntime,
+                        blocker.clone(),
+                    );
+                }
+            }
+            AcceptedIntegrationRuntime::Exact(runtime) => {
+                for blocker in &runtime.resume_blockers {
+                    push(
+                        TransientCheckpointBlockerSource::IntegrationRuntime,
+                        blocker.clone(),
+                    );
+                }
+            }
+        }
+
+        for (missing, message) in [
+            (
+                self.netlist_identity.is_none(),
+                "collision-resistant netlist identity is unavailable",
+            ),
+            (
+                self.simulation_identity.is_none(),
+                "resolved simulation configuration identity is unavailable",
+            ),
+            (
+                self.startup_mode.is_none(),
+                "transient startup mode is unavailable",
+            ),
+            (
+                self.integration_max_step.is_none(),
+                "captured segment maximum step is unavailable",
+            ),
+            (
+                matches!(
+                    self.integration_continuation,
+                    IntegrationContinuation::Unavailable
+                ),
+                "integration continuation state is unavailable",
+            ),
+        ] {
+            if missing {
+                push(
+                    TransientCheckpointBlockerSource::Structural,
+                    message.to_string(),
+                );
+            }
+        }
+
+        TransientCheckpointCapability::from_blockers(blockers)
+    }
+
     /// Refuse to persist a checkpoint that capture already proved cannot be
     /// resumed. This runs before encoding so an unusable image cannot consume
     /// serialization work or reach the atomic writer's temporary-file path.
     fn validate_persistence_preflight(&self) -> Result<(), String> {
         self.validate_numeric_state()?;
-
-        let blocker = self
-            .accepted_junction_history
-            .resume_blockers
-            .first()
-            .map(|blocker| ("accepted BJT/diode transient history", blocker.as_str()))
-            .or_else(|| {
-                self.accepted_nonlinear_states
-                    .resume_blockers
-                    .first()
-                    .map(|blocker| ("accepted native diode/BJT state", blocker.as_str()))
-            })
-            .or_else(|| {
-                self.tline_resume_blockers
-                    .first()
-                    .map(|blocker| ("transmission-line state", blocker.as_str()))
-            })
-            .or_else(|| {
-                self.xspice_resume_blockers
-                    .first()
-                    .map(|blocker| ("XSPICE state", blocker.as_str()))
-            })
-            .or_else(|| match &self.accepted_integration_runtime {
-                AcceptedIntegrationRuntime::UnavailableLegacy => None,
-                AcceptedIntegrationRuntime::RestartNormalized(runtime) => runtime
-                    .resume_blockers
-                    .first()
-                    .map(|blocker| ("restart-normalized integration runtime", blocker.as_str())),
-                AcceptedIntegrationRuntime::Exact(runtime) => runtime
-                    .resume_blockers
-                    .first()
-                    .map(|blocker| ("accepted integration runtime", blocker.as_str())),
-            });
-
-        if let Some((state, blocker)) = blocker {
-            return Err(format!(
-                "refusing to save unusable transient checkpoint: captured {state} resume blocker: {blocker}"
-            ));
-        }
-        Ok(())
+        self.capability()
+            .require_resumable()
+            .map_err(|error| format!("refusing to save unusable transient checkpoint: {error}"))
     }
 
     fn validate_numeric_state(&self) -> Result<(), String> {
@@ -5538,6 +5691,56 @@ impl TransientCheckpoint {
             #[cfg(feature = "veriloga")]
             runtime_veriloga_instance_states,
         })
+    }
+
+    /// Capture only state that can pass the normal resume contract for the
+    /// exact authored netlist and resolved simulation configuration.
+    ///
+    /// The lower-level capture routine remains available inside the engine
+    /// for authenticated HB/PSS synthetic-origin state. Any transient API
+    /// that publishes a user-resumable checkpoint must use this constructor.
+    pub(super) fn capture_resumable(
+        target_netlist: &Netlist,
+        config: &SimulationConfig,
+        fingerprint: u64,
+        netlist_identity: Option<String>,
+        restart_identity: Option<String>,
+        simulation_identity: String,
+        time: Value,
+        solution: &[Value],
+        circuit: &CircuitData,
+        startup_mode: TransientStartupMode,
+        integration_max_step: Option<Value>,
+        integration_continuation: Option<ProposedIntegrationContinuation>,
+        pending_tline_arrivals: &[Value],
+        dynamic_tline_breakpoints_added: usize,
+        accepted_junction_history: AcceptedJunctionTransientHistoryCheckpoint,
+        accepted_integration_runtime: AcceptedIntegrationRuntime,
+        lte_estimator: Option<&LteEstimator>,
+    ) -> Result<Self, String> {
+        let checkpoint = Self::capture_with_restart_identity(
+            fingerprint,
+            netlist_identity,
+            restart_identity,
+            simulation_identity,
+            time,
+            solution,
+            circuit,
+            startup_mode,
+            integration_max_step,
+            integration_continuation,
+            pending_tline_arrivals,
+            dynamic_tline_breakpoints_added,
+            accepted_junction_history,
+            accepted_integration_runtime,
+            lte_estimator,
+        )?;
+        checkpoint.validate_numeric_state()?;
+        checkpoint.capability().require_resumable()?;
+        checkpoint.validate_for_with_config(target_netlist, config)?;
+        checkpoint.validate_recorded_integration_max_step()?;
+        checkpoint.validated_integration_continuation()?;
+        Ok(checkpoint)
     }
 
     #[cfg(test)]
@@ -10969,7 +11172,11 @@ mod tests {
 
         let mut xspice = sample();
         xspice.xspice_resume_blockers = vec!["A1(gain): model owns pending state".to_string()];
-        cases.push((xspice, "XSPICE state", "A1(gain): model owns pending state"));
+        cases.push((
+            xspice,
+            "extension state",
+            "A1(gain): model owns pending state",
+        ));
 
         let mut runtime = sample();
         let AcceptedIntegrationRuntime::Exact(accepted) = &mut runtime.accepted_integration_runtime
@@ -10996,7 +11203,7 @@ mod tests {
         runtime.resume_blockers = vec!["pending retry state is not canonical".to_string()];
         cases.push((
             normalized,
-            "restart-normalized integration runtime",
+            "accepted integration runtime",
             "pending retry state is not canonical",
         ));
 
@@ -11006,7 +11213,7 @@ mod tests {
                     .validate_persistence_preflight()
                     .expect_err("captured resume blocker must refuse persistence"),
                 format!(
-                    "refusing to save unusable transient checkpoint: captured {state} resume blocker: {blocker}"
+                    "refusing to save unusable transient checkpoint: transient checkpoint capability preflight failed: {state}: {blocker}"
                 )
             );
         }
@@ -11035,7 +11242,7 @@ mod tests {
         assert_eq!(
             error,
             format!(
-                "refusing to save unusable transient checkpoint: captured accepted BJT/diode transient history resume blocker: {blocker}"
+                "refusing to save unusable transient checkpoint: transient checkpoint capability preflight failed: accepted BJT/diode transient history: {blocker}"
             )
         );
         assert!(
@@ -11080,7 +11287,7 @@ mod tests {
             assert_eq!(
                 error,
                 format!(
-                    "refusing to save unusable transient checkpoint: captured transmission-line state resume blocker: {blocker}"
+                    "refusing to save unusable transient checkpoint: transient checkpoint capability preflight failed: transmission-line state: {blocker}"
                 )
             );
             assert_eq!(

@@ -385,8 +385,9 @@ mod vbic;
 
 pub use self::{
     checkpoint::{
-        DEFAULT_MAX_CHECKPOINT_BYTES, TransientCheckpoint, TransientCheckpointEncoding,
-        netlist_fingerprint,
+        DEFAULT_MAX_CHECKPOINT_BYTES, TransientCheckpoint, TransientCheckpointBlocker,
+        TransientCheckpointBlockerSource, TransientCheckpointCapability,
+        TransientCheckpointEncoding, netlist_fingerprint,
     },
     restart::{
         XYCE_RESTART_SCHEDULE_TOLERANCE, XyceRestartJobPlan, XyceRestartPlanError,
@@ -2012,6 +2013,29 @@ impl Engine {
         Ok(selected.unwrap_or(TransientStartupMode::OperatingPoint))
     }
 
+    /// Elaborate a transient deck and return its typed checkpoint capability
+    /// without running the solver.
+    pub fn preflight_transient_checkpoint(
+        &self,
+        netlist: &Netlist,
+    ) -> Result<TransientCheckpointCapability, SimulationError> {
+        self.preflight_transient_checkpoint_with_abort(netlist, &NoAbort)
+    }
+
+    /// Cancellable form of [`Engine::preflight_transient_checkpoint`].
+    pub fn preflight_transient_checkpoint_with_abort(
+        &self,
+        netlist: &Netlist,
+        abort: &dyn AbortSignal,
+    ) -> Result<TransientCheckpointCapability, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        let engine = self.resolved_for_netlist(netlist);
+        let circuit = engine.build_circuit_with_abort(netlist, abort)?;
+        Self::transient_checkpoint_capability_for_circuit(&circuit, abort)
+    }
+
     /// Run a transient and additionally return the end-of-run state
     /// checkpoint, for segmented long simulations: save it, then extend
     /// later with [`Engine::run_tran_resume`].
@@ -2660,10 +2684,92 @@ impl Engine {
         blockers
     }
 
+    /// Inspect one elaborated circuit for every state owner that can prove a
+    /// future accepted transient checkpoint unresumable before solver work.
+    fn transient_checkpoint_capability_for_circuit(
+        circuit: &crate::circuit::CircuitData,
+        abort: &dyn AbortSignal,
+    ) -> Result<TransientCheckpointCapability, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+
+        let mut blockers = Vec::new();
+        let mut push = |source, message| {
+            blockers.push(TransientCheckpointBlocker::new(source, message));
+        };
+
+        for (index, line) in circuit.tlines.iter().enumerate() {
+            if index.is_multiple_of(64) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            if let Err(message) = line.checkpoint_state() {
+                push(TransientCheckpointBlockerSource::TransmissionLine, message);
+            }
+        }
+        for (index, line) in circuit.coupled_tlines.iter().enumerate() {
+            if index.is_multiple_of(64) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            push(
+                TransientCheckpointBlockerSource::TransmissionLine,
+                format!(
+                    "coupled transmission line '{}': convolution history is not checkpointable",
+                    line.name
+                ),
+            );
+        }
+
+        let native = circuit.capture_accepted_native_nonlinear_checkpoint_states();
+        for message in native.resume_blockers {
+            push(
+                TransientCheckpointBlockerSource::NativeNonlinearState,
+                message,
+            );
+        }
+        for (index, bjt) in circuit.bjts.devices.iter().enumerate() {
+            if index.is_multiple_of(64) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            if !bjt.uses_legacy_gummel_poon() {
+                push(
+                    TransientCheckpointBlockerSource::JunctionHistory,
+                    format!(
+                        "BJT '{}' transient history is not checkpointable; only the legacy Gummel-Poon runtime has a complete history contract",
+                        bjt.name
+                    ),
+                );
+            }
+        }
+
+        for message in circuit.xspice_checkpoint_resume_blockers() {
+            push(TransientCheckpointBlockerSource::ExtensionState, message);
+        }
+        if let Err(message) = circuit.generated_veriloga_checkpoint_states() {
+            push(TransientCheckpointBlockerSource::ExtensionState, message);
+        }
+        #[cfg(feature = "veriloga")]
+        if let Err(message) = circuit.runtime_veriloga_checkpoint_states() {
+            push(TransientCheckpointBlockerSource::ExtensionState, message);
+        }
+
+        for message in Self::exact_integration_runtime_resume_blockers(circuit, 1) {
+            push(
+                TransientCheckpointBlockerSource::IntegrationRuntime,
+                message,
+            );
+        }
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        Ok(TransientCheckpointCapability::from_blockers(blockers))
+    }
+
     fn capture_scheduled_checkpoint_if_due(
         &self,
         scheduled_times: &[Value],
         cursor: &mut usize,
+        checkpoint_netlist: &Netlist,
         accepted_time: Value,
         fingerprint: u64,
         netlist_identity: &Option<String>,
@@ -2747,7 +2853,7 @@ impl Engine {
                         xyce_step_failure_count: accepted_integration_runtime_capture
                             .xyce_step_failure_count,
                         stale_accept_count: accepted_integration_runtime_capture.stale_accept_count,
-                        resume_blockers: &[],
+                        resume_blockers: accepted_integration_runtime_capture.resume_blockers,
                     },
                 )
                 .map_err(SimulationError::Circuit)?,
@@ -2762,7 +2868,9 @@ impl Engine {
                 .map_err(SimulationError::Circuit)?,
             ))
         };
-        let checkpoint = TransientCheckpoint::capture_with_restart_identity(
+        let checkpoint = TransientCheckpoint::capture_resumable(
+            checkpoint_netlist,
+            &self.config,
             fingerprint,
             netlist_identity.clone(),
             restart_identity.clone(),
@@ -2869,6 +2977,11 @@ impl Engine {
         let record_xspice_event_traces = netlist.options.xspice_event_trace_save.unwrap_or(true);
         let record_device_op_traces = Self::should_record_transient_device_op_traces(netlist);
         let mut circuit = self.build_circuit_with_abort(netlist, abort)?;
+        if final_checkpoint_retention.is_retained() || !scheduled_checkpoint_times.is_empty() {
+            Self::transient_checkpoint_capability_for_circuit(&circuit, abort)?
+                .require_resumable()
+                .map_err(SimulationError::Circuit)?;
+        }
         if circuit.num_nodes() == 0 && circuit.num_branches() == 0 {
             let mut result = TransientResult {
                 time: vec![0.0],
@@ -2893,7 +3006,9 @@ impl Engine {
             let final_checkpoint = if final_checkpoint_retention.is_retained()
                 || !scheduled_checkpoint_times.is_empty()
             {
-                let checkpoint = TransientCheckpoint::capture_with_restart_identity(
+                let checkpoint = TransientCheckpoint::capture_resumable(
+                    checkpoint_netlist,
+                    &self.config,
                     fingerprint,
                     netlist_identity,
                     restart_identity,
@@ -4455,6 +4570,7 @@ impl Engine {
         self.capture_scheduled_checkpoint_if_due(
             scheduled_checkpoint_times,
             &mut scheduled_checkpoint_cursor,
+            checkpoint_netlist,
             resume_time,
             fingerprint,
             &netlist_identity,
@@ -7920,6 +8036,7 @@ impl Engine {
                     self.capture_scheduled_checkpoint_if_due(
                         scheduled_checkpoint_times,
                         &mut scheduled_checkpoint_cursor,
+                        checkpoint_netlist,
                         t,
                         fingerprint,
                         &netlist_identity,
@@ -8526,6 +8643,7 @@ impl Engine {
             self.capture_scheduled_checkpoint_if_due(
                 scheduled_checkpoint_times,
                 &mut scheduled_checkpoint_cursor,
+                checkpoint_netlist,
                 t,
                 fingerprint,
                 &netlist_identity,
@@ -8673,6 +8791,8 @@ impl Engine {
             )));
         }
         let final_checkpoint = if final_checkpoint_retention.is_retained() {
+            let final_runtime_resume_blockers =
+                Self::exact_integration_runtime_resume_blockers(&circuit, accepted_interval_count);
             let final_accepted_junction_history =
                 Self::capture_accepted_junction_transient_history_checkpoint(
                     &circuit,
@@ -8710,13 +8830,15 @@ impl Engine {
                         retry_count,
                         xyce_step_failure_count,
                         stale_accept_count,
-                        resume_blockers: &[],
+                        resume_blockers: &final_runtime_resume_blockers,
                     },
                 )
                 .map_err(SimulationError::Circuit)?,
             );
             Some(
-                TransientCheckpoint::capture_with_restart_identity(
+                TransientCheckpoint::capture_resumable(
+                    checkpoint_netlist,
+                    &self.config,
                     fingerprint,
                     netlist_identity,
                     restart_identity,

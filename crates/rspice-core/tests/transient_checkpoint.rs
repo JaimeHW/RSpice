@@ -4,10 +4,11 @@
 
 use std::sync::Arc;
 
+use rspice_core::abort_signal::ImmediateAbort;
 use rspice_core::engine::ConvergenceConfig;
 use rspice_core::engine::{
-    Engine, SimulationConfig, SpiceDialect, TransientCheckpoint, TransientCheckpointEncoding,
-    TransientStartupMode,
+    Engine, SimulationConfig, SimulationError, SpiceDialect, TransientCheckpoint,
+    TransientCheckpointEncoding, TransientStartupMode,
 };
 use rspice_core::netlist::Netlist;
 use rspice_core::numerics::integration::{IntegrationMethod, TransientErrorControl};
@@ -43,6 +44,15 @@ rload out 0 1k
 .tran 1n 40n
 .end
 ";
+
+#[test]
+fn checkpoint_capability_preflight_honors_cancellation() {
+    let netlist = Netlist::parse(DECK).expect("checkpoint fixture parses");
+    let error = Engine::default()
+        .preflight_transient_checkpoint_with_abort(&netlist, &ImmediateAbort)
+        .expect_err("cancelled preflight must not elaborate or solve");
+    assert!(matches!(error, SimulationError::Aborted));
+}
 
 const TAU_STEP: f64 = 1e-9;
 
@@ -1077,7 +1087,7 @@ rload out 0 1k
 }
 
 #[test]
-fn event_driven_xspice_checkpoint_resume_is_refused_until_event_state_is_serialized() {
+fn event_driven_xspice_checkpoint_is_refused_during_preflight() {
     let uri = "virtual://transient_checkpoint/event_state_blocker";
     register_data_file(uri, "0 0s\n1n 1s\n").expect("register virtual d_source data");
     let deck = format!(
@@ -1095,19 +1105,23 @@ rload out 0 1k
     let netlist = Netlist::parse(&deck).expect("XSPICE event deck parses");
     let engine = Engine::new(SimulationConfig::default());
 
-    let (_, checkpoint) = engine
-        .run_tran_checkpointed(&netlist, 1e-9, 100e-12)
-        .expect("first XSPICE event segment can run");
+    let capability = engine
+        .preflight_transient_checkpoint(&netlist)
+        .expect("checkpoint capability preflight elaborates the deck");
+    assert!(!capability.is_resumable());
+    assert!(capability.blockers().iter().any(|blocker| {
+        blocker.source == rspice_core::engine::TransientCheckpointBlockerSource::ExtensionState
+            && blocker.message.contains("event node values")
+    }));
     let err = engine
-        .run_tran_resume(&netlist, &checkpoint, 2e-9, 100e-12)
-        .expect_err("event-driven XSPICE checkpoint resume must be refused");
+        .run_tran_checkpointed(&netlist, 1e-9, 100e-12)
+        .expect_err("event-driven XSPICE checkpoint must be refused before solver work");
     let _ = unregister_data_file(uri);
     let message = format!("{err}");
     assert!(
-        message.contains("XSPICE")
-            && message.contains("event node values")
-            && message.contains("Run XSPICE transient decks unsegmented"),
-        "diagnostic should explain the unsupported checkpoint boundary: {message}"
+        message.contains("checkpoint capability preflight failed")
+            && message.contains("event node values"),
+        "diagnostic should explain the unsupported checkpoint before solving: {message}"
     );
 }
 

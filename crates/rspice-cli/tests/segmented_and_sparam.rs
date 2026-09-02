@@ -16,6 +16,55 @@ fn run_rspice(args: &[&str]) -> std::process::Output {
         .expect("run rspice")
 }
 
+#[test]
+fn unusable_explicit_checkpoint_is_refused_before_write_and_preserves_destination() {
+    let dir = test_dir("checkpoint_preflight_preserves_destination");
+    let deck = dir.join("stateful.cir");
+    std::fs::write(
+        &deck,
+        "checkpoint preflight blocker\n\
+         V1 in 0 1\n\
+         B1 out 0 V={SDT(V(in))}\n\
+         R1 out 0 1k\n\
+         .TRAN 1n 10n\n\
+         .END\n",
+    )
+    .expect("write blocked checkpoint deck");
+    let checkpoint = dir.join("state.chk");
+    let original = b"last known good checkpoint bytes";
+    std::fs::write(&checkpoint, original).expect("seed existing checkpoint");
+
+    let output = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "--checkpoint",
+        checkpoint.to_str().unwrap(),
+    ]);
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("checkpoint capability preflight failed")
+            && stderr.contains("behavioral-source accepted SDT state is not checkpointed"),
+        "CLI must surface core checkpoint capability failure: {stderr}"
+    );
+    assert_eq!(
+        std::fs::read(&checkpoint).expect("read preserved checkpoint"),
+        original,
+        "preflight refusal must preserve the previous destination byte-for-byte"
+    );
+    assert!(
+        std::fs::read_dir(&dir).unwrap().all(|entry| !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains(".rspice-checkpoint.tmp.")),
+        "preflight refusal must not create an atomic-write temporary"
+    );
+    std::fs::remove_dir_all(dir).expect("remove checkpoint preflight fixture");
+}
+
 fn last_vout(path: &std::path::Path) -> (f64, f64) {
     let text = std::fs::read_to_string(path).expect("read csv");
     let header: Vec<&str> = text.lines().next().expect("header").split(',').collect();

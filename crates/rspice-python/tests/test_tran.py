@@ -179,6 +179,23 @@ class TestTransientValidation:
 
 
 class TestTransientCheckpoint:
+    def test_unresumable_checkpoint_is_refused_during_run_preflight(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* checkpoint capability blocker
+V1 in 0 1
+B1 out 0 V={SDT(V(in))}
+R1 out 0 1k
+.end
+"""
+        )
+        with pytest.raises(
+            rspice.SimulationError,
+            match="checkpoint capability preflight failed.*behavioral-source accepted SDT state",
+        ):
+            engine.run_tran_checkpointed(
+                netlist, stop_time=10e-9, max_step=1e-9
+            )
+
     def test_segmented_resume_matches_uninterrupted_final_state(self, engine):
         netlist = rspice.Netlist.parse(RC_STEP)
         full = engine.run_tran(netlist, stop_time=1e-3, max_step=1e-6)

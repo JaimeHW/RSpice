@@ -120,7 +120,8 @@ pub use result::{
 pub use stb::StbAnalysisResult;
 pub use step::{MaterializedStepRun, StepPlan, StepPlanLimits};
 pub use transient::{
-    DEFAULT_MAX_CHECKPOINT_BYTES, TransientCheckpoint, TransientCheckpointEncoding,
+    DEFAULT_MAX_CHECKPOINT_BYTES, TransientCheckpoint, TransientCheckpointBlocker,
+    TransientCheckpointBlockerSource, TransientCheckpointCapability, TransientCheckpointEncoding,
     TransientStartupMode, XYCE_RESTART_SCHEDULE_TOLERANCE, XyceRestartJobPlan,
     XyceRestartPlanError, netlist_fingerprint, xyce_restart_schedule_is_due,
 };
