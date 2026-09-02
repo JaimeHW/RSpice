@@ -849,9 +849,11 @@ pub fn split(
             return Ok(());
         }
         if function.value(value).value_type.shape().is_some() {
-            // `raise_packed` puts every one of these in the last stage, so
-            // reaching here means the classification changed under this and a
-            // Jacobian would silently be a stale one.
+            // `classify` seeds every packed value as Newton-class before the
+            // fixed point runs, and `propagate` only ever raises a class, so a
+            // packed value is in the last stage by construction. Reaching here
+            // means the classification changed under this and a Jacobian would
+            // silently be a stale one.
             return Err(SplitError::PackedValueCrossesStages(value));
         }
         if slots[usize::from(value)].is_none() {
