@@ -41,8 +41,6 @@ use crate::native::model::NativeRequiredStorage;
 use crate::native::runtime::ExecutableMemory;
 use crate::native::x64::codegen::compile_value_function_artifact_from_ssa;
 use crate::rust_backend::canonical::{noise_plan_decline, stored_charges};
-use crate::rust_backend::discover_veriloga_sources;
-use crate::{CompilerOptions, VerilogACompiler};
 
 /// Outputs lowered and compared per model.
 ///
@@ -1387,92 +1385,92 @@ fn the_two_state_slot_numberings_are_censused_over_the_shipped_corpus() {
         let runtime = &shipped;
         let artifact = &runtime.canonical_ir;
         models += 1;
-            let Ok(cfg) = CfgModel::from_hir(&artifact.hir, &artifact.mir) else {
-                println!("state-slots model={module} refused=cfg-lowering");
-                continue;
-            };
-            let Ok(state) = CfgStateAllocation::build(&artifact.hir, &cfg.function) else {
-                println!("state-slots model={module} refused=state-allocation");
-                continue;
-            };
-            let per_site = state.family_len(CanonicalStateFamily::Integration);
-            let native_storage = NativeRequiredStorage::for_model(&runtime.model).state_values;
-            let agrees = state.agrees_with_emission_allocation(&artifact.hir);
-            let contexts = EmissionCensus::of(&artifact.hir);
-            let noise = !runtime.model.noise_sources.is_empty();
+        let Ok(cfg) = CfgModel::from_hir(&artifact.hir, &artifact.mir) else {
+            println!("state-slots model={module} refused=cfg-lowering");
+            continue;
+        };
+        let Ok(state) = CfgStateAllocation::build(&artifact.hir, &cfg.function) else {
+            println!("state-slots model={module} refused=state-allocation");
+            continue;
+        };
+        let per_site = state.family_len(CanonicalStateFamily::Integration);
+        let native_storage = NativeRequiredStorage::for_model(&runtime.model).state_values;
+        let agrees = state.agrees_with_emission_allocation(&artifact.hir);
+        let contexts = EmissionCensus::of(&artifact.hir);
+        let noise = !runtime.model.noise_sources.is_empty();
 
-            // Where the module's sites fall across the generator's
-            // assignments/equations boundary.
-            let statement_sites = CanonicalStateLayout::statement_prefix(&artifact.hir)
-                .family_len(CanonicalStateFamily::Integration);
-            let contribution_sites = per_site.saturating_sub(statement_sites);
+        // Where the module's sites fall across the generator's
+        // assignments/equations boundary.
+        let statement_sites = CanonicalStateLayout::statement_prefix(&artifact.hir)
+            .family_len(CanonicalStateFamily::Integration);
+        let contribution_sites = per_site.saturating_sub(statement_sites);
 
-            let tags = integration_emission_contexts(&runtime.model);
-            let per_emission = tags.len();
-            let breakdown = |wanted: EmissionContext| {
-                tags.iter()
-                    .filter(|emission| emission.context == wanted)
-                    .count()
-            };
-            // Which operator each re-emission is, which is what names the
-            // mechanism rather than just its size.
-            let reemitted = |wanted: EmittedOperator| {
-                tags.iter()
-                    .filter(|emission| {
-                        emission.operator == wanted
-                            && !matches!(
-                                emission.context,
-                                EmissionContext::Assignment | EmissionContext::EquationPrimal
-                            )
-                    })
-                    .count()
-            };
-            let shape = prefix_shape(&tags, statement_sites, contribution_sites);
+        let tags = integration_emission_contexts(&runtime.model);
+        let per_emission = tags.len();
+        let breakdown = |wanted: EmissionContext| {
+            tags.iter()
+                .filter(|emission| emission.context == wanted)
+                .count()
+        };
+        // Which operator each re-emission is, which is what names the
+        // mechanism rather than just its size.
+        let reemitted = |wanted: EmittedOperator| {
+            tags.iter()
+                .filter(|emission| {
+                    emission.operator == wanted
+                        && !matches!(
+                            emission.context,
+                            EmissionContext::Assignment | EmissionContext::EquationPrimal
+                        )
+                })
+                .count()
+        };
+        let shape = prefix_shape(&tags, statement_sites, contribution_sites);
 
-            if per_site > 0 {
-                with_state += 1;
+        if per_site > 0 {
+            with_state += 1;
+        }
+        if noise {
+            with_noise += 1;
+        }
+        if per_site != per_emission {
+            differing_counts += 1;
+            match shape {
+                PrefixShape::Append | PrefixShape::Identical => appending += 1,
+                PrefixShape::Interleave => interleaving += 1,
             }
-            if noise {
-                with_noise += 1;
-            }
-            if per_site != per_emission {
-                differing_counts += 1;
-                match shape {
-                    PrefixShape::Append | PrefixShape::Identical => appending += 1,
-                    PrefixShape::Interleave => interleaving += 1,
-                }
-            }
-            if agrees && per_site != per_emission {
-                unsound_predicate += 1;
-            }
-            if !agrees && per_site == per_emission {
-                imprecise_predicate += 1;
-            }
-            println!(
-                "state-slots model={module} per_site={per_site} per_emission={per_emission} \
+        }
+        if agrees && per_site != per_emission {
+            unsound_predicate += 1;
+        }
+        if !agrees && per_site == per_emission {
+            imprecise_predicate += 1;
+        }
+        println!(
+            "state-slots model={module} per_site={per_site} per_emission={per_emission} \
                  native_required={native_storage} predicate={agrees} shape={shape:?} \
                  sites[statements={statement_sites} contributions={contribution_sites}] \
                  contexts[parameters={} assignments={} noise_assignments={} equation_primal={} \
                  equation_derivative={} noise_sources={}] \
                  reemitted[ddt={} idt={} idtmod={} limit={} canonical_limit={}] \
                  hir[parameters={} statements={} contributions={} noise={}] noise_sources={}",
-                breakdown(EmissionContext::Parameter),
-                breakdown(EmissionContext::Assignment),
-                breakdown(EmissionContext::NoiseAssignment),
-                breakdown(EmissionContext::EquationPrimal),
-                breakdown(EmissionContext::EquationDerivative),
-                breakdown(EmissionContext::NoiseSource),
-                reemitted(EmittedOperator::Ddt),
-                reemitted(EmittedOperator::Idt),
-                reemitted(EmittedOperator::IdtMod),
-                reemitted(EmittedOperator::Limit),
-                reemitted(EmittedOperator::CanonicalLimit),
-                contexts.parameters,
-                contexts.statements,
-                contexts.contributions,
-                contexts.has_noise,
-                runtime.model.noise_sources.len(),
-            );
+            breakdown(EmissionContext::Parameter),
+            breakdown(EmissionContext::Assignment),
+            breakdown(EmissionContext::NoiseAssignment),
+            breakdown(EmissionContext::EquationPrimal),
+            breakdown(EmissionContext::EquationDerivative),
+            breakdown(EmissionContext::NoiseSource),
+            reemitted(EmittedOperator::Ddt),
+            reemitted(EmittedOperator::Idt),
+            reemitted(EmittedOperator::IdtMod),
+            reemitted(EmittedOperator::Limit),
+            reemitted(EmittedOperator::CanonicalLimit),
+            contexts.parameters,
+            contexts.statements,
+            contexts.contributions,
+            contexts.has_noise,
+            runtime.model.noise_sources.len(),
+        );
     }
     println!(
         "state-slots models={models} with_integration_state={with_state} with_noise={with_noise} \
@@ -1638,370 +1636,348 @@ struct ReactiveTally {
 #[test]
 #[ignore = "release qualification; run with --release --features native -- --ignored --nocapture"]
 fn the_cfg_reactive_jacobian_route_agrees_with_the_interpreter_and_the_oracles() {
-    let root = shipped_model_root();
-    let candidates = discover_veriloga_sources(&root).expect("discover shipped Verilog-A sources");
     let mut tally = ReactiveTally::default();
     let mut worst_overall = 0.0_f64;
     let mut worst_oracle_overall = 0.0_f64;
     let filter = std::env::var("RSPICE_CFG_CENSUS_FILTER").ok();
-    for candidate in candidates {
-        for module in &candidate.modules {
-            if filter
-                .as_deref()
-                .is_some_and(|filter| !module.contains(filter))
-            {
+    for shipped in shipped_census_models_matching(filter.as_deref()) {
+        let module = &shipped.name;
+        let started = std::time::Instant::now();
+        let runtime = &shipped;
+        let artifact = &runtime.canonical_ir;
+        tally.models += 1;
+        let Ok(mut cfg) = CfgModel::from_hir(&artifact.hir, &artifact.mir) else {
+            println!("cfg-reactive model={module} refused=cfg-lowering");
+            continue;
+        };
+
+        // Charges first: the extraction *builds* the values a scaled or
+        // summed charge needs (`k * ddt(q)` stores `k * q`, which exists
+        // nowhere until it is spliced in), so it has to run before the
+        // state allocation is read off the function and before anything is
+        // differentiated.
+        let charges = stored_charges(&mut cfg.function, &cfg.residuals);
+        let Ok(state) = CfgStateAllocation::build(&artifact.hir, &cfg.function) else {
+            println!("cfg-reactive model={module} refused=state-allocation");
+            continue;
+        };
+
+        let (seeds, correction_lane) = derivative_seeds(&cfg, &artifact.mir);
+        let mut differentiated = match differentiate(&cfg.function, &seeds) {
+            Ok(differentiated) => differentiated,
+            Err(error) => {
+                println!("cfg-reactive model={module} refused=differentiate detail={error:?}");
                 continue;
             }
-            let started = std::time::Instant::now();
-            let mut options = CompilerOptions::default();
-            options.include_paths.push(root.clone());
-            options.defines = candidate.compile_profile.defines.clone();
-            options.undefines = candidate.compile_profile.undefines.clone();
-            let compiler = VerilogACompiler::new(options);
-            let runtime = compiler
-                .compile_file_runtime_with_metadata(&candidate.path, Some(module))
-                .unwrap_or_else(|error| {
-                    panic!("compile {} :: {module}: {error}", candidate.path.display())
-                });
-            let artifact = &runtime.canonical_ir;
-            tally.models += 1;
-            let Ok(mut cfg) = CfgModel::from_hir(&artifact.hir, &artifact.mir) else {
-                println!("cfg-reactive model={module} refused=cfg-lowering");
+        };
+        // Every read-out before anything evaluates or lowers: taking one
+        // appends an instruction, so a function captured earlier would not
+        // contain the later ones.
+        let rows: Vec<Vec<Option<ValueId>>> = charges
+            .iter()
+            .map(|charge| match charge {
+                Some(charge) => differentiated.derivative_row(*charge),
+                None => Vec::new(),
+            })
+            .collect();
+        let scalarized = match scalarize_lanes(&differentiated.function) {
+            Ok(scalarized) => scalarized,
+            Err(error) => {
+                println!("cfg-reactive model={module} refused=scalarize detail={error}");
                 continue;
-            };
+            }
+        };
 
-            // Charges first: the extraction *builds* the values a scaled or
-            // summed charge needs (`k * ddt(q)` stores `k * q`, which exists
-            // nowhere until it is spliced in), so it has to run before the
-            // state allocation is read off the function and before anything is
-            // differentiated.
-            let charges = stored_charges(&mut cfg.function, &cfg.residuals);
-            let Ok(state) = CfgStateAllocation::build(&artifact.hir, &cfg.function) else {
-                println!("cfg-reactive model={module} refused=state-allocation");
-                continue;
-            };
-
-            let (seeds, correction_lane) = derivative_seeds(&cfg, &artifact.mir);
-            let mut differentiated = match differentiate(&cfg.function, &seeds) {
-                Ok(differentiated) => differentiated,
-                Err(error) => {
-                    println!("cfg-reactive model={module} refused=differentiate detail={error:?}");
-                    continue;
-                }
-            };
-            // Every read-out before anything evaluates or lowers: taking one
-            // appends an instruction, so a function captured earlier would not
-            // contain the later ones.
-            let rows: Vec<Vec<Option<ValueId>>> = charges
-                .iter()
-                .map(|charge| match charge {
-                    Some(charge) => differentiated.derivative_row(*charge),
-                    None => Vec::new(),
+        let branch_unknowns = canonical_branch_unknown_runtime_map(&runtime.model, &artifact.mir)
+            .unwrap_or_else(|error| panic!("{module}: branch unknown map: {error}"));
+        let event_state_variables: Vec<Option<usize>> = artifact
+            .hir
+            .variables
+            .iter()
+            .filter(|variable| variable.is_state)
+            .map(|variable| {
+                runtime
+                    .model
+                    .variable_names
+                    .iter()
+                    .position(|name| *name == variable.name)
+            })
+            .collect();
+        let bindings = CfgRuntimeBindings::from_mir(
+            module.as_str(),
+            &artifact.mir,
+            branch_unknowns,
+            event_state_variables,
+        );
+        let state_len = state.family_len(CanonicalStateFamily::Integration) + 8;
+        let parameter_defaults: Vec<Option<f64>> = artifact
+            .mir
+            .parameters
+            .iter()
+            .map(|parameter| parameter.default)
+            .collect();
+        let mut points: Vec<OperatingPoint> =
+            [(0x0005_EED1_u64, 0_u8), (0x00C0_FFEE, 2), (0x0000_BEEF, 0)]
+                .into_iter()
+                .map(|(seed, analysis)| {
+                    OperatingPoint::new(
+                        seed,
+                        analysis,
+                        &parameter_defaults,
+                        bindings.terminal_count,
+                        bindings.internal_node_count,
+                        &bindings.branch_unknowns,
+                        state_len,
+                        cfg.event_state_candidates.len(),
+                    )
                 })
                 .collect();
-            let scalarized = match scalarize_lanes(&differentiated.function) {
-                Ok(scalarized) => scalarized,
-                Err(error) => {
-                    println!("cfg-reactive model={module} refused=scalarize detail={error}");
-                    continue;
-                }
-            };
+        let variables = vec![0.0_f64; runtime.model.num_variables + 8];
 
-            let branch_unknowns =
-                canonical_branch_unknown_runtime_map(&runtime.model, &artifact.mir)
-                    .unwrap_or_else(|error| panic!("{module}: branch unknown map: {error}"));
-            let event_state_variables: Vec<Option<usize>> = artifact
-                .hir
-                .variables
-                .iter()
-                .filter(|variable| variable.is_state)
-                .map(|variable| {
-                    runtime
-                        .model
-                        .variable_names
-                        .iter()
-                        .position(|name| *name == variable.name)
-                })
-                .collect();
-            let bindings = CfgRuntimeBindings::from_mir(
-                module.as_str(),
-                &artifact.mir,
-                branch_unknowns,
-                event_state_variables,
+        let charged_equations = charges.iter().filter(|charge| charge.is_some()).count();
+        tally.charged_equations += charged_equations;
+        if charged_equations == 0 {
+            tally.resistive_models += 1;
+        }
+
+        // ---- sparsity ---------------------------------------------------
+        let node_count = artifact.mir.nodes.len();
+        let mut cfg_pairs: HashSet<(usize, usize)> = HashSet::new();
+        for (equation, row) in rows.iter().enumerate() {
+            for (lane, entry) in row.iter().enumerate() {
+                if entry.is_some() && Some(lane) != correction_lane {
+                    cfg_pairs.insert((equation, lane));
+                }
+            }
+        }
+        let mut shipped_pairs: HashSet<(usize, usize)> = HashSet::new();
+        for (equation, program) in runtime.model.stamp_programs.iter().enumerate() {
+            for entry in &program.reactive_jacobians {
+                shipped_pairs.insert((equation, shipped_entry_lane(&entry.col_axis, node_count)));
+            }
+        }
+        let paired = runtime.model.stamp_programs.len() == cfg.residuals.len();
+        let (shared, cfg_only, shipped_only) = if paired {
+            (
+                cfg_pairs.intersection(&shipped_pairs).count(),
+                cfg_pairs.difference(&shipped_pairs).count(),
+                shipped_pairs.difference(&cfg_pairs).count(),
+            )
+        } else {
+            tally.sparsity_unpaired += 1;
+            (0, 0, 0)
+        };
+        tally.sparsity.shared += shared;
+        tally.sparsity.cfg_only += cfg_only;
+        tally.sparsity.shipped_only += shipped_only;
+
+        // Both directions get asked the same question, because for the
+        // reactive matrix both are findings and they are different ones.
+        //
+        // * A **shipped-only** pair with a nonzero `d(charge)/d(unknown)`
+        //   is a capacitance *this* route drops.
+        // * A **cfg-only** pair with a nonzero one is a capacitance the
+        //   *shipped* route drops — `DeviceIR::extract_charge` refuses a
+        //   `ddt` in a shape it does not know and logs a warning rather
+        //   than failing, so a whole reactive row can be missing from the
+        //   AC matrix with nothing but a log line to say so.
+        let probe = |pairs: Vec<(usize, usize)>, sink: &mut ChargeProbe| {
+            probe_charge_pairs(
+                pairs,
+                &charges,
+                &seeds,
+                &differentiated.function,
+                &points[0],
+                artifact.mir.nodes.len(),
+                artifact.mir.branches.len(),
+                sink,
             );
-            let state_len = state.family_len(CanonicalStateFamily::Integration) + 8;
-            let parameter_defaults: Vec<Option<f64>> = artifact
-                .mir
-                .parameters
-                .iter()
-                .map(|parameter| parameter.default)
-                .collect();
-            let mut points: Vec<OperatingPoint> =
-                [(0x0005_EED1_u64, 0_u8), (0x00C0_FFEE, 2), (0x0000_BEEF, 0)]
-                    .into_iter()
-                    .map(|(seed, analysis)| {
-                        OperatingPoint::new(
-                            seed,
-                            analysis,
-                            &parameter_defaults,
-                            bindings.terminal_count,
-                            bindings.internal_node_count,
-                            &bindings.branch_unknowns,
-                            state_len,
-                            cfg.event_state_candidates.len(),
-                        )
-                    })
-                    .collect();
-            let variables = vec![0.0_f64; runtime.model.num_variables + 8];
-
-            let charged_equations = charges.iter().filter(|charge| charge.is_some()).count();
-            tally.charged_equations += charged_equations;
-            if charged_equations == 0 {
-                tally.resistive_models += 1;
-            }
-
-            // ---- sparsity ---------------------------------------------------
-            let node_count = artifact.mir.nodes.len();
-            let mut cfg_pairs: HashSet<(usize, usize)> = HashSet::new();
-            for (equation, row) in rows.iter().enumerate() {
-                for (lane, entry) in row.iter().enumerate() {
-                    if entry.is_some() && Some(lane) != correction_lane {
-                        cfg_pairs.insert((equation, lane));
-                    }
-                }
-            }
-            let mut shipped_pairs: HashSet<(usize, usize)> = HashSet::new();
-            for (equation, program) in runtime.model.stamp_programs.iter().enumerate() {
-                for entry in &program.reactive_jacobians {
-                    shipped_pairs
-                        .insert((equation, shipped_entry_lane(&entry.col_axis, node_count)));
-                }
-            }
-            let paired = runtime.model.stamp_programs.len() == cfg.residuals.len();
-            let (shared, cfg_only, shipped_only) = if paired {
-                (
-                    cfg_pairs.intersection(&shipped_pairs).count(),
-                    cfg_pairs.difference(&shipped_pairs).count(),
-                    shipped_pairs.difference(&cfg_pairs).count(),
-                )
-            } else {
-                tally.sparsity_unpaired += 1;
-                (0, 0, 0)
-            };
-            tally.sparsity.shared += shared;
-            tally.sparsity.cfg_only += cfg_only;
-            tally.sparsity.shipped_only += shipped_only;
-
-            // Both directions get asked the same question, because for the
-            // reactive matrix both are findings and they are different ones.
-            //
-            // * A **shipped-only** pair with a nonzero `d(charge)/d(unknown)`
-            //   is a capacitance *this* route drops.
-            // * A **cfg-only** pair with a nonzero one is a capacitance the
-            //   *shipped* route drops — `DeviceIR::extract_charge` refuses a
-            //   `ddt` in a shape it does not know and logs a warning rather
-            //   than failing, so a whole reactive row can be missing from the
-            //   AC matrix with nothing but a log line to say so.
-            let probe = |pairs: Vec<(usize, usize)>, sink: &mut ChargeProbe| {
-                probe_charge_pairs(
-                    pairs,
-                    &charges,
-                    &seeds,
-                    &differentiated.function,
-                    &points[0],
-                    artifact.mir.nodes.len(),
-                    artifact.mir.branches.len(),
-                    sink,
+        };
+        let mut shipped_only_probe = ChargeProbe::default();
+        let mut cfg_only_probe = ChargeProbe::default();
+        if paired {
+            if shipped_only > 0 {
+                probe(
+                    shipped_pairs.difference(&cfg_pairs).copied().collect(),
+                    &mut shipped_only_probe,
                 );
-            };
-            let mut shipped_only_probe = ChargeProbe::default();
-            let mut cfg_only_probe = ChargeProbe::default();
-            if paired {
-                if shipped_only > 0 {
-                    probe(
-                        shipped_pairs.difference(&cfg_pairs).copied().collect(),
-                        &mut shipped_only_probe,
-                    );
+            }
+            if cfg_only > 0 {
+                probe(
+                    cfg_pairs.difference(&shipped_pairs).copied().collect(),
+                    &mut cfg_only_probe,
+                );
+            }
+        }
+        tally.sparsity.shipped_only_nonzero += shipped_only_probe.nonzero;
+        tally.sparsity.shipped_only_unmapped += shipped_only_probe.unmapped;
+        tally.cfg_only_nonzero += cfg_only_probe.nonzero;
+
+        // ---- lowering, execution and comparison -------------------------
+        let mut reactive_programs = 0_usize;
+        let mut refused = 0_usize;
+        let mut instructions = 0_usize;
+        let mut executed = 0_usize;
+        let mut oracle_checks = 0_usize;
+        let mut worst = 0.0_f64;
+        let mut worst_case: Option<String> = None;
+        let mut worst_oracle = 0.0_f64;
+        let mut oracle_case: Option<String> = None;
+        let mut first_refusal: Option<String> = None;
+
+        for (equation, charge) in charges.iter().enumerate() {
+            let Some(charge) = *charge else { continue };
+            let mut outputs: Vec<(usize, ValueId)> = Vec::new();
+            for (lane, entry) in rows[equation].iter().enumerate() {
+                if Some(lane) == correction_lane {
+                    continue;
                 }
-                if cfg_only > 0 {
-                    probe(
-                        cfg_pairs.difference(&shipped_pairs).copied().collect(),
-                        &mut cfg_only_probe,
-                    );
+                if let Some(entry) = entry
+                    && let Some(scalar) = scalarized.scalar(*entry)
+                {
+                    outputs.push((lane, scalar));
                 }
             }
-            tally.sparsity.shipped_only_nonzero += shipped_only_probe.nonzero;
-            tally.sparsity.shipped_only_unmapped += shipped_only_probe.unmapped;
-            tally.cfg_only_nonzero += cfg_only_probe.nonzero;
 
-            // ---- lowering, execution and comparison -------------------------
-            let mut reactive_programs = 0_usize;
-            let mut refused = 0_usize;
-            let mut instructions = 0_usize;
-            let mut executed = 0_usize;
-            let mut oracle_checks = 0_usize;
-            let mut worst = 0.0_f64;
-            let mut worst_case: Option<String> = None;
-            let mut worst_oracle = 0.0_f64;
-            let mut oracle_case: Option<String> = None;
-            let mut first_refusal: Option<String> = None;
+            // Sliced to the whole row once, then to each entry within it,
+            // for the reason the conduction census gives: pruning is linear
+            // in the function, so slicing the model per entry would be the
+            // equation count times the lane count passes over the whole
+            // body.
+            let row_outputs: Vec<ValueId> = outputs.iter().map(|(_, output)| *output).collect();
+            let (row_function, row_mapped) =
+                prune_cfg_to_outputs(&scalarized.function, &row_outputs);
+            let outputs: Vec<(usize, ValueId)> = outputs
+                .into_iter()
+                .zip(row_mapped)
+                .map(|((lane, _), mapped)| (lane, mapped))
+                .collect();
 
-            for (equation, charge) in charges.iter().enumerate() {
-                let Some(charge) = *charge else { continue };
-                let mut outputs: Vec<(usize, ValueId)> = Vec::new();
-                for (lane, entry) in rows[equation].iter().enumerate() {
-                    if Some(lane) == correction_lane {
-                        continue;
-                    }
-                    if let Some(entry) = entry
-                        && let Some(scalar) = scalarized.scalar(*entry)
-                    {
-                        outputs.push((lane, scalar));
-                    }
+            for (lane, output) in outputs {
+                let (pruned, pruned_outputs) = prune_cfg_to_outputs(&row_function, &[output]);
+                let program =
+                    match lower_cfg_function(&pruned, pruned_outputs[0], &state, &bindings) {
+                        Ok(program) => program,
+                        Err(error) => {
+                            refused += 1;
+                            first_refusal.get_or_insert_with(|| error.to_string());
+                            continue;
+                        }
+                    };
+                reactive_programs += 1;
+                instructions += program.instructions().len();
+
+                if executed >= EXECUTED_JACOBIAN_ENTRIES_PER_MODEL {
+                    continue;
                 }
+                let image = compile_value_function_artifact_from_ssa(&program)
+                    .unwrap_or_else(|error| panic!("{module} dQ{equation}/d{lane}: {error}"));
+                let memory = ExecutableMemory::allocate(image.bytes())
+                    .unwrap_or_else(|error| panic!("{module} dQ{equation}/d{lane}: {error}"));
+                let entry_point = memory.ptr_at(0).expect("entry inside published image");
+                let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                    unsafe { std::mem::transmute(entry_point) };
+                executed += 1;
 
-                // Sliced to the whole row once, then to each entry within it,
-                // for the reason the conduction census gives: pruning is linear
-                // in the function, so slicing the model per entry would be the
-                // equation count times the lane count passes over the whole
-                // body.
-                let row_outputs: Vec<ValueId> = outputs.iter().map(|(_, output)| *output).collect();
-                let (row_function, row_mapped) =
-                    prune_cfg_to_outputs(&scalarized.function, &row_outputs);
-                let outputs: Vec<(usize, ValueId)> = outputs
-                    .into_iter()
-                    .zip(row_mapped)
-                    .map(|((lane, _), mapped)| (lane, mapped))
-                    .collect();
-
-                for (lane, output) in outputs {
-                    let (pruned, pruned_outputs) = prune_cfg_to_outputs(&row_function, &[output]);
-                    let program =
-                        match lower_cfg_function(&pruned, pruned_outputs[0], &state, &bindings) {
-                            Ok(program) => program,
-                            Err(error) => {
-                                refused += 1;
-                                first_refusal.get_or_insert_with(|| error.to_string());
-                                continue;
-                            }
-                        };
-                    reactive_programs += 1;
-                    instructions += program.instructions().len();
-
-                    if executed >= EXECUTED_JACOBIAN_ENTRIES_PER_MODEL {
+                for (index, point) in points.iter_mut().enumerate() {
+                    let interpreter_inputs = point
+                        .interpreter_inputs(artifact.mir.nodes.len(), artifact.mir.branches.len());
+                    let Ok(snapshot) = evaluate_cfg(&pruned, &interpreter_inputs) else {
+                        continue;
+                    };
+                    let Some(reference) = snapshot.value(pruned_outputs[0]) else {
+                        continue;
+                    };
+                    let context = point.context();
+                    context.clear_runtime_error();
+                    let actual = function(&context, variables.as_ptr());
+                    if context.take_runtime_error().is_some() {
+                        tally.runtime_errors += 1;
                         continue;
                     }
-                    let image = compile_value_function_artifact_from_ssa(&program)
-                        .unwrap_or_else(|error| panic!("{module} dQ{equation}/d{lane}: {error}"));
-                    let memory = ExecutableMemory::allocate(image.bytes())
-                        .unwrap_or_else(|error| panic!("{module} dQ{equation}/d{lane}: {error}"));
-                    let entry_point = memory.ptr_at(0).expect("entry inside published image");
-                    let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
-                        unsafe { std::mem::transmute(entry_point) };
-                    executed += 1;
+                    tally.comparisons += 1;
+                    if let Some(delta) = deviation(reference, actual)
+                        && delta > worst
+                    {
+                        worst = delta;
+                        worst_case = Some(format!(
+                            "d(charge {equation})/d(lane {lane}) point={index} \
+                                 interpreter={reference:.17e} block_program={actual:.17e}"
+                        ));
+                    }
 
-                    for (index, point) in points.iter_mut().enumerate() {
-                        let interpreter_inputs = point.interpreter_inputs(
+                    if index == 0 && oracle_checks < ORACLE_ENTRIES_PER_MODEL {
+                        oracle_checks += 1;
+                        let complex = point.complex_inputs(
                             artifact.mir.nodes.len(),
                             artifact.mir.branches.len(),
+                            seeds[lane],
                         );
-                        let Ok(snapshot) = evaluate_cfg(&pruned, &interpreter_inputs) else {
-                            continue;
-                        };
-                        let Some(reference) = snapshot.value(pruned_outputs[0]) else {
-                            continue;
-                        };
-                        let context = point.context();
-                        context.clear_runtime_error();
-                        let actual = function(&context, variables.as_ptr());
-                        if context.take_runtime_error().is_some() {
-                            tally.runtime_errors += 1;
-                            continue;
-                        }
-                        tally.comparisons += 1;
-                        if let Some(delta) = deviation(reference, actual)
-                            && delta > worst
+                        if let Ok(snapshot) = evaluate_cfg(&differentiated.function, &complex)
+                            && let Some(value) = snapshot.value(charge)
                         {
-                            worst = delta;
-                            worst_case = Some(format!(
-                                "d(charge {equation})/d(lane {lane}) point={index} \
-                                 interpreter={reference:.17e} block_program={actual:.17e}"
-                            ));
-                        }
-
-                        if index == 0 && oracle_checks < ORACLE_ENTRIES_PER_MODEL {
-                            oracle_checks += 1;
-                            let complex = point.complex_inputs(
-                                artifact.mir.nodes.len(),
-                                artifact.mir.branches.len(),
-                                seeds[lane],
-                            );
-                            if let Ok(snapshot) = evaluate_cfg(&differentiated.function, &complex)
-                                && let Some(value) = snapshot.value(charge)
+                            let oracle = value.derivative();
+                            tally.oracle_comparisons += 1;
+                            let scale = oracle.abs().max(actual.abs());
+                            if scale > 1.0e-30
+                                && let Some(delta) = deviation(oracle, actual)
+                                && delta > worst_oracle
                             {
-                                let oracle = value.derivative();
-                                tally.oracle_comparisons += 1;
-                                let scale = oracle.abs().max(actual.abs());
-                                if scale > 1.0e-30
-                                    && let Some(delta) = deviation(oracle, actual)
-                                    && delta > worst_oracle
-                                {
-                                    worst_oracle = delta;
-                                    oracle_case = Some(format!(
-                                        "d(charge {equation})/d(lane {lane}) \
+                                worst_oracle = delta;
+                                oracle_case = Some(format!(
+                                    "d(charge {equation})/d(lane {lane}) \
                                          complex_step={oracle:.17e} block_program={actual:.17e}"
-                                    ));
-                                }
+                                ));
                             }
                         }
                     }
                 }
             }
+        }
 
-            tally.reactive_programs += reactive_programs;
-            tally.refused_programs += refused;
-            tally.lowered_instructions += instructions;
-            tally.executed += executed;
-            worst_overall = worst_overall.max(worst);
-            worst_oracle_overall = worst_oracle_overall.max(worst_oracle);
-            println!(
-                "cfg-reactive model={module} equations={} charged={charged_equations} \
+        tally.reactive_programs += reactive_programs;
+        tally.refused_programs += refused;
+        tally.lowered_instructions += instructions;
+        tally.executed += executed;
+        worst_overall = worst_overall.max(worst);
+        worst_oracle_overall = worst_oracle_overall.max(worst_oracle);
+        println!(
+            "cfg-reactive model={module} equations={} charged={charged_equations} \
                  shipped_reactive_rows={} reactive_programs={reactive_programs} refused={refused} \
                  instructions={instructions} executed={executed} \
                  max_relative_deviation={worst:.3e} oracle_deviation={worst_oracle:.3e} \
                  sparsity[shared={shared} cfg_only={cfg_only} shipped_only={shipped_only} \
                  cfg_only_nonzero={} shipped_only_nonzero={}{}] \
                  seconds={:.1}{}{}{}{}{}",
-                cfg.residuals.len(),
-                runtime
-                    .model
-                    .stamp_programs
-                    .iter()
-                    .filter(|stamp| !stamp.reactive_jacobians.is_empty())
-                    .count(),
-                cfg_only_probe.nonzero,
-                shipped_only_probe.nonzero,
-                if paired { "" } else { " UNPAIRED" },
-                started.elapsed().as_secs_f64(),
-                shipped_only_probe
-                    .case
-                    .map(|case| format!(" SHIPPED_ONLY_NONZERO[{case}]"))
-                    .unwrap_or_default(),
-                cfg_only_probe
-                    .case
-                    .map(|case| format!(" SHIPPED_DROPS_CAPACITANCE[{case}]"))
-                    .unwrap_or_default(),
-                worst_case
-                    .map(|case| format!(" worst_case[{case}]"))
-                    .unwrap_or_default(),
-                oracle_case
-                    .map(|case| format!(" oracle_case[{case}]"))
-                    .unwrap_or_default(),
-                first_refusal
-                    .map(|refusal| format!(" first_refusal={refusal}"))
-                    .unwrap_or_default(),
-            );
-        }
+            cfg.residuals.len(),
+            runtime
+                .model
+                .stamp_programs
+                .iter()
+                .filter(|stamp| !stamp.reactive_jacobians.is_empty())
+                .count(),
+            cfg_only_probe.nonzero,
+            shipped_only_probe.nonzero,
+            if paired { "" } else { " UNPAIRED" },
+            started.elapsed().as_secs_f64(),
+            shipped_only_probe
+                .case
+                .map(|case| format!(" SHIPPED_ONLY_NONZERO[{case}]"))
+                .unwrap_or_default(),
+            cfg_only_probe
+                .case
+                .map(|case| format!(" SHIPPED_DROPS_CAPACITANCE[{case}]"))
+                .unwrap_or_default(),
+            worst_case
+                .map(|case| format!(" worst_case[{case}]"))
+                .unwrap_or_default(),
+            oracle_case
+                .map(|case| format!(" oracle_case[{case}]"))
+                .unwrap_or_default(),
+            first_refusal
+                .map(|refusal| format!(" first_refusal={refusal}"))
+                .unwrap_or_default(),
+        );
     }
     println!(
         "cfg-reactive models={} resistive_models={} charged_equations={} reactive_programs={} \
@@ -2128,327 +2104,305 @@ fn noise_process_values(process: &CfgNoiseProcess) -> Vec<(String, ValueId)> {
 #[test]
 #[ignore = "release qualification; run with --release --features native -- --ignored --nocapture"]
 fn the_cfg_noise_route_agrees_with_the_interpreter_and_the_shipped_plan() {
-    let root = shipped_model_root();
-    let candidates = discover_veriloga_sources(&root).expect("discover shipped Verilog-A sources");
     let mut tally = NoiseTally::default();
     let mut worst_overall = 0.0_f64;
     let filter = std::env::var("RSPICE_CFG_CENSUS_FILTER").ok();
-    for candidate in candidates {
-        for module in &candidate.modules {
-            if filter
-                .as_deref()
-                .is_some_and(|filter| !module.contains(filter))
-            {
-                continue;
-            }
-            let started = std::time::Instant::now();
-            let mut options = CompilerOptions::default();
-            options.include_paths.push(root.clone());
-            options.defines = candidate.compile_profile.defines.clone();
-            options.undefines = candidate.compile_profile.undefines.clone();
-            let compiler = VerilogACompiler::new(options);
-            let runtime = compiler
-                .compile_file_runtime_with_metadata(&candidate.path, Some(module))
-                .unwrap_or_else(|error| {
-                    panic!("compile {} :: {module}: {error}", candidate.path.display())
+    for shipped in shipped_census_models_matching(filter.as_deref()) {
+        let module = &shipped.name;
+        let started = std::time::Instant::now();
+        let runtime = &shipped;
+        let artifact = &runtime.canonical_ir;
+        tally.models += 1;
+        let Ok(cfg) = CfgModel::from_hir(&artifact.hir, &artifact.mir) else {
+            println!("cfg-noise model={module} refused=cfg-lowering");
+            continue;
+        };
+        let Ok(state) = CfgStateAllocation::build(&artifact.hir, &cfg.function) else {
+            println!("cfg-noise model={module} refused=state-allocation");
+            continue;
+        };
+
+        tally.processes += cfg.noise_processes.len();
+        tally.shipped_sources += runtime.model.noise_sources.len();
+        if cfg.noise_processes.is_empty() && runtime.model.noise_sources.is_empty() {
+            tally.silent_models += 1;
+        }
+
+        // ---- correspondence with the shipped noise programs -------------
+        //
+        // Keyed by `process_id`, which is the one name the two routes
+        // share: `DeviceIR` takes it from the front end's noise-site
+        // ordinal and the CFG lowering carries the same number on every
+        // `CfgNoiseProcess`.
+        let mut paired = 0_usize;
+        let mut unpaired = 0_usize;
+        let mut mismatch: Option<String> = None;
+        for source in &runtime.model.noise_sources {
+            let Some(process) = cfg
+                .noise_processes
+                .iter()
+                .find(|process| usize::try_from(process.process_id) == Ok(source.process_id))
+            else {
+                unpaired += 1;
+                mismatch.get_or_insert_with(|| {
+                    format!("shipped process {} has no CFG process", source.process_id)
                 });
-            let artifact = &runtime.canonical_ir;
-            tally.models += 1;
-            let Ok(cfg) = CfgModel::from_hir(&artifact.hir, &artifact.mir) else {
-                println!("cfg-noise model={module} refused=cfg-lowering");
                 continue;
             };
-            let Ok(state) = CfgStateAllocation::build(&artifact.hir, &cfg.function) else {
-                println!("cfg-noise model={module} refused=state-allocation");
-                continue;
+            let shipped_table = source.table.as_ref().map_or(0, |(points, _)| points.len());
+            let kind_agrees = match process.kind {
+                CanonicalNoiseSourceKind::White => {
+                    source.exponent_program.is_none() && source.table.is_none()
+                }
+                CanonicalNoiseSourceKind::Flicker => {
+                    source.exponent_program.is_some() && source.table.is_none()
+                }
+                CanonicalNoiseSourceKind::Table => source.table.is_some(),
             };
-
-            tally.processes += cfg.noise_processes.len();
-            tally.shipped_sources += runtime.model.noise_sources.len();
-            if cfg.noise_processes.is_empty() && runtime.model.noise_sources.is_empty() {
-                tally.silent_models += 1;
-            }
-
-            // ---- correspondence with the shipped noise programs -------------
-            //
-            // Keyed by `process_id`, which is the one name the two routes
-            // share: `DeviceIR` takes it from the front end's noise-site
-            // ordinal and the CFG lowering carries the same number on every
-            // `CfgNoiseProcess`.
-            let mut paired = 0_usize;
-            let mut unpaired = 0_usize;
-            let mut mismatch: Option<String> = None;
-            for source in &runtime.model.noise_sources {
-                let Some(process) = cfg
-                    .noise_processes
-                    .iter()
-                    .find(|process| usize::try_from(process.process_id) == Ok(source.process_id))
-                else {
-                    unpaired += 1;
-                    mismatch.get_or_insert_with(|| {
-                        format!("shipped process {} has no CFG process", source.process_id)
-                    });
-                    continue;
-                };
-                let shipped_table = source.table.as_ref().map_or(0, |(points, _)| points.len());
-                let kind_agrees = match process.kind {
-                    CanonicalNoiseSourceKind::White => {
-                        source.exponent_program.is_none() && source.table.is_none()
-                    }
-                    CanonicalNoiseSourceKind::Flicker => {
-                        source.exponent_program.is_some() && source.table.is_none()
-                    }
-                    CanonicalNoiseSourceKind::Table => source.table.is_some(),
-                };
-                if !kind_agrees || process.exponent.is_some() != source.exponent_program.is_some() {
-                    unpaired += 1;
-                    mismatch.get_or_insert_with(|| {
-                        format!(
-                            "process {} kind={:?} exponent={} against shipped exponent={} table={}",
-                            source.process_id,
-                            process.kind,
-                            process.exponent.is_some(),
-                            source.exponent_program.is_some(),
-                            shipped_table,
-                        )
-                    });
-                    continue;
-                }
-                paired += 1;
-            }
-            // A CFG process the shipped model has no source for is the other
-            // direction of the same finding.
-            for process in &cfg.noise_processes {
-                if !runtime
-                    .model
-                    .noise_sources
-                    .iter()
-                    .any(|source| usize::try_from(process.process_id) == Ok(source.process_id))
-                {
-                    unpaired += 1;
-                    mismatch.get_or_insert_with(|| {
-                        format!("CFG process {} has no shipped source", process.process_id)
-                    });
-                }
-            }
-            tally.paired += paired;
-            tally.unpaired += unpaired;
-
-            // ---- which emitter the generated backend uses -------------------
-            //
-            // The emitter's own rule, kept: the slice is cut from the primal
-            // body first and from the differentiated one only if that fails, so
-            // a model that declines on the primal has *not* fallen back until
-            // the second attempt declines too.
-            let seeds = derivative_seeds(&cfg, &artifact.mir).0;
-            let primal_decline = noise_plan_decline(artifact, &cfg, &cfg.function);
-            let mut differentiated: Option<AdFunction> = None;
-            let decline = match primal_decline {
-                None => None,
-                Some(primal) => {
-                    differentiated = differentiate(&cfg.function, &seeds).ok();
-                    match &differentiated {
-                        Some(resolved) => noise_plan_decline(artifact, &cfg, &resolved.function),
-                        None => Some(primal),
-                    }
-                }
-            };
-            if decline.is_some() {
-                tally.flat_fallback_models += 1;
-            }
-
-            if cfg.noise_processes.is_empty() {
-                println!(
-                    "cfg-noise model={module} processes=0 shipped_sources={} \
-                     plan_decline={decline:?} primal_decline={primal_decline:?} seconds={:.1}",
-                    runtime.model.noise_sources.len(),
-                    started.elapsed().as_secs_f64(),
-                );
-                continue;
-            }
-
-            // ---- lowering, execution and comparison -------------------------
-            let branch_unknowns =
-                canonical_branch_unknown_runtime_map(&runtime.model, &artifact.mir)
-                    .unwrap_or_else(|error| panic!("{module}: branch unknown map: {error}"));
-            let event_state_variables: Vec<Option<usize>> = artifact
-                .hir
-                .variables
-                .iter()
-                .filter(|variable| variable.is_state)
-                .map(|variable| {
-                    runtime
-                        .model
-                        .variable_names
-                        .iter()
-                        .position(|name| *name == variable.name)
-                })
-                .collect();
-            let bindings = CfgRuntimeBindings::from_mir(
-                module.as_str(),
-                &artifact.mir,
-                branch_unknowns,
-                event_state_variables,
-            );
-            let state_len = state.family_len(CanonicalStateFamily::Integration) + 8;
-            let parameter_defaults: Vec<Option<f64>> = artifact
-                .mir
-                .parameters
-                .iter()
-                .map(|parameter| parameter.default)
-                .collect();
-            // Noise first, because that is the analysis these magnitudes are
-            // evaluated in; a DC point alongside it so a `$analysis` guard
-            // inside a power is exercised both ways.
-            let mut points: Vec<OperatingPoint> = [(0x0000_5E15_u64, 3_u8), (0x0005_EED1, 0)]
-                .into_iter()
-                .map(|(seed, analysis)| {
-                    OperatingPoint::new(
-                        seed,
-                        analysis,
-                        &parameter_defaults,
-                        bindings.terminal_count,
-                        bindings.internal_node_count,
-                        &bindings.branch_unknowns,
-                        state_len,
-                        cfg.event_state_candidates.len(),
+            if !kind_agrees || process.exponent.is_some() != source.exponent_program.is_some() {
+                unpaired += 1;
+                mismatch.get_or_insert_with(|| {
+                    format!(
+                        "process {} kind={:?} exponent={} against shipped exponent={} table={}",
+                        source.process_id,
+                        process.kind,
+                        process.exponent.is_some(),
+                        source.exponent_program.is_some(),
+                        shipped_table,
                     )
-                })
-                .collect();
-            let variables = vec![0.0_f64; runtime.model.num_variables + 8];
+                });
+                continue;
+            }
+            paired += 1;
+        }
+        // A CFG process the shipped model has no source for is the other
+        // direction of the same finding.
+        for process in &cfg.noise_processes {
+            if !runtime
+                .model
+                .noise_sources
+                .iter()
+                .any(|source| usize::try_from(process.process_id) == Ok(source.process_id))
+            {
+                unpaired += 1;
+                mismatch.get_or_insert_with(|| {
+                    format!("CFG process {} has no shipped source", process.process_id)
+                });
+            }
+        }
+        tally.paired += paired;
+        tally.unpaired += unpaired;
 
-            // The scalarized differentiated body, cut once and only if a
-            // magnitude needs it: a `ddx` inside a noise power has no value
-            // until the AD pass resolves it, and running that pass on a model
-            // whose magnitudes lower from the primal would cost only time.
-            let mut resolved: Option<Option<ScalarLanes>> = None;
+        // ---- which emitter the generated backend uses -------------------
+        //
+        // The emitter's own rule, kept: the slice is cut from the primal
+        // body first and from the differentiated one only if that fails, so
+        // a model that declines on the primal has *not* fallen back until
+        // the second attempt declines too.
+        let seeds = derivative_seeds(&cfg, &artifact.mir).0;
+        let primal_decline = noise_plan_decline(artifact, &cfg, &cfg.function);
+        let mut differentiated: Option<AdFunction> = None;
+        let decline = match primal_decline {
+            None => None,
+            Some(primal) => {
+                differentiated = differentiate(&cfg.function, &seeds).ok();
+                match &differentiated {
+                    Some(resolved) => noise_plan_decline(artifact, &cfg, &resolved.function),
+                    None => Some(primal),
+                }
+            }
+        };
+        if decline.is_some() {
+            tally.flat_fallback_models += 1;
+        }
 
-            let mut lowered_primal = 0_usize;
-            let mut lowered_differentiated = 0_usize;
-            let mut refused = 0_usize;
-            let mut instructions = 0_usize;
-            let mut executed = 0_usize;
-            let mut worst = 0.0_f64;
-            let mut worst_case: Option<String> = None;
-            let mut first_refusal: Option<String> = None;
+        if cfg.noise_processes.is_empty() {
+            println!(
+                "cfg-noise model={module} processes=0 shipped_sources={} \
+                     plan_decline={decline:?} primal_decline={primal_decline:?} seconds={:.1}",
+                runtime.model.noise_sources.len(),
+                started.elapsed().as_secs_f64(),
+            );
+            continue;
+        }
 
-            for process in &cfg.noise_processes {
-                for (name, value) in noise_process_values(process) {
-                    tally.values += 1;
-                    let (pruned, pruned_outputs) = prune_cfg_to_outputs(&cfg.function, &[value]);
-                    let mut program =
-                        lower_cfg_function(&pruned, pruned_outputs[0], &state, &bindings)
-                            .map(|program| (program, pruned, pruned_outputs[0], false));
-                    if program.is_err() {
-                        if resolved.is_none() {
-                            if differentiated.is_none() {
-                                differentiated = differentiate(&cfg.function, &seeds).ok();
-                            }
-                            resolved = Some(
-                                differentiated
-                                    .as_ref()
-                                    .and_then(|body| scalarize_lanes(&body.function).ok()),
-                            );
+        // ---- lowering, execution and comparison -------------------------
+        let branch_unknowns = canonical_branch_unknown_runtime_map(&runtime.model, &artifact.mir)
+            .unwrap_or_else(|error| panic!("{module}: branch unknown map: {error}"));
+        let event_state_variables: Vec<Option<usize>> = artifact
+            .hir
+            .variables
+            .iter()
+            .filter(|variable| variable.is_state)
+            .map(|variable| {
+                runtime
+                    .model
+                    .variable_names
+                    .iter()
+                    .position(|name| *name == variable.name)
+            })
+            .collect();
+        let bindings = CfgRuntimeBindings::from_mir(
+            module.as_str(),
+            &artifact.mir,
+            branch_unknowns,
+            event_state_variables,
+        );
+        let state_len = state.family_len(CanonicalStateFamily::Integration) + 8;
+        let parameter_defaults: Vec<Option<f64>> = artifact
+            .mir
+            .parameters
+            .iter()
+            .map(|parameter| parameter.default)
+            .collect();
+        // Noise first, because that is the analysis these magnitudes are
+        // evaluated in; a DC point alongside it so a `$analysis` guard
+        // inside a power is exercised both ways.
+        let mut points: Vec<OperatingPoint> = [(0x0000_5E15_u64, 3_u8), (0x0005_EED1, 0)]
+            .into_iter()
+            .map(|(seed, analysis)| {
+                OperatingPoint::new(
+                    seed,
+                    analysis,
+                    &parameter_defaults,
+                    bindings.terminal_count,
+                    bindings.internal_node_count,
+                    &bindings.branch_unknowns,
+                    state_len,
+                    cfg.event_state_candidates.len(),
+                )
+            })
+            .collect();
+        let variables = vec![0.0_f64; runtime.model.num_variables + 8];
+
+        // The scalarized differentiated body, cut once and only if a
+        // magnitude needs it: a `ddx` inside a noise power has no value
+        // until the AD pass resolves it, and running that pass on a model
+        // whose magnitudes lower from the primal would cost only time.
+        let mut resolved: Option<Option<ScalarLanes>> = None;
+
+        let mut lowered_primal = 0_usize;
+        let mut lowered_differentiated = 0_usize;
+        let mut refused = 0_usize;
+        let mut instructions = 0_usize;
+        let mut executed = 0_usize;
+        let mut worst = 0.0_f64;
+        let mut worst_case: Option<String> = None;
+        let mut first_refusal: Option<String> = None;
+
+        for process in &cfg.noise_processes {
+            for (name, value) in noise_process_values(process) {
+                tally.values += 1;
+                let (pruned, pruned_outputs) = prune_cfg_to_outputs(&cfg.function, &[value]);
+                let mut program = lower_cfg_function(&pruned, pruned_outputs[0], &state, &bindings)
+                    .map(|program| (program, pruned, pruned_outputs[0], false));
+                if program.is_err() {
+                    if resolved.is_none() {
+                        if differentiated.is_none() {
+                            differentiated = differentiate(&cfg.function, &seeds).ok();
                         }
-                        let scalarized = resolved.as_ref().expect("just filled");
-                        if let Some(scalarized) = scalarized.as_ref()
-                            && let Some(scalar) = scalarized.scalar(value)
-                        {
-                            let (pruned, outputs) =
-                                prune_cfg_to_outputs(&scalarized.function, &[scalar]);
-                            program = lower_cfg_function(&pruned, outputs[0], &state, &bindings)
-                                .map(|program| (program, pruned, outputs[0], true));
-                        }
+                        resolved = Some(
+                            differentiated
+                                .as_ref()
+                                .and_then(|body| scalarize_lanes(&body.function).ok()),
+                        );
                     }
-                    let (program, pruned, output, differentiated) = match program {
-                        Ok(lowered) => lowered,
-                        Err(error) => {
-                            refused += 1;
-                            tally.refused += 1;
-                            first_refusal.get_or_insert_with(|| format!("{name}: {error}"));
-                            continue;
-                        }
-                    };
-                    if differentiated {
-                        lowered_differentiated += 1;
-                        tally.lowered_differentiated += 1;
-                    } else {
-                        lowered_primal += 1;
-                        tally.lowered_primal += 1;
+                    let scalarized = resolved.as_ref().expect("just filled");
+                    if let Some(scalarized) = scalarized.as_ref()
+                        && let Some(scalar) = scalarized.scalar(value)
+                    {
+                        let (pruned, outputs) =
+                            prune_cfg_to_outputs(&scalarized.function, &[scalar]);
+                        program = lower_cfg_function(&pruned, outputs[0], &state, &bindings)
+                            .map(|program| (program, pruned, outputs[0], true));
                     }
-                    instructions += program.instructions().len();
-
-                    if executed >= EXECUTED_NOISE_VALUES_PER_MODEL {
+                }
+                let (program, pruned, output, differentiated) = match program {
+                    Ok(lowered) => lowered,
+                    Err(error) => {
+                        refused += 1;
+                        tally.refused += 1;
+                        first_refusal.get_or_insert_with(|| format!("{name}: {error}"));
                         continue;
                     }
-                    let image = compile_value_function_artifact_from_ssa(&program).unwrap_or_else(
-                        |error| panic!("{module} process {} {name}: {error}", process.process_id),
-                    );
-                    let memory =
-                        ExecutableMemory::allocate(image.bytes()).unwrap_or_else(|error| {
-                            panic!("{module} process {} {name}: {error}", process.process_id)
-                        });
-                    let entry_point = memory.ptr_at(0).expect("entry inside published image");
-                    let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
-                        unsafe { std::mem::transmute(entry_point) };
-                    executed += 1;
-                    tally.executed += 1;
+                };
+                if differentiated {
+                    lowered_differentiated += 1;
+                    tally.lowered_differentiated += 1;
+                } else {
+                    lowered_primal += 1;
+                    tally.lowered_primal += 1;
+                }
+                instructions += program.instructions().len();
 
-                    for (index, point) in points.iter_mut().enumerate() {
-                        let interpreter_inputs = point.interpreter_inputs(
-                            artifact.mir.nodes.len(),
-                            artifact.mir.branches.len(),
-                        );
-                        let Ok(snapshot) = evaluate_cfg(&pruned, &interpreter_inputs) else {
-                            continue;
-                        };
-                        let Some(reference) = snapshot.value(output) else {
-                            continue;
-                        };
-                        let context = point.context();
-                        context.clear_runtime_error();
-                        let actual = function(&context, variables.as_ptr());
-                        if context.take_runtime_error().is_some() {
-                            tally.runtime_errors += 1;
-                            continue;
-                        }
-                        tally.comparisons += 1;
-                        if let Some(delta) = deviation(reference, actual)
-                            && delta > worst
-                        {
-                            worst = delta;
-                            worst_case = Some(format!(
-                                "process={} {name} point={index} interpreter={reference:.17e} \
+                if executed >= EXECUTED_NOISE_VALUES_PER_MODEL {
+                    continue;
+                }
+                let image =
+                    compile_value_function_artifact_from_ssa(&program).unwrap_or_else(|error| {
+                        panic!("{module} process {} {name}: {error}", process.process_id)
+                    });
+                let memory = ExecutableMemory::allocate(image.bytes()).unwrap_or_else(|error| {
+                    panic!("{module} process {} {name}: {error}", process.process_id)
+                });
+                let entry_point = memory.ptr_at(0).expect("entry inside published image");
+                let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                    unsafe { std::mem::transmute(entry_point) };
+                executed += 1;
+                tally.executed += 1;
+
+                for (index, point) in points.iter_mut().enumerate() {
+                    let interpreter_inputs = point
+                        .interpreter_inputs(artifact.mir.nodes.len(), artifact.mir.branches.len());
+                    let Ok(snapshot) = evaluate_cfg(&pruned, &interpreter_inputs) else {
+                        continue;
+                    };
+                    let Some(reference) = snapshot.value(output) else {
+                        continue;
+                    };
+                    let context = point.context();
+                    context.clear_runtime_error();
+                    let actual = function(&context, variables.as_ptr());
+                    if context.take_runtime_error().is_some() {
+                        tally.runtime_errors += 1;
+                        continue;
+                    }
+                    tally.comparisons += 1;
+                    if let Some(delta) = deviation(reference, actual)
+                        && delta > worst
+                    {
+                        worst = delta;
+                        worst_case = Some(format!(
+                            "process={} {name} point={index} interpreter={reference:.17e} \
                                  block_program={actual:.17e}",
-                                process.process_id
-                            ));
-                        }
+                            process.process_id
+                        ));
                     }
                 }
             }
+        }
 
-            tally.lowered_instructions += instructions;
-            worst_overall = worst_overall.max(worst);
-            println!(
-                "cfg-noise model={module} processes={} shipped_sources={} paired={paired} \
+        tally.lowered_instructions += instructions;
+        worst_overall = worst_overall.max(worst);
+        println!(
+            "cfg-noise model={module} processes={} shipped_sources={} paired={paired} \
                  unpaired={unpaired} primal={lowered_primal} differentiated={lowered_differentiated} \
                  refused={refused} instructions={instructions} executed={executed} \
                  max_relative_deviation={worst:.3e} plan_decline={decline:?} \
                  primal_decline={primal_decline:?} seconds={:.1}{}{}{}",
-                cfg.noise_processes.len(),
-                runtime.model.noise_sources.len(),
-                started.elapsed().as_secs_f64(),
-                mismatch
-                    .map(|case| format!(" MISMATCH[{case}]"))
-                    .unwrap_or_default(),
-                worst_case
-                    .map(|case| format!(" worst_case[{case}]"))
-                    .unwrap_or_default(),
-                first_refusal
-                    .map(|refusal| format!(" first_refusal={refusal}"))
-                    .unwrap_or_default(),
-            );
-        }
+            cfg.noise_processes.len(),
+            runtime.model.noise_sources.len(),
+            started.elapsed().as_secs_f64(),
+            mismatch
+                .map(|case| format!(" MISMATCH[{case}]"))
+                .unwrap_or_default(),
+            worst_case
+                .map(|case| format!(" worst_case[{case}]"))
+                .unwrap_or_default(),
+            first_refusal
+                .map(|refusal| format!(" first_refusal={refusal}"))
+                .unwrap_or_default(),
+        );
     }
     println!(
         "cfg-noise models={} silent_models={} processes={} shipped_sources={} paired={} \
