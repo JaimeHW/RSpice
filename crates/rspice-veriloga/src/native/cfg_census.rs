@@ -737,384 +737,362 @@ struct JacobianTally {
 #[test]
 #[ignore = "release qualification; run with --release --features native -- --ignored --nocapture"]
 fn the_cfg_jacobian_route_agrees_with_the_interpreter_and_the_oracles() {
-    let root = shipped_model_root();
-    let candidates = discover_veriloga_sources(&root).expect("discover shipped Verilog-A sources");
     let mut tally = JacobianTally::default();
     let mut worst_overall = 0.0_f64;
     let mut worst_oracle_overall = 0.0_f64;
     let filter = std::env::var("RSPICE_CFG_CENSUS_FILTER").ok();
-    for candidate in candidates {
-        for module in &candidate.modules {
-            if filter
-                .as_deref()
-                .is_some_and(|filter| !module.contains(filter))
-            {
+    for shipped in shipped_census_models_matching(filter.as_deref()) {
+        let module = &shipped.name;
+        let started = std::time::Instant::now();
+        let runtime = &shipped;
+        let artifact = &runtime.canonical_ir;
+        tally.models += 1;
+        let Ok(cfg) = CfgModel::from_hir(&artifact.hir, &artifact.mir) else {
+            println!("cfg-jacobian model={module} refused=cfg-lowering");
+            continue;
+        };
+        let Ok(state) = CfgStateAllocation::build(&artifact.hir, &cfg.function) else {
+            println!("cfg-jacobian model={module} refused=state-allocation");
+            continue;
+        };
+
+        let (seeds, correction_lane) = derivative_seeds(&cfg, &artifact.mir);
+        let mut differentiated = match differentiate(&cfg.function, &seeds) {
+            Ok(differentiated) => differentiated,
+            Err(error) => {
+                tally.differentiation_refusals += 1;
+                println!("cfg-jacobian model={module} refused=differentiate detail={error:?}");
                 continue;
             }
-            let started = std::time::Instant::now();
-            let mut options = CompilerOptions::default();
-            options.include_paths.push(root.clone());
-            options.defines = candidate.compile_profile.defines.clone();
-            options.undefines = candidate.compile_profile.undefines.clone();
-            let compiler = VerilogACompiler::new(options);
-            let runtime = compiler
-                .compile_file_runtime_with_metadata(&candidate.path, Some(module))
-                .unwrap_or_else(|error| {
-                    panic!("compile {} :: {module}: {error}", candidate.path.display())
-                });
-            let artifact = &runtime.canonical_ir;
-            tally.models += 1;
-            let Ok(cfg) = CfgModel::from_hir(&artifact.hir, &artifact.mir) else {
-                println!("cfg-jacobian model={module} refused=cfg-lowering");
+        };
+        // Every read-out before anything evaluates or lowers: taking one
+        // appends an instruction, so a function captured earlier would not
+        // contain the later ones.
+        let rows: Vec<Vec<Option<ValueId>>> = cfg
+            .residuals
+            .iter()
+            .map(|residual| differentiated.derivative_row(*residual))
+            .collect();
+        let scalarized = match scalarize_lanes(&differentiated.function) {
+            Ok(scalarized) => scalarized,
+            Err(error) => {
+                println!("cfg-jacobian model={module} refused=scalarize detail={error}");
                 continue;
-            };
-            let Ok(state) = CfgStateAllocation::build(&artifact.hir, &cfg.function) else {
-                println!("cfg-jacobian model={module} refused=state-allocation");
-                continue;
-            };
+            }
+        };
 
-            let (seeds, correction_lane) = derivative_seeds(&cfg, &artifact.mir);
-            let mut differentiated = match differentiate(&cfg.function, &seeds) {
-                Ok(differentiated) => differentiated,
-                Err(error) => {
-                    tally.differentiation_refusals += 1;
-                    println!("cfg-jacobian model={module} refused=differentiate detail={error:?}");
-                    continue;
-                }
-            };
-            // Every read-out before anything evaluates or lowers: taking one
-            // appends an instruction, so a function captured earlier would not
-            // contain the later ones.
-            let rows: Vec<Vec<Option<ValueId>>> = cfg
-                .residuals
-                .iter()
-                .map(|residual| differentiated.derivative_row(*residual))
-                .collect();
-            let scalarized = match scalarize_lanes(&differentiated.function) {
-                Ok(scalarized) => scalarized,
-                Err(error) => {
-                    println!("cfg-jacobian model={module} refused=scalarize detail={error}");
-                    continue;
-                }
-            };
-
-            let branch_unknowns =
-                canonical_branch_unknown_runtime_map(&runtime.model, &artifact.mir)
-                    .unwrap_or_else(|error| panic!("{module}: branch unknown map: {error}"));
-            let event_state_variables: Vec<Option<usize>> = artifact
-                .hir
-                .variables
-                .iter()
-                .filter(|variable| variable.is_state)
-                .map(|variable| {
-                    runtime
-                        .model
-                        .variable_names
-                        .iter()
-                        .position(|name| *name == variable.name)
+        let branch_unknowns = canonical_branch_unknown_runtime_map(&runtime.model, &artifact.mir)
+            .unwrap_or_else(|error| panic!("{module}: branch unknown map: {error}"));
+        let event_state_variables: Vec<Option<usize>> = artifact
+            .hir
+            .variables
+            .iter()
+            .filter(|variable| variable.is_state)
+            .map(|variable| {
+                runtime
+                    .model
+                    .variable_names
+                    .iter()
+                    .position(|name| *name == variable.name)
+            })
+            .collect();
+        let bindings = CfgRuntimeBindings::from_mir(
+            module.as_str(),
+            &artifact.mir,
+            branch_unknowns,
+            event_state_variables,
+        );
+        let state_len = state.family_len(CanonicalStateFamily::Integration) + 8;
+        let parameter_defaults: Vec<Option<f64>> = artifact
+            .mir
+            .parameters
+            .iter()
+            .map(|parameter| parameter.default)
+            .collect();
+        let mut points: Vec<OperatingPoint> =
+            [(0x0005_EED1_u64, 0_u8), (0x00C0_FFEE, 2), (0x0000_BEEF, 0)]
+                .into_iter()
+                .map(|(seed, analysis)| {
+                    OperatingPoint::new(
+                        seed,
+                        analysis,
+                        &parameter_defaults,
+                        bindings.terminal_count,
+                        bindings.internal_node_count,
+                        &bindings.branch_unknowns,
+                        state_len,
+                        cfg.event_state_candidates.len(),
+                    )
                 })
                 .collect();
-            let bindings = CfgRuntimeBindings::from_mir(
-                module.as_str(),
-                &artifact.mir,
-                branch_unknowns,
-                event_state_variables,
-            );
-            let state_len = state.family_len(CanonicalStateFamily::Integration) + 8;
-            let parameter_defaults: Vec<Option<f64>> = artifact
-                .mir
-                .parameters
-                .iter()
-                .map(|parameter| parameter.default)
-                .collect();
-            let mut points: Vec<OperatingPoint> =
-                [(0x0005_EED1_u64, 0_u8), (0x00C0_FFEE, 2), (0x0000_BEEF, 0)]
-                    .into_iter()
-                    .map(|(seed, analysis)| {
-                        OperatingPoint::new(
-                            seed,
-                            analysis,
-                            &parameter_defaults,
-                            bindings.terminal_count,
-                            bindings.internal_node_count,
-                            &bindings.branch_unknowns,
-                            state_len,
-                            cfg.event_state_candidates.len(),
-                        )
-                    })
-                    .collect();
-            let variables = vec![0.0_f64; runtime.model.num_variables + 8];
+        let variables = vec![0.0_f64; runtime.model.num_variables + 8];
 
-            // ---- sparsity ---------------------------------------------------
-            let node_count = artifact.mir.nodes.len();
-            let mut cfg_pairs: HashSet<(usize, usize)> = HashSet::new();
-            for (equation, row) in rows.iter().enumerate() {
-                for (lane, entry) in row.iter().enumerate() {
-                    if entry.is_some() && Some(lane) != correction_lane {
-                        cfg_pairs.insert((equation, lane));
-                    }
+        // ---- sparsity ---------------------------------------------------
+        let node_count = artifact.mir.nodes.len();
+        let mut cfg_pairs: HashSet<(usize, usize)> = HashSet::new();
+        for (equation, row) in rows.iter().enumerate() {
+            for (lane, entry) in row.iter().enumerate() {
+                if entry.is_some() && Some(lane) != correction_lane {
+                    cfg_pairs.insert((equation, lane));
                 }
             }
-            let mut shipped_pairs: HashSet<(usize, usize)> = HashSet::new();
-            for (equation, program) in runtime.model.stamp_programs.iter().enumerate() {
-                for entry in &program.jacobian_programs {
-                    shipped_pairs
-                        .insert((equation, shipped_entry_lane(&entry.col_axis, node_count)));
-                }
+        }
+        let mut shipped_pairs: HashSet<(usize, usize)> = HashSet::new();
+        for (equation, program) in runtime.model.stamp_programs.iter().enumerate() {
+            for entry in &program.jacobian_programs {
+                shipped_pairs.insert((equation, shipped_entry_lane(&entry.col_axis, node_count)));
             }
-            let paired = runtime.model.stamp_programs.len() == cfg.residuals.len();
-            let (shared, cfg_only, shipped_only) = if paired {
-                (
-                    cfg_pairs.intersection(&shipped_pairs).count(),
-                    cfg_pairs.difference(&shipped_pairs).count(),
-                    shipped_pairs.difference(&cfg_pairs).count(),
-                )
-            } else {
-                tally.sparsity_unpaired += 1;
-                (0, 0, 0)
-            };
-            tally.sparsity.shared += shared;
-            tally.sparsity.cfg_only += cfg_only;
-            tally.sparsity.shipped_only += shipped_only;
+        }
+        let paired = runtime.model.stamp_programs.len() == cfg.residuals.len();
+        let (shared, cfg_only, shipped_only) = if paired {
+            (
+                cfg_pairs.intersection(&shipped_pairs).count(),
+                cfg_pairs.difference(&shipped_pairs).count(),
+                shipped_pairs.difference(&cfg_pairs).count(),
+            )
+        } else {
+            tally.sparsity_unpaired += 1;
+            (0, 0, 0)
+        };
+        tally.sparsity.shared += shared;
+        tally.sparsity.cfg_only += cfg_only;
+        tally.sparsity.shipped_only += shipped_only;
 
-            // Every shipped-only pair gets asked the one question that decides
-            // whether it is a finding: is the derivative actually zero there?
-            // The oracle is complex step on the primal, which shares no chain
-            // rule with either route's sparsity analysis.
-            let mut shipped_only_worst = 0.0_f64;
-            let mut shipped_only_case: Option<String> = None;
-            if paired && shipped_only > 0 {
-                let mut missing: Vec<(usize, usize)> =
-                    shipped_pairs.difference(&cfg_pairs).copied().collect();
-                // By lane, not by pair: a complex-step evaluation perturbs one
-                // unknown and answers for *every* residual at once, so grouping
-                // turns one interpretation per missing entry into one per
-                // distinct unknown. On a compact model that is the difference
-                // between a few dozen evaluations and a few.
-                missing.sort_unstable_by_key(|(equation, lane)| (*lane, *equation));
-                let mut current: Option<(usize, CfgEvalSnapshot<ComplexStep>)> = None;
-                for (equation, lane) in missing {
-                    let Some(seed) = seeds.get(lane).copied() else {
-                        tally.sparsity.shipped_only_unmapped += 1;
-                        continue;
-                    };
-                    if current.as_ref().is_none_or(|(held, _)| *held != lane) {
-                        let complex = points[0].complex_inputs(
-                            artifact.mir.nodes.len(),
-                            artifact.mir.branches.len(),
-                            seed,
-                        );
-                        current = evaluate_cfg(&differentiated.function, &complex)
-                            .ok()
-                            .map(|snapshot| (lane, snapshot));
-                    }
-                    let Some((_, snapshot)) = current.as_ref() else {
-                        continue;
-                    };
-                    let Some(value) = snapshot.value(cfg.residuals[equation]) else {
-                        continue;
-                    };
-                    let derivative = value.derivative();
-                    // Scaled against the residual it belongs to: an absolute
-                    // threshold would call a picoamp model's whole row zero and
-                    // an ampere model's rounding nonzero.
-                    let scale = value.real().abs().max(f64::MIN_POSITIVE);
-                    // Bounded on both sides, and the upper bound is not
-                    // slack. `tests/cfg_derivatives.rs` carries the same
-                    // ceiling under the same name for the same reason: a
-                    // reading twelve orders above the residual it belongs to is
-                    // the *perturbed evaluation* overflowing, not a statement
-                    // about a derivative. A genuinely dropped conductance shows
-                    // up as an ordinary-magnitude reading against a structural
-                    // zero, and that still counts.
-                    if derivative.abs() > scale * ORACLE_SIGNIFICANCE
-                        && derivative.abs() < scale * ORACLE_DIVERGENCE_FACTOR
-                    {
-                        tally.sparsity.shipped_only_nonzero += 1;
-                        if derivative.abs() > shipped_only_worst {
-                            shipped_only_worst = derivative.abs();
-                            shipped_only_case = Some(format!(
-                                "d(equation {equation})/d(lane {lane})={derivative:.6e} \
+        // Every shipped-only pair gets asked the one question that decides
+        // whether it is a finding: is the derivative actually zero there?
+        // The oracle is complex step on the primal, which shares no chain
+        // rule with either route's sparsity analysis.
+        let mut shipped_only_worst = 0.0_f64;
+        let mut shipped_only_case: Option<String> = None;
+        if paired && shipped_only > 0 {
+            let mut missing: Vec<(usize, usize)> =
+                shipped_pairs.difference(&cfg_pairs).copied().collect();
+            // By lane, not by pair: a complex-step evaluation perturbs one
+            // unknown and answers for *every* residual at once, so grouping
+            // turns one interpretation per missing entry into one per
+            // distinct unknown. On a compact model that is the difference
+            // between a few dozen evaluations and a few.
+            missing.sort_unstable_by_key(|(equation, lane)| (*lane, *equation));
+            let mut current: Option<(usize, CfgEvalSnapshot<ComplexStep>)> = None;
+            for (equation, lane) in missing {
+                let Some(seed) = seeds.get(lane).copied() else {
+                    tally.sparsity.shipped_only_unmapped += 1;
+                    continue;
+                };
+                if current.as_ref().is_none_or(|(held, _)| *held != lane) {
+                    let complex = points[0].complex_inputs(
+                        artifact.mir.nodes.len(),
+                        artifact.mir.branches.len(),
+                        seed,
+                    );
+                    current = evaluate_cfg(&differentiated.function, &complex)
+                        .ok()
+                        .map(|snapshot| (lane, snapshot));
+                }
+                let Some((_, snapshot)) = current.as_ref() else {
+                    continue;
+                };
+                let Some(value) = snapshot.value(cfg.residuals[equation]) else {
+                    continue;
+                };
+                let derivative = value.derivative();
+                // Scaled against the residual it belongs to: an absolute
+                // threshold would call a picoamp model's whole row zero and
+                // an ampere model's rounding nonzero.
+                let scale = value.real().abs().max(f64::MIN_POSITIVE);
+                // Bounded on both sides, and the upper bound is not
+                // slack. `tests/cfg_derivatives.rs` carries the same
+                // ceiling under the same name for the same reason: a
+                // reading twelve orders above the residual it belongs to is
+                // the *perturbed evaluation* overflowing, not a statement
+                // about a derivative. A genuinely dropped conductance shows
+                // up as an ordinary-magnitude reading against a structural
+                // zero, and that still counts.
+                if derivative.abs() > scale * ORACLE_SIGNIFICANCE
+                    && derivative.abs() < scale * ORACLE_DIVERGENCE_FACTOR
+                {
+                    tally.sparsity.shipped_only_nonzero += 1;
+                    if derivative.abs() > shipped_only_worst {
+                        shipped_only_worst = derivative.abs();
+                        shipped_only_case = Some(format!(
+                            "d(equation {equation})/d(lane {lane})={derivative:.6e} \
                                  residual={:.6e}",
-                                value.real()
-                            ));
-                        }
+                            value.real()
+                        ));
                     }
                 }
             }
+        }
 
-            // ---- lowering, execution and comparison -------------------------
-            let mut residual_programs = 0_usize;
-            let mut jacobian_programs = 0_usize;
-            let mut refused = 0_usize;
-            let mut instructions = 0_usize;
-            let mut executed = 0_usize;
-            let mut oracle_checks = 0_usize;
-            let mut worst = 0.0_f64;
-            let mut worst_case: Option<String> = None;
-            let mut worst_oracle = 0.0_f64;
-            let mut oracle_case: Option<String> = None;
-            let mut first_refusal: Option<String> = None;
+        // ---- lowering, execution and comparison -------------------------
+        let mut residual_programs = 0_usize;
+        let mut jacobian_programs = 0_usize;
+        let mut refused = 0_usize;
+        let mut instructions = 0_usize;
+        let mut executed = 0_usize;
+        let mut oracle_checks = 0_usize;
+        let mut worst = 0.0_f64;
+        let mut worst_case: Option<String> = None;
+        let mut worst_oracle = 0.0_f64;
+        let mut oracle_case: Option<String> = None;
+        let mut first_refusal: Option<String> = None;
 
-            for (equation, residual) in cfg.residuals.iter().copied().enumerate() {
-                // The primal first, then its row: an entry shares nearly all of
-                // the residual's cone, which is what makes the per-entry program
-                // count the cost this census exists to measure.
-                let mut outputs: Vec<(Option<usize>, ValueId)> = Vec::new();
-                if let Some(primal) = scalarized.scalar(residual) {
-                    outputs.push((None, primal));
+        for (equation, residual) in cfg.residuals.iter().copied().enumerate() {
+            // The primal first, then its row: an entry shares nearly all of
+            // the residual's cone, which is what makes the per-entry program
+            // count the cost this census exists to measure.
+            let mut outputs: Vec<(Option<usize>, ValueId)> = Vec::new();
+            if let Some(primal) = scalarized.scalar(residual) {
+                outputs.push((None, primal));
+            }
+            for (lane, entry) in rows[equation].iter().enumerate() {
+                if Some(lane) == correction_lane {
+                    continue;
                 }
-                for (lane, entry) in rows[equation].iter().enumerate() {
-                    if Some(lane) == correction_lane {
+                if let Some(entry) = entry
+                    && let Some(scalar) = scalarized.scalar(*entry)
+                {
+                    outputs.push((Some(lane), scalar));
+                }
+            }
+
+            // Sliced to the whole row once, then to each entry within it.
+            // Pruning is linear in the function, so slicing the *model* per
+            // entry would be the equation count times the lane count passes
+            // over a compact model's whole body; slicing the row first
+            // makes every inner pass linear in the row instead. The result
+            // is the same function: pruning is idempotent, and composing
+            // two slices keeps exactly what the inner one asked for.
+            let row_outputs: Vec<ValueId> = outputs.iter().map(|(_, output)| *output).collect();
+            let (row_function, row_mapped) =
+                prune_cfg_to_outputs(&scalarized.function, &row_outputs);
+            let outputs: Vec<(Option<usize>, ValueId)> = outputs
+                .into_iter()
+                .zip(row_mapped)
+                .map(|((lane, _), mapped)| (lane, mapped))
+                .collect();
+
+            for (lane, output) in outputs {
+                let (pruned, pruned_outputs) = prune_cfg_to_outputs(&row_function, &[output]);
+                let program =
+                    match lower_cfg_function(&pruned, pruned_outputs[0], &state, &bindings) {
+                        Ok(program) => program,
+                        Err(error) => {
+                            refused += 1;
+                            first_refusal.get_or_insert_with(|| error.to_string());
+                            continue;
+                        }
+                    };
+                if lane.is_some() {
+                    jacobian_programs += 1;
+                } else {
+                    residual_programs += 1;
+                }
+                instructions += program.instructions().len();
+
+                let Some(lane) = lane else { continue };
+                if executed >= EXECUTED_JACOBIAN_ENTRIES_PER_MODEL {
+                    continue;
+                }
+                let image = compile_value_function_artifact_from_ssa(&program)
+                    .unwrap_or_else(|error| panic!("{module} d{equation}/d{lane}: {error}"));
+                let memory = ExecutableMemory::allocate(image.bytes())
+                    .unwrap_or_else(|error| panic!("{module} d{equation}/d{lane}: {error}"));
+                let entry_point = memory.ptr_at(0).expect("entry inside published image");
+                let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                    unsafe { std::mem::transmute(entry_point) };
+                executed += 1;
+
+                for (index, point) in points.iter_mut().enumerate() {
+                    let interpreter_inputs = point
+                        .interpreter_inputs(artifact.mir.nodes.len(), artifact.mir.branches.len());
+                    let Ok(snapshot) = evaluate_cfg(&pruned, &interpreter_inputs) else {
+                        continue;
+                    };
+                    let Some(reference) = snapshot.value(pruned_outputs[0]) else {
+                        continue;
+                    };
+                    let context = point.context();
+                    context.clear_runtime_error();
+                    let actual = function(&context, variables.as_ptr());
+                    if context.take_runtime_error().is_some() {
+                        tally.runtime_errors += 1;
                         continue;
                     }
-                    if let Some(entry) = entry
-                        && let Some(scalar) = scalarized.scalar(*entry)
+                    tally.comparisons += 1;
+                    if let Some(delta) = deviation(reference, actual)
+                        && delta > worst
                     {
-                        outputs.push((Some(lane), scalar));
+                        worst = delta;
+                        worst_case = Some(format!(
+                            "d(equation {equation})/d(lane {lane}) point={index} \
+                                 interpreter={reference:.17e} block_program={actual:.17e}"
+                        ));
                     }
-                }
 
-                // Sliced to the whole row once, then to each entry within it.
-                // Pruning is linear in the function, so slicing the *model* per
-                // entry would be the equation count times the lane count passes
-                // over a compact model's whole body; slicing the row first
-                // makes every inner pass linear in the row instead. The result
-                // is the same function: pruning is idempotent, and composing
-                // two slices keeps exactly what the inner one asked for.
-                let row_outputs: Vec<ValueId> = outputs.iter().map(|(_, output)| *output).collect();
-                let (row_function, row_mapped) =
-                    prune_cfg_to_outputs(&scalarized.function, &row_outputs);
-                let outputs: Vec<(Option<usize>, ValueId)> = outputs
-                    .into_iter()
-                    .zip(row_mapped)
-                    .map(|((lane, _), mapped)| (lane, mapped))
-                    .collect();
-
-                for (lane, output) in outputs {
-                    let (pruned, pruned_outputs) = prune_cfg_to_outputs(&row_function, &[output]);
-                    let program =
-                        match lower_cfg_function(&pruned, pruned_outputs[0], &state, &bindings) {
-                            Ok(program) => program,
-                            Err(error) => {
-                                refused += 1;
-                                first_refusal.get_or_insert_with(|| error.to_string());
-                                continue;
-                            }
-                        };
-                    if lane.is_some() {
-                        jacobian_programs += 1;
-                    } else {
-                        residual_programs += 1;
-                    }
-                    instructions += program.instructions().len();
-
-                    let Some(lane) = lane else { continue };
-                    if executed >= EXECUTED_JACOBIAN_ENTRIES_PER_MODEL {
-                        continue;
-                    }
-                    let image = compile_value_function_artifact_from_ssa(&program)
-                        .unwrap_or_else(|error| panic!("{module} d{equation}/d{lane}: {error}"));
-                    let memory = ExecutableMemory::allocate(image.bytes())
-                        .unwrap_or_else(|error| panic!("{module} d{equation}/d{lane}: {error}"));
-                    let entry_point = memory.ptr_at(0).expect("entry inside published image");
-                    let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
-                        unsafe { std::mem::transmute(entry_point) };
-                    executed += 1;
-
-                    for (index, point) in points.iter_mut().enumerate() {
-                        let interpreter_inputs = point.interpreter_inputs(
+                    // The independent oracle, on the first operating point
+                    // only and for a bounded number of entries.
+                    if index == 0 && oracle_checks < ORACLE_ENTRIES_PER_MODEL {
+                        oracle_checks += 1;
+                        let complex = point.complex_inputs(
                             artifact.mir.nodes.len(),
                             artifact.mir.branches.len(),
+                            seeds[lane],
                         );
-                        let Ok(snapshot) = evaluate_cfg(&pruned, &interpreter_inputs) else {
-                            continue;
-                        };
-                        let Some(reference) = snapshot.value(pruned_outputs[0]) else {
-                            continue;
-                        };
-                        let context = point.context();
-                        context.clear_runtime_error();
-                        let actual = function(&context, variables.as_ptr());
-                        if context.take_runtime_error().is_some() {
-                            tally.runtime_errors += 1;
-                            continue;
-                        }
-                        tally.comparisons += 1;
-                        if let Some(delta) = deviation(reference, actual)
-                            && delta > worst
+                        if let Ok(snapshot) = evaluate_cfg(&differentiated.function, &complex)
+                            && let Some(value) = snapshot.value(residual)
                         {
-                            worst = delta;
-                            worst_case = Some(format!(
-                                "d(equation {equation})/d(lane {lane}) point={index} \
-                                 interpreter={reference:.17e} block_program={actual:.17e}"
-                            ));
-                        }
-
-                        // The independent oracle, on the first operating point
-                        // only and for a bounded number of entries.
-                        if index == 0 && oracle_checks < ORACLE_ENTRIES_PER_MODEL {
-                            oracle_checks += 1;
-                            let complex = point.complex_inputs(
-                                artifact.mir.nodes.len(),
-                                artifact.mir.branches.len(),
-                                seeds[lane],
-                            );
-                            if let Ok(snapshot) = evaluate_cfg(&differentiated.function, &complex)
-                                && let Some(value) = snapshot.value(residual)
+                            let oracle = value.derivative();
+                            tally.oracle_comparisons += 1;
+                            // A near-cancelling entry carries no significant
+                            // figures, and demanding agreement there
+                            // manufactures failures rather than finding them.
+                            let scale = oracle.abs().max(actual.abs());
+                            if scale > 1.0e-30
+                                && let Some(delta) = deviation(oracle, actual)
+                                && delta > worst_oracle
                             {
-                                let oracle = value.derivative();
-                                tally.oracle_comparisons += 1;
-                                // A near-cancelling entry carries no significant
-                                // figures, and demanding agreement there
-                                // manufactures failures rather than finding them.
-                                let scale = oracle.abs().max(actual.abs());
-                                if scale > 1.0e-30
-                                    && let Some(delta) = deviation(oracle, actual)
-                                    && delta > worst_oracle
-                                {
-                                    worst_oracle = delta;
-                                    oracle_case = Some(format!(
-                                        "d(equation {equation})/d(lane {lane}) \
+                                worst_oracle = delta;
+                                oracle_case = Some(format!(
+                                    "d(equation {equation})/d(lane {lane}) \
                                          complex_step={oracle:.17e} block_program={actual:.17e}"
-                                    ));
-                                }
+                                ));
                             }
                         }
                     }
                 }
             }
+        }
 
-            tally.residual_programs += residual_programs;
-            tally.jacobian_programs += jacobian_programs;
-            tally.refused_programs += refused;
-            tally.lowered_instructions += instructions;
-            tally.executed += executed;
-            worst_overall = worst_overall.max(worst);
-            worst_oracle_overall = worst_oracle_overall.max(worst_oracle);
-            println!(
-                "cfg-jacobian model={module} equations={} lanes={} residual_programs={residual_programs} \
+        tally.residual_programs += residual_programs;
+        tally.jacobian_programs += jacobian_programs;
+        tally.refused_programs += refused;
+        tally.lowered_instructions += instructions;
+        tally.executed += executed;
+        worst_overall = worst_overall.max(worst);
+        worst_oracle_overall = worst_oracle_overall.max(worst_oracle);
+        println!(
+            "cfg-jacobian model={module} equations={} lanes={} residual_programs={residual_programs} \
                  jacobian_programs={jacobian_programs} refused={refused} instructions={instructions} \
                  executed={executed} max_relative_deviation={worst:.3e} oracle_deviation={worst_oracle:.3e} \
                  sparsity[shared={shared} cfg_only={cfg_only} shipped_only={shipped_only}{}] seconds={:.1}{}{}{}{}",
-                cfg.residuals.len(),
-                seeds.len(),
-                if paired { "" } else { " UNPAIRED" },
-                started.elapsed().as_secs_f64(),
-                shipped_only_case
-                    .map(|case| format!(" SHIPPED_ONLY_NONZERO[{case}]"))
-                    .unwrap_or_default(),
-                worst_case
-                    .map(|case| format!(" worst_case[{case}]"))
-                    .unwrap_or_default(),
-                oracle_case
-                    .map(|case| format!(" oracle_case[{case}]"))
-                    .unwrap_or_default(),
-                first_refusal
-                    .map(|refusal| format!(" first_refusal={refusal}"))
-                    .unwrap_or_default(),
-            );
-        }
+            cfg.residuals.len(),
+            seeds.len(),
+            if paired { "" } else { " UNPAIRED" },
+            started.elapsed().as_secs_f64(),
+            shipped_only_case
+                .map(|case| format!(" SHIPPED_ONLY_NONZERO[{case}]"))
+                .unwrap_or_default(),
+            worst_case
+                .map(|case| format!(" worst_case[{case}]"))
+                .unwrap_or_default(),
+            oracle_case
+                .map(|case| format!(" oracle_case[{case}]"))
+                .unwrap_or_default(),
+            first_refusal
+                .map(|refusal| format!(" first_refusal={refusal}"))
+                .unwrap_or_default(),
+        );
     }
     println!(
         "cfg-jacobian models={} differentiation_refusals={} residual_programs={} jacobian_programs={} \
@@ -1395,8 +1373,6 @@ fn prefix_shape(tags: &[Emission], statements: usize, contributions: usize) -> P
 #[test]
 #[ignore = "release qualification; run with --release --features native -- --ignored --nocapture"]
 fn the_two_state_slot_numberings_are_censused_over_the_shipped_corpus() {
-    let root = shipped_model_root();
-    let candidates = discover_veriloga_sources(&root).expect("discover shipped Verilog-A sources");
     let mut models = 0_usize;
     let mut with_state = 0_usize;
     let mut with_noise = 0_usize;
@@ -1406,26 +1382,11 @@ fn the_two_state_slot_numberings_are_censused_over_the_shipped_corpus() {
     let mut appending = 0_usize;
     let mut interleaving = 0_usize;
     let filter = std::env::var("RSPICE_CFG_CENSUS_FILTER").ok();
-    for candidate in candidates {
-        for module in &candidate.modules {
-            if filter
-                .as_deref()
-                .is_some_and(|filter| !module.contains(filter))
-            {
-                continue;
-            }
-            let mut options = CompilerOptions::default();
-            options.include_paths.push(root.clone());
-            options.defines = candidate.compile_profile.defines.clone();
-            options.undefines = candidate.compile_profile.undefines.clone();
-            let compiler = VerilogACompiler::new(options);
-            let runtime = compiler
-                .compile_file_runtime_with_metadata(&candidate.path, Some(module))
-                .unwrap_or_else(|error| {
-                    panic!("compile {} :: {module}: {error}", candidate.path.display())
-                });
-            let artifact = &runtime.canonical_ir;
-            models += 1;
+    for shipped in shipped_census_models_matching(filter.as_deref()) {
+        let module = &shipped.name;
+        let runtime = &shipped;
+        let artifact = &runtime.canonical_ir;
+        models += 1;
             let Ok(cfg) = CfgModel::from_hir(&artifact.hir, &artifact.mir) else {
                 println!("state-slots model={module} refused=cfg-lowering");
                 continue;
@@ -1512,7 +1473,6 @@ fn the_two_state_slot_numberings_are_censused_over_the_shipped_corpus() {
                 contexts.has_noise,
                 runtime.model.noise_sources.len(),
             );
-        }
     }
     println!(
         "state-slots models={models} with_integration_state={with_state} with_noise={with_noise} \
