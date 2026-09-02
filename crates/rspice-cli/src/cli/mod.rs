@@ -11,4 +11,5 @@ pub mod error;
 
 pub use args::*;
 pub use config::Config;
+pub(crate) use error::map_atomic_output_error;
 pub use error::{CliError, ErrorDetails};

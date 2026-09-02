@@ -16,8 +16,8 @@ use rspice_core::analysis::s_param;
 use super::RunContext;
 use super::basic::run_dc_op;
 use super::shared::generate_frequency_sweep;
-use crate::atomic_artifact::{write_cli_atomic, write_cli_bytes_atomic};
-use crate::cli::CliError;
+use crate::cli::{CliError, map_atomic_output_error};
+use rspice_output::{AtomicArtifactOptions, Durability, write_atomic};
 
 fn ensure_not_cancelled(ctx: &RunContext<'_>) -> Result<(), CliError> {
     if crate::abort::reason().is_some() {
@@ -300,7 +300,6 @@ fn export_monte_carlo(
     let runs: Vec<f64> = (1..=num_samples).map(|i| i as f64).collect();
 
     if matches!(ctx.format, crate::cli::OutputFormat::Json) {
-        use std::io::Write;
         let json = serde_json::json!({
             "analysis": "monte_carlo",
             "runs": result.num_runs,
@@ -317,12 +316,17 @@ fn export_monte_carlo(
                 })
             }).collect::<Vec<_>>(),
         });
-        write_cli_atomic(output_path, |file| {
-            serde_json::to_writer_pretty(&mut *file, &json)
-                .map_err(|e| CliError::output_json_error(output_path, e))?;
-            file.write_all(b"\n")
-                .map_err(|e| CliError::output_error(output_path, e))
-        })?;
+        write_atomic(
+            output_path,
+            AtomicArtifactOptions::new(Durability::SyncFileAndParent),
+            |file| {
+                serde_json::to_writer_pretty(&mut *file, &json)
+                    .map_err(|e| CliError::output_json_error(output_path, e))?;
+                file.write_all(b"\n")
+                    .map_err(|e| CliError::output_error(output_path, e))
+            },
+        )
+        .map_err(|error| map_atomic_output_error(output_path, error))?;
     } else {
         let signals: Vec<crate::commands::run_signals::ScalarSignal> = variables
             .iter()
@@ -1629,7 +1633,16 @@ fn write_touchstone_nport(
         message,
         suggestion: Some("use CSV, JSON, or HDF5 output for per-port z0 values".to_string()),
     })?;
-    write_cli_bytes_atomic(path, document.as_bytes())
+    write_atomic(
+        path,
+        AtomicArtifactOptions::new(Durability::SyncFileAndParent),
+        |writer| {
+            writer
+                .write_all(document.as_bytes())
+                .map_err(|error| CliError::output_error(path, error))
+        },
+    )
+    .map_err(|error| map_atomic_output_error(path, error))
 }
 
 /// Two-port S-parameter extraction over the deck's `.AC` sweep.
@@ -1856,26 +1869,30 @@ fn write_touchstone_2port(
     frequencies: &[f64],
     s: [&[rspice_core::Complex64]; 4],
 ) -> Result<(), CliError> {
-    use std::io::Write;
-    write_cli_atomic(path, |file| {
-        writeln!(file, "! 2-port S-parameters").map_err(|e| CliError::output_error(path, e))?;
-        writeln!(file, "# HZ S RI R {z0}").map_err(|e| CliError::output_error(path, e))?;
-        let [s11, s21, s12, s22] = s;
-        for (index, freq) in frequencies.iter().enumerate() {
-            let entry = |values: &[rspice_core::Complex64]| {
-                values
-                    .get(index)
-                    .copied()
-                    .unwrap_or_else(|| rspice_core::Complex64::new(0.0, 0.0))
-            };
-            let (a, b, c, d) = (entry(s11), entry(s21), entry(s12), entry(s22));
-            writeln!(
-                file,
-                "{freq:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e}",
-                a.re, a.im, b.re, b.im, c.re, c.im, d.re, d.im
-            )
-            .map_err(|e| CliError::output_error(path, e))?;
-        }
-        Ok(())
-    })
+    write_atomic(
+        path,
+        AtomicArtifactOptions::new(Durability::SyncFileAndParent),
+        |file| {
+            writeln!(file, "! 2-port S-parameters").map_err(|e| CliError::output_error(path, e))?;
+            writeln!(file, "# HZ S RI R {z0}").map_err(|e| CliError::output_error(path, e))?;
+            let [s11, s21, s12, s22] = s;
+            for (index, freq) in frequencies.iter().enumerate() {
+                let entry = |values: &[rspice_core::Complex64]| {
+                    values
+                        .get(index)
+                        .copied()
+                        .unwrap_or_else(|| rspice_core::Complex64::new(0.0, 0.0))
+                };
+                let (a, b, c, d) = (entry(s11), entry(s21), entry(s12), entry(s22));
+                writeln!(
+                    file,
+                    "{freq:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e}",
+                    a.re, a.im, b.re, b.im, c.re, c.im, d.re, d.im
+                )
+                .map_err(|e| CliError::output_error(path, e))?;
+            }
+            Ok(())
+        },
+    )
+    .map_err(|error| map_atomic_output_error(path, error))
 }

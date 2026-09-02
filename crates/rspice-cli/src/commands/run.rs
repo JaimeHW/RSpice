@@ -15,13 +15,14 @@ mod shared;
 
 pub(crate) use crate::commands::export_table as export;
 
-use crate::atomic_artifact::write_cli_bytes_atomic;
 use crate::report::{
     CsvMeasReporter, JUnitReporter, JsonMeasReporter, MeasurementReport, SimulationReport,
     TapReporter,
 };
 
-use crate::cli::{CliError, Config, MeasFormat, OutputFormat, PzTransferMode, RunArgs};
+use crate::cli::{
+    CliError, Config, MeasFormat, OutputFormat, PzTransferMode, RunArgs, map_atomic_output_error,
+};
 use rspice_core::engine::{StepPlan, StepPlanLimits};
 use rspice_core::execution::{
     AxisAssignment, AxisKind, DeckPlan, DeckPlanError, RunAxisValue, RunCoordinate, StepAxisTarget,
@@ -31,6 +32,7 @@ use rspice_core::{
     ConvergencePreset, Engine, Netlist, SimulationConfig, SimulationConfigOverrides,
     resolve_simulation_config,
 };
+use rspice_output::{AtomicArtifactOptions, Durability, write_atomic};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -843,12 +845,15 @@ fn materialize_addresistors_artifact(
             CliError::AddResistorsMaterialization { source }
         })?;
     let path = xyce_addresistors_artifact_path(input);
-    atomic_write_addresistors_artifact(&path, materialized.derived_source.as_bytes()).map_err(
-        |source| CliError::AddResistorsArtifactIo {
-            path: path.clone(),
-            source,
-        },
-    )?;
+    write_atomic(
+        &path,
+        AtomicArtifactOptions::new(Durability::SyncFileAndParent),
+        |writer| writer.write_all(materialized.derived_source.as_bytes()),
+    )
+    .map_err(|source| CliError::AddResistorsArtifactIo {
+        path: path.clone(),
+        source,
+    })?;
     Ok(Some(path))
 }
 
@@ -856,146 +861,6 @@ fn xyce_addresistors_artifact_path(input: &std::path::Path) -> PathBuf {
     let mut name = input.as_os_str().to_os_string();
     name.push("_xyce.cir");
     PathBuf::from(name)
-}
-
-struct TemporaryArtifact {
-    path: PathBuf,
-    armed: bool,
-}
-
-impl Drop for TemporaryArtifact {
-    fn drop(&mut self) {
-        if self.armed {
-            let _ = std::fs::remove_file(&self.path);
-        }
-    }
-}
-
-fn atomic_write_addresistors_artifact(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write as _;
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
-
-    reject_symlink_destination(path)?;
-    let parent = path.parent().unwrap_or_else(|| std::path::Path::new("."));
-    let file_name = path.file_name().ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "ADDRESISTORS artifact path has no file name",
-        )
-    })?;
-
-    let mut opened = None;
-    for _ in 0..128 {
-        let sequence = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-        let mut temporary_name = file_name.to_os_string();
-        temporary_name.push(format!(".tmp.{}.{sequence}", std::process::id()));
-        let temporary_path = parent.join(temporary_name);
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary_path)
-        {
-            Ok(file) => {
-                opened = Some((temporary_path, file));
-                break;
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(error),
-        }
-    }
-    let (temporary_path, mut file) = opened.ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::AlreadyExists,
-            "could not allocate a unique ADDRESISTORS temporary artifact",
-        )
-    })?;
-    let mut guard = TemporaryArtifact {
-        path: temporary_path.clone(),
-        armed: true,
-    };
-
-    file.write_all(bytes)?;
-    file.flush()?;
-    file.sync_all()?;
-    drop(file);
-
-    // Recheck immediately before the atomic namespace operation. A racing
-    // symlink can only be replaced as a directory entry by rename/MoveFileEx;
-    // artifact bytes are never opened through it.
-    reject_symlink_destination(path)?;
-    replace_artifact_atomically(&temporary_path, path)?;
-    guard.armed = false;
-    Ok(())
-}
-
-fn reject_symlink_destination(path: &std::path::Path) -> std::io::Result<()> {
-    match std::fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!(
-                "refusing to replace ADDRESISTORS artifact symlink '{}'",
-                path.display()
-            ),
-        )),
-        Ok(metadata) if metadata.is_dir() => Err(std::io::Error::new(
-            std::io::ErrorKind::IsADirectory,
-            format!(
-                "ADDRESISTORS artifact destination '{}' is a directory",
-                path.display()
-            ),
-        )),
-        Ok(_) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
-}
-
-#[cfg(not(windows))]
-fn replace_artifact_atomically(
-    from: &std::path::Path,
-    to: &std::path::Path,
-) -> std::io::Result<()> {
-    std::fs::rename(from, to)?;
-    std::fs::File::open(to.parent().unwrap_or_else(|| std::path::Path::new(".")))?.sync_all()
-}
-
-#[cfg(windows)]
-fn replace_artifact_atomically(
-    from: &std::path::Path,
-    to: &std::path::Path,
-) -> std::io::Result<()> {
-    use std::os::windows::ffi::OsStrExt as _;
-    use windows_sys::Win32::Storage::FileSystem::{
-        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
-    };
-
-    let from_wide = from
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect::<Vec<_>>();
-    let to_wide = to
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect::<Vec<_>>();
-    // SAFETY: both buffers are live, NUL-terminated UTF-16 paths. The flags
-    // request same-directory atomic replacement and synchronous metadata
-    // completion; the caller has closed the temporary file first.
-    let result = unsafe {
-        MoveFileExW(
-            from_wide.as_ptr(),
-            to_wide.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    };
-    if result == 0 {
-        Err(std::io::Error::last_os_error())
-    } else {
-        Ok(())
-    }
 }
 
 fn validate_run_numeric_args(args: &RunArgs) -> Result<(), CliError> {
@@ -1176,7 +1041,17 @@ fn write_run_summary(
 
     let text =
         serde_json::to_string_pretty(&json).map_err(|e| CliError::output_json_error(path, e))?;
-    write_cli_bytes_atomic(path, (text + "\n").as_bytes())?;
+    let document = text + "\n";
+    write_atomic(
+        path,
+        AtomicArtifactOptions::new(Durability::SyncFileAndParent),
+        |writer| {
+            writer
+                .write_all(document.as_bytes())
+                .map_err(|error| CliError::output_error(path, error))
+        },
+    )
+    .map_err(|error| map_atomic_output_error(path, error))?;
     Ok(())
 }
 

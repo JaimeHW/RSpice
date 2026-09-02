@@ -5,10 +5,10 @@
 //! - TAP (Test Anything Protocol) for streaming output
 //! - JSON/CSV for measurement results
 
-use crate::atomic_artifact::write_cli_atomic;
-use crate::cli::CliError;
+use crate::cli::{CliError, map_atomic_output_error};
+use rspice_output::{AtomicArtifactOptions, Durability, write_atomic};
 use std::fmt;
-use std::io::{BufWriter, Write};
+use std::io::Write;
 use std::path::Path;
 
 /// Simulation result for reporting
@@ -99,7 +99,7 @@ impl JUnitReporter {
     }
 }
 
-fn write_junit_report<W: Write>(
+fn write_junit_report<W: Write + ?Sized>(
     writer: &mut W,
     path: &Path,
     reports: &[SimulationReport],
@@ -223,7 +223,7 @@ impl TapReporter {
     }
 }
 
-fn write_tap_report<W: Write>(
+fn write_tap_report<W: Write + ?Sized>(
     writer: &mut W,
     path: &Path,
     reports: &[SimulationReport],
@@ -409,7 +409,7 @@ impl JsonMeasReporter {
     }
 }
 
-fn write_measurement_json<W: Write>(
+fn write_measurement_json<W: Write + ?Sized>(
     writer: &mut W,
     path: &Path,
     reports: &[SimulationReport],
@@ -464,7 +464,7 @@ impl CsvMeasReporter {
     }
 }
 
-fn write_measurement_csv<W: Write>(
+fn write_measurement_csv<W: Write + ?Sized>(
     writer: &mut W,
     path: &Path,
     reports: &[SimulationReport],
@@ -526,15 +526,14 @@ fn write_measurement_csv<W: Write>(
 
 fn write_buffered_atomic(
     path: &Path,
-    write: impl FnOnce(&mut BufWriter<&mut std::fs::File>) -> Result<(), CliError>,
+    write: impl FnOnce(&mut dyn Write) -> Result<(), CliError>,
 ) -> Result<(), CliError> {
-    write_cli_atomic(path, |file| {
-        let mut writer = BufWriter::new(file);
-        write(&mut writer)?;
-        writer
-            .flush()
-            .map_err(|error| CliError::output_error(path, error))
-    })
+    write_atomic(
+        path,
+        AtomicArtifactOptions::new(Durability::SyncFileAndParent),
+        write,
+    )
+    .map_err(|error| map_atomic_output_error(path, error))
 }
 
 /// Quote a CSV field if it contains separators, quotes, or newlines
@@ -546,7 +545,7 @@ fn csv_escape(field: &str) -> String {
     }
 }
 
-fn write_line<W: Write>(
+fn write_line<W: Write + ?Sized>(
     writer: &mut W,
     path: &Path,
     args: fmt::Arguments<'_>,
@@ -605,6 +604,41 @@ mod tests {
                 target_axis: None,
                 aggregate_policy: None,
             }],
+        }
+    }
+
+    #[test]
+    fn atomic_csv_report_preserves_the_streamed_format_when_replacing() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
+        let reports = [report_with_measurement(Some(2.198108e-7))];
+        let mut expected = Vec::new();
+        write_measurement_csv(&mut expected, Path::new("measurement.csv"), &reports)
+            .expect("serialize expected measurement CSV");
+
+        for preexisting in [false, true] {
+            let id = NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed);
+            let directory = std::env::temp_dir()
+                .join(format!("rspice-report-atomic-{}-{id}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&directory);
+            std::fs::create_dir(&directory).expect("create report test directory");
+            let destination = directory.join("measurement.csv");
+            if preexisting {
+                std::fs::write(&destination, b"old complete report").expect("seed existing report");
+            }
+
+            CsvMeasReporter::write(&reports, &destination).expect("publish measurement CSV");
+            assert_eq!(
+                std::fs::read(&destination).expect("read published measurement CSV"),
+                expected
+            );
+            assert!(
+                rspice_output::stale_artifacts(&destination)
+                    .expect("inspect report staging artifacts")
+                    .is_empty()
+            );
+            std::fs::remove_dir_all(directory).expect("remove report test directory");
         }
     }
 

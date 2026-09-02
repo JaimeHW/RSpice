@@ -3,12 +3,11 @@
 //! The CLI uses a stable, self-describing layout with path-safe dataset names
 //! so exported files remain robust even when signal names contain SPICE syntax.
 
-use crate::atomic_artifact::{AtomicArtifactError, write_atomic};
+use rspice_output::{AtomicArtifactError, AtomicArtifactOptions, Durability, write_atomic};
 use rustyhdf5::{AttrValue, File as Hdf5File, FileBuilder};
 use thiserror::Error;
 
 use std::collections::HashMap;
-use std::io::Write;
 use std::path::Path;
 
 const SCHEMA_VERSION: &str = "1";
@@ -422,17 +421,21 @@ pub fn write_hdf5(path: &Path, data: &Hdf5SimulationData) -> Result<()> {
 }
 
 fn write_hdf5_builder(path: &Path, builder: FileBuilder) -> Result<()> {
-    write_atomic(path, |file| {
-        let bytes = builder.finish()?;
-        file.write_all(&bytes)?;
-        Ok(())
-    })
+    write_atomic(
+        path,
+        AtomicArtifactOptions::new(Durability::SyncFileAndParent),
+        |file| {
+            let bytes = builder.finish()?;
+            file.write_all(&bytes)?;
+            Ok(())
+        },
+    )
     .map_err(|error| match error {
-        AtomicArtifactError::Preparation(error) => Hdf5Error::ArtifactPreparation(error),
+        AtomicArtifactError::Prepare(error) => Hdf5Error::ArtifactPreparation(error),
         AtomicArtifactError::Write(Hdf5StagingError::Backend(error)) => Hdf5Error::Backend(error),
         AtomicArtifactError::Write(Hdf5StagingError::Io(error)) => Hdf5Error::ArtifactWrite(error),
-        AtomicArtifactError::Flush(error) => Hdf5Error::ArtifactFlush(error),
-        AtomicArtifactError::Commit(error) => Hdf5Error::ArtifactCommit(error),
+        AtomicArtifactError::Flush { source, .. } => Hdf5Error::ArtifactFlush(source),
+        AtomicArtifactError::Commit { source, .. } => Hdf5Error::ArtifactCommit(source),
     })
 }
 

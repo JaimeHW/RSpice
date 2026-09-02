@@ -7,13 +7,13 @@
 
 use super::RunContext;
 use super::shared::map_hdf5_output_error;
-use crate::atomic_artifact::write_cli_atomic;
-use crate::cli::{CliError, OutputFormat};
+use crate::cli::{CliError, OutputFormat, map_atomic_output_error};
 use crate::commands::run_signals::{
     SignalKind, checked_dc_operating_point_signals, dc_export_signals,
     dc_operating_point_export_signals, transient_export_signals,
 };
 use crate::hdf5::{Hdf5SimulationData, Hdf5WaveformSection, write_hdf5};
+use rspice_output::{AtomicArtifactOptions, Durability, write_atomic};
 use std::path::{Component, Path, PathBuf};
 
 fn map_output_projection_error(
@@ -202,8 +202,6 @@ fn write_dc_op_output(
     signals: &[crate::commands::run_signals::ScalarSignal],
     format: OutputFormat,
 ) -> Result<(), CliError> {
-    use std::io::Write;
-
     if matches!(format, OutputFormat::Hdf5) {
         let mut data = Hdf5SimulationData::new();
         data.title = "DC Operating Point".to_string();
@@ -222,125 +220,131 @@ fn write_dc_op_output(
         return Ok(());
     }
 
-    write_cli_atomic(path, |file| {
-        match format {
-            OutputFormat::Json => {
-                let mut vars = serde_json::Map::new();
-                for signal in signals {
-                    vars.insert(
-                        signal.display_name.clone(),
-                        serde_json::json!(signal.values[0]),
-                    );
-                }
-                let json = serde_json::json!({
-                    "analysis": "dc_op",
-                    "variables": vars,
-                });
-                let text = serde_json::to_string_pretty(&json)
-                    .map_err(|e| CliError::output_json_error(path, e))?;
-                writeln!(file, "{}", text).map_err(|e| CliError::OutputError {
-                    path: path.to_path_buf(),
-                    source: e,
-                })?;
-            }
-            OutputFormat::Csv => {
-                writeln!(file, "signal,value").map_err(|e| CliError::OutputError {
-                    path: path.to_path_buf(),
-                    source: e,
-                })?;
-                for signal in signals {
-                    writeln!(
-                        file,
-                        "{},{:.17e}",
-                        super::export::delimited_cell(&signal.display_name, ','),
-                        signal.values[0]
-                    )
-                    .map_err(|e| CliError::OutputError {
+    write_atomic(
+        path,
+        AtomicArtifactOptions::new(Durability::SyncFileAndParent),
+        |file| {
+            match format {
+                OutputFormat::Json => {
+                    let mut vars = serde_json::Map::new();
+                    for signal in signals {
+                        vars.insert(
+                            signal.display_name.clone(),
+                            serde_json::json!(signal.values[0]),
+                        );
+                    }
+                    let json = serde_json::json!({
+                        "analysis": "dc_op",
+                        "variables": vars,
+                    });
+                    let text = serde_json::to_string_pretty(&json)
+                        .map_err(|e| CliError::output_json_error(path, e))?;
+                    writeln!(file, "{}", text).map_err(|e| CliError::OutputError {
                         path: path.to_path_buf(),
                         source: e,
                     })?;
                 }
-            }
-            OutputFormat::Tsv => {
-                writeln!(file, "signal\tvalue").map_err(|e| CliError::OutputError {
-                    path: path.to_path_buf(),
-                    source: e,
-                })?;
-                for signal in signals {
-                    writeln!(file, "{}\t{:.17e}", signal.display_name, signal.values[0]).map_err(
-                        |e| CliError::OutputError {
+                OutputFormat::Csv => {
+                    writeln!(file, "signal,value").map_err(|e| CliError::OutputError {
+                        path: path.to_path_buf(),
+                        source: e,
+                    })?;
+                    for signal in signals {
+                        writeln!(
+                            file,
+                            "{},{:.17e}",
+                            super::export::delimited_cell(&signal.display_name, ','),
+                            signal.values[0]
+                        )
+                        .map_err(|e| CliError::OutputError {
                             path: path.to_path_buf(),
                             source: e,
-                        },
-                    )?;
-                }
-            }
-            OutputFormat::Raw | OutputFormat::RawAscii => {
-                writeln!(file, "Title: DC Operating Point").map_err(|e| CliError::OutputError {
-                    path: path.to_path_buf(),
-                    source: e,
-                })?;
-                writeln!(file, "Plotname: DC OP").map_err(|e| CliError::OutputError {
-                    path: path.to_path_buf(),
-                    source: e,
-                })?;
-                writeln!(file, "Flags: real").map_err(|e| CliError::OutputError {
-                    path: path.to_path_buf(),
-                    source: e,
-                })?;
-                writeln!(file, "No. Variables: {}", signals.len()).map_err(|e| {
-                    CliError::OutputError {
-                        path: path.to_path_buf(),
-                        source: e,
+                        })?;
                     }
-                })?;
-                writeln!(file, "No. Points: 1").map_err(|e| CliError::OutputError {
-                    path: path.to_path_buf(),
-                    source: e,
-                })?;
-                writeln!(file, "Variables:").map_err(|e| CliError::OutputError {
-                    path: path.to_path_buf(),
-                    source: e,
-                })?;
-                for (index, signal) in signals.iter().enumerate() {
-                    writeln!(
-                        file,
-                        "\t{}\t{}\t{}",
-                        index,
-                        signal.display_name,
-                        signal.kind.raw_variable_type()
-                    )
-                    .map_err(|e| CliError::OutputError {
+                }
+                OutputFormat::Tsv => {
+                    writeln!(file, "signal\tvalue").map_err(|e| CliError::OutputError {
                         path: path.to_path_buf(),
                         source: e,
                     })?;
+                    for signal in signals {
+                        writeln!(file, "{}\t{:.17e}", signal.display_name, signal.values[0])
+                            .map_err(|e| CliError::OutputError {
+                                path: path.to_path_buf(),
+                                source: e,
+                            })?;
+                    }
                 }
-                writeln!(file, "Values:").map_err(|e| CliError::OutputError {
-                    path: path.to_path_buf(),
-                    source: e,
-                })?;
-                writeln!(file, "0").map_err(|e| CliError::OutputError {
-                    path: path.to_path_buf(),
-                    source: e,
-                })?;
-                for signal in signals {
-                    writeln!(file, "\t{:.17e}", signal.values[0]).map_err(|e| {
+                OutputFormat::Raw | OutputFormat::RawAscii => {
+                    writeln!(file, "Title: DC Operating Point").map_err(|e| {
                         CliError::OutputError {
                             path: path.to_path_buf(),
                             source: e,
                         }
                     })?;
+                    writeln!(file, "Plotname: DC OP").map_err(|e| CliError::OutputError {
+                        path: path.to_path_buf(),
+                        source: e,
+                    })?;
+                    writeln!(file, "Flags: real").map_err(|e| CliError::OutputError {
+                        path: path.to_path_buf(),
+                        source: e,
+                    })?;
+                    writeln!(file, "No. Variables: {}", signals.len()).map_err(|e| {
+                        CliError::OutputError {
+                            path: path.to_path_buf(),
+                            source: e,
+                        }
+                    })?;
+                    writeln!(file, "No. Points: 1").map_err(|e| CliError::OutputError {
+                        path: path.to_path_buf(),
+                        source: e,
+                    })?;
+                    writeln!(file, "Variables:").map_err(|e| CliError::OutputError {
+                        path: path.to_path_buf(),
+                        source: e,
+                    })?;
+                    for (index, signal) in signals.iter().enumerate() {
+                        writeln!(
+                            file,
+                            "\t{}\t{}\t{}",
+                            index,
+                            signal.display_name,
+                            signal.kind.raw_variable_type()
+                        )
+                        .map_err(|e| CliError::OutputError {
+                            path: path.to_path_buf(),
+                            source: e,
+                        })?;
+                    }
+                    writeln!(file, "Values:").map_err(|e| CliError::OutputError {
+                        path: path.to_path_buf(),
+                        source: e,
+                    })?;
+                    writeln!(file, "0").map_err(|e| CliError::OutputError {
+                        path: path.to_path_buf(),
+                        source: e,
+                    })?;
+                    for signal in signals {
+                        writeln!(file, "\t{:.17e}", signal.values[0]).map_err(|e| {
+                            CliError::OutputError {
+                                path: path.to_path_buf(),
+                                source: e,
+                            }
+                        })?;
+                    }
+                }
+                OutputFormat::Hdf5 => {
+                    return Err(CliError::InternalError {
+                        message: "HDF5 handled before text writers".to_string(),
+                    });
                 }
             }
-            OutputFormat::Hdf5 => {
-                return Err(CliError::InternalError {
-                    message: "HDF5 handled before text writers".to_string(),
-                });
-            }
-        }
 
-        Ok(())
-    })
+            Ok(())
+        },
+    )
+    .map_err(|error| map_atomic_output_error(path, error))
 }
 
 pub(super) fn run_dc_sweep(
@@ -1292,10 +1296,11 @@ fn write_fourier_output(
     num_harmonics: usize,
     analyzed: &[(String, &'static str, rspice_core::analysis::FourierResult)],
 ) -> Result<(), CliError> {
-    use std::io::Write;
-
     let io_err = |e: std::io::Error| CliError::output_error(path, e);
-    write_cli_atomic(path, |file| {
+    write_atomic(
+        path,
+        AtomicArtifactOptions::new(Durability::SyncFileAndParent),
+        |file| {
         match format {
             OutputFormat::Csv | OutputFormat::Tsv => {
                 let sep = if matches!(format, OutputFormat::Tsv) {
@@ -1378,8 +1383,10 @@ fn write_fourier_output(
             }
         }
 
-        Ok(())
-    })
+            Ok(())
+        },
+    )
+    .map_err(|error| map_atomic_output_error(path, error))
 }
 
 pub(super) fn run_temp(ctx: &RunContext<'_>, temperatures: &[f64]) -> Result<(), CliError> {
@@ -1455,71 +1462,75 @@ pub(super) fn run_temp(ctx: &RunContext<'_>, temperatures: &[f64]) -> Result<(),
     }
 
     if let Some(ref output_path) = ctx.output_path_for("temp") {
-        use std::io::Write;
+        write_atomic(
+            output_path,
+            AtomicArtifactOptions::new(Durability::SyncFileAndParent),
+            |file| {
+                match ctx.format {
+                    OutputFormat::Csv => {
+                        let num_nodes = results.first().map(|(_, v)| v.len()).unwrap_or(0);
+                        let header: String = (1..num_nodes)
+                            .map(|i| {
+                                let name =
+                                    node_names.get(i).cloned().unwrap_or_else(|| i.to_string());
+                                format!(",V({})", name)
+                            })
+                            .collect();
+                        writeln!(file, "Temperature_C{}", header).map_err(|e| {
+                            CliError::OutputError {
+                                path: output_path.clone(),
+                                source: e,
+                            }
+                        })?;
 
-        write_cli_atomic(output_path, |file| {
-            match ctx.format {
-                OutputFormat::Csv => {
-                    let num_nodes = results.first().map(|(_, v)| v.len()).unwrap_or(0);
-                    let header: String = (1..num_nodes)
-                        .map(|i| {
-                            let name = node_names.get(i).cloned().unwrap_or_else(|| i.to_string());
-                            format!(",V({})", name)
-                        })
-                        .collect();
-                    writeln!(file, "Temperature_C{}", header).map_err(|e| {
-                        CliError::OutputError {
+                        for (temp, voltages) in &results {
+                            // Skip index 0: ground is not a column
+                            let values: String = voltages
+                                .iter()
+                                .skip(1)
+                                .map(|v| format!(",{:.17e}", v))
+                                .collect();
+                            writeln!(file, "{:.2}{}", temp, values).map_err(|e| {
+                                CliError::OutputError {
+                                    path: output_path.clone(),
+                                    source: e,
+                                }
+                            })?;
+                        }
+                    }
+                    OutputFormat::Json => {
+                        let json = serde_json::json!({
+                            "analysis": "temperature_sweep",
+                            "temperatures_c": temperatures,
+                            "results": results.iter().map(|(t, v)| {
+                                serde_json::json!({
+                                    "temperature_c": t,
+                                    "voltages": v,
+                                })
+                            }).collect::<Vec<_>>(),
+                        });
+                        let text = serde_json::to_string_pretty(&json)
+                            .map_err(|e| CliError::output_json_error(output_path, e))?;
+                        writeln!(file, "{}", text).map_err(|e| CliError::OutputError {
                             path: output_path.clone(),
                             source: e,
+                        })?;
+                    }
+                    _ => {
+                        for (temp, voltages) in &results {
+                            writeln!(file, "T={:.2}C: {:?}", temp, voltages).map_err(|e| {
+                                CliError::OutputError {
+                                    path: output_path.clone(),
+                                    source: e,
+                                }
+                            })?;
                         }
-                    })?;
-
-                    for (temp, voltages) in &results {
-                        // Skip index 0: ground is not a column
-                        let values: String = voltages
-                            .iter()
-                            .skip(1)
-                            .map(|v| format!(",{:.17e}", v))
-                            .collect();
-                        writeln!(file, "{:.2}{}", temp, values).map_err(|e| {
-                            CliError::OutputError {
-                                path: output_path.clone(),
-                                source: e,
-                            }
-                        })?;
                     }
                 }
-                OutputFormat::Json => {
-                    let json = serde_json::json!({
-                        "analysis": "temperature_sweep",
-                        "temperatures_c": temperatures,
-                        "results": results.iter().map(|(t, v)| {
-                            serde_json::json!({
-                                "temperature_c": t,
-                                "voltages": v,
-                            })
-                        }).collect::<Vec<_>>(),
-                    });
-                    let text = serde_json::to_string_pretty(&json)
-                        .map_err(|e| CliError::output_json_error(output_path, e))?;
-                    writeln!(file, "{}", text).map_err(|e| CliError::OutputError {
-                        path: output_path.clone(),
-                        source: e,
-                    })?;
-                }
-                _ => {
-                    for (temp, voltages) in &results {
-                        writeln!(file, "T={:.2}C: {:?}", temp, voltages).map_err(|e| {
-                            CliError::OutputError {
-                                path: output_path.clone(),
-                                source: e,
-                            }
-                        })?;
-                    }
-                }
-            }
-            Ok(())
-        })?;
+                Ok(())
+            },
+        )
+        .map_err(|error| map_atomic_output_error(output_path, error))?;
 
         if !ctx.quiet {
             println!("\nResults written to: {}", output_path.display());

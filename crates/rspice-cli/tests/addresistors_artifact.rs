@@ -180,15 +180,10 @@ fn destination_failure_is_safe_and_leaves_no_temporary_file() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(artifact.is_dir());
-    let temporary_prefix = format!("{}.tmp.", artifact.file_name().unwrap().to_string_lossy());
     assert!(
-        std::fs::read_dir(&directory)
-            .expect("list fixture")
-            .all(|entry| !entry
-                .expect("directory entry")
-                .file_name()
-                .to_string_lossy()
-                .starts_with(&temporary_prefix))
+        rspice_output::stale_artifacts(&artifact)
+            .expect("inspect ADDRESISTORS staging artifacts")
+            .is_empty()
     );
 }
 

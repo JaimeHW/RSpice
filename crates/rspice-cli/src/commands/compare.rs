@@ -5,9 +5,9 @@
 //! JSON, HDF5 — auto-detected by extension), with configurable absolute
 //! and relative tolerances.
 
-use crate::atomic_artifact::copy_cli_atomic;
-use crate::cli::{CliError, Config, OutputFormat};
+use crate::cli::{CliError, Config, OutputFormat, map_atomic_output_error};
 use crate::commands::waveform_io::{detect_format, load_table};
+use rspice_output::{AtomicArtifactOptions, Durability, write_atomic};
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -209,7 +209,20 @@ fn bless_golden(
     quiet: bool,
     why: &str,
 ) -> Result<(), CliError> {
-    copy_cli_atomic(result, golden)?;
+    let mut source = std::fs::File::open(result).map_err(|source| CliError::InputReadError {
+        path: result.to_path_buf(),
+        source,
+    })?;
+    write_atomic(
+        golden,
+        AtomicArtifactOptions::new(Durability::SyncFileAndParent),
+        |writer| {
+            std::io::copy(&mut source, writer)
+                .map(|_| ())
+                .map_err(|source| CliError::output_error(golden, source))
+        },
+    )
+    .map_err(|error| map_atomic_output_error(golden, error))?;
     if !quiet {
         println!("✓ Golden updated ({}): {}", why, golden.display());
     }

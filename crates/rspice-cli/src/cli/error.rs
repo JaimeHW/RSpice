@@ -7,6 +7,8 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
+use rspice_output::AtomicArtifactError;
+
 /// Stable machine-readable metadata attached to CLI failures and run reports.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ErrorDetails {
@@ -156,7 +158,7 @@ pub enum CliError {
     AddResistorsArtifactIo {
         path: PathBuf,
         #[source]
-        source: std::io::Error,
+        source: AtomicArtifactError<std::io::Error>,
     },
 
     #[error("Failed to serialize output: {path}")]
@@ -355,6 +357,47 @@ impl CliError {
             source,
         }
     }
+}
+
+/// Preserve writer-domain failures while attaching the publication phase to
+/// I/O failures reported by the shared atomic artifact publisher.
+pub(crate) fn map_atomic_output_error(
+    path: &Path,
+    error: AtomicArtifactError<CliError>,
+) -> CliError {
+    match error {
+        AtomicArtifactError::Write(error) => error,
+        AtomicArtifactError::Prepare(error) => atomic_output_io_error(path, "preparation", error),
+        AtomicArtifactError::Flush { source, .. } => atomic_output_io_error(path, "flush", source),
+        AtomicArtifactError::Commit {
+            source,
+            recovery_path,
+            ..
+        } => {
+            let source = if let Some(recovery_path) = recovery_path {
+                std::io::Error::new(
+                    source.kind(),
+                    format!(
+                        "{source}; complete staging artifact retained at {}",
+                        recovery_path.display()
+                    ),
+                )
+            } else {
+                source
+            };
+            atomic_output_io_error(path, "commit", source)
+        }
+    }
+}
+
+fn atomic_output_io_error(path: &Path, phase: &str, source: std::io::Error) -> CliError {
+    CliError::output_error(
+        path,
+        std::io::Error::new(
+            source.kind(),
+            format!("atomic output {phase} failed: {source}"),
+        ),
+    )
 }
 
 impl From<std::io::Error> for CliError {
