@@ -8,6 +8,13 @@
 
 use super::*;
 
+type PyFourierProvenance = (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<PyRunCoordinate>,
+);
+
 /// A single harmonic component from Fourier analysis
 #[pyclass(name = "Harmonic", module = "rspice", from_py_object)]
 #[derive(Debug, Clone)]
@@ -84,6 +91,18 @@ pub struct PyFourierResult {
     /// fundamental magnitude is exactly zero.
     #[pyo3(get)]
     pub thd: Option<f64>,
+    /// Authored output expression analyzed by a `.FOUR` directive.
+    #[pyo3(get)]
+    pub source_signal: Option<String>,
+    /// Stable identity of the authored `.FOUR` post-process request.
+    #[pyo3(get)]
+    pub analysis_id: Option<String>,
+    /// Stable identity of the transient trajectory consumed by `.FOUR`.
+    #[pyo3(get)]
+    pub parent_analysis_id: Option<String>,
+    /// Materialized run coordinate of the parent transient trajectory.
+    #[pyo3(get)]
+    pub coordinate: Option<PyRunCoordinate>,
     harmonics: Vec<PyHarmonic>,
 }
 
@@ -108,7 +127,27 @@ impl PyFourierResult {
             dc_component: result.dc_component,
             // Core reports THD in percent already.
             thd: result.thd.map(|value| value / 100.0),
+            source_signal: None,
+            analysis_id: None,
+            parent_analysis_id: None,
+            coordinate: None,
             harmonics,
+        }
+    }
+
+    pub fn from_core_with_provenance(
+        result: &rspice_core::analysis::FourierResult,
+        source_signal: String,
+        analysis_id: String,
+        parent_analysis_id: Option<String>,
+        coordinate: Option<PyRunCoordinate>,
+    ) -> Self {
+        Self {
+            source_signal: Some(source_signal),
+            analysis_id: Some(analysis_id),
+            parent_analysis_id,
+            coordinate,
+            ..Self::from_core(result)
         }
     }
 }
@@ -155,10 +194,22 @@ impl PyFourierResult {
 
     /// Rebuild from pickled state. Not part of the public API.
     #[staticmethod]
-    fn _unpickle(dc_component: f64, thd: Option<f64>, harmonics: Vec<PyHarmonic>) -> Self {
+    #[pyo3(signature = (dc_component, thd, harmonics, provenance=None))]
+    fn _unpickle(
+        dc_component: f64,
+        thd: Option<f64>,
+        harmonics: Vec<PyHarmonic>,
+        provenance: Option<PyFourierProvenance>,
+    ) -> Self {
+        let (source_signal, analysis_id, parent_analysis_id, coordinate) =
+            provenance.unwrap_or((None, None, None, None));
         Self {
             dc_component,
             thd,
+            source_signal,
+            analysis_id,
+            parent_analysis_id,
+            coordinate,
             harmonics,
         }
     }
@@ -167,10 +218,23 @@ impl PyFourierResult {
     fn __reduce__<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<(Bound<'py, PyAny>, (f64, Option<f64>, Vec<PyHarmonic>))> {
+    ) -> PyResult<(
+        Bound<'py, PyAny>,
+        (f64, Option<f64>, Vec<PyHarmonic>, PyFourierProvenance),
+    )> {
         Ok((
             unpickler::<Self>(py)?,
-            (self.dc_component, self.thd, self.harmonics.clone()),
+            (
+                self.dc_component,
+                self.thd,
+                self.harmonics.clone(),
+                (
+                    self.source_signal.clone(),
+                    self.analysis_id.clone(),
+                    self.parent_analysis_id.clone(),
+                    self.coordinate.clone(),
+                ),
+            ),
         ))
     }
 }

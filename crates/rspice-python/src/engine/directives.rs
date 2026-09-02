@@ -46,7 +46,8 @@ struct PendingFourier {
     fundamental: f64,
     outputs: Vec<String>,
     num_harmonics: usize,
-    context: Option<ExecutionContext>,
+    analysis_id: String,
+    coordinate: Option<PyRunCoordinate>,
 }
 
 impl<T> Default for LastAndAll<T> {
@@ -98,6 +99,8 @@ struct DirectiveOutcomes {
     op: LastAndAll<Py<PySimulationResult>>,
     dc: LastAndAll<Py<PyDcSweepResult>>,
     tran: LastAndAll<Py<PyTransientResult>>,
+    /// Identity of the transient trajectory stored in `tran.last`.
+    tran_context: Option<ExecutionContext>,
     ac: LastAndAll<Py<PyAcResult>>,
     noise: LastAndAll<Vec<PyNoiseResult>>,
     distortion: LastAndAll<Py<PyDistortionResult>>,
@@ -129,6 +132,7 @@ impl DirectiveOutcomes {
         self.op.append(other.op);
         self.dc.append(other.dc);
         self.tran.append(other.tran);
+        replace_if_some(&mut self.tran_context, other.tran_context);
         self.ac.append(other.ac);
         self.noise.append(other.noise);
         self.distortion.append(other.distortion);
@@ -207,6 +211,7 @@ fn run_directives(
     out: &mut DirectiveOutcomes,
 ) -> PyResult<()> {
     let mut planned = planned_run.analyses.iter();
+    let mut next_fourier_ordinal = 1usize;
 
     for analysis in analyses {
         if matches!(
@@ -216,7 +221,9 @@ fn run_directives(
             continue;
         }
         let analysis_id = if matches!(analysis, AnalysisCommand::Four { .. }) {
-            None
+            let analysis_id = format!("four-{next_fourier_ordinal:03}");
+            next_fourier_ordinal += 1;
+            Some(analysis_id)
         } else {
             planned.next().map(|analysis| analysis.id().tag())
         };
@@ -247,6 +254,9 @@ fn run_directives(
             for record in &mut out.records[records_before..] {
                 record
                     .set_execution_context(context.analysis_id.clone(), context.coordinate.clone());
+            }
+            if matches!(analysis, AnalysisCommand::Tran { .. }) {
+                out.tran_context = Some(context.clone());
             }
         }
     }
@@ -991,11 +1001,13 @@ fn execute(
             outputs,
             num_harmonics,
         } => {
+            let context = context.expect(".FOUR directives always receive a stable identity");
             out.pending_fourier.push(PendingFourier {
                 fundamental: *fundamental,
                 outputs: outputs.clone(),
                 num_harmonics: *num_harmonics,
-                context: context.cloned(),
+                analysis_id: context.analysis_id.clone().expect("checked above"),
+                coordinate: context.coordinate.clone(),
             });
         }
     }
@@ -1011,9 +1023,19 @@ fn evaluate_pending_fourier(py: Python<'_>, out: &mut DirectiveOutcomes) {
             fundamental,
             outputs,
             num_harmonics,
-            context,
+            analysis_id,
+            coordinate,
         } = pending;
         let records_before = out.records.len();
+        let parent_analysis_id = out
+            .tran_context
+            .as_ref()
+            .and_then(|context| context.analysis_id.clone());
+        let parent_coordinate = out
+            .tran_context
+            .as_ref()
+            .and_then(|context| context.coordinate.clone())
+            .or_else(|| coordinate.clone());
         match out.tran.last() {
             Some(tran_obj) => {
                 let tran_ref = tran_obj.borrow(py);
@@ -1031,7 +1053,13 @@ fn evaluate_pending_fourier(py: Python<'_>, out: &mut DirectiveOutcomes) {
                             );
                             match analysis.analyze(&tran_ref.inner.time, &waveform) {
                                 Ok(result) => {
-                                    out.fourier.push(PyFourierResult::from_core(&result));
+                                    out.fourier.push(PyFourierResult::from_core_with_provenance(
+                                        &result,
+                                        output.clone(),
+                                        analysis_id.clone(),
+                                        parent_analysis_id.clone(),
+                                        parent_coordinate.clone(),
+                                    ));
                                     out.records.push(PyAnalysisRecord::executed(
                                         "four",
                                         format!(".four {fundamental} {output}"),
@@ -1066,11 +1094,9 @@ fn evaluate_pending_fourier(py: Python<'_>, out: &mut DirectiveOutcomes) {
                 ));
             }
         }
-        if let Some(context) = context {
-            for record in &mut out.records[records_before..] {
-                record
-                    .set_execution_context(context.analysis_id.clone(), context.coordinate.clone());
-            }
+        for record in &mut out.records[records_before..] {
+            record.set_execution_context(Some(analysis_id.clone()), coordinate.clone());
+            record.set_parent_analysis_id(parent_analysis_id.clone());
         }
     }
 }

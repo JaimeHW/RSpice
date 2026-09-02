@@ -4,6 +4,8 @@
 current or a differential node pair resolves the same way everywhere.
 """
 
+import pickle
+
 import numpy as np
 import pytest
 
@@ -112,6 +114,58 @@ class TestFourDirective:
         report = engine.run(rspice.Netlist.parse(self.DECK))
         assert report.fourier[1].fundamental_magnitude == pytest.approx(
             tran.fourier_current("V1", 1e3).fundamental_magnitude
+        )
+
+    def test_results_identify_the_authored_request_and_parent_transient(self, engine):
+        deck = SINE.replace(
+            ".end",
+            ".tran 4u 20m\n.four 1k V(in)\n.tran 2u 20m\n.end",
+        )
+        report = engine.run(rspice.Netlist.parse(deck))
+
+        assert len(report.fourier) == 1
+        result = report.fourier[0]
+        assert result.source_signal == "V(IN)"
+        assert result.analysis_id == "four-001"
+        assert result.parent_analysis_id == "tran-002"
+        assert result.coordinate is None
+
+        restored = pickle.loads(pickle.dumps(result))
+        assert restored.source_signal == "V(IN)"
+        assert restored.analysis_id == "four-001"
+        assert restored.parent_analysis_id == "tran-002"
+
+        record = next(record for record in report.records if record.kind == "four")
+        assert record.analysis_id == "four-001"
+        assert record.parent_analysis_id == "tran-002"
+        assert record.coordinate is None
+
+    def test_each_coordinate_retains_parent_provenance(self, engine):
+        deck = """* Stepped Fourier provenance
+.param amplitude=1
+V1 in 0 SIN(0 {amplitude} 1k)
+R1 in 0 1k
+.step param amplitude list 1 2
+.four 1k V(in)
+.tran 2u 20m
+.end
+"""
+        report = engine.run(rspice.Netlist.parse(deck))
+
+        assert len(report.fourier) == 2
+        assert [result.analysis_id for result in report.fourier] == [
+            "four-001",
+            "four-001",
+        ]
+        assert [result.parent_analysis_id for result in report.fourier] == [
+            "tran-001",
+            "tran-001",
+        ]
+        assert [
+            result.coordinate.assignments[0].value for result in report.fourier
+        ] == [1.0, 2.0]
+        assert [result.fundamental_magnitude for result in report.fourier] == pytest.approx(
+            [1.0, 2.0], rel=1e-2
         )
 
     def test_an_undefined_output_is_rejected_at_parse_time(self):

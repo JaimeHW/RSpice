@@ -333,6 +333,12 @@ class TestResults:
             h.magnitude for h in original.harmonics
         ]
 
+        legacy = rspice.FourierResult._unpickle(*original.__reduce__()[1][:3])
+        assert legacy.source_signal is None
+        assert legacy.analysis_id is None
+        assert legacy.parent_analysis_id is None
+        assert legacy.coordinate is None
+
     def test_monte_carlo_result(self, engine, analysis_netlist):
         original = engine.run_monte_carlo(analysis_netlist, 24, seed=3)
         restored = round_trip(original)

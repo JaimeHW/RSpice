@@ -364,6 +364,9 @@ pub struct PyAnalysisRecord {
     /// Stable authored-analysis identity (`ac-001`, `ac-002`, ...).
     #[pyo3(get)]
     pub analysis_id: Option<String>,
+    /// Parent physical analysis for a derived post-process record.
+    #[pyo3(get)]
+    pub parent_analysis_id: Option<String>,
     /// Materialized run coordinate, when the deck has a shared run axis.
     #[pyo3(get)]
     pub coordinate: Option<PyRunCoordinate>,
@@ -377,6 +380,7 @@ impl PyAnalysisRecord {
             skipped: false,
             reason: None,
             analysis_id: None,
+            parent_analysis_id: None,
             coordinate: None,
         }
     }
@@ -388,6 +392,7 @@ impl PyAnalysisRecord {
             skipped: true,
             reason: Some(reason.to_string()),
             analysis_id: None,
+            parent_analysis_id: None,
             coordinate: None,
         }
     }
@@ -399,6 +404,10 @@ impl PyAnalysisRecord {
     ) {
         self.analysis_id = analysis_id;
         self.coordinate = coordinate;
+    }
+
+    pub(crate) fn set_parent_analysis_id(&mut self, parent_analysis_id: Option<String>) {
+        self.parent_analysis_id = parent_analysis_id;
     }
 }
 
@@ -418,13 +427,14 @@ impl PyAnalysisRecord {
 
     /// Rebuild from pickled state. Not part of the public API.
     #[staticmethod]
-    #[pyo3(signature = (kind, detail, skipped, reason, execution=None))]
+    #[pyo3(signature = (kind, detail, skipped, reason, execution=None, parent_analysis_id=None))]
     fn _unpickle(
         kind: String,
         detail: String,
         skipped: bool,
         reason: Option<String>,
         execution: Option<(Option<String>, Option<PyRunCoordinate>)>,
+        parent_analysis_id: Option<String>,
     ) -> Self {
         let (analysis_id, coordinate) = execution.unwrap_or((None, None));
         Self {
@@ -433,6 +443,7 @@ impl PyAnalysisRecord {
             skipped,
             reason,
             analysis_id,
+            parent_analysis_id,
             coordinate,
         }
     }
@@ -449,6 +460,7 @@ impl PyAnalysisRecord {
             bool,
             Option<String>,
             (Option<String>, Option<PyRunCoordinate>),
+            Option<String>,
         ),
     )> {
         Ok((
@@ -459,6 +471,7 @@ impl PyAnalysisRecord {
                 self.skipped,
                 self.reason.clone(),
                 (self.analysis_id.clone(), self.coordinate.clone()),
+                self.parent_analysis_id.clone(),
             ),
         ))
     }
