@@ -4,6 +4,7 @@ use crate::netlist::{ElementKind, SourceSpec, StepCommand, StepTarget};
 use crate::netlist::{ModelDef, StepSweep};
 use crate::solver::SimulationResult;
 use crate::{Netlist, Value};
+use std::borrow::Cow;
 use std::collections::HashSet;
 
 #[derive(Clone, Copy)]
@@ -110,7 +111,7 @@ enum StepPlanBindingValue {
 /// command varies fastest, matching Xyce's nested `.STEP` ordering.
 #[derive(Debug, Clone)]
 pub struct StepPlan<'a> {
-    base_netlist: &'a Netlist,
+    base_netlist: Cow<'a, Netlist>,
     steps: Vec<StepCommand>,
     dimensions: Vec<StepPlanDimension>,
     total_runs: usize,
@@ -133,6 +134,21 @@ impl StepPlan<'_> {
 
     pub const fn stored_values(&self) -> usize {
         self.stored_values
+    }
+
+    /// Detach a checked plan from its caller-owned netlist while preserving
+    /// the already validated coordinate dimensions. Frontends can move this
+    /// plan out of an abort-aware planning worker and materialize one run at a
+    /// time instead of retaining every expanded netlist simultaneously.
+    pub fn into_owned(self) -> StepPlan<'static> {
+        StepPlan {
+            base_netlist: Cow::Owned(self.base_netlist.into_owned()),
+            steps: self.steps,
+            dimensions: self.dimensions,
+            total_runs: self.total_runs,
+            bindings_per_run: self.bindings_per_run,
+            stored_values: self.stored_values,
+        }
     }
 
     pub fn step_values(&self, run_index: usize) -> Option<Vec<Value>> {
@@ -373,7 +389,7 @@ impl Engine {
         }
 
         Ok(StepPlan {
-            base_netlist: netlist,
+            base_netlist: Cow::Borrowed(netlist),
             steps: steps.to_vec(),
             dimensions,
             total_runs,
@@ -411,7 +427,7 @@ impl Engine {
             ))
         })?;
         let (step_values, netlist) = self.materialize_step_bindings(
-            plan.base_netlist,
+            plan.base_netlist.as_ref(),
             &plan.steps,
             &plan.dimensions,
             &bindings,
@@ -2139,6 +2155,33 @@ mod tests {
 
     fn plan_limits(max_runs: usize) -> StepPlanLimits {
         StepPlanLimits::new(max_runs, 64, 256, 4096)
+    }
+
+    #[test]
+    fn owned_step_plan_materializes_after_the_source_netlist_is_dropped() {
+        let engine = Engine::default();
+        let plan = {
+            let netlist =
+                Netlist::parse("owned plan\n.param rval=1k\nV1 in 0 1\nR1 in 0 {rval}\n.end\n")
+                    .expect("fixture parses");
+            let steps = [StepCommand {
+                target: StepTarget::Param,
+                name: "rval".to_string(),
+                param_name: None,
+                sweep: StepSweep::List(vec![1.0e3, 2.0e3]),
+            }];
+            engine
+                .plan_step_commands(&netlist, &steps, plan_limits(2))
+                .expect("step plan is valid")
+                .into_owned()
+        };
+
+        let materialized = engine
+            .materialize_step_run(&plan, 1)
+            .expect("owned plan remains materializable");
+
+        assert_eq!(materialized.step_values(), [2.0e3]);
+        assert_eq!(materialized.run_index(), 1);
     }
 
     fn first_step_command(netlist: &Netlist) -> &StepCommand {

@@ -34,7 +34,12 @@ struct LastAndAll<T> {
 #[derive(Clone)]
 struct ExecutionContext {
     analysis_id: Option<String>,
-    coordinate: PyRunCoordinate,
+    coordinate: Option<PyRunCoordinate>,
+}
+
+struct PlannedDirectiveRun<'a> {
+    coordinate: Option<&'a PyRunCoordinate>,
+    analyses: &'a [rspice_core::execution::PlannedAnalysis],
 }
 
 struct PendingFourier {
@@ -118,21 +123,30 @@ pub(super) fn run(
     let net = &netlist.inner;
     let mut out = DirectiveOutcomes::default();
 
-    let temperature_plan = rspice_core::execution::DeckPlan::from_netlist_temperature_axis(net)
-        .map_err(|error| crate::errors::SimulationError::new_err(error.to_string()))?;
-    if let Some(plan) = temperature_plan {
-        run_temperature_plan(py_engine, py, netlist, &plan, continue_on_error, &mut out)?;
-    } else {
+    let plan = run_interruptible(py, &py_engine.active_runs, |abort| {
+        rspice_core::execution::DeckPlan::from_netlist_with_abort(
+            net,
+            &netlist.resource_limits,
+            abort,
+        )
+        .map_err(deck_plan_simulation_error)
+    })?;
+    if plan.axes().is_empty() {
         run_directives(
             py_engine,
             py,
             netlist,
             &net.analyses,
             continue_on_error,
-            None,
+            PlannedDirectiveRun {
+                coordinate: None,
+                analyses: plan.analyses(),
+            },
             &mut out,
         )?;
         evaluate_pending_fourier(py, &mut out);
+    } else {
+        run_axis_plan(py_engine, py, netlist, &plan, continue_on_error, &mut out)?;
     }
 
     let measurements = evaluate_measurements(py, net, &out);
@@ -145,32 +159,28 @@ fn run_directives(
     netlist: &PyNetlist,
     analyses: &[AnalysisCommand],
     continue_on_error: bool,
-    coordinate: Option<&PyRunCoordinate>,
+    planned_run: PlannedDirectiveRun<'_>,
     out: &mut DirectiveOutcomes,
 ) -> PyResult<()> {
-    let mut planned = None;
-    if coordinate.is_some() {
-        let plan = rspice_core::execution::DeckPlan::from_netlist_temperature_axis(&netlist.inner)
-            .map_err(|error| crate::errors::SimulationError::new_err(error.to_string()))?;
-        planned = plan.map(|plan| plan.analyses().to_vec().into_iter());
-    }
+    let mut planned = planned_run.analyses.iter();
 
     for analysis in analyses {
-        if matches!(analysis, AnalysisCommand::Temp { .. }) {
+        if matches!(
+            analysis,
+            AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. }
+        ) {
             continue;
         }
         let analysis_id = if matches!(analysis, AnalysisCommand::Four { .. }) {
             None
         } else {
-            planned
-                .as_mut()
-                .and_then(Iterator::next)
-                .map(|analysis| analysis.id().tag())
+            planned.next().map(|analysis| analysis.id().tag())
         };
-        let context = coordinate.map(|coordinate| ExecutionContext {
-            analysis_id,
-            coordinate: coordinate.clone(),
-        });
+        let context =
+            (analysis_id.is_some() || planned_run.coordinate.is_some()).then(|| ExecutionContext {
+                analysis_id,
+                coordinate: planned_run.coordinate.cloned(),
+            });
         let records_before = out.records.len();
         if let Err(error) = execute(py_engine, py, netlist, analysis, context.as_ref(), out) {
             if !continue_on_error {
@@ -185,25 +195,21 @@ fn run_directives(
                 &crate::errors::describe_pyerr(py, &error),
             );
             if let Some(context) = &context {
-                record.set_execution_context(
-                    context.analysis_id.clone(),
-                    Some(context.coordinate.clone()),
-                );
+                record
+                    .set_execution_context(context.analysis_id.clone(), context.coordinate.clone());
             }
             out.records.push(record);
         } else if let Some(context) = &context {
             for record in &mut out.records[records_before..] {
-                record.set_execution_context(
-                    context.analysis_id.clone(),
-                    Some(context.coordinate.clone()),
-                );
+                record
+                    .set_execution_context(context.analysis_id.clone(), context.coordinate.clone());
             }
         }
     }
     Ok(())
 }
 
-fn run_temperature_plan(
+fn run_axis_plan(
     py_engine: &PyEngine,
     py: Python<'_>,
     netlist: &PyNetlist,
@@ -211,48 +217,84 @@ fn run_temperature_plan(
     continue_on_error: bool,
     out: &mut DirectiveOutcomes,
 ) -> PyResult<()> {
-    let coordinates = plan
-        .coordinates_with_abort(&netlist.resource_limits, &rspice_core::NoAbort)
-        .map_err(|error| crate::errors::SimulationError::new_err(error.to_string()))?;
+    let coordinates = run_interruptible(py, &py_engine.active_runs, |abort| {
+        plan.coordinates_with_abort(&netlist.resource_limits, abort)
+            .map_err(deck_plan_simulation_error)
+    })?;
+    let axis_steps = canonical_axis_step_commands(&netlist.inner);
+    if axis_steps.len() != plan.axes().len() {
+        return Err(crate::errors::SimulationError::new_err(format!(
+            "canonical deck plan has {} axis/axes but the materializer resolved {}",
+            plan.axes().len(),
+            axis_steps.len()
+        )));
+    }
+    let core_engine = py_engine.engine_for_netlist(&netlist.inner);
+    let step_limits =
+        rspice_core::engine::StepPlanLimits::from_resource_limits(netlist.resource_limits);
+    let materialization_plan = run_interruptible(py, &py_engine.active_runs, |abort| {
+        core_engine
+            .plan_step_commands_with_abort(&netlist.inner, &axis_steps, step_limits, abort)
+            .map(rspice_core::engine::StepPlan::into_owned)
+    })?;
+    if materialization_plan.total_runs() != coordinates.len() {
+        return Err(crate::errors::SimulationError::new_err(format!(
+            "canonical deck plan produced {} coordinate(s), but the materializer planned {} run(s)",
+            coordinates.len(),
+            materialization_plan.total_runs()
+        )));
+    }
     let implicit_op = plan.analyses().len() == 1
         && plan.analyses()[0].id().kind() == rspice_core::execution::AnalysisKind::ImplicitOp;
-    let mut temperature_operating_points = Vec::new();
+    let compatibility_axis = implicit_op.then(|| single_legacy_axis(plan)).flatten();
+    let mut compatibility_operating_points = Vec::new();
+    let mut compatibility_complete = compatibility_axis.is_some();
 
-    for coordinate in coordinates {
-        let coordinate = PyRunCoordinate::from_core(&coordinate);
-        let temperature = coordinate.temperature_celsius().ok_or_else(|| {
-            crate::errors::SimulationError::new_err(
-                "temperature plan produced a coordinate without a numeric temperature",
-            )
+    for (run_index, core_coordinate) in coordinates.into_iter().enumerate() {
+        let materialized_run = run_interruptible(py, &py_engine.active_runs, |abort| {
+            core_engine.materialize_step_run_with_abort(&materialization_plan, run_index, abort)
         })?;
-        let mut materialized = netlist.inner.clone();
-        materialized.options.temp = Some(temperature);
+        if materialized_run.run_index() != run_index {
+            return Err(crate::errors::SimulationError::new_err(
+                "axis materializer returned a mismatched run index",
+            ));
+        }
+        let coordinate = PyRunCoordinate::from_core(&core_coordinate);
+        let compatibility_value = compatibility_axis
+            .as_ref()
+            .and_then(|_| legacy_coordinate_value(&core_coordinate));
+        let (_, materialized_netlist) = materialized_run.into_parts();
         let materialized = PyNetlist {
-            inner: materialized,
+            inner: materialized_netlist,
             resource_limits: netlist.resource_limits,
         };
-        let op_count_before = out.op.all.len();
 
         if implicit_op {
             let context = ExecutionContext {
                 analysis_id: Some(plan.analyses()[0].id().tag()),
-                coordinate: coordinate.clone(),
+                coordinate: Some(coordinate.clone()),
             };
             match py_engine.run_dc_op(py, &materialized) {
                 Ok(result) => {
+                    if let Some(value) = compatibility_value {
+                        compatibility_operating_points.push((value, result.inner.clone()));
+                    } else {
+                        compatibility_complete = false;
+                    }
                     let handle = Py::new(py, result)?;
                     out.op.push_with(handle, |handle| handle.clone_ref(py));
                     let mut record = PyAnalysisRecord::executed("op", ".op (implicit)".to_string());
-                    record.set_execution_context(context.analysis_id, Some(context.coordinate));
+                    record.set_execution_context(context.analysis_id, context.coordinate);
                     out.records.push(record);
                 }
                 Err(error) if continue_on_error => {
+                    compatibility_complete = false;
                     let mut record = PyAnalysisRecord::skipped(
                         "op",
                         ".op (implicit)".to_string(),
                         &crate::errors::describe_pyerr(py, &error),
                     );
-                    record.set_execution_context(context.analysis_id, Some(context.coordinate));
+                    record.set_execution_context(context.analysis_id, context.coordinate);
                     out.records.push(record);
                 }
                 Err(error) => return Err(error),
@@ -264,26 +306,106 @@ fn run_temperature_plan(
                 &materialized,
                 &materialized.inner.analyses,
                 continue_on_error,
-                Some(&coordinate),
+                PlannedDirectiveRun {
+                    coordinate: Some(&coordinate),
+                    analyses: plan.analyses(),
+                },
                 out,
             )?;
         }
 
         evaluate_pending_fourier(py, out);
-        if out.op.all.len() > op_count_before
-            && let Some(result) = out.op.last()
-        {
-            temperature_operating_points.push((temperature, result.borrow(py).inner.clone()));
-        }
     }
 
-    if !temperature_operating_points.is_empty() {
-        out.temperature = Some(PyDcSweepResult::new_named(
-            temperature_operating_points,
-            "TEMP",
-        ));
+    if compatibility_complete
+        && compatibility_operating_points.len() == materialization_plan.total_runs()
+        && let Some((kind, name)) = compatibility_axis
+    {
+        let result = PyDcSweepResult::new_named(compatibility_operating_points, &name);
+        match kind {
+            rspice_core::execution::AxisKind::Temperature => out.temperature = Some(result),
+            rspice_core::execution::AxisKind::Data | rspice_core::execution::AxisKind::Step => {
+                out.step_result = Some(result)
+            }
+            rspice_core::execution::AxisKind::Alter => {}
+            _ => {}
+        }
     }
     Ok(())
+}
+
+fn deck_plan_simulation_error(
+    error: rspice_core::execution::DeckPlanError,
+) -> rspice_core::engine::SimulationError {
+    match error {
+        rspice_core::execution::DeckPlanError::Aborted => {
+            rspice_core::engine::SimulationError::Aborted
+        }
+        rspice_core::execution::DeckPlanError::ResourceLimit(error) => error.into(),
+        other => rspice_core::engine::SimulationError::Circuit(other.to_string()),
+    }
+}
+
+fn canonical_axis_step_commands(netlist: &rspice_core::Netlist) -> Vec<StepCommand> {
+    let mut data = Vec::new();
+    let mut step = Vec::new();
+    let mut temperature = Vec::new();
+    for command in &netlist.analyses {
+        match command {
+            AnalysisCommand::Step(command) if matches!(&command.sweep, StepSweep::Data { .. }) => {
+                data.push(command.clone())
+            }
+            AnalysisCommand::Step(command) if command.target == StepTarget::Temp => {
+                temperature.push(command.clone())
+            }
+            AnalysisCommand::Step(command) => step.push(command.clone()),
+            AnalysisCommand::Temp { temperatures } => temperature.push(StepCommand {
+                target: StepTarget::Temp,
+                name: "TEMP".to_string(),
+                param_name: None,
+                sweep: StepSweep::List(temperatures.clone()),
+            }),
+            _ => {}
+        }
+    }
+    data.extend(step);
+    data.extend(temperature);
+    data
+}
+
+fn single_legacy_axis(
+    plan: &rspice_core::execution::DeckPlan,
+) -> Option<(rspice_core::execution::AxisKind, String)> {
+    let axis = plan.axes().first().filter(|_| plan.axes().len() == 1)?;
+    let name = match axis.step_target() {
+        Some(rspice_core::execution::StepAxisTarget::Parameter { name }) => name.clone(),
+        Some(rspice_core::execution::StepAxisTarget::Device {
+            name,
+            parameter: Some(parameter),
+        }) => format!("{name}:{parameter}"),
+        Some(rspice_core::execution::StepAxisTarget::Device {
+            name,
+            parameter: None,
+        }) => name.clone(),
+        Some(rspice_core::execution::StepAxisTarget::Model { name, parameter }) => {
+            format!("{name}:{parameter}")
+        }
+        Some(rspice_core::execution::StepAxisTarget::Temperature) => "TEMP".to_string(),
+        Some(_) => axis.name().to_string(),
+        None if axis.kind() == rspice_core::execution::AxisKind::Temperature => "TEMP".to_string(),
+        None => axis.name().to_string(),
+    };
+    Some((axis.kind(), name))
+}
+
+fn legacy_coordinate_value(coordinate: &rspice_core::execution::RunCoordinate) -> Option<f64> {
+    let assignment = coordinate.assignments().first()?;
+    match assignment.value() {
+        rspice_core::execution::RunAxisValue::Numeric(value) => Some(*value),
+        rspice_core::execution::RunAxisValue::DataRow(_) => Some(assignment.value_index() as f64),
+        rspice_core::execution::RunAxisValue::AlterVariant { .. } => None,
+        _ => None,
+    }
 }
 
 /// Assemble the report, collapsing each `LastAndAll` into the pair it stores.
@@ -836,10 +958,8 @@ fn evaluate_pending_fourier(py: Python<'_>, out: &mut DirectiveOutcomes) {
         }
         if let Some(context) = context {
             for record in &mut out.records[records_before..] {
-                record.set_execution_context(
-                    context.analysis_id.clone(),
-                    Some(context.coordinate.clone()),
-                );
+                record
+                    .set_execution_context(context.analysis_id.clone(), context.coordinate.clone());
             }
         }
     }

@@ -295,13 +295,6 @@ impl PyRunCoordinate {
                 .collect(),
         }
     }
-
-    pub(crate) fn temperature_celsius(&self) -> Option<f64> {
-        self.assignments
-            .iter()
-            .find(|assignment| assignment.kind == "temperature")
-            .and_then(|assignment| assignment.value)
-    }
 }
 
 #[pymethods]

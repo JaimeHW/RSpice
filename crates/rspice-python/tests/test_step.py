@@ -26,7 +26,17 @@ R2 out 0 1k
         assert report.step.primary_source.casefold() == "rval"
         np.testing.assert_array_equal(report.step.sweep_values, [1e3, 2e3, 5e3])
         assert report.step.voltage(2, "out") == pytest.approx(10 / 6, abs=1e-6)
-        assert report.analyses_run == ["step"]
+        assert report.analyses_run == ["op", "op", "op"]
+        assert [record.analysis_id for record in report.records] == [
+            "implicit-op-001",
+            "implicit-op-001",
+            "implicit-op-001",
+        ]
+        assert [record.coordinate.assignments[0].value for record in report.records] == [
+            1e3,
+            2e3,
+            5e3,
+        ]
 
     def test_engine_run_executes_temperature_directive(self, engine, divider):
         netlist = rspice.Netlist.parse(
@@ -112,7 +122,7 @@ R2 out 0 1k
             (record.analysis_id, record.coordinate.id) for record in report.records
         ]
 
-    def test_temperature_and_step_fail_closed_until_cartesian_execution(self, engine):
+    def test_temperature_and_step_execute_as_a_canonical_cartesian_product(self, engine):
         netlist = rspice.Netlist.parse(
             """* TEMP plus STEP
 .param rval=1k
@@ -124,8 +134,86 @@ R1 in 0 {rval}
 .end
 """
         )
-        with pytest.raises(rspice.SimulationError, match="shared STEP-axis executor"):
-            engine.run(netlist)
+        report = engine.run(netlist)
+
+        assert report.step is None
+        assert report.temperature is None
+        assert len(report.all_op) == 4
+        assert report.analyses_run == ["op", "op", "op", "op"]
+        assert [record.analysis_id for record in report.records] == ["op-001"] * 4
+        assert [record.coordinate.ordinal for record in report.records] == [0, 1, 2, 3]
+        assert [
+            [assignment.kind for assignment in record.coordinate.assignments]
+            for record in report.records
+        ] == [["step", "temperature"]] * 4
+        assert [
+            [assignment.value for assignment in record.coordinate.assignments]
+            for record in report.records
+        ] == [
+            [1e3, 25],
+            [2e3, 25],
+            [1e3, 100],
+            [2e3, 100],
+        ]
+
+    def test_scalar_run_records_repeated_analysis_ordinals(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* repeated scalar analyses
+V1 in 0 DC 1 AC 1
+R1 in 0 1k
+.tran 1u 2u
+.ac lin 2 1k 2k
+.ac lin 3 10k 30k
+.end
+"""
+        )
+
+        report = engine.run(netlist)
+
+        assert [record.analysis_id for record in report.records] == [
+            "tran-001",
+            "ac-001",
+            "ac-002",
+        ]
+        assert all(record.coordinate is None for record in report.records)
+
+    def test_data_step_and_temperature_share_one_coordinate_order(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* DATA plus STEP plus TEMP
+.param gain=1 bias=1
+V1 out 0 {gain+bias}
+R1 out 0 1k
+.data samples bias
+10
+20
+.enddata
+.step data=samples
+.step param gain list 1 2
+.temp 25 100
+.op
+.end
+"""
+        )
+
+        report = engine.run(netlist)
+
+        assert len(report.all_op) == 8
+        assert [result.voltage("out") for result in report.all_op] == pytest.approx(
+            [11, 21, 12, 22, 11, 21, 12, 22]
+        )
+        assert [
+            [assignment.kind for assignment in record.coordinate.assignments]
+            for record in report.records
+        ] == [["data", "step", "temperature"]] * 8
+        assert [
+            record.coordinate.assignments[0].value_index for record in report.records
+        ] == [0, 1, 0, 1, 0, 1, 0, 1]
+        assert [
+            record.coordinate.assignments[1].value for record in report.records
+        ] == [1, 1, 2, 2, 1, 1, 2, 2]
+        assert [
+            record.coordinate.assignments[2].value for record in report.records
+        ] == [25, 25, 25, 25, 100, 100, 100, 100]
 
     def test_step_varies_results(self, engine, param_divider):
         results = engine.run_step(param_divider, "rval", [1e3, 2e3, 5e3])

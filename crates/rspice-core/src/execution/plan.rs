@@ -651,8 +651,7 @@ struct CoordinateResourceEstimate {
 }
 
 impl DeckPlan {
-    /// Build the target-neutral run-axis plan for the typed meta-analyses in a
-    /// parsed deck.
+    /// Build the complete target-neutral plan for a parsed deck.
     ///
     /// DATA rows are placed first, numeric `.STEP` dimensions remain in their
     /// authored relative order, and temperature dimensions are placed last.
@@ -660,19 +659,19 @@ impl DeckPlan {
     /// Textual ALTER expansion and coordinate-dependent topology/schema
     /// materialization happen in later planning stages and are intentionally
     /// not inferred here.
-    pub fn from_netlist_run_axes(
+    pub fn from_netlist(
         netlist: &crate::netlist::Netlist,
         limits: &ResourceLimits,
-    ) -> Result<Option<Self>, DeckPlanError> {
-        Self::from_netlist_run_axes_with_abort(netlist, limits, &crate::NoAbort)
+    ) -> Result<Self, DeckPlanError> {
+        Self::from_netlist_with_abort(netlist, limits, &crate::NoAbort)
     }
 
-    /// Abort-aware form of [`Self::from_netlist_run_axes`].
-    pub fn from_netlist_run_axes_with_abort(
+    /// Abort-aware form of [`Self::from_netlist`].
+    pub fn from_netlist_with_abort(
         netlist: &crate::netlist::Netlist,
         limits: &ResourceLimits,
         abort: &dyn AbortSignal,
-    ) -> Result<Option<Self>, DeckPlanError> {
+    ) -> Result<Self, DeckPlanError> {
         use crate::netlist::{AnalysisCommand, StepSweep, StepTarget};
 
         if abort.is_aborted() {
@@ -705,10 +704,6 @@ impl DeckPlan {
             .checked_add(step_axis_count)
             .and_then(|count| count.checked_add(temperature_axis_count))
             .ok_or(DeckPlanError::CoordinateCountOverflow)?;
-        if meta_axis_count == 0 {
-            return Ok(None);
-        }
-
         let mut data_axes = try_vec_with_capacity(data_axis_count, "DATA run axes")?;
         let mut step_axes = try_vec_with_capacity(step_axis_count, "STEP run axes")?;
         let mut temperature_axes =
@@ -762,16 +757,32 @@ impl DeckPlan {
         if abort.is_aborted() {
             return Err(DeckPlanError::Aborted);
         }
-        Ok(Some(plan))
+        Ok(plan)
     }
 
-    /// Compatibility bridge for the Python temperature-only executor.
-    ///
-    /// The canonical planner above composes `.STEP` and `.TEMP`. This bridge
-    /// remains fail-closed for that combination until the Python adapter
-    /// executes every coordinate through the canonical materializer; allowing
-    /// it through today would execute legacy `.STEP` again inside each
-    /// temperature coordinate.
+    /// Compatibility query that returns a plan only when the deck contains a
+    /// run axis. New executors should use [`Self::from_netlist`] so authored
+    /// analysis ordinals also come from the canonical planner for scalar runs.
+    pub fn from_netlist_run_axes(
+        netlist: &crate::netlist::Netlist,
+        limits: &ResourceLimits,
+    ) -> Result<Option<Self>, DeckPlanError> {
+        Self::from_netlist_run_axes_with_abort(netlist, limits, &crate::NoAbort)
+    }
+
+    /// Abort-aware form of [`Self::from_netlist_run_axes`].
+    pub fn from_netlist_run_axes_with_abort(
+        netlist: &crate::netlist::Netlist,
+        limits: &ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<Self>, DeckPlanError> {
+        let plan = Self::from_netlist_with_abort(netlist, limits, abort)?;
+        Ok((!plan.axes.is_empty()).then_some(plan))
+    }
+
+    /// Compatibility bridge for callers that still request a standalone
+    /// `.TEMP` axis. New executors should use [`Self::from_netlist`] so DATA,
+    /// `.STEP`, and temperature axes share one checked Cartesian plan.
     pub fn from_netlist_temperature_axis(
         netlist: &crate::netlist::Netlist,
     ) -> Result<Option<Self>, DeckPlanError> {
@@ -2077,6 +2088,31 @@ mod tests {
             DeckPlan::from_netlist_temperature_axis(&netlist),
             Err(DeckPlanError::TemperatureAxisWithStep)
         ));
+    }
+
+    #[test]
+    fn scalar_deck_plan_preserves_repeated_analysis_ordinals_without_axes() {
+        let netlist = crate::Netlist::parse(
+            "scalar analyses\nV1 in 0 DC 1 AC 1\nR1 in 0 1k\n.ac lin 2 1 2\n.tran 1u 2u\n.ac lin 3 10 30\n.end\n",
+        )
+        .expect("scalar fixture parses");
+
+        let plan = DeckPlan::from_netlist(&netlist, &ResourceLimits::default())
+            .expect("complete scalar plan builds");
+
+        assert!(plan.axes().is_empty());
+        assert_eq!(
+            plan.analyses()
+                .iter()
+                .map(|analysis| analysis.id().tag())
+                .collect::<Vec<_>>(),
+            ["ac-001", "tran-001", "ac-002"]
+        );
+        assert!(
+            DeckPlan::from_netlist_run_axes(&netlist, &ResourceLimits::default())
+                .expect("compatibility query succeeds")
+                .is_none()
+        );
     }
 
     #[test]
