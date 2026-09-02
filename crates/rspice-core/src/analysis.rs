@@ -86,8 +86,8 @@ pub use sensitivity::{
     SensitivityAnalysisError, SensitivityAnalyzer, SensitivityResult,
 };
 pub use stb::{
-    BodePoint, NyquistPoint, StabilityMargins, StbAnalysisError, StbAnalyzer, StbConfig, StbResult,
-    StbSweepType,
+    BodePoint, NyquistPoint, StabilityMargins, StbAnalysisError, StbAnalyzer, StbConfig,
+    StbConfigError, StbResult, StbSweepType,
 };
 pub use temperature::{
     JunctionTempScaling, MosfetTempScaling, ResistorTempCoeffs, TemperatureContext,

@@ -31,6 +31,7 @@ use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
 use num_complex::Complex64;
 use std::f64::consts::PI;
+use std::fmt::Write as _;
 
 //=============================================================================
 // STB Configuration
@@ -81,6 +82,47 @@ pub enum StbSweepType {
     /// Octave (logarithmic) sweep (`num_points` per octave)
     Octave,
 }
+
+/// Invalid authored STB configuration.
+///
+/// The variants are structured so callers can classify configuration
+/// failures without parsing display strings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum StbConfigError {
+    /// The sweep start was not finite and strictly positive.
+    InvalidStartFrequency,
+    /// The sweep stop was not finite or preceded the start.
+    InvalidStopFrequency,
+    /// No sweep points were requested.
+    EmptySweep,
+    /// One or more margin thresholds were not finite.
+    InvalidMarginThreshold,
+    /// A logarithmic sweep's implied point count exceeded `usize`.
+    PointCountOverflow,
+}
+
+impl std::fmt::Display for StbConfigError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidStartFrequency => {
+                formatter.write_str("STB start frequency must be positive and finite")
+            }
+            Self::InvalidStopFrequency => {
+                formatter.write_str("STB stop frequency must be finite and >= start")
+            }
+            Self::EmptySweep => formatter.write_str("STB sweep must have at least one point"),
+            Self::InvalidMarginThreshold => {
+                formatter.write_str("STB margin thresholds must be finite")
+            }
+            Self::PointCountOverflow => {
+                formatter.write_str("STB logarithmic sweep point count exceeds addressable limits")
+            }
+        }
+    }
+}
+
+impl std::error::Error for StbConfigError {}
 
 impl Default for StbConfig {
     fn default() -> Self {
@@ -138,96 +180,116 @@ impl StbConfig {
         self
     }
 
-    /// Generate frequency points
-    pub fn frequency_points(&self) -> Vec<Value> {
-        if self.validate().is_err() {
-            return Vec::new();
-        }
+    /// Generate frequency points while preserving configuration, capacity,
+    /// and allocation failures.
+    pub fn frequency_points(&self) -> Result<Vec<Value>, StbAnalysisError> {
+        self.try_frequency_points()
+    }
+
+    /// Generate frequency points while preserving configuration and
+    /// allocation failures.
+    pub fn try_frequency_points(&self) -> Result<Vec<Value>, StbAnalysisError> {
+        self.try_frequency_points_with_abort(&NoAbort)
+    }
+
+    /// Cancellable, fallible frequency-grid generation.
+    pub fn try_frequency_points_with_abort(
+        &self,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, StbAnalysisError> {
+        ensure_not_aborted(abort)?;
+        let point_count = self.frequency_point_count()?;
+        let mut frequencies = Vec::new();
+        try_reserve_exact(&mut frequencies, point_count, "STB frequency grid")?;
 
         match self.sweep_type {
-            StbSweepType::Linear => self.linear_points(),
-            StbSweepType::Decade => self.decade_points(),
-            StbSweepType::Octave => self.octave_points(),
+            StbSweepType::Linear => {
+                if point_count == 1 {
+                    frequencies.push(self.freq_start);
+                } else {
+                    let step = (self.freq_stop - self.freq_start) / (point_count - 1) as Value;
+                    for index in 0..point_count {
+                        poll_abort(abort, index)?;
+                        frequencies.push(self.freq_start + index as Value * step);
+                    }
+                }
+            }
+            StbSweepType::Decade | StbSweepType::Octave => {
+                let (log_start, log_stop, base) = match self.sweep_type {
+                    StbSweepType::Decade => {
+                        (self.freq_start.log10(), self.freq_stop.log10(), 10.0_f64)
+                    }
+                    StbSweepType::Octave => {
+                        (self.freq_start.log2(), self.freq_stop.log2(), 2.0_f64)
+                    }
+                    StbSweepType::Linear => unreachable!("linear sweep handled above"),
+                };
+                let denominator = point_count.saturating_sub(1).max(1) as Value;
+                for index in 0..point_count {
+                    poll_abort(abort, index)?;
+                    let logarithm =
+                        log_start + (log_stop - log_start) * index as Value / denominator;
+                    frequencies.push(base.powf(logarithm));
+                }
+            }
         }
+
+        ensure_not_aborted(abort)?;
+        Ok(frequencies)
     }
 
     /// Number of sweep points that will be generated, without allocating the
     /// frequency vector.
-    pub fn frequency_point_count(&self) -> Result<usize, String> {
+    pub fn frequency_point_count(&self) -> Result<usize, StbConfigError> {
         self.validate()?;
         let count = match self.sweep_type {
             StbSweepType::Linear => self.num_points,
-            StbSweepType::Decade => ((self.freq_stop.log10() - self.freq_start.log10())
-                * self.num_points as Value)
-                .ceil() as usize,
-            StbSweepType::Octave => ((self.freq_stop.log2() - self.freq_start.log2())
-                * self.num_points as Value)
-                .ceil() as usize,
+            StbSweepType::Decade => checked_logarithmic_point_count(
+                self.freq_stop.log10() - self.freq_start.log10(),
+                self.num_points,
+            )?,
+            StbSweepType::Octave => checked_logarithmic_point_count(
+                self.freq_stop.log2() - self.freq_start.log2(),
+                self.num_points,
+            )?,
         };
         Ok(count.max(1))
     }
 
-    fn linear_points(&self) -> Vec<Value> {
-        if self.num_points <= 1 {
-            return vec![self.freq_start];
-        }
-        let step = (self.freq_stop - self.freq_start) / (self.num_points - 1) as Value;
-        (0..self.num_points)
-            .map(|i| self.freq_start + i as Value * step)
-            .collect()
-    }
-
-    fn decade_points(&self) -> Vec<Value> {
-        let log_start = self.freq_start.log10();
-        let log_stop = self.freq_stop.log10();
-        let num_decades = log_stop - log_start;
-        let total_points = (num_decades * self.num_points as f64).ceil() as usize;
-        let total_points = total_points.max(1);
-
-        (0..total_points)
-            .map(|i| {
-                let log_f = log_start
-                    + (log_stop - log_start) * i as f64 / (total_points - 1).max(1) as f64;
-                10.0_f64.powf(log_f)
-            })
-            .collect()
-    }
-
-    fn octave_points(&self) -> Vec<Value> {
-        let log_start = self.freq_start.log2();
-        let log_stop = self.freq_stop.log2();
-        let num_octaves = log_stop - log_start;
-        let total_points = (num_octaves * self.num_points as f64).ceil() as usize;
-        let total_points = total_points.max(1);
-
-        (0..total_points)
-            .map(|i| {
-                let log_f = log_start
-                    + (log_stop - log_start) * i as f64 / (total_points - 1).max(1) as f64;
-                2.0_f64.powf(log_f)
-            })
-            .collect()
-    }
-
     /// Validate sweep configuration.
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), StbConfigError> {
         if !self.freq_start.is_finite() || self.freq_start <= 0.0 {
-            return Err("STB start frequency must be positive and finite".to_string());
+            return Err(StbConfigError::InvalidStartFrequency);
         }
         if !self.freq_stop.is_finite() || self.freq_stop < self.freq_start {
-            return Err("STB stop frequency must be finite and >= start".to_string());
+            return Err(StbConfigError::InvalidStopFrequency);
         }
         if self.num_points == 0 {
-            return Err("STB sweep must have at least one point".to_string());
+            return Err(StbConfigError::EmptySweep);
         }
         if !self.min_gain_margin_db.is_finite()
             || !self.min_phase_margin_deg.is_finite()
             || !self.max_loop_gain_db.is_finite()
         {
-            return Err("STB margin thresholds must be finite".to_string());
+            return Err(StbConfigError::InvalidMarginThreshold);
         }
         Ok(())
     }
+}
+
+fn checked_logarithmic_point_count(
+    logarithmic_span: Value,
+    points_per_unit: usize,
+) -> Result<usize, StbConfigError> {
+    let raw_count = logarithmic_span * points_per_unit as Value;
+    let rounded_count = raw_count.ceil();
+    // `usize::MAX as f64` rounds upward on 64-bit platforms. Rejecting the
+    // equality boundary is deliberately conservative and prevents a
+    // float-to-integer cast from silently saturating to `usize::MAX`.
+    if !rounded_count.is_finite() || rounded_count >= usize::MAX as Value {
+        return Err(StbConfigError::PointCountOverflow);
+    }
+    Ok((rounded_count as usize).max(1))
 }
 
 //=============================================================================
@@ -394,20 +456,68 @@ impl StbResult {
         }
     }
 
-    /// Get magnitude vs frequency data for Bode plot
-    pub fn magnitude_curve(&self) -> Vec<(Value, Value)> {
-        self.bode_points
-            .iter()
-            .map(|p| (p.frequency, p.magnitude_db))
-            .collect()
+    /// Allocate the retained per-point result storage before analysis work
+    /// begins. The returned vectors have zero length and exact requested
+    /// capacity, so projection itself cannot trigger a user-sized growth.
+    pub(crate) fn try_with_capacity(
+        point_count: usize,
+        compute_nyquist: bool,
+    ) -> Result<Self, StbAnalysisError> {
+        let mut result = Self::new();
+        try_reserve_exact(&mut result.bode_points, point_count, "STB Bode result")?;
+        if compute_nyquist {
+            try_reserve_exact(
+                &mut result.nyquist_points,
+                point_count,
+                "STB Nyquist result",
+            )?;
+        }
+        // A valid projection emits at most the multiple-crossover warning.
+        // Empty and mismatched inputs also emit exactly one diagnostic.
+        try_reserve_exact(&mut result.warnings, 1, "STB warning list")?;
+        Ok(result)
     }
 
-    /// Get phase vs frequency data for Bode plot
-    pub fn phase_curve(&self) -> Vec<(Value, Value)> {
-        self.bode_points
-            .iter()
-            .map(|p| (p.frequency, p.phase_deg))
-            .collect()
+    /// Get magnitude vs frequency data for a Bode plot.
+    pub fn magnitude_curve(&self) -> Result<Vec<(Value, Value)>, StbAnalysisError> {
+        self.magnitude_curve_with_abort(&NoAbort)
+    }
+
+    /// Cancellable, fallible magnitude-curve projection.
+    pub fn magnitude_curve_with_abort(
+        &self,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<(Value, Value)>, StbAnalysisError> {
+        self.project_bode_curve_with_abort(|point| point.magnitude_db, abort)
+    }
+
+    /// Get phase vs frequency data for a Bode plot.
+    pub fn phase_curve(&self) -> Result<Vec<(Value, Value)>, StbAnalysisError> {
+        self.phase_curve_with_abort(&NoAbort)
+    }
+
+    /// Cancellable, fallible phase-curve projection.
+    pub fn phase_curve_with_abort(
+        &self,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<(Value, Value)>, StbAnalysisError> {
+        self.project_bode_curve_with_abort(|point| point.phase_deg, abort)
+    }
+
+    fn project_bode_curve_with_abort(
+        &self,
+        ordinate: impl Fn(&BodePoint) -> Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<(Value, Value)>, StbAnalysisError> {
+        ensure_not_aborted(abort)?;
+        let mut curve = Vec::new();
+        try_reserve_exact(&mut curve, self.bode_points.len(), "STB Bode curve")?;
+        for (index, point) in self.bode_points.iter().enumerate() {
+            poll_abort(abort, index)?;
+            curve.push((point.frequency, ordinate(point)));
+        }
+        ensure_not_aborted(abort)?;
+        Ok(curve)
     }
 
     /// Check if stable
@@ -443,6 +553,20 @@ pub struct StbAnalyzer {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum StbAnalysisError {
+    /// The authored sweep or margin configuration is invalid.
+    InvalidConfiguration(StbConfigError),
+    /// A checked retained shape exceeded the platform address space.
+    CapacityOverflow {
+        /// Result or workspace whose shape overflowed.
+        object: &'static str,
+    },
+    /// A fallible reservation failed before projection wrote any values.
+    Allocation {
+        /// Result or workspace that could not be reserved.
+        object: &'static str,
+        /// Number of elements requested from the allocator.
+        requested: usize,
+    },
     /// The caller cancelled the projection.
     Aborted,
 }
@@ -450,12 +574,30 @@ pub enum StbAnalysisError {
 impl std::fmt::Display for StbAnalysisError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::InvalidConfiguration(error) => {
+                write!(formatter, "invalid STB configuration: {error}")
+            }
+            Self::CapacityOverflow { object } => {
+                write!(formatter, "{object} exceeds addressable capacity")
+            }
+            Self::Allocation { object, requested } => {
+                write!(
+                    formatter,
+                    "unable to allocate {requested} elements for {object}"
+                )
+            }
             Self::Aborted => formatter.write_str("STB result projection was aborted"),
         }
     }
 }
 
 impl std::error::Error for StbAnalysisError {}
+
+impl From<StbConfigError> for StbAnalysisError {
+    fn from(error: StbConfigError) -> Self {
+        Self::InvalidConfiguration(error)
+    }
+}
 
 impl StbAnalyzer {
     /// Create new STB analyzer
@@ -464,9 +606,12 @@ impl StbAnalyzer {
     }
 
     /// Analyze loop gain data and extract stability margins
-    pub fn analyze(&self, frequencies: &[Value], loop_gains: &[Complex64]) -> StbResult {
+    pub fn analyze(
+        &self,
+        frequencies: &[Value],
+        loop_gains: &[Complex64],
+    ) -> Result<StbResult, StbAnalysisError> {
         self.analyze_with_abort(frequencies, loop_gains, &NoAbort)
-            .expect("NoAbort cannot cancel STB result projection")
     }
 
     /// Analyze loop-gain data with cooperative cancellation during every
@@ -478,37 +623,70 @@ impl StbAnalyzer {
         abort: &dyn AbortSignal,
     ) -> Result<StbResult, StbAnalysisError> {
         ensure_not_aborted(abort)?;
-        let mut result = StbResult::new();
 
         if frequencies.is_empty() || loop_gains.is_empty() {
+            let mut result = StbResult::try_with_capacity(0, false)?;
             result.success = false;
-            result.warnings.push("Empty input data".to_string());
+            result
+                .warnings
+                .push(try_owned_message("Empty input data", "STB warning")?);
             return Ok(result);
         }
 
         if frequencies.len() != loop_gains.len() {
+            let mut result = StbResult::try_with_capacity(0, false)?;
             result.success = false;
-            result
-                .warnings
-                .push("Frequency/gain length mismatch".to_string());
+            result.warnings.push(try_owned_message(
+                "Frequency/gain length mismatch",
+                "STB warning",
+            )?);
             return Ok(result);
         }
 
+        let result = StbResult::try_with_capacity(frequencies.len(), self.config.compute_nyquist)?;
+        self.analyze_preallocated_with_abort(frequencies, loop_gains, result, abort)
+    }
+
+    /// Project into storage reserved before circuit work. This is used by the
+    /// engine so a result allocation failure cannot occur after an expensive
+    /// operating-point and frequency solve.
+    pub(crate) fn analyze_preallocated_with_abort(
+        &self,
+        frequencies: &[Value],
+        loop_gains: &[Complex64],
+        mut result: StbResult,
+        abort: &dyn AbortSignal,
+    ) -> Result<StbResult, StbAnalysisError> {
+        ensure_not_aborted(abort)?;
+        if frequencies.is_empty()
+            || frequencies.len() != loop_gains.len()
+            || !result.bode_points.is_empty()
+            || !result.nyquist_points.is_empty()
+            || !result.warnings.is_empty()
+            || result.bode_points.capacity() < frequencies.len()
+            || (self.config.compute_nyquist && result.nyquist_points.capacity() < frequencies.len())
+        {
+            return Err(StbAnalysisError::CapacityOverflow {
+                object: "preallocated STB result",
+            });
+        }
+
         // Build Bode points
-        for (i, &freq) in frequencies.iter().enumerate() {
-            poll_abort(abort, i)?;
+        for (index, (&frequency, &loop_gain)) in frequencies.iter().zip(loop_gains).enumerate() {
+            poll_abort(abort, index)?;
             result
                 .bode_points
-                .push(BodePoint::from_loop_gain(freq, loop_gains[i]));
+                .push(BodePoint::from_loop_gain(frequency, loop_gain));
         }
 
         // Build Nyquist points if configured
         if self.config.compute_nyquist {
-            for (i, &freq) in frequencies.iter().enumerate() {
-                poll_abort(abort, i)?;
+            for (index, (&frequency, &loop_gain)) in frequencies.iter().zip(loop_gains).enumerate()
+            {
+                poll_abort(abort, index)?;
                 result
                     .nyquist_points
-                    .push(NyquistPoint::from_loop_gain(loop_gains[i], freq));
+                    .push(NyquistPoint::from_loop_gain(loop_gain, frequency));
             }
         }
 
@@ -517,10 +695,9 @@ impl StbAnalyzer {
 
         // Check for conditional stability
         if result.margins.num_crossovers > 1 {
-            result.warnings.push(format!(
-                "Multiple unity-gain crossovers detected ({})",
-                result.margins.num_crossovers
-            ));
+            result
+                .warnings
+                .push(multiple_crossover_warning(result.margins.num_crossovers)?);
         }
 
         ensure_not_aborted(abort)?;
@@ -545,11 +722,11 @@ impl StbAnalyzer {
 
         // Find unity gain crossover(s) - where magnitude crosses 0 dB
         let crossovers = self.find_zero_crossings(points, |p| p.magnitude_db, abort)?;
-        margins.num_crossovers = crossovers.len();
-        margins.conditionally_stable = crossovers.len() > 1;
+        margins.num_crossovers = crossovers.count;
+        margins.conditionally_stable = crossovers.count > 1;
 
         // Phase margin: phase at first unity gain crossover
-        if let Some(&(freq, _)) = crossovers.first() {
+        if let Some(freq) = crossovers.first_frequency {
             margins.phase_margin_freq = freq;
             margins.unity_gain_bandwidth = freq;
 
@@ -580,7 +757,7 @@ impl StbAnalyzer {
         let phase_crossings = self.find_phase_crossings(points, -180.0, abort)?;
 
         // Gain margin: magnitude at first phase crossover
-        if let Some(&(freq, _)) = phase_crossings.first() {
+        if let Some(freq) = phase_crossings {
             margins.gain_margin_freq = freq;
 
             // Interpolate magnitude at phase crossover
@@ -600,11 +777,11 @@ impl StbAnalyzer {
         points: &[BodePoint],
         extractor: F,
         abort: &dyn AbortSignal,
-    ) -> Result<Vec<(Value, Value)>, StbAnalysisError>
+    ) -> Result<CrossingSummary, StbAnalysisError>
     where
         F: Fn(&BodePoint) -> Value,
     {
-        let mut crossings = Vec::new();
+        let mut crossings = CrossingSummary::default();
 
         for (index, window) in points.windows(2).enumerate() {
             poll_abort(abort, index)?;
@@ -624,7 +801,8 @@ impl StbAnalyzer {
                 let log_f_cross = log_f0 + alpha * (log_f1 - log_f0);
                 let f_cross = 10.0_f64.powf(log_f_cross);
 
-                crossings.push((f_cross, 0.0));
+                crossings.count += 1;
+                crossings.first_frequency.get_or_insert(f_cross);
             }
         }
 
@@ -637,9 +815,7 @@ impl StbAnalyzer {
         points: &[BodePoint],
         target_phase: Value,
         abort: &dyn AbortSignal,
-    ) -> Result<Vec<(Value, Value)>, StbAnalysisError> {
-        let mut crossings = Vec::new();
-
+    ) -> Result<Option<Value>, StbAnalysisError> {
         for (index, window) in points.windows(2).enumerate() {
             poll_abort(abort, index)?;
             let p0 = window[0].phase_deg;
@@ -662,11 +838,11 @@ impl StbAnalyzer {
                 let log_f_cross = log_f0 + alpha * (log_f1 - log_f0);
                 let f_cross = 10.0_f64.powf(log_f_cross);
 
-                crossings.push((f_cross, target_phase));
+                return Ok(Some(f_cross));
             }
         }
 
-        Ok(crossings)
+        Ok(None)
     }
 
     /// Unwrap phase for proper crossing detection
@@ -713,6 +889,57 @@ impl StbAnalyzer {
             Ok(extractor(points.last().expect("non-empty STB points")))
         }
     }
+}
+
+#[derive(Debug, Default)]
+struct CrossingSummary {
+    first_frequency: Option<Value>,
+    count: usize,
+}
+
+fn try_reserve_exact<T>(
+    values: &mut Vec<T>,
+    requested: usize,
+    object: &'static str,
+) -> Result<(), StbAnalysisError> {
+    values
+        .try_reserve_exact(requested)
+        .map_err(|_| StbAnalysisError::Allocation { object, requested })
+}
+
+fn try_owned_message(message: &str, object: &'static str) -> Result<String, StbAnalysisError> {
+    let mut owned = String::new();
+    owned
+        .try_reserve_exact(message.len())
+        .map_err(|_| StbAnalysisError::Allocation {
+            object,
+            requested: message.len(),
+        })?;
+    owned.push_str(message);
+    Ok(owned)
+}
+
+fn multiple_crossover_warning(count: usize) -> Result<String, StbAnalysisError> {
+    const PREFIX: &str = "Multiple unity-gain crossovers detected (";
+    const MAX_USIZE_DECIMAL_DIGITS: usize = usize::BITS as usize;
+    let capacity = PREFIX
+        .len()
+        .checked_add(MAX_USIZE_DECIMAL_DIGITS)
+        .and_then(|value| value.checked_add(1))
+        .ok_or(StbAnalysisError::CapacityOverflow {
+            object: "STB warning",
+        })?;
+    let mut warning = String::new();
+    warning
+        .try_reserve_exact(capacity)
+        .map_err(|_| StbAnalysisError::Allocation {
+            object: "STB warning",
+            requested: capacity,
+        })?;
+    write!(&mut warning, "{PREFIX}{count})").map_err(|_| StbAnalysisError::CapacityOverflow {
+        object: "STB warning",
+    })?;
+    Ok(warning)
 }
 
 const STB_ABORT_POLL_STRIDE: usize = 256;
@@ -763,8 +990,8 @@ mod tests {
                 .with_sweep_type(StbSweepType::Decade),
         ] {
             assert!(
-                config.frequency_points().is_empty(),
-                "invalid STB sweep config produced points: {config:?}"
+                config.frequency_points().is_err(),
+                "invalid STB sweep config did not return an error: {config:?}"
             );
         }
     }
@@ -788,5 +1015,103 @@ mod tests {
             3,
             "projection must stop on the first true poll"
         );
+    }
+
+    #[test]
+    fn logarithmic_point_count_overflow_is_typed_and_allocation_free() {
+        let config = StbConfig::new()
+            .with_sweep(f64::MIN_POSITIVE, f64::MAX, usize::MAX)
+            .with_sweep_type(StbSweepType::Decade);
+
+        assert_eq!(
+            config.frequency_point_count(),
+            Err(StbConfigError::PointCountOverflow)
+        );
+        assert!(matches!(
+            config.try_frequency_points(),
+            Err(StbAnalysisError::InvalidConfiguration(
+                StbConfigError::PointCountOverflow
+            ))
+        ));
+        assert!(matches!(
+            config.frequency_points(),
+            Err(StbAnalysisError::InvalidConfiguration(
+                StbConfigError::PointCountOverflow
+            ))
+        ));
+    }
+
+    #[test]
+    fn linear_frequency_grid_reports_unallocatable_capacity() {
+        let config = StbConfig::new()
+            .with_sweep(1.0, 2.0, usize::MAX)
+            .with_sweep_type(StbSweepType::Linear);
+
+        assert!(matches!(
+            config.try_frequency_points(),
+            Err(StbAnalysisError::Allocation {
+                object: "STB frequency grid",
+                requested: usize::MAX
+            })
+        ));
+        assert!(matches!(
+            config.frequency_points(),
+            Err(StbAnalysisError::Allocation {
+                object: "STB frequency grid",
+                requested: usize::MAX
+            })
+        ));
+    }
+
+    #[test]
+    fn frequency_grid_observes_abort_within_one_poll_stride() {
+        let count = STB_ABORT_POLL_STRIDE * 4;
+        let config = StbConfig::new()
+            .with_sweep(1.0, count as Value, count)
+            .with_sweep_type(StbSweepType::Linear);
+        let abort = CountingAbort::new(2);
+
+        let error = config
+            .try_frequency_points_with_abort(&abort)
+            .expect_err("counted cancellation must stop frequency generation");
+
+        assert_eq!(error, StbAnalysisError::Aborted);
+        assert_eq!(abort.count(), 3);
+    }
+
+    #[test]
+    fn result_projection_preallocation_reports_unallocatable_capacity() {
+        assert!(matches!(
+            StbResult::try_with_capacity(usize::MAX, true),
+            Err(StbAnalysisError::Allocation {
+                object: "STB Bode result",
+                requested: usize::MAX
+            })
+        ));
+    }
+
+    #[test]
+    fn bode_curve_projection_is_fallible_and_cancellable() {
+        let count = STB_ABORT_POLL_STRIDE * 4;
+        let mut result =
+            StbResult::try_with_capacity(count, false).expect("small test Bode result allocation");
+        for index in 0..count {
+            result.bode_points.push(BodePoint::from_loop_gain(
+                index as Value + 1.0,
+                Complex64::new(2.0, 0.0),
+            ));
+        }
+        let magnitude = result
+            .magnitude_curve()
+            .expect("small magnitude projection");
+        assert_eq!(magnitude.len(), count);
+        assert_eq!(magnitude[0], (1.0, 20.0 * 2.0_f64.log10()));
+
+        let abort = CountingAbort::new(2);
+        assert_eq!(
+            result.phase_curve_with_abort(&abort),
+            Err(StbAnalysisError::Aborted)
+        );
+        assert_eq!(abort.count(), 3);
     }
 }

@@ -42,17 +42,57 @@ const STB_BODE_VALUES_PER_POINT: usize = 6;
 const STB_NYQUIST_VALUES_PER_POINT: usize = 3;
 const STB_MARGIN_VALUES: usize = 6;
 
-fn stb_retained_result_value_count(point_count: usize, compute_nyquist: bool) -> usize {
+fn stb_retained_result_value_count(
+    point_count: usize,
+    compute_nyquist: bool,
+) -> Result<usize, StbAnalysisError> {
     let values_per_point = STB_PRIMARY_VALUES_PER_POINT
-        .saturating_add(STB_BODE_VALUES_PER_POINT)
-        .saturating_add(if compute_nyquist {
+        + STB_BODE_VALUES_PER_POINT
+        + if compute_nyquist {
             STB_NYQUIST_VALUES_PER_POINT
         } else {
             0
-        });
+        };
     point_count
-        .saturating_mul(values_per_point)
-        .saturating_add(STB_MARGIN_VALUES)
+        .checked_mul(values_per_point)
+        .and_then(|values| values.checked_add(STB_MARGIN_VALUES))
+        .ok_or(StbAnalysisError::CapacityOverflow {
+            object: "STB retained-result value count",
+        })
+}
+
+fn map_stb_analysis_error(error: StbAnalysisError) -> SimulationError {
+    match error {
+        StbAnalysisError::Aborted => SimulationError::Aborted,
+        StbAnalysisError::InvalidConfiguration(error) => {
+            SimulationError::Circuit(format!("Invalid STB config: {error}"))
+        }
+        StbAnalysisError::CapacityOverflow { .. } | StbAnalysisError::Allocation { .. } => {
+            SimulationError::Circuit(error.to_string())
+        }
+    }
+}
+
+fn try_reserve_stb_values<T>(
+    values: &mut Vec<T>,
+    requested: usize,
+    object: &'static str,
+) -> Result<(), SimulationError> {
+    values
+        .try_reserve_exact(requested)
+        .map_err(|_| map_stb_analysis_error(StbAnalysisError::Allocation { object, requested }))
+}
+
+fn try_owned_probe_name(probe: &str) -> Result<String, SimulationError> {
+    let mut owned = String::new();
+    owned.try_reserve_exact(probe.len()).map_err(|_| {
+        map_stb_analysis_error(StbAnalysisError::Allocation {
+            object: "STB probe name",
+            requested: probe.len(),
+        })
+    })?;
+    owned.push_str(probe);
+    Ok(owned)
 }
 
 /// STB analysis result: the Tian loop gain sweep plus extracted margins.
@@ -95,34 +135,47 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        config
-            .validate()
-            .map_err(|err| SimulationError::Circuit(format!("Invalid STB config: {err}")))?;
         let frequency_count = config
             .frequency_point_count()
             .map_err(|err| SimulationError::Circuit(format!("Invalid STB config: {err}")))?;
+        let retained_result_values =
+            stb_retained_result_value_count(frequency_count, config.compute_nyquist)
+                .map_err(map_stb_analysis_error)?;
         self.ensure_analysis_points(frequency_count)?;
-        self.ensure_result_values(stb_retained_result_value_count(
-            frequency_count,
-            config.compute_nyquist,
-        ))?;
+        self.ensure_result_values(retained_result_values)?;
 
         let probe_name = config
             .probe_node
-            .clone()
+            .as_deref()
             .ok_or_else(|| {
                 SimulationError::Circuit(
                     "STB requires a probe: name a 0 V voltage source placed in the loop"
                         .to_string(),
                 )
             })?
-            .trim()
-            .to_string();
+            .trim();
         if probe_name.is_empty() {
             return Err(SimulationError::Circuit(
                 "STB probe name is empty".to_string(),
             ));
         }
+        let probe_name = try_owned_probe_name(probe_name)?;
+
+        // Reserve every user-sized retained STB vector before circuit
+        // construction. A hostile or unallocatable request therefore cannot
+        // consume operating-point/frequency-solve work before it fails.
+        let frequencies = config
+            .try_frequency_points_with_abort(abort)
+            .map_err(map_stb_analysis_error)?;
+        if frequencies.len() != frequency_count {
+            return Err(map_stb_analysis_error(StbAnalysisError::CapacityOverflow {
+                object: "STB frequency grid",
+            }));
+        }
+        let mut loop_gains = Vec::new();
+        try_reserve_stb_values(&mut loop_gains, frequency_count, "STB loop-gain result")?;
+        let prepared_result = StbResult::try_with_capacity(frequency_count, config.compute_nyquist)
+            .map_err(map_stb_analysis_error)?;
 
         let engine = self.resolved_for_netlist(netlist);
         let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
@@ -195,13 +248,27 @@ impl Engine {
         let size = circuit.matrix_size();
         let br = circuit.get_branch_matrix_index(br_ordinal);
 
-        let frequencies = config.frequency_points();
-        let mut loop_gains = Vec::with_capacity(frequencies.len());
         let mut ac_matrix = rspice_matrix::ComplexMatrix::from_real_structure(&matrix);
-        let mut batched_rhs = vec![Complex64::new(0.0, 0.0); size.saturating_mul(2)];
+        let batched_value_count = size.checked_mul(2).ok_or_else(|| {
+            map_stb_analysis_error(StbAnalysisError::CapacityOverflow {
+                object: "STB batched solve workspace",
+            })
+        })?;
+        let mut batched_rhs = Vec::new();
+        try_reserve_stb_values(
+            &mut batched_rhs,
+            batched_value_count,
+            "STB batched right-hand side",
+        )?;
+        batched_rhs.resize(batched_value_count, Complex64::new(0.0, 0.0));
         batched_rhs[br - 1] = Complex64::new(1.0, 0.0);
         batched_rhs[size + sense_node - 1] = Complex64::new(1.0, 0.0);
-        let mut batched_solution = Vec::with_capacity(size.saturating_mul(2));
+        let mut batched_solution = Vec::new();
+        try_reserve_stb_values(
+            &mut batched_solution,
+            batched_value_count,
+            "STB batched solution",
+        )?;
 
         for (frequency_index, &freq) in frequencies.iter().enumerate() {
             if abort.is_aborted() {
@@ -253,10 +320,8 @@ impl Engine {
 
         let analyzer = StbAnalyzer::new(config);
         let result = analyzer
-            .analyze_with_abort(&frequencies, &loop_gains, abort)
-            .map_err(|error| match error {
-                StbAnalysisError::Aborted => SimulationError::Aborted,
-            })?;
+            .analyze_preallocated_with_abort(&frequencies, &loop_gains, prepared_result, abort)
+            .map_err(map_stb_analysis_error)?;
 
         Ok(StbAnalysisResult {
             frequencies,
@@ -297,10 +362,35 @@ mod tests {
         result
             .frequencies
             .len()
-            .saturating_add(result.loop_gains.len().saturating_mul(2))
-            .saturating_add(result.result.bode_points.len().saturating_mul(6))
-            .saturating_add(result.result.nyquist_points.len().saturating_mul(3))
-            .saturating_add(6)
+            .checked_add(
+                result
+                    .loop_gains
+                    .len()
+                    .checked_mul(2)
+                    .expect("loop-gain shape"),
+            )
+            .and_then(|count| {
+                count.checked_add(
+                    result
+                        .result
+                        .bode_points
+                        .len()
+                        .checked_mul(6)
+                        .expect("Bode shape"),
+                )
+            })
+            .and_then(|count| {
+                count.checked_add(
+                    result
+                        .result
+                        .nyquist_points
+                        .len()
+                        .checked_mul(3)
+                        .expect("Nyquist shape"),
+                )
+            })
+            .and_then(|count| count.checked_add(6))
+            .expect("retained STB result shape")
     }
 
     #[test]
@@ -312,7 +402,8 @@ mod tests {
             let point_count = config
                 .frequency_point_count()
                 .expect("valid STB point count");
-            let exact_limit = stb_retained_result_value_count(point_count, compute_nyquist);
+            let exact_limit = stb_retained_result_value_count(point_count, compute_nyquist)
+                .expect("small STB result shape is addressable");
             let result = engine_with_result_limit(exact_limit)
                 .run_stb(&netlist, config)
                 .expect("the exact retained-value limit must admit STB");
@@ -337,7 +428,8 @@ mod tests {
             let point_count = config
                 .frequency_point_count()
                 .expect("valid STB point count");
-            let requested = stb_retained_result_value_count(point_count, compute_nyquist);
+            let requested = stb_retained_result_value_count(point_count, compute_nyquist)
+                .expect("small STB result shape is addressable");
             let limit = requested - 1;
             let abort = crate::abort_signal::CountingAbort::new(usize::MAX);
 
@@ -358,6 +450,91 @@ mod tests {
                 "the result budget must fail after the entry abort check and before circuit construction"
             );
         }
+    }
+
+    #[test]
+    fn stb_retained_result_count_is_exact_at_boundary_and_rejects_overflow() {
+        for compute_nyquist in [false, true] {
+            let values_per_point = if compute_nyquist { 12 } else { 9 };
+            let largest = (usize::MAX - STB_MARGIN_VALUES) / values_per_point;
+            assert_eq!(
+                stb_retained_result_value_count(largest, compute_nyquist),
+                Ok(largest * values_per_point + STB_MARGIN_VALUES)
+            );
+            assert!(matches!(
+                stb_retained_result_value_count(largest + 1, compute_nyquist),
+                Err(StbAnalysisError::CapacityOverflow {
+                    object: "STB retained-result value count"
+                })
+            ));
+        }
+    }
+
+    #[test]
+    fn stb_retained_result_overflow_fails_before_circuit_work() {
+        let netlist = Netlist::parse(RESOURCE_LIMIT_DECK).expect("STB resource deck parses");
+        let mut limits = crate::ResourceLimits::unlimited();
+        limits.max_analysis_points = usize::MAX;
+        limits.max_result_values = usize::MAX;
+        let mut simulation_config = crate::engine::SimulationConfig::default();
+        simulation_config.resource_limits = limits;
+        let engine = Engine::new(simulation_config);
+        let abort = crate::abort_signal::CountingAbort::new(usize::MAX);
+        let error = engine
+            .run_stb_with_abort(
+                &netlist,
+                StbConfig::new()
+                    .with_sweep(1.0, 2.0, usize::MAX)
+                    .with_sweep_type(StbSweepType::Linear)
+                    .with_probe("VPROBE"),
+                &abort,
+            )
+            .expect_err("overflowing retained STB shape must fail");
+
+        assert!(matches!(
+            error,
+            SimulationError::Circuit(message)
+                if message == "STB retained-result value count exceeds addressable capacity"
+        ));
+        assert_eq!(
+            abort.count(),
+            1,
+            "retained shape must fail after entry cancellation and before circuit construction"
+        );
+    }
+
+    #[test]
+    fn stb_frequency_allocation_failure_precedes_circuit_work() {
+        let netlist = Netlist::parse(RESOURCE_LIMIT_DECK).expect("STB resource deck parses");
+        let mut simulation_config = crate::engine::SimulationConfig::default();
+        simulation_config.resource_limits = crate::ResourceLimits::unlimited();
+        let engine = Engine::new(simulation_config);
+        let point_count = isize::MAX as usize / std::mem::size_of::<Value>() + 1;
+        let abort = crate::abort_signal::CountingAbort::new(usize::MAX);
+        let error = engine
+            .run_stb_with_abort(
+                &netlist,
+                StbConfig::new()
+                    .with_sweep(1.0, 2.0, point_count)
+                    .with_sweep_type(StbSweepType::Linear)
+                    .with_probe("VPROBE")
+                    .with_nyquist(false),
+                &abort,
+            )
+            .expect_err("unallocatable STB frequency grid must fail");
+
+        assert!(matches!(
+            error,
+            SimulationError::Circuit(message)
+                if message == format!(
+                    "unable to allocate {point_count} elements for STB frequency grid"
+                )
+        ));
+        assert_eq!(
+            abort.count(),
+            2,
+            "allocation must fail during the pre-circuit frequency projection"
+        );
     }
 
     #[test]
