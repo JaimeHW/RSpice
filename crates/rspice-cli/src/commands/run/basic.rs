@@ -806,17 +806,7 @@ pub(super) fn run_transient(
             )
             .map_err(|error| map_output_projection_error(ctx, error, "Transient"))?;
 
-            if !result.fft_results.is_empty()
-                && result.fft_results.len() != ctx.netlist.fft_analyses.len()
-            {
-                return Err(CliError::InternalError {
-                    message: format!(
-                        "core returned {} transient FFT result(s) for {} authored directive(s)",
-                        result.fft_results.len(),
-                        ctx.netlist.fft_analyses.len()
-                    ),
-                });
-            }
+            validate_fft_result_count(&result.fft_results, &ctx.netlist.fft_analyses)?;
 
             if let Some(output_path) = ctx.output_path_for("tran") {
                 let output_start = result
@@ -897,6 +887,7 @@ pub(super) fn run_transient(
                         &parent_analysis_id,
                         ctx.coordinate.as_ref(),
                         &result.fft_results,
+                        ctx.netlist,
                         ctx.args.timeout,
                     )?;
                     if !ctx.quiet {
@@ -1210,8 +1201,11 @@ fn write_transient_fft_output_pair(
     parent_analysis_id: &str,
     coordinate: Option<&super::ArtifactCoordinate>,
     results: &[rspice_core::engine::TransientFftResult],
+    netlist: &rspice_core::Netlist,
     timeout_seconds: Option<f64>,
 ) -> Result<(), CliError> {
+    validate_fft_publication(results, netlist)?;
+    let requests = &netlist.fft_analyses;
     let transient_stage = stage_artifact(transient_path, |writer| {
         transient.write_to(writer, transient_path, format)
     })?;
@@ -1223,6 +1217,7 @@ fn write_transient_fft_output_pair(
             parent_analysis_id,
             coordinate,
             results,
+            requests,
             timeout_seconds,
         )
     })?;
@@ -1238,7 +1233,7 @@ fn write_transient_fft_output_pair(
     )
 }
 
-const FFT_ARTIFACT_SCHEMA_VERSION: u32 = 1;
+const FFT_ARTIFACT_SCHEMA_VERSION: u32 = 2;
 
 #[derive(serde::Serialize)]
 struct FftJsonCoordinate<'a> {
@@ -1269,6 +1264,7 @@ struct FftJsonDocument<'a> {
 struct FftJsonResults<'a> {
     parent_analysis_id: &'a str,
     results: &'a [rspice_core::engine::TransientFftResult],
+    requests: &'a [rspice_core::netlist::FftAnalysis],
 }
 
 impl serde::Serialize for FftJsonResults<'_> {
@@ -1279,7 +1275,7 @@ impl serde::Serialize for FftJsonResults<'_> {
         use serde::ser::{Error as _, SerializeSeq as _};
 
         let mut sequence = serializer.serialize_seq(Some(self.results.len()))?;
-        for (index, result) in self.results.iter().enumerate() {
+        for (index, (result, request)) in self.results.iter().zip(self.requests).enumerate() {
             if index.is_multiple_of(32) && crate::abort::reason().is_some() {
                 return Err(S::Error::custom("FFT JSON serialization was cancelled"));
             }
@@ -1287,6 +1283,7 @@ impl serde::Serialize for FftJsonResults<'_> {
                 result,
                 index + 1,
                 self.parent_analysis_id,
+                request,
             ))?;
         }
         sequence.end()
@@ -1328,6 +1325,7 @@ struct FftJsonTransform<'a> {
     fundamental_bin: usize,
     minimum_metric_bin: usize,
     maximum_metric_bin: usize,
+    sfdr_search_minimum_bin: usize,
 }
 
 #[derive(serde::Serialize)]
@@ -1465,9 +1463,10 @@ impl<'a> FftJsonResult<'a> {
         result: &'a rspice_core::engine::TransientFftResult,
         ordinal: usize,
         parent_analysis_id: &'a str,
+        request: &'a rspice_core::netlist::FftAnalysis,
     ) -> Self {
         let (source_kind, source_text, authored_output) = fft_output_identity(&result.output);
-        let unit = fft_value_unit(result.physical_type);
+        let unit = fft_value_unit(result.physical_type, result.format).unwrap_or(None);
         Self {
             analysis_id: format!("fft-{ordinal:03}"),
             parent_analysis_id,
@@ -1500,6 +1499,7 @@ impl<'a> FftJsonResult<'a> {
                 fundamental_bin: result.fundamental_bin,
                 minimum_metric_bin: result.minimum_metric_bin,
                 maximum_metric_bin: result.maximum_metric_bin,
+                sfdr_search_minimum_bin: fft_sfdr_search_minimum_bin(result, request),
             },
             spectrum: FftJsonSpectrum {
                 frequency_unit: "Hz",
@@ -1576,18 +1576,440 @@ const fn fft_window_name(window: rspice_core::netlist::FftWindow) -> &'static st
     }
 }
 
-const fn fft_value_unit(physical_type: &str) -> Option<&'static str> {
-    match physical_type.as_bytes() {
+fn fft_value_unit(
+    physical_type: &str,
+    format: rspice_core::netlist::FftFormat,
+) -> Result<Option<&'static str>, &'static str> {
+    let physical_unit = match physical_type.as_bytes() {
         b"voltage" => Some("V"),
         b"current" => Some("A"),
-        _ => None,
+        b"parameter" => None,
+        _ => return Err("unsupported FFT physical type"),
+    };
+    Ok(
+        if matches!(format, rspice_core::netlist::FftFormat::Normalized) {
+            Some("1")
+        } else {
+            physical_unit
+        },
+    )
+}
+
+fn fft_sfdr_search_minimum_bin(
+    result: &rspice_core::engine::TransientFftResult,
+    request: &rspice_core::netlist::FftAnalysis,
+) -> usize {
+    if request.minimum_frequency.is_none() && result.maximum_metric_bin >= result.fundamental_bin {
+        result.fundamental_bin
+    } else {
+        result.minimum_metric_bin
     }
+}
+
+fn validate_fft_result_count(
+    results: &[rspice_core::engine::TransientFftResult],
+    requests: &[rspice_core::netlist::FftAnalysis],
+) -> Result<(), CliError> {
+    if results.len() != requests.len() {
+        return Err(CliError::InternalError {
+            message: format!(
+                "core returned {} transient FFT result(s) for {} authored directive(s)",
+                results.len(),
+                requests.len()
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn fft_validation_error(ordinal: usize, message: impl std::fmt::Display) -> CliError {
+    CliError::InternalError {
+        message: format!("cannot publish fft-{ordinal:03}: {message}"),
+    }
+}
+
+fn fft_expected_frequency_bin(
+    ordinal: usize,
+    name: &str,
+    requested: Option<f64>,
+    default: usize,
+    frequency_resolution: f64,
+    nyquist_bin: usize,
+) -> Result<usize, CliError> {
+    let Some(requested) = requested else {
+        return Ok(default);
+    };
+    let rounded = (requested / frequency_resolution).round();
+    if !rounded.is_finite() || rounded < 0.0 || rounded > usize::MAX as f64 {
+        return Err(fft_validation_error(
+            ordinal,
+            format!("authored {name} cannot be represented as a transform bin"),
+        ));
+    }
+    let bin = rounded as usize;
+    if (name == "FREQ" && bin == 0) || bin > nyquist_bin {
+        return Err(fft_validation_error(
+            ordinal,
+            format!("authored {name} is outside the retained one-sided spectrum"),
+        ));
+    }
+    Ok(bin)
+}
+
+fn fft_validation_window_coefficient(
+    window: rspice_core::netlist::FftWindow,
+    index: usize,
+    points: usize,
+    denominator: f64,
+) -> f64 {
+    use std::f64::consts::PI;
+
+    if window == rspice_core::netlist::FftWindow::Rectangular {
+        return 1.0;
+    }
+    let x = index as f64 / denominator;
+    let cosine = |multiple: f64| (multiple * 2.0 * PI * x).cos();
+    match window {
+        rspice_core::netlist::FftWindow::Rectangular => 1.0,
+        rspice_core::netlist::FftWindow::Bartlett => {
+            if (index as f64) < 0.5 * (points - 1) as f64 {
+                2.0 * x
+            } else {
+                2.0 - 2.0 * x
+            }
+        }
+        rspice_core::netlist::FftWindow::BartlettHann => {
+            0.62 - 0.48 * (x - 0.5).abs() + 0.38 * (2.0 * PI * (x - 0.5)).cos()
+        }
+        rspice_core::netlist::FftWindow::Hamming => 0.54 - 0.46 * cosine(1.0),
+        rspice_core::netlist::FftWindow::Hann | rspice_core::netlist::FftWindow::Cosine2 => {
+            0.5 - 0.5 * cosine(1.0)
+        }
+        rspice_core::netlist::FftWindow::Blackman67Db => {
+            0.42323 - 0.49755 * cosine(1.0) + 0.07922 * cosine(2.0)
+        }
+        rspice_core::netlist::FftWindow::Blackman => 0.42 - 0.5 * cosine(1.0) + 0.08 * cosine(2.0),
+        rspice_core::netlist::FftWindow::BlackmanHarris => {
+            0.35875 - 0.48829 * cosine(1.0) + 0.14128 * cosine(2.0) - 0.01168 * cosine(3.0)
+        }
+        rspice_core::netlist::FftWindow::Nuttall => {
+            0.3635819 - 0.4891775 * cosine(1.0) + 0.1365995 * cosine(2.0) - 0.0106411 * cosine(3.0)
+        }
+        rspice_core::netlist::FftWindow::HalfCycleSine => (PI * x).sin(),
+        rspice_core::netlist::FftWindow::HalfCycleSine3 => (PI * x).sin().powi(3),
+        rspice_core::netlist::FftWindow::HalfCycleSine6 => (PI * x).sin().powi(6),
+        rspice_core::netlist::FftWindow::Cosine4 => 0.375 - 0.5 * cosine(1.0) + 0.125 * cosine(2.0),
+    }
+}
+
+fn validate_fft_publication(
+    results: &[rspice_core::engine::TransientFftResult],
+    netlist: &rspice_core::Netlist,
+) -> Result<(), CliError> {
+    let requests = &netlist.fft_analyses;
+    validate_fft_result_count(results, requests)?;
+    let expected_mode = netlist.options.fft_mode.unwrap_or_default();
+    let expected_accurate_sampling = netlist.options.fft_accurate.unwrap_or(true)
+        && netlist.options.output_interval_schedule.is_none();
+    let expected_metrics = netlist.options.fft_output_metrics.unwrap_or(false);
+    for (index, (result, request)) in results.iter().zip(requests).enumerate() {
+        let ordinal = index + 1;
+        if result.output != request.output {
+            return Err(fft_validation_error(
+                ordinal,
+                "result source does not match the authored request at this ordinal",
+            ));
+        }
+        fft_value_unit(result.physical_type, result.format)
+            .map_err(|message| fft_validation_error(ordinal, message))?;
+        if result.output_name.is_empty() {
+            return Err(fft_validation_error(
+                ordinal,
+                "resolved signal name is empty",
+            ));
+        }
+        if result.mode != expected_mode
+            || result.accurate_sampling != expected_accurate_sampling
+            || result.metrics.is_some() != expected_metrics
+        {
+            return Err(fft_validation_error(
+                ordinal,
+                "FFT mode, sampling policy, or FFTOUT presence does not match the deck options",
+            ));
+        }
+        if result.point_count != request.points
+            || result.point_count < 4
+            || !result.point_count.is_power_of_two()
+        {
+            return Err(fft_validation_error(
+                ordinal,
+                "result point count does not match the authored request",
+            ));
+        }
+        for (name, value, allow_zero) in [
+            ("FREQ", request.fundamental_frequency, false),
+            ("FMIN", request.minimum_frequency, true),
+            ("FMAX", request.maximum_frequency, false),
+        ] {
+            if let Some(value) = value
+                && (!value.is_finite() || value < 0.0 || (!allow_zero && value == 0.0))
+            {
+                return Err(fft_validation_error(
+                    ordinal,
+                    format!("authored {name} is not a valid frequency"),
+                ));
+            }
+        }
+        if request
+            .minimum_frequency
+            .zip(request.maximum_frequency)
+            .is_some_and(|(minimum, maximum)| minimum > maximum)
+        {
+            return Err(fft_validation_error(ordinal, "authored FMIN exceeds FMAX"));
+        }
+        let expected_start = request.start.unwrap_or(0.0);
+        if !fft_values_close(result.start_time, expected_start)
+            || request
+                .stop
+                .is_some_and(|stop| !fft_values_close(result.stop_time, stop))
+            || !result.start_time.is_finite()
+            || !result.stop_time.is_finite()
+            || result.stop_time <= result.start_time
+        {
+            return Err(fft_validation_error(
+                ordinal,
+                "sampling interval does not match the authored START/STOP request",
+            ));
+        }
+        let duration = result.stop_time - result.start_time;
+        let expected_sample_interval = duration / result.point_count as f64;
+        let expected_frequency_resolution = 1.0 / duration;
+        if !result.sample_interval.is_finite()
+            || !result.frequency_resolution.is_finite()
+            || result.sample_interval <= 0.0
+            || result.frequency_resolution <= 0.0
+            || !fft_values_close(result.sample_interval, expected_sample_interval)
+            || !fft_values_close(result.frequency_resolution, expected_frequency_resolution)
+        {
+            return Err(fft_validation_error(
+                ordinal,
+                "sampling calibration is inconsistent with START, STOP, or NP",
+            ));
+        }
+        let expected_format = request.format.unwrap_or(match result.mode {
+            rspice_core::netlist::XyceFftMode::HspiceCompatible => {
+                rspice_core::netlist::FftFormat::Normalized
+            }
+            rspice_core::netlist::XyceFftMode::SpectreCompatible => {
+                rspice_core::netlist::FftFormat::Unnormalized
+            }
+        });
+        if result.format != expected_format
+            || result.window != request.window
+            || result.window_name != request.window_name
+            || !fft_values_close(result.alpha, request.alpha)
+        {
+            return Err(fft_validation_error(
+                ordinal,
+                "effective format or window metadata does not match the authored request",
+            ));
+        }
+        let denominator = if matches!(
+            result.mode,
+            rspice_core::netlist::XyceFftMode::SpectreCompatible
+        ) {
+            result.point_count as f64
+        } else {
+            (result.point_count - 1) as f64
+        };
+        let expected_coherent_gain = (0..result.point_count)
+            .map(|sample| {
+                fft_validation_window_coefficient(
+                    request.window,
+                    sample,
+                    result.point_count,
+                    denominator,
+                )
+            })
+            .sum::<f64>()
+            / result.point_count as f64;
+        if !result.coherent_gain.is_finite()
+            || result.coherent_gain <= 0.0
+            || !fft_values_close(result.coherent_gain, expected_coherent_gain)
+        {
+            return Err(fft_validation_error(
+                ordinal,
+                "coherent-gain calibration does not match the effective window",
+            ));
+        }
+
+        let bin_count = result.point_count / 2 + 1;
+        if result.bins.len() != bin_count {
+            return Err(fft_validation_error(
+                ordinal,
+                "one-sided bin count does not match NP",
+            ));
+        }
+        let nyquist_bin = result.point_count / 2;
+        let expected_fundamental = fft_expected_frequency_bin(
+            ordinal,
+            "FREQ",
+            request.fundamental_frequency,
+            1,
+            result.frequency_resolution,
+            nyquist_bin,
+        )?;
+        let expected_minimum = fft_expected_frequency_bin(
+            ordinal,
+            "FMIN",
+            request.minimum_frequency,
+            1,
+            result.frequency_resolution,
+            nyquist_bin,
+        )?;
+        let expected_maximum = fft_expected_frequency_bin(
+            ordinal,
+            "FMAX",
+            request.maximum_frequency,
+            nyquist_bin,
+            result.frequency_resolution,
+            nyquist_bin,
+        )?;
+        if result.fundamental_bin != expected_fundamental
+            || result.minimum_metric_bin != expected_minimum
+            || result.maximum_metric_bin != expected_maximum
+            || expected_maximum < expected_minimum
+            || (expected_fundamental == 1 && expected_maximum < 2)
+            || (expected_fundamental > 1 && expected_maximum < 1)
+        {
+            return Err(fft_validation_error(
+                ordinal,
+                "metric-bin bounds do not match authored FREQ/FMIN/FMAX",
+            ));
+        }
+        for (bin_index, bin) in result.bins.iter().enumerate() {
+            let expected_frequency = bin_index as f64 * result.frequency_resolution;
+            let expected_magnitude = bin.real.hypot(bin.imaginary);
+            let expected_phase = bin.imaginary.atan2(bin.real).to_degrees();
+            if bin.index != bin_index
+                || ![
+                    bin.frequency,
+                    bin.real,
+                    bin.imaginary,
+                    bin.magnitude,
+                    bin.phase_degrees,
+                ]
+                .iter()
+                .all(|value| value.is_finite())
+                || bin.magnitude < 0.0
+                || !fft_values_close(bin.frequency, expected_frequency)
+                || !fft_values_close(bin.magnitude, expected_magnitude)
+                || fft_phase_distance_degrees(bin.phase_degrees, expected_phase) > 1.0e-9
+            {
+                return Err(fft_validation_error(
+                    ordinal,
+                    format!("bin {bin_index} is inconsistent with the transform schema"),
+                ));
+            }
+        }
+        if result.format == rspice_core::netlist::FftFormat::Normalized {
+            let maximum_magnitude = result
+                .bins
+                .iter()
+                .map(|bin| bin.magnitude)
+                .fold(0.0, f64::max);
+            if maximum_magnitude != 0.0 && !fft_values_close(maximum_magnitude, 1.0) {
+                return Err(fft_validation_error(
+                    ordinal,
+                    "normalized spectrum does not peak at one",
+                ));
+            }
+        }
+
+        let Some(metrics) = &result.metrics else {
+            continue;
+        };
+        let mut magnitudes = Vec::new();
+        magnitudes
+            .try_reserve_exact(result.bins.len())
+            .map_err(|error| {
+                fft_validation_error(
+                    ordinal,
+                    format!("cannot allocate metric validation workspace: {error}"),
+                )
+            })?;
+        magnitudes.extend(result.bins.iter().map(|bin| bin.magnitude));
+        let sfdr_search_minimum = fft_sfdr_search_minimum_bin(result, request);
+        let expected_metrics = crate::hdf5::fft_metric_expectations(
+            &magnitudes,
+            result.fundamental_bin,
+            result.maximum_metric_bin,
+            sfdr_search_minimum,
+        )
+        .ok_or_else(|| fft_validation_error(ordinal, "metrics cannot be derived from spectrum"))?;
+        let spur_frequency_matches = match (
+            metrics.sfdr_spur_frequency,
+            expected_metrics
+                .sfdr_spur_bin
+                .map(|bin| result.bins[bin].frequency),
+        ) {
+            (Some(actual), Some(expected)) => fft_values_close(actual, expected),
+            (None, None) => true,
+            _ => false,
+        };
+        if !fft_values_close(
+            metrics.fundamental_magnitude,
+            expected_metrics.fundamental_magnitude,
+        ) || !fft_values_close(metrics.thd_ratio, expected_metrics.thd_ratio)
+            || !fft_values_close(metrics.thd_db, expected_metrics.thd_db)
+            || !fft_values_close(metrics.sndr_db, expected_metrics.sndr_db)
+            || !fft_values_close(metrics.enob_bits, expected_metrics.enob_bits)
+            || !fft_values_close(metrics.snr_db, expected_metrics.snr_db)
+            || !fft_values_close(metrics.sfdr_db, expected_metrics.sfdr_db)
+            || metrics.sfdr_spur_bin != expected_metrics.sfdr_spur_bin
+            || !spur_frequency_matches
+            || metrics.largest_harmonics.len() != expected_metrics.ranked_bins.len()
+        {
+            return Err(fft_validation_error(
+                ordinal,
+                "FFTOUT metrics do not match the spectrum",
+            ));
+        }
+        for (harmonic_index, (harmonic, expected_bin)) in metrics
+            .largest_harmonics
+            .iter()
+            .zip(expected_metrics.ranked_bins)
+            .enumerate()
+        {
+            let bin = &result.bins[expected_bin];
+            if harmonic.rank != harmonic_index + 1
+                || harmonic.bin != expected_bin
+                || !fft_values_close(harmonic.frequency, bin.frequency)
+                || !fft_values_close(harmonic.magnitude, bin.magnitude)
+                || !fft_values_close(
+                    harmonic.magnitude_db,
+                    20.0 * bin.magnitude.max(1.0e-10).log10(),
+                )
+                || fft_phase_distance_degrees(harmonic.phase_degrees, bin.phase_degrees) > 1.0e-9
+            {
+                return Err(fft_validation_error(
+                    ordinal,
+                    format!(
+                        "ranked harmonic {} does not match the spectrum",
+                        harmonic_index + 1
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn fft_json_document<'a>(
     parent_analysis_id: &'a str,
     coordinate: Option<&'a super::ArtifactCoordinate>,
     results: &'a [rspice_core::engine::TransientFftResult],
+    requests: &'a [rspice_core::netlist::FftAnalysis],
 ) -> FftJsonDocument<'a> {
     FftJsonDocument {
         schema_version: FFT_ARTIFACT_SCHEMA_VERSION,
@@ -1603,6 +2025,7 @@ fn fft_json_document<'a>(
         results: FftJsonResults {
             parent_analysis_id,
             results,
+            requests,
         },
         format_policy: FftJsonFormatPolicy {
             selected: "json",
@@ -1612,7 +2035,7 @@ fn fft_json_document<'a>(
     }
 }
 
-const FFT_DELIMITED_HEADER: [&str; 53] = [
+const FFT_DELIMITED_HEADER: [&str; 54] = [
     "schema_version",
     "analysis",
     "artifact_format",
@@ -1644,6 +2067,7 @@ const FFT_DELIMITED_HEADER: [&str; 53] = [
     "fundamental_bin",
     "minimum_metric_bin",
     "maximum_metric_bin",
+    "sfdr_search_minimum_bin",
     "fundamental_magnitude",
     "thd_ratio",
     "thd_db",
@@ -1686,6 +2110,7 @@ fn fft_delimited_common_fields(
     parent_analysis_id: &str,
     coordinate: Option<&super::ArtifactCoordinate>,
     result: &rspice_core::engine::TransientFftResult,
+    request: &rspice_core::netlist::FftAnalysis,
 ) -> Vec<String> {
     let (source_kind, source_text, authored_output) = fft_output_identity(&result.output);
     let metrics = result.metrics.as_ref();
@@ -1716,7 +2141,8 @@ fn fft_delimited_common_fields(
         authored_output,
         result.output_name.clone(),
         result.physical_type.to_string(),
-        fft_value_unit(result.physical_type)
+        fft_value_unit(result.physical_type, result.format)
+            .unwrap_or(None)
             .unwrap_or_default()
             .to_string(),
         delimited_float(result.start_time),
@@ -1734,6 +2160,7 @@ fn fft_delimited_common_fields(
         result.fundamental_bin.to_string(),
         result.minimum_metric_bin.to_string(),
         result.maximum_metric_bin.to_string(),
+        fft_sfdr_search_minimum_bin(result, request).to_string(),
         metrics
             .map(|value| delimited_float(value.fundamental_magnitude))
             .unwrap_or_default(),
@@ -1790,6 +2217,7 @@ fn write_fft_delimited(
     parent_analysis_id: &str,
     coordinate: Option<&super::ArtifactCoordinate>,
     results: &[rspice_core::engine::TransientFftResult],
+    requests: &[rspice_core::netlist::FftAnalysis],
     timeout_seconds: Option<f64>,
 ) -> Result<(), CliError> {
     let delimiter = if matches!(format, OutputFormat::Csv) {
@@ -1799,12 +2227,18 @@ fn write_fft_delimited(
     };
     write_delimited_fields(writer, path, delimiter, FFT_DELIMITED_HEADER)?;
 
-    for (index, result) in results.iter().enumerate() {
+    for (index, (result, request)) in results.iter().zip(requests).enumerate() {
         if crate::abort::reason().is_some() {
             return Err(super::cancellation_cli_error(timeout_seconds));
         }
-        let common =
-            fft_delimited_common_fields(format, index + 1, parent_analysis_id, coordinate, result);
+        let common = fft_delimited_common_fields(
+            format,
+            index + 1,
+            parent_analysis_id,
+            coordinate,
+            result,
+            request,
+        );
         for bin in &result.bins {
             if bin.index.is_multiple_of(256) && crate::abort::reason().is_some() {
                 return Err(super::cancellation_cli_error(timeout_seconds));
@@ -1927,6 +2361,7 @@ pub(crate) struct FftRawTransform {
     fundamental_bin: usize,
     minimum_metric_bin: usize,
     maximum_metric_bin: usize,
+    sfdr_search_minimum_bin: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -1983,9 +2418,12 @@ impl FftRawMetadataResult {
         result: &rspice_core::engine::TransientFftResult,
         ordinal: usize,
         parent_analysis_id: &str,
+        request: &rspice_core::netlist::FftAnalysis,
     ) -> Self {
         let (kind, text, authored_output) = fft_output_identity(&result.output);
-        let unit = fft_value_unit(result.physical_type).map(str::to_string);
+        let unit = fft_value_unit(result.physical_type, result.format)
+            .unwrap_or(None)
+            .map(str::to_string);
         Self {
             analysis_id: format!("fft-{ordinal:03}"),
             parent_analysis_id: parent_analysis_id.to_string(),
@@ -2018,6 +2456,7 @@ impl FftRawMetadataResult {
                 fundamental_bin: result.fundamental_bin,
                 minimum_metric_bin: result.minimum_metric_bin,
                 maximum_metric_bin: result.maximum_metric_bin,
+                sfdr_search_minimum_bin: fft_sfdr_search_minimum_bin(result, request),
             },
             metrics: result.metrics.as_ref().map(|metrics| FftRawMetrics {
                 units: FftRawMetricUnits {
@@ -2061,6 +2500,7 @@ fn fft_raw_metadata(
     parent_analysis_id: &str,
     coordinate: Option<&super::ArtifactCoordinate>,
     results: &[rspice_core::engine::TransientFftResult],
+    requests: &[rspice_core::netlist::FftAnalysis],
 ) -> FftRawMetadata {
     FftRawMetadata {
         schema_version: FFT_ARTIFACT_SCHEMA_VERSION,
@@ -2075,8 +2515,11 @@ fn fft_raw_metadata(
         result_count: results.len(),
         results: results
             .iter()
+            .zip(requests)
             .enumerate()
-            .map(|(index, result)| FftRawMetadataResult::new(result, index + 1, parent_analysis_id))
+            .map(|(index, (result, request))| {
+                FftRawMetadataResult::new(result, index + 1, parent_analysis_id, request)
+            })
             .collect(),
         data_columns: [
             "frequency_hz".to_string(),
@@ -2138,9 +2581,11 @@ fn validate_fft_raw_metadata(metadata: &FftRawMetadata) -> Result<(), String> {
         if result.analysis_id != format!("fft-{ordinal:03}")
             || result.parent_analysis_id != metadata.parent_analysis_id
             || result.ordinal != ordinal
-            || !matches!(result.source.kind.as_str(), "probe" | "expression")
-            || result.source.text.is_empty()
-            || result.source.authored_output.is_empty()
+            || !crate::hdf5::fft_source_identity_is_valid(
+                &result.source.kind,
+                &result.source.text,
+                &result.source.authored_output,
+            )
             || result.signal.name.is_empty()
             || result.signal.physical_type.is_empty()
             || result.sampling.point_count == 0
@@ -2188,19 +2633,34 @@ fn validate_fft_raw_metadata(metadata: &FftRawMetadata) -> Result<(), String> {
         }
         let bin_count = result.sampling.point_count / 2 + 1;
         if result.transform.fundamental_bin >= bin_count
+            || result.transform.fundamental_bin == 0
             || result.transform.minimum_metric_bin >= bin_count
             || result.transform.maximum_metric_bin >= bin_count
             || result.transform.minimum_metric_bin > result.transform.maximum_metric_bin
+            || result.transform.sfdr_search_minimum_bin >= bin_count
+            || result.transform.sfdr_search_minimum_bin > result.transform.maximum_metric_bin
+            || !matches!(
+                result.transform.sfdr_search_minimum_bin,
+                value if value == result.transform.minimum_metric_bin
+                    || value == result.transform.fundamental_bin
+            )
+            || (result.transform.fundamental_bin == 1 && result.transform.maximum_metric_bin < 2)
+            || (result.transform.fundamental_bin > 1 && result.transform.maximum_metric_bin < 1)
         {
             return Err(format!(
                 "invalid FFT RAW metric-bin bounds for fft-{ordinal:03}"
             ));
         }
-        let expected_unit = match result.signal.physical_type.as_str() {
+        let physical_unit = match result.signal.physical_type.as_str() {
             "voltage" => Some("V"),
             "current" => Some("A"),
             "parameter" => None,
             _ => return Err(format!("invalid FFT RAW signal type for fft-{ordinal:03}")),
+        };
+        let expected_unit = if result.transform.format == "normalized" {
+            Some("1")
+        } else {
+            physical_unit
         };
         if result.signal.unit.as_deref() != expected_unit {
             return Err(format!("invalid FFT RAW signal unit for fft-{ordinal:03}"));
@@ -2275,13 +2735,91 @@ fn validate_fft_raw_metadata(metadata: &FftRawMetadata) -> Result<(), String> {
 }
 
 fn fft_values_close(actual: f64, expected: f64) -> bool {
-    let tolerance = 1.0e-11 * actual.abs().max(expected.abs()).max(1.0);
+    if actual == expected {
+        return true;
+    }
+    let scale = actual.abs().max(expected.abs());
+    let tolerance = 128.0 * f64::EPSILON * scale;
     (actual - expected).abs() <= tolerance
 }
 
 fn fft_phase_distance_degrees(actual: f64, expected: f64) -> f64 {
     let delta = (actual - expected).rem_euclid(360.0);
     delta.min(360.0 - delta)
+}
+
+fn validate_fft_raw_metrics_against_bins(
+    result: &FftRawMetadataResult,
+    bins: &[DecodedFftRawBin],
+) -> Result<(), String> {
+    let Some(metrics) = &result.metrics else {
+        return Ok(());
+    };
+    let magnitudes = bins.iter().map(|bin| bin.magnitude).collect::<Vec<_>>();
+    let expected = crate::hdf5::fft_metric_expectations(
+        &magnitudes,
+        result.transform.fundamental_bin,
+        result.transform.maximum_metric_bin,
+        result.transform.sfdr_search_minimum_bin,
+    )
+    .ok_or_else(|| {
+        format!(
+            "FFT RAW {} cannot produce valid metrics from its spectrum",
+            result.analysis_id
+        )
+    })?;
+    let spur_frequency_matches = match (
+        metrics.sfdr_spur_frequency_hz,
+        expected.sfdr_spur_bin.map(|bin| bins[bin].frequency_hz),
+    ) {
+        (Some(actual), Some(expected)) => fft_values_close(actual, expected),
+        (None, None) => true,
+        _ => false,
+    };
+    if !fft_values_close(
+        metrics.fundamental_magnitude,
+        expected.fundamental_magnitude,
+    ) || !fft_values_close(metrics.thd_ratio, expected.thd_ratio)
+        || !fft_values_close(metrics.thd_db, expected.thd_db)
+        || !fft_values_close(metrics.sndr_db, expected.sndr_db)
+        || !fft_values_close(metrics.enob_bits, expected.enob_bits)
+        || !fft_values_close(metrics.snr_db, expected.snr_db)
+        || !fft_values_close(metrics.sfdr_db, expected.sfdr_db)
+        || metrics.sfdr_spur_bin != expected.sfdr_spur_bin
+        || !spur_frequency_matches
+        || metrics.largest_harmonics.len() != expected.ranked_bins.len()
+    {
+        return Err(format!(
+            "FFT RAW {} metrics do not match its spectrum",
+            result.analysis_id
+        ));
+    }
+
+    for (index, (harmonic, expected_bin)) in metrics
+        .largest_harmonics
+        .iter()
+        .zip(expected.ranked_bins)
+        .enumerate()
+    {
+        let bin = &bins[expected_bin];
+        if harmonic.rank != index + 1
+            || harmonic.bin != expected_bin
+            || !fft_values_close(harmonic.frequency_hz, bin.frequency_hz)
+            || !fft_values_close(harmonic.magnitude, bin.magnitude)
+            || !fft_values_close(
+                harmonic.magnitude_db,
+                20.0 * bin.magnitude.max(1.0e-10).log10(),
+            )
+            || fft_phase_distance_degrees(harmonic.phase_degrees, bin.phase_degrees) > 1.0e-9
+        {
+            return Err(format!(
+                "FFT RAW {} ranked harmonic {} does not match its spectrum",
+                result.analysis_id,
+                index + 1
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -2377,6 +2915,7 @@ pub(crate) fn read_fft_raw_artifact(path: &Path) -> Result<DecodedFftRawArtifact
     let mut bins = Vec::with_capacity(expected_points);
     let mut row = 0usize;
     for result in &metadata.results {
+        let result_start = row;
         let bin_count = result.sampling.point_count / 2 + 1;
         for bin_index in 0..bin_count {
             let ordinal = columns[5].y[row];
@@ -2433,6 +2972,19 @@ pub(crate) fn read_fft_raw_artifact(path: &Path) -> Result<DecodedFftRawArtifact
             });
             row += 1;
         }
+        if result.transform.format == "normalized" {
+            let maximum_magnitude = bins[result_start..row]
+                .iter()
+                .map(|bin| bin.magnitude)
+                .fold(0.0, f64::max);
+            if maximum_magnitude != 0.0 && !fft_values_close(maximum_magnitude, 1.0) {
+                return Err(format!(
+                    "FFT RAW {} normalized spectrum does not peak at 1",
+                    result.analysis_id
+                ));
+            }
+        }
+        validate_fft_raw_metrics_against_bins(result, &bins[result_start..row])?;
     }
     Ok(DecodedFftRawArtifact { metadata, bins })
 }
@@ -2444,9 +2996,10 @@ fn write_fft_raw(
     parent_analysis_id: &str,
     coordinate: Option<&super::ArtifactCoordinate>,
     results: &[rspice_core::engine::TransientFftResult],
+    requests: &[rspice_core::netlist::FftAnalysis],
     timeout_seconds: Option<f64>,
 ) -> Result<(), CliError> {
-    let metadata = fft_raw_metadata(format, parent_analysis_id, coordinate, results);
+    let metadata = fft_raw_metadata(format, parent_analysis_id, coordinate, results, requests);
     validate_fft_raw_metadata(&metadata).map_err(|message| CliError::InternalError { message })?;
     let command = serde_json::to_string(&metadata).map_err(|error| {
         if crate::abort::reason().is_some() {
@@ -2530,6 +3083,7 @@ fn hdf5_fft_section(
     parent_analysis_id: &str,
     coordinate: Option<&super::ArtifactCoordinate>,
     results: &[rspice_core::engine::TransientFftResult],
+    requests: &[rspice_core::netlist::FftAnalysis],
     timeout_seconds: Option<f64>,
 ) -> Result<Hdf5FftSection, CliError> {
     let mut hdf5_results = Vec::new();
@@ -2538,7 +3092,7 @@ fn hdf5_fft_section(
         .map_err(|error| CliError::InternalError {
             message: format!("cannot allocate typed HDF5 FFT result metadata: {error}"),
         })?;
-    for (index, result) in results.iter().enumerate() {
+    for (index, (result, request)) in results.iter().zip(requests).enumerate() {
         if crate::abort::reason().is_some() {
             return Err(super::cancellation_cli_error(timeout_seconds));
         }
@@ -2613,7 +3167,9 @@ fn hdf5_fft_section(
             authored_output,
             output_name: result.output_name.clone(),
             physical_type: result.physical_type.to_string(),
-            value_unit: fft_value_unit(result.physical_type).map(str::to_string),
+            value_unit: fft_value_unit(result.physical_type, result.format)
+                .unwrap_or(None)
+                .map(str::to_string),
             start_time_s: result.start_time,
             stop_time_s: result.stop_time,
             sample_interval_s: result.sample_interval,
@@ -2629,6 +3185,7 @@ fn hdf5_fft_section(
             fundamental_bin: result.fundamental_bin,
             minimum_metric_bin: result.minimum_metric_bin,
             maximum_metric_bin: result.maximum_metric_bin,
+            sfdr_search_minimum_bin: fft_sfdr_search_minimum_bin(result, request),
             bin_indices,
             frequency_hz,
             real,
@@ -2658,11 +3215,14 @@ fn write_fft_output(
     parent_analysis_id: &str,
     coordinate: Option<&super::ArtifactCoordinate>,
     results: &[rspice_core::engine::TransientFftResult],
+    netlist: &rspice_core::Netlist,
     timeout_seconds: Option<f64>,
 ) -> Result<(), CliError> {
     if crate::abort::reason().is_some() {
         return Err(super::cancellation_cli_error(timeout_seconds));
     }
+    validate_fft_publication(results, netlist)?;
+    let requests = &netlist.fft_analyses;
     write_atomic(
         path,
         AtomicArtifactOptions::new(Durability::SyncFileAndParent),
@@ -2674,6 +3234,7 @@ fn write_fft_output(
                 parent_analysis_id,
                 coordinate,
                 results,
+                requests,
                 timeout_seconds,
             )
         },
@@ -2689,6 +3250,7 @@ fn write_fft_to_writer(
     parent_analysis_id: &str,
     coordinate: Option<&super::ArtifactCoordinate>,
     results: &[rspice_core::engine::TransientFftResult],
+    requests: &[rspice_core::netlist::FftAnalysis],
     timeout_seconds: Option<f64>,
 ) -> Result<(), CliError> {
     if crate::abort::reason().is_some() {
@@ -2696,7 +3258,7 @@ fn write_fft_to_writer(
     }
     match format {
         OutputFormat::Json => {
-            let document = fft_json_document(parent_analysis_id, coordinate, results);
+            let document = fft_json_document(parent_analysis_id, coordinate, results, requests);
             serde_json::to_writer_pretty(&mut *writer, &document).map_err(|error| {
                 if crate::abort::reason().is_some() {
                     super::cancellation_cli_error(timeout_seconds)
@@ -2715,6 +3277,7 @@ fn write_fft_to_writer(
             parent_analysis_id,
             coordinate,
             results,
+            requests,
             timeout_seconds,
         )?,
         OutputFormat::Raw | OutputFormat::RawAscii => write_fft_raw(
@@ -2724,6 +3287,7 @@ fn write_fft_to_writer(
             parent_analysis_id,
             coordinate,
             results,
+            requests,
             timeout_seconds,
         )?,
         OutputFormat::Hdf5 => {
@@ -2733,6 +3297,7 @@ fn write_fft_to_writer(
                 parent_analysis_id,
                 coordinate,
                 results,
+                requests,
                 timeout_seconds,
             )?);
             write_hdf5_to_writer(writer, &data)
@@ -3489,15 +4054,206 @@ mod restart_tests {
     }
 
     #[test]
-    fn binary_and_ascii_fft_raw_artifacts_round_trip_typed_metadata_and_ragged_bins() {
+    fn fft_value_units_preserve_physical_type_and_transform_semantics() {
+        use rspice_core::netlist::FftFormat::{Normalized, Unnormalized};
+
+        assert_eq!(fft_value_unit("voltage", Normalized), Ok(Some("1")));
+        assert_eq!(fft_value_unit("current", Normalized), Ok(Some("1")));
+        assert_eq!(fft_value_unit("parameter", Normalized), Ok(Some("1")));
+        assert_eq!(fft_value_unit("voltage", Unnormalized), Ok(Some("V")));
+        assert_eq!(fft_value_unit("current", Unnormalized), Ok(Some("A")));
+        assert_eq!(fft_value_unit("parameter", Unnormalized), Ok(None));
+        assert!(fft_value_unit("unsupported", Normalized).is_err());
+    }
+
+    fn fft_publication_fixture() -> (
+        rspice_core::Netlist,
+        Vec<rspice_core::engine::TransientFftResult>,
+    ) {
         let netlist = rspice_core::Netlist::parse(
-            "typed FFT RAW round trip\n\
-             V1 out 0 SIN(0 1 1k)\n\
+            "typed FFT publication validation\n\
+             V1 out 0 SIN(0 1 3k)\n\
              R1 out 0 1k\n\
              .options fft fftout=1\n\
              .tran 1u 1m\n\
-             .fft v(out) np=8 format=unorm window=rect freq=1k\n\
-             .fft {2*v(out)} np=16 window=hann freq=1k\n\
+             .fft v(out) np=8 format=unorm window=rect freq=3k\n\
+             .fft {2*v(out)} np=16 window=hann freq=3k fmin=1k\n\
+             .end\n",
+        )
+        .expect("parse FFT publication fixture");
+        let transient = rspice_core::Engine::new(rspice_core::SimulationConfig::default())
+            .run_tran(&netlist, 1.0e-3, 1.0e-6)
+            .expect("run FFT publication fixture");
+        (netlist, transient.fft_results)
+    }
+
+    fn assert_fft_publication_rejected_for_every_format(
+        directory: &FftTestDirectory,
+        label: &str,
+        results: &[rspice_core::engine::TransientFftResult],
+        netlist: &rspice_core::Netlist,
+    ) {
+        for (format, extension) in [
+            (OutputFormat::Json, "json"),
+            (OutputFormat::Csv, "csv"),
+            (OutputFormat::Tsv, "tsv"),
+            (OutputFormat::Raw, "raw"),
+            (OutputFormat::RawAscii, "ascii.raw"),
+            (OutputFormat::Hdf5, "h5"),
+        ] {
+            let path = directory.0.join(format!("{label}.{extension}"));
+            write_fft_output(&path, format, "tran-001", None, results, netlist, None)
+                .expect_err("malformed FFT publication must fail closed");
+            assert!(!path.exists(), "malformed {format:?} FFT was published");
+        }
+        let entries = std::fs::read_dir(&directory.0)
+            .expect("read rejected FFT publication directory")
+            .map(|entry| entry.expect("read rejected FFT entry").file_name())
+            .collect::<Vec<_>>();
+        assert!(
+            entries.iter().all(|name| !name
+                .to_string_lossy()
+                .contains(rspice_output::STAGING_MARKER)),
+            "rejected FFT publication left a staging artifact: {entries:?}"
+        );
+    }
+
+    #[test]
+    fn fft_publication_rejects_count_identity_and_core_invariant_corruption_in_every_format() {
+        let (netlist, results) = fft_publication_fixture();
+        let directory = FftTestDirectory::new();
+
+        assert!(validate_fft_result_count(&[], &netlist.fft_analyses).is_err());
+        assert_fft_publication_rejected_for_every_format(
+            &directory,
+            "missing-results",
+            &[],
+            &netlist,
+        );
+
+        let mut reordered = results.clone();
+        reordered.swap(0, 1);
+        assert_fft_publication_rejected_for_every_format(
+            &directory,
+            "reordered",
+            &reordered,
+            &netlist,
+        );
+
+        let mut wrong_mode = results.clone();
+        wrong_mode[0].mode = rspice_core::netlist::XyceFftMode::SpectreCompatible;
+        assert_fft_publication_rejected_for_every_format(
+            &directory,
+            "wrong-mode",
+            &wrong_mode,
+            &netlist,
+        );
+
+        let mut wrong_sampling_policy = results.clone();
+        wrong_sampling_policy[0].accurate_sampling = false;
+        assert_fft_publication_rejected_for_every_format(
+            &directory,
+            "wrong-sampling-policy",
+            &wrong_sampling_policy,
+            &netlist,
+        );
+
+        let mut missing_metrics = results.clone();
+        missing_metrics[0].metrics = None;
+        assert_fft_publication_rejected_for_every_format(
+            &directory,
+            "missing-metrics",
+            &missing_metrics,
+            &netlist,
+        );
+
+        let transient_path = directory.0.join("reordered.tran.json");
+        let fft_path = directory.0.join("reordered.fft.json");
+        let transient =
+            TransientOutputDocument::Table(crate::commands::export_table::ExportTable {
+                analysis: "transient".to_string(),
+                plot_name: "Transient Analysis".to_string(),
+                scale_name: "time".to_string(),
+                scale_type: "time".to_string(),
+                scale: vec![0.0],
+                columns: Vec::new(),
+            });
+        write_transient_fft_output_pair(
+            &transient_path,
+            &transient,
+            &fft_path,
+            OutputFormat::Json,
+            "tran-001",
+            None,
+            &reordered,
+            &netlist,
+            None,
+        )
+        .expect_err("malformed FFT pair must fail before staging either sibling");
+        assert!(!transient_path.exists());
+        assert!(!fft_path.exists());
+
+        let mut impossible_results = results.clone();
+        let mut impossible_requests = netlist.fft_analyses.clone();
+        impossible_requests[0].fundamental_frequency = Some(2.0e3);
+        impossible_requests[0].minimum_frequency = Some(0.0);
+        impossible_requests[0].maximum_frequency = Some(1.0);
+        impossible_results[0].fundamental_bin = 2;
+        impossible_results[0].minimum_metric_bin = 0;
+        impossible_results[0].maximum_metric_bin = 0;
+        impossible_results[0].metrics = None;
+        let mut impossible_netlist = netlist.clone();
+        impossible_netlist.fft_analyses = impossible_requests;
+        assert_fft_publication_rejected_for_every_format(
+            &directory,
+            "impossible-bounds",
+            &impossible_results,
+            &impossible_netlist,
+        );
+
+        let mut not_normalized = results.clone();
+        not_normalized[1].metrics = None;
+        let peak = not_normalized[1]
+            .bins
+            .iter()
+            .enumerate()
+            .max_by(|(_, left), (_, right)| left.magnitude.total_cmp(&right.magnitude))
+            .map(|(index, _)| index)
+            .expect("normalized FFT has a bin");
+        not_normalized[1].bins[peak].real *= 0.5;
+        not_normalized[1].bins[peak].imaginary *= 0.5;
+        not_normalized[1].bins[peak].magnitude *= 0.5;
+        assert_fft_publication_rejected_for_every_format(
+            &directory,
+            "not-normalized",
+            &not_normalized,
+            &netlist,
+        );
+
+        let mut stale_metrics = results;
+        stale_metrics[0]
+            .metrics
+            .as_mut()
+            .expect("FFTOUT fixture")
+            .thd_ratio += 0.25;
+        assert_fft_publication_rejected_for_every_format(
+            &directory,
+            "stale-metrics",
+            &stale_metrics,
+            &netlist,
+        );
+    }
+
+    #[test]
+    fn binary_and_ascii_fft_raw_artifacts_round_trip_typed_metadata_and_ragged_bins() {
+        let netlist = rspice_core::Netlist::parse(
+            "typed FFT RAW round trip\n\
+             V1 out 0 SIN(0 1 3k)\n\
+             R1 out 0 1k\n\
+             .options fft fftout=1\n\
+             .tran 1u 1m\n\
+             .fft v(out) np=8 format=unorm window=rect freq=3k\n\
+             .fft {2*v(out)} np=16 window=hann freq=3k fmin=1k\n\
              .end\n",
         )
         .expect("parse typed FFT RAW test deck");
@@ -3518,6 +4274,7 @@ mod restart_tests {
                 "tran-007",
                 None,
                 &transient.fft_results,
+                &netlist,
                 None,
             )
             .expect("write typed FFT RAW artifact");
@@ -3530,6 +4287,35 @@ mod restart_tests {
             assert_eq!(decoded.metadata.complex_representation, "cartesian");
             assert_eq!(decoded.metadata.results[0].analysis_id, "fft-001");
             assert_eq!(decoded.metadata.results[1].analysis_id, "fft-002");
+            assert_eq!(decoded.metadata.results[0].signal.physical_type, "voltage");
+            assert_eq!(
+                decoded.metadata.results[0].signal.unit.as_deref(),
+                Some("V")
+            );
+            assert_eq!(
+                decoded.metadata.results[1].signal.physical_type,
+                "parameter"
+            );
+            assert_eq!(
+                decoded.metadata.results[1].signal.unit.as_deref(),
+                Some("1")
+            );
+            assert_eq!(
+                decoded.metadata.results[0]
+                    .transform
+                    .sfdr_search_minimum_bin,
+                decoded.metadata.results[0].transform.fundamental_bin
+            );
+            assert_eq!(
+                decoded.metadata.results[1]
+                    .transform
+                    .sfdr_search_minimum_bin,
+                decoded.metadata.results[1].transform.minimum_metric_bin
+            );
+            assert_ne!(
+                decoded.metadata.results[1].transform.fundamental_bin,
+                decoded.metadata.results[1].transform.minimum_metric_bin
+            );
             assert!(decoded.metadata.results[0].metrics.is_some());
             assert!(decoded.metadata.results[1].metrics.is_some());
             assert_eq!(decoded.bins[0].analysis_id, "fft-001");
@@ -3571,6 +4357,10 @@ mod restart_tests {
             );
 
             if matches!(format, OutputFormat::Raw) {
+                let mut old = decoded.metadata.clone();
+                old.schema_version = 1;
+                assert!(validate_fft_raw_metadata(&old).is_err());
+
                 let mut future = decoded.metadata.clone();
                 future.schema_version = FFT_ARTIFACT_SCHEMA_VERSION + 1;
                 assert!(validate_fft_raw_metadata(&future).is_err());
@@ -3582,6 +4372,48 @@ mod restart_tests {
                 let mut unknown_enum = decoded.metadata.clone();
                 unknown_enum.results[0].transform.window = "future_window".to_string();
                 assert!(validate_fft_raw_metadata(&unknown_enum).is_err());
+
+                let mut inconsistent_source = decoded.metadata.clone();
+                inconsistent_source.results[0].source.kind = "expression".to_string();
+                assert!(validate_fft_raw_metadata(&inconsistent_source).is_err());
+
+                let mut impossible_bounds = decoded.metadata.clone();
+                impossible_bounds.results[0].transform.fundamental_bin = 2;
+                impossible_bounds.results[0].transform.minimum_metric_bin = 0;
+                impossible_bounds.results[0].transform.maximum_metric_bin = 0;
+                impossible_bounds.results[0]
+                    .transform
+                    .sfdr_search_minimum_bin = 0;
+                impossible_bounds.results[0].metrics = None;
+                assert!(validate_fft_raw_metadata(&impossible_bounds).is_err());
+
+                let first_bin_count = decoded.metadata.results[0].sampling.point_count / 2 + 1;
+                let first_bins = &decoded.bins[..first_bin_count];
+                let mut wrong_thd = decoded.metadata.results[0].clone();
+                wrong_thd
+                    .metrics
+                    .as_mut()
+                    .expect("metric fixture")
+                    .thd_ratio += 0.25;
+                assert!(validate_fft_raw_metrics_against_bins(&wrong_thd, first_bins).is_err());
+
+                let mut wrong_spur = decoded.metadata.results[0].clone();
+                let metrics = wrong_spur.metrics.as_mut().expect("metric fixture");
+                metrics.sfdr_spur_bin = Some(2);
+                metrics.sfdr_spur_frequency_hz =
+                    Some(2.0 * wrong_spur.transform.frequency_resolution_hz);
+                assert!(validate_fft_raw_metrics_against_bins(&wrong_spur, first_bins).is_err());
+
+                let mut wrong_harmonic = decoded.metadata.results[0].clone();
+                wrong_harmonic
+                    .metrics
+                    .as_mut()
+                    .expect("metric fixture")
+                    .largest_harmonics[0]
+                    .magnitude += 1.0e-6;
+                assert!(
+                    validate_fft_raw_metrics_against_bins(&wrong_harmonic, first_bins).is_err()
+                );
 
                 let original = std::fs::read(&path).expect("read binary FFT RAW bytes");
                 let mut corrupt_schema = original.clone();
@@ -3611,8 +4443,61 @@ mod restart_tests {
                     .copy_from_slice(&123.0_f64.to_le_bytes());
                 std::fs::write(&path, &wrong_phase).expect("write inconsistent FFT RAW phase");
                 assert!(read_fft_raw_artifact(&path).is_err());
+
+                let mut not_normalized = original.clone();
+                let normalized_peak = decoded.bins[second_start..]
+                    .iter()
+                    .enumerate()
+                    .max_by(|(_, left), (_, right)| left.magnitude.total_cmp(&right.magnitude))
+                    .map(|(index, _)| second_start + index)
+                    .expect("normalized FFT has bins");
+                for (column, value) in [
+                    (1, decoded.bins[normalized_peak].real * 0.5),
+                    (2, decoded.bins[normalized_peak].imaginary * 0.5),
+                    (3, decoded.bins[normalized_peak].magnitude * 0.5),
+                ] {
+                    let offset = binary_offset + (normalized_peak * 7 + column) * 8;
+                    not_normalized[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
+                }
+                std::fs::write(&path, &not_normalized)
+                    .expect("write non-normalized FFT RAW spectrum");
+                assert!(read_fft_raw_artifact(&path).is_err());
+
+                let mut negative_sub_pico = original.clone();
+                let first_row_magnitude = binary_offset + 3 * 8;
+                negative_sub_pico[first_row_magnitude..first_row_magnitude + 8]
+                    .copy_from_slice(&(-1.0e-300_f64).to_le_bytes());
+                std::fs::write(&path, &negative_sub_pico)
+                    .expect("write negative sub-pico FFT RAW magnitude");
+                assert!(read_fft_raw_artifact(&path).is_err());
                 std::fs::write(&path, original).expect("restore binary FFT RAW fixture");
             }
         }
+
+        let hdf5_path = directory.0.join("fft.h5");
+        write_fft_output(
+            &hdf5_path,
+            OutputFormat::Hdf5,
+            "tran-007",
+            None,
+            &transient.fft_results,
+            &netlist,
+            None,
+        )
+        .expect("write typed FFT HDF5 artifact");
+        let hdf5 = crate::hdf5::read_hdf5(&hdf5_path).expect("decode typed FFT HDF5 artifact");
+        let hdf5_fft = hdf5.fft.expect("typed FFT HDF5 section");
+        assert_eq!(hdf5_fft.results[0].physical_type, "voltage");
+        assert_eq!(hdf5_fft.results[0].value_unit.as_deref(), Some("V"));
+        assert_eq!(hdf5_fft.results[1].physical_type, "parameter");
+        assert_eq!(hdf5_fft.results[1].value_unit.as_deref(), Some("1"));
+        assert_eq!(
+            hdf5_fft.results[0].sfdr_search_minimum_bin,
+            hdf5_fft.results[0].fundamental_bin
+        );
+        assert_eq!(
+            hdf5_fft.results[1].sfdr_search_minimum_bin,
+            hdf5_fft.results[1].minimum_metric_bin
+        );
     }
 }

@@ -107,7 +107,7 @@ fn json_bundle_preserves_ordered_complex_spectra_metrics_units_and_parent_identi
     assert!(directory.join("results.tran.json").exists());
     let artifact = directory.join("results.fft.json");
     let document = read_json(&artifact);
-    assert_eq!(document["schema_version"], 1);
+    assert_eq!(document["schema_version"], 2);
     assert_eq!(document["analysis"], "fft");
     assert_eq!(document["parent_analysis_id"], "tran-001");
     assert!(document["coordinate"].is_null());
@@ -123,7 +123,7 @@ fn json_bundle_preserves_ordered_complex_spectra_metrics_units_and_parent_identi
     assert_eq!(results[0]["signal"]["physical_type"], "voltage");
     assert_eq!(results[0]["signal"]["unit"], "V");
     assert_eq!(results[1]["signal"]["physical_type"], "current");
-    assert_eq!(results[1]["signal"]["unit"], "A");
+    assert_eq!(results[1]["signal"]["unit"], "1");
     assert_eq!(results[0]["transform"]["format"], "unnormalized");
     assert_eq!(results[1]["transform"]["format"], "normalized");
     assert_eq!(
@@ -131,6 +131,10 @@ fn json_bundle_preserves_ordered_complex_spectra_metrics_units_and_parent_identi
         "cartesian"
     );
     assert_eq!(results[0]["spectrum"]["frequency_unit"], "Hz");
+    assert_eq!(results[0]["spectrum"]["value_unit"], "V");
+    assert_eq!(results[1]["spectrum"]["value_unit"], "1");
+    assert_eq!(results[0]["metrics"]["units"]["fundamental_magnitude"], "V");
+    assert_eq!(results[1]["metrics"]["units"]["fundamental_magnitude"], "1");
     let first_bins = results[0]["spectrum"]["bins"]
         .as_array()
         .expect("first FFT bins");
@@ -179,7 +183,8 @@ fn csv_and_tsv_are_lossless_flattened_bin_and_metric_record_tables() {
         let text = std::fs::read_to_string(&artifact).expect("read FFT delimited artifact");
         let mut lines = text.lines();
         let header = lines.next().expect("FFT delimited header");
-        assert_eq!(header.split(separator).count(), 53);
+        assert_eq!(header.split(separator).count(), 54);
+        let columns = header.split(separator).collect::<Vec<_>>();
         for required in [
             "analysis_id",
             "parent_analysis_id",
@@ -194,12 +199,27 @@ fn csv_and_tsv_are_lossless_flattened_bin_and_metric_record_tables() {
             assert!(header.split(separator).any(|field| field == required));
         }
         let records = lines.collect::<Vec<_>>();
+        let first_record = records
+            .first()
+            .expect("FFT delimited artifact has a bin record")
+            .split(separator)
+            .collect::<Vec<_>>();
+        let physical_type = columns
+            .iter()
+            .position(|column| *column == "physical_type")
+            .expect("physical_type column");
+        let value_unit = columns
+            .iter()
+            .position(|column| *column == "value_unit")
+            .expect("value_unit column");
+        assert_eq!(first_record[physical_type], "voltage");
+        assert_eq!(first_record[value_unit], "1");
         assert!(records.iter().any(|line| line.contains("bin")));
         assert!(records.iter().any(|line| line.contains("largest_harmonic")));
         assert!(
             records
                 .iter()
-                .all(|line| line.split(separator).count() == 53)
+                .all(|line| line.split(separator).count() == 54)
         );
     }
     assert_no_staging_file(&directory);

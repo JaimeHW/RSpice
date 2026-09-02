@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 const SCHEMA_VERSION: &str = "1";
-const FFT_SECTION_SCHEMA_VERSION: &str = "1";
+const FFT_SECTION_SCHEMA_VERSION: &str = "2";
 
 #[derive(Debug, Error)]
 pub enum Hdf5Error {
@@ -257,6 +257,9 @@ pub struct Hdf5FftResult {
     pub authored_output: String,
     pub output_name: String,
     pub physical_type: String,
+    /// Effective unit of Cartesian coefficients, magnitudes, and
+    /// magnitude-like metrics. Normalized spectra use `1` while
+    /// `physical_type` retains source provenance.
     pub value_unit: Option<String>,
     pub start_time_s: f64,
     pub stop_time_s: f64,
@@ -273,6 +276,9 @@ pub struct Hdf5FftResult {
     pub fundamental_bin: usize,
     pub minimum_metric_bin: usize,
     pub maximum_metric_bin: usize,
+    /// First bin included in SFDR spur selection. This preserves whether an
+    /// authored FMIN overrode the core's default search starting at FREQ.
+    pub sfdr_search_minimum_bin: usize,
     pub bin_indices: Vec<u64>,
     pub frequency_hz: Vec<f64>,
     pub real: Vec<f64>,
@@ -289,6 +295,140 @@ pub struct Hdf5FftSection {
     pub parent_analysis_id: String,
     pub coordinate: Option<Hdf5FftCoordinate>,
     pub results: Vec<Hdf5FftResult>,
+}
+
+const FFT_DB_NOISE_FLOOR: f64 = 1.0e-10;
+const FFT_MAX_RANKED_HARMONICS: usize = 30;
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FftMetricExpectations {
+    pub(crate) fundamental_magnitude: f64,
+    pub(crate) thd_ratio: f64,
+    pub(crate) thd_db: f64,
+    pub(crate) sndr_db: f64,
+    pub(crate) enob_bits: f64,
+    pub(crate) snr_db: f64,
+    pub(crate) sfdr_db: f64,
+    pub(crate) sfdr_spur_bin: Option<usize>,
+    pub(crate) ranked_bins: Vec<usize>,
+}
+
+pub(crate) fn fft_values_close(actual: f64, expected: f64) -> bool {
+    if actual == expected {
+        return true;
+    }
+    let scale = actual.abs().max(expected.abs());
+    let tolerance = 128.0 * f64::EPSILON * scale;
+    (actual - expected).abs() <= tolerance
+}
+
+pub(crate) fn fft_phase_distance_degrees(actual: f64, expected: f64) -> f64 {
+    let delta = (actual - expected).rem_euclid(360.0);
+    delta.min(360.0 - delta)
+}
+
+pub(crate) fn fft_source_identity_is_valid(kind: &str, text: &str, authored: &str) -> bool {
+    if text.is_empty() || authored.is_empty() {
+        return false;
+    }
+    match kind {
+        "probe" => authored == text,
+        "expression" => {
+            authored
+                .strip_prefix('{')
+                .and_then(|value| value.strip_suffix('}'))
+                == Some(text)
+        }
+        _ => false,
+    }
+}
+
+pub(crate) fn fft_metric_expectations(
+    magnitudes: &[f64],
+    fundamental_bin: usize,
+    maximum_metric_bin: usize,
+    sfdr_search_minimum_bin: usize,
+) -> Option<FftMetricExpectations> {
+    let fundamental_magnitude = *magnitudes.get(fundamental_bin)?;
+    if !fundamental_magnitude.is_finite() || fundamental_magnitude <= FFT_DB_NOISE_FLOOR {
+        return None;
+    }
+
+    let mut distortion_power = 0.0;
+    for bin in
+        (fundamental_bin.saturating_mul(2)..=maximum_metric_bin).step_by(fundamental_bin.max(1))
+    {
+        distortion_power += magnitudes.get(bin)?.powi(2);
+    }
+    let thd_ratio = distortion_power.sqrt() / fundamental_magnitude;
+    let thd_db = 20.0 * thd_ratio.max(FFT_DB_NOISE_FLOOR).log10();
+
+    let noise_and_distortion_power = magnitudes
+        .iter()
+        .enumerate()
+        .skip(1)
+        .filter(|(bin, _)| *bin != fundamental_bin)
+        .map(|(_, magnitude)| magnitude.powi(2))
+        .sum::<f64>();
+    let sndr_denominator = noise_and_distortion_power.sqrt().max(FFT_DB_NOISE_FLOOR);
+    let sndr_db = 20.0 * (fundamental_magnitude / sndr_denominator).log10();
+    let enob_bits = (sndr_db - 1.76) / 6.02;
+
+    let signal_frequency_limit = maximum_metric_bin.max(fundamental_bin);
+    let noise_power = magnitudes
+        .iter()
+        .enumerate()
+        .skip(1)
+        .filter(|(bin, _)| *bin % fundamental_bin != 0 || *bin > signal_frequency_limit)
+        .map(|(_, magnitude)| magnitude.powi(2))
+        .sum::<f64>();
+    let snr_ratio = fundamental_magnitude / noise_power.sqrt().max(FFT_DB_NOISE_FLOOR);
+    let snr_db = 20.0 * snr_ratio.log10();
+
+    let mut sfdr_spur_bin = None;
+    for bin in sfdr_search_minimum_bin..=maximum_metric_bin {
+        if bin != fundamental_bin
+            && magnitudes[bin] > sfdr_spur_bin.map_or(0.0, |spur| magnitudes[spur])
+        {
+            sfdr_spur_bin = Some(bin);
+        }
+    }
+    let sfdr_spur_magnitude = sfdr_spur_bin.map_or(0.0, |bin| magnitudes[bin]);
+    let sfdr_db =
+        20.0 * (fundamental_magnitude / sfdr_spur_magnitude.max(FFT_DB_NOISE_FLOOR)).log10();
+
+    let ranked_len = magnitudes
+        .len()
+        .saturating_sub(1)
+        .min(FFT_MAX_RANKED_HARMONICS);
+    let mut ranked_bins = Vec::with_capacity(ranked_len);
+    for bin in 1..magnitudes.len() {
+        let position = ranked_bins
+            .iter()
+            .position(|retained| {
+                magnitudes[bin] > magnitudes[*retained]
+                    || (magnitudes[bin] == magnitudes[*retained] && bin < *retained)
+            })
+            .unwrap_or(ranked_bins.len());
+        if ranked_bins.len() < ranked_len {
+            ranked_bins.insert(position, bin);
+        } else if position < ranked_len {
+            ranked_bins.pop();
+            ranked_bins.insert(position, bin);
+        }
+    }
+
+    Some(FftMetricExpectations {
+        fundamental_magnitude,
+        thd_ratio,
+        thd_db,
+        sndr_db,
+        enob_bits,
+        snr_db,
+        sfdr_db,
+        sfdr_spur_bin,
+        ranked_bins,
+    })
 }
 
 impl Hdf5FftSection {
@@ -330,10 +470,11 @@ impl Hdf5FftResult {
                 self.analysis_id
             )));
         }
-        if !matches!(self.source_kind.as_str(), "probe" | "expression")
-            || self.source_text.is_empty()
-            || self.authored_output.is_empty()
-            || self.output_name.is_empty()
+        if !fft_source_identity_is_valid(
+            &self.source_kind,
+            &self.source_text,
+            &self.authored_output,
+        ) || self.output_name.is_empty()
             || self.physical_type.is_empty()
         {
             return Err(Hdf5Error::InvalidSchema(format!(
@@ -341,7 +482,7 @@ impl Hdf5FftResult {
                 self.analysis_id
             )));
         }
-        let expected_unit = match self.physical_type.as_str() {
+        let physical_unit = match self.physical_type.as_str() {
             "voltage" => Some("V"),
             "current" => Some("A"),
             "parameter" => None,
@@ -351,6 +492,11 @@ impl Hdf5FftResult {
                     self.analysis_id
                 )));
             }
+        };
+        let expected_unit = match self.format.as_str() {
+            "normalized" => Some("1"),
+            "unnormalized" => physical_unit,
+            _ => None,
         };
         if self.value_unit.as_deref() != expected_unit
             || !matches!(self.format.as_str(), "normalized" | "unnormalized")
@@ -403,9 +549,18 @@ impl Hdf5FftResult {
             )));
         }
         if self.fundamental_bin >= bin_count
+            || self.fundamental_bin == 0
             || self.minimum_metric_bin >= bin_count
             || self.maximum_metric_bin >= bin_count
             || self.minimum_metric_bin > self.maximum_metric_bin
+            || self.sfdr_search_minimum_bin >= bin_count
+            || self.sfdr_search_minimum_bin > self.maximum_metric_bin
+            || !matches!(
+                self.sfdr_search_minimum_bin,
+                value if value == self.minimum_metric_bin || value == self.fundamental_bin
+            )
+            || (self.fundamental_bin == 1 && self.maximum_metric_bin < 2)
+            || (self.fundamental_bin > 1 && self.maximum_metric_bin < 1)
         {
             return Err(Hdf5Error::InvalidSchema(format!(
                 "FFT result '{}' metric bin bounds exceed its spectrum",
@@ -453,15 +608,44 @@ impl Hdf5FftResult {
                 self.analysis_id
             )));
         }
+        for bin in 0..bin_count {
+            let expected_frequency = bin as f64 * self.frequency_resolution_hz;
+            let derived_magnitude = self.real[bin].hypot(self.imaginary[bin]);
+            if self.magnitude[bin] < 0.0
+                || !fft_values_close(self.frequency_hz[bin], expected_frequency)
+                || !fft_values_close(self.magnitude[bin], derived_magnitude)
+                || (derived_magnitude > 1.0e-14
+                    && fft_phase_distance_degrees(
+                        self.phase_degrees[bin],
+                        self.imaginary[bin].atan2(self.real[bin]).to_degrees(),
+                    ) > 1.0e-9)
+            {
+                return Err(Hdf5Error::InvalidSchema(format!(
+                    "FFT result '{}' has inconsistent bin {bin}",
+                    self.analysis_id
+                )));
+            }
+        }
+        if self.format == "normalized" {
+            let maximum_magnitude = self.magnitude.iter().copied().fold(0.0, f64::max);
+            if maximum_magnitude != 0.0 && !fft_values_close(maximum_magnitude, 1.0) {
+                return Err(Hdf5Error::InvalidSchema(format!(
+                    "FFT result '{}' normalized spectrum does not peak at 1",
+                    self.analysis_id
+                )));
+            }
+        }
         if let Some(metrics) = &self.metrics {
-            metrics.validate(&self.analysis_id, bin_count)?;
+            metrics.validate(self)?;
         }
         Ok(())
     }
 }
 
 impl Hdf5FftMetrics {
-    fn validate(&self, analysis_id: &str, bin_count: usize) -> Result<()> {
+    fn validate(&self, result: &Hdf5FftResult) -> Result<()> {
+        let analysis_id = &result.analysis_id;
+        let bin_count = result.bin_indices.len();
         if ![
             self.fundamental_magnitude,
             self.thd_ratio,
@@ -478,19 +662,54 @@ impl Hdf5FftMetrics {
                 .is_some_and(|value| !value.is_finite())
             || self.sfdr_spur_bin.is_some() != self.sfdr_spur_frequency_hz.is_some()
             || self.sfdr_spur_bin.is_some_and(|bin| bin >= bin_count)
-            || self.largest_harmonics.len() > 30
+            || self.largest_harmonics.len() > FFT_MAX_RANKED_HARMONICS
         {
             return Err(Hdf5Error::InvalidSchema(format!(
                 "FFT result '{analysis_id}' has invalid metric scalars"
             )));
         }
-        for (index, harmonic) in self.largest_harmonics.iter().enumerate() {
+        let expected = fft_metric_expectations(
+            &result.magnitude,
+            result.fundamental_bin,
+            result.maximum_metric_bin,
+            result.sfdr_search_minimum_bin,
+        )
+        .ok_or_else(|| {
+            Hdf5Error::InvalidSchema(format!(
+                "FFT result '{analysis_id}' cannot produce valid metrics"
+            ))
+        })?;
+        let spur_frequency_matches = match (
+            self.sfdr_spur_frequency_hz,
+            expected.sfdr_spur_bin.map(|bin| result.frequency_hz[bin]),
+        ) {
+            (Some(actual), Some(expected)) => fft_values_close(actual, expected),
+            (None, None) => true,
+            _ => false,
+        };
+        if !fft_values_close(self.fundamental_magnitude, expected.fundamental_magnitude)
+            || !fft_values_close(self.thd_ratio, expected.thd_ratio)
+            || !fft_values_close(self.thd_db, expected.thd_db)
+            || !fft_values_close(self.sndr_db, expected.sndr_db)
+            || !fft_values_close(self.enob_bits, expected.enob_bits)
+            || !fft_values_close(self.snr_db, expected.snr_db)
+            || !fft_values_close(self.sfdr_db, expected.sfdr_db)
+            || self.sfdr_spur_bin != expected.sfdr_spur_bin
+            || !spur_frequency_matches
+            || self.largest_harmonics.len() != expected.ranked_bins.len()
+        {
+            return Err(Hdf5Error::InvalidSchema(format!(
+                "FFT result '{analysis_id}' metrics do not match its spectrum"
+            )));
+        }
+        for (index, (harmonic, expected_bin)) in self
+            .largest_harmonics
+            .iter()
+            .zip(expected.ranked_bins)
+            .enumerate()
+        {
             if harmonic.rank != index + 1
-                || harmonic.bin == 0
-                || harmonic.bin >= bin_count
-                || self.largest_harmonics[..index]
-                    .iter()
-                    .any(|previous| previous.bin == harmonic.bin)
+                || harmonic.bin != expected_bin
                 || ![
                     harmonic.frequency_hz,
                     harmonic.magnitude,
@@ -499,6 +718,18 @@ impl Hdf5FftMetrics {
                 ]
                 .iter()
                 .all(|value| value.is_finite())
+                || !fft_values_close(harmonic.frequency_hz, result.frequency_hz[expected_bin])
+                || !fft_values_close(harmonic.magnitude, result.magnitude[expected_bin])
+                || !fft_values_close(
+                    harmonic.magnitude_db,
+                    20.0 * result.magnitude[expected_bin]
+                        .max(FFT_DB_NOISE_FLOOR)
+                        .log10(),
+                )
+                || fft_phase_distance_degrees(
+                    harmonic.phase_degrees,
+                    result.phase_degrees[expected_bin],
+                ) > 1.0e-9
             {
                 return Err(Hdf5Error::InvalidSchema(format!(
                     "FFT result '{analysis_id}' has an invalid ranked harmonic at position {}",
@@ -1187,6 +1418,7 @@ fn add_fft_section(builder: &mut FileBuilder, section: &Hdf5FftSection) -> Resul
             ("fundamental_bin", result.fundamental_bin),
             ("minimum_metric_bin", result.minimum_metric_bin),
             ("maximum_metric_bin", result.maximum_metric_bin),
+            ("sfdr_search_minimum_bin", result.sfdr_search_minimum_bin),
         ] {
             group.set_attr(
                 &format!("{prefix}_{suffix}"),
@@ -1485,6 +1717,10 @@ fn read_fft_section(file: &Hdf5File) -> Result<Hdf5FftSection> {
                 read_required_i64_attr(&attrs, &format!("{prefix}_maximum_metric_bin"))?,
                 "FFT maximum_metric_bin",
             )?,
+            sfdr_search_minimum_bin: non_negative_count(
+                read_required_i64_attr(&attrs, &format!("{prefix}_sfdr_search_minimum_bin"))?,
+                "FFT sfdr_search_minimum_bin",
+            )?,
             bin_indices: group
                 .dataset(&format!("{prefix}_bin_index"))?
                 .read_i64()?
@@ -1726,6 +1962,31 @@ mod tests {
         let imaginary = vec![0.0; bin_count];
         let magnitude = real.clone();
         let phase_degrees = vec![0.0; bin_count];
+        let fundamental_bin = 1;
+        let maximum_metric_bin = bin_count - 1;
+        let sfdr_search_minimum_bin = fundamental_bin;
+        let expected_metrics = fft_metric_expectations(
+            &magnitude,
+            fundamental_bin,
+            maximum_metric_bin,
+            sfdr_search_minimum_bin,
+        )
+        .expect("valid FFT metric fixture");
+        let sfdr_spur_frequency_hz = expected_metrics.sfdr_spur_bin.map(|bin| frequency_hz[bin]);
+        let largest_harmonics = expected_metrics
+            .ranked_bins
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(index, bin)| Hdf5FftHarmonic {
+                rank: index + 1,
+                bin,
+                frequency_hz: frequency_hz[bin],
+                magnitude: magnitude[bin],
+                magnitude_db: 20.0 * magnitude[bin].max(FFT_DB_NOISE_FLOOR).log10(),
+                phase_degrees: phase_degrees[bin],
+            })
+            .collect();
         Hdf5FftResult {
             analysis_id: format!("fft-{ordinal:03}"),
             ordinal,
@@ -1735,7 +1996,11 @@ mod tests {
                 "probe".to_string()
             },
             source_text: "V(OUT)".to_string(),
-            authored_output: "V(OUT)".to_string(),
+            authored_output: if physical_type == "parameter" {
+                "{V(OUT)}".to_string()
+            } else {
+                "V(OUT)".to_string()
+            },
             output_name: "V(OUT)".to_string(),
             physical_type: physical_type.to_string(),
             value_unit: value_unit.map(str::to_string),
@@ -1763,33 +2028,27 @@ mod tests {
             alpha: 3.0,
             coherent_gain: 1.0,
             frequency_resolution_hz: 1.0,
-            fundamental_bin: 1,
+            fundamental_bin,
             minimum_metric_bin: 0,
-            maximum_metric_bin: bin_count - 1,
+            maximum_metric_bin,
+            sfdr_search_minimum_bin,
             bin_indices: (0..u64::try_from(bin_count).expect("bounded bin count")).collect(),
             frequency_hz,
             real,
             imaginary,
             magnitude,
             phase_degrees,
-            metrics: with_metrics.then(|| Hdf5FftMetrics {
-                fundamental_magnitude: 1.0,
-                thd_ratio: 0.01,
-                thd_db: -40.0,
-                sndr_db: 80.0,
-                enob_bits: 13.0,
-                snr_db: 82.0,
-                sfdr_db: 70.0,
-                sfdr_spur_bin: Some(2),
-                sfdr_spur_frequency_hz: Some(2.0),
-                largest_harmonics: vec![Hdf5FftHarmonic {
-                    rank: 1,
-                    bin: 1,
-                    frequency_hz: 1.0,
-                    magnitude: 1.0,
-                    magnitude_db: 0.0,
-                    phase_degrees: 0.0,
-                }],
+            metrics: with_metrics.then_some(Hdf5FftMetrics {
+                fundamental_magnitude: expected_metrics.fundamental_magnitude,
+                thd_ratio: expected_metrics.thd_ratio,
+                thd_db: expected_metrics.thd_db,
+                sndr_db: expected_metrics.sndr_db,
+                enob_bits: expected_metrics.enob_bits,
+                snr_db: expected_metrics.snr_db,
+                sfdr_db: expected_metrics.sfdr_db,
+                sfdr_spur_bin: expected_metrics.sfdr_spur_bin,
+                sfdr_spur_frequency_hz,
+                largest_harmonics,
             }),
         }
     }
@@ -1809,7 +2068,7 @@ mod tests {
                 assignment: "PARAM gain = 2, TEMP = 75".to_string(),
             }),
             results: vec![
-                fft_result(1, 8, "voltage", Some("V"), true),
+                fft_result(1, 8, "voltage", Some("1"), true),
                 fft_result(2, 16, "parameter", None, false),
             ],
         });
@@ -1826,7 +2085,7 @@ mod tests {
     fn malformed_fft_section_is_rejected_before_publication() {
         let directory = TestDirectory::new("fft-malformed");
         let destination = directory.0.join("fft.h5");
-        let mut malformed = fft_result(1, 8, "voltage", Some("V"), true);
+        let mut malformed = fft_result(1, 8, "voltage", Some("1"), true);
         malformed.analysis_id = "fft-002".to_string();
         let mut data = Hdf5SimulationData::new();
         data.fft = Some(Hdf5FftSection {
@@ -1842,7 +2101,121 @@ mod tests {
     }
 
     #[test]
-    fn future_root_and_fft_section_schemas_are_rejected() {
+    fn fft_units_and_normalization_are_validated_against_transform_semantics() {
+        assert!(fft_source_identity_is_valid("probe", "V(OUT)", "V(OUT)"));
+        assert!(fft_source_identity_is_valid(
+            "expression",
+            "2*V(OUT)",
+            "{2*V(OUT)}"
+        ));
+        assert!(!fft_source_identity_is_valid("probe", "V(OUT)", "V(IN)"));
+        assert!(!fft_source_identity_is_valid(
+            "expression",
+            "2*V(OUT)",
+            "2*V(OUT)"
+        ));
+        assert!(
+            fft_result(1, 8, "voltage", Some("1"), true)
+                .validate(1)
+                .is_ok()
+        );
+        assert!(
+            fft_result(1, 8, "current", Some("1"), true)
+                .validate(1)
+                .is_ok()
+        );
+        assert!(
+            fft_result(2, 8, "voltage", Some("V"), false)
+                .validate(2)
+                .is_ok()
+        );
+        assert!(
+            fft_result(2, 8, "current", Some("A"), false)
+                .validate(2)
+                .is_ok()
+        );
+
+        assert!(
+            fft_result(1, 8, "voltage", Some("V"), true)
+                .validate(1)
+                .is_err()
+        );
+        assert!(
+            fft_result(2, 8, "current", Some("1"), false)
+                .validate(2)
+                .is_err()
+        );
+        assert!(
+            fft_result(1, 8, "unsupported", Some("1"), false)
+                .validate(1)
+                .is_err()
+        );
+
+        let mut inconsistent_expression = fft_result(2, 8, "parameter", None, false);
+        inconsistent_expression.authored_output = inconsistent_expression.source_text.clone();
+        assert!(inconsistent_expression.validate(2).is_err());
+
+        let mut impossible_bounds = fft_result(2, 8, "voltage", Some("V"), false);
+        impossible_bounds.fundamental_bin = 2;
+        impossible_bounds.minimum_metric_bin = 0;
+        impossible_bounds.maximum_metric_bin = 0;
+        impossible_bounds.sfdr_search_minimum_bin = 0;
+        assert!(impossible_bounds.validate(2).is_err());
+
+        let mut not_normalized = fft_result(1, 8, "voltage", Some("1"), false);
+        not_normalized.real[1] = 0.5;
+        not_normalized.magnitude[1] = 0.5;
+        assert!(not_normalized.validate(1).is_err());
+
+        let mut negative_sub_pico = fft_result(1, 8, "voltage", Some("1"), false);
+        negative_sub_pico.magnitude[0] = -1.0e-300;
+        assert!(negative_sub_pico.validate(1).is_err());
+    }
+
+    #[test]
+    fn fft_metric_mutations_are_rejected_against_the_spectrum() {
+        let valid = fft_result(1, 8, "voltage", Some("1"), true);
+        assert!(valid.validate(1).is_ok());
+
+        let mut wrong_fundamental = valid.clone();
+        wrong_fundamental
+            .metrics
+            .as_mut()
+            .expect("metric fixture")
+            .fundamental_magnitude += 0.25;
+        assert!(wrong_fundamental.validate(1).is_err());
+
+        for mutate in [
+            |metrics: &mut Hdf5FftMetrics| metrics.thd_ratio += 0.25,
+            |metrics: &mut Hdf5FftMetrics| metrics.thd_db += 1.0,
+            |metrics: &mut Hdf5FftMetrics| metrics.sndr_db += 1.0,
+            |metrics: &mut Hdf5FftMetrics| metrics.enob_bits += 1.0,
+            |metrics: &mut Hdf5FftMetrics| metrics.snr_db += 1.0,
+            |metrics: &mut Hdf5FftMetrics| metrics.sfdr_db += 1.0,
+        ] {
+            let mut malformed = valid.clone();
+            mutate(malformed.metrics.as_mut().expect("metric fixture"));
+            assert!(malformed.validate(1).is_err());
+        }
+
+        let mut wrong_spur = valid.clone();
+        let metrics = wrong_spur.metrics.as_mut().expect("metric fixture");
+        metrics.sfdr_spur_bin = Some(2);
+        metrics.sfdr_spur_frequency_hz = Some(2.0);
+        assert!(wrong_spur.validate(1).is_err());
+
+        let mut wrong_harmonic = valid;
+        wrong_harmonic
+            .metrics
+            .as_mut()
+            .expect("metric fixture")
+            .largest_harmonics[0]
+            .magnitude += 1.0e-6;
+        assert!(wrong_harmonic.validate(1).is_err());
+    }
+
+    #[test]
+    fn unsupported_root_and_fft_section_schemas_are_rejected() {
         let directory = TestDirectory::new("fft-future-schema");
 
         let future_root = directory.0.join("future-root.h5");
@@ -1856,21 +2229,23 @@ mod tests {
         let root_error = read_hdf5(&future_root).expect_err("reject future root schema");
         assert!(matches!(root_error, Hdf5Error::InvalidSchema(_)));
 
-        let future_fft = directory.0.join("future-fft.h5");
-        let mut fft_builder = FileBuilder::new();
-        fft_builder.set_attr(
-            "schema_version",
-            AttrValue::String(SCHEMA_VERSION.to_string()),
-        );
-        let mut fft_group = fft_builder.create_group("fft");
-        fft_group.set_attr("schema_version", AttrValue::String("2".to_string()));
-        fft_builder.add_group(fft_group.finish());
-        std::fs::write(
-            &future_fft,
-            fft_builder.finish().expect("encode future FFT schema"),
-        )
-        .expect("write future FFT schema");
-        let fft_error = read_hdf5(&future_fft).expect_err("reject future FFT schema");
-        assert!(matches!(fft_error, Hdf5Error::InvalidSchema(_)));
+        for (label, version) in [("old", "1"), ("future", "3")] {
+            let fft_path = directory.0.join(format!("{label}-fft.h5"));
+            let mut fft_builder = FileBuilder::new();
+            fft_builder.set_attr(
+                "schema_version",
+                AttrValue::String(SCHEMA_VERSION.to_string()),
+            );
+            let mut fft_group = fft_builder.create_group("fft");
+            fft_group.set_attr("schema_version", AttrValue::String(version.to_string()));
+            fft_builder.add_group(fft_group.finish());
+            std::fs::write(
+                &fft_path,
+                fft_builder.finish().expect("encode unsupported FFT schema"),
+            )
+            .expect("write unsupported FFT schema");
+            let fft_error = read_hdf5(&fft_path).expect_err("reject unsupported FFT schema");
+            assert!(matches!(fft_error, Hdf5Error::InvalidSchema(_)));
+        }
     }
 }
