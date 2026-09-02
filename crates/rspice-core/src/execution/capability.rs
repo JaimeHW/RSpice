@@ -221,8 +221,7 @@ impl AnalysisResultCapability {
 const CLI_ARTIFACT: &str = "CSV/text artifact exists, but no shared typed result document";
 const CLI_AXIS: &str =
     "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document";
-const CLI_AXIS_UNAVAILABLE: &str =
-    "CLI has no authored deck-axis route for this analysis family";
+const CLI_AXIS_UNAVAILABLE: &str = "CLI has no authored deck-axis route for this analysis family";
 const PY_AXIS_UNAVAILABLE: &str =
     "typed direct API exists, but Engine.run has no authored axis route";
 const WASM_UNAVAILABLE: &str = "browser API has no result adapter for this family";
@@ -524,9 +523,7 @@ pub const SIGNAL_CAPABILITY_MATRIX: &[SignalCapability] = &[
         signal: SignalKind::DeviceObservable,
         cli: MappingStatus::Partial(ADVANCED_SIGNAL_SUBSET),
         python: MappingStatus::Partial(ADVANCED_SIGNAL_SUBSET),
-        wasm: MappingStatus::Partial(
-            "mapped for OP, DC, transient, and noise result documents",
-        ),
+        wasm: MappingStatus::Partial("mapped for OP, DC, transient, and noise result documents"),
         engine_adapter: MappingStatus::Mapped,
     },
     SignalCapability {
