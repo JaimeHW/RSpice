@@ -125,6 +125,23 @@ impl MaterializedRun {
     pub fn analyses(&self) -> &[MaterializedAnalysis] {
         &self.analyses
     }
+
+    /// Consume this run without cloning its coordinate-local netlist or
+    /// analysis configurations.
+    ///
+    /// Frontend adapters that need an owned netlist should prefer this over
+    /// cloning [`Self::netlist`], because a materialized hierarchy can be
+    /// large even though only one coordinate is retained at a time.
+    pub fn into_parts(
+        self,
+    ) -> (
+        RunCoordinate,
+        Netlist,
+        super::TopologyFingerprint,
+        Vec<MaterializedAnalysis>,
+    ) {
+        (self.coordinate, self.netlist, self.topology, self.analyses)
+    }
 }
 
 /// Prepared lazy bridge from one canonical planning structure to its borrowed
@@ -631,6 +648,12 @@ mod tests {
             expected
         );
         assert!(run.netlist().analyses.is_empty());
+        let expected_topology = run.topology_fingerprint();
+        let (coordinate, netlist, topology, analyses) = run.into_parts();
+        assert_eq!(coordinate, materializer.coordinates()[0]);
+        assert!(netlist.analyses.is_empty());
+        assert_eq!(topology, expected_topology);
+        assert_eq!(analyses.len(), 1);
     }
 
     #[test]
