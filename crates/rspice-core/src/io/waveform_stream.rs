@@ -35,7 +35,7 @@
 
 use crate::Value;
 use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits, ResourceReadError};
-use std::fs::File;
+use rspice_output::{AtomicArtifactError, AtomicArtifactFile, AtomicArtifactOptions, Durability};
 use std::io::{self, BufWriter, Seek, SeekFrom, Write};
 use std::path::Path;
 use thiserror::Error;
@@ -89,8 +89,8 @@ const HEADER_POINT_COUNT_WIDTH: usize = 20;
 /// Uses binary format for efficient storage: [time, v0, v1, ...] as f64s.
 #[derive(Debug)]
 pub struct StreamingWaveformWriter {
-    /// Buffered file writer
-    writer: BufWriter<File>,
+    /// Buffered writer backed by a same-directory staging transaction.
+    writer: Option<BufWriter<AtomicArtifactFile>>,
     /// Number of channels (not including time)
     num_channels: usize,
     /// Channel names for header
@@ -248,12 +248,17 @@ impl StreamingWaveformWriter {
             ))
         })?;
 
-        // Validation and memory reservation intentionally precede file
-        // creation so bad input never truncates an existing destination.
-        let file = File::create(path)?;
-        let writer = BufWriter::with_capacity(65_536, file);
+        // Validation and memory reservation intentionally precede staging-file
+        // creation. The destination is not changed until `finalize` publishes
+        // a complete, synchronized artifact.
+        let artifact = AtomicArtifactFile::prepare(
+            path.as_ref(),
+            AtomicArtifactOptions::new(Durability::SyncFileAndParent),
+        )
+        .map_err(atomic_artifact_io_error)?;
+        let writer = BufWriter::with_capacity(65_536, artifact);
         let mut this = Self {
-            writer,
+            writer: Some(writer),
             num_channels,
             channel_names: names,
             buffer,
@@ -271,24 +276,25 @@ impl StreamingWaveformWriter {
 
     /// Write file header
     fn write_header(&mut self) -> io::Result<()> {
+        let writer = self.writer.as_mut().ok_or_else(inactive_writer_error)?;
         // Write a simple header format
-        writeln!(self.writer, "Title: RSpice Streaming Waveform")?;
-        writeln!(self.writer, "Date: {}", chrono_lite_now())?;
-        writeln!(self.writer, "Plotname: Transient Analysis")?;
-        writeln!(self.writer, "Flags: real double")?;
-        writeln!(self.writer, "No. Variables: {}", self.num_channels + 1)?;
-        write!(self.writer, "No. Points: ")?;
-        self.point_count_offset = self.writer.stream_position()?;
-        writeln!(self.writer, "{0:01$}", 0, HEADER_POINT_COUNT_WIDTH)?;
-        writeln!(self.writer, "Variables:")?;
-        writeln!(self.writer, "  0 time seconds")?;
+        writeln!(writer, "Title: RSpice Streaming Waveform")?;
+        writeln!(writer, "Date: {}", chrono_lite_now())?;
+        writeln!(writer, "Plotname: Transient Analysis")?;
+        writeln!(writer, "Flags: real double")?;
+        writeln!(writer, "No. Variables: {}", self.num_channels + 1)?;
+        write!(writer, "No. Points: ")?;
+        self.point_count_offset = writer.stream_position()?;
+        writeln!(writer, "{0:01$}", 0, HEADER_POINT_COUNT_WIDTH)?;
+        writeln!(writer, "Variables:")?;
+        writeln!(writer, "  0 time seconds")?;
         for (i, name) in self.channel_names.iter().enumerate() {
-            writeln!(self.writer, "  {} {} voltage", i + 1, name)?;
+            writeln!(writer, "  {} {} voltage", i + 1, name)?;
         }
         if self.binary {
-            writeln!(self.writer, "Binary:")?;
+            writeln!(writer, "Binary:")?;
         } else {
-            writeln!(self.writer, "Values:")?;
+            writeln!(writer, "Values:")?;
         }
 
         Ok(())
@@ -310,34 +316,56 @@ impl StreamingWaveformWriter {
         time: Value,
         values: &[Value],
     ) -> Result<(), WaveformStreamError> {
+        if self.writer.is_none() {
+            return Err(WaveformStreamError::Io(inactive_writer_error()));
+        }
         if values.len() != self.num_channels {
-            return Err(WaveformStreamError::InvalidFormat(format!(
+            let error = WaveformStreamError::InvalidFormat(format!(
                 "waveform point has {} channel value(s), expected {}",
                 values.len(),
                 self.num_channels
-            )));
+            ));
+            self.abort();
+            return Err(error);
         }
         if !time.is_finite() || values.iter().any(|value| !value.is_finite()) {
-            return Err(WaveformStreamError::InvalidFormat(
+            let error = WaveformStreamError::InvalidFormat(
                 "waveform points must contain only finite values".to_string(),
-            ));
+            );
+            self.abort();
+            return Err(error);
         }
-        let next_points = self.points_written.checked_add(1).ok_or_else(|| {
-            WaveformStreamError::InvalidFormat(
+        let Some(next_points) = self.points_written.checked_add(1) else {
+            let error = WaveformStreamError::InvalidFormat(
                 "streaming waveform point count overflowed this platform".to_string(),
-            )
-        })?;
-        ResourceLimitError::ensure(ResourceKind::AnalysisPoints, next_points, self.max_points)?;
+            );
+            self.abort();
+            return Err(error);
+        };
+        if let Err(error) =
+            ResourceLimitError::ensure(ResourceKind::AnalysisPoints, next_points, self.max_points)
+        {
+            self.abort();
+            return Err(error.into());
+        }
         let row_size = self.num_channels.saturating_add(1);
         let next_values = next_points.saturating_mul(row_size);
-        ResourceLimitError::ensure(ResourceKind::ResultValues, next_values, self.max_values)?;
+        if let Err(error) =
+            ResourceLimitError::ensure(ResourceKind::ResultValues, next_values, self.max_values)
+        {
+            self.abort();
+            return Err(error.into());
+        }
 
         self.buffer.push(time);
         self.buffer.extend_from_slice(values);
 
         // Check if flush needed
-        if self.buffer.len() >= self.buffer_capacity {
-            self.flush_buffer()?;
+        if self.buffer.len() >= self.buffer_capacity
+            && let Err(error) = self.flush_buffer()
+        {
+            self.abort();
+            return Err(error.into());
         }
 
         self.points_written = next_points;
@@ -352,22 +380,23 @@ impl StreamingWaveformWriter {
 
         let row_size = self.num_channels + 1;
         let buffered_points = self.buffer.len() / row_size;
+        let writer = self.writer.as_mut().ok_or_else(inactive_writer_error)?;
 
         if self.binary {
             // Write as binary f64 values
             for chunk in self.buffer.chunks(row_size) {
                 for &val in chunk {
-                    self.writer.write_all(&val.to_le_bytes())?;
+                    writer.write_all(&val.to_le_bytes())?;
                 }
             }
         } else {
             // Write as ASCII
             for (row, chunk) in self.buffer.chunks(row_size).enumerate() {
-                write!(self.writer, "{}", self.points_flushed.saturating_add(row))?;
+                write!(writer, "{}", self.points_flushed.saturating_add(row))?;
                 for &val in chunk {
-                    write!(self.writer, "\t{:.17e}", val)?;
+                    write!(writer, "\t{:.17e}", val)?;
                 }
-                writeln!(self.writer)?;
+                writeln!(writer)?;
             }
         }
 
@@ -381,24 +410,37 @@ impl StreamingWaveformWriter {
 
     /// Force flush to disk
     pub fn flush(&mut self) -> io::Result<()> {
-        self.flush_buffer()?;
-        self.writer.flush()
+        let result = self.flush_buffer().and_then(|()| {
+            self.writer
+                .as_mut()
+                .ok_or_else(inactive_writer_error)?
+                .flush()
+        });
+        if result.is_err() {
+            self.abort();
+        }
+        result
     }
 
     /// Finalize the file (flush and update header)
     pub fn finalize(mut self) -> io::Result<usize> {
         self.flush_buffer()?;
-        self.writer.flush()?;
+        let writer = self.writer.as_mut().ok_or_else(inactive_writer_error)?;
+        writer.flush()?;
 
-        let end_position = self.writer.stream_position()?;
-        self.writer.seek(SeekFrom::Start(self.point_count_offset))?;
+        let end_position = writer.stream_position()?;
+        writer.seek(SeekFrom::Start(self.point_count_offset))?;
         write!(
-            self.writer,
+            writer,
             "{0:01$}",
             self.points_written, HEADER_POINT_COUNT_WIDTH
         )?;
-        self.writer.flush()?;
-        self.writer.seek(SeekFrom::Start(end_position))?;
+        writer.flush()?;
+        writer.seek(SeekFrom::Start(end_position))?;
+
+        let writer = self.writer.take().ok_or_else(inactive_writer_error)?;
+        let artifact = writer.into_inner().map_err(|error| error.into_error())?;
+        artifact.commit().map_err(atomic_artifact_io_error)?;
 
         Ok(self.points_written)
     }
@@ -412,6 +454,28 @@ impl StreamingWaveformWriter {
     pub fn num_channels(&self) -> usize {
         self.num_channels
     }
+
+    fn abort(&mut self) {
+        self.writer.take();
+        self.buffer.clear();
+    }
+}
+
+fn inactive_writer_error() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::BrokenPipe,
+        "streaming waveform transaction is no longer active",
+    )
+}
+
+fn atomic_artifact_io_error(error: AtomicArtifactError<io::Error>) -> io::Error {
+    let kind = match &error {
+        AtomicArtifactError::Prepare(source) | AtomicArtifactError::Write(source) => source.kind(),
+        AtomicArtifactError::Flush { source, .. } | AtomicArtifactError::Commit { source, .. } => {
+            source.kind()
+        }
+    };
+    io::Error::new(kind, error)
 }
 
 /// Simple timestamp without chrono dependency
@@ -426,6 +490,7 @@ fn chrono_lite_now() -> String {
 
 #[cfg(test)]
 mod tests {
+    use rspice_output::stale_artifacts;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
@@ -439,6 +504,32 @@ mod tests {
             "rspice-waveform-{label}-{}-{unique}.raw",
             std::process::id()
         ))
+    }
+
+    fn seed_destination(path: &Path, preexisting: bool) {
+        if preexisting {
+            std::fs::write(path, b"old complete waveform").expect("seed existing waveform");
+        }
+    }
+
+    fn assert_old_or_absent(path: &Path, preexisting: bool) {
+        if preexisting {
+            assert_eq!(
+                std::fs::read(path).expect("read preserved waveform"),
+                b"old complete waveform"
+            );
+        } else {
+            assert!(!path.exists(), "failed stream published a destination");
+        }
+    }
+
+    fn assert_no_stages(path: &Path) {
+        assert!(
+            stale_artifacts(path)
+                .expect("inspect streaming staging artifacts")
+                .is_empty(),
+            "streaming writer left a staging artifact"
+        );
     }
 
     #[test]
@@ -484,33 +575,104 @@ mod tests {
             })
         ));
         assert_eq!(std::fs::read(&path).expect("read destination"), b"existing");
+        assert_no_stages(&path);
         std::fs::remove_file(path).expect("remove test waveform");
     }
 
     #[test]
     fn writer_preserves_typed_point_limit_errors() {
-        let path = temporary_path("point-limit");
-        let mut limits = ResourceLimits::default();
-        limits.max_analysis_points = 1;
-        let mut writer = StreamingWaveformWriter::new_with_limits(&path, &["V(out)"], 1, limits)
-            .expect("create limited writer");
-        writer
-            .write_point_checked(0.0, &[1.0])
-            .expect("first point fits");
+        for preexisting in [false, true] {
+            let path = temporary_path("point-limit");
+            seed_destination(&path, preexisting);
+            let mut limits = ResourceLimits::default();
+            limits.max_analysis_points = 1;
+            let mut writer =
+                StreamingWaveformWriter::new_with_limits(&path, &["V(out)"], 1, limits)
+                    .expect("create limited writer");
+            writer
+                .write_point_checked(0.0, &[1.0])
+                .expect("first point fits");
 
-        let error = writer
-            .write_point_checked(1.0, &[2.0])
-            .expect_err("second point exceeds the limit");
-        assert!(matches!(
-            error,
-            WaveformStreamError::ResourceLimit(ResourceLimitError {
-                resource: ResourceKind::AnalysisPoints,
-                requested: 2,
-                limit: 1,
-            })
-        ));
-        drop(writer);
-        std::fs::remove_file(path).expect("remove test waveform");
+            let error = writer
+                .write_point_checked(1.0, &[2.0])
+                .expect_err("second point exceeds the limit");
+            assert!(matches!(
+                error,
+                WaveformStreamError::ResourceLimit(ResourceLimitError {
+                    resource: ResourceKind::AnalysisPoints,
+                    requested: 2,
+                    limit: 1,
+                })
+            ));
+            assert_old_or_absent(&path, preexisting);
+            assert_no_stages(&path);
+            writer
+                .finalize()
+                .expect_err("a resource-limit error permanently aborts publication");
+            assert_old_or_absent(&path, preexisting);
+            assert_no_stages(&path);
+        }
+    }
+
+    #[test]
+    fn point_validation_error_aborts_publication_immediately() {
+        for preexisting in [false, true] {
+            let path = temporary_path("point-error");
+            seed_destination(&path, preexisting);
+            let mut writer = StreamingWaveformWriter::new(&path, &["V(out)"], 1)
+                .expect("create streaming writer");
+
+            writer
+                .write_point_checked(0.0, &[])
+                .expect_err("missing channel value must fail");
+
+            assert_old_or_absent(&path, preexisting);
+            assert_no_stages(&path);
+        }
+    }
+
+    #[test]
+    fn dropping_unfinalized_writer_aborts_publication() {
+        for preexisting in [false, true] {
+            let path = temporary_path("drop");
+            seed_destination(&path, preexisting);
+            let mut writer = StreamingWaveformWriter::new(&path, &["V(out)"], 1)
+                .expect("create streaming writer");
+            writer.write_point(0.0, &[1.0]).expect("write point");
+            writer.flush().expect("flush staged waveform");
+            assert_eq!(
+                stale_artifacts(&path)
+                    .expect("inspect active streaming stage")
+                    .len(),
+                1
+            );
+
+            drop(writer);
+
+            assert_old_or_absent(&path, preexisting);
+            assert_no_stages(&path);
+        }
+    }
+
+    #[test]
+    fn successful_finalize_publishes_complete_waveform() {
+        for preexisting in [false, true] {
+            let path = temporary_path("transaction-success");
+            seed_destination(&path, preexisting);
+            let mut writer = StreamingWaveformWriter::new(&path, &["V(out)"], 1)
+                .expect("create streaming writer");
+            writer.write_point(0.0, &[1.0]).expect("write point");
+            writer.write_point(1.0, &[2.0]).expect("write point");
+
+            assert_eq!(writer.finalize().expect("publish waveform"), 2);
+
+            let parsed = crate::io::ltspice_raw::parse_raw_file(&path)
+                .expect("published streaming RAW must parse");
+            assert_eq!(parsed.header.no_points, 2);
+            assert_eq!(parsed.waveforms[1].y, vec![1.0, 2.0]);
+            assert_no_stages(&path);
+            std::fs::remove_file(path).expect("remove test waveform");
+        }
     }
 
     /// What this writer emits is a SPICE RAW file, not a private format, and

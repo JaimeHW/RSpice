@@ -12,7 +12,7 @@
 
 use std::ffi::{OsStr, OsString};
 use std::fs::{File, OpenOptions};
-use std::io::{self, BufWriter, Write};
+use std::io::{self, BufWriter, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -148,6 +148,181 @@ where
     },
 }
 
+/// Seekable, same-directory staging file for a long-running artifact write.
+///
+/// All writes target a uniquely created sibling of the destination. Calling
+/// [`Self::commit`] flushes and synchronizes the completed file according to
+/// the configured durability policy, then atomically replaces the
+/// destination. Dropping this value without committing closes and removes the
+/// staging file, leaving an existing destination byte-identical.
+#[derive(Debug)]
+pub struct AtomicArtifactFile {
+    destination: PathBuf,
+    file: Option<File>,
+    cleanup: StagingCleanup,
+    options: AtomicArtifactOptions,
+}
+
+impl AtomicArtifactFile {
+    /// Prepare a seekable staging file beside `destination`.
+    pub fn prepare(
+        destination: &Path,
+        options: AtomicArtifactOptions,
+    ) -> Result<Self, AtomicArtifactError<io::Error>> {
+        Self::prepare_impl::<io::Error, _>(destination, options, &mut NoFaults)
+    }
+
+    /// Publish the completed staging file atomically.
+    ///
+    /// Errors before replacement leave the destination unchanged. A parent
+    /// directory synchronization error is reported with
+    /// [`DestinationState::PublishedDurabilityUncertain`] because replacement
+    /// has already occurred at that point.
+    pub fn commit(self) -> Result<(), AtomicArtifactError<io::Error>> {
+        self.commit_impl::<io::Error, _>(&mut NoFaults)
+    }
+
+    fn prepare_impl<E, H>(
+        destination: &Path,
+        options: AtomicArtifactOptions,
+        hooks: &mut H,
+    ) -> Result<Self, AtomicArtifactError<E>>
+    where
+        E: std::error::Error + 'static,
+        H: FaultHooks,
+    {
+        reject_symlink_destination(destination).map_err(AtomicArtifactError::Prepare)?;
+        let (staging_path, file) =
+            create_staging_file(destination).map_err(AtomicArtifactError::Prepare)?;
+        let artifact = Self {
+            destination: destination.to_path_buf(),
+            file: Some(file),
+            cleanup: StagingCleanup::new(staging_path),
+            options,
+        };
+
+        hooks
+            .check(FaultPoint::AfterPrepare)
+            .map_err(AtomicArtifactError::Prepare)?;
+        Ok(artifact)
+    }
+
+    fn commit_impl<E, H>(mut self, hooks: &mut H) -> Result<(), AtomicArtifactError<E>>
+    where
+        E: std::error::Error + 'static,
+        H: FaultHooks,
+    {
+        hooks
+            .check(FaultPoint::Flush)
+            .map_err(|source| AtomicArtifactError::Flush {
+                operation: FlushOperation::FlushBuffer,
+                source,
+            })?;
+        self.open_file_mut()
+            .and_then(Write::flush)
+            .map_err(|source| AtomicArtifactError::Flush {
+                operation: FlushOperation::FlushBuffer,
+                source,
+            })?;
+
+        if matches!(
+            self.options.durability,
+            Durability::SyncFile | Durability::SyncFileAndParent
+        ) {
+            self.open_file_mut()
+                .and_then(|file| file.sync_all())
+                .map_err(|source| AtomicArtifactError::Flush {
+                    operation: FlushOperation::SyncFile,
+                    source,
+                })?;
+        }
+
+        hooks
+            .check(FaultPoint::AfterFlush)
+            .map_err(precommit_error)?;
+        self.file.take();
+
+        hooks
+            .check(FaultPoint::BeforeCommit)
+            .map_err(precommit_error)?;
+        reject_symlink_destination(&self.destination).map_err(precommit_error)?;
+
+        let staging_path = self.cleanup.path().map_err(precommit_error)?.to_path_buf();
+        let replace_result = hooks.check(FaultPoint::Replace).and_then(|()| {
+            commit_staging_file(&staging_path, &self.destination, self.options.durability)
+        });
+        if let Err(source) = replace_result {
+            let recovery_path = match self.options.commit_failure {
+                CommitFailurePolicy::Cleanup => {
+                    self.cleanup.remove_now();
+                    None
+                }
+                CommitFailurePolicy::PreserveForRecovery => {
+                    self.cleanup.disarm();
+                    Some(staging_path)
+                }
+            };
+            return Err(AtomicArtifactError::Commit {
+                operation: CommitOperation::Replace,
+                destination_state: DestinationState::Unchanged,
+                recovery_path,
+                source,
+            });
+        }
+        self.cleanup.disarm();
+
+        if self.options.durability == Durability::SyncFileAndParent {
+            hooks
+                .check(FaultPoint::SyncParent)
+                .and_then(|()| sync_parent_directory(&self.destination))
+                .map_err(|source| AtomicArtifactError::Commit {
+                    operation: CommitOperation::SyncParent,
+                    destination_state: DestinationState::PublishedDurabilityUncertain,
+                    recovery_path: None,
+                    source,
+                })?;
+        }
+
+        Ok(())
+    }
+
+    fn open_file_mut(&mut self) -> io::Result<&mut File> {
+        self.file.as_mut().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "atomic artifact staging file is already closed",
+            )
+        })
+    }
+}
+
+impl Write for AtomicArtifactFile {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        self.open_file_mut()?.write(buffer)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.open_file_mut()?.flush()
+    }
+
+    fn write_vectored(&mut self, buffers: &[io::IoSlice<'_>]) -> io::Result<usize> {
+        self.open_file_mut()?.write_vectored(buffers)
+    }
+}
+
+impl Seek for AtomicArtifactFile {
+    fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
+        self.open_file_mut()?.seek(position)
+    }
+}
+
+impl Drop for AtomicArtifactFile {
+    fn drop(&mut self) {
+        self.file.take();
+        self.cleanup.remove_now();
+    }
+}
+
 /// Stream one artifact into a staging file and publish it atomically.
 ///
 /// The closure writes through a buffered stream. Returning an error (including
@@ -211,96 +386,20 @@ where
     F: FnOnce(&mut dyn Write) -> Result<(), E>,
     H: FaultHooks,
 {
-    reject_symlink_destination(destination).map_err(AtomicArtifactError::Prepare)?;
-    let (temporary_path, temporary_file) =
-        create_staging_file(destination).map_err(AtomicArtifactError::Prepare)?;
-    let mut cleanup = StagingCleanup::new(temporary_path.clone());
-
-    if let Err(source) = hooks.check(FaultPoint::AfterPrepare) {
-        // `StagingCleanup` was created after the open file and would otherwise
-        // run first during unwinding; close explicitly so Windows can unlink.
-        drop(temporary_file);
-        return Err(AtomicArtifactError::Prepare(source));
-    }
-
-    let mut writer = BufWriter::new(temporary_file);
+    let artifact = AtomicArtifactFile::prepare_impl::<E, _>(destination, options, hooks)?;
+    let mut writer = BufWriter::new(artifact);
     if let Err(source) = write(&mut writer) {
         drop(writer);
         return Err(AtomicArtifactError::Write(source));
     }
 
-    hooks
-        .check(FaultPoint::Flush)
-        .map_err(|source| AtomicArtifactError::Flush {
+    let artifact = writer
+        .into_inner()
+        .map_err(|error| AtomicArtifactError::Flush {
             operation: FlushOperation::FlushBuffer,
-            source,
+            source: error.into_error(),
         })?;
-    writer
-        .flush()
-        .map_err(|source| AtomicArtifactError::Flush {
-            operation: FlushOperation::FlushBuffer,
-            source,
-        })?;
-
-    if matches!(
-        options.durability,
-        Durability::SyncFile | Durability::SyncFileAndParent
-    ) {
-        writer
-            .get_ref()
-            .sync_all()
-            .map_err(|source| AtomicArtifactError::Flush {
-                operation: FlushOperation::SyncFile,
-                source,
-            })?;
-    }
-
-    hooks
-        .check(FaultPoint::AfterFlush)
-        .map_err(|source| precommit_error(source))?;
-    drop(writer);
-
-    hooks
-        .check(FaultPoint::BeforeCommit)
-        .map_err(|source| precommit_error(source))?;
-    reject_symlink_destination(destination).map_err(precommit_error)?;
-
-    let replace_result = hooks
-        .check(FaultPoint::Replace)
-        .and_then(|()| commit_staging_file(&temporary_path, destination, options.durability));
-    if let Err(source) = replace_result {
-        let recovery_path = match options.commit_failure {
-            CommitFailurePolicy::Cleanup => {
-                cleanup.remove_now();
-                None
-            }
-            CommitFailurePolicy::PreserveForRecovery => {
-                cleanup.disarm();
-                Some(temporary_path)
-            }
-        };
-        return Err(AtomicArtifactError::Commit {
-            operation: CommitOperation::Replace,
-            destination_state: DestinationState::Unchanged,
-            recovery_path,
-            source,
-        });
-    }
-    cleanup.disarm();
-
-    if options.durability == Durability::SyncFileAndParent {
-        hooks
-            .check(FaultPoint::SyncParent)
-            .and_then(|()| sync_parent_directory(destination))
-            .map_err(|source| AtomicArtifactError::Commit {
-                operation: CommitOperation::SyncParent,
-                destination_state: DestinationState::PublishedDurabilityUncertain,
-                recovery_path: None,
-                source,
-            })?;
-    }
-
-    Ok(())
+    artifact.commit_impl::<E, _>(hooks)
 }
 
 fn precommit_error<E>(source: io::Error) -> AtomicArtifactError<E>
@@ -446,6 +545,7 @@ fn sync_parent_directory(_destination: &Path) -> io::Result<()> {
     Ok(())
 }
 
+#[derive(Debug)]
 struct StagingCleanup {
     path: Option<PathBuf>,
 }
@@ -462,6 +562,15 @@ impl StagingCleanup {
         {
             self.path = Some(path);
         }
+    }
+
+    fn path(&self) -> io::Result<&Path> {
+        self.path.as_deref().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "atomic artifact staging path is already disarmed",
+            )
+        })
     }
 
     fn disarm(&mut self) {
@@ -563,6 +672,81 @@ mod tests {
             stale_artifacts(destination).expect("inspect staging artifacts"),
             Vec::<PathBuf>::new()
         );
+    }
+
+    #[test]
+    fn persistent_staging_drop_is_transactional() {
+        for preexisting in [false, true] {
+            let directory = TestDirectory::new("persistent-drop");
+            let destination = directory.destination();
+            seed(&destination, preexisting);
+
+            let mut artifact = AtomicArtifactFile::prepare(&destination, options())
+                .expect("prepare persistent staging file");
+            artifact
+                .write_all(b"partial replacement")
+                .expect("write staged bytes");
+            assert_eq!(
+                stale_artifacts(&destination)
+                    .expect("inspect active persistent staging artifact")
+                    .len(),
+                1
+            );
+            drop(artifact);
+
+            assert_old_or_absent(&destination, preexisting);
+            assert_no_stages(&destination);
+        }
+    }
+
+    #[test]
+    fn persistent_staging_commit_faults_are_transactional() {
+        for preexisting in [false, true] {
+            for fault in [
+                FaultPoint::Flush,
+                FaultPoint::AfterFlush,
+                FaultPoint::BeforeCommit,
+                FaultPoint::Replace,
+            ] {
+                let directory = TestDirectory::new("persistent-fault");
+                let destination = directory.destination();
+                seed(&destination, preexisting);
+                let mut artifact = AtomicArtifactFile::prepare(&destination, options())
+                    .expect("prepare persistent staging file");
+                artifact
+                    .write_all(b"complete replacement")
+                    .expect("write staged bytes");
+
+                artifact
+                    .commit_impl::<io::Error, _>(&mut InjectFault(fault))
+                    .expect_err("injected pre-publication fault must propagate");
+
+                assert_old_or_absent(&destination, preexisting);
+                assert_no_stages(&destination);
+            }
+        }
+    }
+
+    #[test]
+    fn persistent_staging_commit_replaces_only_with_complete_bytes() {
+        for preexisting in [false, true] {
+            let directory = TestDirectory::new("persistent-success");
+            let destination = directory.destination();
+            seed(&destination, preexisting);
+            let mut artifact = AtomicArtifactFile::prepare(&destination, options())
+                .expect("prepare persistent staging file");
+            artifact
+                .write_all(b"new complete artifact")
+                .expect("write complete staged artifact");
+
+            artifact.commit().expect("commit persistent artifact");
+
+            assert_eq!(
+                std::fs::read(&destination).expect("read committed artifact"),
+                b"new complete artifact"
+            );
+            assert_no_stages(&destination);
+        }
     }
 
     #[test]
