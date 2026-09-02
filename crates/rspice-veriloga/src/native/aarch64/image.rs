@@ -10,12 +10,14 @@ use super::codegen::{
     compile_fused_stamp_kernel, compile_loop_dispatch_function,
     compile_segmented_assignment_driver, compile_segmented_indexed_assignment_driver,
     compile_segmented_program, compile_segmented_value_driver, compile_value_function,
+    compile_value_function_from_ssa,
 };
 use super::unwind::{A64UnwindFunction, analyze_function};
 use super::verifier::{DirectBranchKind, VerifiedA64Code, verify_exact_function_at};
 use crate::native::assignment::{NativeAssignment, chunk_ranges, shareable_batch_ranges};
 use crate::native::expr::{NativeProgram, native_op_name};
 use crate::native::model::{CodeOffset, NativeEntryStarts};
+use crate::native::plan_program::{PlanProgram, PlanProgramRef};
 use crate::native::ssa::{AssignmentProgram, Program};
 use crate::native::value_cache::ValueEntryCache;
 use crate::native::{JitError, JitResult};
@@ -111,19 +113,47 @@ impl A64ImageBuilder {
         Ok(())
     }
 
+    /// Publish one plan entry, reusing an identical body if one is already in
+    /// the image.
+    ///
+    /// Both forms reach the same emitter, allocator and verifier: a postfix
+    /// entry is lifted into SSA as it always was, a block entry is already
+    /// there.
+    ///
+    /// The one thing only a postfix entry can do is *segment*. An A64 function
+    /// has an architectural size ceiling, and an entry over it is split into
+    /// numbered pieces behind a driver — a rewrite of the operand stream that
+    /// has no block-form counterpart, because a block program's control flow
+    /// does not survive being cut at an arbitrary operation. An oversized block
+    /// entry is therefore refused by name rather than mis-segmented.
     pub(super) fn append_value(
         &mut self,
-        program: &NativeProgram,
+        program: PlanProgramRef<'_>,
         entry_kind: &str,
     ) -> JitResult<CodeOffset> {
         if let Some(offset) = self.value_entries.lookup(program) {
             return Ok(offset);
         }
-        let bytes = compile_value_function(program)?;
+        let bytes = match program {
+            PlanProgramRef::Postfix(program) => compile_value_function(program)?,
+            PlanProgramRef::Blocks(program) => compile_value_function_from_ssa(program.ssa())?,
+        };
         let offset = if bytes.len() <= MAX_A64_FUNCTION_BYTES {
             self.append_function(bytes, entry_kind)
         } else {
-            self.append_segmented_value(program, entry_kind)
+            match program {
+                PlanProgramRef::Postfix(postfix) => {
+                    self.append_segmented_value(postfix, entry_kind)
+                }
+                PlanProgramRef::Blocks(_) => Err(program.unsupported(
+                    MODEL,
+                    &format!(
+                        "{entry_kind} needs {} bytes, over the {MAX_A64_FUNCTION_BYTES}-byte A64 \
+                         function ceiling, and only the postfix form can be segmented",
+                        bytes.len()
+                    ),
+                )),
+            }
         }?;
         self.value_entries.insert(program, offset);
         Ok(offset)
@@ -367,7 +397,7 @@ impl A64ImageBuilder {
     pub(super) fn append_fused_evaluation_kernel(
         &mut self,
         assignment: CodeOffset,
-        stamp_values: &[NativeProgram],
+        stamp_values: &[PlanProgram],
         stamp_value_entries: &[CodeOffset],
         published_current_pairs: &[Option<(usize, usize)>],
     ) -> JitResult<CodeOffset> {
@@ -395,8 +425,8 @@ impl A64ImageBuilder {
     pub(super) fn append_fused_stamp_kernel(
         &mut self,
         assignment: CodeOffset,
-        stamp_values: &[NativeProgram],
-        jacobians: &[Vec<NativeProgram>],
+        stamp_values: &[PlanProgram],
+        jacobians: &[Vec<PlanProgram>],
         stamp_value_entries: &[CodeOffset],
         jacobian_entries: &[Vec<CodeOffset>],
         published_current_pairs: &[Option<(usize, usize)>],

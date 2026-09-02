@@ -39,8 +39,8 @@ use std::borrow::Cow;
 use crate::canonical_ir::CanonicalIrArtifact;
 use crate::codegen::CompiledModel;
 use crate::jit::assignment::NativeAssignment;
-use crate::jit::expr::NativeProgram;
 use crate::jit::model_plan::NativeModelPlan;
+use crate::jit::plan_program::PlanProgramRef;
 use thiserror::Error;
 use wasm_encoder::{
     CodeSection, CustomSection, ExportKind, ExportSection, Function, FunctionSection,
@@ -313,7 +313,7 @@ fn emit_model_value_module(
     plan: &NativeModelPlan,
 ) -> WasmJitResult<WasmJitModelArtifact> {
     struct PlannedValue<'a> {
-        program: &'a NativeProgram,
+        program: PlanProgramRef<'a>,
         role: WasmJitValueRole,
     }
 
@@ -335,7 +335,7 @@ fn emit_model_value_module(
                 NativeAssignment::Direct { var_index, program } => {
                     let value_entry = u32_index(entries.len(), "scalar entry")?;
                     entries.push(PlannedValue {
-                        program,
+                        program: PlanProgramRef::Postfix(program),
                         role: WasmJitValueRole::Assignment {
                             phase,
                             path: path.clone(),
@@ -356,7 +356,7 @@ fn emit_model_value_module(
                 } => {
                     let index_entry = u32_index(entries.len(), "scalar entry")?;
                     entries.push(PlannedValue {
-                        program: index,
+                        program: PlanProgramRef::Postfix(index),
                         role: WasmJitValueRole::Assignment {
                             phase,
                             path: path.clone(),
@@ -365,7 +365,7 @@ fn emit_model_value_module(
                     });
                     let value_entry = u32_index(entries.len(), "scalar entry")?;
                     entries.push(PlannedValue {
-                        program: value,
+                        program: PlanProgramRef::Postfix(value),
                         role: WasmJitValueRole::Assignment {
                             phase,
                             path: path.clone(),
@@ -383,7 +383,7 @@ fn emit_model_value_module(
                 NativeAssignment::Loop { condition, body } => {
                     let condition_entry = u32_index(entries.len(), "scalar entry")?;
                     entries.push(PlannedValue {
-                        program: condition,
+                        program: PlanProgramRef::Postfix(condition),
                         role: WasmJitValueRole::Assignment {
                             phase,
                             path: path.clone(),
@@ -423,7 +423,7 @@ fn emit_model_value_module(
     for (parameter_index, program) in plan.parameter_defaults.iter().enumerate() {
         if let Some(program) = program {
             planned.push(PlannedValue {
-                program,
+                program: program.borrow(),
                 role: WasmJitValueRole::ParameterDefault {
                     parameter_index: u32_index(parameter_index, "parameter")?,
                 },
@@ -433,7 +433,7 @@ fn emit_model_value_module(
     for (stamp_index, program) in plan.static_conditions.iter().enumerate() {
         if let Some(program) = program {
             planned.push(PlannedValue {
-                program,
+                program: program.borrow(),
                 role: WasmJitValueRole::StaticCondition {
                     stamp_index: u32_index(stamp_index, "stamp")?,
                 },
@@ -447,7 +447,7 @@ fn emit_model_value_module(
     for (stamp_index, program) in plan.stamp_values.iter().enumerate() {
         stamp_value_entries.push(u32_index(planned.len(), "scalar entry")?);
         planned.push(PlannedValue {
-            program,
+            program: program.borrow(),
             role: WasmJitValueRole::StampValue {
                 stamp_index: u32_index(stamp_index, "stamp")?,
             },
@@ -458,7 +458,7 @@ fn emit_model_value_module(
         for (entry_index, program) in programs.iter().enumerate() {
             entries.push(u32_index(planned.len(), "scalar entry")?);
             planned.push(PlannedValue {
-                program,
+                program: program.borrow(),
                 role: WasmJitValueRole::Jacobian {
                     stamp_index: u32_index(stamp_index, "stamp")?,
                     entry_index: u32_index(entry_index, "Jacobian")?,
@@ -470,7 +470,7 @@ fn emit_model_value_module(
     for (stamp_index, programs) in plan.reactive_jacobians.iter().enumerate() {
         for (entry_index, program) in programs.iter().enumerate() {
             planned.push(PlannedValue {
-                program,
+                program: program.borrow(),
                 role: WasmJitValueRole::ReactiveJacobian {
                     stamp_index: u32_index(stamp_index, "stamp")?,
                     entry_index: u32_index(entry_index, "reactive Jacobian")?,
@@ -480,7 +480,7 @@ fn emit_model_value_module(
     }
     for (noise_index, program) in plan.noise_psd.iter().enumerate() {
         planned.push(PlannedValue {
-            program,
+            program: program.borrow(),
             role: WasmJitValueRole::NoisePowerSpectralDensity {
                 noise_index: u32_index(noise_index, "noise")?,
             },
@@ -489,7 +489,7 @@ fn emit_model_value_module(
     for (noise_index, program) in plan.noise_exponents.iter().enumerate() {
         if let Some(program) = program {
             planned.push(PlannedValue {
-                program,
+                program: program.borrow(),
                 role: WasmJitValueRole::NoiseExponent {
                     noise_index: u32_index(noise_index, "noise")?,
                 },
@@ -617,17 +617,17 @@ fn summarize_model_plan(
     let mut emitted_programs = Vec::new();
 
     fn include_program<'a>(
-        program: &'a NativeProgram,
+        program: PlanProgramRef<'a>,
         programs: &mut usize,
         operations: &mut usize,
         maximum_stack_depth: &mut usize,
-        emitted_programs: &mut Vec<&'a NativeProgram>,
+        emitted_programs: &mut Vec<PlanProgramRef<'a>>,
     ) -> WasmJitResult<()> {
         *programs = programs
             .checked_add(1)
             .ok_or_else(|| contract_error("model program count overflow"))?;
         *operations = operations
-            .checked_add(program.ops().len())
+            .checked_add(program.operation_count())
             .ok_or_else(|| contract_error("model operation count overflow"))?;
         *maximum_stack_depth = (*maximum_stack_depth).max(program.max_stack_depth());
         emitted_programs.push(program);
@@ -639,11 +639,11 @@ fn summarize_model_plan(
         programs: &mut usize,
         operations: &mut usize,
         maximum_stack_depth: &mut usize,
-        emitted_programs: &mut Vec<&'a NativeProgram>,
+        emitted_programs: &mut Vec<PlanProgramRef<'a>>,
     ) -> WasmJitResult<()> {
         match assignment {
             NativeAssignment::Direct { program, .. } => include_program(
-                program,
+                PlanProgramRef::Postfix(program),
                 programs,
                 operations,
                 maximum_stack_depth,
@@ -651,14 +651,14 @@ fn summarize_model_plan(
             ),
             NativeAssignment::Indexed { index, value, .. } => {
                 include_program(
-                    index,
+                    PlanProgramRef::Postfix(index),
                     programs,
                     operations,
                     maximum_stack_depth,
                     emitted_programs,
                 )?;
                 include_program(
-                    value,
+                    PlanProgramRef::Postfix(value),
                     programs,
                     operations,
                     maximum_stack_depth,
@@ -667,7 +667,7 @@ fn summarize_model_plan(
             }
             NativeAssignment::Loop { condition, body } => {
                 include_program(
-                    condition,
+                    PlanProgramRef::Postfix(condition),
                     programs,
                     operations,
                     maximum_stack_depth,
@@ -698,7 +698,7 @@ fn summarize_model_plan(
     }
     for program in plan.parameter_defaults.iter().flatten() {
         include_program(
-            program,
+            program.borrow(),
             &mut entry_programs,
             &mut operations,
             &mut maximum_stack_depth,
@@ -707,7 +707,7 @@ fn summarize_model_plan(
     }
     for program in plan.static_conditions.iter().flatten() {
         include_program(
-            program,
+            program.borrow(),
             &mut entry_programs,
             &mut operations,
             &mut maximum_stack_depth,
@@ -716,7 +716,7 @@ fn summarize_model_plan(
     }
     for program in &plan.stamp_values {
         include_program(
-            program,
+            program.borrow(),
             &mut entry_programs,
             &mut operations,
             &mut maximum_stack_depth,
@@ -725,7 +725,7 @@ fn summarize_model_plan(
     }
     for program in plan.jacobians.iter().flatten() {
         include_program(
-            program,
+            program.borrow(),
             &mut entry_programs,
             &mut operations,
             &mut maximum_stack_depth,
@@ -734,7 +734,7 @@ fn summarize_model_plan(
     }
     for program in plan.reactive_jacobians.iter().flatten() {
         include_program(
-            program,
+            program.borrow(),
             &mut entry_programs,
             &mut operations,
             &mut maximum_stack_depth,
@@ -743,7 +743,7 @@ fn summarize_model_plan(
     }
     for program in &plan.noise_psd {
         include_program(
-            program,
+            program.borrow(),
             &mut entry_programs,
             &mut operations,
             &mut maximum_stack_depth,
@@ -752,7 +752,7 @@ fn summarize_model_plan(
     }
     for program in plan.noise_exponents.iter().flatten() {
         include_program(
-            program,
+            program.borrow(),
             &mut entry_programs,
             &mut operations,
             &mut maximum_stack_depth,

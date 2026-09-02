@@ -14,10 +14,13 @@ use super::{
     WASM_JIT_ABI_VERSION, WASM_JIT_CONTRACT_SECTION, WASM_JIT_EMITTER_VERSION,
     WASM_JIT_IMPORT_MODULE, WASM_JIT_MEMORY_IMPORT, WasmJitError, WasmJitResult,
 };
+#[cfg(test)]
+use crate::jit::expr::NativeProgram;
 use crate::jit::expr::{
-    BinaryMathOp, CompareOp, ExtremumOp, IntegerBinaryOp, LogicalOp, NativeOp, NativeProgram,
-    UnaryMathOp, VoltageNode,
+    BinaryMathOp, CompareOp, ExtremumOp, IntegerBinaryOp, LogicalOp, NativeOp, UnaryMathOp,
+    VoltageNode,
 };
+use crate::jit::plan_program::PlanProgramRef;
 use crate::jit::ssa::{Instruction, Program, Terminator};
 
 pub(crate) const WASM_JIT_EVAL_HELPER_IMPORT: &str = "eval_op_v1";
@@ -194,7 +197,7 @@ pub(crate) struct WasmFusedKernel {
 
 #[cfg(test)]
 pub(crate) fn encode_value_program(program: &NativeProgram) -> WasmJitResult<Vec<u8>> {
-    encode_value_module(encode_value_body(program)?)
+    encode_value_module(encode_value_body(PlanProgramRef::Postfix(program))?)
 }
 
 /// Wrap one encoded value body in a single-entry module.
@@ -236,7 +239,7 @@ fn encode_value_module(body: Function) -> WasmJitResult<Vec<u8>> {
 }
 
 pub(crate) fn emit_verified_value_program_set(
-    programs: &[&NativeProgram],
+    programs: &[PlanProgramRef<'_>],
 ) -> WasmJitResult<Vec<u8>> {
     let bytes = encode_model_program_set(programs, &[], &[])?;
     verify_value_program_set(&bytes, programs)?;
@@ -244,7 +247,7 @@ pub(crate) fn emit_verified_value_program_set(
 }
 
 pub(crate) fn emit_verified_model_module(
-    programs: &[&NativeProgram],
+    programs: &[PlanProgramRef<'_>],
     kernels: &[WasmAssignmentKernel],
     fused: &[WasmFusedKernel],
 ) -> WasmJitResult<Vec<u8>> {
@@ -255,7 +258,7 @@ pub(crate) fn emit_verified_model_module(
 
 pub(crate) fn verify_value_program_set(
     bytes: &[u8],
-    expected_programs: &[&NativeProgram],
+    expected_programs: &[PlanProgramRef<'_>],
 ) -> WasmJitResult<()> {
     if bytes.len() > super::SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES {
         return Err(WasmJitError::ArtifactTooLarge {
@@ -280,7 +283,7 @@ pub(crate) fn verify_value_program_set(
 
 fn verify_model_module(
     bytes: &[u8],
-    expected_programs: &[&NativeProgram],
+    expected_programs: &[PlanProgramRef<'_>],
     kernels: &[WasmAssignmentKernel],
     fused: &[WasmFusedKernel],
 ) -> WasmJitResult<()> {
@@ -319,13 +322,13 @@ fn verify_model_module(
 }
 
 fn encode_model_program_set(
-    programs: &[&NativeProgram],
+    programs: &[PlanProgramRef<'_>],
     kernels: &[WasmAssignmentKernel],
     fused: &[WasmFusedKernel],
 ) -> WasmJitResult<Vec<u8>> {
     let value_bodies = programs
         .iter()
-        .map(|program| encode_value_body(program))
+        .map(|program| encode_value_body(*program))
         .collect::<WasmJitResult<Vec<_>>>()?;
     let function_count = u32::try_from(value_bodies.len())
         .map_err(|_| WasmJitError::Encoding("model entry count exceeds u32".into()))?;
@@ -398,9 +401,20 @@ fn encode_model_program_set(
     Ok(module.finish())
 }
 
-fn encode_value_body(program: &NativeProgram) -> WasmJitResult<Function> {
-    let ssa = Program::lower(program).map_err(|error| WasmJitError::Encoding(error.to_string()))?;
-    encode_value_body_from_ssa(&ssa)
+/// Encode one plan entry.
+///
+/// Both forms reach the same encoder, the same helper imports and the same
+/// module validator: a postfix entry is lifted into SSA the way it always was,
+/// and a block entry is already in that form.
+fn encode_value_body(program: PlanProgramRef<'_>) -> WasmJitResult<Function> {
+    match program {
+        PlanProgramRef::Postfix(program) => {
+            let ssa = Program::lower(program)
+                .map_err(|error| WasmJitError::Encoding(error.to_string()))?;
+            encode_value_body_from_ssa(&ssa)
+        }
+        PlanProgramRef::Blocks(program) => encode_value_body_from_ssa(program.ssa()),
+    }
 }
 
 /// Encode one already-lowered value entry.
@@ -2661,7 +2675,7 @@ mod tests {
         let value = program(vec![NativeOp::Const(7.0)], 1);
         let index = program(vec![NativeOp::Const(1.0)], 1);
         let condition = program(vec![NativeOp::Const(0.0)], 1);
-        let programs = [&value, &index, &condition];
+        let programs = [&value, &index, &condition].map(PlanProgramRef::Postfix);
         let kernels = [WasmAssignmentKernel {
             export_name: WASM_JIT_ASSIGNMENT_EXPORT,
             assignments: vec![
@@ -2713,7 +2727,7 @@ mod tests {
         let index = program(vec![NativeOp::Const(1.0)], 1);
         let condition = program(vec![NativeOp::LoadVariable(4)], 1);
         let zero = program(vec![NativeOp::Const(0.0)], 1);
-        let programs = [&seven, &index, &condition, &zero];
+        let programs = [&seven, &index, &condition, &zero].map(PlanProgramRef::Postfix);
         let kernels = [WasmAssignmentKernel {
             export_name: WASM_JIT_ASSIGNMENT_EXPORT,
             assignments: vec![
@@ -2885,7 +2899,10 @@ mod tests {
         let programs = (0_u8..=8)
             .map(|analysis_id| program(vec![NativeOp::Analysis(analysis_id)], 1))
             .collect::<Vec<_>>();
-        let program_refs = programs.iter().collect::<Vec<_>>();
+        let program_refs = programs
+            .iter()
+            .map(PlanProgramRef::Postfix)
+            .collect::<Vec<_>>();
         let bytes = emit_verified_value_program_set(&program_refs)
             .expect("encode analysis-mask model module");
 

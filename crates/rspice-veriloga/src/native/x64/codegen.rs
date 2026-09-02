@@ -25,6 +25,7 @@ use super::{
     CompiledX64Function, WindowsX64UnwindInfo, WindowsX64UnwindOperation, X64DataKind,
     X64DataRange, X64FunctionBody, X64RipRelativeRelocation,
 };
+use crate::jit::plan_program::PlanProgram;
 use crate::native::abi::NativeRuntimeStatus;
 use crate::native::abi::{
     INTEGER_CAST_DESCRIPTOR, integer_binary_const_descriptor, integer_binary_descriptor,
@@ -234,8 +235,8 @@ fn compile_assignment_function_artifact(
 pub(super) fn compile_fused_stamp_kernel_artifact(
     kernel_image_offset: usize,
     assignment: crate::native::model::CodeOffset,
-    stamp_values: &[NativeProgram],
-    jacobians: &[Vec<NativeProgram>],
+    stamp_values: &[PlanProgram],
+    jacobians: &[Vec<PlanProgram>],
     published_current_pairs: &[Option<(usize, usize)>],
 ) -> JitResult<CompiledX64Function> {
     compile_fused_kernel_artifact(
@@ -251,8 +252,8 @@ pub(super) fn compile_fused_stamp_kernel_artifact(
 fn compile_fused_kernel_artifact(
     kernel_image_offset: usize,
     assignment: crate::native::model::CodeOffset,
-    stamp_values: &[NativeProgram],
-    jacobians: Option<&[Vec<NativeProgram>]>,
+    stamp_values: &[PlanProgram],
+    jacobians: Option<&[Vec<PlanProgram>]>,
     published_current_pairs: &[Option<(usize, usize)>],
     kernel_name: &str,
 ) -> JitResult<CompiledX64Function> {
@@ -265,9 +266,13 @@ fn compile_fused_kernel_artifact(
         });
     }
 
+    // The kernel inlines its entries rather than calling them, so it needs each
+    // one in block form. A postfix entry is lifted exactly as it always was; a
+    // block entry is already there. `emit_allocated_program` emits real
+    // branches, so a multi-block entry inlines like any other.
     let value_ssa = stamp_values
         .iter()
-        .map(X64SsaProgram::lower)
+        .map(|program| program.borrow().lower_to_ssa())
         .collect::<JitResult<Vec<_>>>()?;
     let jacobian_ssa = jacobians
         .map(|entries| {
@@ -276,7 +281,7 @@ fn compile_fused_kernel_artifact(
                 .map(|stamp| {
                     stamp
                         .iter()
-                        .map(X64SsaProgram::lower)
+                        .map(|program| program.borrow().lower_to_ssa())
                         .collect::<JitResult<Vec<_>>>()
                 })
                 .collect::<JitResult<Vec<_>>>()
@@ -4805,6 +4810,7 @@ mod tests {
         rspice_exp, value_program_needs_saved_entry_args,
     };
     use crate::codegen::{BytecodeProgram, Instruction, LookupTable};
+    use crate::jit::plan_program::PlanProgram;
     use crate::laplace::StateSpaceFilter;
     use crate::native::expr::{
         BinaryMathOp, CompareOp, EntryKind, ExtremumOp, IntegerBinaryOp, LogicalOp,
@@ -4999,12 +5005,12 @@ mod tests {
 
     #[test]
     fn fused_stamp_kernel_inlines_value_and_jacobian_programs() {
-        let value = NativeProgram::from_ops_for_test(
+        let value = PlanProgram::Postfix(NativeProgram::from_ops_for_test(
             vec![NativeOp::LoadVariable(0)],
             1,
             Vec::new(),
             Vec::new(),
-        );
+        ));
         let artifact = super::compile_fused_stamp_kernel_artifact(
             1024,
             CodeOffset::new(0),
