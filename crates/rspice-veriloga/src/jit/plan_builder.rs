@@ -13,6 +13,7 @@ use super::expr::{
     native_op_stack_effect, pair_canonical_state_slots,
 };
 use super::model_plan::NativeModelPlan;
+use super::plan_program::PlanProgram;
 use super::{JitError, JitResult};
 use crate::canonical_ir::{
     CanonicalIrArtifact, CanonicalStateOperator, EquationId, ExprId, HirAnalogOperator,
@@ -118,6 +119,7 @@ fn build_model_plan_inner(
                         program,
                         base_limits,
                     )
+                    .map(PlanProgram::Postfix)
                 })
                 .transpose()
         })
@@ -156,6 +158,7 @@ fn build_model_plan_inner(
                     condition,
                     base_limits,
                 )
+                .map(PlanProgram::Postfix)
             })
             .transpose()?;
         static_condition_branch_unknown_dependencies.push(
@@ -168,13 +171,13 @@ fn build_model_plan_inner(
         let value_limits = base_limits
             .with_available_current_pairs(&available_current_pairs)
             .with_prior_current_probes(&prior_current_probes);
-        let value = lower_stamp_value_program(
+        let value = PlanProgram::Postfix(lower_stamp_value_program(
             model,
             canonical_mir,
             stamp_index,
             &stamp.value_program,
             value_limits,
-        )?;
+        )?);
         stamp_value_current_dependencies.push(value.current_pair_dependencies().to_vec());
         stamp_value_prior_current_dependencies.push(value.prior_current_dependencies().to_vec());
         stamp_value_branch_unknown_dependencies.push(value.branch_unknown_dependencies().to_vec());
@@ -221,14 +224,14 @@ fn build_model_plan_inner(
         let mut stamp_jacobian_branch_unknown_dependencies =
             Vec::with_capacity(stamp.jacobian_programs.len());
         for jacobian in &stamp.jacobian_programs {
-            let program = lower_jacobian_program(
+            let program = PlanProgram::Postfix(lower_jacobian_program(
                 model,
                 canonical_mir,
                 stamp_index,
                 jacobian,
                 jacobian_limits,
                 &jacobian_table_lookup_slots,
-            )?;
+            )?);
             stamp_jacobian_current_dependencies.push(program.current_pair_dependencies().to_vec());
             stamp_jacobian_prior_current_dependencies
                 .push(program.prior_current_dependencies().to_vec());
@@ -257,13 +260,13 @@ fn build_model_plan_inner(
         let mut stamp_reactive_jacobian_branch_unknown_dependencies =
             Vec::with_capacity(stamp.reactive_jacobians.len());
         for reactive_jacobian in &stamp.reactive_jacobians {
-            let program = lower_reactive_jacobian_program(
+            let program = PlanProgram::Postfix(lower_reactive_jacobian_program(
                 model,
                 canonical_reactive_mir.as_ref(),
                 stamp_index,
                 reactive_jacobian,
                 base_limits,
-            )?;
+            )?);
             stamp_reactive_jacobian_current_dependencies
                 .push(program.current_pair_dependencies().to_vec());
             stamp_reactive_jacobian_prior_current_dependencies
@@ -309,14 +312,14 @@ fn build_model_plan_inner(
     let mut noise_exponent_branch_unknown_dependencies =
         Vec::with_capacity(model.noise_sources.len());
     for (source_index, source) in model.noise_sources.iter().enumerate() {
-        let psd = lower_noise_psd_program(
+        let psd = PlanProgram::Postfix(lower_noise_psd_program(
             model,
             canonical_noise_plan.as_ref(),
             source_index,
             source,
             &source.psd_program,
             noise_limits,
-        )?;
+        )?);
         noise_psd_current_dependencies.push(psd.current_pair_dependencies().to_vec());
         noise_psd_prior_current_dependencies.push(psd.prior_current_dependencies().to_vec());
         noise_psd_branch_unknown_dependencies.push(psd.branch_unknown_dependencies().to_vec());
@@ -334,6 +337,7 @@ fn build_model_plan_inner(
                     program,
                     noise_limits,
                 )
+                .map(PlanProgram::Postfix)
             })
             .transpose()?;
         noise_exponent_current_dependencies.push(
