@@ -1,13 +1,31 @@
 use super::*;
 
 const TXL_MIN_INDUCTANCE: f64 = 1.0e-12;
-const LTRA_SUPPORTED_SHUNT_CONDUCTANCE_ABS: f64 = 1.0e-18;
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(in crate::engine::builder) enum TransmissionLineModelKind {
     #[default]
     Ltra,
     Txl,
+}
+
+/// Authoritative native scalar-LTRA model class.
+///
+/// Keep this classification exact: RLGC values are per-unit-length physical
+/// parameters, so an absolute epsilon cannot decide whether authored shunt
+/// conductance is negligible over an arbitrary line length.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::engine::builder) enum LtraModelClass {
+    /// Finite-length RLC or lossless LC line (`L > 0`, `C > 0`, `G = 0`).
+    RlcLc,
+    /// Finite-length RC diffusion line (`R > 0`, `C > 0`, `L = G = 0`).
+    Rc,
+    /// Finite-length memoryless RG line (`R > 0`, `G > 0`, `L = C = 0`).
+    ///
+    /// This class is recognized so it cannot fall through to a synthetic
+    /// lossless line, but its native execution stamps are a follow-up slice.
+    Rg,
+    /// Xyce's exact `LEN=0` RC/RG ideal-through special case.
+    ZeroLengthThrough,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -23,6 +41,7 @@ pub(in crate::engine::builder) enum LtraInterpolationMode {
 #[derive(Debug, Clone, Copy, Default)]
 pub(in crate::engine::builder) struct TransmissionLineModelParams {
     pub(in crate::engine::builder) kind: TransmissionLineModelKind,
+    pub(in crate::engine::builder) ltra_class: Option<LtraModelClass>,
     pub(in crate::engine::builder) z0: Option<f64>,
     pub(in crate::engine::builder) td: Option<f64>,
     pub(in crate::engine::builder) freq: Option<f64>,
@@ -74,33 +93,15 @@ impl TransmissionLineModelParams {
     /// must therefore bypass the delayed-wave kernel entirely.
     #[inline]
     pub(in crate::engine::builder) fn is_zero_length_rc_rg(self) -> bool {
-        if self.kind != TransmissionLineModelKind::Ltra
-            || self.len != Some(0.0)
-            || !self.r.is_some_and(|r| r.is_finite() && r > 0.0)
-            || self.l.is_some_and(|l| !l.is_finite() || l != 0.0)
-        {
-            return false;
-        }
-
-        let g_zero = self.g.unwrap_or(0.0);
-        let c_zero = self.c.unwrap_or(0.0);
-        let rc =
-            self.c.is_some_and(|c| c.is_finite() && c > 0.0) && g_zero.is_finite() && g_zero == 0.0;
-        let rg =
-            self.g.is_some_and(|g| g.is_finite() && g > 0.0) && c_zero.is_finite() && c_zero == 0.0;
-        rc || rg
+        self.kind == TransmissionLineModelKind::Ltra
+            && self.ltra_class == Some(LtraModelClass::ZeroLengthThrough)
     }
 
     /// Return whether this is the finite-length RC special case implemented
     /// by the native scalar LTRA convolution runtime.
     #[inline]
     pub(in crate::engine::builder) fn is_finite_rc(self) -> bool {
-        self.kind == TransmissionLineModelKind::Ltra
-            && self.r.is_some_and(|r| r.is_finite() && r > 0.0)
-            && self.c.is_some_and(|c| c.is_finite() && c > 0.0)
-            && self.len.is_some_and(|len| len.is_finite() && len > 0.0)
-            && self.l.is_none_or(|l| l.is_finite() && l == 0.0)
-            && self.g.is_none_or(|g| g.is_finite() && g == 0.0)
+        self.kind == TransmissionLineModelKind::Ltra && self.ltra_class == Some(LtraModelClass::Rc)
     }
 }
 
@@ -128,6 +129,41 @@ fn enabled_model_flag(params: &[(String, f64)], name: &str) -> bool {
         .rev()
         .find(|(param_name, _)| param_name.eq_ignore_ascii_case(name))
         .is_some_and(|(_, value)| value.is_finite() && *value != 0.0)
+}
+
+fn canonical_ltra_primary_parameter(name: &str) -> Option<&'static str> {
+    if name.eq_ignore_ascii_case("R") || name.eq_ignore_ascii_case("R0") {
+        Some("R")
+    } else if name.eq_ignore_ascii_case("L") || name.eq_ignore_ascii_case("L0") {
+        Some("L")
+    } else if name.eq_ignore_ascii_case("G") || name.eq_ignore_ascii_case("G0") {
+        Some("G")
+    } else if name.eq_ignore_ascii_case("C") || name.eq_ignore_ascii_case("C0") {
+        Some("C")
+    } else if name.eq_ignore_ascii_case("LEN") || name.eq_ignore_ascii_case("LENGTH") {
+        Some("LEN")
+    } else {
+        None
+    }
+}
+
+fn validate_ltra_primary_parameter_uniqueness(
+    model_name: &str,
+    params: &[(String, f64)],
+) -> Result<(), SimulationError> {
+    let mut seen = std::collections::BTreeMap::<&'static str, &str>::new();
+    for (name, _) in params {
+        let Some(canonical) = canonical_ltra_primary_parameter(name) else {
+            continue;
+        };
+        if let Some(previous) = seen.insert(canonical, name) {
+            return Err(SimulationError::Circuit(format!(
+                "LTRA model '{}' specifies {} more than once via '{}' and '{}'",
+                model_name, canonical, previous, name
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -164,6 +200,7 @@ pub(in crate::engine::builder) fn resolve_tline_model_params(
         } else {
             TransmissionLineModelKind::Ltra
         },
+        ltra_class: None,
         z0: model_param(&model.params, &["Z0", "ZO"]),
         td: model_param(&model.params, &["TD", "TDELAY"]),
         freq: model_param(&model.params, &["F", "FREQ"]),
@@ -187,6 +224,7 @@ pub(in crate::engine::builder) fn resolve_tline_model_params(
     if params.kind == TransmissionLineModelKind::Txl {
         params = finalize_txl_model_params(model_name, params)?;
     } else {
+        validate_ltra_primary_parameter_uniqueness(model_name, &model.params)?;
         params = finalize_ltra_model_params(model_name, params)?;
     }
 
@@ -262,6 +300,7 @@ pub fn validate_native_xyce_ltra_model_contract(
         "R",
         "L",
         "G",
+        "G0",
         "C",
         "LEN",
         "REL",
@@ -277,17 +316,22 @@ pub fn validate_native_xyce_ltra_model_contract(
     ];
     let mut seen = std::collections::BTreeSet::new();
     for (name, value) in &model.params {
-        let canonical = name.to_ascii_uppercase();
-        if !SUPPORTED.contains(&canonical.as_str()) {
+        let authored = name.to_ascii_uppercase();
+        if !SUPPORTED.contains(&authored.as_str()) {
             return Err(SimulationError::Circuit(format!(
                 "LTRA model '{}' uses unsupported parameter '{}'",
                 model.name, name
             )));
         }
+        let canonical = match authored.as_str() {
+            "G0" => "G".to_string(),
+            "LENGTH" => "LEN".to_string(),
+            _ => authored,
+        };
         if !seen.insert(canonical) {
             return Err(SimulationError::Circuit(format!(
-                "LTRA model '{}' repeats parameter '{}'",
-                model.name, name
+                "LTRA model '{}' repeats parameter or alias '{}'",
+                model.name, name,
             )));
         }
         if !value.is_finite() {
@@ -301,40 +345,19 @@ pub fn validate_native_xyce_ltra_model_contract(
     let params = resolve_tline_model_params(netlist, model_name)?.ok_or_else(|| {
         SimulationError::Circuit(format!("LTRA model '{model_name}' is not defined"))
     })?;
-    if params.is_zero_length_rc_rg() {
-        return Ok(());
-    }
-
-    if params.is_finite_rc() {
-        return Ok(());
-    }
-
-    let (Some(r), Some(l), Some(c), Some(len), Some(z0), Some(td)) = (
-        params.r, params.l, params.c, params.len, params.z0, params.td,
-    ) else {
-        return Err(SimulationError::Circuit(format!(
-            "LTRA model '{}' requires explicit finite R, L, C, and LEN parameters",
+    match params.ltra_class {
+        Some(LtraModelClass::RlcLc | LtraModelClass::Rc | LtraModelClass::ZeroLengthThrough) => {
+            Ok(())
+        }
+        Some(LtraModelClass::Rg) => Err(SimulationError::Circuit(format!(
+            "LTRA model '{}' is finite-length RG, whose native execution stamps are not implemented",
             model.name
-        )));
-    };
-    let g = params.g.unwrap_or(0.0);
-    if params.is_txl()
-        || r < 0.0
-        || l <= 0.0
-        || c <= 0.0
-        || len <= 0.0
-        || g.abs() > LTRA_SUPPORTED_SHUNT_CONDUCTANCE_ABS
-        || !z0.is_finite()
-        || z0 <= 0.0
-        || !td.is_finite()
-        || td <= 0.0
-    {
-        return Err(SimulationError::Circuit(format!(
-            "LTRA model '{}' is outside the native finite RLC, G=0 contract",
+        ))),
+        None => Err(SimulationError::Circuit(format!(
+            "LTRA model '{}' has no classified native scalar semantics",
             model.name
-        )));
+        ))),
     }
-    Ok(())
 }
 
 fn require_txl_param(
@@ -380,67 +403,93 @@ fn validate_optional_ltra_non_negative(
     Ok(())
 }
 
-fn validate_optional_ltra_positive(
+fn classify_ltra_model_params(
     model_name: &str,
-    param_name: &str,
-    value: Option<f64>,
-) -> Result<(), SimulationError> {
-    let Some(value) = value else {
-        return Ok(());
-    };
-    if !value.is_finite() {
+    params: TransmissionLineModelParams,
+) -> Result<LtraModelClass, SimulationError> {
+    let len = params.len.ok_or_else(|| {
+        SimulationError::Circuit(format!(
+            "LTRA model '{}' requires an explicit LEN/LENGTH parameter",
+            model_name
+        ))
+    })?;
+    let r = params.r.unwrap_or(0.0);
+    let l = params.l.unwrap_or(0.0);
+    let g = params.g.unwrap_or(0.0);
+    let c = params.c.unwrap_or(0.0);
+
+    let rc = r > 0.0 && c > 0.0 && l == 0.0 && g == 0.0;
+    let rg = r > 0.0 && g > 0.0 && l == 0.0 && c == 0.0;
+    if len == 0.0 {
+        if rc || rg {
+            return Ok(LtraModelClass::ZeroLengthThrough);
+        }
         return Err(SimulationError::Circuit(format!(
-            "LTRA model '{}' has non-finite {}={}",
-            model_name, param_name, value
+            "LTRA model '{}' has LEN=0 but is not an RC or RG ideal-through special case",
+            model_name
         )));
     }
-    if value <= 0.0 {
+
+    if g > 0.0 {
+        if rg {
+            return Ok(LtraModelClass::Rg);
+        }
         return Err(SimulationError::Circuit(format!(
-            "LTRA model '{}' has invalid {}={} (must be > 0)",
-            model_name, param_name, value
+            "LTRA model '{}' uses finite nonzero G={}; nonzero G is valid only for a pure RG line with R>0 and L=C=0",
+            model_name, g
         )));
     }
-    Ok(())
+    if l > 0.0 && c > 0.0 {
+        return Ok(LtraModelClass::RlcLc);
+    }
+    if rc {
+        return Ok(LtraModelClass::Rc);
+    }
+
+    Err(SimulationError::Circuit(format!(
+        "LTRA model '{}' has unsupported or ambiguous RLGC combination R={}, L={}, G={}, C={}, LEN={}; expected finite RLC/LC, RC, RG, or LEN=0 RC/RG semantics",
+        model_name, r, l, g, c, len
+    )))
 }
 
 fn finalize_ltra_model_params(
     model_name: &str,
-    params: TransmissionLineModelParams,
+    mut params: TransmissionLineModelParams,
 ) -> Result<TransmissionLineModelParams, SimulationError> {
     validate_optional_ltra_non_negative(model_name, "R", params.r)?;
-    let zero_length = params.len == Some(0.0);
-    if let Some(g) = params.g {
-        if !g.is_finite() {
-            return Err(SimulationError::Circuit(format!(
-                "LTRA model '{}' has non-finite G={}",
-                model_name, g
-            )));
-        }
-        if !zero_length && g.abs() > LTRA_SUPPORTED_SHUNT_CONDUCTANCE_ABS {
-            return Err(SimulationError::Circuit(format!(
-                "LTRA model '{}' uses unsupported G={}; use G=0 for the native LTRA runtime",
-                model_name, g
-            )));
-        }
-    }
-    if params.is_zero_length_rc_rg() {
-        // The special-case predicate already enforces the exact finite RC/RG
-        // value domain (including R>0 and LEN=0).  Keep the shared optional
-        // validation for the remaining tolerance controls below.
-    } else if params.is_finite_rc() {
-        // Finite RC cards intentionally carry L=0 (or omit L) and G=0 (or
-        // omit G).  The predicate enforces the strict R>0/C>0/LEN>0 domain.
-        validate_optional_ltra_positive(model_name, "C", params.c)?;
-        validate_optional_ltra_positive(model_name, "LENGTH", params.len)?;
-    } else {
-        validate_optional_ltra_positive(model_name, "L", params.l)?;
-        validate_optional_ltra_positive(model_name, "C", params.c)?;
-        validate_optional_ltra_positive(model_name, "LENGTH", params.len)?;
-    }
+    validate_optional_ltra_non_negative(model_name, "L", params.l)?;
+    validate_optional_ltra_non_negative(model_name, "G", params.g)?;
+    validate_optional_ltra_non_negative(model_name, "C", params.c)?;
+    validate_optional_ltra_non_negative(model_name, "LENGTH", params.len)?;
     validate_optional_ltra_non_negative(model_name, "REL", params.rel)?;
     validate_optional_ltra_non_negative(model_name, "ABS", params.abs)?;
     validate_optional_ltra_non_negative(model_name, "COMPACTREL", params.compactrel)?;
     validate_optional_ltra_non_negative(model_name, "COMPACTABS", params.compactabs)?;
+
+    for (name, value) in [
+        ("Z0", params.z0),
+        ("TD", params.td),
+        ("FREQ", params.freq),
+        ("NL", params.nl),
+        ("ALPHA", params.alpha),
+        ("ATTEN", params.atten),
+    ] {
+        if value.is_some() {
+            return Err(SimulationError::Circuit(format!(
+                "LTRA model '{}' uses {} outside the distributed RLGC model contract",
+                model_name, name
+            )));
+        }
+    }
+
+    let class = classify_ltra_model_params(model_name, params)?;
+    if class == LtraModelClass::Rg {
+        return Err(SimulationError::Circuit(format!(
+            "LTRA model '{}' is a finite-length RG line (R>0, G>0, L=C=0), whose native execution stamps are not implemented; only LEN=0 RG is currently supported",
+            model_name
+        )));
+    }
+    params.ltra_class = Some(class);
     Ok(params)
 }
 
@@ -813,25 +862,25 @@ mod tests {
     fn ltra_interpolation_flags_select_requested_mode() {
         let default = resolve_test_tline(
             r#"title
-.model y ltra z0=50 td=1n
+.model y ltra r=1 l=1n g=0 c=1p len=1
 .end
 "#,
         );
         let lin = resolve_test_tline(
             r#"title
-.model y ltra z0=50 td=1n lininterp
+.model y ltra r=1 l=1n g=0 c=1p len=1 lininterp
 .end
 "#,
         );
         let quad = resolve_test_tline(
             r#"title
-.model y ltra z0=50 td=1n quadinterp
+.model y ltra r=1 l=1n g=0 c=1p len=1 quadinterp
 .end
 "#,
         );
         let mixed = resolve_test_tline(
             r#"title
-.model y ltra z0=50 td=1n mixedinterp
+.model y ltra r=1 l=1n g=0 c=1p len=1 mixedinterp
 .end
 "#,
         );
@@ -854,6 +903,7 @@ mod tests {
         assert_eq!(rc.r, Some(0.05));
         assert_eq!(rc.c, Some(20e-12));
         assert_eq!(rc.len, Some(0.0));
+        assert_eq!(rc.ltra_class, Some(LtraModelClass::ZeroLengthThrough));
 
         let rg = resolve_test_tline(
             r#"title
@@ -865,6 +915,7 @@ mod tests {
         assert_eq!(rg.r, Some(0.05));
         assert_eq!(rg.g, Some(20.0));
         assert_eq!(rg.len, Some(0.0));
+        assert_eq!(rg.ltra_class, Some(LtraModelClass::ZeroLengthThrough));
     }
 
     #[test]
@@ -885,6 +936,18 @@ mod tests {
             assert_eq!(resolved.r, Some(1.0));
             assert_eq!(resolved.c, Some(1e-12));
             assert_eq!(resolved.len, Some(1.0));
+            assert_eq!(resolved.ltra_class, Some(LtraModelClass::Rc));
+        }
+    }
+
+    #[test]
+    fn ltra_finite_rlc_and_lc_receive_one_authoritative_class() {
+        for line in [
+            ".model y ltra r=1 l=1n g=0 c=1p len=1",
+            ".model y ltra l=1n c=1p len=1",
+        ] {
+            let resolved = resolve_test_tline(&format!("title\n{line}\n.end\n"));
+            assert_eq!(resolved.ltra_class, Some(LtraModelClass::RlcLc));
         }
     }
 
@@ -926,8 +989,68 @@ mod tests {
 "#,
         );
 
-        assert!(err.to_string().contains("unsupported G"), "{err}");
-        assert!(err.to_string().contains("use G=0"), "{err}");
+        assert!(err.to_string().contains("finite nonzero G"), "{err}");
+        assert!(err.to_string().contains("pure RG line"), "{err}");
+    }
+
+    #[test]
+    fn ltra_rejects_every_tiny_nonzero_g_outside_zero_length_rg() {
+        for g in [1.0e-30_f64, -1.0e-30_f64] {
+            let err = resolve_test_tline_err(&format!(
+                "title\n.model y ltra r=1 l=1n g={g:e} c=1p len=1e30\n.end\n"
+            ));
+            let text = err.to_string();
+            if g.is_sign_negative() {
+                assert!(text.contains("invalid G="), "{err}");
+                assert!(text.contains("must be >= 0"), "{err}");
+            } else {
+                assert!(text.contains("finite nonzero G"), "{err}");
+            }
+        }
+    }
+
+    #[test]
+    fn ltra_classifies_but_rejects_finite_rg_until_native_stamps_exist() {
+        let err = resolve_test_tline_err(
+            r#"title
+.model y ltra r=3 g=1u len=10
+.end
+"#,
+        );
+        assert!(err.to_string().contains("finite-length RG line"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("native execution stamps are not implemented"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn ltra_rejects_unclassified_cards_before_synthetic_line_defaults() {
+        for line in [
+            ".model y ltra",
+            ".model y ltra r=1 len=1",
+            ".model y ltra l=1n len=1",
+            ".model y ltra c=1p len=1",
+            ".model y ltra g=1u len=1",
+            ".model y ltra r=1 l=1n len=1",
+            ".model y ltra l=1n g=0 c=1p",
+            ".model y ltra z0=50 td=1n",
+        ] {
+            let err = resolve_test_tline_err(&format!("title\n{line}\n.end\n"));
+            assert!(err.to_string().contains("LTRA model 'y'"), "{line}: {err}");
+        }
+    }
+
+    #[test]
+    fn ltra_rejects_duplicate_primary_aliases() {
+        for line in [
+            ".model y ltra r=1 l=1n g=0 g0=0 c=1p len=1",
+            ".model y ltra r=1 l=1n c=1p len=1 length=1",
+        ] {
+            let err = resolve_test_tline_err(&format!("title\n{line}\n.end\n"));
+            assert!(err.to_string().contains("more than once"), "{line}: {err}");
+        }
     }
 
     #[test]
@@ -939,7 +1062,7 @@ mod tests {
             ),
             (
                 ".model y ltra r=1 l=1n g=0 c=1p length=0",
-                "invalid LENGTH=0",
+                "LEN=0 but is not an RC or RG",
             ),
         ] {
             let source = format!("title\n{line}\n.end\n");
@@ -966,6 +1089,54 @@ mod tests {
             .unwrap();
         assert!(!params.ltra_step_limit);
         assert!(params.ltra_trunc_dont_cut);
+    }
+
+    #[test]
+    fn native_xyce_ltra_contract_accepts_g0_alias_and_rejects_alias_collision() {
+        let accepted = crate::netlist::Netlist::parse(
+            r#"title
+.model cable1 ltra r=0.05 g0=20 len=0
+.end
+"#,
+        )
+        .expect("G0 alias model parses");
+        validate_native_xyce_ltra_model_contract(&accepted, "cable1")
+            .expect("G0 follows the execution alias for zero-length RG");
+
+        let duplicate = crate::netlist::Netlist::parse(
+            r#"title
+.model cable1 ltra r=0.05 g=20 g0=20 len=0
+.end
+"#,
+        )
+        .expect("duplicate alias model parses");
+        let error = validate_native_xyce_ltra_model_contract(&duplicate, "cable1")
+            .expect_err("G and G0 must not define one physical parameter twice");
+        assert!(
+            error
+                .to_string()
+                .to_ascii_lowercase()
+                .contains("repeats parameter or alias 'g0'"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn native_xyce_ltra_contract_rejects_tiny_positive_and_negative_g() {
+        for g in [1.0e-30_f64, -1.0e-30_f64] {
+            let netlist = crate::netlist::Netlist::parse(&format!(
+                "title\n.model cable1 ltra r=1 l=1n g0={g:e} c=1p len=1e30\n.end\n"
+            ))
+            .expect("tiny-G model parses");
+            let error = validate_native_xyce_ltra_model_contract(&netlist, "cable1")
+                .expect_err("the public native-LTRA contract must reject every nonzero finite G");
+            let text = error.to_string();
+            if g.is_sign_negative() {
+                assert!(text.contains("invalid G="), "{error}");
+            } else {
+                assert!(text.contains("finite nonzero G"), "{error}");
+            }
+        }
     }
 
     #[test]

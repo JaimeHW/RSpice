@@ -978,7 +978,7 @@ impl TransmissionLine {
             || l <= 0.0
             || c <= 0.0
             || len <= 0.0
-            || g.abs() > 1e-18
+            || g != 0.0
         {
             self.distributed_rlc = None;
             self.distributed_rc = None;
@@ -1721,6 +1721,20 @@ mod tests {
             line.update_history(time, v1, 0.0, 0.0, 0.0);
         }
         line
+    }
+
+    #[test]
+    fn distributed_rlc_kernel_requires_exactly_zero_shunt_conductance() {
+        let mut line = TransmissionLine::new("TLTRA".to_string(), 1, 0, 2, 0, 1.0, 1.0);
+
+        line.set_distributed_rlgc(1.0, 1.0, 1.0e-30, 1.0, 1.0);
+        assert!(!line.has_distributed_rlgc());
+
+        line.set_distributed_rlgc(1.0, 1.0, -1.0e-30, 1.0, 1.0);
+        assert!(!line.has_distributed_rlgc());
+
+        line.set_distributed_rlgc(1.0, 1.0, 0.0, 1.0, 1.0);
+        assert!(line.has_distributed_rlgc());
     }
 
     fn lossless_line(samples: &[(Value, Value)]) -> TransmissionLine {
