@@ -13,7 +13,7 @@
 
 use super::{JitError, JitResult};
 use crate::array_index::checked_array_slot;
-use crate::canonical_ir::state::{self, CanonicalStateOperator};
+use crate::canonical_ir::state::CanonicalStateOperator;
 use crate::canonical_ir::{
     EquationId, ExprId, HirAnalogOperator, HirCrossDirection, HirExprKind, HirLaplaceKind,
     HirLimiterArgument, MirEquationKind, MirModel, NodeId,
@@ -1175,84 +1175,27 @@ impl<'a> NativeLoweringLimits<'a> {
     }
 }
 
-/// The bytecode half of the state vocabulary.
+/// The bytecode half of the state vocabulary lives in
+/// [`crate::codegen::state_slots`].
 ///
-/// The operator itself, and what makes a canonical expression own a record of
-/// its kind, are defined once in [`crate::canonical_ir::state`], which is where
-/// a CFG-sourced backend can reach them. Only this direction - from a legacy
-/// bytecode instruction back to the slot it names - belongs here, because only
-/// this direction mentions bytecode.
-impl CanonicalStateOperator {
-    pub(crate) fn bytecode_slot(self, instruction: &Instruction) -> Option<usize> {
-        match (self, instruction) {
-            (Self::Ddt, Instruction::DdtState(slot)) | (Self::Idt, Instruction::IdtState(slot)) => {
-                Some(*slot)
-            }
-            (Self::IdtMod, Instruction::IdtModState(slot)) => Some(*slot),
-            (
-                Self::Transition,
-                Instruction::TransitionState(slot) | Instruction::TransitionStateDerivative(slot),
-            ) => Some(*slot),
-            (Self::Slew, Instruction::SlewState(slot) | Instruction::SlewStateDerivative(slot)) => {
-                Some(*slot)
-            }
-            (
-                Self::Absdelay,
-                Instruction::AbsDelayState(slot)
-                | Instruction::AbsDelayStateMax(slot)
-                | Instruction::AbsDelayStateDerivative(slot)
-                | Instruction::AbsDelayStateDerivativeMax(slot),
-            ) => Some(*slot),
-            (
-                Self::Laplace,
-                Instruction::LaplaceState(slot) | Instruction::LaplaceStateDerivative(slot),
-            ) => Some(*slot),
-            (Self::Zi, Instruction::ZiState(layout) | Instruction::ZiStateDerivative(layout)) => {
-                Some(layout.filter_id)
-            }
-            (Self::Cross, Instruction::CrossState(slot))
-            | (Self::Cross, Instruction::LastCrossingState(slot)) => Some(*slot),
-            (Self::Above, Instruction::AboveState(slot)) => Some(*slot),
-            (Self::Timer, Instruction::TimerState(slot)) => Some(*slot),
-            (Self::Limit, Instruction::LimitState(slot))
-            | (Self::Limit, Instruction::CanonicalLimitState(slot)) => Some(*slot),
-            (Self::TableLookup, Instruction::TableLookup(slot)) => Some(*slot),
-            _ => None,
+/// It used to live here, where it was reachable only under a JIT feature. The
+/// per-site state renumbering runs on every compiled model whichever runtime
+/// will execute it, so the vocabulary had to become unconditional; what stays
+/// here is the wrapper that names the model in a [`JitError`].
+pub(crate) use crate::codegen::state_slots::CanonicalStateSiteScan;
+
+/// Walk one canonical expression's state sites, naming the model on failure.
+pub(crate) fn canonical_state_site_scan(
+    model: &SmolStr,
+    mir: &MirModel,
+    expr_id: ExprId,
+) -> JitResult<CanonicalStateSiteScan> {
+    CanonicalStateSiteScan::for_expression(mir, expr_id).map_err(|error| {
+        JitError::InvalidCanonicalIr {
+            model: model.clone(),
+            detail: error.to_string().into(),
         }
-    }
-}
-
-/// Every state-bearing site under one canonical expression, split by the record
-/// family it owns and kept in traversal order.
-///
-/// One walk answers all thirteen families. A canonical expression owns at most
-/// one record - [`state::classify`] is what decides which - so a single
-/// post-order pass fills every list, where this used to be thirteen passes over
-/// the same tree asking a different question each time.
-#[derive(Debug, Default)]
-pub(crate) struct CanonicalStateSiteScan {
-    by_operator: [Vec<ExprId>; CanonicalStateOperator::ALL.len()],
-}
-
-impl CanonicalStateSiteScan {
-    pub(crate) fn for_expression(
-        model: &SmolStr,
-        mir: &MirModel,
-        expr_id: ExprId,
-    ) -> JitResult<Self> {
-        let mut scan = Self::default();
-        collect_canonical_state_sites(model, mir, expr_id, &mut scan)?;
-        Ok(scan)
-    }
-
-    /// The sites of one family, in traversal order.
-    pub(crate) fn sites(&self, operator: CanonicalStateOperator) -> &[ExprId] {
-        &self.by_operator[operator.index()]
-    }
-
-    fn push(&mut self, operator: CanonicalStateOperator, expr_id: ExprId) {
-        self.by_operator[operator.index()].push(expr_id);
-    }
+    })
 }
 
 pub(crate) fn canonical_state_slots_for_equation(
@@ -1301,26 +1244,17 @@ pub(crate) fn canonical_state_slots_for_expression(
     bytecode_program: &BytecodeProgram,
     operator: CanonicalStateOperator,
 ) -> JitResult<Vec<(ExprId, usize)>> {
-    let scan = CanonicalStateSiteScan::for_expression(&model, mir, expr_id)?;
+    let scan = canonical_state_site_scan(&model, mir, expr_id)?;
     pair_canonical_state_slots(model, expr_id, &scan, bytecode_program, operator)
 }
 
 /// Give each canonical site the runtime slot the program it is lowered from
-/// allocated for it.
+/// allocated for it, naming the model in a [`JitError`] when the two cannot be
+/// correlated.
 ///
-/// The identity and the order of the sites come from the canonical level; only
-/// the *number* comes from the bytecode, and it has to, because the two
-/// numbering spaces are not the same size. A module with noise in an assignment
-/// is emitted twice - once as its assignment steps and again as the
-/// noise-shadowed replay - and the generator allocates a fresh scalar-state slot
-/// at each emission, so one canonical `ddt` site can own two bytecode slots.
-/// [`crate::canonical_ir::state`] documents what a backend allocating its own
-/// storage does instead.
-///
-/// The length disagreement below is therefore a real error rather than a
-/// tolerance: within one program the two lists describe the same operators in
-/// the same order, and a program whose bytecode names more or fewer records
-/// than the canonical expression owns is a correlation that cannot be made.
+/// The correlation itself is [`crate::codegen::state_slots`]'s; this adds only
+/// the model name, because a `JitError` carries one and the shared pairing does
+/// not.
 pub(crate) fn pair_canonical_state_slots(
     model: SmolStr,
     expr_id: ExprId,
@@ -1328,56 +1262,18 @@ pub(crate) fn pair_canonical_state_slots(
     bytecode_program: &BytecodeProgram,
     operator: CanonicalStateOperator,
 ) -> JitResult<Vec<(ExprId, usize)>> {
-    let canonical_exprs = scan.sites(operator);
-
-    let bytecode_slots = bytecode_program
-        .instructions
-        .iter()
-        .filter_map(|instruction| operator.bytecode_slot(instruction))
-        .collect::<Vec<_>>();
-
-    if canonical_exprs.len() != bytecode_slots.len() {
-        return Err(JitError::InvalidCanonicalIr {
-            model,
-            detail: format!(
-                "canonical expression {expr_id} has {} {} operators {:?} but bytecode program has {} {}State slots {:?}",
-                canonical_exprs.len(),
-                operator.name(),
-                canonical_exprs,
-                bytecode_slots.len(),
-                operator.name(),
-                bytecode_slots,
-            )
-            .into(),
-        });
-    }
-
-    Ok(canonical_exprs
-        .iter()
-        .copied()
-        .zip(bytecode_slots)
-        .collect())
-}
-
-/// Wrap the canonical traversal in the JIT's error type.
-///
-/// The walk itself lives in `canonical_ir::state` so that the layout's
-/// numbering and this correlation cannot classify an operator differently; all
-/// this adds is the model name a `JitError` has to carry.
-fn collect_canonical_state_sites(
-    model: &SmolStr,
-    mir: &MirModel,
-    expr_id: ExprId,
-    scan: &mut CanonicalStateSiteScan,
-) -> JitResult<()> {
-    state::visit_state_sites(&mir.expressions, expr_id, &mut |operator, kind| {
-        scan.push(kind, operator);
-    })
-    .map_err(|missing| JitError::InvalidCanonicalIr {
-        model: model.clone(),
-        detail: missing.to_string().into(),
+    crate::codegen::state_slots::pair_canonical_state_slots(
+        expr_id,
+        scan,
+        bytecode_program,
+        operator,
+    )
+    .map_err(|error| JitError::InvalidCanonicalIr {
+        model,
+        detail: error.to_string().into(),
     })
 }
+
 impl NativeProgram {
     #[cfg(test)]
     pub(crate) fn from_ops_for_test(

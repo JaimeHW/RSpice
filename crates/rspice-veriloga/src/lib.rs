@@ -794,6 +794,8 @@ impl VerilogACompiler {
             &executable,
             measurements,
         )?;
+        let mut model = model;
+        Self::renumber_state_slots(&mut model, &canonical_ir)?;
         measurements.checkpoint(PipelinePhase::RuntimeQualification)?;
         let phase_started = web_time::Instant::now();
         let mut report = RuntimeCompileReport::from_artifacts(model, canonical_ir, qualifications);
@@ -818,6 +820,39 @@ impl VerilogACompiler {
         measurements.record(PipelinePhase::IntegrityValidation, phase_started.elapsed())?;
         report.metrics = measurements.metrics().clone();
         Ok(report)
+    }
+
+    /// Put the compiled model's state slots into the canonical per-site
+    /// numbering.
+    ///
+    /// Both runtime entry points build the bytecode model and the canonical
+    /// artifact from one analyzed module, and this is the seam between them:
+    /// the generator numbers an analog operator's record once per *emission*,
+    /// the runtimes address one record per *site*, and
+    /// [`codegen::state_renumbering`] rewrites the first into the second. It
+    /// runs here rather than inside the generator because the canonical HIR —
+    /// which defines the site numbering — does not exist until this point.
+    ///
+    /// It runs for every runtime, not only the JIT: the VM and the JIT read the
+    /// same `state_values` array through the same programs, so a model
+    /// renumbered for one is renumbered for both, and a model renumbered for
+    /// neither would have the CFG route and the MIR-lowered assignments
+    /// integrating separate histories of the same operator.
+    fn renumber_state_slots(
+        model: &mut CompiledModel,
+        canonical_ir: &canonical_ir::CanonicalIrArtifact,
+    ) -> CompileResult<()> {
+        codegen::state_renumbering::renumber_state_slots_to_canonical_sites(
+            model,
+            &canonical_ir.hir,
+            &canonical_ir.mir,
+        )
+        .map(drop)
+        .map_err(|error| {
+            CompileError::CodeGen(error::CodeGenError::new(
+                error::CodeGenErrorKind::StateRenumbering(error),
+            ))
+        })
     }
 
     /// Compile Verilog-A source code to the canonical HIR/MIR artifact.
@@ -1429,6 +1464,8 @@ impl VerilogACompiler {
             &executable,
             &mut measurements,
         )?;
+        let mut model = model;
+        Self::renumber_state_slots(&mut model, &canonical_ir)?;
 
         Ok(CompiledRuntimeFile {
             model,

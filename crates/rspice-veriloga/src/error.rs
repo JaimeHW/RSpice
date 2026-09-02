@@ -447,6 +447,19 @@ pub enum CodeGenErrorKind {
          on its own"
     )]
     UnsupportedDigitalExecution { construct: String, detail: String },
+
+    /// A module whose emitted state slots cannot be told which canonical
+    /// operator site owns them.
+    ///
+    /// The runtimes address one analog-operator record per *site*, and the
+    /// bytecode generator numbers them per *emission*; the compiler rewrites
+    /// the second numbering into the first. When that rewrite is not
+    /// well defined for a module — a program whose slot count disagrees with
+    /// its canonical expression, an emitted slot two sites claim, a slot no
+    /// site claims — the module refuses to compile rather than run with a
+    /// record read at one number and written at another.
+    #[error("{0}")]
+    StateRenumbering(#[from] crate::codegen::StateRenumberingError),
 }
 
 impl CodeGenErrorKind {
@@ -458,6 +471,7 @@ impl CodeGenErrorKind {
             Self::Internal(_) => "VA-CODEGEN-INTERNAL",
             Self::InvalidExpression(_) => "VA-CODEGEN-INVALID-EXPRESSION",
             Self::UnsupportedDigitalExecution { .. } => "VA-CODEGEN-UNSUPPORTED-AMS-DIGITAL",
+            Self::StateRenumbering(_) => "VA-CODEGEN-STATE-RENUMBERING",
         }
     }
 }

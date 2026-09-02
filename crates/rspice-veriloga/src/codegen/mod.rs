@@ -15,6 +15,8 @@ use smol_str::SmolStr;
 mod generator;
 mod lookup_table;
 mod model;
+pub(crate) mod state_renumbering;
+pub(crate) mod state_slots;
 
 pub use model::{
     AssignmentProgram, AssignmentStep, BytecodeProgram, CodeGenerator, ColumnAxis,
@@ -23,3 +25,4 @@ pub use model::{
     JacobianEntry, LookupTable, StampIndex, StampLocation, StampProgram, ZiPolynomialLayout,
     ZiRuntimeLayout,
 };
+pub use state_renumbering::StateRenumberingError;

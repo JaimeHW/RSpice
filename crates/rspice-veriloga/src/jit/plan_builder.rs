@@ -7,10 +7,10 @@
 use super::assignment::NativeAssignment;
 use super::current_dependencies::JitCurrentDependencies as NativeCurrentDependencies;
 use super::expr::{
-    BranchUnknownRuntimeMapping, CanonicalDerivativeAxis, CanonicalStateSiteScan, EntryKind,
-    NativeIdentifierIndex, NativeLoweringLimits, NativeOp, NativeProgram, PriorCurrentProbe,
-    canonical_table_lookup_slots_for_equation, constant_dynamic_variable_slot,
-    native_op_stack_effect, pair_canonical_state_slots,
+    BranchUnknownRuntimeMapping, CanonicalDerivativeAxis, EntryKind, NativeIdentifierIndex,
+    NativeLoweringLimits, NativeOp, NativeProgram, PriorCurrentProbe,
+    canonical_state_site_scan, canonical_table_lookup_slots_for_equation,
+    constant_dynamic_variable_slot, native_op_stack_effect, pair_canonical_state_slots,
 };
 use super::model_plan::NativeModelPlan;
 use super::{JitError, JitResult};
@@ -3708,7 +3708,7 @@ impl CanonicalExpressionStateSlots {
         // files it under the family it belongs to; asking thirteen separate
         // questions of the same tree was work proportional to the number of
         // families rather than to the number of sites.
-        let scan = CanonicalStateSiteScan::for_expression(&model.name, mir, expr_id)?;
+        let scan = canonical_state_site_scan(&model.name, mir, expr_id)?;
         let collect = |operator| {
             pair_canonical_state_slots(
                 model.name.clone(),
