@@ -212,21 +212,25 @@ fn pair_rooted_program(
     }
     census.state_programs += 1;
 
-    if !scans.contains_key(&root) {
-        match CanonicalStateSiteScan::for_expression(model, mir, root) {
-            Ok(scan) => {
-                scans.insert(root, scan);
-            }
-            Err(error) => {
-                census.mismatches.push(format!(
-                    "{} {label}: canonical scan of expression {root} failed: {error}",
-                    pass.name()
-                ));
-                return;
+    // Memoized per root: an equation's scan is walked once and reused by its
+    // value program and each of its derivative programs, which on a compact
+    // model is the difference between one traversal of a large tree and one per
+    // Jacobian entry.
+    let scan = match scans.entry(root) {
+        std::collections::hash_map::Entry::Occupied(held) => held.into_mut(),
+        std::collections::hash_map::Entry::Vacant(slot) => {
+            match CanonicalStateSiteScan::for_expression(model, mir, root) {
+                Ok(scan) => slot.insert(scan),
+                Err(error) => {
+                    census.mismatches.push(format!(
+                        "{} {label}: canonical scan of expression {root} failed: {error}",
+                        pass.name()
+                    ));
+                    return;
+                }
             }
         }
-    }
-    let scan = &scans[&root];
+    };
 
     let mut paired = true;
     for operator in CanonicalStateOperator::ALL {
