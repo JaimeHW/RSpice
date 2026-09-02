@@ -238,7 +238,13 @@ impl Lowerer<'_> {
                 let emitted = self.emit(&mut builder, &lowered, instruction.result)?;
                 lowered[usize::from(instruction.result)] = Some(emitted);
             }
+            // A speculated cone value may appear in more than one operator's
+            // cone, and a speculated value may also be one this block already
+            // computes; either way it is emitted once.
             for value in &hoisted[usize::from(*block)] {
+                if lowered[usize::from(*value)].is_some() {
+                    continue;
+                }
                 let emitted = self.emit(&mut builder, &lowered, *value)?;
                 lowered[usize::from(*value)] = Some(emitted);
             }
@@ -267,28 +273,13 @@ impl Lowerer<'_> {
     /// on the path the source did not take, which is what the shipped route
     /// already does.
     ///
-    /// When no such block exists — an operator whose operand is itself computed
-    /// inside the conditional — this refuses by name rather than speculating
-    /// the operand's whole cone. Speculating it would mean evaluating
-    /// everything the conditional guards, including a bounds-checked read the
-    /// guard exists to prevent, on a path the source did not take. The select
-    /// form does exactly that, which is one of the costs the block model exists
-    /// to remove; reproducing it here would be a decision about how far the
-    /// unconditional-advance extension reaches, not about this lowering.
-    /// (Verilog-AMS LRM 2.4 section 4.4.1 restricts where an analog operator
-    /// may appear at all, and a model that puts one under a bias-dependent
-    /// condition is already outside it.)
+    /// When the operator's own operand is computed inside the conditional, the
+    /// operand's cone is *speculated*: moved to the same block, so that it too
+    /// is evaluated on the path the source did not take. See
+    /// [`Self::speculation_cone`] for exactly how far that reaches and what it
+    /// refuses.
     fn hoisted_state_operators(&self, layout: &Layout) -> JitResult<Vec<Vec<CfgValueId>>> {
-        let mut definition: Vec<Option<usize>> = vec![None; self.function.values.len()];
-        for block in &self.function.blocks {
-            let index = usize::from(block.id);
-            for param in &block.params {
-                definition[usize::from(*param)] = Some(index);
-            }
-            for instruction in &block.instructions {
-                definition[usize::from(instruction.result)] = Some(index);
-            }
-        }
+        let definition = self.definition_blocks();
         let mut hoisted: Vec<Vec<CfgValueId>> = vec![Vec::new(); self.function.blocks.len()];
         for block in &layout.order {
             let index = usize::from(*block);
@@ -300,34 +291,154 @@ impl Lowerer<'_> {
                 if value.kind.state_site().is_none() {
                     continue;
                 }
-                let deepest_operand = value
-                    .kind
-                    .operands()
-                    .into_iter()
-                    .filter_map(|operand| definition[usize::from(operand)])
-                    .max_by_key(|candidate| dominator_depth(&layout.idom, *candidate))
-                    .unwrap_or(usize::from(self.function.entry));
+                // The destination is a property of the operator's position
+                // alone: the deepest block that still dominates the exit. The
+                // entry block always qualifies, so the walk terminates.
                 let mut target = index;
-                loop {
-                    if dominates(&layout.idom, target, layout.exit)
-                        && dominates(&layout.idom, deepest_operand, target)
-                    {
-                        break;
-                    }
+                while !dominates(&layout.idom, target, layout.exit) {
                     match layout.idom[target] {
                         Some(parent) if parent != target => target = parent,
-                        _ => {
-                            return Err(self.refuse(format!(
-                                "canonical analog operator {} runs under a condition and its operand is computed there too, so its record cannot be made to advance once per evaluation",
-                                kind_name(&value.kind)
-                            )));
-                        }
+                        _ => break,
                     }
                 }
+                if !dominates(&layout.idom, target, layout.exit) {
+                    return Err(self.refuse(format!(
+                        "canonical analog operator {} runs in a block with no dominator that reaches the exit",
+                        kind_name(&value.kind)
+                    )));
+                }
+                let cone =
+                    self.speculation_cone(layout, &definition, instruction.result, target)?;
+                hoisted[target].extend(cone);
                 hoisted[target].push(instruction.result);
             }
         }
         Ok(hoisted)
+    }
+
+    /// The values an operator's operands need that are not available where the
+    /// operator is being moved to, in an order that defines each before it is
+    /// read.
+    ///
+    /// # What is speculated, and why that is the compatible answer
+    ///
+    /// A state record must advance once per evaluation whatever the control
+    /// flow does. The operator itself therefore moves to a block that dominates
+    /// the exit — but an operand computed inside the conditional is not
+    /// available there, and the only way to make it so is to compute it there:
+    /// unconditionally, on the path the source did not take.
+    ///
+    /// That is not a new semantics. It is precisely what the shipped MIR route
+    /// already does, and not as an accident of its lowering but as the whole
+    /// shape of it: MIR dissolves every conditional into a select, which
+    /// evaluates *both* arms before choosing between them, so a `ddt` under an
+    /// `if` and everything feeding it are already evaluated on both paths in
+    /// every shipped native and bytecode image today. Speculating the cone here
+    /// reproduces the shipped behaviour exactly; refusing it would make this
+    /// route answer differently from the one it has to replace. The operator's
+    /// *result* still moves nowhere — it is read only where the source read it
+    /// — so the residual is unchanged and the reference interpreter still
+    /// agrees. What changes is only which side effects the untaken path has,
+    /// and this makes them the ones the shipped route already has.
+    ///
+    /// Verilog-AMS LRM 2.4 section 4.4.1 restricts where an analog operator may
+    /// appear at all, and a model putting one under a bias-dependent condition
+    /// is already outside it; the standard does not define what such a model
+    /// means, so the shipped route's answer is the only compatibility bar there
+    /// is, and this meets it.
+    ///
+    /// # What is refused, by name
+    ///
+    /// Speculation is safe exactly when re-evaluating a value on a path that
+    /// did not ask for it is unobservable. Three classes are not, and each is
+    /// refused with the kind named:
+    ///
+    /// * **Values that own a state record.** Advancing a second operator's
+    ///   history because a first one had to move would corrupt it. Such an
+    ///   operator is hoisted in its own right by the loop above, which is where
+    ///   the decision about its record belongs.
+    /// * **Values that can raise a runtime error** — `$param_given` and
+    ///   `$port_connected`, whose native loads are bounds-checked, and the
+    ///   integration-scale readbacks. A guard exists to keep exactly these off
+    ///   a path, and stepping over it would turn a well-formed evaluation into
+    ///   a reported failure.
+    /// * **Block parameters.** A parameter is a merge of the arms that reach
+    ///   it, so there is no single value to move: speculating one would mean
+    ///   choosing an arm, which is a different program.
+    ///
+    /// Everything admitted is a pure load or arithmetic. A call to a libm
+    /// helper is *not* a hazard, though the block model's `Effects` groups
+    /// `MAY_CALL` with the two above: that grouping is about register
+    /// allocation and result sharing, not about observability, and `exp` on an
+    /// untaken path is what the select form already computes.
+    fn speculation_cone(
+        &self,
+        layout: &Layout,
+        definition: &[Option<usize>],
+        operator: CfgValueId,
+        target: usize,
+    ) -> JitResult<Vec<CfgValueId>> {
+        let mut cone = Vec::new();
+        let mut visited = vec![false; self.function.values.len()];
+        // Post-order over the operand graph, so a value is pushed after
+        // everything it reads. Explicit rather than recursive: a compact
+        // model's expression cone is tens of thousands of values deep in the
+        // worst case, which is a blown stack rather than a diagnostic.
+        let mut stack: Vec<(CfgValueId, bool)> = self
+            .function
+            .value(operator)
+            .kind
+            .operands()
+            .into_iter()
+            .map(|operand| (operand, false))
+            .collect();
+        while let Some((value, expanded)) = stack.pop() {
+            let index = usize::from(value);
+            if expanded {
+                cone.push(value);
+                continue;
+            }
+            if visited[index] {
+                continue;
+            }
+            // Available already: a leaf, which the entry block materializes, or
+            // a value whose block dominates the destination.
+            match definition[index] {
+                None => continue,
+                Some(block) if dominates(&layout.idom, block, target) => continue,
+                Some(_) => {}
+            }
+            visited[index] = true;
+            let kind = &self.function.value(value).kind;
+            if let Some(hazard) = speculation_hazard(kind) {
+                return Err(self.refuse(format!(
+                    "canonical analog operator {} runs under a condition and its operand cone \
+                     contains {}, which {hazard}",
+                    kind_name(&self.function.value(operator).kind),
+                    kind_name(kind)
+                )));
+            }
+            stack.push((value, true));
+            for operand in kind.operands() {
+                stack.push((operand, false));
+            }
+        }
+        Ok(cone)
+    }
+
+    /// Which block defines each value, or `None` for an unpinned leaf.
+    fn definition_blocks(&self) -> Vec<Option<usize>> {
+        let mut definition: Vec<Option<usize>> = vec![None; self.function.values.len()];
+        for block in &self.function.blocks {
+            let index = usize::from(block.id);
+            for param in &block.params {
+                definition[usize::from(*param)] = Some(index);
+            }
+            for instruction in &block.instructions {
+                definition[usize::from(instruction.result)] = Some(index);
+            }
+        }
+        definition
     }
 
     /// Values that are read but that no block defines, in value order.
@@ -1004,23 +1115,6 @@ fn intersect(idom: &[Option<usize>], rank: &[usize], left: usize, right: usize) 
     left
 }
 
-/// How far `block` sits from the root of the dominator tree.
-///
-/// Two blocks on one dominator chain are ordered by it, which is what picks the
-/// deepest of an operator's operand definitions.
-fn dominator_depth(idom: &[Option<usize>], block: usize) -> usize {
-    let mut cursor = block;
-    let mut depth = 0;
-    while let Some(parent) = idom[cursor] {
-        if parent == cursor || depth > idom.len() {
-            break;
-        }
-        cursor = parent;
-        depth += 1;
-    }
-    depth
-}
-
 fn dominates(idom: &[Option<usize>], ancestor: usize, block: usize) -> bool {
     let mut cursor = block;
     loop {
@@ -1044,7 +1138,49 @@ fn dominates(idom: &[Option<usize>], ancestor: usize, block: usize) -> bool {
 /// delimiter, so the leading identifier is exactly the name and nothing of the
 /// payload — which carries value ids that mean nothing outside the function —
 /// escapes into the message.
-fn kind_name(kind: &CfgValueKind) -> String {
+/// Why a value may not be evaluated on a path the source did not take, or
+/// `None` if it may.
+///
+/// An allow-list, and deliberately one: the admitted set is the subset of what
+/// [`Lowerer::emit`] lowers whose evaluation is unobservable, and a kind added
+/// to that lowering later reaches the wildcard here and is refused until
+/// somebody rules on it. The other direction — listing the hazards — would let
+/// a new kind be speculated by omission, which is the failure that has no
+/// symptom.
+fn speculation_hazard(kind: &CfgValueKind) -> Option<&'static str> {
+    match kind {
+        CfgValueKind::RealConstant(_)
+        | CfgValueKind::BooleanConstant(_)
+        | CfgValueKind::Parameter(_)
+        | CfgValueKind::EventState(_)
+        | CfgValueKind::Temperature
+        | CfgValueKind::ThermalVoltage
+        | CfgValueKind::Multiplicity
+        | CfgValueKind::Time
+        | CfgValueKind::Analysis(_)
+        | CfgValueKind::SimParam { .. }
+        | CfgValueKind::NodePotential(_)
+        | CfgValueKind::BranchUnknownFlow(_)
+        | CfgValueKind::NoiseProcess(_)
+        | CfgValueKind::Unary { .. }
+        | CfgValueKind::Binary { .. } => None,
+        CfgValueKind::BlockParameter => {
+            Some("is a merge of the arms reaching it and so has no single value to move")
+        }
+        CfgValueKind::ParameterGiven(_) | CfgValueKind::PortConnected(_) => {
+            Some("is a bounds-checked read that can report a runtime error")
+        }
+        CfgValueKind::DdtScale | CfgValueKind::IdtScale => {
+            Some("reads the integration state the guard exists to keep it off")
+        }
+        kind if kind.state_site().is_some() => {
+            Some("owns a state record that must not advance a second time")
+        }
+        _ => Some("has no ruling on whether evaluating it off its guarded path is observable"),
+    }
+}
+
+pub(crate) fn kind_name(kind: &CfgValueKind) -> String {
     format!("{kind:?}")
         .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
         .next()
