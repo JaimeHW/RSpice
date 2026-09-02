@@ -3839,6 +3839,15 @@ fn write_fourier_output(
 }
 
 pub(super) fn run_temp(ctx: &RunContext<'_>, temperatures: &[f64]) -> Result<(), CliError> {
+    let ensure_not_cancelled = || {
+        if crate::abort::reason().is_some() {
+            Err(super::cancellation_cli_error(ctx.args.timeout))
+        } else {
+            Ok(())
+        }
+    };
+
+    ensure_not_cancelled()?;
     if !ctx.quiet {
         println!("Running temperature sweep: {} points", temperatures.len());
         if ctx.verbose {
@@ -3850,6 +3859,7 @@ pub(super) fn run_temp(ctx: &RunContext<'_>, temperatures: &[f64]) -> Result<(),
     let mut node_names: Vec<String> = Vec::new();
 
     for (i, temp_c) in temperatures.iter().enumerate() {
+        ensure_not_cancelled()?;
         let temp_k = temp_c + 273.15;
 
         if !ctx.quiet {
@@ -3866,8 +3876,9 @@ pub(super) fn run_temp(ctx: &RunContext<'_>, temperatures: &[f64]) -> Result<(),
         temp_config.temperature = temp_k;
         let temp_engine = rspice_core::Engine::new(temp_config);
 
-        match temp_engine.run_dc_op(ctx.netlist) {
+        match temp_engine.run_dc_op_with_abort(ctx.netlist, &crate::abort::ProcessAbort) {
             Ok(result) => {
+                ensure_not_cancelled()?;
                 if ctx.verbose && !ctx.quiet {
                     for j in 1..=result.node_voltages.len().min(5) {
                         println!("  V({}) = {:.6} V", j, result.voltage(j));
@@ -3878,6 +3889,9 @@ pub(super) fn run_temp(ctx: &RunContext<'_>, temperatures: &[f64]) -> Result<(),
                 }
                 results.push((*temp_c, result.node_voltages.clone()));
             }
+            Err(rspice_core::SimulationError::Aborted) => {
+                return Err(super::cancellation_cli_error(ctx.args.timeout));
+            }
             Err(e) => {
                 if !ctx.quiet {
                     eprintln!("  DC OP failed at {:.1} °C: {}", temp_c, e);
@@ -3886,6 +3900,7 @@ pub(super) fn run_temp(ctx: &RunContext<'_>, temperatures: &[f64]) -> Result<(),
         }
     }
 
+    ensure_not_cancelled()?;
     if results.is_empty() && !temperatures.is_empty() {
         return Err(CliError::simulation_error_in(
             "no temperature point converged",
@@ -3911,20 +3926,21 @@ pub(super) fn run_temp(ctx: &RunContext<'_>, temperatures: &[f64]) -> Result<(),
     }
 
     if let Some(ref output_path) = ctx.output_path_for("temp") {
+        ensure_not_cancelled()?;
         write_atomic(
             output_path,
             AtomicArtifactOptions::new(Durability::SyncFileAndParent),
             |file| {
+                ensure_not_cancelled()?;
                 match ctx.format {
                     OutputFormat::Csv => {
                         let num_nodes = results.first().map(|(_, v)| v.len()).unwrap_or(0);
-                        let header: String = (1..num_nodes)
-                            .map(|i| {
-                                let name =
-                                    node_names.get(i).cloned().unwrap_or_else(|| i.to_string());
-                                format!(",V({})", name)
-                            })
-                            .collect();
+                        let mut header = String::new();
+                        for i in 1..num_nodes {
+                            ensure_not_cancelled()?;
+                            let name = node_names.get(i).cloned().unwrap_or_else(|| i.to_string());
+                            header.push_str(&format!(",V({name})"));
+                        }
                         writeln!(file, "Temperature_C{}", header).map_err(|e| {
                             CliError::OutputError {
                                 path: output_path.clone(),
@@ -3933,40 +3949,71 @@ pub(super) fn run_temp(ctx: &RunContext<'_>, temperatures: &[f64]) -> Result<(),
                         })?;
 
                         for (temp, voltages) in &results {
+                            ensure_not_cancelled()?;
                             // Skip index 0: ground is not a column
-                            let values: String = voltages
-                                .iter()
-                                .skip(1)
-                                .map(|v| format!(",{:.17e}", v))
-                                .collect();
-                            writeln!(file, "{:.2}{}", temp, values).map_err(|e| {
+                            write!(file, "{temp:.2}").map_err(|e| CliError::OutputError {
+                                path: output_path.clone(),
+                                source: e,
+                            })?;
+                            for voltage in voltages.iter().skip(1) {
+                                ensure_not_cancelled()?;
+                                write!(file, ",{voltage:.17e}").map_err(|e| {
+                                    CliError::OutputError {
+                                        path: output_path.clone(),
+                                        source: e,
+                                    }
+                                })?;
+                            }
+                            writeln!(file).map_err(|e| CliError::OutputError {
+                                path: output_path.clone(),
+                                source: e,
+                            })?;
+                        }
+                    }
+                    OutputFormat::Json => {
+                        let mut json_results = Vec::new();
+                        json_results
+                            .try_reserve_exact(results.len())
+                            .map_err(|error| {
+                                CliError::simulation_error_in(
+                                    format!("cannot allocate temperature output rows: {error}"),
+                                    "Temperature Sweep",
+                                )
+                            })?;
+                        for (temperature, voltages) in &results {
+                            ensure_not_cancelled()?;
+                            json_results.push(serde_json::json!({
+                                "temperature_c": temperature,
+                                "voltages": voltages,
+                            }));
+                        }
+                        let json = serde_json::json!({
+                            "analysis": "temperature_sweep",
+                            "temperatures_c": temperatures,
+                            "results": json_results,
+                        });
+                        let text = serde_json::to_string_pretty(&json)
+                            .map_err(|e| CliError::output_json_error(output_path, e))?;
+                        ensure_not_cancelled()?;
+                        for chunk in text.as_bytes().chunks(64 * 1024) {
+                            ensure_not_cancelled()?;
+                            std::io::Write::write_all(file, chunk).map_err(|e| {
                                 CliError::OutputError {
                                     path: output_path.clone(),
                                     source: e,
                                 }
                             })?;
                         }
-                    }
-                    OutputFormat::Json => {
-                        let json = serde_json::json!({
-                            "analysis": "temperature_sweep",
-                            "temperatures_c": temperatures,
-                            "results": results.iter().map(|(t, v)| {
-                                serde_json::json!({
-                                    "temperature_c": t,
-                                    "voltages": v,
-                                })
-                            }).collect::<Vec<_>>(),
-                        });
-                        let text = serde_json::to_string_pretty(&json)
-                            .map_err(|e| CliError::output_json_error(output_path, e))?;
-                        writeln!(file, "{}", text).map_err(|e| CliError::OutputError {
-                            path: output_path.clone(),
-                            source: e,
+                        std::io::Write::write_all(file, b"\n").map_err(|e| {
+                            CliError::OutputError {
+                                path: output_path.clone(),
+                                source: e,
+                            }
                         })?;
                     }
                     _ => {
                         for (temp, voltages) in &results {
+                            ensure_not_cancelled()?;
                             writeln!(file, "T={:.2}C: {:?}", temp, voltages).map_err(|e| {
                                 CliError::OutputError {
                                     path: output_path.clone(),
@@ -3976,6 +4023,7 @@ pub(super) fn run_temp(ctx: &RunContext<'_>, temperatures: &[f64]) -> Result<(),
                         }
                     }
                 }
+                ensure_not_cancelled()?;
                 Ok(())
             },
         )
@@ -3986,6 +4034,7 @@ pub(super) fn run_temp(ctx: &RunContext<'_>, temperatures: &[f64]) -> Result<(),
         }
     }
 
+    ensure_not_cancelled()?;
     Ok(())
 }
 
