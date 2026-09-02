@@ -39,6 +39,18 @@ pub(in crate::engine::builder) fn resolve_inductor_instance_value(
         None
     };
 
+    if spice_dialect == SpiceDialect::Xyce {
+        if let Some((model_def, unsupported)) = model_def.and_then(|model_def| {
+            first_model_param_name(model_def, &["NT", "LENGTH", "DIA", "CSECT", "MU"])
+                .map(|unsupported| (model_def, unsupported))
+        }) {
+            return Err(SimulationError::Circuit(format!(
+                "Inductor '{}' model '{}' parameter '{}' is not supported by Xyce linear-inductor models; Xyce requires an instance L value and treats model L as a multiplier",
+                element_name, model_def.name, unsupported
+            )));
+        }
+    }
+
     let (eval_ctx, current_temp_c, tnom_c) =
         resolve_passive_eval_context(netlist, model_def, instance_params, temperature_kelvin)?;
 
@@ -135,6 +147,52 @@ pub(in crate::engine::builder) fn resolve_inductor_instance_value(
     }
 
     Ok(resolved)
+}
+
+fn first_model_param_name<'a>(
+    model_def: &'a crate::netlist::ModelDef,
+    names: &[&str],
+) -> Option<&'a str> {
+    model_def
+        .params
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .chain(model_def.expr_params.iter().map(|(name, _)| name.as_str()))
+        .chain(
+            model_def
+                .string_params
+                .iter()
+                .map(|(name, _)| name.as_str()),
+        )
+        .chain(
+            model_def
+                .string_vector_params
+                .iter()
+                .map(|(name, _)| name.as_str()),
+        )
+        .chain(
+            model_def
+                .real_vector_params
+                .iter()
+                .map(|(name, _)| name.as_str()),
+        )
+        .chain(
+            model_def
+                .real_vector_expr_params
+                .iter()
+                .map(|(name, _)| name.as_str()),
+        )
+        .chain(
+            model_def
+                .integer_vector_params
+                .iter()
+                .map(|(name, _)| name.as_str()),
+        )
+        .find(|name| {
+            names
+                .iter()
+                .any(|candidate| name.eq_ignore_ascii_case(candidate))
+        })
 }
 
 /// Ngspice 46 section 3.3.11 geometry synthesis for a linear inductor.
@@ -332,22 +390,23 @@ mod tests {
     }
 
     #[test]
-    fn ngspice_cross_section_geometry_matches_the_lundin_oracle() {
-        let inductance = resolve_inductor_from_source(
-            "ngspice finite solenoid\n\
-             L1 a 0 imod\n\
-             .model imod L CSECT=126.7u LENGTH=1.69m NT=17 MU=1\n\
-             .end\n",
-            "L1",
-        );
+    fn ngspice_and_best_available_cross_section_geometry_match_the_lundin_oracle() {
+        let source = "ngspice finite solenoid\n\
+                      L1 a 0 imod\n\
+                      .model imod L CSECT=126.7u LENGTH=1.69m NT=17 MU=1\n\
+                      .end\n";
 
         // Independent evaluation of ngspice 46 equation 3.17 plus the
         // source-published Lundin coefficient for this geometry.
         const ORACLE_HENRIES: f64 = 6.714_481_731_512_433e-6;
-        assert!(
-            ((inductance - ORACLE_HENRIES) / ORACLE_HENRIES).abs() < 2.0e-15,
-            "resolved {inductance:.17e}, oracle {ORACLE_HENRIES:.17e}"
-        );
+        for dialect in [SpiceDialect::Ngspice, SpiceDialect::BestAvailable] {
+            let inductance = resolve_inductor_from_source_with_dialect(source, "L1", dialect)
+                .expect("geometry inductor resolves");
+            assert!(
+                ((inductance - ORACLE_HENRIES) / ORACLE_HENRIES).abs() < 2.0e-15,
+                "dialect {dialect:?}: resolved {inductance:.17e}, oracle {ORACLE_HENRIES:.17e}"
+            );
+        }
     }
 
     #[test]
@@ -416,12 +475,12 @@ mod tests {
     #[test]
     fn xyce_model_l_multiplies_explicit_inductance() {
         let l = resolve_inductor_from_source_with_dialect(
-            "xyce ind\nL1 a 0 lmod 10m temp=90\n.model lmod L L=2 TC1=0.010 TC2=0.926e-4\n.end\n",
+            "xyce ind\nL1 a 0 lmod 10m temp=90 m=4\n.model lmod L L=2 TC1=0.010 TC2=0.926e-4\n.end\n",
             "L1",
             SpiceDialect::Xyce,
         )
         .expect("inductor resolves");
-        let expected = 10e-3 * 2.0 * (1.0 + 0.010 * 63.0 + 0.926e-4 * 63.0 * 63.0);
+        let expected = 10e-3 * 2.0 * (1.0 + 0.010 * 63.0 + 0.926e-4 * 63.0 * 63.0) / 4.0;
         assert!(
             ((l - expected) / expected).abs() < 1e-12,
             "resolved {l}, expected {expected}"
@@ -429,8 +488,42 @@ mod tests {
     }
 
     #[test]
+    fn xyce_geometry_model_without_instance_value_is_rejected() {
+        assert_xyce_geometry_model_params_are_rejected(false);
+    }
+
+    #[test]
+    fn xyce_geometry_model_with_instance_value_is_rejected() {
+        assert_xyce_geometry_model_params_are_rejected(true);
+    }
+
+    fn assert_xyce_geometry_model_params_are_rejected(with_instance_value: bool) {
+        for (name, assignment) in [
+            ("NT", "NT={10}"),
+            ("LENGTH", "LENGTH=1m"),
+            ("DIA", "DIA=1m"),
+            ("CSECT", "CSECT=1u"),
+            ("MU", "MU=2"),
+        ] {
+            let instance_value = if with_instance_value { " 1m" } else { "" };
+            let source = format!(
+                "xyce geometry rejection\nL1 a 0 lmod{instance_value}\n.model lmod L L=2 {assignment}\n.end\n"
+            );
+            let error =
+                resolve_inductor_from_source_with_dialect(&source, "L1", SpiceDialect::Xyce)
+                    .expect_err("Xyce linear inductors do not support ngspice geometry parameters");
+            let message = error.to_string();
+            assert!(
+                message.contains(name)
+                    && message.contains("not supported by Xyce linear-inductor models"),
+                "unexpected {name} error: {message}"
+            );
+        }
+    }
+
+    #[test]
     fn xyce_model_l_without_instance_value_stays_invalid() {
-        let err = resolve_inductor_from_source_with_dialect(
+        let error = resolve_inductor_from_source_with_dialect(
             "xyce missing ind\nL1 a 0 lmod\n.model lmod L L=2\n.end\n",
             "L1",
             SpiceDialect::Xyce,
@@ -438,8 +531,10 @@ mod tests {
         .expect_err("Xyce inductor model L is a multiplier, not a replacement value");
 
         assert!(
-            err.to_string().contains("requires an instance L/IND value"),
-            "unexpected error: {err}"
+            error
+                .to_string()
+                .contains("requires an instance L/IND value"),
+            "unexpected error: {error}"
         );
     }
 }

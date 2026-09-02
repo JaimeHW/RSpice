@@ -881,9 +881,12 @@ Xyce fixture as one oracle rather than the executable definition of support.
 
 - Implement LTRA shunt conductance `G != 0` in DC, AC, transient, noise, and
   periodic analyses, including stable convolution/history and passivity tests.
-- Implement Xyce-compatible inductor synthesis from `NT`, `CSECT`, and `LENGTH`
-  with units, geometry validation, temperature behavior, and analytical
-  qualification.
+- Implement ngspice-compatible linear-inductor synthesis from `NT`, `CSECT` or
+  `DIA`, and `LENGTH`, with units, geometry validation, temperature behavior,
+  and analytical qualification. Preserve Xyce's distinct required instance
+  `L` plus model-`L` multiplier contract and reject ngspice geometry parameters
+  under the Xyce policy. The authoritative evidence and intentional dialect
+  boundary are recorded in `INDUCTOR_GEOMETRY_DIALECT_DECISION.md`.
 - Resolve HICUM/MEXTRAM ownership before coding. If these are delivered by the
   separate Verilog-A/model effort, this plan adds only native parser/routing,
   result, and analysis-capability integration tests. If native implementations
@@ -993,7 +996,7 @@ but generated documentation prevents claims from drifting away from code.
 | AR-11 | 5.1-5.4 | Inventory equality, error bounds, schedule and segmented-run equivalence |
 | AR-12 | 5.5, 6 | Known blocker refuses save and commits no checkpoint artifact |
 | AR-13 | 10.1-10.6 | Per-capability device/oracle matrix and stationary/transient limits |
-| AR-14 | 10.7 | LTRA/inductor oracle tests; explicit HICUM/MEXTRAM ownership and full qualification |
+| AR-14 | 10.7 | LTRA and ngspice-inductor oracle tests; explicit Xyce geometry rejection; HICUM/MEXTRAM ownership and full qualification |
 | AR-15 | 8.5-8.7 | SPEF electrical equivalence and Spectre corpus/statistics gates |
 | AR-16 | 9 | Evidence-backed intentional boundary or fully qualified higher orders |
 | AR-17 | 6 | Fault injection proves old-or-complete atomic behavior |
