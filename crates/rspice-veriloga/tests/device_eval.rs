@@ -738,19 +738,19 @@ endmodule
 
     // The index is in range everywhere except noise, so the instance is a
     // working device for every other analysis and must construct.
-    let mut device = model
+    let device = model
         .try_device("X1", &[1, 0])
         .expect("an index that only leaves the array under noise must still construct");
-    device
-        .try_set_analysis_type(3)
-        .expect("noise analysis configures");
 
-    // The scalar entry point is called here for its diagnostic only. It is
-    // not the route a schema-1 model takes for physics, and the point of
-    // calling it is that the fault lives in the model body, ahead of anything
-    // either noise path decides.
-    let err = device
-        .try_noise_sources(&[0.0])
+    // Selecting noise is where the model leaves its array, and which call
+    // notices depends on the backend: the interpreter re-evaluates static
+    // conditions as the analysis type changes, while the native backend gets
+    // there during the evaluation itself. Either landing is the same fault, so
+    // take the whole switch-and-evaluate as one step.
+    let mut probe = device.clone();
+    let err = probe
+        .try_set_analysis_type(3)
+        .and_then(|()| probe.try_noise_sources(&[0.0]).map(|_| ()))
         .expect_err("checked noise evaluation must report runtime array bounds errors");
     let text = err.to_string();
     assert!(
@@ -760,8 +760,14 @@ endmodule
 
     // The grouped path is the one the engine uses, and it must report the
     // model's own fault rather than the planning failure behind it.
-    let err = device
-        .try_noise_processes_at_frequency(&[0.0], 1.0e3)
+    let mut probe = device.clone();
+    let err = probe
+        .try_set_analysis_type(3)
+        .and_then(|()| {
+            probe
+                .try_noise_processes_at_frequency(&[0.0], 1.0e3)
+                .map(|_| ())
+        })
         .expect_err("the grouped path must report the same runtime array bounds error");
     let text = err.to_string();
     assert!(
