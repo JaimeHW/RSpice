@@ -23,6 +23,7 @@
 use super::census_models::shipped_census_models;
 use crate::jit::expr::{NativeOp, NativeProgram};
 use crate::jit::plan_builder::build_model_plan_with_canonical_ir;
+use crate::jit::plan_program::PlanProgram;
 use crate::jit::ssa::Program;
 use crate::native::abi::EvalContext;
 use crate::native::assignment::NativeAssignment;
@@ -182,16 +183,64 @@ fn value_programs(plan: &crate::jit::model_plan::NativeModelPlan) -> Vec<&Native
         }
     }
 
+    /// The census is about the postfix lift: it compares the select form of a
+    /// conditional against the branch form lowered from the same operation
+    /// stream. A plan entry that was never a postfix stream has no select form
+    /// to compare against, so it does not belong in the corpus — and today
+    /// there are none, which is the assertion.
+    fn postfix<'a>(entry: &'a PlanProgram, what: &str) -> &'a NativeProgram {
+        match entry {
+            PlanProgram::Postfix(program) => program,
+            PlanProgram::Blocks(_) => panic!(
+                "the shipped census is entirely postfix; {what} arrived in block form, so the \
+                 branch-agreement corpus no longer covers every shipped program"
+            ),
+        }
+    }
+
     let mut programs = Vec::new();
     push_assignments(&plan.assignments, &mut programs);
     push_assignments(&plan.post_assignments, &mut programs);
-    programs.extend(plan.parameter_defaults.iter().flatten());
-    programs.extend(plan.static_conditions.iter().flatten());
-    programs.extend(plan.stamp_values.iter());
-    programs.extend(plan.jacobians.iter().flatten());
-    programs.extend(plan.reactive_jacobians.iter().flatten());
-    programs.extend(plan.noise_psd.iter());
-    programs.extend(plan.noise_exponents.iter().flatten());
+    programs.extend(
+        plan.parameter_defaults
+            .iter()
+            .flatten()
+            .map(|entry| postfix(entry, "a parameter default")),
+    );
+    programs.extend(
+        plan.static_conditions
+            .iter()
+            .flatten()
+            .map(|entry| postfix(entry, "a static condition")),
+    );
+    programs.extend(
+        plan.stamp_values
+            .iter()
+            .map(|entry| postfix(entry, "a stamp value")),
+    );
+    programs.extend(
+        plan.jacobians
+            .iter()
+            .flatten()
+            .map(|entry| postfix(entry, "a Jacobian entry")),
+    );
+    programs.extend(
+        plan.reactive_jacobians
+            .iter()
+            .flatten()
+            .map(|entry| postfix(entry, "a reactive Jacobian entry")),
+    );
+    programs.extend(
+        plan.noise_psd
+            .iter()
+            .map(|entry| postfix(entry, "a noise PSD")),
+    );
+    programs.extend(
+        plan.noise_exponents
+            .iter()
+            .flatten()
+            .map(|entry| postfix(entry, "a noise exponent")),
+    );
     programs
 }
 
