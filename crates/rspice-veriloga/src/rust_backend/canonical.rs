@@ -1041,7 +1041,8 @@ impl ModelPlan {
         // always-differentiated costs the other 35 more than it saves the six,
         // because the AD pass leaves bookkeeping the magnitudes can reach.
         let mut noise = plan_noise(artifact, &cfg, &cfg.function)
-            .or_else(|| plan_noise(artifact, &cfg, &differentiated.function));
+            .ok()
+            .or_else(|| plan_noise(artifact, &cfg, &differentiated.function).ok());
         if let Some(noise) = &noise {
             let parameter_scopes = artifact
                 .mir
@@ -1719,6 +1720,32 @@ fn share_noise_preprocessing(
     crate::metrics::usize_to_u64(before.saturating_sub(after))
 }
 
+/// Why a module's noise slice could not be cut from its CFG, so the flat
+/// HIR-driven emitter in [`super::noise`] carries it instead.
+///
+/// Named rather than counted because the two halves of the answer want
+/// different responses: a correspondence that failed is a compiler fault to
+/// chase, while a module with no planned sources at all is simply silent and
+/// there is nothing to plan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NoiseDecline {
+    /// The artifact carries no noise-source plan: the module is silent.
+    NoPlannedSources,
+    /// The body lowered a different number of sources than the plan holds.
+    SourceCount { planned: usize, lowered: usize },
+    /// A planned source names no equation, or no lowered source carries its
+    /// `(contribution, ordinal)` name.
+    Unpaired { index: usize },
+    /// A paired source disagrees about its kind, whether it has an exponent, or
+    /// how wide its table is.
+    Shape { index: usize },
+    /// A magnitude reads a `ddt` — which would advance per-instance transient
+    /// history while a noise analysis merely reads it — or an unresolved `ddx`,
+    /// which is what sends the module round again against the differentiated
+    /// body.
+    LiveStateOperator,
+}
+
 /// Match the lowered noise sources to the plan the descriptors come from, and
 /// reduce the body to just the magnitudes.
 ///
@@ -1726,20 +1753,26 @@ fn share_noise_preprocessing(
 /// contribution it was written in and its position among that contribution's
 /// sources, because the plan is extracted from a second lowering of the same
 /// expressions and shares no expression ids with the body. Where the two
-/// disagree this returns `None` rather than guessing: a noise source silently
-/// given another source's power would be reported under the wrong mechanism at
-/// the wrong branch, which reads as a physics result rather than as a compiler
-/// fault. `None` costs the model nothing but the smaller file.
+/// disagree this declines rather than guessing: a noise source silently given
+/// another source's power would be reported under the wrong mechanism at the
+/// wrong branch, which reads as a physics result rather than as a compiler
+/// fault. Declining costs the model nothing but the smaller file.
 fn plan_noise(
     artifact: &CanonicalIrArtifact,
     cfg: &CfgModel,
     function: &CfgFunction,
-) -> Option<NoisePlan> {
+) -> Result<NoisePlan, NoiseDecline> {
     let planned = &artifact.noise_sources.sources;
     // A silent model falls back too: the generator being replaced already emits
     // the empty evaluator for one, and this emitter has no reason to.
-    if planned.is_empty() || cfg.noise.len() != planned.len() {
-        return None;
+    if planned.is_empty() {
+        return Err(NoiseDecline::NoPlannedSources);
+    }
+    if cfg.noise.len() != planned.len() {
+        return Err(NoiseDecline::SourceCount {
+            planned: planned.len(),
+            lowered: cfg.noise.len(),
+        });
     }
 
     let mut wanted = Vec::new();
@@ -1749,7 +1782,8 @@ fn plan_noise(
             .mir
             .equations
             .get(usize::from(source.equation))
-            .map(|equation| equation.contribution)?;
+            .map(|equation| equation.contribution)
+            .ok_or(NoiseDecline::Unpaired { index })?;
         let ordinal = planned[..index]
             .iter()
             .filter(|earlier| earlier.equation == source.equation)
@@ -1757,7 +1791,8 @@ fn plan_noise(
         let lowered = cfg
             .noise
             .iter()
-            .find(|lowered| lowered.contribution == contribution && lowered.ordinal == ordinal)?;
+            .find(|lowered| lowered.contribution == contribution && lowered.ordinal == ordinal)
+            .ok_or(NoiseDecline::Unpaired { index })?;
 
         let table_width = source
             .table
@@ -1767,7 +1802,7 @@ fn plan_noise(
             || lowered.exponent.is_some() != source.exponent.is_some()
             || lowered.table.len() != table_width
         {
-            return None;
+            return Err(NoiseDecline::Shape { index });
         }
 
         let mut place = |value: ValueId| {
@@ -1808,8 +1843,8 @@ fn plan_noise(
         // `ddt` reads and writes per-instance history, and a magnitude that
         // reached one would advance the transient state while the noise
         // analysis merely read it. A `ddx` is unresolved, which only happens in
-        // the primal body — returning `None` on one is what sends the model
-        // round again against the differentiated function.
+        // the primal body — declining on one is what sends the model round
+        // again against the differentiated function.
         if !matches!(
             value.kind,
             CfgValueKind::Ddt { .. } | CfgValueKind::Ddx { .. }
@@ -1817,14 +1852,14 @@ fn plan_noise(
             continue;
         }
         if live[index] {
-            return None;
+            return Err(NoiseDecline::LiveStateOperator);
         }
         // Nothing the magnitudes read can observe this, by the walk just done,
         // so it becomes a constant rather than a call: left as it was, the body
         // would still advance the history of a charge no noise source mentions.
         value.kind = CfgValueKind::RealConstant(0.0);
     }
-    Some(NoisePlan {
+    Ok(NoisePlan {
         function,
         outputs,
         sources,
@@ -1832,6 +1867,25 @@ fn plan_noise(
         prepared_slots: 0,
         shared_through: None,
     })
+}
+
+/// Why the CFG noise slice declined a module, or `None` if it did not.
+///
+/// The one route to that answer from outside this module. Exposed so that the
+/// census in `crate::native::cfg_census` can name the reason a shipped model
+/// takes the flat emitter instead of re-deriving the correspondence, which
+/// would make the census a second copy of the thing it measures.
+///
+/// Gated to exactly that census's own configuration: it has no other caller,
+/// and a hook that compiled into the shipped library with none would be one
+/// more thing to keep alive.
+#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
+pub(crate) fn noise_plan_decline(
+    artifact: &CanonicalIrArtifact,
+    cfg: &CfgModel,
+    function: &CfgFunction,
+) -> Option<NoiseDecline> {
+    plan_noise(artifact, cfg, function).err()
 }
 
 /// Every value `roots` can read, following a block parameter back through the
@@ -4223,7 +4277,20 @@ impl Wants {
 /// charge with conduction in one statement: separating those needs the reactive
 /// part tracked through the arithmetic, and calling the whole expression a
 /// charge would put conduction into the reactive matrix.
-pub(super) fn stored_charges(
+///
+/// # The CFG level's one charge extraction
+///
+/// Crate-visible rather than backend-private because it is the only
+/// charge extraction that operates on the CFG, and the native block route needs
+/// the same answer. The tree has two others and both work on flatter forms:
+/// `DeviceIR::extract_charge` peels an `IrExpr`, and
+/// `jit::plan_builder::canonical_extract_reactive_charge` peels a MIR
+/// expression. Neither can see a guarded contribution, because in a CFG the
+/// guard is a block parameter rather than a `Conditional` node — which is
+/// exactly the case this one exists to cover, and exactly the case a
+/// self-heating model is written in. A fourth copy for the block route would be
+/// a fourth set of shape rules to keep in step.
+pub(crate) fn stored_charges(
     function: &mut CfgFunction,
     residuals: &[ValueId],
 ) -> Vec<Option<ValueId>> {
