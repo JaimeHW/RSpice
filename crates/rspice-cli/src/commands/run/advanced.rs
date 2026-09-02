@@ -949,7 +949,9 @@ fn run_corner_job(
         show_progress: false,
         compress: setup.compress,
         compress_tol: setup.compress_tol,
-        multi_analysis: corner_netlist.analyses.len() > 1,
+        multi_analysis: corner_netlist.analyses.len() > 1
+            || !corner_netlist.fft_analyses.is_empty(),
+        coordinate: None,
         output_tag_multiplicities: super::analysis_output_tag_multiplicities(&corner_netlist),
         next_output_tag_ordinal: std::cell::RefCell::new(std::collections::HashMap::new()),
         verbose: false,
@@ -1155,7 +1157,9 @@ fn run_corner_serial_source(
         show_progress: ctx.show_progress,
         compress: ctx.compress,
         compress_tol: ctx.compress_tol,
-        multi_analysis: corner_netlist.analyses.len() > 1,
+        multi_analysis: corner_netlist.analyses.len() > 1
+            || !corner_netlist.fft_analyses.is_empty(),
+        coordinate: ctx.coordinate.clone(),
         output_tag_multiplicities: super::analysis_output_tag_multiplicities(&corner_netlist),
         next_output_tag_ordinal: std::cell::RefCell::new(std::collections::HashMap::new()),
         verbose: ctx.verbose,

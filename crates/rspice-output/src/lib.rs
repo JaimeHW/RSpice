@@ -163,6 +163,20 @@ pub struct AtomicArtifactFile {
     options: AtomicArtifactOptions,
 }
 
+/// A completely written, flushed, and synchronized artifact that has not yet
+/// replaced its destination.
+///
+/// This split phase is useful when a logical result consists of several
+/// sibling files: callers can prepare every member before publishing the
+/// first one. Dropping a prepared artifact removes only its staging file and
+/// leaves the destination unchanged.
+#[derive(Debug)]
+pub struct PreparedAtomicArtifact {
+    destination: PathBuf,
+    cleanup: StagingCleanup,
+    options: AtomicArtifactOptions,
+}
+
 impl AtomicArtifactFile {
     /// Prepare a seekable staging file beside `destination`.
     pub fn prepare(
@@ -180,6 +194,41 @@ impl AtomicArtifactFile {
     /// has already occurred at that point.
     pub fn commit(self) -> Result<(), AtomicArtifactError<io::Error>> {
         self.commit_impl::<io::Error, _>(&mut NoFaults)
+    }
+
+    /// Finish all fallible data flushing and synchronization without
+    /// publishing the artifact.
+    ///
+    /// Once this succeeds, [`PreparedAtomicArtifact::commit`] performs only
+    /// destination validation, atomic replacement, and optional parent
+    /// directory synchronization.
+    pub fn prepare_for_commit(
+        mut self,
+    ) -> Result<PreparedAtomicArtifact, AtomicArtifactError<io::Error>> {
+        self.open_file_mut()
+            .and_then(Write::flush)
+            .map_err(|source| AtomicArtifactError::Flush {
+                operation: FlushOperation::FlushBuffer,
+                source,
+            })?;
+        if matches!(
+            self.options.durability,
+            Durability::SyncFile | Durability::SyncFileAndParent
+        ) {
+            self.open_file_mut()
+                .and_then(|file| file.sync_all())
+                .map_err(|source| AtomicArtifactError::Flush {
+                    operation: FlushOperation::SyncFile,
+                    source,
+                })?;
+        }
+        self.file.take();
+        let cleanup = std::mem::replace(&mut self.cleanup, StagingCleanup { path: None });
+        Ok(PreparedAtomicArtifact {
+            destination: self.destination.clone(),
+            cleanup,
+            options: self.options,
+        })
     }
 
     fn prepare_impl<E, H>(
@@ -293,6 +342,47 @@ impl AtomicArtifactFile {
                 "atomic artifact staging file is already closed",
             )
         })
+    }
+}
+
+impl PreparedAtomicArtifact {
+    /// Atomically replace the destination with this fully prepared artifact.
+    pub fn commit(mut self) -> Result<(), AtomicArtifactError<io::Error>> {
+        reject_symlink_destination(&self.destination).map_err(precommit_error)?;
+        let staging_path = self.cleanup.path().map_err(precommit_error)?.to_path_buf();
+        if let Err(source) =
+            commit_staging_file(&staging_path, &self.destination, self.options.durability)
+        {
+            let recovery_path = match self.options.commit_failure {
+                CommitFailurePolicy::Cleanup => {
+                    self.cleanup.remove_now();
+                    None
+                }
+                CommitFailurePolicy::PreserveForRecovery => {
+                    self.cleanup.disarm();
+                    Some(staging_path)
+                }
+            };
+            return Err(AtomicArtifactError::Commit {
+                operation: CommitOperation::Replace,
+                destination_state: DestinationState::Unchanged,
+                recovery_path,
+                source,
+            });
+        }
+        self.cleanup.disarm();
+
+        if self.options.durability == Durability::SyncFileAndParent {
+            sync_parent_directory(&self.destination).map_err(|source| {
+                AtomicArtifactError::Commit {
+                    operation: CommitOperation::SyncParent,
+                    destination_state: DestinationState::PublishedDurabilityUncertain,
+                    recovery_path: None,
+                    source,
+                }
+            })?;
+        }
+        Ok(())
     }
 }
 
@@ -644,6 +734,84 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn dropping_prepared_artifact_preserves_destination_and_cleans_stage() {
+        let directory = TestDirectory::new("prepared-drop");
+        let destination = directory.0.join("result.bin");
+        std::fs::write(&destination, b"predecessor").expect("write predecessor");
+        let mut artifact = AtomicArtifactFile::prepare(&destination, options())
+            .expect("prepare split-phase artifact");
+        artifact.write_all(b"successor").expect("write successor");
+        let prepared = artifact
+            .prepare_for_commit()
+            .expect("finish split-phase staging");
+        drop(prepared);
+
+        assert_eq!(
+            std::fs::read(&destination).expect("read predecessor"),
+            b"predecessor"
+        );
+        assert!(
+            stale_artifacts(&destination)
+                .expect("list stages")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn prepared_artifact_commit_replaces_destination() {
+        let directory = TestDirectory::new("prepared-commit");
+        let destination = directory.0.join("result.bin");
+        std::fs::write(&destination, b"predecessor").expect("write predecessor");
+        let mut artifact = AtomicArtifactFile::prepare(&destination, options())
+            .expect("prepare split-phase artifact");
+        artifact.write_all(b"successor").expect("write successor");
+        artifact
+            .prepare_for_commit()
+            .expect("finish split-phase staging")
+            .commit()
+            .expect("commit prepared artifact");
+
+        assert_eq!(
+            std::fs::read(&destination).expect("read successor"),
+            b"successor"
+        );
+        assert!(
+            stale_artifacts(&destination)
+                .expect("list stages")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn prepared_commit_failure_preserves_invalid_destination_and_cleans_stage() {
+        let directory = TestDirectory::new("prepared-invalid-destination");
+        let destination = directory.0.join("result.bin");
+        std::fs::create_dir(&destination).expect("create conflicting destination directory");
+        let mut artifact = AtomicArtifactFile::prepare(&destination, options())
+            .expect("prepare split-phase artifact");
+        artifact.write_all(b"successor").expect("write successor");
+        let error = artifact
+            .prepare_for_commit()
+            .expect("finish split-phase staging")
+            .commit()
+            .expect_err("directory replacement must fail");
+
+        assert!(matches!(
+            error,
+            AtomicArtifactError::Commit {
+                destination_state: DestinationState::Unchanged,
+                ..
+            }
+        ));
+        assert!(destination.is_dir());
+        assert!(
+            stale_artifacts(&destination)
+                .expect("list stages")
+                .is_empty()
+        );
     }
 
     fn options() -> AtomicArtifactOptions {

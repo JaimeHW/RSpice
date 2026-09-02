@@ -376,15 +376,9 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
     AnalysisResultCapability {
         result: AnalysisResultKind::Fft,
         cli: SurfaceCapability::new(
-            MappingStatus::Partial(
-                "transient computes FFT results, but the CLI exporter does not publish them",
-            ),
-            MappingStatus::Partial(
-                "stepped transient computes FFT results, but the CLI exporter does not publish them",
-            ),
-            MappingStatus::Partial(
-                "temperature transient computes FFT results, but the CLI exporter does not publish them",
-            ),
+            MappingStatus::Mapped,
+            MappingStatus::Mapped,
+            MappingStatus::Mapped,
         ),
         python: python_mapped_axes(),
         wasm: wasm_direct_only(),

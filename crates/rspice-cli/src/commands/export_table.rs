@@ -210,24 +210,28 @@ impl ExportTable {
         write_atomic(
             path,
             AtomicArtifactOptions::new(Durability::SyncFileAndParent),
-            |writer| {
-                match format {
-                    OutputFormat::Raw => self.write_raw(writer, path, true)?,
-                    OutputFormat::RawAscii => self.write_raw(writer, path, false)?,
-                    OutputFormat::Csv => self.write_delimited(writer, path, ',')?,
-                    OutputFormat::Tsv => self.write_delimited(writer, path, '\t')?,
-                    OutputFormat::Json => self.write_json(writer, path)?,
-                    OutputFormat::Hdf5 => {
-                        return Err(CliError::InternalError {
-                            message: "HDF5 export must be handled by the analysis-specific writer"
-                                .to_string(),
-                        });
-                    }
-                }
-                Ok(())
-            },
+            |writer| self.write_to(writer, path, format),
         )
         .map_err(|error| map_atomic_error(path, error))
+    }
+
+    /// Serialize this table into an already staged artifact.
+    pub(crate) fn write_to(
+        &self,
+        writer: &mut dyn Write,
+        path: &Path,
+        format: OutputFormat,
+    ) -> Result<(), CliError> {
+        match format {
+            OutputFormat::Raw => self.write_raw(writer, path, true),
+            OutputFormat::RawAscii => self.write_raw(writer, path, false),
+            OutputFormat::Csv => self.write_delimited(writer, path, ','),
+            OutputFormat::Tsv => self.write_delimited(writer, path, '\t'),
+            OutputFormat::Json => self.write_json(writer, path),
+            OutputFormat::Hdf5 => Err(CliError::InternalError {
+                message: "HDF5 export must be handled by the analysis-specific writer".to_string(),
+            }),
+        }
     }
 
     /// Value of `column` at row `row` as (real, imag).

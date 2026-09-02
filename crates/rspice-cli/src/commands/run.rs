@@ -14,6 +14,7 @@ mod frequency;
 mod shared;
 
 pub(crate) use crate::commands::export_table as export;
+pub(crate) use basic::read_fft_raw_artifact;
 
 use crate::report::{
     CsvMeasReporter, JUnitReporter, JsonMeasReporter, MeasurementReport, SimulationReport,
@@ -77,6 +78,9 @@ struct RunContext<'a> {
     compress_tol: f64,
     /// More than one analysis card runs; output files get per-analysis tags.
     multi_analysis: bool,
+    /// Canonical identity of the concrete STEP/TEMP coordinate, when this is
+    /// an axis-expanded run. Scalar runs deliberately retain `None`.
+    coordinate: Option<ArtifactCoordinate>,
     /// Number of authored analysis instances that publish under each output
     /// tag. Repeated kinds receive stable one-based ordinal suffixes.
     output_tag_multiplicities: std::collections::HashMap<&'static str, usize>,
@@ -108,6 +112,25 @@ struct RetainedTransient {
     result: rspice_core::engine::TransientResult,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ArtifactCoordinate {
+    id: String,
+    ordinal: usize,
+    tag: String,
+    assignment: String,
+}
+
+impl ArtifactCoordinate {
+    fn from_run_coordinate(coordinate: &RunCoordinate) -> Self {
+        Self {
+            id: coordinate.stable_id().to_string(),
+            ordinal: coordinate.ordinal().saturating_add(1),
+            tag: coordinate.stable_tag(),
+            assignment: canonical_coordinate_description(coordinate),
+        }
+    }
+}
+
 impl<'a> RunContext<'a> {
     fn new(
         engine: &'a Engine,
@@ -117,6 +140,7 @@ impl<'a> RunContext<'a> {
         verbose: bool,
         quiet: bool,
         run_label: Option<&str>,
+        coordinate: Option<&RunCoordinate>,
     ) -> Result<Self, CliError> {
         let format = match args.format {
             Some(format) => format,
@@ -153,7 +177,11 @@ impl<'a> RunContext<'a> {
             compress_tol: args
                 .compress_tol
                 .unwrap_or(config.simulation.compression_tolerance),
-            multi_analysis: netlist.analyses.len() > 1,
+            // `.FFT` is retained outside `Netlist::analyses`, but publishing
+            // its typed result adds an independent artifact beside the
+            // parent transient and therefore also requires tagged paths.
+            multi_analysis: netlist.analyses.len() > 1 || !netlist.fft_analyses.is_empty(),
+            coordinate: coordinate.map(ArtifactCoordinate::from_run_coordinate),
             output_tag_multiplicities: analysis_output_tag_multiplicities(netlist),
             next_output_tag_ordinal: std::cell::RefCell::new(std::collections::HashMap::new()),
             verbose,
@@ -311,6 +339,33 @@ impl<'a> RunContext<'a> {
         }
         let ordinal = self.next_transient_ordinal.get();
         Some(tag_output_path(&path, &format!("tran-{ordinal:03}")))
+    }
+
+    fn current_transient_analysis_id(&self) -> Result<String, CliError> {
+        let ordinal = self.next_transient_ordinal.get();
+        if ordinal == 0 {
+            return Err(CliError::InternalError {
+                message: "transient execution entered without an assigned analysis ordinal"
+                    .to_string(),
+            });
+        }
+        Ok(format!("tran-{ordinal:03}"))
+    }
+
+    /// One FFT artifact contains every source-authored directive for one
+    /// parent transient. Repeated transients compose the parent identity into
+    /// the artifact tag so no result can overwrite another.
+    fn fft_output_path_for(&self, parent_analysis_id: &str) -> Option<std::path::PathBuf> {
+        let tag = if self
+            .output_tag_multiplicities
+            .get("tran")
+            .is_some_and(|count| *count > 1)
+        {
+            format!("{parent_analysis_id}.fft")
+        } else {
+            "fft".to_string()
+        };
+        self.output_path_for(&tag)
     }
 
     fn run_analysis(&self, analysis: &AnalysisCommand) -> Result<(), CliError> {
@@ -1857,7 +1912,9 @@ fn run_implicit_step_op_table(
             message: "implicit STEP materializer has no command".to_string(),
         })?;
     let target = step_target_description(step);
-    let ctx = RunContext::new(engine, netlist, args, config, verbose, quiet, run_label)?;
+    let ctx = RunContext::new(
+        engine, netlist, args, config, verbose, quiet, run_label, None,
+    )?;
     let start_time = Instant::now();
     let mut retained_values = 0usize;
     let mut preflight = Vec::with_capacity(coordinates.len());
@@ -2275,8 +2332,15 @@ fn run_deck(
     )
     .map_err(|error| map_deck_plan_error(error, args))?;
     let Some(canonical_plan) = canonical_plan else {
-        let (report, outputs) =
-            run_concrete_deck(executable_netlist, args, config, verbose, quiet, run_label)?;
+        let (report, outputs) = run_concrete_deck(
+            executable_netlist,
+            args,
+            config,
+            verbose,
+            quiet,
+            run_label,
+            None,
+        )?;
         return Ok(DeckOutcome {
             reports: vec![report],
             outputs,
@@ -2296,8 +2360,18 @@ fn run_deck(
                 ),
             });
         }
-        let (report, outputs) =
-            run_concrete_deck(executable_netlist, args, config, verbose, quiet, run_label)?;
+        let coordinate = coordinates.first().ok_or_else(|| CliError::InternalError {
+            message: "canonical singleton run plan contains no coordinate".to_string(),
+        })?;
+        let (report, outputs) = run_concrete_deck(
+            executable_netlist,
+            args,
+            config,
+            verbose,
+            quiet,
+            run_label,
+            Some(coordinate),
+        )?;
         return Ok(DeckOutcome {
             reports: vec![report],
             outputs,
@@ -2404,12 +2478,19 @@ fn run_deck(
                 canonical_coordinate_description(canonical_coordinate)
             );
         }
-        let (report, run_outputs) =
-            match run_concrete_deck(&stepped, args, config, verbose, quiet, Some(&label)) {
-                Ok(outcome) => outcome,
-                Err(_) if crate::abort::reason().is_some() => break,
-                Err(error) => return Err(error),
-            };
+        let (report, run_outputs) = match run_concrete_deck(
+            &stepped,
+            args,
+            config,
+            verbose,
+            quiet,
+            Some(&label),
+            Some(canonical_coordinate),
+        ) {
+            Ok(outcome) => outcome,
+            Err(_) if crate::abort::reason().is_some() => break,
+            Err(error) => return Err(error),
+        };
         reports.push(report);
         outputs.extend(run_outputs);
         if crate::abort::reason().is_some() {
@@ -2439,6 +2520,7 @@ fn run_concrete_deck(
     verbose: bool,
     quiet: bool,
     run_label: Option<&str>,
+    coordinate: Option<&RunCoordinate>,
 ) -> Result<(SimulationReport, Vec<PathBuf>), CliError> {
     if verbose {
         println!("Title: {}", netlist.title);
@@ -2448,7 +2530,9 @@ fn run_concrete_deck(
 
     let sim_config = build_sim_config(args, config, netlist);
     let engine = Engine::try_new(sim_config)?;
-    let ctx = RunContext::new(&engine, netlist, args, config, verbose, quiet, run_label)?;
+    let ctx = RunContext::new(
+        &engine, netlist, args, config, verbose, quiet, run_label, coordinate,
+    )?;
 
     let base_name = args
         .input

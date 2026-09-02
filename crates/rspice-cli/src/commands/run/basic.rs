@@ -12,8 +12,15 @@ use crate::commands::run_signals::{
     SignalKind, checked_dc_operating_point_signals, dc_export_signals,
     dc_operating_point_export_signals, transient_export_signals,
 };
-use crate::hdf5::{Hdf5SimulationData, Hdf5WaveformSection, write_hdf5};
-use rspice_output::{AtomicArtifactOptions, Durability, write_atomic};
+use crate::hdf5::{
+    Hdf5FftCoordinate, Hdf5FftHarmonic, Hdf5FftMetrics, Hdf5FftResult, Hdf5FftSection,
+    Hdf5SimulationData, Hdf5WaveformSection, write_hdf5, write_hdf5_to_writer,
+};
+use rspice_output::{
+    AtomicArtifactError, AtomicArtifactFile, AtomicArtifactOptions, DestinationState, Durability,
+    PreparedAtomicArtifact, write_atomic,
+};
+use std::io::BufWriter;
 use std::path::{Component, Path, PathBuf};
 
 fn map_output_projection_error(
@@ -799,7 +806,19 @@ pub(super) fn run_transient(
             )
             .map_err(|error| map_output_projection_error(ctx, error, "Transient"))?;
 
-            if let Some(ref output_path) = ctx.output_path_for("tran") {
+            if !result.fft_results.is_empty()
+                && result.fft_results.len() != ctx.netlist.fft_analyses.len()
+            {
+                return Err(CliError::InternalError {
+                    message: format!(
+                        "core returned {} transient FFT result(s) for {} authored directive(s)",
+                        result.fft_results.len(),
+                        ctx.netlist.fft_analyses.len()
+                    ),
+                });
+            }
+
+            if let Some(output_path) = ctx.output_path_for("tran") {
                 let output_start = result
                     .time
                     .first()
@@ -827,7 +846,7 @@ pub(super) fn run_transient(
                         .iter()
                         .map(|signal| (signal.display_name.as_str(), signal.values.as_slice())),
                 )?;
-                match ctx.format {
+                let document = match ctx.format {
                     OutputFormat::Hdf5 => {
                         let mut data = Hdf5SimulationData::new();
                         data.title = "Transient Analysis".to_string();
@@ -841,24 +860,47 @@ pub(super) fn run_transient(
                             );
                         }
                         data.transient = Some(transient);
-
-                        write_hdf5(output_path, &data)
-                            .map_err(|err| map_hdf5_output_error(output_path, err))?;
+                        TransientOutputDocument::Hdf5(Box::new(data))
                     }
                     OutputFormat::Raw
                     | OutputFormat::RawAscii
                     | OutputFormat::Csv
                     | OutputFormat::Tsv
                     | OutputFormat::Json => {
-                        super::export::scalar_table(
+                        TransientOutputDocument::Table(super::export::scalar_table(
                             "transient",
                             "Transient Analysis",
                             "time",
                             "time",
                             output_time,
                             &signals,
-                        )
-                        .write(output_path, ctx.format)?;
+                        ))
+                    }
+                };
+
+                if result.fft_results.is_empty() {
+                    document.write(&output_path, ctx.format)?;
+                } else {
+                    let parent_analysis_id = ctx.current_transient_analysis_id()?;
+                    let fft_output_path =
+                        ctx.fft_output_path_for(&parent_analysis_id)
+                            .ok_or_else(|| CliError::InternalError {
+                                message:
+                                    "FFT publication was requested without a resolved output path"
+                                        .to_string(),
+                            })?;
+                    write_transient_fft_output_pair(
+                        &output_path,
+                        &document,
+                        &fft_output_path,
+                        ctx.format,
+                        &parent_analysis_id,
+                        ctx.coordinate.as_ref(),
+                        &result.fft_results,
+                        ctx.args.timeout,
+                    )?;
+                    if !ctx.quiet {
+                        println!("  FFT results exported to: {}", fft_output_path.display());
                     }
                 }
 
@@ -870,6 +912,1837 @@ pub(super) fn run_transient(
         }
         Err(e) => Err(CliError::simulation_error_in(e.to_string(), "Transient")),
     }
+}
+
+enum TransientOutputDocument {
+    Hdf5(Box<Hdf5SimulationData>),
+    Table(super::export::ExportTable),
+}
+
+impl TransientOutputDocument {
+    fn write(&self, path: &Path, format: OutputFormat) -> Result<(), CliError> {
+        match self {
+            Self::Hdf5(data) => {
+                write_hdf5(path, data).map_err(|error| map_hdf5_output_error(path, error))
+            }
+            Self::Table(table) => table.write(path, format),
+        }
+    }
+
+    fn write_to(
+        &self,
+        writer: &mut dyn std::io::Write,
+        path: &Path,
+        format: OutputFormat,
+    ) -> Result<(), CliError> {
+        match self {
+            Self::Hdf5(data) => write_hdf5_to_writer(writer, data)
+                .map_err(|error| map_hdf5_output_error(path, error)),
+            Self::Table(table) => table.write_to(writer, path, format),
+        }
+    }
+}
+
+const FFT_PAIR_BACKUP_MARKER: &str = ".rspice-pair-backup-v1-";
+static NEXT_FFT_PAIR_BACKUP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+enum ArtifactPredecessorKind {
+    Missing,
+    File,
+    Other,
+}
+
+struct ArtifactPredecessor {
+    kind: ArtifactPredecessorKind,
+    backup: Option<PathBuf>,
+    retain_for_recovery: bool,
+}
+
+impl ArtifactPredecessor {
+    fn capture(path: &Path) -> Result<Self, CliError> {
+        let metadata = match std::fs::symlink_metadata(path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(Self {
+                    kind: ArtifactPredecessorKind::Missing,
+                    backup: None,
+                    retain_for_recovery: false,
+                });
+            }
+            Err(error) => return Err(CliError::output_error(path, error)),
+        };
+        if metadata.file_type().is_symlink() {
+            return Err(CliError::output_error(
+                path,
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "refusing to snapshot a symlink artifact destination",
+                ),
+            ));
+        }
+        if !metadata.is_file() {
+            return Ok(Self {
+                kind: ArtifactPredecessorKind::Other,
+                backup: None,
+                retain_for_recovery: false,
+            });
+        }
+
+        let backup = unique_fft_pair_sidecar(path, FFT_PAIR_BACKUP_MARKER)?;
+        let mut source =
+            std::fs::File::open(path).map_err(|error| CliError::output_error(path, error))?;
+        let mut destination = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&backup)
+            .map_err(|error| CliError::output_error(path, error))?;
+        if let Err(error) =
+            std::io::copy(&mut source, &mut destination).and_then(|_| destination.sync_all())
+        {
+            let _ = std::fs::remove_file(&backup);
+            return Err(CliError::output_error(path, error));
+        }
+        Ok(Self {
+            kind: ArtifactPredecessorKind::File,
+            backup: Some(backup),
+            retain_for_recovery: false,
+        })
+    }
+
+    fn preserve(&mut self) {
+        self.retain_for_recovery = true;
+    }
+
+    fn recovery_path(&self) -> Option<&Path> {
+        self.backup.as_deref()
+    }
+}
+
+impl Drop for ArtifactPredecessor {
+    fn drop(&mut self) {
+        if !self.retain_for_recovery
+            && let Some(path) = self.backup.take()
+        {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+fn unique_fft_pair_sidecar(path: &Path, marker: &str) -> Result<PathBuf, CliError> {
+    let name = path.file_name().ok_or_else(|| CliError::InternalError {
+        message: format!("artifact path '{}' does not name a file", path.display()),
+    })?;
+    let parent = path.parent().filter(|value| !value.as_os_str().is_empty());
+    for _ in 0..1_024 {
+        let id = NEXT_FFT_PAIR_BACKUP.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut sidecar_name = std::ffi::OsString::from(".");
+        sidecar_name.push(name);
+        sidecar_name.push(format!("{marker}{}-{id}", std::process::id()));
+        let candidate =
+            parent.map_or_else(|| PathBuf::from(&sidecar_name), |p| p.join(&sidecar_name));
+        if !candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+    Err(CliError::output_error(
+        path,
+        std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "could not allocate a unique grouped-artifact recovery sidecar",
+        ),
+    ))
+}
+
+fn map_prepared_atomic_error(
+    path: &Path,
+    phase: &str,
+    error: AtomicArtifactError<std::io::Error>,
+) -> CliError {
+    CliError::output_error(
+        path,
+        std::io::Error::other(format!("atomic {phase} failed: {error}")),
+    )
+}
+
+fn stage_artifact(
+    path: &Path,
+    write: impl FnOnce(&mut dyn std::io::Write) -> Result<(), CliError>,
+) -> Result<PreparedAtomicArtifact, CliError> {
+    let artifact = AtomicArtifactFile::prepare(
+        path,
+        AtomicArtifactOptions::new(Durability::SyncFileAndParent),
+    )
+    .map_err(|error| map_prepared_atomic_error(path, "preparation", error))?;
+    let mut writer = BufWriter::new(artifact);
+    if let Err(error) = write(&mut writer) {
+        drop(writer);
+        return Err(error);
+    }
+    let artifact = writer.into_inner().map_err(|error| {
+        CliError::output_error(
+            path,
+            std::io::Error::new(error.error().kind(), error.error().to_string()),
+        )
+    })?;
+    artifact
+        .prepare_for_commit()
+        .map_err(|error| map_prepared_atomic_error(path, "staging", error))
+}
+
+fn rollback_published_destination(
+    path: &Path,
+    predecessor: &ArtifactPredecessor,
+) -> std::io::Result<()> {
+    match predecessor.kind {
+        ArtifactPredecessorKind::Missing => match std::fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.is_file() => {
+                let rollback = unique_fft_pair_sidecar(path, ".rspice-pair-rollback-v1-")
+                    .map_err(|error| std::io::Error::other(error.to_string()))?;
+                std::fs::rename(path, &rollback)?;
+                std::fs::remove_file(rollback)
+            }
+            Ok(_) => Err(std::io::Error::other(format!(
+                "cannot roll back non-file destination {}",
+                path.display()
+            ))),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+        },
+        ArtifactPredecessorKind::File => {
+            let backup = predecessor.backup.as_deref().ok_or_else(|| {
+                std::io::Error::other("predecessor backup is unavailable for rollback")
+            })?;
+            let mut source = std::fs::File::open(backup)?;
+            let mut restoration = AtomicArtifactFile::prepare(
+                path,
+                AtomicArtifactOptions::new(Durability::SyncFileAndParent),
+            )
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+            std::io::copy(&mut source, &mut restoration)?;
+            restoration
+                .prepare_for_commit()
+                .map_err(|error| std::io::Error::other(error.to_string()))?
+                .commit()
+                .map_err(|error| std::io::Error::other(error.to_string()))
+        }
+        ArtifactPredecessorKind::Other => Ok(()),
+    }
+}
+
+fn commit_artifact_pair(
+    first_path: &Path,
+    first: PreparedAtomicArtifact,
+    second_path: &Path,
+    second: PreparedAtomicArtifact,
+    timeout_seconds: Option<f64>,
+) -> Result<(), CliError> {
+    let mut first_predecessor = ArtifactPredecessor::capture(first_path)?;
+    let mut second_predecessor = ArtifactPredecessor::capture(second_path)?;
+    if crate::abort::reason().is_some() {
+        return Err(super::cancellation_cli_error(timeout_seconds));
+    }
+
+    if let Err(error) = first.commit() {
+        if matches!(
+            &error,
+            AtomicArtifactError::Commit {
+                destination_state: DestinationState::PublishedDurabilityUncertain,
+                ..
+            }
+        ) && let Err(rollback) = rollback_published_destination(first_path, &first_predecessor)
+        {
+            first_predecessor.preserve();
+            return Err(CliError::output_error(
+                first_path,
+                std::io::Error::other(format!(
+                    "grouped artifact first commit failed ({error}); rollback failed ({rollback}); predecessor retained at {}",
+                    first_predecessor.recovery_path().map_or_else(
+                        || "<missing>".to_string(),
+                        |path| path.display().to_string()
+                    )
+                )),
+            ));
+        }
+        return Err(map_prepared_atomic_error(first_path, "group commit", error));
+    }
+
+    if let Err(error) = second.commit() {
+        let mut rollback_errors = Vec::new();
+        if matches!(
+            &error,
+            AtomicArtifactError::Commit {
+                destination_state: DestinationState::PublishedDurabilityUncertain,
+                ..
+            }
+        ) && let Err(rollback) = rollback_published_destination(second_path, &second_predecessor)
+        {
+            rollback_errors.push(format!("{}: {rollback}", second_path.display()));
+            second_predecessor.preserve();
+        }
+        if let Err(rollback) = rollback_published_destination(first_path, &first_predecessor) {
+            rollback_errors.push(format!("{}: {rollback}", first_path.display()));
+            first_predecessor.preserve();
+        }
+        if rollback_errors.is_empty() {
+            return Err(map_prepared_atomic_error(
+                second_path,
+                "group commit",
+                error,
+            ));
+        }
+        return Err(CliError::output_error(
+            second_path,
+            std::io::Error::other(format!(
+                "grouped artifact second commit failed ({error}); rollback incomplete: {}",
+                rollback_errors.join("; ")
+            )),
+        ));
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_transient_fft_output_pair(
+    transient_path: &Path,
+    transient: &TransientOutputDocument,
+    fft_path: &Path,
+    format: OutputFormat,
+    parent_analysis_id: &str,
+    coordinate: Option<&super::ArtifactCoordinate>,
+    results: &[rspice_core::engine::TransientFftResult],
+    timeout_seconds: Option<f64>,
+) -> Result<(), CliError> {
+    let transient_stage = stage_artifact(transient_path, |writer| {
+        transient.write_to(writer, transient_path, format)
+    })?;
+    let fft_stage = stage_artifact(fft_path, |writer| {
+        write_fft_to_writer(
+            writer,
+            fft_path,
+            format,
+            parent_analysis_id,
+            coordinate,
+            results,
+            timeout_seconds,
+        )
+    })?;
+    if crate::abort::reason().is_some() {
+        return Err(super::cancellation_cli_error(timeout_seconds));
+    }
+    commit_artifact_pair(
+        transient_path,
+        transient_stage,
+        fft_path,
+        fft_stage,
+        timeout_seconds,
+    )
+}
+
+const FFT_ARTIFACT_SCHEMA_VERSION: u32 = 1;
+
+#[derive(serde::Serialize)]
+struct FftJsonCoordinate<'a> {
+    coordinate_id: &'a str,
+    ordinal: usize,
+    tag: &'a str,
+    assignment: &'a str,
+}
+
+#[derive(serde::Serialize)]
+struct FftJsonFormatPolicy {
+    selected: &'static str,
+    representation: &'static str,
+    supported: [&'static str; 6],
+}
+
+#[derive(serde::Serialize)]
+struct FftJsonDocument<'a> {
+    schema_version: u32,
+    analysis: &'static str,
+    parent_analysis_id: &'a str,
+    coordinate: Option<FftJsonCoordinate<'a>>,
+    result_count: usize,
+    results: FftJsonResults<'a>,
+    format_policy: FftJsonFormatPolicy,
+}
+
+struct FftJsonResults<'a> {
+    parent_analysis_id: &'a str,
+    results: &'a [rspice_core::engine::TransientFftResult],
+}
+
+impl serde::Serialize for FftJsonResults<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::{Error as _, SerializeSeq as _};
+
+        let mut sequence = serializer.serialize_seq(Some(self.results.len()))?;
+        for (index, result) in self.results.iter().enumerate() {
+            if index.is_multiple_of(32) && crate::abort::reason().is_some() {
+                return Err(S::Error::custom("FFT JSON serialization was cancelled"));
+            }
+            sequence.serialize_element(&FftJsonResult::new(
+                result,
+                index + 1,
+                self.parent_analysis_id,
+            ))?;
+        }
+        sequence.end()
+    }
+}
+
+#[derive(serde::Serialize)]
+struct FftJsonSource<'a> {
+    kind: &'static str,
+    text: &'a str,
+    authored_output: String,
+}
+
+#[derive(serde::Serialize)]
+struct FftJsonSignal<'a> {
+    name: &'a str,
+    physical_type: &'a str,
+    unit: Option<&'static str>,
+}
+
+#[derive(serde::Serialize)]
+struct FftJsonSampling {
+    start_time_s: f64,
+    stop_time_s: f64,
+    sample_interval_s: f64,
+    point_count: usize,
+    accurate_sampling: bool,
+}
+
+#[derive(serde::Serialize)]
+struct FftJsonTransform<'a> {
+    format: &'static str,
+    mode: &'static str,
+    window: &'static str,
+    window_name: &'a str,
+    alpha: f64,
+    coherent_gain: f64,
+    frequency_resolution_hz: f64,
+    fundamental_bin: usize,
+    minimum_metric_bin: usize,
+    maximum_metric_bin: usize,
+}
+
+#[derive(serde::Serialize)]
+struct FftJsonSpectrum<'a> {
+    frequency_unit: &'static str,
+    value_unit: Option<&'static str>,
+    phase_unit: &'static str,
+    complex_representation: &'static str,
+    bins: FftJsonBins<'a>,
+}
+
+struct FftJsonBins<'a>(&'a [rspice_core::engine::TransientFftBin]);
+
+impl serde::Serialize for FftJsonBins<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::{Error as _, SerializeSeq as _};
+
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for bin in self.0 {
+            if bin.index.is_multiple_of(256) && crate::abort::reason().is_some() {
+                return Err(S::Error::custom("FFT JSON serialization was cancelled"));
+            }
+            sequence.serialize_element(&FftJsonBin {
+                index: bin.index,
+                frequency_hz: bin.frequency,
+                value: FftJsonComplex {
+                    real: bin.real,
+                    imaginary: bin.imaginary,
+                },
+                magnitude: bin.magnitude,
+                phase_degrees: bin.phase_degrees,
+            })?;
+        }
+        sequence.end()
+    }
+}
+
+#[derive(serde::Serialize)]
+struct FftJsonBin {
+    index: usize,
+    frequency_hz: f64,
+    value: FftJsonComplex,
+    magnitude: f64,
+    phase_degrees: f64,
+}
+
+#[derive(serde::Serialize)]
+struct FftJsonComplex {
+    real: f64,
+    imaginary: f64,
+}
+
+#[derive(serde::Serialize)]
+struct FftJsonMetricUnits {
+    fundamental_magnitude: Option<&'static str>,
+    thd_ratio: &'static str,
+    thd_db: &'static str,
+    sndr_db: &'static str,
+    enob_bits: &'static str,
+    snr_db: &'static str,
+    sfdr_db: &'static str,
+    sfdr_spur_frequency: &'static str,
+}
+
+#[derive(serde::Serialize)]
+struct FftJsonMetrics<'a> {
+    units: FftJsonMetricUnits,
+    fundamental_magnitude: f64,
+    thd_ratio: f64,
+    thd_db: f64,
+    sndr_db: f64,
+    enob_bits: f64,
+    snr_db: f64,
+    sfdr_db: f64,
+    sfdr_spur_bin: Option<usize>,
+    sfdr_spur_frequency_hz: Option<f64>,
+    largest_harmonics: FftJsonHarmonics<'a>,
+}
+
+struct FftJsonHarmonics<'a>(&'a [rspice_core::engine::TransientFftHarmonic]);
+
+impl serde::Serialize for FftJsonHarmonics<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::{Error as _, SerializeSeq as _};
+
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for harmonic in self.0 {
+            if harmonic.rank.is_multiple_of(256) && crate::abort::reason().is_some() {
+                return Err(S::Error::custom("FFT JSON serialization was cancelled"));
+            }
+            sequence.serialize_element(&FftJsonHarmonic {
+                rank: harmonic.rank,
+                bin: harmonic.bin,
+                frequency_hz: harmonic.frequency,
+                magnitude: harmonic.magnitude,
+                magnitude_db: harmonic.magnitude_db,
+                phase_degrees: harmonic.phase_degrees,
+            })?;
+        }
+        sequence.end()
+    }
+}
+
+#[derive(serde::Serialize)]
+struct FftJsonHarmonic {
+    rank: usize,
+    bin: usize,
+    frequency_hz: f64,
+    magnitude: f64,
+    magnitude_db: f64,
+    phase_degrees: f64,
+}
+
+#[derive(serde::Serialize)]
+struct FftJsonResult<'a> {
+    analysis_id: String,
+    parent_analysis_id: &'a str,
+    ordinal: usize,
+    source: FftJsonSource<'a>,
+    signal: FftJsonSignal<'a>,
+    sampling: FftJsonSampling,
+    transform: FftJsonTransform<'a>,
+    spectrum: FftJsonSpectrum<'a>,
+    metrics: Option<FftJsonMetrics<'a>>,
+}
+
+impl<'a> FftJsonResult<'a> {
+    fn new(
+        result: &'a rspice_core::engine::TransientFftResult,
+        ordinal: usize,
+        parent_analysis_id: &'a str,
+    ) -> Self {
+        let (source_kind, source_text, authored_output) = fft_output_identity(&result.output);
+        let unit = fft_value_unit(result.physical_type);
+        Self {
+            analysis_id: format!("fft-{ordinal:03}"),
+            parent_analysis_id,
+            ordinal,
+            source: FftJsonSource {
+                kind: source_kind,
+                text: source_text,
+                authored_output,
+            },
+            signal: FftJsonSignal {
+                name: &result.output_name,
+                physical_type: result.physical_type,
+                unit,
+            },
+            sampling: FftJsonSampling {
+                start_time_s: result.start_time,
+                stop_time_s: result.stop_time,
+                sample_interval_s: result.sample_interval,
+                point_count: result.point_count,
+                accurate_sampling: result.accurate_sampling,
+            },
+            transform: FftJsonTransform {
+                format: fft_format_name(result.format),
+                mode: fft_mode_name(result.mode),
+                window: fft_window_name(result.window),
+                window_name: &result.window_name,
+                alpha: result.alpha,
+                coherent_gain: result.coherent_gain,
+                frequency_resolution_hz: result.frequency_resolution,
+                fundamental_bin: result.fundamental_bin,
+                minimum_metric_bin: result.minimum_metric_bin,
+                maximum_metric_bin: result.maximum_metric_bin,
+            },
+            spectrum: FftJsonSpectrum {
+                frequency_unit: "Hz",
+                value_unit: unit,
+                phase_unit: "degree",
+                complex_representation: "cartesian",
+                bins: FftJsonBins(&result.bins),
+            },
+            metrics: result.metrics.as_ref().map(|metrics| FftJsonMetrics {
+                units: FftJsonMetricUnits {
+                    fundamental_magnitude: unit,
+                    thd_ratio: "1",
+                    thd_db: "dB",
+                    sndr_db: "dB",
+                    enob_bits: "bit",
+                    snr_db: "dB",
+                    sfdr_db: "dB",
+                    sfdr_spur_frequency: "Hz",
+                },
+                fundamental_magnitude: metrics.fundamental_magnitude,
+                thd_ratio: metrics.thd_ratio,
+                thd_db: metrics.thd_db,
+                sndr_db: metrics.sndr_db,
+                enob_bits: metrics.enob_bits,
+                snr_db: metrics.snr_db,
+                sfdr_db: metrics.sfdr_db,
+                sfdr_spur_bin: metrics.sfdr_spur_bin,
+                sfdr_spur_frequency_hz: metrics.sfdr_spur_frequency,
+                largest_harmonics: FftJsonHarmonics(&metrics.largest_harmonics),
+            }),
+        }
+    }
+}
+
+fn fft_output_identity(output: &rspice_core::netlist::FftOutput) -> (&'static str, &str, String) {
+    match output {
+        rspice_core::netlist::FftOutput::Probe(probe) => ("probe", probe, probe.clone()),
+        rspice_core::netlist::FftOutput::Expression(expression) => {
+            ("expression", expression, format!("{{{expression}}}"))
+        }
+    }
+}
+
+const fn fft_format_name(format: rspice_core::netlist::FftFormat) -> &'static str {
+    match format {
+        rspice_core::netlist::FftFormat::Normalized => "normalized",
+        rspice_core::netlist::FftFormat::Unnormalized => "unnormalized",
+    }
+}
+
+const fn fft_mode_name(mode: rspice_core::netlist::XyceFftMode) -> &'static str {
+    match mode {
+        rspice_core::netlist::XyceFftMode::HspiceCompatible => "hspice_compatible",
+        rspice_core::netlist::XyceFftMode::SpectreCompatible => "spectre_compatible",
+    }
+}
+
+const fn fft_window_name(window: rspice_core::netlist::FftWindow) -> &'static str {
+    match window {
+        rspice_core::netlist::FftWindow::Rectangular => "rectangular",
+        rspice_core::netlist::FftWindow::Bartlett => "bartlett",
+        rspice_core::netlist::FftWindow::BartlettHann => "bartlett_hann",
+        rspice_core::netlist::FftWindow::Hamming => "hamming",
+        rspice_core::netlist::FftWindow::Hann => "hann",
+        rspice_core::netlist::FftWindow::Blackman67Db => "blackman_67db",
+        rspice_core::netlist::FftWindow::Blackman => "blackman",
+        rspice_core::netlist::FftWindow::BlackmanHarris => "blackman_harris",
+        rspice_core::netlist::FftWindow::Nuttall => "nuttall",
+        rspice_core::netlist::FftWindow::HalfCycleSine => "half_cycle_sine",
+        rspice_core::netlist::FftWindow::HalfCycleSine3 => "half_cycle_sine_3",
+        rspice_core::netlist::FftWindow::HalfCycleSine6 => "half_cycle_sine_6",
+        rspice_core::netlist::FftWindow::Cosine2 => "cosine_2",
+        rspice_core::netlist::FftWindow::Cosine4 => "cosine_4",
+    }
+}
+
+const fn fft_value_unit(physical_type: &str) -> Option<&'static str> {
+    match physical_type.as_bytes() {
+        b"voltage" => Some("V"),
+        b"current" => Some("A"),
+        _ => None,
+    }
+}
+
+fn fft_json_document<'a>(
+    parent_analysis_id: &'a str,
+    coordinate: Option<&'a super::ArtifactCoordinate>,
+    results: &'a [rspice_core::engine::TransientFftResult],
+) -> FftJsonDocument<'a> {
+    FftJsonDocument {
+        schema_version: FFT_ARTIFACT_SCHEMA_VERSION,
+        analysis: "fft",
+        parent_analysis_id,
+        coordinate: coordinate.map(|coordinate| FftJsonCoordinate {
+            coordinate_id: &coordinate.id,
+            ordinal: coordinate.ordinal,
+            tag: &coordinate.tag,
+            assignment: &coordinate.assignment,
+        }),
+        result_count: results.len(),
+        results: FftJsonResults {
+            parent_analysis_id,
+            results,
+        },
+        format_policy: FftJsonFormatPolicy {
+            selected: "json",
+            representation: "structured",
+            supported: ["json", "csv", "tsv", "raw", "ascii", "hdf5"],
+        },
+    }
+}
+
+const FFT_DELIMITED_HEADER: [&str; 53] = [
+    "schema_version",
+    "analysis",
+    "artifact_format",
+    "analysis_id",
+    "parent_analysis_id",
+    "coordinate_id",
+    "coordinate_ordinal",
+    "coordinate_tag",
+    "coordinate_assignment",
+    "fft_ordinal",
+    "source_kind",
+    "source_text",
+    "authored_output",
+    "output_name",
+    "physical_type",
+    "value_unit",
+    "start_time_s",
+    "stop_time_s",
+    "sample_interval_s",
+    "point_count",
+    "accurate_sampling",
+    "format",
+    "mode",
+    "window",
+    "window_name",
+    "alpha",
+    "coherent_gain",
+    "frequency_resolution_hz",
+    "fundamental_bin",
+    "minimum_metric_bin",
+    "maximum_metric_bin",
+    "fundamental_magnitude",
+    "thd_ratio",
+    "thd_db",
+    "sndr_db",
+    "enob_bits",
+    "snr_db",
+    "sfdr_db",
+    "sfdr_spur_bin",
+    "sfdr_spur_frequency_hz",
+    "record_kind",
+    "bin_index",
+    "frequency_hz",
+    "real",
+    "imaginary",
+    "magnitude",
+    "phase_degrees",
+    "harmonic_rank",
+    "harmonic_bin",
+    "harmonic_frequency_hz",
+    "harmonic_magnitude",
+    "harmonic_magnitude_db",
+    "harmonic_phase_degrees",
+];
+
+fn delimited_float(value: f64) -> String {
+    format!("{value:.17e}")
+}
+
+fn delimited_optional_float(value: Option<f64>) -> String {
+    value.map(delimited_float).unwrap_or_default()
+}
+
+fn delimited_optional_usize(value: Option<usize>) -> String {
+    value.map(|value| value.to_string()).unwrap_or_default()
+}
+
+fn fft_delimited_common_fields(
+    format: OutputFormat,
+    ordinal: usize,
+    parent_analysis_id: &str,
+    coordinate: Option<&super::ArtifactCoordinate>,
+    result: &rspice_core::engine::TransientFftResult,
+) -> Vec<String> {
+    let (source_kind, source_text, authored_output) = fft_output_identity(&result.output);
+    let metrics = result.metrics.as_ref();
+    vec![
+        FFT_ARTIFACT_SCHEMA_VERSION.to_string(),
+        "fft".to_string(),
+        match format {
+            OutputFormat::Csv => "csv",
+            OutputFormat::Tsv => "tsv",
+            _ => unreachable!("validated flattened FFT format"),
+        }
+        .to_string(),
+        format!("fft-{ordinal:03}"),
+        parent_analysis_id.to_string(),
+        coordinate.map(|value| value.id.clone()).unwrap_or_default(),
+        coordinate
+            .map(|value| value.ordinal.to_string())
+            .unwrap_or_default(),
+        coordinate
+            .map(|value| value.tag.clone())
+            .unwrap_or_default(),
+        coordinate
+            .map(|value| value.assignment.clone())
+            .unwrap_or_default(),
+        ordinal.to_string(),
+        source_kind.to_string(),
+        source_text.to_string(),
+        authored_output,
+        result.output_name.clone(),
+        result.physical_type.to_string(),
+        fft_value_unit(result.physical_type)
+            .unwrap_or_default()
+            .to_string(),
+        delimited_float(result.start_time),
+        delimited_float(result.stop_time),
+        delimited_float(result.sample_interval),
+        result.point_count.to_string(),
+        result.accurate_sampling.to_string(),
+        fft_format_name(result.format).to_string(),
+        fft_mode_name(result.mode).to_string(),
+        fft_window_name(result.window).to_string(),
+        result.window_name.clone(),
+        delimited_float(result.alpha),
+        delimited_float(result.coherent_gain),
+        delimited_float(result.frequency_resolution),
+        result.fundamental_bin.to_string(),
+        result.minimum_metric_bin.to_string(),
+        result.maximum_metric_bin.to_string(),
+        metrics
+            .map(|value| delimited_float(value.fundamental_magnitude))
+            .unwrap_or_default(),
+        metrics
+            .map(|value| delimited_float(value.thd_ratio))
+            .unwrap_or_default(),
+        metrics
+            .map(|value| delimited_float(value.thd_db))
+            .unwrap_or_default(),
+        metrics
+            .map(|value| delimited_float(value.sndr_db))
+            .unwrap_or_default(),
+        metrics
+            .map(|value| delimited_float(value.enob_bits))
+            .unwrap_or_default(),
+        metrics
+            .map(|value| delimited_float(value.snr_db))
+            .unwrap_or_default(),
+        metrics
+            .map(|value| delimited_float(value.sfdr_db))
+            .unwrap_or_default(),
+        delimited_optional_usize(metrics.and_then(|value| value.sfdr_spur_bin)),
+        delimited_optional_float(metrics.and_then(|value| value.sfdr_spur_frequency)),
+    ]
+}
+
+fn write_delimited_fields<'a>(
+    writer: &mut dyn std::io::Write,
+    path: &Path,
+    delimiter: char,
+    fields: impl IntoIterator<Item = &'a str>,
+) -> Result<(), CliError> {
+    let io_err = |error| CliError::output_error(path, error);
+    let mut first = true;
+    for field in fields {
+        if !first {
+            write!(writer, "{delimiter}").map_err(io_err)?;
+        }
+        first = false;
+        write!(
+            writer,
+            "{}",
+            super::export::delimited_cell(field, delimiter)
+        )
+        .map_err(io_err)?;
+    }
+    writeln!(writer).map_err(io_err)
+}
+
+fn write_fft_delimited(
+    writer: &mut dyn std::io::Write,
+    path: &Path,
+    format: OutputFormat,
+    parent_analysis_id: &str,
+    coordinate: Option<&super::ArtifactCoordinate>,
+    results: &[rspice_core::engine::TransientFftResult],
+    timeout_seconds: Option<f64>,
+) -> Result<(), CliError> {
+    let delimiter = if matches!(format, OutputFormat::Csv) {
+        ','
+    } else {
+        '\t'
+    };
+    write_delimited_fields(writer, path, delimiter, FFT_DELIMITED_HEADER)?;
+
+    for (index, result) in results.iter().enumerate() {
+        if crate::abort::reason().is_some() {
+            return Err(super::cancellation_cli_error(timeout_seconds));
+        }
+        let common =
+            fft_delimited_common_fields(format, index + 1, parent_analysis_id, coordinate, result);
+        for bin in &result.bins {
+            if bin.index.is_multiple_of(256) && crate::abort::reason().is_some() {
+                return Err(super::cancellation_cli_error(timeout_seconds));
+            }
+            let record = [
+                "bin".to_string(),
+                bin.index.to_string(),
+                delimited_float(bin.frequency),
+                delimited_float(bin.real),
+                delimited_float(bin.imaginary),
+                delimited_float(bin.magnitude),
+                delimited_float(bin.phase_degrees),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+            ];
+            write_delimited_fields(
+                writer,
+                path,
+                delimiter,
+                common
+                    .iter()
+                    .map(String::as_str)
+                    .chain(record.iter().map(String::as_str)),
+            )?;
+        }
+        if let Some(metrics) = &result.metrics {
+            for harmonic in &metrics.largest_harmonics {
+                if harmonic.rank.is_multiple_of(256) && crate::abort::reason().is_some() {
+                    return Err(super::cancellation_cli_error(timeout_seconds));
+                }
+                let record = [
+                    "largest_harmonic".to_string(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    harmonic.rank.to_string(),
+                    harmonic.bin.to_string(),
+                    delimited_float(harmonic.frequency),
+                    delimited_float(harmonic.magnitude),
+                    delimited_float(harmonic.magnitude_db),
+                    delimited_float(harmonic.phase_degrees),
+                ];
+                write_delimited_fields(
+                    writer,
+                    path,
+                    delimiter,
+                    common
+                        .iter()
+                        .map(String::as_str)
+                        .chain(record.iter().map(String::as_str)),
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct FftRawMetadata {
+    schema_version: u32,
+    analysis: String,
+    parent_analysis_id: String,
+    coordinate: Option<FftRawCoordinate>,
+    result_count: usize,
+    results: Vec<FftRawMetadataResult>,
+    data_columns: [String; 7],
+    frequency_unit: String,
+    phase_unit: String,
+    complex_representation: String,
+    selected_format: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct FftRawCoordinate {
+    coordinate_id: String,
+    ordinal: usize,
+    tag: String,
+    assignment: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct FftRawSource {
+    kind: String,
+    text: String,
+    authored_output: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct FftRawSignal {
+    name: String,
+    physical_type: String,
+    unit: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct FftRawSampling {
+    start_time_s: f64,
+    stop_time_s: f64,
+    sample_interval_s: f64,
+    point_count: usize,
+    accurate_sampling: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct FftRawTransform {
+    format: String,
+    mode: String,
+    window: String,
+    window_name: String,
+    alpha: f64,
+    coherent_gain: f64,
+    frequency_resolution_hz: f64,
+    fundamental_bin: usize,
+    minimum_metric_bin: usize,
+    maximum_metric_bin: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct FftRawMetricUnits {
+    fundamental_magnitude: Option<String>,
+    thd_ratio: String,
+    thd_db: String,
+    sndr_db: String,
+    enob_bits: String,
+    snr_db: String,
+    sfdr_db: String,
+    sfdr_spur_frequency: String,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct FftRawHarmonic {
+    rank: usize,
+    bin: usize,
+    frequency_hz: f64,
+    magnitude: f64,
+    magnitude_db: f64,
+    phase_degrees: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct FftRawMetrics {
+    units: FftRawMetricUnits,
+    fundamental_magnitude: f64,
+    thd_ratio: f64,
+    thd_db: f64,
+    sndr_db: f64,
+    enob_bits: f64,
+    snr_db: f64,
+    sfdr_db: f64,
+    sfdr_spur_bin: Option<usize>,
+    sfdr_spur_frequency_hz: Option<f64>,
+    largest_harmonics: Vec<FftRawHarmonic>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct FftRawMetadataResult {
+    analysis_id: String,
+    parent_analysis_id: String,
+    ordinal: usize,
+    source: FftRawSource,
+    signal: FftRawSignal,
+    sampling: FftRawSampling,
+    transform: FftRawTransform,
+    metrics: Option<FftRawMetrics>,
+}
+
+impl FftRawMetadataResult {
+    fn new(
+        result: &rspice_core::engine::TransientFftResult,
+        ordinal: usize,
+        parent_analysis_id: &str,
+    ) -> Self {
+        let (kind, text, authored_output) = fft_output_identity(&result.output);
+        let unit = fft_value_unit(result.physical_type).map(str::to_string);
+        Self {
+            analysis_id: format!("fft-{ordinal:03}"),
+            parent_analysis_id: parent_analysis_id.to_string(),
+            ordinal,
+            source: FftRawSource {
+                kind: kind.to_string(),
+                text: text.to_string(),
+                authored_output,
+            },
+            signal: FftRawSignal {
+                name: result.output_name.clone(),
+                physical_type: result.physical_type.to_string(),
+                unit: unit.clone(),
+            },
+            sampling: FftRawSampling {
+                start_time_s: result.start_time,
+                stop_time_s: result.stop_time,
+                sample_interval_s: result.sample_interval,
+                point_count: result.point_count,
+                accurate_sampling: result.accurate_sampling,
+            },
+            transform: FftRawTransform {
+                format: fft_format_name(result.format).to_string(),
+                mode: fft_mode_name(result.mode).to_string(),
+                window: fft_window_name(result.window).to_string(),
+                window_name: result.window_name.clone(),
+                alpha: result.alpha,
+                coherent_gain: result.coherent_gain,
+                frequency_resolution_hz: result.frequency_resolution,
+                fundamental_bin: result.fundamental_bin,
+                minimum_metric_bin: result.minimum_metric_bin,
+                maximum_metric_bin: result.maximum_metric_bin,
+            },
+            metrics: result.metrics.as_ref().map(|metrics| FftRawMetrics {
+                units: FftRawMetricUnits {
+                    fundamental_magnitude: unit,
+                    thd_ratio: "1".to_string(),
+                    thd_db: "dB".to_string(),
+                    sndr_db: "dB".to_string(),
+                    enob_bits: "bit".to_string(),
+                    snr_db: "dB".to_string(),
+                    sfdr_db: "dB".to_string(),
+                    sfdr_spur_frequency: "Hz".to_string(),
+                },
+                fundamental_magnitude: metrics.fundamental_magnitude,
+                thd_ratio: metrics.thd_ratio,
+                thd_db: metrics.thd_db,
+                sndr_db: metrics.sndr_db,
+                enob_bits: metrics.enob_bits,
+                snr_db: metrics.snr_db,
+                sfdr_db: metrics.sfdr_db,
+                sfdr_spur_bin: metrics.sfdr_spur_bin,
+                sfdr_spur_frequency_hz: metrics.sfdr_spur_frequency,
+                largest_harmonics: metrics
+                    .largest_harmonics
+                    .iter()
+                    .map(|harmonic| FftRawHarmonic {
+                        rank: harmonic.rank,
+                        bin: harmonic.bin,
+                        frequency_hz: harmonic.frequency,
+                        magnitude: harmonic.magnitude,
+                        magnitude_db: harmonic.magnitude_db,
+                        phase_degrees: harmonic.phase_degrees,
+                    })
+                    .collect(),
+            }),
+        }
+    }
+}
+
+fn fft_raw_metadata(
+    format: OutputFormat,
+    parent_analysis_id: &str,
+    coordinate: Option<&super::ArtifactCoordinate>,
+    results: &[rspice_core::engine::TransientFftResult],
+) -> FftRawMetadata {
+    FftRawMetadata {
+        schema_version: FFT_ARTIFACT_SCHEMA_VERSION,
+        analysis: "fft".to_string(),
+        parent_analysis_id: parent_analysis_id.to_string(),
+        coordinate: coordinate.map(|coordinate| FftRawCoordinate {
+            coordinate_id: coordinate.id.clone(),
+            ordinal: coordinate.ordinal,
+            tag: coordinate.tag.clone(),
+            assignment: coordinate.assignment.clone(),
+        }),
+        result_count: results.len(),
+        results: results
+            .iter()
+            .enumerate()
+            .map(|(index, result)| FftRawMetadataResult::new(result, index + 1, parent_analysis_id))
+            .collect(),
+        data_columns: [
+            "frequency_hz".to_string(),
+            "real".to_string(),
+            "imaginary".to_string(),
+            "magnitude".to_string(),
+            "phase_degrees".to_string(),
+            "fft_ordinal".to_string(),
+            "bin_index".to_string(),
+        ],
+        frequency_unit: "Hz".to_string(),
+        phase_unit: "degree".to_string(),
+        complex_representation: "cartesian".to_string(),
+        selected_format: if matches!(format, OutputFormat::Raw) {
+            "raw".to_string()
+        } else {
+            "ascii".to_string()
+        },
+    }
+}
+
+fn validate_fft_raw_metadata(metadata: &FftRawMetadata) -> Result<(), String> {
+    const EXPECTED_COLUMNS: [&str; 7] = [
+        "frequency_hz",
+        "real",
+        "imaginary",
+        "magnitude",
+        "phase_degrees",
+        "fft_ordinal",
+        "bin_index",
+    ];
+    if metadata.schema_version != FFT_ARTIFACT_SCHEMA_VERSION
+        || metadata.analysis != "fft"
+        || metadata.parent_analysis_id.is_empty()
+        || metadata.result_count != metadata.results.len()
+        || metadata.results.is_empty()
+        || metadata.frequency_unit != "Hz"
+        || metadata.phase_unit != "degree"
+        || metadata.complex_representation != "cartesian"
+        || !matches!(metadata.selected_format.as_str(), "raw" | "ascii")
+        || metadata
+            .data_columns
+            .iter()
+            .map(String::as_str)
+            .ne(EXPECTED_COLUMNS)
+    {
+        return Err("invalid FFT RAW document envelope".to_string());
+    }
+    if let Some(coordinate) = &metadata.coordinate
+        && (coordinate.coordinate_id.is_empty()
+            || coordinate.ordinal == 0
+            || coordinate.tag.is_empty()
+            || coordinate.assignment.is_empty())
+    {
+        return Err("incomplete FFT RAW coordinate identity".to_string());
+    }
+    for (index, result) in metadata.results.iter().enumerate() {
+        let ordinal = index + 1;
+        if result.analysis_id != format!("fft-{ordinal:03}")
+            || result.parent_analysis_id != metadata.parent_analysis_id
+            || result.ordinal != ordinal
+            || !matches!(result.source.kind.as_str(), "probe" | "expression")
+            || result.source.text.is_empty()
+            || result.source.authored_output.is_empty()
+            || result.signal.name.is_empty()
+            || result.signal.physical_type.is_empty()
+            || result.sampling.point_count == 0
+            || ![
+                result.sampling.start_time_s,
+                result.sampling.stop_time_s,
+                result.sampling.sample_interval_s,
+                result.transform.alpha,
+                result.transform.coherent_gain,
+                result.transform.frequency_resolution_hz,
+            ]
+            .iter()
+            .all(|value| value.is_finite())
+            || result.sampling.stop_time_s <= result.sampling.start_time_s
+            || result.sampling.sample_interval_s <= 0.0
+            || result.transform.frequency_resolution_hz <= 0.0
+            || !matches!(
+                result.transform.format.as_str(),
+                "normalized" | "unnormalized"
+            )
+            || !matches!(
+                result.transform.mode.as_str(),
+                "hspice_compatible" | "spectre_compatible"
+            )
+            || !matches!(
+                result.transform.window.as_str(),
+                "rectangular"
+                    | "bartlett"
+                    | "bartlett_hann"
+                    | "hamming"
+                    | "hann"
+                    | "blackman_67db"
+                    | "blackman"
+                    | "blackman_harris"
+                    | "nuttall"
+                    | "half_cycle_sine"
+                    | "half_cycle_sine_3"
+                    | "half_cycle_sine_6"
+                    | "cosine_2"
+                    | "cosine_4"
+            )
+            || result.transform.window_name.is_empty()
+        {
+            return Err(format!("invalid FFT RAW metadata for fft-{ordinal:03}"));
+        }
+        let bin_count = result.sampling.point_count / 2 + 1;
+        if result.transform.fundamental_bin >= bin_count
+            || result.transform.minimum_metric_bin >= bin_count
+            || result.transform.maximum_metric_bin >= bin_count
+            || result.transform.minimum_metric_bin > result.transform.maximum_metric_bin
+        {
+            return Err(format!(
+                "invalid FFT RAW metric-bin bounds for fft-{ordinal:03}"
+            ));
+        }
+        let expected_unit = match result.signal.physical_type.as_str() {
+            "voltage" => Some("V"),
+            "current" => Some("A"),
+            "parameter" => None,
+            _ => return Err(format!("invalid FFT RAW signal type for fft-{ordinal:03}")),
+        };
+        if result.signal.unit.as_deref() != expected_unit {
+            return Err(format!("invalid FFT RAW signal unit for fft-{ordinal:03}"));
+        }
+        if let Some(metrics) = &result.metrics {
+            if ![
+                metrics.fundamental_magnitude,
+                metrics.thd_ratio,
+                metrics.thd_db,
+                metrics.sndr_db,
+                metrics.enob_bits,
+                metrics.snr_db,
+                metrics.sfdr_db,
+            ]
+            .iter()
+            .all(|value| value.is_finite())
+                || metrics.sfdr_spur_bin.is_some() != metrics.sfdr_spur_frequency_hz.is_some()
+                || metrics
+                    .sfdr_spur_frequency_hz
+                    .is_some_and(|value| !value.is_finite())
+                || metrics.sfdr_spur_bin.is_some_and(|bin| bin >= bin_count)
+                || metrics
+                    .sfdr_spur_bin
+                    .zip(metrics.sfdr_spur_frequency_hz)
+                    .is_some_and(|(bin, frequency)| {
+                        !fft_values_close(
+                            frequency,
+                            bin as f64 * result.transform.frequency_resolution_hz,
+                        )
+                    })
+                || metrics.largest_harmonics.len() > 30
+                || metrics.units.fundamental_magnitude.as_deref() != expected_unit
+                || metrics.units.thd_ratio != "1"
+                || metrics.units.thd_db != "dB"
+                || metrics.units.sndr_db != "dB"
+                || metrics.units.enob_bits != "bit"
+                || metrics.units.snr_db != "dB"
+                || metrics.units.sfdr_db != "dB"
+                || metrics.units.sfdr_spur_frequency != "Hz"
+            {
+                return Err(format!("invalid FFT RAW metrics for fft-{ordinal:03}"));
+            }
+            for (harmonic_index, harmonic) in metrics.largest_harmonics.iter().enumerate() {
+                if harmonic.rank != harmonic_index + 1
+                    || harmonic.bin == 0
+                    || harmonic.bin >= bin_count
+                    || metrics.largest_harmonics[..harmonic_index]
+                        .iter()
+                        .any(|previous| previous.bin == harmonic.bin)
+                    || ![
+                        harmonic.frequency_hz,
+                        harmonic.magnitude,
+                        harmonic.magnitude_db,
+                        harmonic.phase_degrees,
+                    ]
+                    .iter()
+                    .all(|value| value.is_finite())
+                    || !fft_values_close(
+                        harmonic.frequency_hz,
+                        harmonic.bin as f64 * result.transform.frequency_resolution_hz,
+                    )
+                {
+                    return Err(format!(
+                        "invalid FFT RAW ranked harmonic {} for fft-{ordinal:03}",
+                        harmonic_index + 1
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn fft_values_close(actual: f64, expected: f64) -> bool {
+    let tolerance = 1.0e-11 * actual.abs().max(expected.abs()).max(1.0);
+    (actual - expected).abs() <= tolerance
+}
+
+fn fft_phase_distance_degrees(actual: f64, expected: f64) -> f64 {
+    let delta = (actual - expected).rem_euclid(360.0);
+    delta.min(360.0 - delta)
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct DecodedFftRawBin {
+    pub(crate) analysis_id: String,
+    pub(crate) index: usize,
+    pub(crate) frequency_hz: f64,
+    pub(crate) real: f64,
+    pub(crate) imaginary: f64,
+    pub(crate) magnitude: f64,
+    pub(crate) phase_degrees: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct DecodedFftRawArtifact {
+    pub(crate) metadata: FftRawMetadata,
+    pub(crate) bins: Vec<DecodedFftRawBin>,
+}
+
+/// Read and validate the RSpice FFT RAW extension. The ordinary waveform
+/// reader intentionally remains generic; this decoder joins its numeric
+/// columns with the typed JSON provenance carried by the standard `Command:`
+/// header and rejects any inconsistent identity or bin layout.
+pub(crate) fn read_fft_raw_artifact(path: &Path) -> Result<DecodedFftRawArtifact, String> {
+    const EXPECTED_VARIABLES: [&str; 7] = [
+        "frequency",
+        "fft_real",
+        "fft_imaginary",
+        "fft_magnitude",
+        "fft_phase_degrees",
+        "fft_ordinal",
+        "bin_index",
+    ];
+    const EXPECTED_VARIABLE_TYPES: [&str; 7] = [
+        "frequency",
+        "value",
+        "value",
+        "value",
+        "degree",
+        "index",
+        "index",
+    ];
+    let raw = rspice_core::io::parse_raw_file(path).map_err(|error| error.to_string())?;
+    if raw.header.plotname != "Transient FFT"
+        || raw.variables.len() != EXPECTED_VARIABLES.len()
+        || raw
+            .variables
+            .iter()
+            .map(|variable| variable.name.as_str())
+            .ne(EXPECTED_VARIABLES)
+        || raw
+            .variables
+            .iter()
+            .map(|variable| variable.var_type.as_str())
+            .ne(EXPECTED_VARIABLE_TYPES)
+        || raw.waveforms.len() != EXPECTED_VARIABLES.len()
+        || raw
+            .header
+            .flags
+            .iter()
+            .map(String::as_str)
+            .ne(["real", "double"])
+        || raw.header.is_complex
+        || !raw.header.is_double
+    {
+        return Err("invalid FFT RAW variable schema".to_string());
+    }
+    let metadata: FftRawMetadata =
+        serde_json::from_str(&raw.header.command).map_err(|error| error.to_string())?;
+    validate_fft_raw_metadata(&metadata)?;
+    let expected_format = if raw.header.is_binary { "raw" } else { "ascii" };
+    if metadata.selected_format != expected_format {
+        return Err(format!(
+            "FFT RAW metadata selects '{}', but the artifact is {expected_format}",
+            metadata.selected_format
+        ));
+    }
+    let expected_points = metadata.results.iter().try_fold(0usize, |count, result| {
+        count.checked_add(result.sampling.point_count / 2 + 1)
+    });
+    let expected_points =
+        expected_points.ok_or_else(|| "FFT RAW point count overflow".to_string())?;
+    if raw.header.no_points != expected_points
+        || raw
+            .waveforms
+            .iter()
+            .any(|waveform| waveform.y.len() != expected_points)
+    {
+        return Err("FFT RAW point count does not match typed metadata".to_string());
+    }
+
+    let columns = &raw.waveforms;
+    let mut bins = Vec::with_capacity(expected_points);
+    let mut row = 0usize;
+    for result in &metadata.results {
+        let bin_count = result.sampling.point_count / 2 + 1;
+        for bin_index in 0..bin_count {
+            let ordinal = columns[5].y[row];
+            let stored_index = columns[6].y[row];
+            if ordinal != result.ordinal as f64 || stored_index != bin_index as f64 {
+                return Err(format!(
+                    "FFT RAW row {row} does not match {} bin {bin_index}",
+                    result.analysis_id
+                ));
+            }
+            let real = columns[1].y[row];
+            let imaginary = columns[2].y[row];
+            let magnitude = columns[3].y[row];
+            let frequency = columns[0].y[row];
+            let phase_degrees = columns[4].y[row];
+            if ![frequency, real, imaginary, magnitude, phase_degrees]
+                .iter()
+                .all(|value| value.is_finite())
+                || magnitude < 0.0
+            {
+                return Err(format!(
+                    "FFT RAW row {row} contains non-finite or invalid data"
+                ));
+            }
+            let expected_frequency = bin_index as f64 * result.transform.frequency_resolution_hz;
+            if !fft_values_close(frequency, expected_frequency) {
+                return Err(format!(
+                    "FFT RAW row {row} frequency does not match {} bin {bin_index}",
+                    result.analysis_id
+                ));
+            }
+            let derived_magnitude = real.hypot(imaginary);
+            if !fft_values_close(magnitude, derived_magnitude) {
+                return Err(format!(
+                    "FFT RAW row {row} magnitude is inconsistent with its Cartesian value"
+                ));
+            }
+            if derived_magnitude > 1.0e-14 {
+                let derived_phase = imaginary.atan2(real).to_degrees();
+                if fft_phase_distance_degrees(phase_degrees, derived_phase) > 1.0e-9 {
+                    return Err(format!(
+                        "FFT RAW row {row} phase is inconsistent with its Cartesian value"
+                    ));
+                }
+            }
+            bins.push(DecodedFftRawBin {
+                analysis_id: result.analysis_id.clone(),
+                index: bin_index,
+                frequency_hz: frequency,
+                real,
+                imaginary,
+                magnitude,
+                phase_degrees,
+            });
+            row += 1;
+        }
+    }
+    Ok(DecodedFftRawArtifact { metadata, bins })
+}
+
+fn write_fft_raw(
+    writer: &mut dyn std::io::Write,
+    path: &Path,
+    format: OutputFormat,
+    parent_analysis_id: &str,
+    coordinate: Option<&super::ArtifactCoordinate>,
+    results: &[rspice_core::engine::TransientFftResult],
+    timeout_seconds: Option<f64>,
+) -> Result<(), CliError> {
+    let metadata = fft_raw_metadata(format, parent_analysis_id, coordinate, results);
+    validate_fft_raw_metadata(&metadata).map_err(|message| CliError::InternalError { message })?;
+    let command = serde_json::to_string(&metadata).map_err(|error| {
+        if crate::abort::reason().is_some() {
+            super::cancellation_cli_error(timeout_seconds)
+        } else {
+            CliError::output_json_error(path, error)
+        }
+    })?;
+    let point_count = results
+        .iter()
+        .try_fold(0usize, |count, result| count.checked_add(result.bins.len()))
+        .ok_or_else(|| CliError::InternalError {
+            message: "FFT RAW point count overflowed this platform".to_string(),
+        })?;
+    let io_err = |error| CliError::output_error(path, error);
+    writeln!(writer, "Title: RSpice FFT bundle {parent_analysis_id}").map_err(io_err)?;
+    writeln!(writer, "Date: Generated by RSpice").map_err(io_err)?;
+    writeln!(writer, "Plotname: Transient FFT").map_err(io_err)?;
+    writeln!(writer, "Command: {command}").map_err(io_err)?;
+    writeln!(writer, "Flags: real double").map_err(io_err)?;
+    writeln!(writer, "No. Variables: 7").map_err(io_err)?;
+    writeln!(writer, "No. Points: {point_count}").map_err(io_err)?;
+    writeln!(writer, "Variables:").map_err(io_err)?;
+    for (index, (name, variable_type)) in [
+        ("frequency", "frequency"),
+        ("fft_real", "value"),
+        ("fft_imaginary", "value"),
+        ("fft_magnitude", "value"),
+        ("fft_phase_degrees", "degree"),
+        ("fft_ordinal", "index"),
+        ("bin_index", "index"),
+    ]
+    .iter()
+    .enumerate()
+    {
+        writeln!(writer, "\t{index}\t{name}\t{variable_type}").map_err(io_err)?;
+    }
+
+    match format {
+        OutputFormat::Raw => writeln!(writer, "Binary:").map_err(io_err)?,
+        OutputFormat::RawAscii => writeln!(writer, "Values:").map_err(io_err)?,
+        _ => unreachable!("validated FFT RAW format"),
+    }
+    let mut row_index = 0usize;
+    for (result_index, result) in results.iter().enumerate() {
+        for bin in &result.bins {
+            if row_index.is_multiple_of(256) && crate::abort::reason().is_some() {
+                return Err(super::cancellation_cli_error(timeout_seconds));
+            }
+            let row = [
+                bin.frequency,
+                bin.real,
+                bin.imaginary,
+                bin.magnitude,
+                bin.phase_degrees,
+                (result_index + 1) as f64,
+                bin.index as f64,
+            ];
+            match format {
+                OutputFormat::Raw => {
+                    for value in row {
+                        writer.write_all(&value.to_le_bytes()).map_err(io_err)?;
+                    }
+                }
+                OutputFormat::RawAscii => {
+                    write!(writer, "{row_index}").map_err(io_err)?;
+                    for value in row {
+                        write!(writer, "\t{value:.17e}").map_err(io_err)?;
+                    }
+                    writeln!(writer).map_err(io_err)?;
+                }
+                _ => unreachable!("validated FFT RAW format"),
+            }
+            row_index = row_index.saturating_add(1);
+        }
+    }
+    Ok(())
+}
+
+fn hdf5_fft_section(
+    parent_analysis_id: &str,
+    coordinate: Option<&super::ArtifactCoordinate>,
+    results: &[rspice_core::engine::TransientFftResult],
+    timeout_seconds: Option<f64>,
+) -> Result<Hdf5FftSection, CliError> {
+    let mut hdf5_results = Vec::new();
+    hdf5_results
+        .try_reserve_exact(results.len())
+        .map_err(|error| CliError::InternalError {
+            message: format!("cannot allocate typed HDF5 FFT result metadata: {error}"),
+        })?;
+    for (index, result) in results.iter().enumerate() {
+        if crate::abort::reason().is_some() {
+            return Err(super::cancellation_cli_error(timeout_seconds));
+        }
+        let (source_kind, source_text, authored_output) = fft_output_identity(&result.output);
+        let mut bin_indices = Vec::new();
+        let mut frequency_hz = Vec::new();
+        let mut real = Vec::new();
+        let mut imaginary = Vec::new();
+        let mut magnitude = Vec::new();
+        let mut phase_degrees = Vec::new();
+        bin_indices
+            .try_reserve_exact(result.bins.len())
+            .map_err(|error| CliError::InternalError {
+                message: format!("cannot allocate typed HDF5 FFT bin indices: {error}"),
+            })?;
+        for values in [
+            &mut frequency_hz,
+            &mut real,
+            &mut imaginary,
+            &mut magnitude,
+            &mut phase_degrees,
+        ] {
+            values
+                .try_reserve_exact(result.bins.len())
+                .map_err(|error| CliError::InternalError {
+                    message: format!("cannot allocate typed HDF5 FFT bins: {error}"),
+                })?;
+        }
+        for bin in &result.bins {
+            if bin.index.is_multiple_of(256) && crate::abort::reason().is_some() {
+                return Err(super::cancellation_cli_error(timeout_seconds));
+            }
+            bin_indices.push(
+                u64::try_from(bin.index).map_err(|_| CliError::InternalError {
+                    message: "FFT bin index exceeds the HDF5 u64 schema".to_string(),
+                })?,
+            );
+            frequency_hz.push(bin.frequency);
+            real.push(bin.real);
+            imaginary.push(bin.imaginary);
+            magnitude.push(bin.magnitude);
+            phase_degrees.push(bin.phase_degrees);
+        }
+        let metrics = result.metrics.as_ref().map(|metrics| Hdf5FftMetrics {
+            fundamental_magnitude: metrics.fundamental_magnitude,
+            thd_ratio: metrics.thd_ratio,
+            thd_db: metrics.thd_db,
+            sndr_db: metrics.sndr_db,
+            enob_bits: metrics.enob_bits,
+            snr_db: metrics.snr_db,
+            sfdr_db: metrics.sfdr_db,
+            sfdr_spur_bin: metrics.sfdr_spur_bin,
+            sfdr_spur_frequency_hz: metrics.sfdr_spur_frequency,
+            largest_harmonics: metrics
+                .largest_harmonics
+                .iter()
+                .map(|harmonic| Hdf5FftHarmonic {
+                    rank: harmonic.rank,
+                    bin: harmonic.bin,
+                    frequency_hz: harmonic.frequency,
+                    magnitude: harmonic.magnitude,
+                    magnitude_db: harmonic.magnitude_db,
+                    phase_degrees: harmonic.phase_degrees,
+                })
+                .collect(),
+        });
+        hdf5_results.push(Hdf5FftResult {
+            analysis_id: format!("fft-{:03}", index + 1),
+            ordinal: index + 1,
+            source_kind: source_kind.to_string(),
+            source_text: source_text.to_string(),
+            authored_output,
+            output_name: result.output_name.clone(),
+            physical_type: result.physical_type.to_string(),
+            value_unit: fft_value_unit(result.physical_type).map(str::to_string),
+            start_time_s: result.start_time,
+            stop_time_s: result.stop_time,
+            sample_interval_s: result.sample_interval,
+            point_count: result.point_count,
+            accurate_sampling: result.accurate_sampling,
+            format: fft_format_name(result.format).to_string(),
+            mode: fft_mode_name(result.mode).to_string(),
+            window: fft_window_name(result.window).to_string(),
+            window_name: result.window_name.clone(),
+            alpha: result.alpha,
+            coherent_gain: result.coherent_gain,
+            frequency_resolution_hz: result.frequency_resolution,
+            fundamental_bin: result.fundamental_bin,
+            minimum_metric_bin: result.minimum_metric_bin,
+            maximum_metric_bin: result.maximum_metric_bin,
+            bin_indices,
+            frequency_hz,
+            real,
+            imaginary,
+            magnitude,
+            phase_degrees,
+            metrics,
+        });
+    }
+
+    Ok(Hdf5FftSection {
+        parent_analysis_id: parent_analysis_id.to_string(),
+        coordinate: coordinate.map(|coordinate| Hdf5FftCoordinate {
+            coordinate_id: coordinate.id.clone(),
+            ordinal: coordinate.ordinal,
+            tag: coordinate.tag.clone(),
+            assignment: coordinate.assignment.clone(),
+        }),
+        results: hdf5_results,
+    })
+}
+
+#[cfg(test)]
+fn write_fft_output(
+    path: &Path,
+    format: OutputFormat,
+    parent_analysis_id: &str,
+    coordinate: Option<&super::ArtifactCoordinate>,
+    results: &[rspice_core::engine::TransientFftResult],
+    timeout_seconds: Option<f64>,
+) -> Result<(), CliError> {
+    if crate::abort::reason().is_some() {
+        return Err(super::cancellation_cli_error(timeout_seconds));
+    }
+    write_atomic(
+        path,
+        AtomicArtifactOptions::new(Durability::SyncFileAndParent),
+        |writer| {
+            write_fft_to_writer(
+                writer,
+                path,
+                format,
+                parent_analysis_id,
+                coordinate,
+                results,
+                timeout_seconds,
+            )
+        },
+    )
+    .map_err(|error| map_atomic_output_error(path, error))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_fft_to_writer(
+    writer: &mut dyn std::io::Write,
+    path: &Path,
+    format: OutputFormat,
+    parent_analysis_id: &str,
+    coordinate: Option<&super::ArtifactCoordinate>,
+    results: &[rspice_core::engine::TransientFftResult],
+    timeout_seconds: Option<f64>,
+) -> Result<(), CliError> {
+    if crate::abort::reason().is_some() {
+        return Err(super::cancellation_cli_error(timeout_seconds));
+    }
+    match format {
+        OutputFormat::Json => {
+            let document = fft_json_document(parent_analysis_id, coordinate, results);
+            serde_json::to_writer_pretty(&mut *writer, &document).map_err(|error| {
+                if crate::abort::reason().is_some() {
+                    super::cancellation_cli_error(timeout_seconds)
+                } else {
+                    CliError::output_json_error(path, error)
+                }
+            })?;
+            writer
+                .write_all(b"\n")
+                .map_err(|error| CliError::output_error(path, error))?;
+        }
+        OutputFormat::Csv | OutputFormat::Tsv => write_fft_delimited(
+            writer,
+            path,
+            format,
+            parent_analysis_id,
+            coordinate,
+            results,
+            timeout_seconds,
+        )?,
+        OutputFormat::Raw | OutputFormat::RawAscii => write_fft_raw(
+            writer,
+            path,
+            format,
+            parent_analysis_id,
+            coordinate,
+            results,
+            timeout_seconds,
+        )?,
+        OutputFormat::Hdf5 => {
+            let mut data = Hdf5SimulationData::new();
+            data.title = format!("Transient FFT ({parent_analysis_id})");
+            data.fft = Some(hdf5_fft_section(
+                parent_analysis_id,
+                coordinate,
+                results,
+                timeout_seconds,
+            )?);
+            write_hdf5_to_writer(writer, &data)
+                .map_err(|error| map_hdf5_output_error(path, error))?;
+        }
+    }
+    if crate::abort::reason().is_some() {
+        return Err(super::cancellation_cli_error(timeout_seconds));
+    }
+    Ok(())
 }
 
 fn run_authored_restart(
@@ -1577,6 +3450,27 @@ fn default_transient_max_step(tstep: f64, tstop: f64, tstart: f64) -> f64 {
 #[cfg(test)]
 mod restart_tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_FFT_TEST: AtomicU64 = AtomicU64::new(0);
+
+    struct FftTestDirectory(PathBuf);
+
+    impl FftTestDirectory {
+        fn new() -> Self {
+            let id = NEXT_FFT_TEST.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir()
+                .join(format!("rspice-cli-fft-raw-{}-{id}", std::process::id()));
+            std::fs::create_dir(&path).expect("create FFT RAW test directory");
+            Self(path)
+        }
+    }
+
+    impl Drop for FftTestDirectory {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
 
     #[test]
     fn restart_logical_names_are_single_portable_components() {
@@ -1591,6 +3485,134 @@ mod restart_tests {
             "C:state",
         ] {
             assert!(validate_restart_logical_name(unsafe_name, "FILE").is_err());
+        }
+    }
+
+    #[test]
+    fn binary_and_ascii_fft_raw_artifacts_round_trip_typed_metadata_and_ragged_bins() {
+        let netlist = rspice_core::Netlist::parse(
+            "typed FFT RAW round trip\n\
+             V1 out 0 SIN(0 1 1k)\n\
+             R1 out 0 1k\n\
+             .options fft fftout=1\n\
+             .tran 1u 1m\n\
+             .fft v(out) np=8 format=unorm window=rect freq=1k\n\
+             .fft {2*v(out)} np=16 window=hann freq=1k\n\
+             .end\n",
+        )
+        .expect("parse typed FFT RAW test deck");
+        let transient = rspice_core::Engine::new(rspice_core::SimulationConfig::default())
+            .run_tran(&netlist, 1.0e-3, 1.0e-6)
+            .expect("run typed FFT RAW test deck");
+        assert_eq!(transient.fft_results.len(), 2);
+        let directory = FftTestDirectory::new();
+
+        for (format, extension, selected) in [
+            (OutputFormat::Raw, "raw", "raw"),
+            (OutputFormat::RawAscii, "ascii.raw", "ascii"),
+        ] {
+            let path = directory.0.join(format!("fft.{extension}"));
+            write_fft_output(
+                &path,
+                format,
+                "tran-007",
+                None,
+                &transient.fft_results,
+                None,
+            )
+            .expect("write typed FFT RAW artifact");
+            let decoded = read_fft_raw_artifact(&path).expect("decode typed FFT RAW artifact");
+            assert_eq!(decoded.metadata.selected_format, selected);
+            assert_eq!(decoded.metadata.parent_analysis_id, "tran-007");
+            assert_eq!(decoded.metadata.result_count, 2);
+            assert_eq!(decoded.metadata.frequency_unit, "Hz");
+            assert_eq!(decoded.metadata.phase_unit, "degree");
+            assert_eq!(decoded.metadata.complex_representation, "cartesian");
+            assert_eq!(decoded.metadata.results[0].analysis_id, "fft-001");
+            assert_eq!(decoded.metadata.results[1].analysis_id, "fft-002");
+            assert!(decoded.metadata.results[0].metrics.is_some());
+            assert!(decoded.metadata.results[1].metrics.is_some());
+            assert_eq!(decoded.bins[0].analysis_id, "fft-001");
+            let second_start = transient.fft_results[0].bins.len();
+            assert_eq!(decoded.bins[second_start].analysis_id, "fft-002");
+            assert_eq!(decoded.bins[second_start].index, 0);
+            assert_eq!(decoded.bins[second_start].frequency_hz, 0.0);
+            assert_eq!(
+                decoded.bins.len(),
+                transient
+                    .fft_results
+                    .iter()
+                    .map(|result| result.bins.len())
+                    .sum::<usize>()
+            );
+            assert!((decoded.bins[1].real - transient.fft_results[0].bins[1].real).abs() < 1e-14);
+            assert!(
+                (decoded.bins[1].imaginary - transient.fft_results[0].bins[1].imaginary).abs()
+                    < 1e-14
+            );
+            assert!(
+                (decoded.bins[1].magnitude - transient.fft_results[0].bins[1].magnitude).abs()
+                    < 1e-14
+            );
+            assert!(
+                (decoded.bins[1].phase_degrees - transient.fft_results[0].bins[1].phase_degrees)
+                    .abs()
+                    < 1e-14
+            );
+            let entries = std::fs::read_dir(&directory.0)
+                .expect("read FFT RAW test directory")
+                .map(|entry| entry.expect("read FFT RAW entry").file_name())
+                .collect::<Vec<_>>();
+            assert!(
+                entries.iter().all(|name| !name
+                    .to_string_lossy()
+                    .contains(rspice_output::STAGING_MARKER)),
+                "atomic FFT RAW staging artifact remained: {entries:?}"
+            );
+
+            if matches!(format, OutputFormat::Raw) {
+                let mut future = decoded.metadata.clone();
+                future.schema_version = FFT_ARTIFACT_SCHEMA_VERSION + 1;
+                assert!(validate_fft_raw_metadata(&future).is_err());
+
+                let mut malformed = decoded.metadata.clone();
+                malformed.results[0].analysis_id = "fft-999".to_string();
+                assert!(validate_fft_raw_metadata(&malformed).is_err());
+
+                let mut unknown_enum = decoded.metadata.clone();
+                unknown_enum.results[0].transform.window = "future_window".to_string();
+                assert!(validate_fft_raw_metadata(&unknown_enum).is_err());
+
+                let original = std::fs::read(&path).expect("read binary FFT RAW bytes");
+                let mut corrupt_schema = original.clone();
+                let schema_offset = corrupt_schema
+                    .windows(b"fft_real\tvalue".len())
+                    .position(|window| window == b"fft_real\tvalue")
+                    .expect("find FFT RAW variable type")
+                    + b"fft_real\t".len();
+                corrupt_schema[schema_offset..schema_offset + 5].copy_from_slice(b"bogus");
+                std::fs::write(&path, &corrupt_schema).expect("write corrupt variable schema");
+                assert!(read_fft_raw_artifact(&path).is_err());
+
+                let mut non_finite = original.clone();
+                let binary_offset = non_finite
+                    .windows(b"Binary:\n".len())
+                    .position(|window| window == b"Binary:\n")
+                    .expect("find FFT RAW binary payload")
+                    + b"Binary:\n".len();
+                non_finite[binary_offset..binary_offset + 8]
+                    .copy_from_slice(&f64::NAN.to_le_bytes());
+                std::fs::write(&path, &non_finite).expect("write non-finite FFT RAW row");
+                assert!(read_fft_raw_artifact(&path).is_err());
+
+                let mut wrong_phase = original.clone();
+                let second_row_phase = binary_offset + 7 * 8 + 4 * 8;
+                wrong_phase[second_row_phase..second_row_phase + 8]
+                    .copy_from_slice(&123.0_f64.to_le_bytes());
+                std::fs::write(&path, &wrong_phase).expect("write inconsistent FFT RAW phase");
+                assert!(read_fft_raw_artifact(&path).is_err());
+                std::fs::write(&path, original).expect("restore binary FFT RAW fixture");
+            }
         }
     }
 }

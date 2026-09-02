@@ -21,7 +21,7 @@ This is an adapter inventory, not a claim of numerical qualification. `mapped` m
 | `sensitivity` | partial / partial / partial | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
 | `pole-zero` | partial / partial / partial | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
 | `fourier` | partial / partial / partial | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
-| `fft` | partial / partial / partial | mapped / mapped / mapped | mapped / unsupported / unsupported | unsupported / unsupported / unsupported |
+| `fft` | mapped / mapped / mapped | mapped / mapped / mapped | mapped / unsupported / unsupported | unsupported / unsupported / unsupported |
 | `monte-carlo` | partial / unsupported / unsupported | mapped / partial / partial | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
 | `pss` | partial / unsupported / unsupported | mapped / unsupported / unsupported | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
 | `pac` | unsupported / unsupported / unsupported | mapped / unsupported / unsupported | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
@@ -87,9 +87,6 @@ Repeated forms with the same declaration are grouped. Every non-mapped declarati
 | `fourier` | CLI | STEP, TEMP | partial | shared deck axes execute, but the CLI artifact does not retain a typed coordinate document |
 | `fourier` | WASM | scalar, STEP, TEMP | unsupported | browser API has no result adapter for this family |
 | `fourier` | Engine adapter | scalar, STEP, TEMP | unsupported | protocol-3 adapter has no result mapping for this family |
-| `fft` | CLI | scalar | partial | transient computes FFT results, but the CLI exporter does not publish them |
-| `fft` | CLI | STEP | partial | stepped transient computes FFT results, but the CLI exporter does not publish them |
-| `fft` | CLI | TEMP | partial | temperature transient computes FFT results, but the CLI exporter does not publish them |
 | `fft` | WASM | STEP, TEMP | unsupported | browser API does not consume DeckPlan axes |
 | `fft` | Engine adapter | scalar, STEP, TEMP | unsupported | protocol-3 adapter has no result mapping for this family |
 | `monte-carlo` | CLI | scalar | partial | CSV/text artifact exists, but no shared typed result document |

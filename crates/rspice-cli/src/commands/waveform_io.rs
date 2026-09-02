@@ -204,6 +204,15 @@ fn load_rawfile(
 ) -> Result<ExportTable, CliError> {
     let data = rspice_core::io::parse_raw_file_with_limits(path, resource_limits)
         .map_err(|e| conversion_error(path, e))?;
+    if data.header.plotname == "Transient FFT" {
+        crate::commands::run::read_fft_raw_artifact(path).map_err(|error| {
+            conversion_error(path, format!("invalid typed FFT RAW artifact: {error}"))
+        })?;
+        return Err(conversion_error(
+            path,
+            "typed transient FFT RAW artifacts cannot be flattened by generic waveform conversion without losing analysis identity, transform metadata, and FFTOUT metrics",
+        ));
+    }
 
     let mut waveforms = data.waveforms.into_iter();
     let Some(scale) = waveforms.next() else {
@@ -554,6 +563,13 @@ fn load_hdf5(
             .collect(),
     };
 
+    if data.fft.is_some() {
+        return Err(conversion_error(
+            path,
+            "typed transient FFT HDF5 artifacts cannot be flattened by generic waveform conversion without losing analysis identity, transform metadata, and FFTOUT metrics",
+        ));
+    }
+
     if let Some(section) = data.transient.clone() {
         return Ok(from_section(section, "transient"));
     }
@@ -782,5 +798,61 @@ mod tests {
             };
             assert_limit(error, rspice_core::ResourceKind::ExternalDataValues, 4, 3);
         }
+    }
+
+    #[test]
+    fn combined_hdf5_waveform_and_fft_is_rejected_before_flattening() {
+        let input = TempInput::new("h5", "placeholder");
+        let mut data = crate::hdf5::Hdf5SimulationData::new();
+        data.title = "combined waveform and FFT".to_string();
+        let mut transient = crate::hdf5::Hdf5WaveformSection::new("time", vec![0.0, 1.0]);
+        transient.add_typed_signal("V(out)", "voltage", vec![0.0, 1.0]);
+        data.transient = Some(transient);
+        data.fft = Some(crate::hdf5::Hdf5FftSection {
+            parent_analysis_id: "tran-001".to_string(),
+            coordinate: None,
+            results: vec![crate::hdf5::Hdf5FftResult {
+                analysis_id: "fft-001".to_string(),
+                ordinal: 1,
+                source_kind: "probe".to_string(),
+                source_text: "V(out)".to_string(),
+                authored_output: "V(out)".to_string(),
+                output_name: "V(out)".to_string(),
+                physical_type: "voltage".to_string(),
+                value_unit: Some("V".to_string()),
+                start_time_s: 0.0,
+                stop_time_s: 1.0,
+                sample_interval_s: 0.5,
+                point_count: 2,
+                accurate_sampling: true,
+                format: "normalized".to_string(),
+                mode: "hspice_compatible".to_string(),
+                window: "rectangular".to_string(),
+                window_name: "RECT".to_string(),
+                alpha: 3.0,
+                coherent_gain: 1.0,
+                frequency_resolution_hz: 1.0,
+                fundamental_bin: 1,
+                minimum_metric_bin: 0,
+                maximum_metric_bin: 1,
+                bin_indices: vec![0, 1],
+                frequency_hz: vec![0.0, 1.0],
+                real: vec![0.0, 1.0],
+                imaginary: vec![0.0, 0.0],
+                magnitude: vec![0.0, 1.0],
+                phase_degrees: vec![0.0, 0.0],
+                metrics: None,
+            }],
+        });
+        crate::hdf5::write_hdf5(&input.0, &data).expect("write combined HDF5 fixture");
+
+        let error = match load_hdf5(&input.0, rspice_core::ResourceLimits::default()) {
+            Err(error) => error,
+            Ok(_) => panic!("combined typed FFT data must not be flattened"),
+        };
+        assert!(
+            error.to_string().contains("typed transient FFT HDF5"),
+            "unexpected conversion error: {error}"
+        );
     }
 }

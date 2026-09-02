@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 const SCHEMA_VERSION: &str = "1";
+const FFT_SECTION_SCHEMA_VERSION: &str = "1";
 
 #[derive(Debug, Error)]
 pub enum Hdf5Error {
@@ -210,6 +211,305 @@ pub struct Hdf5DistortionSection {
     pub series: Vec<Hdf5DistortionSeries>,
 }
 
+/// Canonical run-axis identity attached to an FFT artifact. Scalar runs omit
+/// this object rather than inventing a synthetic coordinate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hdf5FftCoordinate {
+    pub coordinate_id: String,
+    pub ordinal: usize,
+    pub tag: String,
+    pub assignment: String,
+}
+
+/// One magnitude-ranked harmonic retained by `.OPTIONS FFT FFTOUT=1`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Hdf5FftHarmonic {
+    pub rank: usize,
+    pub bin: usize,
+    pub frequency_hz: f64,
+    pub magnitude: f64,
+    pub magnitude_db: f64,
+    pub phase_degrees: f64,
+}
+
+/// Typed optional FFT metric payload.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Hdf5FftMetrics {
+    pub fundamental_magnitude: f64,
+    pub thd_ratio: f64,
+    pub thd_db: f64,
+    pub sndr_db: f64,
+    pub enob_bits: f64,
+    pub snr_db: f64,
+    pub sfdr_db: f64,
+    pub sfdr_spur_bin: Option<usize>,
+    pub sfdr_spur_frequency_hz: Option<f64>,
+    pub largest_harmonics: Vec<Hdf5FftHarmonic>,
+}
+
+/// Complete typed representation of one source-authored transient `.FFT`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Hdf5FftResult {
+    pub analysis_id: String,
+    pub ordinal: usize,
+    pub source_kind: String,
+    pub source_text: String,
+    pub authored_output: String,
+    pub output_name: String,
+    pub physical_type: String,
+    pub value_unit: Option<String>,
+    pub start_time_s: f64,
+    pub stop_time_s: f64,
+    pub sample_interval_s: f64,
+    pub point_count: usize,
+    pub accurate_sampling: bool,
+    pub format: String,
+    pub mode: String,
+    pub window: String,
+    pub window_name: String,
+    pub alpha: f64,
+    pub coherent_gain: f64,
+    pub frequency_resolution_hz: f64,
+    pub fundamental_bin: usize,
+    pub minimum_metric_bin: usize,
+    pub maximum_metric_bin: usize,
+    pub bin_indices: Vec<u64>,
+    pub frequency_hz: Vec<f64>,
+    pub real: Vec<f64>,
+    pub imaginary: Vec<f64>,
+    pub magnitude: Vec<f64>,
+    pub phase_degrees: Vec<f64>,
+    pub metrics: Option<Hdf5FftMetrics>,
+}
+
+/// One atomic HDF5 FFT artifact, containing every directive evaluated by one
+/// parent transient in exact source order.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Hdf5FftSection {
+    pub parent_analysis_id: String,
+    pub coordinate: Option<Hdf5FftCoordinate>,
+    pub results: Vec<Hdf5FftResult>,
+}
+
+impl Hdf5FftSection {
+    fn validate(&self) -> Result<()> {
+        if self.parent_analysis_id.is_empty() {
+            return Err(Hdf5Error::InvalidSchema(
+                "FFT parent_analysis_id must not be empty".to_string(),
+            ));
+        }
+        if let Some(coordinate) = &self.coordinate
+            && (coordinate.coordinate_id.is_empty()
+                || coordinate.ordinal == 0
+                || coordinate.tag.is_empty()
+                || coordinate.assignment.is_empty())
+        {
+            return Err(Hdf5Error::InvalidSchema(
+                "FFT coordinate identity fields must be complete".to_string(),
+            ));
+        }
+        if self.results.is_empty() {
+            return Err(Hdf5Error::InvalidSchema(
+                "FFT section must contain at least one result".to_string(),
+            ));
+        }
+        for (index, result) in self.results.iter().enumerate() {
+            result.validate(index + 1)?;
+        }
+        Ok(())
+    }
+}
+
+impl Hdf5FftResult {
+    fn validate(&self, expected_ordinal: usize) -> Result<()> {
+        if self.ordinal != expected_ordinal
+            || self.analysis_id != format!("fft-{expected_ordinal:03}")
+        {
+            return Err(Hdf5Error::InvalidSchema(format!(
+                "FFT result {} does not match source-order identity fft-{expected_ordinal:03}",
+                self.analysis_id
+            )));
+        }
+        if !matches!(self.source_kind.as_str(), "probe" | "expression")
+            || self.source_text.is_empty()
+            || self.authored_output.is_empty()
+            || self.output_name.is_empty()
+            || self.physical_type.is_empty()
+        {
+            return Err(Hdf5Error::InvalidSchema(format!(
+                "FFT result '{}' has incomplete source or signal metadata",
+                self.analysis_id
+            )));
+        }
+        let expected_unit = match self.physical_type.as_str() {
+            "voltage" => Some("V"),
+            "current" => Some("A"),
+            "parameter" => None,
+            other => {
+                return Err(Hdf5Error::InvalidSchema(format!(
+                    "FFT result '{}' has unsupported physical type '{other}'",
+                    self.analysis_id
+                )));
+            }
+        };
+        if self.value_unit.as_deref() != expected_unit
+            || !matches!(self.format.as_str(), "normalized" | "unnormalized")
+            || !matches!(
+                self.mode.as_str(),
+                "hspice_compatible" | "spectre_compatible"
+            )
+            || !matches!(
+                self.window.as_str(),
+                "rectangular"
+                    | "bartlett"
+                    | "bartlett_hann"
+                    | "hamming"
+                    | "hann"
+                    | "blackman_67db"
+                    | "blackman"
+                    | "blackman_harris"
+                    | "nuttall"
+                    | "half_cycle_sine"
+                    | "half_cycle_sine_3"
+                    | "half_cycle_sine_6"
+                    | "cosine_2"
+                    | "cosine_4"
+            )
+        {
+            return Err(Hdf5Error::InvalidSchema(format!(
+                "FFT result '{}' has inconsistent units or transform enums",
+                self.analysis_id
+            )));
+        }
+        let bin_count = self.bin_indices.len();
+        for (name, count) in [
+            ("frequency_hz", self.frequency_hz.len()),
+            ("real", self.real.len()),
+            ("imaginary", self.imaginary.len()),
+            ("magnitude", self.magnitude.len()),
+            ("phase_degrees", self.phase_degrees.len()),
+        ] {
+            if count != bin_count {
+                return Err(Hdf5Error::InvalidSchema(format!(
+                    "FFT result '{}' has {count} {name} values for {bin_count} bins",
+                    self.analysis_id
+                )));
+            }
+        }
+        if self.point_count == 0 || bin_count != self.point_count / 2 + 1 {
+            return Err(Hdf5Error::InvalidSchema(format!(
+                "FFT result '{}' has {bin_count} bins for {} input points",
+                self.analysis_id, self.point_count
+            )));
+        }
+        if self.fundamental_bin >= bin_count
+            || self.minimum_metric_bin >= bin_count
+            || self.maximum_metric_bin >= bin_count
+            || self.minimum_metric_bin > self.maximum_metric_bin
+        {
+            return Err(Hdf5Error::InvalidSchema(format!(
+                "FFT result '{}' metric bin bounds exceed its spectrum",
+                self.analysis_id
+            )));
+        }
+        for (expected, actual) in self.bin_indices.iter().copied().enumerate() {
+            let expected_index = u64::try_from(expected).map_err(|_| {
+                Hdf5Error::InvalidSchema(format!(
+                    "FFT result '{}' bin index {expected} cannot be represented",
+                    self.analysis_id
+                ))
+            })?;
+            if actual != expected_index {
+                return Err(Hdf5Error::InvalidSchema(format!(
+                    "FFT result '{}' bin index {actual} is out of order at {expected}",
+                    self.analysis_id
+                )));
+            }
+        }
+        if ![
+            self.start_time_s,
+            self.stop_time_s,
+            self.sample_interval_s,
+            self.alpha,
+            self.coherent_gain,
+            self.frequency_resolution_hz,
+        ]
+        .iter()
+        .all(|value| value.is_finite())
+            || self.stop_time_s <= self.start_time_s
+            || self.sample_interval_s <= 0.0
+            || self.frequency_resolution_hz <= 0.0
+            || self
+                .frequency_hz
+                .iter()
+                .chain(&self.real)
+                .chain(&self.imaginary)
+                .chain(&self.magnitude)
+                .chain(&self.phase_degrees)
+                .any(|value| !value.is_finite())
+        {
+            return Err(Hdf5Error::InvalidSchema(format!(
+                "FFT result '{}' contains invalid numeric metadata or bins",
+                self.analysis_id
+            )));
+        }
+        if let Some(metrics) = &self.metrics {
+            metrics.validate(&self.analysis_id, bin_count)?;
+        }
+        Ok(())
+    }
+}
+
+impl Hdf5FftMetrics {
+    fn validate(&self, analysis_id: &str, bin_count: usize) -> Result<()> {
+        if ![
+            self.fundamental_magnitude,
+            self.thd_ratio,
+            self.thd_db,
+            self.sndr_db,
+            self.enob_bits,
+            self.snr_db,
+            self.sfdr_db,
+        ]
+        .iter()
+        .all(|value| value.is_finite())
+            || self
+                .sfdr_spur_frequency_hz
+                .is_some_and(|value| !value.is_finite())
+            || self.sfdr_spur_bin.is_some() != self.sfdr_spur_frequency_hz.is_some()
+            || self.sfdr_spur_bin.is_some_and(|bin| bin >= bin_count)
+            || self.largest_harmonics.len() > 30
+        {
+            return Err(Hdf5Error::InvalidSchema(format!(
+                "FFT result '{analysis_id}' has invalid metric scalars"
+            )));
+        }
+        for (index, harmonic) in self.largest_harmonics.iter().enumerate() {
+            if harmonic.rank != index + 1
+                || harmonic.bin == 0
+                || harmonic.bin >= bin_count
+                || self.largest_harmonics[..index]
+                    .iter()
+                    .any(|previous| previous.bin == harmonic.bin)
+                || ![
+                    harmonic.frequency_hz,
+                    harmonic.magnitude,
+                    harmonic.magnitude_db,
+                    harmonic.phase_degrees,
+                ]
+                .iter()
+                .all(|value| value.is_finite())
+            {
+                return Err(Hdf5Error::InvalidSchema(format!(
+                    "FFT result '{analysis_id}' has an invalid ranked harmonic at position {}",
+                    index + 1
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
 impl Hdf5DistortionSection {
     fn validate(&self) -> Result<()> {
         if self.mode != "harmonic" && self.mode != "two_tone" {
@@ -353,6 +653,7 @@ pub struct Hdf5SimulationData {
     pub noise: Option<Hdf5WaveformSection>,
     pub ac: Option<Hdf5AcSection>,
     pub distortion: Option<Hdf5DistortionSection>,
+    pub fft: Option<Hdf5FftSection>,
     pub measurements: Vec<Hdf5Measurement>,
 }
 
@@ -380,11 +681,30 @@ impl Hdf5SimulationData {
         if let Some(distortion) = &self.distortion {
             distortion.validate()?;
         }
+        if let Some(fft) = &self.fft {
+            fft.validate()?;
+        }
         Ok(())
     }
 }
 
 pub fn write_hdf5(path: &Path, data: &Hdf5SimulationData) -> Result<()> {
+    let builder = build_hdf5(data)?;
+    write_hdf5_builder(path, builder)
+}
+
+/// Serialize an HDF5 document into an already prepared artifact. Callers that
+/// publish a logical multi-file result use this to finish every sibling before
+/// committing any destination.
+pub(crate) fn write_hdf5_to_writer(
+    writer: &mut dyn std::io::Write,
+    data: &Hdf5SimulationData,
+) -> Result<()> {
+    let bytes = build_hdf5(data)?.finish()?;
+    writer.write_all(&bytes).map_err(Hdf5Error::ArtifactWrite)
+}
+
+fn build_hdf5(data: &Hdf5SimulationData) -> Result<FileBuilder> {
     data.validate()?;
 
     let mut builder = FileBuilder::new();
@@ -413,11 +733,14 @@ pub fn write_hdf5(path: &Path, data: &Hdf5SimulationData) -> Result<()> {
     if let Some(distortion) = &data.distortion {
         add_distortion_section(&mut builder, distortion)?;
     }
+    if let Some(fft) = &data.fft {
+        add_fft_section(&mut builder, fft)?;
+    }
     if !data.measurements.is_empty() {
         add_measurements(&mut builder, &data.measurements)?;
     }
 
-    write_hdf5_builder(path, builder)
+    Ok(builder)
 }
 
 fn write_hdf5_builder(path: &Path, builder: FileBuilder) -> Result<()> {
@@ -443,6 +766,12 @@ pub fn read_hdf5(path: &Path) -> Result<Hdf5SimulationData> {
     let file = Hdf5File::open(path)?;
     let root = file.root();
     let root_attrs = root.attrs()?;
+    let schema_version = read_required_string_attr(&root_attrs, "schema_version")?;
+    if schema_version != SCHEMA_VERSION {
+        return Err(Hdf5Error::InvalidSchema(format!(
+            "unsupported HDF5 schema version '{schema_version}', expected '{SCHEMA_VERSION}'"
+        )));
+    }
 
     let title = read_string_attr(&root_attrs, "title")?.unwrap_or_default();
     let root_groups = root.groups()?;
@@ -477,6 +806,11 @@ pub fn read_hdf5(path: &Path) -> Result<Hdf5SimulationData> {
     } else {
         None
     };
+    let fft = if root_groups.iter().any(|group| group == "fft") {
+        Some(read_fft_section(&file)?)
+    } else {
+        None
+    };
     let measurements = if root_groups.iter().any(|group| group == "measurements") {
         read_measurements(&file)?
     } else {
@@ -491,6 +825,7 @@ pub fn read_hdf5(path: &Path) -> Result<Hdf5SimulationData> {
         noise,
         ac,
         distortion,
+        fft,
         measurements,
     })
 }
@@ -766,6 +1101,424 @@ fn read_distortion_section(file: &Hdf5File) -> Result<Hdf5DistortionSection> {
     Ok(section)
 }
 
+fn checked_i64(value: usize, name: &str) -> Result<i64> {
+    i64::try_from(value).map_err(|_| {
+        Hdf5Error::InvalidSchema(format!("{name} exceeds the HDF5 signed-integer range"))
+    })
+}
+
+fn add_fft_section(builder: &mut FileBuilder, section: &Hdf5FftSection) -> Result<()> {
+    let mut group = builder.create_group("fft");
+    group.set_attr("section_type", AttrValue::String("fft".to_string()));
+    group.set_attr(
+        "schema_version",
+        AttrValue::String(FFT_SECTION_SCHEMA_VERSION.to_string()),
+    );
+    group.set_attr(
+        "parent_analysis_id",
+        AttrValue::String(section.parent_analysis_id.clone()),
+    );
+    group.set_attr(
+        "has_coordinate",
+        AttrValue::I64(i64::from(section.coordinate.is_some())),
+    );
+    if let Some(coordinate) = &section.coordinate {
+        group.set_attr(
+            "coordinate_id",
+            AttrValue::String(coordinate.coordinate_id.clone()),
+        );
+        group.set_attr(
+            "coordinate_ordinal",
+            AttrValue::I64(checked_i64(coordinate.ordinal, "FFT coordinate ordinal")?),
+        );
+        group.set_attr("coordinate_tag", AttrValue::String(coordinate.tag.clone()));
+        group.set_attr(
+            "coordinate_assignment",
+            AttrValue::String(coordinate.assignment.clone()),
+        );
+    }
+    group.set_attr(
+        "result_count",
+        AttrValue::I64(checked_i64(section.results.len(), "FFT result count")?),
+    );
+
+    for (index, result) in section.results.iter().enumerate() {
+        let prefix = format!("result_{index:04}");
+        for (suffix, value) in [
+            ("analysis_id", result.analysis_id.as_str()),
+            ("source_kind", result.source_kind.as_str()),
+            ("source_text", result.source_text.as_str()),
+            ("authored_output", result.authored_output.as_str()),
+            ("output_name", result.output_name.as_str()),
+            ("physical_type", result.physical_type.as_str()),
+            ("format", result.format.as_str()),
+            ("mode", result.mode.as_str()),
+            ("window", result.window.as_str()),
+            ("window_name", result.window_name.as_str()),
+        ] {
+            group.set_attr(
+                &format!("{prefix}_{suffix}"),
+                AttrValue::String(value.to_string()),
+            );
+        }
+        group.set_attr(
+            &format!("{prefix}_has_value_unit"),
+            AttrValue::I64(i64::from(result.value_unit.is_some())),
+        );
+        if let Some(unit) = &result.value_unit {
+            group.set_attr(
+                &format!("{prefix}_value_unit"),
+                AttrValue::String(unit.clone()),
+            );
+        }
+        for (suffix, value) in [
+            ("start_time_s", result.start_time_s),
+            ("stop_time_s", result.stop_time_s),
+            ("sample_interval_s", result.sample_interval_s),
+            ("alpha", result.alpha),
+            ("coherent_gain", result.coherent_gain),
+            ("frequency_resolution_hz", result.frequency_resolution_hz),
+        ] {
+            group.set_attr(&format!("{prefix}_{suffix}"), AttrValue::F64(value));
+        }
+        for (suffix, value) in [
+            ("ordinal", result.ordinal),
+            ("point_count", result.point_count),
+            ("fundamental_bin", result.fundamental_bin),
+            ("minimum_metric_bin", result.minimum_metric_bin),
+            ("maximum_metric_bin", result.maximum_metric_bin),
+        ] {
+            group.set_attr(
+                &format!("{prefix}_{suffix}"),
+                AttrValue::I64(checked_i64(value, &format!("{prefix}_{suffix}"))?),
+            );
+        }
+        group.set_attr(
+            &format!("{prefix}_accurate_sampling"),
+            AttrValue::I64(i64::from(result.accurate_sampling)),
+        );
+        group.set_attr(
+            &format!("{prefix}_has_metrics"),
+            AttrValue::I64(i64::from(result.metrics.is_some())),
+        );
+        let bin_indices = result
+            .bin_indices
+            .iter()
+            .map(|value| {
+                i64::try_from(*value).map_err(|_| {
+                    Hdf5Error::InvalidSchema(format!(
+                        "{prefix} FFT bin index exceeds the HDF5 signed-integer range"
+                    ))
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        group
+            .create_dataset(&format!("{prefix}_bin_index"))
+            .with_i64_data(&bin_indices);
+        for (suffix, values) in [
+            ("frequency_hz", &result.frequency_hz),
+            ("real", &result.real),
+            ("imaginary", &result.imaginary),
+            ("magnitude", &result.magnitude),
+            ("phase_degrees", &result.phase_degrees),
+        ] {
+            group
+                .create_dataset(&format!("{prefix}_{suffix}"))
+                .with_f64_data(values);
+        }
+
+        if let Some(metrics) = &result.metrics {
+            for (suffix, value) in [
+                ("fundamental_magnitude", metrics.fundamental_magnitude),
+                ("thd_ratio", metrics.thd_ratio),
+                ("thd_db", metrics.thd_db),
+                ("sndr_db", metrics.sndr_db),
+                ("enob_bits", metrics.enob_bits),
+                ("snr_db", metrics.snr_db),
+                ("sfdr_db", metrics.sfdr_db),
+            ] {
+                group.set_attr(&format!("{prefix}_metrics_{suffix}"), AttrValue::F64(value));
+            }
+            group.set_attr(
+                &format!("{prefix}_metrics_has_spur"),
+                AttrValue::I64(i64::from(metrics.sfdr_spur_bin.is_some())),
+            );
+            if let (Some(bin), Some(frequency)) =
+                (metrics.sfdr_spur_bin, metrics.sfdr_spur_frequency_hz)
+            {
+                group.set_attr(
+                    &format!("{prefix}_metrics_sfdr_spur_bin"),
+                    AttrValue::I64(checked_i64(bin, "FFT SFDR spur bin")?),
+                );
+                group.set_attr(
+                    &format!("{prefix}_metrics_sfdr_spur_frequency_hz"),
+                    AttrValue::F64(frequency),
+                );
+            }
+            let ranks = metrics
+                .largest_harmonics
+                .iter()
+                .map(|harmonic| checked_i64(harmonic.rank, "FFT harmonic rank"))
+                .collect::<Result<Vec<_>>>()?;
+            let bins = metrics
+                .largest_harmonics
+                .iter()
+                .map(|harmonic| checked_i64(harmonic.bin, "FFT harmonic bin"))
+                .collect::<Result<Vec<_>>>()?;
+            group
+                .create_dataset(&format!("{prefix}_metrics_harmonic_rank"))
+                .with_i64_data(&ranks);
+            group
+                .create_dataset(&format!("{prefix}_metrics_harmonic_bin"))
+                .with_i64_data(&bins);
+            for (suffix, values) in [
+                (
+                    "frequency_hz",
+                    metrics
+                        .largest_harmonics
+                        .iter()
+                        .map(|harmonic| harmonic.frequency_hz)
+                        .collect::<Vec<_>>(),
+                ),
+                (
+                    "magnitude",
+                    metrics
+                        .largest_harmonics
+                        .iter()
+                        .map(|harmonic| harmonic.magnitude)
+                        .collect::<Vec<_>>(),
+                ),
+                (
+                    "magnitude_db",
+                    metrics
+                        .largest_harmonics
+                        .iter()
+                        .map(|harmonic| harmonic.magnitude_db)
+                        .collect::<Vec<_>>(),
+                ),
+                (
+                    "phase_degrees",
+                    metrics
+                        .largest_harmonics
+                        .iter()
+                        .map(|harmonic| harmonic.phase_degrees)
+                        .collect::<Vec<_>>(),
+                ),
+            ] {
+                group
+                    .create_dataset(&format!("{prefix}_metrics_harmonic_{suffix}"))
+                    .with_f64_data(&values);
+            }
+        }
+    }
+
+    builder.add_group(group.finish());
+    Ok(())
+}
+
+fn read_fft_section(file: &Hdf5File) -> Result<Hdf5FftSection> {
+    let group = file.group("fft")?;
+    let attrs = group.attrs()?;
+    let schema_version = read_required_string_attr(&attrs, "schema_version")?;
+    if schema_version != FFT_SECTION_SCHEMA_VERSION {
+        return Err(Hdf5Error::InvalidSchema(format!(
+            "unsupported FFT HDF5 schema version '{schema_version}', expected '{FFT_SECTION_SCHEMA_VERSION}'"
+        )));
+    }
+    let parent_analysis_id = read_required_string_attr(&attrs, "parent_analysis_id")?;
+    let coordinate = if read_binary_flag(&attrs, "has_coordinate")? {
+        Some(Hdf5FftCoordinate {
+            coordinate_id: read_required_string_attr(&attrs, "coordinate_id")?,
+            ordinal: non_negative_count(
+                read_required_i64_attr(&attrs, "coordinate_ordinal")?,
+                "FFT coordinate ordinal",
+            )?,
+            tag: read_required_string_attr(&attrs, "coordinate_tag")?,
+            assignment: read_required_string_attr(&attrs, "coordinate_assignment")?,
+        })
+    } else {
+        None
+    };
+    let result_count = non_negative_count(
+        read_required_i64_attr(&attrs, "result_count")?,
+        "FFT result_count",
+    )?;
+    let mut results = Vec::with_capacity(result_count);
+
+    for index in 0..result_count {
+        let prefix = format!("result_{index:04}");
+        let metrics = if read_binary_flag(&attrs, &format!("{prefix}_has_metrics"))? {
+            let has_spur = read_binary_flag(&attrs, &format!("{prefix}_metrics_has_spur"))?;
+            let ranks = group
+                .dataset(&format!("{prefix}_metrics_harmonic_rank"))?
+                .read_i64()?;
+            let bins = group
+                .dataset(&format!("{prefix}_metrics_harmonic_bin"))?
+                .read_i64()?;
+            let frequencies = group
+                .dataset(&format!("{prefix}_metrics_harmonic_frequency_hz"))?
+                .read_f64()?;
+            let magnitudes = group
+                .dataset(&format!("{prefix}_metrics_harmonic_magnitude"))?
+                .read_f64()?;
+            let magnitudes_db = group
+                .dataset(&format!("{prefix}_metrics_harmonic_magnitude_db"))?
+                .read_f64()?;
+            let phases = group
+                .dataset(&format!("{prefix}_metrics_harmonic_phase_degrees"))?
+                .read_f64()?;
+            let harmonic_count = ranks.len();
+            if [
+                bins.len(),
+                frequencies.len(),
+                magnitudes.len(),
+                magnitudes_db.len(),
+                phases.len(),
+            ]
+            .iter()
+            .any(|count| *count != harmonic_count)
+            {
+                return Err(Hdf5Error::InvalidSchema(format!(
+                    "{prefix} FFT harmonic datasets have inconsistent lengths"
+                )));
+            }
+            let mut largest_harmonics = Vec::with_capacity(harmonic_count);
+            for harmonic_index in 0..harmonic_count {
+                largest_harmonics.push(Hdf5FftHarmonic {
+                    rank: non_negative_count(
+                        ranks[harmonic_index],
+                        &format!("{prefix} FFT harmonic rank"),
+                    )?,
+                    bin: non_negative_count(
+                        bins[harmonic_index],
+                        &format!("{prefix} FFT harmonic bin"),
+                    )?,
+                    frequency_hz: frequencies[harmonic_index],
+                    magnitude: magnitudes[harmonic_index],
+                    magnitude_db: magnitudes_db[harmonic_index],
+                    phase_degrees: phases[harmonic_index],
+                });
+            }
+            Some(Hdf5FftMetrics {
+                fundamental_magnitude: read_required_f64_attr(
+                    &attrs,
+                    &format!("{prefix}_metrics_fundamental_magnitude"),
+                )?,
+                thd_ratio: read_required_f64_attr(&attrs, &format!("{prefix}_metrics_thd_ratio"))?,
+                thd_db: read_required_f64_attr(&attrs, &format!("{prefix}_metrics_thd_db"))?,
+                sndr_db: read_required_f64_attr(&attrs, &format!("{prefix}_metrics_sndr_db"))?,
+                enob_bits: read_required_f64_attr(&attrs, &format!("{prefix}_metrics_enob_bits"))?,
+                snr_db: read_required_f64_attr(&attrs, &format!("{prefix}_metrics_snr_db"))?,
+                sfdr_db: read_required_f64_attr(&attrs, &format!("{prefix}_metrics_sfdr_db"))?,
+                sfdr_spur_bin: has_spur
+                    .then(|| {
+                        non_negative_count(
+                            read_required_i64_attr(
+                                &attrs,
+                                &format!("{prefix}_metrics_sfdr_spur_bin"),
+                            )?,
+                            "FFT SFDR spur bin",
+                        )
+                    })
+                    .transpose()?,
+                sfdr_spur_frequency_hz: has_spur
+                    .then(|| {
+                        read_required_f64_attr(
+                            &attrs,
+                            &format!("{prefix}_metrics_sfdr_spur_frequency_hz"),
+                        )
+                    })
+                    .transpose()?,
+                largest_harmonics,
+            })
+        } else {
+            None
+        };
+        let has_value_unit = read_binary_flag(&attrs, &format!("{prefix}_has_value_unit"))?;
+        results.push(Hdf5FftResult {
+            analysis_id: read_required_string_attr(&attrs, &format!("{prefix}_analysis_id"))?,
+            ordinal: non_negative_count(
+                read_required_i64_attr(&attrs, &format!("{prefix}_ordinal"))?,
+                "FFT ordinal",
+            )?,
+            source_kind: read_required_string_attr(&attrs, &format!("{prefix}_source_kind"))?,
+            source_text: read_required_string_attr(&attrs, &format!("{prefix}_source_text"))?,
+            authored_output: read_required_string_attr(
+                &attrs,
+                &format!("{prefix}_authored_output"),
+            )?,
+            output_name: read_required_string_attr(&attrs, &format!("{prefix}_output_name"))?,
+            physical_type: read_required_string_attr(&attrs, &format!("{prefix}_physical_type"))?,
+            value_unit: has_value_unit
+                .then(|| read_required_string_attr(&attrs, &format!("{prefix}_value_unit")))
+                .transpose()?,
+            start_time_s: read_required_f64_attr(&attrs, &format!("{prefix}_start_time_s"))?,
+            stop_time_s: read_required_f64_attr(&attrs, &format!("{prefix}_stop_time_s"))?,
+            sample_interval_s: read_required_f64_attr(
+                &attrs,
+                &format!("{prefix}_sample_interval_s"),
+            )?,
+            point_count: non_negative_count(
+                read_required_i64_attr(&attrs, &format!("{prefix}_point_count"))?,
+                "FFT point_count",
+            )?,
+            accurate_sampling: read_binary_flag(&attrs, &format!("{prefix}_accurate_sampling"))?,
+            format: read_required_string_attr(&attrs, &format!("{prefix}_format"))?,
+            mode: read_required_string_attr(&attrs, &format!("{prefix}_mode"))?,
+            window: read_required_string_attr(&attrs, &format!("{prefix}_window"))?,
+            window_name: read_required_string_attr(&attrs, &format!("{prefix}_window_name"))?,
+            alpha: read_required_f64_attr(&attrs, &format!("{prefix}_alpha"))?,
+            coherent_gain: read_required_f64_attr(&attrs, &format!("{prefix}_coherent_gain"))?,
+            frequency_resolution_hz: read_required_f64_attr(
+                &attrs,
+                &format!("{prefix}_frequency_resolution_hz"),
+            )?,
+            fundamental_bin: non_negative_count(
+                read_required_i64_attr(&attrs, &format!("{prefix}_fundamental_bin"))?,
+                "FFT fundamental_bin",
+            )?,
+            minimum_metric_bin: non_negative_count(
+                read_required_i64_attr(&attrs, &format!("{prefix}_minimum_metric_bin"))?,
+                "FFT minimum_metric_bin",
+            )?,
+            maximum_metric_bin: non_negative_count(
+                read_required_i64_attr(&attrs, &format!("{prefix}_maximum_metric_bin"))?,
+                "FFT maximum_metric_bin",
+            )?,
+            bin_indices: group
+                .dataset(&format!("{prefix}_bin_index"))?
+                .read_i64()?
+                .into_iter()
+                .map(|value| {
+                    u64::try_from(value).map_err(|_| {
+                        Hdf5Error::InvalidSchema(format!(
+                            "{prefix} FFT bin index must be non-negative, got {value}"
+                        ))
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?,
+            frequency_hz: group
+                .dataset(&format!("{prefix}_frequency_hz"))?
+                .read_f64()?,
+            real: group.dataset(&format!("{prefix}_real"))?.read_f64()?,
+            imaginary: group.dataset(&format!("{prefix}_imaginary"))?.read_f64()?,
+            magnitude: group.dataset(&format!("{prefix}_magnitude"))?.read_f64()?,
+            phase_degrees: group
+                .dataset(&format!("{prefix}_phase_degrees"))?
+                .read_f64()?,
+            metrics,
+        });
+    }
+
+    let section = Hdf5FftSection {
+        parent_analysis_id,
+        coordinate,
+        results,
+    };
+    section.validate()?;
+    Ok(section)
+}
+
 fn add_measurements(builder: &mut FileBuilder, measurements: &[Hdf5Measurement]) -> Result<()> {
     let mut group = builder.create_group("measurements");
     group.set_attr(
@@ -956,5 +1709,168 @@ mod tests {
             data
         );
         assert_only_destination_remains(&directory.0, &destination, true);
+    }
+
+    fn fft_result(
+        ordinal: usize,
+        point_count: usize,
+        physical_type: &str,
+        value_unit: Option<&str>,
+        with_metrics: bool,
+    ) -> Hdf5FftResult {
+        let bin_count = point_count / 2 + 1;
+        let frequency_hz = (0..bin_count).map(|bin| bin as f64).collect::<Vec<_>>();
+        let real = (0..bin_count)
+            .map(|bin| if bin == 1 { 1.0 } else { 0.0 })
+            .collect::<Vec<_>>();
+        let imaginary = vec![0.0; bin_count];
+        let magnitude = real.clone();
+        let phase_degrees = vec![0.0; bin_count];
+        Hdf5FftResult {
+            analysis_id: format!("fft-{ordinal:03}"),
+            ordinal,
+            source_kind: if physical_type == "parameter" {
+                "expression".to_string()
+            } else {
+                "probe".to_string()
+            },
+            source_text: "V(OUT)".to_string(),
+            authored_output: "V(OUT)".to_string(),
+            output_name: "V(OUT)".to_string(),
+            physical_type: physical_type.to_string(),
+            value_unit: value_unit.map(str::to_string),
+            start_time_s: 0.0,
+            stop_time_s: 1.0,
+            sample_interval_s: 1.0 / point_count as f64,
+            point_count,
+            accurate_sampling: true,
+            format: if ordinal == 1 {
+                "normalized".to_string()
+            } else {
+                "unnormalized".to_string()
+            },
+            mode: "hspice_compatible".to_string(),
+            window: if ordinal == 1 {
+                "hann".to_string()
+            } else {
+                "rectangular".to_string()
+            },
+            window_name: if ordinal == 1 {
+                "HANN".to_string()
+            } else {
+                "RECT".to_string()
+            },
+            alpha: 3.0,
+            coherent_gain: 1.0,
+            frequency_resolution_hz: 1.0,
+            fundamental_bin: 1,
+            minimum_metric_bin: 0,
+            maximum_metric_bin: bin_count - 1,
+            bin_indices: (0..u64::try_from(bin_count).expect("bounded bin count")).collect(),
+            frequency_hz,
+            real,
+            imaginary,
+            magnitude,
+            phase_degrees,
+            metrics: with_metrics.then(|| Hdf5FftMetrics {
+                fundamental_magnitude: 1.0,
+                thd_ratio: 0.01,
+                thd_db: -40.0,
+                sndr_db: 80.0,
+                enob_bits: 13.0,
+                snr_db: 82.0,
+                sfdr_db: 70.0,
+                sfdr_spur_bin: Some(2),
+                sfdr_spur_frequency_hz: Some(2.0),
+                largest_harmonics: vec![Hdf5FftHarmonic {
+                    rank: 1,
+                    bin: 1,
+                    frequency_hz: 1.0,
+                    magnitude: 1.0,
+                    magnitude_db: 0.0,
+                    phase_degrees: 0.0,
+                }],
+            }),
+        }
+    }
+
+    #[test]
+    fn typed_fft_section_round_trips_ragged_results_and_coordinate_metadata() {
+        let directory = TestDirectory::new("fft-round-trip");
+        let destination = directory.0.join("fft.h5");
+        let mut data = Hdf5SimulationData::new();
+        data.title = "typed FFT".to_string();
+        data.fft = Some(Hdf5FftSection {
+            parent_analysis_id: "tran-002".to_string(),
+            coordinate: Some(Hdf5FftCoordinate {
+                coordinate_id: "0123456789abcdef0123456789abcdef-001".to_string(),
+                ordinal: 2,
+                tag: "run-0123456789abcdef0123456789abcdef-001".to_string(),
+                assignment: "PARAM gain = 2, TEMP = 75".to_string(),
+            }),
+            results: vec![
+                fft_result(1, 8, "voltage", Some("V"), true),
+                fft_result(2, 16, "parameter", None, false),
+            ],
+        });
+
+        write_hdf5(&destination, &data).expect("write typed FFT HDF5 artifact");
+        assert_eq!(
+            read_hdf5(&destination).expect("read typed FFT HDF5 artifact"),
+            data
+        );
+        assert_only_destination_remains(&directory.0, &destination, true);
+    }
+
+    #[test]
+    fn malformed_fft_section_is_rejected_before_publication() {
+        let directory = TestDirectory::new("fft-malformed");
+        let destination = directory.0.join("fft.h5");
+        let mut malformed = fft_result(1, 8, "voltage", Some("V"), true);
+        malformed.analysis_id = "fft-002".to_string();
+        let mut data = Hdf5SimulationData::new();
+        data.fft = Some(Hdf5FftSection {
+            parent_analysis_id: "tran-001".to_string(),
+            coordinate: None,
+            results: vec![malformed],
+        });
+
+        let error = write_hdf5(&destination, &data).expect_err("reject malformed FFT identity");
+        assert!(matches!(error, Hdf5Error::InvalidSchema(_)));
+        assert!(!destination.exists());
+        assert_only_destination_remains(&directory.0, &destination, false);
+    }
+
+    #[test]
+    fn future_root_and_fft_section_schemas_are_rejected() {
+        let directory = TestDirectory::new("fft-future-schema");
+
+        let future_root = directory.0.join("future-root.h5");
+        let mut root_builder = FileBuilder::new();
+        root_builder.set_attr("schema_version", AttrValue::String("2".to_string()));
+        std::fs::write(
+            &future_root,
+            root_builder.finish().expect("encode future root schema"),
+        )
+        .expect("write future root schema");
+        let root_error = read_hdf5(&future_root).expect_err("reject future root schema");
+        assert!(matches!(root_error, Hdf5Error::InvalidSchema(_)));
+
+        let future_fft = directory.0.join("future-fft.h5");
+        let mut fft_builder = FileBuilder::new();
+        fft_builder.set_attr(
+            "schema_version",
+            AttrValue::String(SCHEMA_VERSION.to_string()),
+        );
+        let mut fft_group = fft_builder.create_group("fft");
+        fft_group.set_attr("schema_version", AttrValue::String("2".to_string()));
+        fft_builder.add_group(fft_group.finish());
+        std::fs::write(
+            &future_fft,
+            fft_builder.finish().expect("encode future FFT schema"),
+        )
+        .expect("write future FFT schema");
+        let fft_error = read_hdf5(&future_fft).expect_err("reject future FFT schema");
+        assert!(matches!(fft_error, Hdf5Error::InvalidSchema(_)));
     }
 }
