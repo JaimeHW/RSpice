@@ -413,6 +413,19 @@ impl VerilogACompiler {
     /// identically whether compiling from a string or from a file. The
     /// source must contain exactly one module; multi-module sources
     /// require [`Self::compile_module`].
+    ///
+    /// # The model's state slots are numbered per emission
+    ///
+    /// This entry produces the bytecode model alone, with no canonical
+    /// artifact — and the canonical HIR is what defines the per-*site* state
+    /// numbering the runtimes address records by, so there is nothing here to
+    /// renumber against. The model that comes back therefore keeps the
+    /// generator's per-*emission* numbering, in which one source operator can
+    /// own several records. It runs correctly, but its slot indices are not
+    /// the ones a checkpoint written by the engine uses, and it is not
+    /// interchangeable with a model from [`Self::compile_runtime`] or
+    /// [`Self::compile_file_runtime_with_metadata`]. Use one of those for
+    /// anything a simulation will resume, cache, or check point.
     pub fn compile(&self, source: &str) -> CompileResult<CompiledModel> {
         self.compile_module(source, None)
     }
