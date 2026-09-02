@@ -28,6 +28,7 @@ use crate::canonical_ir::{
     CanonicalStateFamily, CfgEvalInputs, CfgStateAllocation, evaluate_cfg, prune_cfg_to_outputs,
 };
 use crate::jit::cfg_program::{CfgRuntimeBindings, lower_cfg_function};
+use crate::jit::expr::BranchUnknownRuntimeMapping;
 use crate::jit::plan_builder::canonical_branch_unknown_runtime_map;
 use crate::native::abi::EvalContext;
 use crate::native::runtime::ExecutableMemory;
@@ -78,7 +79,17 @@ struct OperatingPoint {
     port_connected: Vec<u8>,
     terminal_voltages: Vec<f64>,
     internal_voltages: Vec<f64>,
+    /// Branch-unknown flows in *canonical* order, which is what the CFG names
+    /// and the interpreter indexes.
     branch_unknowns: Vec<f64>,
+    /// The same flows in *runtime* order, with the sign the runtime branch
+    /// source carries.
+    ///
+    /// Two arrays rather than one: a canonical branch unknown and the runtime
+    /// branch source it maps to are two numbering spaces, and one of them
+    /// reverses the branch's ends. Handing a single array to both routes makes
+    /// them disagree about a value neither got wrong.
+    runtime_branch_unknowns: Vec<f64>,
     temperature: f64,
     multiplicity: f64,
     time: f64,
@@ -104,7 +115,7 @@ impl OperatingPoint {
         parameter_defaults: &[Option<f64>],
         terminal_count: usize,
         internal_count: usize,
-        branch_unknown_count: usize,
+        branch_unknowns: &[BranchUnknownRuntimeMapping],
         state_len: usize,
         event_state_slots: usize,
     ) -> Self {
@@ -122,13 +133,21 @@ impl OperatingPoint {
             .zip(fill(parameter_count))
             .map(|(default, sampled)| default.unwrap_or(sampled))
             .collect();
+        let canonical_flows = fill(branch_unknowns.len());
+        let mut runtime_flows = vec![0.0; branch_unknowns.len()];
+        for (mapping, flow) in branch_unknowns.iter().zip(&canonical_flows) {
+            if let Some(slot) = runtime_flows.get_mut(mapping.runtime_index) {
+                *slot = if mapping.inverted { -*flow } else { *flow };
+            }
+        }
         Self {
             parameters,
             parameter_given: vec![1; parameter_count],
             port_connected: vec![1; terminal_count],
             terminal_voltages: fill(terminal_count),
             internal_voltages: fill(internal_count),
-            branch_unknowns: fill(branch_unknown_count),
+            branch_unknowns: canonical_flows,
+            runtime_branch_unknowns: runtime_flows,
             temperature: 300.15,
             multiplicity: 1.0,
             time: 1.0e-9,
@@ -175,7 +194,7 @@ impl OperatingPoint {
         context.port_connected_len = self.port_connected.len();
         context.voltages = self.terminal_voltages.as_ptr();
         context.internal_voltages = self.internal_voltages.as_ptr();
-        context.branch_unknowns = self.branch_unknowns.as_ptr();
+        context.branch_unknowns = self.runtime_branch_unknowns.as_ptr();
         context.num_terminals = self.terminal_voltages.len();
         context.temperature = self.temperature;
         context.multiplicity = self.multiplicity;
@@ -205,12 +224,20 @@ impl OperatingPoint {
     }
 }
 
+/// The `$analysis` names active at one runtime analysis code.
+///
+/// The two routes read the same question from different sides: the interpreter
+/// is handed the set of active names, while the compiled program compares the
+/// context's analysis code. `static` is true for a DC or an initial-condition
+/// analysis and `smallsignal` for an AC or a noise one, so the set has to say
+/// the same or the two disagree for a reason that is not the lowering.
 fn analysis_names(analysis: u8) -> std::collections::HashSet<smol_str::SmolStr> {
     let names: &[&str] = match analysis {
         0 => &["dc", "op", "static"],
-        1 => &["ac"],
+        1 => &["ac", "smallsig", "smallsignal", "small_signal"],
         2 => &["tran", "transient"],
-        3 => &["noise"],
+        3 => &["noise", "smallsig", "smallsignal", "small_signal"],
+        4 => &["ic", "static"],
         _ => &[],
     };
     names.iter().map(|name| (*name).into()).collect()
@@ -362,32 +389,12 @@ fn the_cfg_block_lowering_agrees_with_the_reference_interpreter() {
                             &parameter_defaults,
                             bindings.terminal_count,
                             bindings.internal_node_count,
-                            artifact.mir.branch_unknowns.len(),
+                            &bindings.branch_unknowns,
                             state_len,
                             cfg.event_state_candidates.len(),
                         )
                     })
                     .collect();
-
-            // The interpreter runs once per operating point on the whole
-            // function; pruning to one output does not change any value it
-            // keeps, so its answer serves every output.
-            let expected: Vec<_> = points
-                .iter()
-                .map(|point| {
-                    evaluate_cfg(
-                        &cfg.function,
-                        &point.interpreter_inputs(
-                            artifact.mir.nodes.len(),
-                            artifact.mir.branches.len(),
-                        ),
-                    )
-                })
-                .collect();
-            if let Some(Err(error)) = expected.iter().find(|result| result.is_err()) {
-                tally.oracle_refusals += 1;
-                println!("cfg-census model={module} oracle-refused detail={error:?}");
-            }
 
             // Zeroed, and the interpreter's accepted event state is zero too:
             // the only variable slot a CFG-lowered residual reads is the
@@ -397,8 +404,10 @@ fn the_cfg_block_lowering_agrees_with_the_reference_interpreter() {
 
             let mut lowered = 0_usize;
             let mut first_refusal: Option<String> = None;
+            let mut oracle_refusal: Option<String> = None;
             let mut executed = 0_usize;
             let mut worst = 0.0_f64;
+            let mut worst_case: Option<String> = None;
             for (ordinal, residual) in cfg.residuals.iter().copied().enumerate() {
                 let (pruned, outputs) = prune_cfg_to_outputs(&cfg.function, &[residual]);
                 let output = outputs[0];
@@ -428,9 +437,27 @@ fn the_cfg_block_lowering_agrees_with_the_reference_interpreter() {
                 let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
                     unsafe { std::mem::transmute(entry) };
                 executed += 1;
-                for (point, snapshot) in points.iter_mut().zip(&expected) {
-                    let Ok(snapshot) = snapshot else { continue };
-                    let Some(reference) = snapshot.value(residual) else {
+                // The oracle runs on the *pruned* function, one output at a
+                // time. Interpreting the whole body instead would report a
+                // refusal for the whole model whenever any residual reads an
+                // undifferentiated `ddx`, including for the residuals that do
+                // not, which is most of them.
+                for (index, point) in points.iter_mut().enumerate() {
+                    let snapshot = match evaluate_cfg(
+                        &pruned,
+                        &point.interpreter_inputs(
+                            artifact.mir.nodes.len(),
+                            artifact.mir.branches.len(),
+                        ),
+                    ) {
+                        Ok(snapshot) => snapshot,
+                        Err(error) => {
+                            tally.oracle_refusals += 1;
+                            oracle_refusal.get_or_insert_with(|| format!("{error:?}"));
+                            continue;
+                        }
+                    };
+                    let Some(reference) = snapshot.value(output) else {
                         continue;
                     };
                     let context = point.context();
@@ -441,8 +468,13 @@ fn the_cfg_block_lowering_agrees_with_the_reference_interpreter() {
                         continue;
                     }
                     tally.comparisons += 1;
-                    if let Some(delta) = deviation(reference, actual) {
-                        worst = worst.max(delta);
+                    if let Some(delta) = deviation(reference, actual)
+                        && delta > worst
+                    {
+                        worst = delta;
+                        worst_case = Some(format!(
+                            "residual={ordinal} point={index} interpreter={reference:.17e} block_program={actual:.17e}"
+                        ));
                     }
                 }
             }
@@ -450,9 +482,15 @@ fn the_cfg_block_lowering_agrees_with_the_reference_interpreter() {
             tally.executed_outputs += executed;
             worst_overall = worst_overall.max(worst);
             println!(
-                "cfg-census model={module} outputs={} lowered={lowered} executed={executed} max_relative_deviation={worst:.3e} seconds={:.1}{}",
+                "cfg-census model={module} outputs={} lowered={lowered} executed={executed} max_relative_deviation={worst:.3e} seconds={:.1}{}{}{}",
                 cfg.residuals.len(),
                 started.elapsed().as_secs_f64(),
+                worst_case
+                    .map(|case| format!(" worst_case[{case}]"))
+                    .unwrap_or_default(),
+                oracle_refusal
+                    .map(|refusal| format!(" oracle_refused={refusal}"))
+                    .unwrap_or_default(),
                 first_refusal
                     .map(|refusal| format!(" first_refusal={refusal}"))
                     .unwrap_or_default(),
