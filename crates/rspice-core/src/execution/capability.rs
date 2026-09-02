@@ -349,7 +349,7 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
         result: AnalysisResultKind::Stability,
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
-        wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
+        wasm: wasm_direct_only(),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
     },
     AnalysisResultCapability {

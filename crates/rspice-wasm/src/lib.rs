@@ -5,6 +5,7 @@
 //! all numerical work to `rspice-core`.
 
 mod result_document;
+mod stb_result_document;
 
 pub use result_document::{
     ANALOG_RESULT_SCHEMA, ANALOG_RESULT_VERSION, AnalogAnalysisKind, AnalogResultDocument,
@@ -13,12 +14,20 @@ pub use result_document::{
     SignalDescriptor, SignalOwner, SignalSeries, SignalUnit, SignalValueType, SignalValues,
     SignalWindow, SignalWindowValues,
 };
+pub use stb_result_document::{
+    STB_RESULT_SCHEMA, STB_RESULT_VERSION, StbAnalysisIdentity, StbAnalysisKind, StbBodeSeries,
+    StbBodeWindow, StbComplexSample, StbComplexWindow, StbDocumentError, StbMarginDescriptors,
+    StbMarginUnits, StbMargins, StbNyquistSeries, StbNyquistWindow, StbPrimarySeries,
+    StbPrimaryWindow, StbResultDocument, StbResultMetadata, StbResultWindow, StbSeriesDescriptor,
+    StbUnit, StbValueType,
+};
 
 use rspice_core::{
     AbortSignal, Engine, Netlist, NoAbort, ResourceKind, ResourceLimitError, ResourceLimits,
     SimulationConfig,
 };
 use rspice_core::{
+    analysis::{StbConfig, StbSweepType},
     engine::{
         TransientFftHarmonic, TransientFftMetrics, TransientFftResult, TransientResult,
         TransientResultCompressed,
@@ -137,6 +146,36 @@ impl Default for WasmResourceLimits {
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct WasmExecutionOptions {
     pub resource_limits: WasmResourceLimits,
+}
+
+/// Frequency-grid convention for direct scalar STB execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WasmStbSweep {
+    Linear,
+    Decade,
+    Octave,
+}
+
+impl WasmStbSweep {
+    const fn to_core(self) -> StbSweepType {
+        match self {
+            Self::Linear => StbSweepType::Linear,
+            Self::Decade => StbSweepType::Decade,
+            Self::Octave => StbSweepType::Octave,
+        }
+    }
+
+    fn parse(value: &str) -> DetailedWasmResult<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "lin" | "linear" => Ok(Self::Linear),
+            "dec" | "decade" => Ok(Self::Decade),
+            "oct" | "octave" => Ok(Self::Octave),
+            _ => Err(Box::new(WasmError::invalid_argument(format!(
+                "STB sweep must be 'linear', 'decade', or 'octave', got {value:?}"
+            )))),
+        }
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -656,6 +695,166 @@ pub struct TransientFftSnapshot {
 pub struct WasmAnalogResultHandle {
     document: AnalogResultDocument,
     maximum_window_values: usize,
+}
+
+/// Versioned STB result retained in WebAssembly memory.
+///
+/// Metadata contains the six scalar margins and all descriptors. Large
+/// primary, Bode, and optional Nyquist columns cross the boundary only through
+/// bounded typed-array windows.
+#[derive(Debug)]
+#[wasm_bindgen]
+pub struct WasmStbResultHandle {
+    document: StbResultDocument,
+    maximum_window_values: usize,
+}
+
+fn stb_metadata_error(error: StbDocumentError) -> Box<WasmError> {
+    match error {
+        StbDocumentError::Aborted => Box::new(WasmError::from_simulation_error(
+            rspice_core::engine::SimulationError::Aborted,
+        )),
+        StbDocumentError::Invalid(message) => Box::new(WasmError::new(
+            message,
+            "invalid_result_document",
+            "result_validation",
+        )),
+        StbDocumentError::Allocation(message) => Box::new(WasmError::new(
+            message,
+            "result_allocation_failed",
+            "result_transfer",
+        )),
+    }
+}
+
+fn stb_window_error(error: StbDocumentError) -> Box<WasmError> {
+    match error {
+        StbDocumentError::Aborted => Box::new(WasmError::from_simulation_error(
+            rspice_core::engine::SimulationError::Aborted,
+        )),
+        StbDocumentError::Invalid(message) => Box::new(WasmError::new(
+            message,
+            "invalid_result_window",
+            "result_transfer",
+        )),
+        StbDocumentError::Allocation(message) => Box::new(WasmError::new(
+            message,
+            "result_allocation_failed",
+            "result_transfer",
+        )),
+    }
+}
+
+impl WasmStbResultHandle {
+    fn new_with_abort(
+        document: StbResultDocument,
+        resource_limits: ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> DetailedWasmResult<Self> {
+        match document.validate_with_abort(abort) {
+            Ok(()) => {}
+            Err(stb_result_document::StbDocumentError::Aborted) => {
+                return Err(Box::new(WasmError::from_simulation_error(
+                    rspice_core::engine::SimulationError::Aborted,
+                )));
+            }
+            Err(stb_result_document::StbDocumentError::Invalid(message)) => {
+                return Err(Box::new(WasmError::new(
+                    message,
+                    "invalid_result_document",
+                    "result_validation",
+                )));
+            }
+            Err(stb_result_document::StbDocumentError::Allocation(message)) => {
+                return Err(Box::new(WasmError::new(
+                    message,
+                    "result_allocation_failed",
+                    "result_validation",
+                )));
+            }
+        }
+        let retained_values = document.retained_numeric_value_count().map_err(|message| {
+            Box::new(WasmError::new(
+                message,
+                "invalid_result_document",
+                "result_validation",
+            ))
+        })?;
+        if retained_values > resource_limits.max_result_values {
+            return Err(resource_limit_error(
+                ResourceKind::ResultValues,
+                retained_values,
+                resource_limits.max_result_values,
+            ));
+        }
+        Ok(Self {
+            document,
+            maximum_window_values: resource_limits
+                .max_result_values
+                .min(DEFAULT_MAX_TRANSFER_VALUES),
+        })
+    }
+
+    /// Access the canonical Rust document without crossing the JS boundary.
+    pub fn document(&self) -> &StbResultDocument {
+        &self.document
+    }
+
+    fn metadata_snapshot(&self) -> DetailedWasmResult<StbResultMetadata> {
+        self.document
+            .metadata(self.maximum_window_values)
+            .map_err(stb_metadata_error)
+    }
+
+    fn window_snapshot(&self, start: usize, count: usize) -> DetailedWasmResult<StbResultWindow> {
+        self.document
+            .window(start, count, self.maximum_window_values)
+            .map_err(stb_window_error)
+    }
+}
+
+#[wasm_bindgen]
+impl WasmStbResultHandle {
+    #[wasm_bindgen(getter, js_name = pointCount)]
+    pub fn point_count(&self) -> usize {
+        self.document.point_count
+    }
+
+    #[wasm_bindgen(getter, js_name = analysisId)]
+    pub fn analysis_id(&self) -> String {
+        self.document.analysis.id.clone()
+    }
+
+    /// Return STB descriptors, units, margins, status, and transfer ceiling
+    /// without copying any per-frequency sample column.
+    #[wasm_bindgen(js_name = metadata)]
+    pub fn metadata_js(&self) -> Result<JsValue, JsValue> {
+        let metadata = self
+            .metadata_snapshot()
+            .map_err(|error| wasm_error_to_js(*error))?;
+        serialize_to_js(&metadata).map_err(|_| {
+            wasm_error_to_js(WasmError::new(
+                "failed to serialize STB result metadata".to_owned(),
+                "result_serialization_failed",
+                "result_transfer",
+            ))
+        })
+    }
+
+    /// Transfer one bounded half-open frequency range as typed arrays.
+    #[wasm_bindgen(js_name = readWindow)]
+    pub fn read_window_js(&self, start: usize, count: usize) -> Result<JsValue, JsValue> {
+        let window = self
+            .window_snapshot(start, count)
+            .map_err(|error| wasm_error_to_js(*error))?;
+        serialize_stb_result_window_to_js(&window).map_err(|_| {
+            wasm_error_to_js(WasmError::new(
+                "failed to serialize STB result window".to_owned(),
+                "result_serialization_failed",
+                "result_transfer",
+            ))
+        })
+    }
 }
 
 impl WasmAnalogResultHandle {
@@ -1354,7 +1553,7 @@ fn serialize_to_js<T: Serialize>(value: &T) -> Result<JsValue, JsValue> {
 fn js_property(object: &JsValue, name: &str) -> Result<JsValue, JsValue> {
     js_sys::Reflect::get(object, &JsValue::from_str(name)).map_err(|_| {
         JsValue::from_str(&format!(
-            "serialization failed: transient property `{name}` is unavailable"
+            "serialization failed: result property `{name}` is unavailable"
         ))
     })
 }
@@ -1365,7 +1564,7 @@ fn set_float64_array(object: &JsValue, name: &str, values: &[f64]) -> Result<(),
         .map(|_| ())
         .map_err(|_| {
             JsValue::from_str(&format!(
-                "serialization failed: cannot publish transient typed array `{name}`"
+                "serialization failed: cannot publish result typed array `{name}`"
             ))
         })
 }
@@ -1378,7 +1577,7 @@ fn set_float64_array_entry(
 ) -> Result<(), JsValue> {
     let index = u32::try_from(index).map_err(|_| {
         JsValue::from_str(&format!(
-            "serialization failed: transient `{name}` index exceeds JavaScript array bounds"
+            "serialization failed: result `{name}` index exceeds JavaScript array bounds"
         ))
     })?;
     let values = js_sys::Float64Array::from(values);
@@ -1391,7 +1590,7 @@ fn js_array_property(object: &JsValue, name: &str) -> Result<js_sys::Array, JsVa
         .dyn_into::<js_sys::Array>()
         .map_err(|_| {
             JsValue::from_str(&format!(
-                "serialization failed: transient property `{name}` is not an array"
+                "serialization failed: result property `{name}` is not an array"
             ))
         })
 }
@@ -1420,7 +1619,7 @@ fn publish_trace_values_as_typed_arrays<T>(
     for (index, trace) in traces.iter().enumerate() {
         let js_trace = serialized.get(u32::try_from(index).map_err(|_| {
             JsValue::from_str(&format!(
-                "serialization failed: transient `{name}` index exceeds JavaScript array bounds"
+                "serialization failed: result `{name}` index exceeds JavaScript array bounds"
             ))
         })?);
         set_float64_array(&js_trace, "values", values(trace))?;
@@ -1571,6 +1770,47 @@ fn serialize_result_window_to_js(window: &AnalogResultWindow) -> Result<JsValue,
                 set_uint8_array(&values, "validity", validity)?;
             }
         }
+    }
+    Ok(serialized)
+}
+
+/// Serialize one bounded STB window, replacing every retained per-frequency
+/// numeric column with a `Float64Array` while leaving optional Nyquist absence
+/// explicit as `null`.
+fn serialize_stb_result_window_to_js(window: &StbResultWindow) -> Result<JsValue, JsValue> {
+    let serializer = serde_wasm_bindgen::Serializer::new().serialize_missing_as_null(true);
+    let serialized = window
+        .serialize(&serializer)
+        .map_err(|error| JsValue::from_str(&format!("serialization failed: {error}")))?;
+
+    let primary = js_property(&serialized, "primary")?;
+    set_float64_array(&primary, "frequencies", &window.primary.frequencies)?;
+    let primary_loop_gain = js_property(&primary, "loopGain")?;
+    set_float64_array(&primary_loop_gain, "real", &window.primary.loop_gain.real)?;
+    set_float64_array(
+        &primary_loop_gain,
+        "imaginary",
+        &window.primary.loop_gain.imaginary,
+    )?;
+
+    let bode = js_property(&serialized, "bode")?;
+    set_float64_array(&bode, "frequencies", &window.bode.frequencies)?;
+    set_float64_array(&bode, "magnitudes", &window.bode.magnitudes)?;
+    set_float64_array(&bode, "magnitudesDb", &window.bode.magnitudes_db)?;
+    set_float64_array(&bode, "phaseDegrees", &window.bode.phase_degrees)?;
+    let bode_loop_gain = js_property(&bode, "loopGain")?;
+    set_float64_array(&bode_loop_gain, "real", &window.bode.loop_gain.real)?;
+    set_float64_array(
+        &bode_loop_gain,
+        "imaginary",
+        &window.bode.loop_gain.imaginary,
+    )?;
+
+    if let Some(nyquist) = &window.nyquist {
+        let js_nyquist = js_property(&serialized, "nyquist")?;
+        set_float64_array(&js_nyquist, "real", &nyquist.real)?;
+        set_float64_array(&js_nyquist, "imaginary", &nyquist.imaginary)?;
+        set_float64_array(&js_nyquist, "frequencies", &nyquist.frequencies)?;
     }
     Ok(serialized)
 }
@@ -2698,6 +2938,84 @@ pub fn run_noise_document_detailed(
     )
 }
 
+/// Run one scalar Tian loop-stability analysis into its lossless retained
+/// result document. The direct request deliberately does not consume authored
+/// STEP/TEMP axes.
+#[allow(clippy::too_many_arguments)]
+pub fn run_stb_document_with_options_and_abort_detailed(
+    source: &str,
+    probe: &str,
+    sweep: WasmStbSweep,
+    points: usize,
+    start_frequency: f64,
+    stop_frequency: f64,
+    compute_nyquist: bool,
+    ordinal: usize,
+    options: &WasmExecutionOptions,
+    external_abort: &dyn AbortSignal,
+) -> DetailedWasmResult<StbResultDocument> {
+    validate_analysis_ordinal(ordinal)?;
+    ensure_not_aborted(external_abort)?;
+    if probe.trim().is_empty() {
+        return Err(Box::new(WasmError::invalid_argument(
+            "STB probe name must not be empty".to_owned(),
+        )));
+    }
+    let config = StbConfig::new()
+        .with_sweep(start_frequency, stop_frequency, points)
+        .with_sweep_type(sweep.to_core())
+        .with_probe(probe)
+        .with_nyquist(compute_nyquist);
+    config.validate().map_err(|message| {
+        Box::new(WasmError::invalid_argument(format!(
+            "invalid STB request: {message}"
+        )))
+    })?;
+
+    let resource_limits = options.resource_limits.to_core();
+    let netlist = parse_netlist_detailed(source, resource_limits, external_abort)?;
+    let result = engine_with_resource_limits(resource_limits)?
+        .run_stb_with_abort(&netlist, config, external_abort)
+        .map_err(|error| Box::new(WasmError::from_simulation_error(error)))?;
+    ensure_not_aborted(external_abort)?;
+    match stb_result_document::stb_document_with_abort(result, ordinal, external_abort) {
+        Ok(document) => Ok(document),
+        Err(stb_result_document::StbDocumentError::Aborted) => Err(Box::new(
+            WasmError::from_simulation_error(rspice_core::engine::SimulationError::Aborted),
+        )),
+        Err(stb_result_document::StbDocumentError::Invalid(message)) => Err(Box::new(
+            WasmError::new(message, "invalid_result_document", "result_validation"),
+        )),
+        Err(stb_result_document::StbDocumentError::Allocation(message)) => Err(Box::new(
+            WasmError::new(message, "result_allocation_failed", "result_projection"),
+        )),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn run_stb_document_detailed(
+    source: &str,
+    probe: &str,
+    sweep: WasmStbSweep,
+    points: usize,
+    start_frequency: f64,
+    stop_frequency: f64,
+    compute_nyquist: bool,
+) -> DetailedWasmResult<StbResultDocument> {
+    run_stb_document_with_options_and_abort_detailed(
+        source,
+        probe,
+        sweep,
+        points,
+        start_frequency,
+        stop_frequency,
+        compute_nyquist,
+        1,
+        &WasmExecutionOptions::default(),
+        &NoAbort,
+    )
+}
+
 /// Exercise the configured browser parser-to-solver path without I/O.
 pub fn health_check_with_options_detailed(
     options: &WasmExecutionOptions,
@@ -3017,6 +3335,46 @@ pub fn run_noise_document_js(
         .map_err(|error| wasm_error_to_js(*error))
 }
 
+#[wasm_bindgen(js_name = runStbAnalysisDocument)]
+#[allow(clippy::too_many_arguments)]
+pub fn run_stb_document_js(
+    source: &str,
+    probe: &str,
+    sweep: &str,
+    points: usize,
+    start_frequency: f64,
+    stop_frequency: f64,
+    compute_nyquist: bool,
+    ordinal: usize,
+    options: JsValue,
+) -> Result<WasmStbResultHandle, JsValue> {
+    let request = execution_request_from_js(options).map_err(|error| wasm_error_to_js(*error))?;
+    let sweep = WasmStbSweep::parse(sweep).map_err(|error| wasm_error_to_js(*error))?;
+    let cancellation_enabled = request.cancellation.is_some();
+    let _guard = ActiveSharedCancellationGuard::install(request.cancellation)
+        .map_err(|error| wasm_error_to_js(*error))?;
+    let shared_abort = JsSharedAbortSignal {
+        enabled: cancellation_enabled,
+    };
+    let abort = ConfiguredAbort::new(request.timeout_milliseconds, &shared_abort)
+        .map_err(|error| wasm_error_to_js(*error))?;
+    let document = run_stb_document_with_options_and_abort_detailed(
+        source,
+        probe,
+        sweep,
+        points,
+        start_frequency,
+        stop_frequency,
+        compute_nyquist,
+        ordinal,
+        &request.options,
+        &abort,
+    )
+    .map_err(|error| wasm_error_to_js(*error))?;
+    WasmStbResultHandle::new_with_abort(document, request.options.resource_limits.to_core(), &abort)
+        .map_err(|error| wasm_error_to_js(*error))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3317,7 +3675,7 @@ mod tests {
     }
 
     #[test]
-    fn every_browser_analog_path_propagates_the_explicit_abort_source() {
+    fn every_browser_analysis_path_propagates_the_explicit_abort_source() {
         let options = WasmExecutionOptions::default();
         let abort = rspice_core::abort_signal::ImmediateAbort;
 
@@ -3415,6 +3773,21 @@ mod tests {
             )
             .expect_err("typed noise must observe the frontend abort source"),
         );
+        assert_cancelled(
+            run_stb_document_with_options_and_abort_detailed(
+                CANCELLATION_DECK,
+                "V1",
+                WasmStbSweep::Linear,
+                2,
+                1.0,
+                10.0,
+                true,
+                1,
+                &options,
+                &abort,
+            )
+            .expect_err("typed STB must observe the frontend abort source"),
+        );
     }
 
     const TYPED_DOCUMENT_DECK: &str = "browser typed analog document\n\
@@ -3423,6 +3796,277 @@ mod tests {
         R2 out 0 1k\n\
         .save V(out) I(V1)\n\
         .end\n";
+
+    const STB_DOCUMENT_DECK: &str = "browser typed STB document\n\
+        EAMP out 0 in 0 10\n\
+        VPROBE out fb 0\n\
+        RF fb in 10k\n\
+        RIN in 0 1k\n\
+        .end\n";
+
+    #[test]
+    fn scalar_stb_document_retains_primary_bode_nyquist_margins_and_units() {
+        let document = run_stb_document_detailed(
+            STB_DOCUMENT_DECK,
+            "VPROBE",
+            WasmStbSweep::Linear,
+            4,
+            10.0,
+            1.0e3,
+            true,
+        )
+        .expect("typed STB document executes");
+
+        assert_eq!(document.schema, STB_RESULT_SCHEMA);
+        assert_eq!(document.schema_version, STB_RESULT_VERSION);
+        assert_eq!(document.analysis.id, "stb-001");
+        assert_eq!(document.coordinate_id, None);
+        assert_eq!(document.point_count, 4);
+        assert_eq!(document.primary.frequencies.len(), 4);
+        assert_eq!(document.primary.loop_gains.len(), 4);
+        assert_eq!(document.bode.frequencies.len(), 4);
+        assert_eq!(document.bode.loop_gains.len(), 4);
+        assert_eq!(document.nyquist.as_ref().unwrap().real.len(), 4);
+        assert_eq!(document.retained_numeric_value_count().unwrap(), 4 * 12 + 6);
+        assert_eq!(document.margins.units.gain_margin_db, StbUnit::Decibel);
+        assert_eq!(
+            document.margins.units.phase_margin_frequency,
+            StbUnit::Hertz
+        );
+
+        let core_netlist = Netlist::parse(STB_DOCUMENT_DECK).expect("parse core STB deck");
+        let core_result = Engine::new(SimulationConfig::default())
+            .run_stb(
+                &core_netlist,
+                StbConfig::new()
+                    .with_sweep(10.0, 1.0e3, 4)
+                    .with_sweep_type(StbSweepType::Linear)
+                    .with_probe("VPROBE")
+                    .with_nyquist(true),
+            )
+            .expect("core STB reference executes");
+        assert_eq!(document.primary.frequencies, core_result.frequencies);
+        for (mapped, core) in document
+            .primary
+            .loop_gains
+            .iter()
+            .zip(&core_result.loop_gains)
+        {
+            assert_eq!(mapped.real.to_bits(), core.re.to_bits());
+            assert_eq!(mapped.imaginary.to_bits(), core.im.to_bits());
+        }
+        for (index, core) in core_result.result.bode_points.iter().enumerate() {
+            assert_eq!(
+                document.bode.frequencies[index].to_bits(),
+                core.frequency.to_bits()
+            );
+            assert_eq!(
+                document.bode.magnitudes[index].to_bits(),
+                core.magnitude.to_bits()
+            );
+            assert_eq!(
+                document.bode.magnitudes_db[index].to_bits(),
+                core.magnitude_db.to_bits()
+            );
+            assert_eq!(
+                document.bode.phase_degrees[index].to_bits(),
+                core.phase_deg.to_bits()
+            );
+            assert_eq!(
+                document.bode.loop_gains[index].real.to_bits(),
+                core.loop_gain.re.to_bits()
+            );
+            assert_eq!(
+                document.bode.loop_gains[index].imaginary.to_bits(),
+                core.loop_gain.im.to_bits()
+            );
+        }
+        let mapped_nyquist = document.nyquist.as_ref().expect("mapped Nyquist data");
+        for (index, core) in core_result.result.nyquist_points.iter().enumerate() {
+            assert_eq!(mapped_nyquist.real[index].to_bits(), core.real.to_bits());
+            assert_eq!(
+                mapped_nyquist.imaginary[index].to_bits(),
+                core.imag.to_bits()
+            );
+            assert_eq!(
+                mapped_nyquist.frequencies[index].to_bits(),
+                core.frequency.to_bits()
+            );
+        }
+        let core_margins = &core_result.result.margins;
+        assert_eq!(
+            document.margins.gain_margin_db.to_bits(),
+            core_margins.gain_margin_db.to_bits()
+        );
+        assert_eq!(
+            document.margins.gain_margin_frequency.to_bits(),
+            core_margins.gain_margin_freq.to_bits()
+        );
+        assert_eq!(
+            document.margins.phase_margin_degrees.to_bits(),
+            core_margins.phase_margin_deg.to_bits()
+        );
+        assert_eq!(
+            document.margins.phase_margin_frequency.to_bits(),
+            core_margins.phase_margin_freq.to_bits()
+        );
+        assert_eq!(
+            document.margins.dc_gain_db.to_bits(),
+            core_margins.dc_gain_db.to_bits()
+        );
+        assert_eq!(
+            document.margins.unity_gain_bandwidth.to_bits(),
+            core_margins.unity_gain_bandwidth.to_bits()
+        );
+        assert_eq!(
+            document.margins.conditionally_stable,
+            core_margins.conditionally_stable
+        );
+        assert_eq!(document.margins.num_crossovers, core_margins.num_crossovers);
+        assert_eq!(document.margins.is_stable, core_margins.is_stable());
+
+        let metadata = document.metadata(128).expect("STB metadata projects");
+        assert!(metadata.has_nyquist);
+        assert_eq!(metadata.series.len(), 10);
+        assert!(metadata.series.iter().any(|descriptor| {
+            descriptor.group == "bode"
+                && descriptor.name == "phase_degrees"
+                && descriptor.unit == StbUnit::Degree
+        }));
+
+        let json = serde_json::to_string(&document).expect("STB document JSON serializes");
+        let decoded: StbResultDocument =
+            serde_json::from_str(&json).expect("STB document JSON deserializes");
+        decoded.validate().expect("STB JSON round trip validates");
+        assert_eq!(decoded.primary.frequencies, document.primary.frequencies);
+        for (decoded, original) in decoded
+            .primary
+            .loop_gains
+            .iter()
+            .zip(&document.primary.loop_gains)
+        {
+            assert!((decoded.real - original.real).abs() <= f64::EPSILON);
+            assert!((decoded.imaginary - original.imaginary).abs() <= f64::EPSILON);
+        }
+        assert_eq!(
+            decoded.nyquist.as_ref().map(|series| series.real.len()),
+            document.nyquist.as_ref().map(|series| series.real.len())
+        );
+    }
+
+    #[test]
+    fn scalar_stb_optional_nyquist_and_exact_resource_accounting_are_fail_closed() {
+        let without_nyquist = run_stb_document_detailed(
+            STB_DOCUMENT_DECK,
+            "VPROBE",
+            WasmStbSweep::Linear,
+            4,
+            10.0,
+            1.0e3,
+            false,
+        )
+        .expect("STB executes without Nyquist projection");
+        assert!(without_nyquist.nyquist.is_none());
+        assert_eq!(
+            without_nyquist.retained_numeric_value_count().unwrap(),
+            4 * 9 + 6
+        );
+
+        let mut options = WasmExecutionOptions::default();
+        options.resource_limits.max_result_values = 4 * 12 + 6 - 1;
+        let error = run_stb_document_with_options_and_abort_detailed(
+            STB_DOCUMENT_DECK,
+            "VPROBE",
+            WasmStbSweep::Linear,
+            4,
+            10.0,
+            1.0e3,
+            true,
+            1,
+            &options,
+            &NoAbort,
+        )
+        .expect_err("one value below exact retained STB accounting must fail");
+        assert_eq!(error.code, "resource_limit");
+        assert_eq!(error.category, "resource_limit");
+        assert_eq!(error.resource.as_deref(), Some("result_values"));
+        assert_eq!(error.requested, Some(4 * 12 + 6));
+        assert_eq!(error.limit, Some(4 * 12 + 5));
+    }
+
+    #[test]
+    fn retained_stb_handle_enforces_exact_bounded_window_columns() {
+        let document = run_stb_document_detailed(
+            STB_DOCUMENT_DECK,
+            "VPROBE",
+            WasmStbSweep::Linear,
+            4,
+            10.0,
+            1.0e3,
+            true,
+        )
+        .expect("typed STB document executes");
+        let cancelled_document = document.clone();
+        let mut handle =
+            WasmStbResultHandle::new_with_abort(document, ResourceLimits::default(), &NoAbort)
+                .expect("valid handle");
+        handle.maximum_window_values = 24;
+        assert_eq!(
+            handle
+                .metadata_snapshot()
+                .expect("STB metadata projects")
+                .maximum_window_values,
+            24
+        );
+        assert!(handle.window_snapshot(0, 2).is_ok());
+        let error = handle
+            .window_snapshot(0, 3)
+            .expect_err("36-value STB window exceeds a 24-value ceiling");
+        assert_eq!(error.code, "invalid_result_window");
+        assert_eq!(error.category, "result_transfer");
+
+        let abort = rspice_core::abort_signal::CountingAbort::new(3);
+        let error = WasmStbResultHandle::new_with_abort(
+            cancelled_document,
+            ResourceLimits::default(),
+            &abort,
+        )
+        .expect_err("retained-handle validation must remain cancellable");
+        assert_eq!(error.code, "aborted");
+        assert_eq!(error.category, "cancellation");
+    }
+
+    #[test]
+    fn stb_boundary_validation_uses_typed_argument_errors() {
+        let error = run_stb_document_detailed(
+            STB_DOCUMENT_DECK,
+            "VPROBE",
+            WasmStbSweep::Decade,
+            0,
+            10.0,
+            1.0e3,
+            true,
+        )
+        .expect_err("zero STB density must fail at the browser boundary");
+        assert_eq!(error.code, "invalid_argument");
+        assert_eq!(error.category, "input_validation");
+
+        let error = WasmStbSweep::parse("logarithmic")
+            .expect_err("unknown STB sweep spelling must fail closed");
+        assert_eq!(error.code, "invalid_argument");
+
+        for error in [
+            stb_metadata_error(StbDocumentError::Allocation(
+                "synthetic metadata allocation failure".to_owned(),
+            )),
+            stb_window_error(StbDocumentError::Allocation(
+                "synthetic window allocation failure".to_owned(),
+            )),
+        ] {
+            assert_eq!(error.code, "result_allocation_failed");
+            assert_eq!(error.category, "result_transfer");
+        }
+    }
 
     #[test]
     fn typed_documents_cover_scalar_op_dc_ac_tran_and_noise_without_schema_loss() {
@@ -4247,7 +4891,7 @@ mod tests {
 
     #[cfg(target_arch = "wasm32")]
     #[wasm_bindgen_test::wasm_bindgen_test]
-    fn node_shared_control_word_cancels_every_analog_export() {
+    fn node_shared_control_word_cancels_every_analysis_export() {
         let options = || js_shared_cancellation_options(true);
 
         assert_js_error_code(
@@ -4307,6 +4951,21 @@ mod tests {
                 options(),
             )
             .expect_err("pre-set shared flag cancels typed noise"),
+            "aborted",
+        );
+        assert_js_error_code(
+            run_stb_document_js(
+                CANCELLATION_DECK,
+                "V1",
+                "linear",
+                2,
+                1.0,
+                10.0,
+                true,
+                1,
+                options(),
+            )
+            .expect_err("pre-set shared flag cancels typed STB"),
             "aborted",
         );
     }
@@ -4573,6 +5232,128 @@ mod tests {
             js_property(&values, "validity")
                 .expect("validity values exist")
                 .is_instance_of::<js_sys::Uint8Array>()
+        );
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    fn stb_windows_use_typed_columns_and_explicit_optional_nyquist() {
+        let document = run_stb_document_detailed(
+            STB_DOCUMENT_DECK,
+            "VPROBE",
+            WasmStbSweep::Linear,
+            4,
+            10.0,
+            1.0e3,
+            true,
+        )
+        .expect("typed STB document executes under wasm32");
+        let window = document
+            .window(0, 2, 128)
+            .expect("bounded STB window exists");
+        let serialized =
+            serialize_stb_result_window_to_js(&window).expect("serialize typed STB window");
+
+        let primary = js_property(&serialized, "primary").expect("primary STB group exists");
+        let primary_gain = js_property(&primary, "loopGain").expect("primary loop gain exists");
+        for (object, fields) in [
+            (&primary, &["frequencies"][..]),
+            (&primary_gain, &["real", "imaginary"][..]),
+        ] {
+            for field in fields {
+                assert!(
+                    js_property(object, field)
+                        .expect("primary STB numeric field exists")
+                        .is_instance_of::<js_sys::Float64Array>()
+                );
+            }
+        }
+        let bode = js_property(&serialized, "bode").expect("Bode STB group exists");
+        for field in ["frequencies", "magnitudes", "magnitudesDb", "phaseDegrees"] {
+            assert!(
+                js_property(&bode, field)
+                    .expect("Bode numeric field exists")
+                    .is_instance_of::<js_sys::Float64Array>()
+            );
+        }
+        let nyquist = js_property(&serialized, "nyquist").expect("Nyquist group exists");
+        for field in ["real", "imaginary", "frequencies"] {
+            assert!(
+                js_property(&nyquist, field)
+                    .expect("Nyquist numeric field exists")
+                    .is_instance_of::<js_sys::Float64Array>()
+            );
+        }
+
+        let without_nyquist = run_stb_document_detailed(
+            STB_DOCUMENT_DECK,
+            "VPROBE",
+            WasmStbSweep::Linear,
+            2,
+            10.0,
+            100.0,
+            false,
+        )
+        .expect("STB without Nyquist executes under wasm32");
+        let serialized = serialize_stb_result_window_to_js(
+            &without_nyquist
+                .window(0, 2, 128)
+                .expect("bounded non-Nyquist STB window exists"),
+        )
+        .expect("serialize non-Nyquist STB window");
+        assert!(
+            js_property(&serialized, "nyquist")
+                .expect("Nyquist optionality is explicit")
+                .is_null()
+        );
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    fn public_stb_export_returns_structured_metadata_and_typed_windows() {
+        let handle = run_stb_document_js(
+            STB_DOCUMENT_DECK,
+            "VPROBE",
+            "linear",
+            4,
+            10.0,
+            1.0e3,
+            true,
+            1,
+            JsValue::UNDEFINED,
+        )
+        .expect("public STB export executes");
+
+        assert_eq!(handle.analysis_id(), "stb-001");
+        assert_eq!(handle.point_count(), 4);
+        let metadata = handle.metadata_js().expect("public metadata serializes");
+        assert_eq!(
+            js_property(&metadata, "schema")
+                .expect("metadata schema")
+                .as_string()
+                .as_deref(),
+            Some(STB_RESULT_SCHEMA)
+        );
+        assert!(
+            js_property(&metadata, "margins")
+                .expect("metadata margins")
+                .is_object()
+        );
+
+        let window = handle
+            .read_window_js(0, 2)
+            .expect("public bounded window serializes");
+        let primary = js_property(&window, "primary").expect("public primary series");
+        assert!(
+            js_property(&primary, "frequencies")
+                .expect("public primary frequencies")
+                .is_instance_of::<js_sys::Float64Array>()
+        );
+        let nyquist = js_property(&window, "nyquist").expect("public Nyquist series");
+        assert!(
+            js_property(&nyquist, "real")
+                .expect("public Nyquist real values")
+                .is_instance_of::<js_sys::Float64Array>()
         );
     }
 }

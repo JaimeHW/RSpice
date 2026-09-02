@@ -1,11 +1,11 @@
 # RSpice WASM
 
 WebAssembly bindings for the RSpice simulation engine. The crate is
-deliberately thin: a single `src/lib.rs` exposes serializable snapshots,
+deliberately thin: `src/lib.rs` and focused result-document modules expose serializable snapshots,
 structured errors, and browser-safe execution policies over `rspice-core`, so
 a browser can parse a netlist and run DC operating-point, AC, and transient
 analyses entirely client-side. The versioned result-document API additionally
-maps scalar-deck DC sweeps and input-referred noise. All numerical work happens in `rspice-core`;
+maps scalar-deck DC sweeps, input-referred noise, and loop stability. All numerical work happens in `rspice-core`;
 this crate adapts inputs and serializes results across the JS boundary.
 
 This is what powers the "run it in your browser" demo on the project site.
@@ -33,6 +33,7 @@ by throwing an `RSpiceError` with stable structured fields.
 | `runAcAnalysisDocument(source, frequencies, ordinal[, options])` | explicit frequency grid | retained version-1 typed analog result handle |
 | `runTransientAnalysisDocument(source, tstop, maxStep, ordinal[, options])` | explicit transient interval | retained version-1 typed analog result handle |
 | `runNoiseAnalysisDocument(source, outputNode, referenceNode, inputSource, frequencies, ordinal[, options])` | named output/input and explicit positive frequency grid | retained version-1 typed analog result handle |
+| `runStbAnalysisDocument(source, probe, sweep, points, startFrequency, stopFrequency, computeNyquist, ordinal[, options])` | scalar Tian STB request (`linear`/`decade`/`octave`) | retained version-1 lossless STB result handle |
 
 The five `*Document` calls share the schema identity `rspice-analog-result`
 and schema version `1`. Each document retains a stable kind/ordinal ID such as
@@ -53,6 +54,19 @@ fail with `code: "invalid_result_window"`. The default transfer ceiling is
 262,144 numeric/validity values and is further reduced by `maxResultValues`.
 This retained-handle contract avoids constructing a second full ordinary JS
 array copy of a large result.
+
+STB uses the dedicated schema identity `rspice-stb-result`, version `1`,
+because core intentionally retains separate primary, Bode, and optional
+Nyquist records. `WasmStbResultHandle.metadata()` publishes the probe,
+analysis identity, explicit `coordinateId: null`, success/warnings/assessment,
+all six margin values, and hertz/dimensionless/decibel/degree descriptors.
+`readWindow(start, count)` transfers the primary frequency and complex loop
+gain, the complete Bode record, and optional Nyquist real/imaginary/frequency
+columns as `Float64Array` values. The bounded transfer charges exactly 9
+values per point without Nyquist or 12 with it; the six numeric margins are
+also included in result-resource accounting. JSON documents encode non-finite
+STB values as `"NaN"`, `"Infinity"`, or `"-Infinity"` so valid no-crossover
+margin semantics round-trip instead of becoming ambiguous `null` values.
 
 Transient numeric columns cross the JavaScript boundary as typed arrays:
 `time`, `step_sizes`, each retained voltage or branch-current waveform, and
@@ -113,7 +127,7 @@ the browser build is single-threaded.
 
 ### Cancellation and deadlines
 
-Every OP, DC, AC, TRAN, noise, and compressed-TRAN browser export calls the corresponding
+Every OP, DC, AC, TRAN, noise, STB, and compressed-TRAN browser export calls the corresponding
 abort-aware `rspice-core` entrypoint. Parsing uses the core abort-aware parser
 as well. There are two supported controls:
 
@@ -186,14 +200,15 @@ that explicit abort-aware path.
 
 ## Module layout
 
-There are no submodules — `src/lib.rs` contains:
+The public bindings live in `src/lib.rs`; result-document adapters are kept in
+small focused submodules:
 
 - Snapshot types: `NetlistSummary`, `DcOperatingPoint`, `ComplexSeries`
   (parallel real/imag vectors), `AcPointSnapshot`, the complete analog
   `TransientSnapshot`/device-op/store/compression family, and the complete
   `TransientFftSnapshot`/bins/metrics/harmonics DTO family
-- Versioned typed analog result documents for scalar OP, DC, AC, TRAN, and
-  noise, plus a retained handle that publishes bounded typed-array windows
+- Versioned typed result documents for scalar OP, DC, AC, TRAN, noise, and
+  STB, plus retained handles that publish bounded typed-array windows
 - Browser-safe resource defaults, typed per-call options, and input validation
 - Structured error conversion with stable machine-readable resource details
 - The `#[wasm_bindgen]` export shims
@@ -215,7 +230,7 @@ UI event loop. Inside that worker the solve is still single-threaded; Verilog-A
 is not enabled here.
 
 Not exposed through these bindings: authored `DeckPlan` STEP/TEMP axes,
-`.MEAS` evaluation, SP/port-noise, distortion, TF, STB, sensitivity,
+`.MEAS` evaluation, SP/port-noise, distortion, TF, sensitivity,
 pole-zero, Fourier, Monte Carlo, PSS/PAC/PNoise, HB, and envelope. These remain
 explicitly unsupported in the generated non-UI capability matrix rather than
 being coerced into an OP/AC/TRAN shape. The full application surface is the
@@ -245,7 +260,7 @@ wasm threads.
 
 `cargo test -p rspice-wasm` runs native unit and integration tests for browser
 defaults, option decoding, fail-closed field handling, structured error
-contracts, abort propagation across all four analog paths, and the analysis
+contracts, abort propagation across every mapped analysis path, and the analysis
 adapters. Transient tests compare the complete
 full and compressed analog inventories against `rspice-core`, exercise
 authored projection missingness and stable trace ordering, run the real
@@ -254,9 +269,11 @@ source-order position with `rspice-core`, round-trip the serializable records,
 and ratchet the documented field inventory. Wasm32 tests additionally assert
 that time-domain, bin, and ranked-harmonic columns use JavaScript typed arrays
 and that optional fields are explicit `null`. Typed document tests execute all
-five mapped scalar analysis families, round-trip the versioned Serde document,
+six mapped scalar analysis families, round-trip the versioned Serde documents,
 reject a forward version, preserve complex/current/device data, and enforce
-bounded windows with explicit validity. Node wasm-bindgen tests exercise
+bounded windows with explicit validity. STB tests additionally ratchet exact
+retained resource counts, optional Nyquist data, non-finite JSON semantics,
+projection cancellation, and typed-array window columns. Node wasm-bindgen tests exercise
 pre-set shared control words, zero deadlines, unsupported mechanisms, and
 ordinary-buffer rejection through the actual JavaScript exports. CI also builds the real
 `wasm32-unknown-unknown` artifact. The static browser contract is guarded by

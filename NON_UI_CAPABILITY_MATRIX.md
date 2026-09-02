@@ -17,7 +17,7 @@ This is an adapter inventory, not a claim of numerical qualification. `mapped` m
 | `port-noise` | partial / partial / partial | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
 | `distortion` | partial / partial / partial | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
 | `tf` | partial / partial / partial | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
-| `stb` | partial / partial / partial | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
+| `stb` | partial / partial / partial | mapped / mapped / mapped | mapped / unsupported / unsupported | unsupported / unsupported / unsupported |
 | `sensitivity` | partial / partial / partial | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
 | `pole-zero` | partial / partial / partial | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
 | `fourier` | partial / partial / partial | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
@@ -73,7 +73,7 @@ Repeated forms with the same declaration are grouped. Every non-mapped declarati
 | `tf` | Engine adapter | scalar, STEP, TEMP | unsupported | protocol-3 adapter has no result mapping for this family |
 | `stb` | CLI | scalar | partial | CSV/text artifact exists, but no shared typed result document |
 | `stb` | CLI | STEP, TEMP | partial | shared deck axes execute, but the CLI artifact does not retain a typed coordinate document |
-| `stb` | WASM | scalar, STEP, TEMP | unsupported | browser API has no result adapter for this family |
+| `stb` | WASM | STEP, TEMP | unsupported | browser API does not consume DeckPlan axes |
 | `stb` | Engine adapter | scalar, STEP, TEMP | unsupported | protocol-3 adapter has no result mapping for this family |
 | `sensitivity` | CLI | scalar | partial | CSV/text artifact exists, but no shared typed result document |
 | `sensitivity` | CLI | STEP, TEMP | partial | shared deck axes execute, but the CLI artifact does not retain a typed coordinate document |
