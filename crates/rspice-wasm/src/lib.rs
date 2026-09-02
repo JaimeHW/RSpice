@@ -4,9 +4,16 @@
 //! serializable snapshots that mirror stable simulator concepts while delegating
 //! all numerical work to `rspice-core`.
 
+mod deck_result_document;
 mod result_document;
 mod stb_result_document;
 
+pub use deck_result_document::{
+    DECK_RESULT_SCHEMA, DECK_RESULT_VERSION, DeckAxisAssignment, DeckAxisDescriptor, DeckAxisValue,
+    DeckCoordinateDescriptor, DeckDataBinding, DeckFftBinWindow, DeckFftHarmonicWindow,
+    DeckFftMetadata, DeckFftMetricsMetadata, DeckFftSummary, DeckPlannedAnalysisDescriptor,
+    DeckResultDocument, DeckResultMetadata, DeckResultSummary,
+};
 pub use result_document::{
     ANALOG_RESULT_SCHEMA, ANALOG_RESULT_VERSION, AnalogAnalysisKind, AnalogResultDocument,
     AnalogResultMetadata, AnalogResultWindow, AnalogSignalKind, AnalysisIdentity, AxisDescriptor,
@@ -697,6 +704,17 @@ pub struct WasmAnalogResultHandle {
     maximum_window_values: usize,
 }
 
+/// Versioned results from a complete authored analog deck.
+///
+/// The handle retains every coordinate-local result in WebAssembly memory.
+/// Only descriptors and caller-bounded numeric windows cross into JavaScript.
+#[derive(Debug)]
+#[wasm_bindgen]
+pub struct WasmDeckResultHandle {
+    document: DeckResultDocument,
+    maximum_window_values: usize,
+}
+
 /// Versioned STB result retained in WebAssembly memory.
 ///
 /// Metadata contains the six scalar margins and all descriptors. Large
@@ -908,6 +926,225 @@ impl WasmAnalogResultHandle {
                     "result_transfer",
                 ))
             })
+    }
+}
+
+impl WasmDeckResultHandle {
+    fn new_with_abort(
+        document: DeckResultDocument,
+        resource_limits: ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> DetailedWasmResult<Self> {
+        document.validate_with_abort(abort).map_err(|message| {
+            if abort.is_aborted() {
+                aborted_error()
+            } else {
+                Box::new(WasmError::new(
+                    message,
+                    "invalid_deck_result_document",
+                    "result_validation",
+                ))
+            }
+        })?;
+        let retained_values = document
+            .retained_numeric_value_count_with_abort(abort)
+            .map_err(|message| {
+                if abort.is_aborted() {
+                    aborted_error()
+                } else {
+                    Box::new(WasmError::new(
+                        message,
+                        "invalid_deck_result_document",
+                        "result_validation",
+                    ))
+                }
+            })?;
+        if retained_values > resource_limits.max_result_values {
+            return Err(resource_limit_error(
+                ResourceKind::ResultValues,
+                retained_values,
+                resource_limits.max_result_values,
+            ));
+        }
+        Ok(Self {
+            document,
+            maximum_window_values: resource_limits
+                .max_result_values
+                .min(DEFAULT_MAX_TRANSFER_VALUES),
+        })
+    }
+
+    /// Access the canonical Rust document without crossing the JS boundary.
+    pub fn document(&self) -> &DeckResultDocument {
+        &self.document
+    }
+}
+
+#[wasm_bindgen]
+impl WasmDeckResultHandle {
+    #[wasm_bindgen(getter, js_name = coordinateCount)]
+    pub fn coordinate_count(&self) -> usize {
+        self.document.coordinates.len()
+    }
+
+    #[wasm_bindgen(getter, js_name = resultCount)]
+    pub fn result_count(&self) -> usize {
+        self.document.results.len()
+    }
+
+    #[wasm_bindgen(getter, js_name = fftResultCount)]
+    pub fn fft_result_count(&self) -> usize {
+        self.document.fft_results.len()
+    }
+
+    /// Return aggregate axes, coordinates, stable namespaces, and compact
+    /// result summaries without copying any numeric result column.
+    #[wasm_bindgen(js_name = metadata)]
+    pub fn metadata_js(&self) -> Result<JsValue, JsValue> {
+        let metadata = self
+            .document
+            .metadata(self.maximum_window_values)
+            .map_err(|message| {
+                wasm_error_to_js(WasmError::new(
+                    message,
+                    "invalid_deck_result_document",
+                    "result_validation",
+                ))
+            })?;
+        serialize_to_js(&metadata).map_err(|_| {
+            wasm_error_to_js(WasmError::new(
+                "failed to serialize deck result metadata".to_owned(),
+                "result_serialization_failed",
+                "result_transfer",
+            ))
+        })
+    }
+
+    /// Return the coordinate-local schema for one analog result.
+    #[wasm_bindgen(js_name = resultMetadata)]
+    pub fn result_metadata_js(&self, result_index: usize) -> Result<JsValue, JsValue> {
+        let metadata = self
+            .document
+            .result_metadata(result_index, self.maximum_window_values)
+            .map_err(|message| {
+                wasm_error_to_js(WasmError::new(
+                    message,
+                    "invalid_result_index",
+                    "result_transfer",
+                ))
+            })?;
+        serialize_to_js(&metadata).map_err(|_| {
+            wasm_error_to_js(WasmError::new(
+                "failed to serialize coordinate-local result metadata".to_owned(),
+                "result_serialization_failed",
+                "result_transfer",
+            ))
+        })
+    }
+
+    /// Transfer one bounded half-open window from one coordinate-local analog
+    /// result as typed numeric and validity arrays.
+    #[wasm_bindgen(js_name = readWindow)]
+    pub fn read_window_js(
+        &self,
+        result_index: usize,
+        start: usize,
+        count: usize,
+    ) -> Result<JsValue, JsValue> {
+        let window = self
+            .document
+            .result_window(result_index, start, count, self.maximum_window_values)
+            .map_err(|message| {
+                wasm_error_to_js(WasmError::new(
+                    message,
+                    "invalid_result_window",
+                    "result_transfer",
+                ))
+            })?;
+        serialize_result_window_to_js(&window).map_err(|_| {
+            wasm_error_to_js(WasmError::new(
+                "failed to serialize coordinate-local result window".to_owned(),
+                "result_serialization_failed",
+                "result_transfer",
+            ))
+        })
+    }
+
+    /// Return complete scalar FFT configuration and metrics without copying
+    /// bin or harmonic numeric columns.
+    #[wasm_bindgen(js_name = fftMetadata)]
+    pub fn fft_metadata_js(&self, fft_index: usize) -> Result<JsValue, JsValue> {
+        let metadata = self
+            .document
+            .fft_metadata(fft_index, self.maximum_window_values)
+            .map_err(|message| {
+                wasm_error_to_js(WasmError::new(
+                    message,
+                    "invalid_fft_result_index",
+                    "result_transfer",
+                ))
+            })?;
+        serialize_to_js(&metadata).map_err(|_| {
+            wasm_error_to_js(WasmError::new(
+                "failed to serialize deck FFT metadata".to_owned(),
+                "result_serialization_failed",
+                "result_transfer",
+            ))
+        })
+    }
+
+    /// Transfer one bounded half-open FFT-bin window as typed arrays.
+    #[wasm_bindgen(js_name = readFftBins)]
+    pub fn read_fft_bins_js(
+        &self,
+        fft_index: usize,
+        start: usize,
+        count: usize,
+    ) -> Result<JsValue, JsValue> {
+        let window = self
+            .document
+            .fft_bin_window(fft_index, start, count, self.maximum_window_values)
+            .map_err(|message| {
+                wasm_error_to_js(WasmError::new(
+                    message,
+                    "invalid_fft_result_window",
+                    "result_transfer",
+                ))
+            })?;
+        serialize_deck_fft_bin_window_to_js(&window).map_err(|_| {
+            wasm_error_to_js(WasmError::new(
+                "failed to serialize deck FFT bin window".to_owned(),
+                "result_serialization_failed",
+                "result_transfer",
+            ))
+        })
+    }
+
+    /// Transfer one bounded half-open magnitude-ranked harmonic window.
+    #[wasm_bindgen(js_name = readFftHarmonics)]
+    pub fn read_fft_harmonics_js(
+        &self,
+        fft_index: usize,
+        start: usize,
+        count: usize,
+    ) -> Result<JsValue, JsValue> {
+        let window = self
+            .document
+            .fft_harmonic_window(fft_index, start, count, self.maximum_window_values)
+            .map_err(|message| {
+                wasm_error_to_js(WasmError::new(
+                    message,
+                    "invalid_fft_result_window",
+                    "result_transfer",
+                ))
+            })?;
+        serialize_deck_fft_harmonic_window_to_js(&window).map_err(|_| {
+            wasm_error_to_js(WasmError::new(
+                "failed to serialize deck FFT harmonic window".to_owned(),
+                "result_serialization_failed",
+                "result_transfer",
+            ))
+        })
     }
 }
 
@@ -1771,6 +2008,30 @@ fn serialize_result_window_to_js(window: &AnalogResultWindow) -> Result<JsValue,
             }
         }
     }
+    Ok(serialized)
+}
+
+fn serialize_deck_fft_bin_window_to_js(window: &DeckFftBinWindow) -> Result<JsValue, JsValue> {
+    let serialized = serialize_to_js(window)?;
+    set_uint32_array(&serialized, "indices", &window.indices)?;
+    set_float64_array(&serialized, "frequencies", &window.frequencies)?;
+    set_float64_array(&serialized, "real", &window.real)?;
+    set_float64_array(&serialized, "imaginary", &window.imaginary)?;
+    set_float64_array(&serialized, "magnitudes", &window.magnitudes)?;
+    set_float64_array(&serialized, "phaseDegrees", &window.phase_degrees)?;
+    Ok(serialized)
+}
+
+fn serialize_deck_fft_harmonic_window_to_js(
+    window: &DeckFftHarmonicWindow,
+) -> Result<JsValue, JsValue> {
+    let serialized = serialize_to_js(window)?;
+    set_uint32_array(&serialized, "ranks", &window.ranks)?;
+    set_uint32_array(&serialized, "bins", &window.bins)?;
+    set_float64_array(&serialized, "frequencies", &window.frequencies)?;
+    set_float64_array(&serialized, "magnitudes", &window.magnitudes)?;
+    set_float64_array(&serialized, "magnitudesDb", &window.magnitudes_db)?;
+    set_float64_array(&serialized, "phaseDegrees", &window.phase_degrees)?;
     Ok(serialized)
 }
 
@@ -3016,6 +3277,559 @@ pub fn run_stb_document_detailed(
     )
 }
 
+/// Execute every supported physical analysis in an authored analog deck over
+/// its canonical STEP/TEMP coordinate product. No request selection or
+/// implicit scalar fallback is applied: an unsupported card rejects the whole
+/// request before a result handle is published.
+pub fn run_authored_deck_document_with_options_and_abort_detailed(
+    source: &str,
+    options: &WasmExecutionOptions,
+    external_abort: &dyn AbortSignal,
+) -> DetailedWasmResult<DeckResultDocument> {
+    use rspice_core::execution::{AnalysisKind, DeckPlan};
+    ensure_not_aborted(external_abort)?;
+    let resource_limits = options.resource_limits.to_core();
+    let netlist = parse_netlist_detailed(source, resource_limits, external_abort)?;
+    preflight_authored_deck(&netlist)?;
+    let plan = DeckPlan::from_netlist_with_abort(&netlist, &resource_limits, external_abort)
+        .map_err(deck_plan_wasm_error)?;
+    for axis in plan.axes() {
+        match axis.kind() {
+            rspice_core::execution::AxisKind::Data
+            | rspice_core::execution::AxisKind::Step
+            | rspice_core::execution::AxisKind::Temperature => {}
+            rspice_core::execution::AxisKind::Alter => {
+                return Err(unsupported_deck_axis(
+                    "ALTER axes must be expanded before browser deck execution".to_owned(),
+                ));
+            }
+            _ => {
+                return Err(unsupported_deck_axis(
+                    "unknown canonical run-axis kind is not supported".to_owned(),
+                ));
+            }
+        }
+    }
+    for planned in plan.analyses() {
+        if !matches!(
+            planned.id().kind(),
+            AnalysisKind::ImplicitOp
+                | AnalysisKind::Op
+                | AnalysisKind::Dc
+                | AnalysisKind::Ac
+                | AnalysisKind::Tran
+                | AnalysisKind::Noise
+        ) {
+            return Err(unsupported_deck_analysis(format!(
+                "canonical analysis {} is not mapped by the browser deck API",
+                planned.id()
+            )));
+        }
+    }
+
+    let planning_engine = engine_with_resource_limits(resource_limits)?;
+    let materializer = planning_engine
+        .prepare_deck_plan_materializer_with_abort(&netlist, &plan, external_abort)
+        .map_err(materialized_run_wasm_error)?;
+    let mut document = DeckResultDocument::new(&plan).map_err(deck_document_error)?;
+    document
+        .coordinates
+        .try_reserve_exact(materializer.len())
+        .map_err(|_| deck_allocation_error("deck coordinates"))?;
+    let result_capacity = materializer
+        .len()
+        .checked_mul(plan.analyses().len())
+        .ok_or_else(|| deck_allocation_error("coordinate-local analysis results"))?;
+    document
+        .results
+        .try_reserve_exact(result_capacity)
+        .map_err(|_| deck_allocation_error("coordinate-local analysis results"))?;
+    let mut retained_values = 0usize;
+
+    for run_index in 0..materializer.len() {
+        ensure_not_aborted(external_abort)?;
+        let materialized = materializer
+            .materialize_run_with_abort(run_index, external_abort)
+            .map_err(materialized_run_wasm_error)?;
+        let (coordinate, coordinate_netlist, _topology, analyses) = materialized.into_parts();
+        let coordinate_index = document
+            .push_coordinate(&coordinate)
+            .map_err(deck_document_error)?;
+        if analyses.len() != plan.analyses().len() {
+            return Err(deck_document_error(format!(
+                "coordinate {coordinate_index} materialized {} analyses; expected {}",
+                analyses.len(),
+                plan.analyses().len()
+            )));
+        }
+        let coordinate_config = rspice_core::resolve_simulation_config(
+            planning_engine.config(),
+            Some(&coordinate_netlist.options),
+            &rspice_core::SimulationConfigOverrides::default(),
+        );
+        let coordinate_engine = Engine::try_new(coordinate_config).map_err(|error| {
+            Box::new(WasmError::from_simulation_error(
+                rspice_core::engine::SimulationError::Configuration(error),
+            ))
+        })?;
+
+        for analysis in analyses {
+            ensure_not_aborted(external_abort)?;
+            let analysis_id = analysis.id();
+            let ordinal = analysis_id.ordinal() as usize + 1;
+            let (mut analog, fft_results) = match analysis.command() {
+                None if analysis_id.kind() == AnalysisKind::ImplicitOp => {
+                    execute_authored_operating_point(
+                        &coordinate_engine,
+                        &coordinate_netlist,
+                        ordinal,
+                        external_abort,
+                    )?
+                }
+                None => {
+                    return Err(deck_document_error(format!(
+                        "canonical materializer omitted the authored command for {analysis_id}"
+                    )));
+                }
+                Some(command) => execute_authored_analysis(
+                    &coordinate_engine,
+                    &coordinate_netlist,
+                    command,
+                    ordinal,
+                    resource_limits,
+                    external_abort,
+                )?,
+            };
+            deck_result_document::set_execution_identity(&mut analog, &coordinate, analysis_id);
+            let analog_values = analog.retained_numeric_value_count();
+            let fft_values = fft_results.iter().try_fold(0usize, |total, fft| {
+                total
+                    .checked_add(
+                        deck_result_document::fft_retained_numeric_value_count(fft)
+                            .map_err(deck_document_error)?,
+                    )
+                    .ok_or_else(|| {
+                        deck_document_error("deck retained-value count overflowed usize".to_owned())
+                    })
+            })?;
+            let next_retained_values = retained_values
+                .checked_add(analog_values)
+                .and_then(|value| value.checked_add(fft_values))
+                .ok_or_else(|| {
+                    deck_document_error("deck retained-value count overflowed usize".to_owned())
+                })?;
+            if next_retained_values > resource_limits.max_result_values {
+                return Err(resource_limit_error(
+                    ResourceKind::ResultValues,
+                    next_retained_values,
+                    resource_limits.max_result_values,
+                ));
+            }
+            retained_values = next_retained_values;
+            let output_namespace = analysis.output_namespace().components().join("/");
+            let checkpoint_namespace = analysis.checkpoint_namespace().components().join("/");
+            let parent_result_index = document.results.len();
+            document
+                .results
+                .push(deck_result_document::DeckAnalogResult {
+                    coordinate_index,
+                    analysis_instance_id: analysis_id.tag(),
+                    output_namespace,
+                    checkpoint_namespace,
+                    document: analog,
+                });
+            if !fft_results.is_empty() {
+                document
+                    .fft_results
+                    .try_reserve(fft_results.len())
+                    .map_err(|_| deck_allocation_error("attached FFT results"))?;
+            }
+            for mut fft in fft_results {
+                fft.parent_analysis_id = analysis_id.tag();
+                let output_namespace = format!(
+                    "{}/{}/{}",
+                    coordinate.stable_tag(),
+                    analysis_id,
+                    fft.analysis_id
+                );
+                document
+                    .fft_results
+                    .push(deck_result_document::DeckFftResult {
+                        coordinate_index,
+                        parent_result_index,
+                        output_namespace,
+                        snapshot: fft,
+                    });
+            }
+        }
+    }
+    ensure_not_aborted(external_abort)?;
+    document
+        .validate_with_abort(external_abort)
+        .map_err(|message| {
+            if external_abort.is_aborted() {
+                aborted_error()
+            } else {
+                deck_document_error(message)
+            }
+        })?;
+    Ok(document)
+}
+
+pub fn run_authored_deck_document_detailed(source: &str) -> DetailedWasmResult<DeckResultDocument> {
+    run_authored_deck_document_with_options_and_abort_detailed(
+        source,
+        &WasmExecutionOptions::default(),
+        &NoAbort,
+    )
+}
+
+fn preflight_authored_deck(netlist: &Netlist) -> DetailedWasmResult<()> {
+    use rspice_core::netlist::AnalysisCommand;
+
+    if netlist.source_text.as_deref().is_some_and(|source| {
+        source.lines().any(|line| {
+            line.split_whitespace()
+                .next()
+                .is_some_and(|token| token.eq_ignore_ascii_case(".alter"))
+        })
+    }) {
+        return Err(unsupported_deck_axis(
+            "ALTER variants must be expanded before browser deck execution".to_owned(),
+        ));
+    }
+    for command in &netlist.analyses {
+        match command {
+            AnalysisCommand::Op
+            | AnalysisCommand::Dc { sweep2: None, .. }
+            | AnalysisCommand::Ac { .. }
+            | AnalysisCommand::Tran { start: None, .. }
+            | AnalysisCommand::Tran {
+                start: Some(0.0), ..
+            }
+            | AnalysisCommand::Noise { .. }
+            | AnalysisCommand::Step(_)
+            | AnalysisCommand::Temp { .. } => {}
+            AnalysisCommand::Dc {
+                sweep2: Some(_), ..
+            } => {
+                return Err(unsupported_deck_analysis(
+                    "nested two-source DC sweeps are not represented by analog result schema v1"
+                        .to_owned(),
+                ));
+            }
+            AnalysisCommand::Tran { start: Some(_), .. } => {
+                return Err(unsupported_deck_analysis(
+                    "nonzero transient output start times are not represented by this browser deck executor"
+                        .to_owned(),
+                ));
+            }
+            AnalysisCommand::Four { .. } => {
+                return Err(unsupported_deck_analysis(
+                    "authored FOUR post-processing is not represented by the browser deck API"
+                        .to_owned(),
+                ));
+            }
+            other => {
+                return Err(unsupported_deck_analysis(format!(
+                    "authored analysis {other:?} is not mapped by the browser deck API"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn execute_authored_operating_point(
+    engine: &Engine,
+    netlist: &Netlist,
+    ordinal: usize,
+    abort: &dyn AbortSignal,
+) -> DetailedWasmResult<(AnalogResultDocument, Vec<TransientFftSnapshot>)> {
+    let (result, report) = engine
+        .run_dc_op_with_report_and_abort(netlist, abort)
+        .map_err(|error| Box::new(WasmError::from_simulation_error(error)))?;
+    ensure_not_aborted(abort)?;
+    let document = result_document::operating_point_document(result, report, ordinal)
+        .map_err(deck_document_error)?;
+    Ok((document, Vec::new()))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_authored_analysis(
+    engine: &Engine,
+    netlist: &Netlist,
+    command: &rspice_core::netlist::AnalysisCommand,
+    ordinal: usize,
+    resource_limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> DetailedWasmResult<(AnalogResultDocument, Vec<TransientFftSnapshot>)> {
+    use rspice_core::netlist::{AnalysisCommand, DcSweepSpec};
+
+    match command {
+        AnalysisCommand::Op => execute_authored_operating_point(engine, netlist, ordinal, abort),
+        AnalysisCommand::Dc {
+            source,
+            start,
+            stop,
+            step,
+            mode,
+            sweep2: None,
+        } => {
+            let spec = DcSweepSpec {
+                start: *start,
+                stop: *stop,
+                step: *step,
+                mode: mode.clone(),
+            };
+            let points = engine
+                .run_dc_sweep2_spec_with_report_and_abort(netlist, source, &spec, None, abort)
+                .map_err(|error| Box::new(WasmError::from_simulation_error(error)))?;
+            ensure_not_aborted(abort)?;
+            let document = result_document::dc_sweep_document(source, points, ordinal)
+                .map_err(deck_document_error)?;
+            Ok((document, Vec::new()))
+        }
+        AnalysisCommand::Ac {
+            variation,
+            points,
+            start_freq,
+            stop_freq,
+        } => {
+            let frequencies = authored_frequency_grid(
+                *variation,
+                *points,
+                *start_freq,
+                *stop_freq,
+                false,
+                resource_limits,
+                abort,
+            )?;
+            let results = engine
+                .run_ac_with_abort(netlist, &frequencies, abort)
+                .map_err(|error| Box::new(WasmError::from_simulation_error(error)))?;
+            let mut snapshots = Vec::new();
+            snapshots
+                .try_reserve_exact(results.len())
+                .map_err(|_| deck_allocation_error("coordinate-local AC snapshots"))?;
+            for (index, point) in results.into_iter().enumerate() {
+                if index.is_multiple_of(64) {
+                    ensure_not_aborted(abort)?;
+                }
+                snapshots.push(AcPointSnapshot {
+                    frequency: point.frequency,
+                    node_names: point.node_names,
+                    branch_names: point.branch_names,
+                    voltages: complex_series_from_slice(&point.voltages),
+                    currents: complex_series_from_slice(&point.currents),
+                });
+            }
+            ensure_not_aborted(abort)?;
+            let document =
+                result_document::ac_document(snapshots, ordinal).map_err(deck_document_error)?;
+            Ok((document, Vec::new()))
+        }
+        AnalysisCommand::Tran {
+            step,
+            stop,
+            start,
+            max_step,
+            uic,
+        } if start.is_none_or(|start| start == 0.0) => {
+            let ceiling = resolved_authored_tran_step(*step, *stop, *max_step)?;
+            validate_transient_request(*stop, ceiling, resource_limits)?;
+            let result = engine
+                .run_tran_with_startup_mode_and_abort(
+                    netlist,
+                    *stop,
+                    ceiling,
+                    rspice_core::engine::TransientStartupMode::from_uic(*uic),
+                    abort,
+                )
+                .map_err(|error| Box::new(WasmError::from_simulation_error(error)))?;
+            let mut snapshot = transient_snapshot_from_result(result).map_err(|message| {
+                Box::new(WasmError::new(
+                    message,
+                    "invalid_transient_result",
+                    "result_validation",
+                ))
+            })?;
+            ensure_not_aborted(abort)?;
+            let fft_results = std::mem::take(&mut snapshot.fft_results);
+            let document = result_document::transient_document(snapshot, ordinal)
+                .map_err(deck_document_error)?;
+            Ok((document, fft_results))
+        }
+        AnalysisCommand::Noise {
+            output_node,
+            reference_node,
+            input_source,
+            variation,
+            points,
+            start_freq,
+            stop_freq,
+        } => {
+            let frequencies = authored_frequency_grid(
+                *variation,
+                *points,
+                *start_freq,
+                *stop_freq,
+                true,
+                resource_limits,
+                abort,
+            )?;
+            let points = engine
+                .run_noise_named_with_input_source_and_abort(
+                    netlist,
+                    output_node,
+                    reference_node.as_deref(),
+                    input_source,
+                    &frequencies,
+                    engine.config().temperature,
+                    abort,
+                )
+                .map_err(|error| Box::new(WasmError::from_simulation_error(error)))?;
+            ensure_not_aborted(abort)?;
+            let document =
+                result_document::noise_document(points, ordinal).map_err(deck_document_error)?;
+            Ok((document, Vec::new()))
+        }
+        _ => Err(unsupported_deck_analysis(format!(
+            "materialized analysis {command:?} is not mapped by the browser deck API"
+        ))),
+    }
+}
+
+fn authored_frequency_grid(
+    variation: rspice_core::netlist::FreqVariation,
+    points: usize,
+    start: f64,
+    stop: f64,
+    strictly_positive: bool,
+    resource_limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> DetailedWasmResult<Vec<f64>> {
+    ensure_not_aborted(abort)?;
+    if strictly_positive && (!start.is_finite() || start <= 0.0) {
+        return Err(Box::new(WasmError::invalid_argument(format!(
+            "authored noise start frequency must be positive and finite, got {start}"
+        ))));
+    }
+    rspice_core::analysis::ac::try_ac_sweep_frequencies_bounded_with_abort(
+        variation,
+        points,
+        start,
+        stop,
+        resource_limits.max_analysis_points,
+        abort,
+    )
+    .map_err(|error| match error {
+        rspice_core::analysis::FrequencyGridError::Aborted => aborted_error(),
+        rspice_core::analysis::FrequencyGridError::LimitExceeded { requested, limit } => {
+            resource_limit_error(ResourceKind::AnalysisPoints, requested, limit)
+        }
+        rspice_core::analysis::FrequencyGridError::Allocation { requested } => {
+            Box::new(WasmError::new(
+                format!("could not allocate the {requested}-point authored frequency grid"),
+                "result_allocation_failed",
+                "analysis_setup",
+            ))
+        }
+        other => Box::new(WasmError::invalid_argument(format!(
+            "invalid authored frequency sweep {variation:?} {points} from {start} to {stop} Hz: {other}"
+        ))),
+    })
+}
+
+fn resolved_authored_tran_step(
+    step: f64,
+    stop: f64,
+    explicit: Option<f64>,
+) -> DetailedWasmResult<f64> {
+    if !step.is_finite() || step <= 0.0 {
+        return Err(Box::new(WasmError::invalid_argument(format!(
+            "authored transient print step must be positive and finite, got {step}"
+        ))));
+    }
+    if !stop.is_finite() || stop <= 0.0 {
+        return Err(Box::new(WasmError::invalid_argument(format!(
+            "authored transient stop time must be positive and finite, got {stop}"
+        ))));
+    }
+    match explicit {
+        Some(value) if value.is_finite() && value > 0.0 => Ok(value),
+        Some(value) => Err(Box::new(WasmError::invalid_argument(format!(
+            "authored transient maximum step must be positive and finite, got {value}"
+        )))),
+        None => Ok((stop / 50.0).min(step).max(1.0e-18)),
+    }
+}
+
+fn unsupported_deck_analysis(message: String) -> Box<WasmError> {
+    Box::new(WasmError::new(
+        message,
+        "unsupported_deck_analysis",
+        "unsupported_feature",
+    ))
+}
+
+fn unsupported_deck_axis(message: String) -> Box<WasmError> {
+    Box::new(WasmError::new(
+        message,
+        "unsupported_deck_axis",
+        "unsupported_feature",
+    ))
+}
+
+fn deck_document_error(message: String) -> Box<WasmError> {
+    Box::new(WasmError::new(
+        message,
+        "invalid_deck_result_document",
+        "result_validation",
+    ))
+}
+
+fn deck_allocation_error(object: &'static str) -> Box<WasmError> {
+    Box::new(WasmError::new(
+        format!("could not allocate {object}"),
+        "result_allocation_failed",
+        "result_projection",
+    ))
+}
+
+fn deck_plan_wasm_error(error: rspice_core::execution::DeckPlanError) -> Box<WasmError> {
+    match error {
+        rspice_core::execution::DeckPlanError::Aborted => aborted_error(),
+        rspice_core::execution::DeckPlanError::ResourceLimit(error) => {
+            Box::new(WasmError::resource_limit(error.to_string(), error))
+        }
+        other => Box::new(WasmError::new(
+            other.to_string(),
+            "invalid_deck_plan",
+            "input_validation",
+        )),
+    }
+}
+
+fn materialized_run_wasm_error(
+    error: rspice_core::execution::MaterializedRunError,
+) -> Box<WasmError> {
+    match error {
+        rspice_core::execution::MaterializedRunError::Aborted => aborted_error(),
+        rspice_core::execution::MaterializedRunError::DeckPlan(error) => {
+            deck_plan_wasm_error(error)
+        }
+        rspice_core::execution::MaterializedRunError::Simulation(error) => {
+            Box::new(WasmError::from_simulation_error(error))
+        }
+        other => Box::new(WasmError::new(
+            other.to_string(),
+            "deck_materialization_failed",
+            "execution",
+        )),
+    }
+}
+
 /// Exercise the configured browser parser-to-solver path without I/O.
 pub fn health_check_with_options_detailed(
     options: &WasmExecutionOptions,
@@ -3373,6 +4187,36 @@ pub fn run_stb_document_js(
     .map_err(|error| wasm_error_to_js(*error))?;
     WasmStbResultHandle::new_with_abort(document, request.options.resource_limits.to_core(), &abort)
         .map_err(|error| wasm_error_to_js(*error))
+}
+
+/// Execute a complete authored analog deck, including canonical STEP/TEMP
+/// axes, and retain its coordinate-local results behind bounded windows.
+#[wasm_bindgen(js_name = runAuthoredDeckDocument)]
+pub fn run_authored_deck_document_js(
+    source: &str,
+    options: JsValue,
+) -> Result<WasmDeckResultHandle, JsValue> {
+    let request = execution_request_from_js(options).map_err(|error| wasm_error_to_js(*error))?;
+    let cancellation_enabled = request.cancellation.is_some();
+    let _guard = ActiveSharedCancellationGuard::install(request.cancellation)
+        .map_err(|error| wasm_error_to_js(*error))?;
+    let shared_abort = JsSharedAbortSignal {
+        enabled: cancellation_enabled,
+    };
+    let abort = ConfiguredAbort::new(request.timeout_milliseconds, &shared_abort)
+        .map_err(|error| wasm_error_to_js(*error))?;
+    let document = run_authored_deck_document_with_options_and_abort_detailed(
+        source,
+        &request.options,
+        &abort,
+    )
+    .map_err(|error| wasm_error_to_js(*error))?;
+    WasmDeckResultHandle::new_with_abort(
+        document,
+        request.options.resource_limits.to_core(),
+        &abort,
+    )
+    .map_err(|error| wasm_error_to_js(*error))
 }
 
 #[cfg(test)]
@@ -3788,6 +4632,249 @@ mod tests {
             )
             .expect_err("typed STB must observe the frontend abort source"),
         );
+        assert_cancelled(
+            run_authored_deck_document_with_options_and_abort_detailed(
+                "authored cancellation\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n",
+                &options,
+                &abort,
+            )
+            .expect_err("authored deck execution must observe the frontend abort source"),
+        );
+    }
+
+    const AUTHORED_STEP_TRAN_DECK: &str = "authored STEP transient\n\
+        .param load=1k\n\
+        V1 out 0 PULSE(0 1 0 1n 1n 1u 2u)\n\
+        R1 out 0 {load}\n\
+        .step param load list 1k 2k\n\
+        .tran 200n 1u\n\
+        .end\n";
+
+    const AUTHORED_TEMP_AC_DECK: &str = "authored TEMP AC\n\
+        V1 out 0 AC 1\n\
+        R1 out 0 1k\n\
+        .temp 0 27\n\
+        .ac lin 2 1 10\n\
+        .end\n";
+
+    #[test]
+    fn authored_step_and_temp_wrap_only_the_authored_physical_analysis() {
+        let step = run_authored_deck_document_detailed(AUTHORED_STEP_TRAN_DECK)
+            .expect("STEP/TRAN authored deck executes");
+        assert_eq!(step.coordinates.len(), 2);
+        assert_eq!(step.planned_analyses.len(), 1);
+        assert_eq!(step.planned_analyses[0].analysis_instance_id, "tran-001");
+        assert_eq!(step.results.len(), 2);
+        assert!(
+            step.results
+                .iter()
+                .all(|result| result.analysis_instance_id == "tran-001")
+        );
+        assert!(
+            step.results
+                .iter()
+                .all(|result| result.document.analysis.kind == AnalogAnalysisKind::Transient)
+        );
+
+        let temperature = run_authored_deck_document_detailed(AUTHORED_TEMP_AC_DECK)
+            .expect("TEMP/AC authored deck executes");
+        assert_eq!(temperature.coordinates.len(), 2);
+        assert_eq!(temperature.results.len(), 2);
+        assert!(
+            temperature
+                .results
+                .iter()
+                .all(|result| result.analysis_instance_id == "ac-001")
+        );
+        assert!(
+            temperature
+                .results
+                .iter()
+                .all(|result| result.document.analysis.kind == AnalogAnalysisKind::AcSmallSignal)
+        );
+    }
+
+    #[test]
+    fn authored_data_backed_step_preserves_row_bindings_and_coordinates() {
+        let deck = "authored DATA STEP\n\
+            .param load=1k bias=1\n\
+            V1 out 0 {bias}\n\
+            R1 out 0 {load}\n\
+            .data corners load bias\n\
+            1k 1\n\
+            2k 2\n\
+            .enddata\n\
+            .step data=corners\n\
+            .op\n\
+            .end\n";
+        let document = run_authored_deck_document_detailed(deck)
+            .expect("DATA-backed STEP executes through the canonical materializer");
+        assert_eq!(document.axes.len(), 1);
+        assert_eq!(document.axes[0].kind, "data");
+        assert_eq!(document.axes[0].data_bindings, ["bias", "load"]);
+        assert_eq!(document.coordinates.len(), 2);
+        for (index, coordinate) in document.coordinates.iter().enumerate() {
+            assert_eq!(coordinate.index, index);
+            let DeckAxisValue::DataRow { bindings } = &coordinate.assignments[0].value else {
+                panic!("DATA coordinate must retain named row bindings")
+            };
+            assert_eq!(
+                bindings
+                    .iter()
+                    .map(|binding| binding.name.as_str())
+                    .collect::<Vec<_>>(),
+                ["bias", "load"]
+            );
+        }
+    }
+
+    #[test]
+    fn authored_repeated_analyses_preserve_order_and_unique_instance_ids() {
+        let deck = "authored repeated analyses\n\
+            V1 out 0 DC 1 AC 1\n\
+            R1 out 0 1k\n\
+            .op\n\
+            .ac lin 3 1 10\n\
+            .ac lin 4 10 100\n\
+            .end\n";
+        let document =
+            run_authored_deck_document_detailed(deck).expect("repeated authored analyses execute");
+        assert_eq!(document.coordinates.len(), 1);
+        assert_eq!(
+            document
+                .planned_analyses
+                .iter()
+                .map(|analysis| analysis.analysis_instance_id.as_str())
+                .collect::<Vec<_>>(),
+            ["op-001", "ac-001", "ac-002"]
+        );
+        assert_eq!(
+            document
+                .results
+                .iter()
+                .map(|result| result.analysis_instance_id.as_str())
+                .collect::<Vec<_>>(),
+            ["op-001", "ac-001", "ac-002"]
+        );
+        assert_eq!(document.results[1].document.point_count, 3);
+        assert_eq!(document.results[2].document.point_count, 4);
+        assert_ne!(
+            document.results[1].output_namespace,
+            document.results[2].output_namespace
+        );
+    }
+
+    #[test]
+    fn authored_multi_coordinate_multi_analysis_budget_is_cumulative() {
+        let deck = "authored cumulative result budget\n\
+            .param load=1k\n\
+            V1 out 0 DC 1 AC 1\n\
+            R1 out 0 {load}\n\
+            .step param load list 1k 2k\n\
+            .op\n\
+            .ac lin 3 1 10\n\
+            .end\n";
+        let accepted = run_authored_deck_document_detailed(deck)
+            .expect("cumulative-budget fixture executes under defaults");
+        assert_eq!(accepted.coordinates.len(), 2);
+        assert_eq!(accepted.results.len(), 4);
+        let contributions = accepted
+            .results
+            .iter()
+            .map(|result| result.document.retained_numeric_value_count())
+            .collect::<Vec<_>>();
+        let total = contributions.iter().sum::<usize>();
+        assert!(contributions.iter().all(|value| *value < total - 1));
+
+        let mut options = WasmExecutionOptions::default();
+        options.resource_limits.max_result_values = total - 1;
+        let error =
+            run_authored_deck_document_with_options_and_abort_detailed(deck, &options, &NoAbort)
+                .expect_err("aggregate result values above the shared ceiling must fail");
+        assert_eq!(error.code, "resource_limit");
+        assert_eq!(error.resource.as_deref(), Some("result_values"));
+        assert_eq!(error.requested, Some(total));
+        assert_eq!(error.limit, Some(total - 1));
+    }
+
+    #[test]
+    fn conditional_coordinate_local_schemas_are_stable_by_coordinate_identity() {
+        fn execute(values: &str) -> DeckResultDocument {
+            run_authored_deck_document_detailed(&format!(
+                "conditional topology\n\
+                 .param sel=0\n\
+                 V1 in 0 AC 1\n\
+                 .step param sel list {values}\n\
+                 .if (sel==0)\n\
+                 R1 in 0 1k\n\
+                 .else\n\
+                 R1 in mid 1k\n\
+                 R2 mid 0 1k\n\
+                 .endif\n\
+                 .ac lin 2 1 10\n\
+                 .end\n"
+            ))
+            .expect("conditional authored deck executes")
+        }
+
+        let forward = execute("0 1");
+        let reverse = execute("1 0");
+        let schema = |document: &DeckResultDocument| {
+            document
+                .results
+                .iter()
+                .map(|result| {
+                    (
+                        result.document.coordinate_id.clone().unwrap(),
+                        result
+                            .document
+                            .signals
+                            .iter()
+                            .map(|signal| signal.canonical_name.clone())
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .collect::<std::collections::BTreeMap<_, _>>()
+        };
+        assert_eq!(schema(&forward), schema(&reverse));
+        assert_ne!(
+            forward.results[0].document.signals.len(),
+            forward.results[1].document.signals.len(),
+            "conditional topology must retain coordinate-local schemas"
+        );
+    }
+
+    #[test]
+    fn authored_deck_rejects_unsupported_analysis_shapes() {
+        let unsupported = run_authored_deck_document_detailed(
+            "unsupported deck\nV1 out 0 1\nR1 out 0 1k\n.tf V(out) V1\n.end\n",
+        )
+        .expect_err("unmapped TF must fail closed");
+        assert_eq!(unsupported.code, "unsupported_deck_analysis");
+
+        let nested_dc = run_authored_deck_document_detailed(
+            "nested DC\nV1 out 0 0\nV2 x 0 0\nR1 out 0 1k\n.dc V1 0 1 1 V2 0 1 1\n.end\n",
+        )
+        .expect_err("nested DC schema must fail closed");
+        assert_eq!(nested_dc.code, "unsupported_deck_analysis");
+
+        let alter = run_authored_deck_document_detailed(
+            "ALTER deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.alter second\nR1 out 0 2k\n.end\n",
+        )
+        .expect_err("textual ALTER must fail before materialization");
+        assert_eq!(alter.code, "unsupported_deck_axis");
+    }
+
+    #[test]
+    fn authored_tran_default_and_explicit_max_step_contract_is_exact() {
+        assert_eq!(resolved_authored_tran_step(1.0, 100.0, None).unwrap(), 1.0);
+        assert_eq!(resolved_authored_tran_step(10.0, 100.0, None).unwrap(), 2.0);
+        assert_eq!(
+            resolved_authored_tran_step(10.0, 100.0, Some(0.25)).unwrap(),
+            0.25
+        );
+        assert!(resolved_authored_tran_step(1.0, 100.0, Some(0.0)).is_err());
+        assert!(resolved_authored_tran_step(1.0, 100.0, Some(f64::NAN)).is_err());
     }
 
     const TYPED_DOCUMENT_DECK: &str = "browser typed analog document\n\
@@ -4160,6 +5247,76 @@ mod tests {
         .fft v(out) np=128 format=unorm window=hann freq=1k fmin=1k fmax=10k\n\
         .fft {2*v(out)} np=64 format=norm window=rect\n\
         .end\n";
+
+    #[test]
+    fn authored_deck_attaches_complete_fft_results_to_the_exact_transient_parent() {
+        let document = run_authored_deck_document_detailed(FFT_PARITY_DECK)
+            .expect("authored FFT deck executes");
+        assert_eq!(document.results.len(), 1);
+        assert_eq!(document.results[0].analysis_instance_id, "tran-001");
+        assert_eq!(document.fft_results.len(), 2);
+        for (index, fft) in document.fft_results.iter().enumerate() {
+            assert_eq!(fft.coordinate_index, 0);
+            assert_eq!(fft.parent_result_index, 0);
+            assert_eq!(fft.snapshot.parent_analysis_id, "tran-001");
+            assert_eq!(fft.snapshot.analysis_id, format!("fft-{:03}", index + 1));
+            assert!(
+                fft.output_namespace
+                    .ends_with(&format!("/tran-001/fft-{:03}", index + 1))
+            );
+        }
+
+        let analog_values = document.results[0].document.retained_numeric_value_count();
+        let fft_values = document
+            .fft_results
+            .iter()
+            .map(|fft| {
+                let bin_values = fft.snapshot.bins.indices.len() * 6;
+                let (metric_values, harmonic_values) =
+                    fft.snapshot.metrics.as_ref().map_or((0, 0), |metrics| {
+                        (
+                            7 + usize::from(metrics.sfdr_spur_bin.is_some())
+                                + usize::from(metrics.sfdr_spur_frequency.is_some()),
+                            metrics.largest_harmonics.ranks.len() * 6,
+                        )
+                    });
+                bin_values + metric_values + harmonic_values
+            })
+            .sum::<usize>();
+        assert_eq!(
+            document.retained_numeric_value_count().unwrap(),
+            analog_values + fft_values
+        );
+    }
+
+    #[test]
+    fn authored_deck_attaches_each_global_fft_to_each_repeated_transient_parent() {
+        let document = run_authored_deck_document_detailed(
+            "repeated transient FFT parents\n\
+             V1 out 0 SIN(0 1 1k)\n\
+             R1 out 0 1k\n\
+             .tran 10u 1m\n\
+             .tran 20u 1m\n\
+             .fft V(out) NP=16 FORMAT=UNORM WINDOW=HANN\n\
+             .end\n",
+        )
+        .expect("each authored transient receives the global FFT request");
+
+        assert_eq!(document.results.len(), 2);
+        assert_eq!(document.fft_results.len(), 2);
+        for (parent_index, expected_parent) in ["tran-001", "tran-002"].iter().enumerate() {
+            let result = &document.results[parent_index];
+            let fft = &document.fft_results[parent_index];
+            assert_eq!(result.analysis_instance_id, *expected_parent);
+            assert_eq!(fft.parent_result_index, parent_index);
+            assert_eq!(fft.snapshot.parent_analysis_id, *expected_parent);
+            assert_eq!(fft.snapshot.analysis_id, "fft-001");
+            assert!(
+                fft.output_namespace
+                    .ends_with(&format!("/{expected_parent}/fft-001"))
+            );
+        }
+    }
 
     const ANALOG_PARITY_DECK: &str = "browser complete analog transient parity\n\
         VDD d 0 5\n\
@@ -4967,6 +6124,182 @@ mod tests {
             )
             .expect_err("pre-set shared flag cancels typed STB"),
             "aborted",
+        );
+        assert_js_error_code(
+            run_authored_deck_document_js(
+                "authored JS cancellation\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n",
+                options(),
+            )
+            .expect_err("pre-set shared flag cancels authored deck execution"),
+            "aborted",
+        );
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    fn authored_deck_public_js_handle_preserves_axes_ids_and_typed_windows() {
+        let handle = run_authored_deck_document_js(AUTHORED_TEMP_AC_DECK, JsValue::NULL)
+            .expect("public authored deck export executes under Node");
+        assert_eq!(handle.coordinate_count(), 2);
+        assert_eq!(handle.result_count(), 2);
+        assert_eq!(handle.fft_result_count(), 0);
+
+        let metadata = handle.metadata_js().expect("deck metadata serializes");
+        assert_eq!(
+            js_property(&metadata, "schema")
+                .expect("schema exists")
+                .as_string()
+                .as_deref(),
+            Some(DECK_RESULT_SCHEMA)
+        );
+        let coordinates = js_array_property(&metadata, "coordinates")
+            .expect("canonical coordinate descriptors exist");
+        assert_eq!(coordinates.length(), 2);
+        let results =
+            js_array_property(&metadata, "results").expect("canonical result summaries exist");
+        assert_eq!(results.length(), 2);
+        assert_eq!(
+            js_property(&results.get(0), "analysisInstanceId")
+                .expect("stable analysis instance id exists")
+                .as_string()
+                .as_deref(),
+            Some("ac-001")
+        );
+        assert_ne!(
+            js_property(&coordinates.get(0), "id")
+                .expect("first coordinate id exists")
+                .as_string(),
+            js_property(&coordinates.get(1), "id")
+                .expect("second coordinate id exists")
+                .as_string()
+        );
+
+        let result_metadata = handle
+            .result_metadata_js(0)
+            .expect("coordinate-local schema serializes");
+        assert_eq!(
+            js_property(&result_metadata, "coordinateId")
+                .expect("result coordinate id exists")
+                .as_string(),
+            js_property(&coordinates.get(0), "id")
+                .expect("coordinate id exists")
+                .as_string()
+        );
+        let window = handle
+            .read_window_js(0, 0, 1)
+            .expect("bounded coordinate-local window transfers");
+        let axes = js_array_property(&window, "axes").expect("result axes exist");
+        assert!(
+            js_property(&axes.get(0), "values")
+                .expect("frequency values exist")
+                .is_instance_of::<js_sys::Float64Array>()
+        );
+        let signals = js_array_property(&window, "signals").expect("result signals exist");
+        let values = js_property(&signals.get(0), "values").expect("signal values exist");
+        assert!(
+            js_property(&values, "real")
+                .expect("complex real values exist")
+                .is_instance_of::<js_sys::Float64Array>()
+        );
+        assert!(
+            js_property(&values, "validity")
+                .expect("signal validity exists")
+                .is_instance_of::<js_sys::Uint8Array>()
+        );
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    fn authored_deck_node_regressions_cover_step_repetition_conditionals_and_fail_closed() {
+        let step = run_authored_deck_document_js(AUTHORED_STEP_TRAN_DECK, JsValue::NULL)
+            .expect("public STEP/TRAN deck executes");
+        assert_eq!(step.coordinate_count(), 2);
+        assert_eq!(step.result_count(), 2);
+        assert!(
+            step.document()
+                .results
+                .iter()
+                .all(|result| result.analysis_instance_id == "tran-001")
+        );
+
+        let repeated = run_authored_deck_document_js(
+            "Node repeated analyses\n\
+             V1 out 0 DC 1 AC 1\n\
+             R1 out 0 1k\n\
+             .op\n\
+             .ac lin 3 1 10\n\
+             .ac lin 4 10 100\n\
+             .end\n",
+            JsValue::NULL,
+        )
+        .expect("public repeated-analysis deck executes");
+        assert_eq!(
+            repeated
+                .document()
+                .results
+                .iter()
+                .map(|result| result.analysis_instance_id.as_str())
+                .collect::<Vec<_>>(),
+            ["op-001", "ac-001", "ac-002"]
+        );
+
+        let conditional = |values: &str| {
+            run_authored_deck_document_js(
+                &format!(
+                    "Node conditional topology\n\
+                     .param sel=0\n\
+                     V1 in 0 AC 1\n\
+                     .step param sel list {values}\n\
+                     .if (sel==0)\n\
+                     R1 in 0 1k\n\
+                     .else\n\
+                     R1 in mid 1k\n\
+                     R2 mid 0 1k\n\
+                     .endif\n\
+                     .ac lin 3 1 10\n\
+                     .end\n"
+                ),
+                JsValue::NULL,
+            )
+            .expect("public conditional deck executes")
+        };
+        let forward = conditional("0 1");
+        let reverse = conditional("1 0");
+        let schemas = |handle: &WasmDeckResultHandle| {
+            handle
+                .document()
+                .results
+                .iter()
+                .map(|result| {
+                    (
+                        result.document.coordinate_id.clone().unwrap(),
+                        result
+                            .document
+                            .signals
+                            .iter()
+                            .map(|signal| signal.canonical_name.clone())
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .collect::<std::collections::BTreeMap<_, _>>()
+        };
+        assert_eq!(schemas(&forward), schemas(&reverse));
+
+        assert_js_error_code(
+            run_authored_deck_document_js(
+                "Node unsupported\nV1 out 0 1\nR1 out 0 1k\n.tf V(out) V1\n.end\n",
+                JsValue::NULL,
+            )
+            .expect_err("unmapped authored analysis must fail through the JS export"),
+            "unsupported_deck_analysis",
+        );
+        assert_js_error_code(
+            run_authored_deck_document_js(
+                "Node malformed\nV1 out 0 1\nR1 out 0 1k!\n.end\n",
+                JsValue::NULL,
+            )
+            .expect_err("malformed authored deck must fail through the JS export"),
+            "parse_error",
         );
     }
 

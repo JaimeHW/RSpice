@@ -34,6 +34,7 @@ by throwing an `RSpiceError` with stable structured fields.
 | `runTransientAnalysisDocument(source, tstop, maxStep, ordinal[, options])` | explicit transient interval | retained version-1 typed analog result handle |
 | `runNoiseAnalysisDocument(source, outputNode, referenceNode, inputSource, frequencies, ordinal[, options])` | named output/input and explicit positive frequency grid | retained version-1 typed analog result handle |
 | `runStbAnalysisDocument(source, probe, sweep, points, startFrequency, stopFrequency, computeNyquist, ordinal[, options])` | scalar Tian STB request (`linear`/`decade`/`octave`) | retained version-1 lossless STB result handle |
+| `runAuthoredDeckDocument(source[, options])` | complete authored analog deck containing mapped OP, DC, AC, TRAN, or noise analyses and optional DATA/STEP/TEMP axes | retained version-1 deck result handle with canonical coordinate/analysis namespaces and bounded analog/attached-FFT windows |
 
 The five `*Document` calls share the schema identity `rspice-analog-result`
 and schema version `1`. Each document retains a stable kind/ordinal ID such as
@@ -54,6 +55,22 @@ fail with `code: "invalid_result_window"`. The default transfer ceiling is
 262,144 numeric/validity values and is further reduced by `maxResultValues`.
 This retained-handle contract avoids constructing a second full ordinary JS
 array copy of a large result.
+
+Authored-deck execution uses the dedicated `rspice-deck-result` schema,
+version `1`. `WasmDeckResultHandle.metadata()` returns ordered run-axis
+descriptors, canonical `RunCoordinate` IDs and assignments, planned analysis
+instance IDs such as `ac-001`/`ac-002`, collision-free output/checkpoint
+namespaces, and compact result summaries. Each coordinate keeps its exact
+local signal schema; call `resultMetadata(resultIndex)` and
+`readWindow(resultIndex, start, count)` to inspect it without unioning or
+zero-filling conditional topology. Attached transient FFTs use
+`fftMetadata(index)`, `readFftBins(index, start, count)`, and
+`readFftHarmonics(index, start, count)`. All numeric windows use typed arrays
+and share the same transfer ceiling. Global authored FFT requests are attached
+independently to every authored TRAN parent, preserving each `tran-NNN` parent
+identity and its own `fft-NNN` namespace. A deck containing an unmapped
+analysis, nonzero TRAN output start, nested two-source DC sweep, textual ALTER,
+or FOUR fails as a whole; no partial or coerced result is published.
 
 STB uses the dedicated schema identity `rspice-stb-result`, version `1`,
 because core intentionally retains separate primary, Bode, and optional
@@ -127,7 +144,7 @@ the browser build is single-threaded.
 
 ### Cancellation and deadlines
 
-Every OP, DC, AC, TRAN, noise, STB, and compressed-TRAN browser export calls the corresponding
+Every OP, DC, AC, TRAN, noise, STB, authored-deck, and compressed-TRAN browser export calls the corresponding
 abort-aware `rspice-core` entrypoint. Parsing uses the core abort-aware parser
 as well. There are two supported controls:
 
@@ -188,7 +205,8 @@ diagnostic errors retain source locations and unresolved output symbols.
 
 The same analysis operations are also exported as plain Rust functions
 (`summarize_netlist`, `run_dc_operating_point`, `run_ac_analysis`,
-`run_transient_analysis`, `run_transient_analysis_compressed`) returning
+`run_transient_analysis`, `run_transient_analysis_compressed`,
+`run_authored_deck_document_detailed`) returning
 `Result<T, String>`, since the crate
 builds as both `cdylib` and `rlib`. Their `*_detailed` variants return
 `WasmError`, and `*_with_options_detailed` variants accept the typed
@@ -208,7 +226,8 @@ small focused submodules:
   `TransientSnapshot`/device-op/store/compression family, and the complete
   `TransientFftSnapshot`/bins/metrics/harmonics DTO family
 - Versioned typed result documents for scalar OP, DC, AC, TRAN, noise, and
-  STB, plus retained handles that publish bounded typed-array windows
+  STB, plus a canonical authored-deck aggregate and retained handles that
+  publish bounded typed-array windows
 - Browser-safe resource defaults, typed per-call options, and input validation
 - Structured error conversion with stable machine-readable resource details
 - The `#[wasm_bindgen]` export shims
@@ -229,8 +248,8 @@ inside a dedicated module Web Worker so long solves do not block the page's
 UI event loop. Inside that worker the solve is still single-threaded; Verilog-A
 is not enabled here.
 
-Not exposed through these bindings: authored `DeckPlan` STEP/TEMP axes,
-`.MEAS` evaluation, SP/port-noise, distortion, TF, sensitivity,
+Not exposed through these bindings: `.MEAS` evaluation, SP/port-noise,
+distortion, TF, sensitivity,
 pole-zero, Fourier, Monte Carlo, PSS/PAC/PNoise, HB, and envelope. These remain
 explicitly unsupported in the generated non-UI capability matrix rather than
 being coerced into an OP/AC/TRAN shape. The full application surface is the
@@ -275,7 +294,11 @@ bounded windows with explicit validity. STB tests additionally ratchet exact
 retained resource counts, optional Nyquist data, non-finite JSON semantics,
 projection cancellation, and typed-array window columns. Node wasm-bindgen tests exercise
 pre-set shared control words, zero deadlines, unsupported mechanisms, and
-ordinary-buffer rejection through the actual JavaScript exports. CI also builds the real
+ordinary-buffer rejection through the actual JavaScript exports. Authored-deck
+tests cover STEP/TEMP/DATA coordinates, repeated analysis identities,
+conditional coordinate-local schemas, attached FFT parentage, unsupported
+families and ambiguous shapes, cumulative result accounting, cancellation,
+and the public retained-handle typed-array path. CI also builds the real
 `wasm32-unknown-unknown` artifact. The static browser contract is guarded by
 `tools/ci/test_wasm_playground.py`, which verifies that the canonical
 playground routes engine calls through `engine-worker.js`, that AC controls are

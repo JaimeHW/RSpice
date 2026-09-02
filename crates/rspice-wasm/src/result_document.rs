@@ -66,13 +66,16 @@ impl AnalogResultDocument {
                 self.schema_version, ANALOG_RESULT_VERSION
             ));
         }
+        let ordinary_id = format!(
+            "{}-{:03}",
+            self.analysis.kind.id_prefix(),
+            self.analysis.ordinal
+        );
+        let implicit_op_id = format!("implicit-op-{:03}", self.analysis.ordinal);
         if self.analysis.ordinal == 0
-            || self.analysis.id
-                != format!(
-                    "{}-{:03}",
-                    self.analysis.kind.id_prefix(),
-                    self.analysis.ordinal
-                )
+            || (self.analysis.id != ordinary_id
+                && !(self.analysis.kind == AnalogAnalysisKind::OperatingPoint
+                    && self.analysis.id == implicit_op_id))
         {
             return Err("analysis identity does not match its kind and ordinal".to_owned());
         }
@@ -194,6 +197,23 @@ impl AnalogResultDocument {
         count: usize,
         maximum_values: usize,
     ) -> Result<AnalogResultWindow, String> {
+        // `AnalogResultDocument` is a public Rust DTO. Callers can deserialize
+        // or construct one without going through `WasmAnalogResultHandle`, so
+        // a window request must not assume that `validate()` already proved
+        // every retained column has `point_count` entries. Check the O(column)
+        // shape invariants before any slice operation; otherwise a malformed
+        // document can turn an ordinary API error into a bounds panic.
+        if self
+            .axes
+            .iter()
+            .any(|axis| axis.values.len() != self.point_count)
+            || self
+                .signals
+                .iter()
+                .any(|signal| signal.values.len() != self.point_count)
+        {
+            return Err("result document columns do not match point_count".to_owned());
+        }
         let end = start
             .checked_add(count)
             .ok_or_else(|| "result window range overflows usize".to_owned())?;
@@ -1357,6 +1377,35 @@ mod tests {
         let encoded = serde_json::to_string(&document).unwrap();
         let decoded: AnalogResultDocument = serde_json::from_str(&encoded).unwrap();
         assert!(decoded.validate().unwrap_err().contains("unsupported"));
+    }
+
+    #[test]
+    fn malformed_document_window_fails_before_slicing_short_columns() {
+        let mut document = AnalogResultDocument::new(AnalogAnalysisKind::AcSmallSignal, "ac", 1);
+        document.point_count = 2;
+        document.axes.push(AxisSeries {
+            name: "frequency".to_owned(),
+            unit: Some(SignalUnit::Hertz),
+            values: vec![1.0],
+        });
+        document.signals.push(complex_signal(
+            "v(out)".to_owned(),
+            "V(out)".to_owned(),
+            AnalogSignalKind::Voltage,
+            SignalOwner::Node {
+                name: "out".to_owned(),
+            },
+            Some(SignalUnit::Volt),
+            vec![Some(ComplexSample {
+                real: 1.0,
+                imaginary: 0.0,
+            })],
+        ));
+
+        assert_eq!(
+            document.window(0, 2, 64),
+            Err("result document columns do not match point_count".to_owned())
+        );
     }
 
     #[test]
