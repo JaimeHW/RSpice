@@ -33,6 +33,28 @@ use crate::analysis::stb::{StbAnalysisError, StbAnalyzer, StbConfig, StbResult};
 use crate::{Complex64, Netlist, Value};
 use std::f64::consts::PI;
 
+// A completed STB result deliberately retains both its primary sweep and the
+// derived Bode/Nyquist records.  Resource accounting must charge the copies
+// that remain reachable from `StbAnalysisResult`, not just the three primary
+// frequency/complex-loop-gain scalars.
+const STB_PRIMARY_VALUES_PER_POINT: usize = 3;
+const STB_BODE_VALUES_PER_POINT: usize = 6;
+const STB_NYQUIST_VALUES_PER_POINT: usize = 3;
+const STB_MARGIN_VALUES: usize = 6;
+
+fn stb_retained_result_value_count(point_count: usize, compute_nyquist: bool) -> usize {
+    let values_per_point = STB_PRIMARY_VALUES_PER_POINT
+        .saturating_add(STB_BODE_VALUES_PER_POINT)
+        .saturating_add(if compute_nyquist {
+            STB_NYQUIST_VALUES_PER_POINT
+        } else {
+            0
+        });
+    point_count
+        .saturating_mul(values_per_point)
+        .saturating_add(STB_MARGIN_VALUES)
+}
+
 /// STB analysis result: the Tian loop gain sweep plus extracted margins.
 #[derive(Debug, Clone)]
 pub struct StbAnalysisResult {
@@ -80,7 +102,10 @@ impl Engine {
             .frequency_point_count()
             .map_err(|err| SimulationError::Circuit(format!("Invalid STB config: {err}")))?;
         self.ensure_analysis_points(frequency_count)?;
-        self.ensure_result_shape(frequency_count, 3)?;
+        self.ensure_result_values(stb_retained_result_value_count(
+            frequency_count,
+            config.compute_nyquist,
+        ))?;
 
         let probe_name = config
             .probe_node
@@ -246,6 +271,94 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::analysis::stb::StbSweepType;
+
+    const RESOURCE_LIMIT_DECK: &str = "STB retained-result resource limit\n\
+         EAMP out 0 in 0 10\n\
+         VPROBE out fb 0\n\
+         RF fb in 10k\n\
+         RIN in 0 1k\n\
+         .END\n";
+
+    fn resource_limit_config(compute_nyquist: bool) -> StbConfig {
+        StbConfig::new()
+            .with_sweep(10.0, 1.0e3, 4)
+            .with_sweep_type(StbSweepType::Linear)
+            .with_probe("VPROBE")
+            .with_nyquist(compute_nyquist)
+    }
+
+    fn engine_with_result_limit(limit: usize) -> Engine {
+        let mut config = crate::engine::SimulationConfig::default();
+        config.resource_limits.max_result_values = limit;
+        Engine::new(config)
+    }
+
+    fn actual_retained_result_values(result: &StbAnalysisResult) -> usize {
+        result
+            .frequencies
+            .len()
+            .saturating_add(result.loop_gains.len().saturating_mul(2))
+            .saturating_add(result.result.bode_points.len().saturating_mul(6))
+            .saturating_add(result.result.nyquist_points.len().saturating_mul(3))
+            .saturating_add(6)
+    }
+
+    #[test]
+    fn stb_result_limit_accepts_the_exact_retained_value_count() {
+        let netlist = Netlist::parse(RESOURCE_LIMIT_DECK).expect("STB resource deck parses");
+
+        for compute_nyquist in [false, true] {
+            let config = resource_limit_config(compute_nyquist);
+            let point_count = config
+                .frequency_point_count()
+                .expect("valid STB point count");
+            let exact_limit = stb_retained_result_value_count(point_count, compute_nyquist);
+            let result = engine_with_result_limit(exact_limit)
+                .run_stb(&netlist, config)
+                .expect("the exact retained-value limit must admit STB");
+
+            assert_eq!(result.frequencies.len(), point_count);
+            assert_eq!(result.loop_gains.len(), point_count);
+            assert_eq!(result.result.bode_points.len(), point_count);
+            assert_eq!(
+                result.result.nyquist_points.len(),
+                if compute_nyquist { point_count } else { 0 }
+            );
+            assert_eq!(actual_retained_result_values(&result), exact_limit);
+        }
+    }
+
+    #[test]
+    fn stb_result_limit_rejects_one_value_below_before_circuit_work() {
+        let netlist = Netlist::parse(RESOURCE_LIMIT_DECK).expect("STB resource deck parses");
+
+        for compute_nyquist in [false, true] {
+            let config = resource_limit_config(compute_nyquist);
+            let point_count = config
+                .frequency_point_count()
+                .expect("valid STB point count");
+            let requested = stb_retained_result_value_count(point_count, compute_nyquist);
+            let limit = requested - 1;
+            let abort = crate::abort_signal::CountingAbort::new(usize::MAX);
+
+            let error = engine_with_result_limit(limit)
+                .run_stb_with_abort(&netlist, config, &abort)
+                .expect_err("one value below the exact requirement must fail");
+
+            assert!(matches!(
+                error,
+                SimulationError::ResourceLimit(resource)
+                    if resource.resource == crate::resource::ResourceKind::ResultValues
+                        && resource.requested == requested
+                        && resource.limit == limit
+            ));
+            assert_eq!(
+                abort.count(),
+                1,
+                "the result budget must fail after the entry abort check and before circuit construction"
+            );
+        }
+    }
 
     #[test]
     fn stb_refreshes_frequency_dependent_behavioral_conductance() {
