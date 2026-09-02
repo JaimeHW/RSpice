@@ -516,9 +516,39 @@ pub struct TransientStoreSnapshot {
 /// Provenance for a compressed transient result.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TransientCompressionSnapshot {
+    /// Version of the compression evidence contract.
+    pub schema_version: u32,
+    /// Stable compression-algorithm identifier.
+    pub algorithm: String,
+    /// Sample domain over which reconstruction error was measured.
+    pub sample_domain: String,
+    /// Whether decimation was enabled.
+    pub enabled: bool,
+    /// Applied absolute tolerance in each signal's native unit.
+    pub absolute_tolerance: f64,
+    /// Applied relative tolerance.
+    pub relative_tolerance: f64,
+    /// Applied maximum interval between retained samples.
+    pub maximum_retained_interval: f64,
     pub input_points: usize,
     pub retained_points: usize,
     pub compression_ratio: f64,
+    /// Worst final-grid reconstruction error, selected by tolerance use.
+    pub worst_observed: Option<TransientCompressionErrorSnapshot>,
+}
+
+/// Browser-facing final-grid compression-error evidence.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TransientCompressionErrorSnapshot {
+    pub signal_kind: String,
+    pub canonical_name: String,
+    pub input_sample_index: usize,
+    pub time: f64,
+    pub actual_value: f64,
+    pub absolute_error: f64,
+    pub relative_error: Option<f64>,
+    pub allowed_tolerance: f64,
+    pub tolerance_utilization: f64,
 }
 
 /// Columnar FFT bins. The JavaScript export materializes every field as a
@@ -1823,9 +1853,32 @@ pub fn transient_snapshot_from_compressed_result(
         store_traces: store_snapshots(result.store_traces),
         fft_results,
         compression: Some(TransientCompressionSnapshot {
+            schema_version: result.compression_report.schema_version,
+            algorithm: result.compression_report.algorithm.as_str().to_string(),
+            sample_domain: result.compression_report.sample_domain.as_str().to_string(),
+            enabled: result.compression_report.applied_policy.enabled,
+            absolute_tolerance: result.compression_report.applied_policy.absolute_tolerance,
+            relative_tolerance: result.compression_report.applied_policy.relative_tolerance,
+            maximum_retained_interval: result
+                .compression_report
+                .applied_policy
+                .maximum_retained_interval,
             input_points: result.input_points,
             retained_points: point_count,
             compression_ratio: result.compression_ratio,
+            worst_observed: result.compression_report.worst_observed.map(|observation| {
+                TransientCompressionErrorSnapshot {
+                    signal_kind: observation.signal.kind.as_str().to_string(),
+                    canonical_name: observation.signal.canonical_name,
+                    input_sample_index: observation.input_sample_index,
+                    time: observation.time,
+                    actual_value: observation.actual_value,
+                    absolute_error: observation.absolute_error,
+                    relative_error: observation.relative_error,
+                    allowed_tolerance: observation.allowed_tolerance,
+                    tolerance_utilization: observation.tolerance_utilization,
+                }
+            }),
         }),
     })
 }
@@ -2739,6 +2792,7 @@ mod tests {
 
     fn synthetic_compressed_analog_result() -> TransientResultCompressed {
         let result = synthetic_analog_result();
+        let compression_config = rspice_core::engine::CompressionConfig::default();
         TransientResultCompressed {
             time: result.time,
             step_sizes: result.step_sizes,
@@ -2752,6 +2806,31 @@ mod tests {
             fft_results: result.fft_results,
             compression_ratio: 2.0,
             input_points: 6,
+            compression_report: rspice_core::engine::TransientCompressionReport {
+                schema_version: rspice_core::engine::TRANSIENT_COMPRESSION_REPORT_VERSION,
+                algorithm:
+                    rspice_core::engine::TransientCompressionAlgorithm::MultiChannelRdpLinearV1,
+                sample_domain:
+                    rspice_core::engine::TransientCompressionSampleDomain::AcceptedInputSamples,
+                applied_policy: (&compression_config).into(),
+                input_points: 6,
+                retained_points: 3,
+                worst_observed: Some(rspice_core::engine::TransientCompressionErrorObservation {
+                    signal: rspice_core::engine::TransientCompressionSignal::new(
+                        rspice_core::engine::TransientCompressionSignalKind::Voltage,
+                        "v(first)",
+                    )
+                    .expect("synthetic compression signal is valid"),
+                    input_sample_index: 1,
+                    time: 0.5,
+                    actual_value: 1.5,
+                    absolute_error: 0.0,
+                    relative_error: Some(0.0),
+                    allowed_tolerance: compression_config.abs_tol
+                        + compression_config.rel_tol * 1.5,
+                    tolerance_utilization: 0.0,
+                }),
+            },
         }
     }
 
@@ -2953,9 +3032,27 @@ mod tests {
         assert_eq!(
             compressed.compression,
             Some(TransientCompressionSnapshot {
+                schema_version: rspice_core::engine::TRANSIENT_COMPRESSION_REPORT_VERSION,
+                algorithm: "multi-channel-rdp-linear-v1".to_string(),
+                sample_domain: "accepted-input-samples".to_string(),
+                enabled: true,
+                absolute_tolerance: 1.0e-6,
+                relative_tolerance: 1.0e-3,
+                maximum_retained_interval: 0.0,
                 input_points: 6,
                 retained_points: 3,
                 compression_ratio: 2.0,
+                worst_observed: Some(TransientCompressionErrorSnapshot {
+                    signal_kind: "voltage".to_string(),
+                    canonical_name: "v(first)".to_string(),
+                    input_sample_index: 1,
+                    time: 0.5,
+                    actual_value: 1.5,
+                    absolute_error: 0.0,
+                    relative_error: Some(0.0),
+                    allowed_tolerance: 1.501e-3,
+                    tolerance_utilization: 0.0,
+                }),
             })
         );
     }
@@ -3079,9 +3176,46 @@ mod tests {
         assert_eq!(
             compressed.compression,
             Some(TransientCompressionSnapshot {
+                schema_version: compressed_core.compression_report.schema_version,
+                algorithm: compressed_core
+                    .compression_report
+                    .algorithm
+                    .as_str()
+                    .to_string(),
+                sample_domain: compressed_core
+                    .compression_report
+                    .sample_domain
+                    .as_str()
+                    .to_string(),
+                enabled: compressed_core.compression_report.applied_policy.enabled,
+                absolute_tolerance: compressed_core
+                    .compression_report
+                    .applied_policy
+                    .absolute_tolerance,
+                relative_tolerance: compressed_core
+                    .compression_report
+                    .applied_policy
+                    .relative_tolerance,
+                maximum_retained_interval: compressed_core
+                    .compression_report
+                    .applied_policy
+                    .maximum_retained_interval,
                 input_points: compressed_core.input_points,
                 retained_points: compressed_core.time.len(),
                 compression_ratio: compressed_core.compression_ratio,
+                worst_observed: compressed_core.compression_report.worst_observed.map(
+                    |observation| TransientCompressionErrorSnapshot {
+                        signal_kind: observation.signal.kind.as_str().to_string(),
+                        canonical_name: observation.signal.canonical_name,
+                        input_sample_index: observation.input_sample_index,
+                        time: observation.time,
+                        actual_value: observation.actual_value,
+                        absolute_error: observation.absolute_error,
+                        relative_error: observation.relative_error,
+                        allowed_tolerance: observation.allowed_tolerance,
+                        tolerance_utilization: observation.tolerance_utilization,
+                    }
+                ),
             })
         );
     }
@@ -3188,8 +3322,30 @@ mod tests {
         ];
         const DEVICE_OP_FIELDS: &[&str] = &["device_name", "parameter", "values"];
         const STORE_FIELDS: &[&str] = &["name", "values"];
-        const COMPRESSION_FIELDS: &[&str] =
-            &["input_points", "retained_points", "compression_ratio"];
+        const COMPRESSION_FIELDS: &[&str] = &[
+            "schema_version",
+            "algorithm",
+            "sample_domain",
+            "enabled",
+            "absolute_tolerance",
+            "relative_tolerance",
+            "maximum_retained_interval",
+            "input_points",
+            "retained_points",
+            "compression_ratio",
+            "worst_observed",
+        ];
+        const COMPRESSION_ERROR_FIELDS: &[&str] = &[
+            "signal_kind",
+            "canonical_name",
+            "input_sample_index",
+            "time",
+            "actual_value",
+            "absolute_error",
+            "relative_error",
+            "allowed_tolerance",
+            "tolerance_utilization",
+        ];
 
         let (_, snapshot) = fft_parity_fixture();
         let encoded = serde_json::to_value(&snapshot).expect("serialize transient FFT DTO");
@@ -3216,6 +3372,10 @@ mod tests {
         assert_object_fields(&encoded["device_op_traces"][0], DEVICE_OP_FIELDS);
         assert_object_fields(&encoded["store_traces"][0], STORE_FIELDS);
         assert_object_fields(&encoded["compression"], COMPRESSION_FIELDS);
+        assert_object_fields(
+            &encoded["compression"]["worst_observed"],
+            COMPRESSION_ERROR_FIELDS,
+        );
         assert!(encoded["voltages"][1].is_null());
         assert!(encoded["branch_currents"][1].is_null());
         let decoded: TransientSnapshot =

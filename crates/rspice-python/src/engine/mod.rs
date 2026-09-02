@@ -599,7 +599,8 @@ impl PyEngine {
     ///     stop_time: Simulation end time in seconds (positive, finite)
     ///     max_step: Maximum solver timestep in seconds. Defaults to
     ///               stop_time / 50.
-    ///     abs_tol: Absolute interpolation error budget in volts
+    ///     abs_tol: Absolute interpolation error budget in each signal's
+    ///              native unit
     ///     rel_tol: Relative interpolation error budget
     ///     max_interval: Upper bound in seconds on the gap between two
     ///                   retained samples. 0.0 (the default) imposes no
@@ -610,7 +611,8 @@ impl PyEngine {
     ///                   sampling cadence on long, slow-moving runs.
     ///
     /// Returns:
-    ///     CompressedTransientResult: Decimated node-voltage waveforms
+    ///     CompressedTransientResult: Decimated analog waveforms with an
+    ///                                applied-policy and worst-error report
     ///
     /// Raises:
     ///     ValueError: If stop_time or max_step is not positive and finite,

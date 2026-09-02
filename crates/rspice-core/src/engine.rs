@@ -124,7 +124,12 @@ pub use transient::{
     TransientStartupMode, XYCE_RESTART_SCHEDULE_TOLERANCE, XyceRestartJobPlan,
     XyceRestartPlanError, netlist_fingerprint, xyce_restart_schedule_is_due,
 };
-pub use waveform::{CompressionConfig, TransientResultCompressed, WaveformRecorder};
+pub use waveform::{
+    CompressionConfig, TRANSIENT_COMPRESSION_REPORT_VERSION, TransientCompressionAlgorithm,
+    TransientCompressionErrorObservation, TransientCompressionPolicy, TransientCompressionReport,
+    TransientCompressionSampleDomain, TransientCompressionSignal, TransientCompressionSignalKind,
+    TransientResultCompressed, WaveformRecorder,
+};
 
 pub(crate) use source_values::extract_dc_value_with_limits;
 /// Independent-source introspection: the DC and AC quantities a parsed

@@ -14,7 +14,10 @@ use crate::device::semiconductor::{
     BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM, BJT_INTERNAL_STATE_DIM, BjtChargeBranch,
     BjtChargeSnapshot,
 };
-use crate::engine::waveform::{CompressionConfig, TransientResultCompressed};
+use crate::engine::waveform::{
+    CompressionConfig, TransientCompressionErrorObservation, TransientCompressionReport,
+    TransientCompressionSignal, TransientResultCompressed,
+};
 use crate::netlist::{
     AnalysisCommand, OutputAnalysisKind, OutputDirectiveKind, OutputSymbolKind, SaveSet,
     SaveSignal, is_device_lead_current_accessor, measure_output_dependencies,
@@ -8968,6 +8971,19 @@ fn compress_transient_result(
             "Cannot compress a transient with non-finite or non-increasing time points".to_string(),
         ));
     }
+    if config.enabled && config.min_interval > 0.0 {
+        for window in result.time.windows(2) {
+            if compression_interval_exceeds(window[0], window[1], config.min_interval) {
+                return Err(SimulationError::Circuit(format!(
+                    "Compression maximum retained interval {:.17e}s cannot be guaranteed because the accepted solver grid has a {:.17e}s gap from {:.17e}s to {:.17e}s",
+                    config.min_interval,
+                    window[1] - window[0],
+                    window[0],
+                    window[1]
+                )));
+            }
+        }
+    }
     let result_window = result
         .time
         .first()
@@ -9013,6 +9029,12 @@ fn compress_transient_result(
             fft_results: result.fft_results.clone(),
             compression_ratio: 1.0,
             input_points: point_count,
+            compression_report: TransientCompressionReport::new(
+                config,
+                point_count,
+                point_count,
+                None,
+            ),
         });
     }
     let mut retained = vec![false; point_count];
@@ -9085,6 +9107,11 @@ fn compress_transient_result(
                     let actual = waveform[point];
                     let predicted = waveform[start] + fraction * (waveform[end] - waveform[start]);
                     let tolerance = config.abs_tol + config.rel_tol * actual.abs();
+                    if !tolerance.is_finite() {
+                        return Err(SimulationError::Circuit(format!(
+                            "Compression tolerance overflowed at input sample {point}"
+                        )));
+                    }
                     let error = (actual - predicted).abs();
                     let ratio = if !error.is_finite() {
                         Value::INFINITY
@@ -9118,6 +9145,19 @@ fn compress_transient_result(
         .filter_map(|(index, keep)| keep.then_some(index))
         .collect::<Vec<_>>();
     let stored_points = indices.len();
+    if config.min_interval > 0.0 {
+        for retained_window in indices.windows(2) {
+            let start = result.time[retained_window[0]];
+            let stop = result.time[retained_window[1]];
+            if compression_interval_exceeds(start, stop, config.min_interval) {
+                return Err(SimulationError::Circuit(format!(
+                    "Compression failed to enforce the maximum retained interval {:.17e}s between {:.17e}s and {:.17e}s",
+                    config.min_interval, start, stop
+                )));
+            }
+        }
+    }
+    let worst_observed = verify_compressed_transient_error(result, config, &indices, abort)?;
     Ok(TransientResultCompressed {
         time: indices.iter().map(|&index| result.time[index]).collect(),
         step_sizes: indices
@@ -9169,7 +9209,162 @@ fn compress_transient_result(
         fft_results: result.fft_results.clone(),
         compression_ratio: point_count as Value / stored_points as Value,
         input_points: point_count,
+        compression_report: TransientCompressionReport::new(
+            config,
+            point_count,
+            stored_points,
+            worst_observed,
+        ),
     })
+}
+
+struct CompressionSignalView<'a> {
+    signal: TransientCompressionSignal,
+    values: &'a [Value],
+}
+
+fn compression_signal_views(
+    result: &TransientResult,
+) -> Result<Vec<CompressionSignalView<'_>>, SimulationError> {
+    let mut signals = Vec::new();
+    for (name, values) in result.node_names.iter().zip(&result.voltages) {
+        if !values.is_empty() {
+            signals.push(CompressionSignalView {
+                signal: TransientCompressionSignal::voltage(name)
+                    .map_err(SimulationError::Circuit)?,
+                values,
+            });
+        }
+    }
+    for (name, values) in result.branch_names.iter().zip(&result.branch_currents) {
+        if !values.is_empty() {
+            signals.push(CompressionSignalView {
+                signal: TransientCompressionSignal::branch_current(name)
+                    .map_err(SimulationError::Circuit)?,
+                values,
+            });
+        }
+    }
+    for trace in &result.device_op_traces {
+        signals.push(CompressionSignalView {
+            signal: TransientCompressionSignal::device_observable(
+                &trace.device_name,
+                &trace.parameter,
+            )
+            .map_err(SimulationError::Circuit)?,
+            values: &trace.values,
+        });
+    }
+    for trace in &result.store_traces {
+        signals.push(CompressionSignalView {
+            signal: TransientCompressionSignal::device_store(&trace.name)
+                .map_err(SimulationError::Circuit)?,
+            values: &trace.values,
+        });
+    }
+    Ok(signals)
+}
+
+/// Independently certify the reconstruction error of the final published
+/// retained grid. Candidate errors from an earlier coarse RDP segment cannot
+/// be reported because later splits repair that segment.
+fn verify_compressed_transient_error(
+    result: &TransientResult,
+    config: &CompressionConfig,
+    retained_indices: &[usize],
+    abort: &dyn AbortSignal,
+) -> Result<Option<TransientCompressionErrorObservation>, SimulationError> {
+    if abort.is_aborted() {
+        return Err(SimulationError::Aborted);
+    }
+    let signals = compression_signal_views(result)?;
+    if signals.is_empty() || retained_indices.len() >= result.time.len() {
+        return Ok(None);
+    }
+
+    let mut worst: Option<TransientCompressionErrorObservation> = None;
+    let mut scanned_points = 0usize;
+    for retained_window in retained_indices.windows(2) {
+        let start = retained_window[0];
+        let end = retained_window[1];
+        if end <= start + 1 {
+            continue;
+        }
+        let t0 = result.time[start];
+        let inverse_dt = 1.0 / (result.time[end] - t0);
+        for point in (start + 1)..end {
+            scanned_points = scanned_points.saturating_add(1);
+            if scanned_points.is_multiple_of(4096) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let fraction = (result.time[point] - t0) * inverse_dt;
+            for signal in &signals {
+                let actual = signal.values[point];
+                let predicted =
+                    signal.values[start] + fraction * (signal.values[end] - signal.values[start]);
+                let absolute_error = (actual - predicted).abs();
+                let allowed_tolerance = config.abs_tol + config.rel_tol * actual.abs();
+                if !absolute_error.is_finite() || !allowed_tolerance.is_finite() {
+                    return Err(SimulationError::Circuit(format!(
+                        "Compression error certificate became non-finite for '{}:{}' at input sample {point}",
+                        signal.signal.kind.as_str(),
+                        signal.signal.canonical_name
+                    )));
+                }
+                let tolerance_utilization = if allowed_tolerance > 0.0 {
+                    absolute_error / allowed_tolerance
+                } else if absolute_error == 0.0 {
+                    0.0
+                } else {
+                    Value::INFINITY
+                };
+                if !tolerance_utilization.is_finite()
+                    || tolerance_utilization > 1.0 + 64.0 * Value::EPSILON
+                {
+                    return Err(SimulationError::Circuit(format!(
+                        "Compression final-grid verification failed for '{}:{}' at t={:.17e}s: error {:.17e}, tolerance {:.17e}",
+                        signal.signal.kind.as_str(),
+                        signal.signal.canonical_name,
+                        result.time[point],
+                        absolute_error,
+                        allowed_tolerance
+                    )));
+                }
+                let relative_error = if actual == 0.0 {
+                    None
+                } else {
+                    let relative = absolute_error / actual.abs();
+                    relative.is_finite().then_some(relative)
+                };
+                let observation = TransientCompressionErrorObservation {
+                    signal: signal.signal.clone(),
+                    input_sample_index: point,
+                    time: result.time[point],
+                    actual_value: actual,
+                    absolute_error,
+                    relative_error,
+                    allowed_tolerance,
+                    tolerance_utilization,
+                };
+                if worst.as_ref().is_none_or(|current| {
+                    observation.tolerance_utilization > current.tolerance_utilization
+                }) {
+                    worst = Some(observation);
+                }
+            }
+        }
+    }
+    Ok(worst)
+}
+
+fn compression_interval_exceeds(start: Value, stop: Value, maximum_interval: Value) -> bool {
+    let gap = stop - start;
+    let scale = start
+        .abs()
+        .max(stop.abs())
+        .max(maximum_interval.abs())
+        .max(Value::MIN_POSITIVE);
+    gap > maximum_interval + 64.0 * Value::EPSILON * scale
 }
 
 fn validate_transient_window(tstop: Value, max_step: Value) -> Result<(), SimulationError> {
@@ -11437,6 +11632,231 @@ D1 D 0 DMOD
     }
 
     #[test]
+    fn compressed_report_certifies_adversarial_final_grid() {
+        let time = (0..=240)
+            .map(|index| {
+                let fraction = index as Value / 240.0;
+                fraction * fraction
+            })
+            .collect::<Vec<_>>();
+        let voltage = time
+            .iter()
+            .map(|&time| (1.0 - ((time - 0.25) / 0.0125).abs()).max(0.0))
+            .collect::<Vec<_>>();
+        let branch_current = time
+            .iter()
+            .map(|&time| 2.0e-3 * (-3.0 * time).exp() * (40.0 * std::f64::consts::PI * time).sin())
+            .collect::<Vec<_>>();
+        let device_observable = time
+            .iter()
+            .map(|&time| if time < 0.6 { -0.25 } else { 0.75 })
+            .collect::<Vec<_>>();
+        let device_store = time
+            .iter()
+            .map(|&time| 100.0 + 20.0 * time * time)
+            .collect::<Vec<_>>();
+        let result = TransientResult {
+            step_sizes: std::iter::once(0.0)
+                .chain(time.windows(2).map(|window| window[1] - window[0]))
+                .collect(),
+            time: time.clone(),
+            voltages: vec![voltage.clone()],
+            branch_currents: vec![branch_current.clone()],
+            num_nodes: 1,
+            node_names: vec!["pulse".to_string()],
+            branch_names: vec!["VRING".to_string()],
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: vec![crate::engine::TransientDeviceOpTrace {
+                device_name: "MSTEP".to_string(),
+                parameter: "gm".to_string(),
+                values: device_observable.clone(),
+            }],
+            store_traces: vec![crate::engine::TransientStoreTrace {
+                name: "YDEVICE!STATE".to_string(),
+                values: device_store.clone(),
+            }],
+            fft_results: Vec::new(),
+        };
+        let config = CompressionConfig {
+            abs_tol: 1.0e-5,
+            rel_tol: 1.0e-3,
+            enabled: true,
+            min_interval: 0.0,
+        };
+        let compressed = compress_transient_result(&result, &config, &[], &NoAbort)
+            .expect("adversarial analog waveforms compress");
+        compressed
+            .validate()
+            .expect("compression report and retained inventory validate");
+        assert!(compressed.time.len() < time.len());
+        assert_eq!(
+            compressed.compression_report.schema_version,
+            crate::engine::TRANSIENT_COMPRESSION_REPORT_VERSION
+        );
+        assert_eq!(
+            compressed.compression_report.applied_policy,
+            (&config).into()
+        );
+        assert_eq!(compressed.compression_report.input_points, time.len());
+        assert_eq!(
+            compressed.compression_report.retained_points,
+            compressed.time.len()
+        );
+
+        let signals = [
+            (
+                TransientCompressionSignal::voltage("pulse").unwrap(),
+                voltage,
+                time.iter()
+                    .map(|&sample_time| compressed.interpolate(0, sample_time).unwrap())
+                    .collect::<Vec<_>>(),
+            ),
+            (
+                TransientCompressionSignal::branch_current("VRING").unwrap(),
+                branch_current,
+                time.iter()
+                    .map(|&sample_time| {
+                        compressed
+                            .interpolate_branch_current_named("vring", sample_time)
+                            .unwrap()
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+            (
+                TransientCompressionSignal::device_observable("MSTEP", "gm").unwrap(),
+                device_observable,
+                time.iter()
+                    .map(|&sample_time| {
+                        compressed
+                            .interpolate_device_op_named("mstep", "GM", sample_time)
+                            .unwrap()
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+            (
+                TransientCompressionSignal::device_store("YDEVICE!STATE").unwrap(),
+                device_store,
+                time.iter()
+                    .map(|&sample_time| {
+                        compressed
+                            .interpolate_store_named("ydevice!state", sample_time)
+                            .unwrap()
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+        ];
+
+        let mut expected: Option<TransientCompressionErrorObservation> = None;
+        for (point, &sample_time) in time.iter().enumerate() {
+            if compressed
+                .time
+                .binary_search_by(|candidate| candidate.total_cmp(&sample_time))
+                .is_ok()
+            {
+                continue;
+            }
+            for (signal, original, reconstructed) in &signals {
+                let absolute_error = (original[point] - reconstructed[point]).abs();
+                let allowed_tolerance = config.abs_tol + config.rel_tol * original[point].abs();
+                let tolerance_utilization = if allowed_tolerance > 0.0 {
+                    absolute_error / allowed_tolerance
+                } else {
+                    0.0
+                };
+                assert!(
+                    tolerance_utilization <= 1.0 + 64.0 * Value::EPSILON,
+                    "{}:{} exceeded its tolerance at input sample {point}",
+                    signal.kind.as_str(),
+                    signal.canonical_name
+                );
+                let observation = TransientCompressionErrorObservation {
+                    signal: signal.clone(),
+                    input_sample_index: point,
+                    time: sample_time,
+                    actual_value: original[point],
+                    absolute_error,
+                    relative_error: (original[point] != 0.0)
+                        .then(|| absolute_error / original[point].abs())
+                        .filter(|error| error.is_finite()),
+                    allowed_tolerance,
+                    tolerance_utilization,
+                };
+                if expected.as_ref().is_none_or(|current| {
+                    observation.tolerance_utilization > current.tolerance_utilization
+                }) {
+                    expected = Some(observation);
+                }
+            }
+        }
+        assert_eq!(compressed.compression_report.worst_observed, expected);
+    }
+
+    #[test]
+    fn compressed_report_marks_disabled_storage_as_exact() {
+        let time = vec![0.0, 0.1, 0.4, 1.0];
+        let result = TransientResult {
+            time: time.clone(),
+            step_sizes: vec![0.0, 0.1, 0.3, 0.6],
+            voltages: vec![vec![0.0, 1.0, -1.0, 0.0]],
+            branch_currents: Vec::new(),
+            num_nodes: 1,
+            node_names: vec!["out".to_string()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+            fft_results: Vec::new(),
+        };
+        let config = CompressionConfig::none();
+        let compressed = compress_transient_result(&result, &config, &[], &NoAbort)
+            .expect("disabled compression preserves every point");
+        assert_eq!(compressed.time, time);
+        assert_eq!(
+            compressed.compression_report.applied_policy,
+            (&config).into()
+        );
+        assert_eq!(compressed.compression_report.input_points, 4);
+        assert_eq!(compressed.compression_report.retained_points, 4);
+        assert_eq!(compressed.compression_report.worst_observed, None);
+        compressed.validate().expect("exact report validates");
+    }
+
+    #[test]
+    fn compression_report_verification_observes_abort() {
+        struct AlwaysAbort;
+        impl AbortSignal for AlwaysAbort {
+            fn is_aborted(&self) -> bool {
+                true
+            }
+        }
+
+        let result = TransientResult {
+            time: vec![0.0, 0.5, 1.0],
+            step_sizes: vec![0.0, 0.5, 0.5],
+            voltages: vec![vec![0.0, 0.25, 1.0]],
+            branch_currents: Vec::new(),
+            num_nodes: 1,
+            node_names: vec!["out".to_string()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+            fft_results: Vec::new(),
+        };
+        let error = verify_compressed_transient_error(
+            &result,
+            &CompressionConfig::default(),
+            &[0, 2],
+            &AlwaysAbort,
+        )
+        .expect_err("final-grid certificate verification must be cancellable");
+        assert!(matches!(error, SimulationError::Aborted));
+    }
+
+    #[test]
     fn compressed_transient_retains_mandatory_output_points_exactly() {
         let time = vec![0.0, 0.5, 1.0, 1.5, 2.0];
         let result = TransientResult {
@@ -11665,6 +12085,51 @@ D1 D 0 DMOD
                 .time
                 .windows(2)
                 .all(|window| window[1] - window[0] <= 1.0)
+        );
+        let worst = compressed
+            .compression_report
+            .worst_observed
+            .as_ref()
+            .expect("a discarded exact-linear sample still has a zero-error observation");
+        assert_eq!(worst.signal.kind.as_str(), "voltage");
+        assert_eq!(worst.absolute_error, 0.0);
+        assert_eq!(worst.tolerance_utilization, 0.0);
+        compressed.validate().expect("maximum-gap report validates");
+    }
+
+    #[test]
+    fn compression_rejects_an_unattainable_maximum_interval() {
+        let result = TransientResult {
+            time: vec![0.0, 1.5, 3.0],
+            step_sizes: vec![0.0, 1.5, 1.5],
+            voltages: vec![vec![0.0, 1.5, 3.0]],
+            branch_currents: Vec::new(),
+            num_nodes: 1,
+            node_names: vec!["out".to_string()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+            fft_results: Vec::new(),
+        };
+
+        let error = compress_transient_result(
+            &result,
+            &CompressionConfig {
+                abs_tol: 1.0,
+                rel_tol: 1.0,
+                enabled: true,
+                min_interval: 1.0,
+            },
+            &[],
+            &NoAbort,
+        )
+        .expect_err("compression cannot promise samples absent from the accepted grid");
+
+        assert!(
+            error.to_string().contains("cannot be guaranteed"),
+            "unexpected error: {error}"
         );
     }
 

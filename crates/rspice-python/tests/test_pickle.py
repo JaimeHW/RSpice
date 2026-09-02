@@ -867,6 +867,16 @@ class TestCompressedTransientResult:
         )
         assert original.num_points > 2
         assert original.input_points >= original.num_points
+        assert original.compression_sample_domain == "accepted-input-samples"
+        if original.input_points > original.num_points:
+            assert original.worst_compression_error_signal_kind is not None
+            assert original.worst_compression_error_signal is not None
+            assert original.worst_compression_error_input_sample_index is not None
+            assert original.worst_compression_error_time is not None
+            assert original.worst_compression_actual_value is not None
+            assert original.worst_compression_absolute_error is not None
+            assert original.worst_compression_allowed_tolerance is not None
+            assert 0.0 <= original.worst_compression_tolerance_utilization <= 1.0
 
         restored = round_trip(original)
         for name in (
@@ -874,6 +884,22 @@ class TestCompressedTransientResult:
             "num_points",
             "input_points",
             "compression_ratio",
+            "compression_report_version",
+            "compression_algorithm",
+            "compression_sample_domain",
+            "compression_enabled",
+            "compression_absolute_tolerance",
+            "compression_relative_tolerance",
+            "compression_maximum_interval",
+            "worst_compression_error_signal_kind",
+            "worst_compression_error_signal",
+            "worst_compression_error_input_sample_index",
+            "worst_compression_error_time",
+            "worst_compression_actual_value",
+            "worst_compression_absolute_error",
+            "worst_compression_relative_error",
+            "worst_compression_allowed_tolerance",
+            "worst_compression_tolerance_utilization",
             "node_names",
             "branch_names",
             "device_parameter_names",
@@ -908,11 +934,30 @@ class TestCompressedTransientResult:
         unpickler, state = original.__reduce__()
 
         with pytest.raises(ValueError, match="predates lossless analog inventory"):
+            unpickler(*state[:-2])
+        with pytest.raises(ValueError, match="missing its required compression error"):
             unpickler(*state[:-1])
 
-        version, step_sizes, branch_currents, branch_names, device_ops, stores = (
-            state[-1]
+        (
+            version,
+            step_sizes,
+            branch_currents,
+            branch_names,
+            device_ops,
+            stores,
+        ) = state[-2]
+        compression_report = state[-1]
+        legacy = (
+            1,
+            step_sizes,
+            branch_currents,
+            branch_names,
+            device_ops,
+            stores,
         )
+        with pytest.raises(ValueError, match="predates the required compression error"):
+            unpickler(*state[:-2], legacy)
+
         future = (
             999,
             step_sizes,
@@ -922,7 +967,25 @@ class TestCompressedTransientResult:
             stores,
         )
         with pytest.raises(ValueError, match="unsupported compressed-transient analog"):
-            unpickler(*state[:-1], future)
+            unpickler(*state[:-2], future, compression_report)
+
+        future_report = (999, *compression_report[1:])
+        with pytest.raises(
+            ValueError, match="unsupported compressed-transient compression-report"
+        ):
+            unpickler(*state[:-2], state[-2], future_report)
+
+        if compression_report[-1] is not None:
+            impossible_observation = list(compression_report[-1])
+            impossible_observation[4] += 1.0
+            impossible_report = (*compression_report[:-1], tuple(impossible_observation))
+            with pytest.raises(ValueError, match="absolute error.*inconsistent"):
+                unpickler(*state[:-2], state[-2], impossible_report)
+
+        impossible_interval = list(compression_report)
+        impossible_interval[6] = np.finfo(np.float64).tiny
+        with pytest.raises(ValueError, match="maximum interval"):
+            unpickler(*state[:-2], state[-2], tuple(impossible_interval))
 
         malformed = (
             version,
@@ -933,7 +996,7 @@ class TestCompressedTransientResult:
             stores,
         )
         with pytest.raises(ValueError, match="step sizes"):
-            unpickler(*state[:-1], malformed)
+            unpickler(*state[:-2], malformed, compression_report)
 
 
 class TestDistortionResult:

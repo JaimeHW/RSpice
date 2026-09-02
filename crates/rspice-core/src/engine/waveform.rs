@@ -28,7 +28,7 @@ use crate::Value;
 //=============================================================================
 
 /// Configuration for waveform compression
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CompressionConfig {
     /// Absolute tolerance in each channel's native units.
     /// Points within this absolute error of the interpolated value are skipped.
@@ -46,6 +46,214 @@ pub struct CompressionConfig {
     /// The historical field name is retained for API compatibility. Set to
     /// 0.0 to impose no time-axis gap limit.
     pub min_interval: Value,
+}
+
+/// Schema version for the persisted transient-compression certificate.
+pub const TRANSIENT_COMPRESSION_REPORT_VERSION: u32 = 1;
+
+/// Algorithm that produced a compressed transient waveform.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransientCompressionAlgorithm {
+    /// Shared-grid, multi-channel Ramer-Douglas-Peucker decimation with
+    /// piecewise-linear reconstruction.
+    MultiChannelRdpLinearV1,
+}
+
+impl TransientCompressionAlgorithm {
+    /// Stable wire spelling for adapters and persistence layers.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::MultiChannelRdpLinearV1 => "multi-channel-rdp-linear-v1",
+        }
+    }
+}
+
+/// Sample domain over which the declared compression error was measured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransientCompressionSampleDomain {
+    /// Every discarded sample from the original accepted solver grid.
+    AcceptedInputSamples,
+}
+
+impl TransientCompressionSampleDomain {
+    /// Stable wire spelling for adapters and persistence layers.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::AcceptedInputSamples => "accepted-input-samples",
+        }
+    }
+}
+
+/// Exact compression policy applied to one published result.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransientCompressionPolicy {
+    /// Whether decimation was enabled.
+    pub enabled: bool,
+    /// Absolute interpolation tolerance in each signal's native unit.
+    pub absolute_tolerance: Value,
+    /// Relative interpolation tolerance as a fraction of the actual sample.
+    pub relative_tolerance: Value,
+    /// Maximum permitted gap between retained time points. Zero disables it.
+    pub maximum_retained_interval: Value,
+}
+
+impl From<&CompressionConfig> for TransientCompressionPolicy {
+    fn from(config: &CompressionConfig) -> Self {
+        Self {
+            enabled: config.enabled,
+            absolute_tolerance: config.abs_tol,
+            relative_tolerance: config.rel_tol,
+            maximum_retained_interval: config.min_interval,
+        }
+    }
+}
+
+/// Stable identity class for a compressed analog signal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransientCompressionSignalKind {
+    Voltage,
+    BranchCurrent,
+    DeviceObservable,
+    DeviceStore,
+}
+
+impl TransientCompressionSignalKind {
+    /// Stable wire spelling for adapters and persistence layers.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Voltage => "voltage",
+            Self::BranchCurrent => "branch-current",
+            Self::DeviceObservable => "device-observable",
+            Self::DeviceStore => "device-store",
+        }
+    }
+}
+
+/// Stable signal identity attached to a compression-error observation.
+///
+/// `canonical_name` is deliberately independent of the current positional
+/// result arrays so this identity can become a direct reference into the
+/// descriptor-indexed Phase 5.1 result container.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransientCompressionSignal {
+    pub kind: TransientCompressionSignalKind,
+    pub canonical_name: String,
+}
+
+impl TransientCompressionSignal {
+    /// Construct a canonical signal identity.
+    pub fn new(
+        kind: TransientCompressionSignalKind,
+        canonical_name: impl Into<String>,
+    ) -> Result<Self, String> {
+        let canonical_name = canonical_name.into();
+        let canonical_name = canonical_name.trim();
+        if canonical_name.is_empty() {
+            return Err("compression signal canonical name cannot be empty".to_string());
+        }
+        Ok(Self {
+            kind,
+            canonical_name: canonical_name.to_ascii_lowercase(),
+        })
+    }
+
+    pub(crate) fn voltage(name: &str) -> Result<Self, String> {
+        if name.trim().is_empty() {
+            return Err("compression voltage identity requires a node name".to_string());
+        }
+        Self::new(
+            TransientCompressionSignalKind::Voltage,
+            format!("v({})", name.trim()),
+        )
+    }
+
+    pub(crate) fn branch_current(name: &str) -> Result<Self, String> {
+        if name.trim().is_empty() {
+            return Err("compression branch-current identity requires a branch name".to_string());
+        }
+        Self::new(
+            TransientCompressionSignalKind::BranchCurrent,
+            format!("i({})", name.trim()),
+        )
+    }
+
+    pub(crate) fn device_observable(device: &str, parameter: &str) -> Result<Self, String> {
+        if device.trim().is_empty() || parameter.trim().is_empty() {
+            return Err(
+                "compression device-observable identity requires device and parameter names"
+                    .to_string(),
+            );
+        }
+        Self::new(
+            TransientCompressionSignalKind::DeviceObservable,
+            format!("@{}[{}]", device.trim(), parameter.trim()),
+        )
+    }
+
+    pub(crate) fn device_store(name: &str) -> Result<Self, String> {
+        Self::new(TransientCompressionSignalKind::DeviceStore, name)
+    }
+}
+
+/// Worst final-grid reconstruction error observed at one discarded sample.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransientCompressionErrorObservation {
+    /// Stable identity of the signal that consumed the largest fraction of
+    /// its declared tolerance.
+    pub signal: TransientCompressionSignal,
+    /// Index of the sample in the original accepted input grid.
+    pub input_sample_index: usize,
+    /// Original sample time in seconds.
+    pub time: Value,
+    /// Original signal value at the measured sample. This makes the reported
+    /// relative error and absolute-plus-relative allowance independently
+    /// checkable after the full accepted grid has been released.
+    pub actual_value: Value,
+    /// Absolute reconstruction error in the signal's native unit.
+    pub absolute_error: Value,
+    /// Absolute error divided by `|actual|`; absent at zero or when the ratio
+    /// cannot be represented as a finite `Value`.
+    pub relative_error: Option<Value>,
+    /// Applied `absolute + relative * |actual|` tolerance in the signal's
+    /// native unit.
+    pub allowed_tolerance: Value,
+    /// Unitless `absolute_error / allowed_tolerance`. A zero tolerance with
+    /// zero error has utilization zero.
+    pub tolerance_utilization: Value,
+}
+
+/// Versioned evidence describing how a compressed transient was produced and
+/// the worst error of its final published retained grid.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransientCompressionReport {
+    pub schema_version: u32,
+    pub algorithm: TransientCompressionAlgorithm,
+    pub sample_domain: TransientCompressionSampleDomain,
+    pub applied_policy: TransientCompressionPolicy,
+    pub input_points: usize,
+    pub retained_points: usize,
+    /// `None` means no input sample was approximated (or there were no
+    /// compressible analog signals), never that error measurement was skipped.
+    pub worst_observed: Option<TransientCompressionErrorObservation>,
+}
+
+impl TransientCompressionReport {
+    pub(crate) fn new(
+        config: &CompressionConfig,
+        input_points: usize,
+        retained_points: usize,
+        worst_observed: Option<TransientCompressionErrorObservation>,
+    ) -> Self {
+        Self {
+            schema_version: TRANSIENT_COMPRESSION_REPORT_VERSION,
+            algorithm: TransientCompressionAlgorithm::MultiChannelRdpLinearV1,
+            sample_domain: TransientCompressionSampleDomain::AcceptedInputSamples,
+            applied_policy: config.into(),
+            input_points,
+            retained_points,
+            worst_observed,
+        }
+    }
 }
 
 impl Default for CompressionConfig {
@@ -381,6 +589,9 @@ pub struct TransientResultCompressed {
 
     /// Total number of simulation points before compression
     pub input_points: usize,
+
+    /// Versioned applied-policy and final-grid reconstruction-error evidence.
+    pub compression_report: TransientCompressionReport,
 }
 
 /// Detailed compression statistics
@@ -483,6 +694,40 @@ impl TransientResultCompressed {
                 self.input_points
             ));
         }
+        let report = &self.compression_report;
+        if report.schema_version != TRANSIENT_COMPRESSION_REPORT_VERSION {
+            return Err(format!(
+                "compressed transient has unsupported compression-report version {}",
+                report.schema_version
+            ));
+        }
+        if report.input_points != self.input_points || report.retained_points != point_count {
+            return Err(format!(
+                "compressed transient report counts {}/{} do not match result counts {}/{}",
+                report.retained_points, report.input_points, point_count, self.input_points
+            ));
+        }
+        let policy = &report.applied_policy;
+        for (name, value) in [
+            ("absolute tolerance", policy.absolute_tolerance),
+            ("relative tolerance", policy.relative_tolerance),
+            (
+                "maximum retained interval",
+                policy.maximum_retained_interval,
+            ),
+        ] {
+            if !value.is_finite() || value < 0.0 {
+                return Err(format!(
+                    "compressed transient report has invalid {name} {value}"
+                ));
+            }
+        }
+        if !policy.enabled && report.input_points != report.retained_points {
+            return Err(
+                "compressed transient report claims disabled compression discarded input points"
+                    .to_string(),
+            );
+        }
         if !self.compression_ratio.is_finite() || self.compression_ratio < 1.0 {
             return Err(format!(
                 "compressed transient has invalid compression ratio {}",
@@ -511,6 +756,17 @@ impl TransientResultCompressed {
                 "compressed transient time points must be finite and strictly increasing"
                     .to_string(),
             );
+        }
+        if policy.enabled
+            && policy.maximum_retained_interval > 0.0
+            && self.time.windows(2).any(|window| {
+                retained_gap_exceeds(window[0], window[1], policy.maximum_retained_interval)
+            })
+        {
+            return Err(format!(
+                "compressed transient retained grid exceeds the declared maximum interval {}",
+                policy.maximum_retained_interval
+            ));
         }
         if self
             .step_sizes
@@ -566,7 +822,200 @@ impl TransientResultCompressed {
                 ));
             }
         }
+
+        let has_analog_signal = self
+            .voltages
+            .iter()
+            .chain(&self.branch_currents)
+            .any(|values| !values.is_empty())
+            || !self.device_op_traces.is_empty()
+            || !self.store_traces.is_empty();
+        let has_approximated_signal =
+            report.input_points > report.retained_points && has_analog_signal;
+        match &report.worst_observed {
+            None if has_approximated_signal => {
+                return Err(
+                    "compressed transient report omitted the worst approximated analog sample"
+                        .to_string(),
+                );
+            }
+            None => {}
+            Some(observation) => {
+                if report.input_points == report.retained_points {
+                    return Err(
+                        "compressed transient report records an error when no sample was approximated"
+                            .to_string(),
+                    );
+                }
+                if observation.input_sample_index >= report.input_points {
+                    return Err(format!(
+                        "compressed transient worst-error sample index {} is outside the {}-point input grid",
+                        observation.input_sample_index, report.input_points
+                    ));
+                }
+                if !observation.time.is_finite()
+                    || !self
+                        .time
+                        .first()
+                        .is_some_and(|start| observation.time >= *start)
+                    || !self
+                        .time
+                        .last()
+                        .is_some_and(|stop| observation.time <= *stop)
+                {
+                    return Err(format!(
+                        "compressed transient worst-error time {} is outside the result interval",
+                        observation.time
+                    ));
+                }
+                if self
+                    .time
+                    .binary_search_by(|time| time.total_cmp(&observation.time))
+                    .is_ok()
+                {
+                    return Err(
+                        "compressed transient worst-error observation names a retained sample"
+                            .to_string(),
+                    );
+                }
+                let signal_values = self
+                    .compression_signal_values(&observation.signal)?
+                    .ok_or_else(|| {
+                        format!(
+                            "compressed transient worst-error signal '{}:{}' does not exist in the result",
+                            observation.signal.kind.as_str(),
+                            observation.signal.canonical_name
+                        )
+                    })?;
+                for (name, value) in [
+                    ("actual value", observation.actual_value),
+                    ("absolute error", observation.absolute_error),
+                    ("allowed tolerance", observation.allowed_tolerance),
+                    ("tolerance utilization", observation.tolerance_utilization),
+                ] {
+                    if !value.is_finite() || (name != "actual value" && value < 0.0) {
+                        return Err(format!(
+                            "compressed transient worst-error report has invalid {name} {value}"
+                        ));
+                    }
+                }
+                let reconstructed = self
+                    .interpolate_values(signal_values, observation.time)
+                    .ok_or_else(|| {
+                        "compressed transient worst-error signal cannot be reconstructed"
+                            .to_string()
+                    })?;
+                let expected_absolute_error = (observation.actual_value - reconstructed).abs();
+                if !expected_absolute_error.is_finite()
+                    || !certificate_value_matches(
+                        observation.absolute_error,
+                        expected_absolute_error,
+                    )
+                {
+                    return Err(format!(
+                        "compressed transient worst-error absolute error {} is inconsistent with actual value {} and reconstructed value {reconstructed} (expected {expected_absolute_error})",
+                        observation.absolute_error, observation.actual_value
+                    ));
+                }
+                let expected_relative_error = if observation.actual_value == 0.0 {
+                    None
+                } else {
+                    let relative = observation.absolute_error / observation.actual_value.abs();
+                    relative.is_finite().then_some(relative)
+                };
+                if !optional_certificate_value_matches(
+                    observation.relative_error,
+                    expected_relative_error,
+                ) {
+                    return Err(format!(
+                        "compressed transient worst-error relative error {:?} is inconsistent with error {} and actual value {}",
+                        observation.relative_error,
+                        observation.absolute_error,
+                        observation.actual_value
+                    ));
+                }
+                let expected_tolerance = policy.absolute_tolerance
+                    + policy.relative_tolerance * observation.actual_value.abs();
+                if !expected_tolerance.is_finite()
+                    || !certificate_value_matches(observation.allowed_tolerance, expected_tolerance)
+                {
+                    return Err(format!(
+                        "compressed transient worst-error tolerance {} is inconsistent with policy and actual value {} (expected {expected_tolerance})",
+                        observation.allowed_tolerance, observation.actual_value
+                    ));
+                }
+                let expected_utilization = if observation.allowed_tolerance > 0.0 {
+                    observation.absolute_error / observation.allowed_tolerance
+                } else if observation.absolute_error == 0.0 {
+                    0.0
+                } else {
+                    Value::INFINITY
+                };
+                let utilization_slack = 64.0
+                    * Value::EPSILON
+                    * expected_utilization
+                        .abs()
+                        .max(observation.tolerance_utilization.abs())
+                        .max(1.0);
+                if !expected_utilization.is_finite()
+                    || (observation.tolerance_utilization - expected_utilization).abs()
+                        > utilization_slack
+                    || observation.tolerance_utilization > 1.0 + 64.0 * Value::EPSILON
+                {
+                    return Err(format!(
+                        "compressed transient worst-error utilization {} is inconsistent with error {} and tolerance {}",
+                        observation.tolerance_utilization,
+                        observation.absolute_error,
+                        observation.allowed_tolerance
+                    ));
+                }
+            }
+        }
         Ok(())
+    }
+
+    fn compression_signal_values<'a>(
+        &'a self,
+        expected: &TransientCompressionSignal,
+    ) -> Result<Option<&'a [Value]>, String> {
+        match expected.kind {
+            TransientCompressionSignalKind::Voltage => {
+                for (name, values) in self.node_names.iter().zip(&self.voltages) {
+                    if !values.is_empty() && TransientCompressionSignal::voltage(name)? == *expected
+                    {
+                        return Ok(Some(values));
+                    }
+                }
+            }
+            TransientCompressionSignalKind::BranchCurrent => {
+                for (name, values) in self.branch_names.iter().zip(&self.branch_currents) {
+                    if !values.is_empty()
+                        && TransientCompressionSignal::branch_current(name)? == *expected
+                    {
+                        return Ok(Some(values));
+                    }
+                }
+            }
+            TransientCompressionSignalKind::DeviceObservable => {
+                for trace in &self.device_op_traces {
+                    if TransientCompressionSignal::device_observable(
+                        &trace.device_name,
+                        &trace.parameter,
+                    )? == *expected
+                    {
+                        return Ok(Some(&trace.values));
+                    }
+                }
+            }
+            TransientCompressionSignalKind::DeviceStore => {
+                for trace in &self.store_traces {
+                    if TransientCompressionSignal::device_store(&trace.name)? == *expected {
+                        return Ok(Some(&trace.values));
+                    }
+                }
+            }
+        }
+        Ok(None)
     }
 
     fn aligned_values<'a>(&self, values: &'a [Value]) -> Option<&'a [Value]> {
@@ -691,6 +1140,31 @@ impl TransientResultCompressed {
     }
 }
 
+fn certificate_value_matches(actual: Value, expected: Value) -> bool {
+    let scale = actual.abs().max(expected.abs()).max(Value::MIN_POSITIVE);
+    (actual - expected).abs() <= 64.0 * Value::EPSILON * scale
+}
+
+fn optional_certificate_value_matches(actual: Option<Value>, expected: Option<Value>) -> bool {
+    match (actual, expected) {
+        (Some(actual), Some(expected)) => {
+            actual.is_finite() && actual >= 0.0 && certificate_value_matches(actual, expected)
+        }
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+fn retained_gap_exceeds(start: Value, stop: Value, maximum_interval: Value) -> bool {
+    let gap = stop - start;
+    let scale = start
+        .abs()
+        .max(stop.abs())
+        .max(maximum_interval.abs())
+        .max(Value::MIN_POSITIVE);
+    gap > maximum_interval + 64.0 * Value::EPSILON * scale
+}
+
 fn validate_channel_count(context: &str, actual: usize, expected: usize) -> Result<(), String> {
     if actual == expected {
         Ok(())
@@ -710,6 +1184,7 @@ mod tests {
     use super::*;
 
     fn malformed_compressed_result(voltages: Vec<Vec<Value>>) -> TransientResultCompressed {
+        let config = CompressionConfig::none();
         TransientResultCompressed {
             time: vec![0.0, 1.0, 2.0],
             step_sizes: vec![0.0, 1.0, 1.0],
@@ -723,6 +1198,7 @@ mod tests {
             fft_results: Vec::new(),
             compression_ratio: 1.0,
             input_points: 3,
+            compression_report: TransientCompressionReport::new(&config, 3, 3, None),
         }
     }
 
@@ -757,11 +1233,159 @@ mod tests {
         let mut malformed = malformed_compressed_result(vec![vec![0.0, 1.0, 2.0]]);
         malformed.input_points = 6;
         malformed.compression_ratio = 1.5;
+        malformed.compression_report.input_points = 6;
+        malformed.compression_report.applied_policy.enabled = true;
 
         let error = malformed
             .validate()
             .expect_err("ratio metadata must agree with retained and input point counts");
         assert!(error.contains("inconsistent"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn compressed_result_rejects_malformed_error_certificate() {
+        let mut certified = malformed_compressed_result(vec![vec![0.0, 1.0, 2.0]]);
+        certified.input_points = 4;
+        certified.compression_ratio = 4.0 / 3.0;
+        let observed_actual = 0.500_000_5_f64;
+        let observed_error = (observed_actual - 0.5).abs();
+        let observed_tolerance = 1.0e-6 + 1.0e-3 * observed_actual.abs();
+        certified.compression_report = TransientCompressionReport {
+            schema_version: TRANSIENT_COMPRESSION_REPORT_VERSION,
+            algorithm: TransientCompressionAlgorithm::MultiChannelRdpLinearV1,
+            sample_domain: TransientCompressionSampleDomain::AcceptedInputSamples,
+            applied_policy: (&CompressionConfig::default()).into(),
+            input_points: 4,
+            retained_points: 3,
+            worst_observed: Some(TransientCompressionErrorObservation {
+                signal: TransientCompressionSignal::voltage("out").unwrap(),
+                input_sample_index: 1,
+                time: 0.5,
+                actual_value: observed_actual,
+                absolute_error: observed_error,
+                relative_error: Some(observed_error / observed_actual),
+                allowed_tolerance: observed_tolerance,
+                tolerance_utilization: observed_error / observed_tolerance,
+            }),
+        };
+        certified
+            .validate()
+            .expect("baseline certificate validates");
+
+        let mut missing = certified.clone();
+        missing.compression_report.worst_observed = None;
+        assert!(
+            missing
+                .validate()
+                .expect_err("discarded analog samples require an observation")
+                .contains("omitted")
+        );
+
+        let mut future = certified.clone();
+        future.compression_report.schema_version += 1;
+        assert!(
+            future
+                .validate()
+                .expect_err("future report versions fail closed")
+                .contains("unsupported")
+        );
+
+        let mut unknown_signal = certified.clone();
+        unknown_signal
+            .compression_report
+            .worst_observed
+            .as_mut()
+            .unwrap()
+            .signal = TransientCompressionSignal::voltage("missing").unwrap();
+        assert!(
+            unknown_signal
+                .validate()
+                .expect_err("the reported signal must exist")
+                .contains("does not exist")
+        );
+
+        let mut impossible_tolerance = certified.clone();
+        let observation = impossible_tolerance
+            .compression_report
+            .worst_observed
+            .as_mut()
+            .unwrap();
+        observation.allowed_tolerance = 1.0e-6;
+        observation.tolerance_utilization = observation.absolute_error / 1.0e-6;
+        assert!(
+            impossible_tolerance
+                .validate()
+                .expect_err("policy algebra must be independently checkable")
+                .contains("inconsistent with policy")
+        );
+
+        let mut impossible_relative = certified.clone();
+        impossible_relative
+            .compression_report
+            .worst_observed
+            .as_mut()
+            .unwrap()
+            .relative_error = Some(2.0e-6);
+        assert!(
+            impossible_relative
+                .validate()
+                .expect_err("relative-error algebra must be independently checkable")
+                .contains("relative error")
+        );
+
+        let mut impossible_interval = certified.clone();
+        impossible_interval
+            .compression_report
+            .applied_policy
+            .maximum_retained_interval = 0.5;
+        assert!(
+            impossible_interval
+                .validate()
+                .expect_err("the retained grid must honor its declared interval")
+                .contains("maximum interval")
+        );
+
+        let mut retained_sample = certified.clone();
+        retained_sample
+            .compression_report
+            .worst_observed
+            .as_mut()
+            .unwrap()
+            .time = 1.0;
+        assert!(
+            retained_sample
+                .validate()
+                .expect_err("a retained sample was not reconstructed")
+                .contains("retained sample")
+        );
+
+        let mut projected_out = certified.clone();
+        projected_out.voltages[0].clear();
+        assert!(
+            projected_out
+                .validate()
+                .expect_err("a projected-out channel cannot support an error observation")
+                .contains("does not exist")
+        );
+
+        let mut over_budget = certified;
+        let observation = over_budget
+            .compression_report
+            .worst_observed
+            .as_mut()
+            .unwrap();
+        observation.actual_value = 0.501;
+        observation.absolute_error = (observation.actual_value - 0.5).abs();
+        observation.relative_error = Some(observation.absolute_error / observation.actual_value);
+        observation.allowed_tolerance = 1.0e-6 + 1.0e-3 * observation.actual_value;
+        observation.tolerance_utilization =
+            observation.absolute_error / observation.allowed_tolerance;
+        assert!(
+            over_budget
+                .validate()
+                .expect_err("a certificate cannot claim an over-budget result")
+                .contains("utilization")
+        );
     }
 
     #[test]

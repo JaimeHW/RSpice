@@ -16,7 +16,21 @@ pub struct PyCompressedTransientResult {
     inner: rspice_core::engine::TransientResultCompressed,
 }
 
-const COMPRESSED_TRANSIENT_ANALOG_STATE_VERSION: usize = 1;
+const COMPRESSED_TRANSIENT_ANALOG_STATE_VERSION: usize = 2;
+type CompressionErrorPersistenceState =
+    (String, String, usize, f64, f64, f64, Option<f64>, f64, f64);
+type CompressionReportPersistenceState = (
+    u32,
+    String,
+    String,
+    bool,
+    f64,
+    f64,
+    f64,
+    usize,
+    usize,
+    Option<CompressionErrorPersistenceState>,
+);
 type CompressedTransientAnalogState = (
     usize,
     Vec<f64>,
@@ -25,6 +39,139 @@ type CompressedTransientAnalogState = (
     Vec<(String, String, Vec<f64>)>,
     Vec<(String, Vec<f64>)>,
 );
+
+fn compression_report_persistence_state(
+    report: &rspice_core::engine::TransientCompressionReport,
+) -> CompressionReportPersistenceState {
+    let worst = report.worst_observed.as_ref().map(|observation| {
+        (
+            observation.signal.kind.as_str().to_string(),
+            observation.signal.canonical_name.clone(),
+            observation.input_sample_index,
+            observation.time,
+            observation.actual_value,
+            observation.absolute_error,
+            observation.relative_error,
+            observation.allowed_tolerance,
+            observation.tolerance_utilization,
+        )
+    });
+    (
+        report.schema_version,
+        report.algorithm.as_str().to_string(),
+        report.sample_domain.as_str().to_string(),
+        report.applied_policy.enabled,
+        report.applied_policy.absolute_tolerance,
+        report.applied_policy.relative_tolerance,
+        report.applied_policy.maximum_retained_interval,
+        report.input_points,
+        report.retained_points,
+        worst,
+    )
+}
+
+fn rebuild_compression_report(
+    state: CompressionReportPersistenceState,
+) -> PyResult<rspice_core::engine::TransientCompressionReport> {
+    let (
+        schema_version,
+        algorithm,
+        sample_domain,
+        enabled,
+        absolute_tolerance,
+        relative_tolerance,
+        maximum_retained_interval,
+        input_points,
+        retained_points,
+        worst,
+    ) = state;
+    if schema_version != rspice_core::engine::TRANSIENT_COMPRESSION_REPORT_VERSION {
+        return Err(crate::errors::value_error(format!(
+            "unsupported compressed-transient compression-report version {schema_version}"
+        )));
+    }
+    let algorithm = match algorithm.as_str() {
+        "multi-channel-rdp-linear-v1" => {
+            rspice_core::engine::TransientCompressionAlgorithm::MultiChannelRdpLinearV1
+        }
+        _ => {
+            return Err(crate::errors::value_error(format!(
+                "unsupported compressed-transient compression algorithm '{algorithm}'"
+            )));
+        }
+    };
+    let sample_domain = match sample_domain.as_str() {
+        "accepted-input-samples" => {
+            rspice_core::engine::TransientCompressionSampleDomain::AcceptedInputSamples
+        }
+        _ => {
+            return Err(crate::errors::value_error(format!(
+                "unsupported compressed-transient compression sample domain '{sample_domain}'"
+            )));
+        }
+    };
+    let worst_observed = worst
+        .map(
+            |(
+                signal_kind,
+                canonical_name,
+                input_sample_index,
+                time,
+                actual_value,
+                absolute_error,
+                relative_error,
+                allowed_tolerance,
+                tolerance_utilization,
+            )| {
+                let kind = match signal_kind.as_str() {
+                    "voltage" => rspice_core::engine::TransientCompressionSignalKind::Voltage,
+                    "branch-current" => {
+                        rspice_core::engine::TransientCompressionSignalKind::BranchCurrent
+                    }
+                    "device-observable" => {
+                        rspice_core::engine::TransientCompressionSignalKind::DeviceObservable
+                    }
+                    "device-store" => {
+                        rspice_core::engine::TransientCompressionSignalKind::DeviceStore
+                    }
+                    _ => {
+                        return Err(crate::errors::value_error(format!(
+                            "unsupported compressed-transient compression signal kind '{signal_kind}'"
+                        )));
+                    }
+                };
+                Ok(rspice_core::engine::TransientCompressionErrorObservation {
+                    signal: rspice_core::engine::TransientCompressionSignal::new(
+                        kind,
+                        canonical_name,
+                    )
+                    .map_err(crate::errors::value_error)?,
+                    input_sample_index,
+                    time,
+                    actual_value,
+                    absolute_error,
+                    relative_error,
+                    allowed_tolerance,
+                    tolerance_utilization,
+                })
+            },
+        )
+        .transpose()?;
+    Ok(rspice_core::engine::TransientCompressionReport {
+        schema_version,
+        algorithm,
+        sample_domain,
+        applied_policy: rspice_core::engine::TransientCompressionPolicy {
+            enabled,
+            absolute_tolerance,
+            relative_tolerance,
+            maximum_retained_interval,
+        },
+        input_points,
+        retained_points,
+        worst_observed,
+    })
+}
 
 impl PyCompressedTransientResult {
     pub fn new(inner: rspice_core::engine::TransientResultCompressed) -> Self {
@@ -109,6 +256,148 @@ impl PyCompressedTransientResult {
     #[getter]
     fn compression_ratio(&self) -> f64 {
         self.inner.compression_ratio
+    }
+
+    /// Version of the persisted compression evidence contract.
+    #[getter]
+    fn compression_report_version(&self) -> u32 {
+        self.inner.compression_report.schema_version
+    }
+
+    /// Stable identifier of the compression algorithm.
+    #[getter]
+    fn compression_algorithm(&self) -> &'static str {
+        self.inner.compression_report.algorithm.as_str()
+    }
+
+    /// Stable identifier of the input-sample domain used for verification.
+    #[getter]
+    fn compression_sample_domain(&self) -> &'static str {
+        self.inner.compression_report.sample_domain.as_str()
+    }
+
+    /// Whether waveform decimation was enabled for this result.
+    #[getter]
+    fn compression_enabled(&self) -> bool {
+        self.inner.compression_report.applied_policy.enabled
+    }
+
+    /// Applied absolute interpolation tolerance in each signal's native unit.
+    #[getter]
+    fn compression_absolute_tolerance(&self) -> f64 {
+        self.inner
+            .compression_report
+            .applied_policy
+            .absolute_tolerance
+    }
+
+    /// Applied relative interpolation tolerance.
+    #[getter]
+    fn compression_relative_tolerance(&self) -> f64 {
+        self.inner
+            .compression_report
+            .applied_policy
+            .relative_tolerance
+    }
+
+    /// Applied maximum interval between retained points in seconds.
+    #[getter]
+    fn compression_maximum_interval(&self) -> f64 {
+        self.inner
+            .compression_report
+            .applied_policy
+            .maximum_retained_interval
+    }
+
+    /// Stable kind of the signal with the highest tolerance utilization.
+    #[getter]
+    fn worst_compression_error_signal_kind(&self) -> Option<&'static str> {
+        self.inner
+            .compression_report
+            .worst_observed
+            .as_ref()
+            .map(|observation| observation.signal.kind.as_str())
+    }
+
+    /// Canonical identity of the signal with the highest tolerance utilization.
+    #[getter]
+    fn worst_compression_error_signal(&self) -> Option<String> {
+        self.inner
+            .compression_report
+            .worst_observed
+            .as_ref()
+            .map(|observation| observation.signal.canonical_name.clone())
+    }
+
+    /// Original accepted-grid index of the worst reconstructed sample.
+    #[getter]
+    fn worst_compression_error_input_sample_index(&self) -> Option<usize> {
+        self.inner
+            .compression_report
+            .worst_observed
+            .as_ref()
+            .map(|observation| observation.input_sample_index)
+    }
+
+    /// Source-sample time of the worst final-grid reconstruction error.
+    #[getter]
+    fn worst_compression_error_time(&self) -> Option<f64> {
+        self.inner
+            .compression_report
+            .worst_observed
+            .as_ref()
+            .map(|observation| observation.time)
+    }
+
+    /// Original value at the worst-utilization observation.
+    #[getter]
+    fn worst_compression_actual_value(&self) -> Option<f64> {
+        self.inner
+            .compression_report
+            .worst_observed
+            .as_ref()
+            .map(|observation| observation.actual_value)
+    }
+
+    /// Absolute reconstruction error at the worst-utilization observation.
+    #[getter]
+    fn worst_compression_absolute_error(&self) -> Option<f64> {
+        self.inner
+            .compression_report
+            .worst_observed
+            .as_ref()
+            .map(|observation| observation.absolute_error)
+    }
+
+    /// Relative error at the worst observation; absent when the actual value
+    /// is zero or the ratio cannot be represented finitely.
+    #[getter]
+    fn worst_compression_relative_error(&self) -> Option<f64> {
+        self.inner
+            .compression_report
+            .worst_observed
+            .as_ref()
+            .and_then(|observation| observation.relative_error)
+    }
+
+    /// Allowed absolute-plus-relative tolerance at the worst observation.
+    #[getter]
+    fn worst_compression_allowed_tolerance(&self) -> Option<f64> {
+        self.inner
+            .compression_report
+            .worst_observed
+            .as_ref()
+            .map(|observation| observation.allowed_tolerance)
+    }
+
+    /// Fraction of the declared tolerance consumed at the worst observation.
+    #[getter]
+    fn worst_compression_tolerance_utilization(&self) -> Option<f64> {
+        self.inner
+            .compression_report
+            .worst_observed
+            .as_ref()
+            .map(|observation| observation.tolerance_utilization)
     }
 
     /// Canonical branch names aligned with retained branch-current waveforms.
@@ -338,7 +627,7 @@ impl PyCompressedTransientResult {
     /// Rebuild from pickled state. Not part of the public API.
     ///
     #[staticmethod]
-    #[pyo3(signature = (time, voltages, num_nodes, node_names, compression_ratio, input_points, fft_state=None, analog_state=None))]
+    #[pyo3(signature = (time, voltages, num_nodes, node_names, compression_ratio, input_points, fft_state=None, analog_state=None, compression_state=None))]
     #[allow(clippy::too_many_arguments)]
     fn _unpickle(
         time: Vec<f64>,
@@ -349,6 +638,7 @@ impl PyCompressedTransientResult {
         input_points: usize,
         fft_state: Option<TransientFftPersistenceState>,
         analog_state: Option<CompressedTransientAnalogState>,
+        compression_state: Option<CompressionReportPersistenceState>,
     ) -> PyResult<Self> {
         let Some((
             version,
@@ -363,11 +653,21 @@ impl PyCompressedTransientResult {
                 "legacy compressed-transient pickle predates lossless analog inventory persistence; rerun the analysis",
             ));
         };
+        if version < COMPRESSED_TRANSIENT_ANALOG_STATE_VERSION {
+            return Err(crate::errors::value_error(format!(
+                "compressed-transient analog pickle state version {version} predates the required compression error certificate; rerun the analysis"
+            )));
+        }
         if version != COMPRESSED_TRANSIENT_ANALOG_STATE_VERSION {
             return Err(crate::errors::value_error(format!(
                 "unsupported compressed-transient analog pickle state version {version}"
             )));
         }
+        let Some(compression_report) = compression_state else {
+            return Err(crate::errors::value_error(
+                "compressed-transient pickle is missing its required compression error certificate; rerun the analysis",
+            ));
+        };
         let inner = rspice_core::engine::TransientResultCompressed {
             time,
             step_sizes,
@@ -393,6 +693,7 @@ impl PyCompressedTransientResult {
             fft_results: rebuild_transient_fft_results(fft_state)?,
             compression_ratio,
             input_points,
+            compression_report: rebuild_compression_report(compression_report)?,
         };
         inner.validate().map_err(crate::errors::value_error)?;
         Ok(Self::new(inner))
@@ -413,6 +714,7 @@ impl PyCompressedTransientResult {
             usize,
             TransientFftPersistenceState,
             CompressedTransientAnalogState,
+            CompressionReportPersistenceState,
         ),
     )> {
         Ok((
@@ -447,6 +749,7 @@ impl PyCompressedTransientResult {
                         .map(|trace| (trace.name.clone(), trace.values.clone()))
                         .collect(),
                 ),
+                compression_report_persistence_state(&self.inner.compression_report),
             ),
         ))
     }
