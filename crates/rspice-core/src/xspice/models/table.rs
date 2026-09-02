@@ -415,26 +415,36 @@ impl<T> TableDataCache<T> {
     }
 }
 
-fn table2d_cache() -> &'static Mutex<TableDataCache<Table2DData>> {
+fn shared_table2d_cache() -> &'static Mutex<TableDataCache<Table2DData>> {
     static CACHE: OnceLock<Mutex<TableDataCache<Table2DData>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(TableDataCache::default()))
 }
 
-fn table3d_cache() -> &'static Mutex<TableDataCache<Table3DData>> {
+fn shared_table3d_cache() -> &'static Mutex<TableDataCache<Table3DData>> {
     static CACHE: OnceLock<Mutex<TableDataCache<Table3DData>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(TableDataCache::default()))
 }
 
-fn lock_table2d_cache() -> MutexGuard<'static, TableDataCache<Table2DData>> {
-    table2d_cache()
+fn lock_shared_table2d_cache() -> MutexGuard<'static, TableDataCache<Table2DData>> {
+    shared_table2d_cache()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn lock_table3d_cache() -> MutexGuard<'static, TableDataCache<Table3DData>> {
-    table3d_cache()
+fn lock_shared_table3d_cache() -> MutexGuard<'static, TableDataCache<Table3DData>> {
+    shared_table3d_cache()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Run `operation` against the 2-D table cache this thread loads through.
+fn with_table2d_cache<R>(operation: impl FnOnce(&mut TableDataCache<Table2DData>) -> R) -> R {
+    operation(&mut lock_shared_table2d_cache())
+}
+
+/// Run `operation` against the 3-D table cache this thread loads through.
+fn with_table3d_cache<R>(operation: impl FnOnce(&mut TableDataCache<Table3DData>) -> R) -> R {
+    operation(&mut lock_shared_table3d_cache())
 }
 
 fn table_cache_entry_bytes<T>(key: &TableCacheKey, retained_value_bytes: usize) -> usize {
@@ -961,28 +971,27 @@ fn load_table2d_limited(
             .map_err(|err| table_file_error(model, file, err))?;
     let virtual_stamp = data_file::loaded_virtual_data_file_stamp(stamp);
     let key = table_cache_key(file, stamp);
-    {
-        let mut guard = lock_table2d_cache();
-        let cached = guard.with_entries(|entries, snapshot| {
+    let cached = with_table2d_cache(|cache| {
+        cache.with_entries(|entries, snapshot| {
             entries.enforce_limit(resource_limits.max_shared_cache_bytes);
             (!key.virtual_file || snapshot.contains(&key.file, key.stamp()))
                 .then(|| entries.get_cloned(&key))
                 .flatten()
-        });
-        if let Some(table) = cached {
-            let retained_values = table
-                .x
-                .len()
-                .saturating_add(table.y.len())
-                .saturating_add(table.values.len());
-            crate::resource::ResourceLimitError::ensure(
-                crate::resource::ResourceKind::ExternalDataValues,
-                retained_values,
-                resource_limits.max_external_data_values,
-            )
-            .map_err(|error| table_file_error(model, file, error.to_string()))?;
-            return Ok((table, virtual_stamp));
-        }
+        })
+    });
+    if let Some(table) = cached {
+        let retained_values = table
+            .x
+            .len()
+            .saturating_add(table.y.len())
+            .saturating_add(table.values.len());
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::ExternalDataValues,
+            retained_values,
+            resource_limits.max_external_data_values,
+        )
+        .map_err(|error| table_file_error(model, file, error.to_string()))?;
+        return Ok((table, virtual_stamp));
     }
 
     let table = Arc::new(parse_table2d_contents_limited(
@@ -990,19 +999,20 @@ fn load_table2d_limited(
         &contents,
         resource_limits.max_external_data_values,
     )?);
-    let mut guard = lock_table2d_cache();
     let retained_bytes = table_cache_entry_bytes::<Table2DData>(&key, table.retained_bytes());
-    let table = guard.with_entries(|entries, snapshot| {
-        if key.virtual_file && !snapshot.contains(&key.file, key.stamp()) {
-            table
-        } else {
-            entries.insert_or_get(
-                key,
-                table,
-                retained_bytes,
-                resource_limits.max_shared_cache_bytes,
-            )
-        }
+    let table = with_table2d_cache(|cache| {
+        cache.with_entries(|entries, snapshot| {
+            if key.virtual_file && !snapshot.contains(&key.file, key.stamp()) {
+                table
+            } else {
+                entries.insert_or_get(
+                    key,
+                    table,
+                    retained_bytes,
+                    resource_limits.max_shared_cache_bytes,
+                )
+            }
+        })
     });
     Ok((table, virtual_stamp))
 }
@@ -1024,29 +1034,28 @@ fn load_table3d_limited(
             .map_err(|err| table_file_error(model, file, err))?;
     let virtual_stamp = data_file::loaded_virtual_data_file_stamp(stamp);
     let key = table_cache_key(file, stamp);
-    {
-        let mut guard = lock_table3d_cache();
-        let cached = guard.with_entries(|entries, snapshot| {
+    let cached = with_table3d_cache(|cache| {
+        cache.with_entries(|entries, snapshot| {
             entries.enforce_limit(resource_limits.max_shared_cache_bytes);
             (!key.virtual_file || snapshot.contains(&key.file, key.stamp()))
                 .then(|| entries.get_cloned(&key))
                 .flatten()
-        });
-        if let Some(table) = cached {
-            let retained_values = table
-                .x
-                .len()
-                .saturating_add(table.y.len())
-                .saturating_add(table.z.len())
-                .saturating_add(table.values.len());
-            crate::resource::ResourceLimitError::ensure(
-                crate::resource::ResourceKind::ExternalDataValues,
-                retained_values,
-                resource_limits.max_external_data_values,
-            )
-            .map_err(|error| table_file_error(model, file, error.to_string()))?;
-            return Ok((table, virtual_stamp));
-        }
+        })
+    });
+    if let Some(table) = cached {
+        let retained_values = table
+            .x
+            .len()
+            .saturating_add(table.y.len())
+            .saturating_add(table.z.len())
+            .saturating_add(table.values.len());
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::ExternalDataValues,
+            retained_values,
+            resource_limits.max_external_data_values,
+        )
+        .map_err(|error| table_file_error(model, file, error.to_string()))?;
+        return Ok((table, virtual_stamp));
     }
 
     let table = Arc::new(parse_table3d_contents_limited(
@@ -1054,19 +1063,20 @@ fn load_table3d_limited(
         &contents,
         resource_limits.max_external_data_values,
     )?);
-    let mut guard = lock_table3d_cache();
     let retained_bytes = table_cache_entry_bytes::<Table3DData>(&key, table.retained_bytes());
-    let table = guard.with_entries(|entries, snapshot| {
-        if key.virtual_file && !snapshot.contains(&key.file, key.stamp()) {
-            table
-        } else {
-            entries.insert_or_get(
-                key,
-                table,
-                retained_bytes,
-                resource_limits.max_shared_cache_bytes,
-            )
-        }
+    let table = with_table3d_cache(|cache| {
+        cache.with_entries(|entries, snapshot| {
+            if key.virtual_file && !snapshot.contains(&key.file, key.stamp()) {
+                table
+            } else {
+                entries.insert_or_get(
+                    key,
+                    table,
+                    retained_bytes,
+                    resource_limits.max_shared_cache_bytes,
+                )
+            }
+        })
     });
     Ok((table, virtual_stamp))
 }
@@ -2098,7 +2108,7 @@ mod tests {
 
     fn poison_table2d_cache_lock() {
         let result = std::panic::catch_unwind(|| {
-            let _guard = lock_table2d_cache();
+            let _guard = lock_shared_table2d_cache();
             panic!("poison table2d cache lock for recovery test");
         });
         assert!(result.is_err(), "recovery test must poison the mutex");
@@ -2106,7 +2116,7 @@ mod tests {
 
     fn poison_table3d_cache_lock() {
         let result = std::panic::catch_unwind(|| {
-            let _guard = lock_table3d_cache();
+            let _guard = lock_shared_table3d_cache();
             panic!("poison table3d cache lock for recovery test");
         });
         assert!(result.is_err(), "recovery test must poison the mutex");
@@ -2115,10 +2125,10 @@ mod tests {
     #[test]
     fn table_cache_locks_recover_after_poison() {
         poison_table2d_cache_lock();
-        lock_table2d_cache().clear();
+        lock_shared_table2d_cache().clear();
 
         poison_table3d_cache_lock();
-        lock_table3d_cache().clear();
+        lock_shared_table3d_cache().clear();
     }
 
     #[test]
@@ -2624,8 +2634,9 @@ mod tests {
         let (table, _) = load_table2d_limited(file, limits)
             .expect("zero-retention policy still returns parsed table data");
         assert_eq!(table.values.len(), 4);
-        let cache = lock_table2d_cache();
-        assert!(cache.entries.keys().all(|key| key.file != file));
+        with_table2d_cache(|cache| {
+            assert!(cache.entries.keys().all(|key| key.file != file));
+        });
 
         let _ = data_file::unregister_data_file(file);
     }
@@ -2637,7 +2648,7 @@ mod tests {
         let unrelated_file = "virtual://table2d/unrelated-change";
         let _ = data_file::unregister_data_file(retained_file);
         let _ = data_file::unregister_data_file(unrelated_file);
-        lock_table2d_cache().clear();
+        lock_shared_table2d_cache().clear();
 
         let contents = "\
 2
@@ -2655,16 +2666,16 @@ mod tests {
             .expect("register unrelated virtual table2d data");
         load_table2d(unrelated_file).expect("cache unrelated virtual table2d data");
 
-        let cache = lock_table2d_cache();
-        assert_eq!(
-            cache
-                .entries
-                .keys()
-                .filter(|key| key.file == retained_file)
-                .count(),
-            1
-        );
-        drop(cache);
+        with_table2d_cache(|cache| {
+            assert_eq!(
+                cache
+                    .entries
+                    .keys()
+                    .filter(|key| key.file == retained_file)
+                    .count(),
+                1
+            );
+        });
 
         let _ = data_file::unregister_data_file(retained_file);
         let _ = data_file::unregister_data_file(unrelated_file);
@@ -2892,8 +2903,8 @@ mod tests {
         let table3d_file = "virtual://table3d/cache-retention";
         let _ = data_file::unregister_data_file(table2d_file);
         let _ = data_file::unregister_data_file(table3d_file);
-        lock_table2d_cache().clear();
-        lock_table3d_cache().clear();
+        lock_shared_table2d_cache().clear();
+        lock_shared_table3d_cache().clear();
 
         data_file::register_data_file(
             table2d_file,
@@ -2963,24 +2974,22 @@ mod tests {
         let (second3d, _) = load_table3d(table3d_file).expect("load replaced virtual table3d data");
         assert_eq!(second3d.values, vec![3.0; 8]);
 
-        let cached_table2d_entries = {
-            let guard = lock_table2d_cache();
-            guard
+        let cached_table2d_entries = with_table2d_cache(|cache| {
+            cache
                 .entries
                 .keys()
                 .filter(|key| key.file == table2d_file)
                 .count()
-        };
+        });
         assert_eq!(cached_table2d_entries, 1);
 
-        let cached_table3d_entries = {
-            let guard = lock_table3d_cache();
-            guard
+        let cached_table3d_entries = with_table3d_cache(|cache| {
+            cache
                 .entries
                 .keys()
                 .filter(|key| key.file == table3d_file)
                 .count()
-        };
+        });
         assert_eq!(cached_table3d_entries, 1);
 
         let _ = data_file::unregister_data_file(table2d_file);
