@@ -3,7 +3,8 @@
 use super::*;
 use crate::suites::ngspice::{TestRunner as NgspiceOracleRunner, TestRunnerConfig};
 use rspice_core::SimulationError;
-use rspice_core::analysis::ac::ac_sweep_frequencies;
+use rspice_core::analysis::FrequencyGridError;
+use rspice_core::analysis::ac::try_ac_sweep_frequencies_with_abort;
 use rspice_core::analysis::s_param;
 
 impl ExecutionRunner {
@@ -273,11 +274,16 @@ impl ExecutionRunner {
                 start_freq,
                 stop_freq,
             } => {
-                let frequencies =
-                    ac_sweep_frequencies(*variation, *points, *start_freq, *stop_freq);
-                if frequencies.is_empty() {
-                    return (AnalysisOutcome::NotExecuted, false);
-                }
+                let frequencies = match checked_frequency_sweep(
+                    *variation,
+                    *points,
+                    *start_freq,
+                    *stop_freq,
+                    abort,
+                ) {
+                    Ok(frequencies) => frequencies,
+                    Err(outcome) => return (outcome, false),
+                };
                 match engine.run_ac_with_abort(netlist, &frequencies, abort) {
                     Ok(results)
                         if results.iter().all(|point| {
@@ -309,11 +315,16 @@ impl ExecutionRunner {
                 stop_freq,
                 ..
             } => {
-                let frequencies =
-                    ac_sweep_frequencies(*variation, *points, *start_freq, *stop_freq);
-                if frequencies.is_empty() {
-                    return (AnalysisOutcome::NotExecuted, false);
-                }
+                let frequencies = match checked_frequency_sweep(
+                    *variation,
+                    *points,
+                    *start_freq,
+                    *stop_freq,
+                    abort,
+                ) {
+                    Ok(frequencies) => frequencies,
+                    Err(outcome) => return (outcome, false),
+                };
                 let ports = match s_param::collect_ports(netlist) {
                     Ok(ports) => ports,
                     Err(error) => {
@@ -409,11 +420,16 @@ impl ExecutionRunner {
                 start_freq,
                 stop_freq,
             } => {
-                let frequencies =
-                    ac_sweep_frequencies(*variation, *points, *start_freq, *stop_freq);
-                if frequencies.is_empty() {
-                    return (AnalysisOutcome::NotExecuted, false);
-                }
+                let frequencies = match checked_frequency_sweep(
+                    *variation,
+                    *points,
+                    *start_freq,
+                    *stop_freq,
+                    abort,
+                ) {
+                    Ok(frequencies) => frequencies,
+                    Err(outcome) => return (outcome, false),
+                };
                 match engine.run_noise_named_with_input_source_and_abort(
                     netlist,
                     output_node,
@@ -502,6 +518,21 @@ fn classify(result: Result<bool, SimulationError>) -> AnalysisOutcome {
         Err(SimulationError::Aborted) => AnalysisOutcome::TimedOut,
         Err(err) => AnalysisOutcome::Refused(err.to_string()),
     }
+}
+
+fn checked_frequency_sweep(
+    variation: rspice_core::netlist::FreqVariation,
+    points: usize,
+    start: f64,
+    stop: f64,
+    abort: &DeadlineAbort,
+) -> Result<Vec<f64>, AnalysisOutcome> {
+    try_ac_sweep_frequencies_with_abort(variation, points, start, stop, abort).map_err(|error| {
+        match error {
+            FrequencyGridError::Aborted => AnalysisOutcome::TimedOut,
+            _ => AnalysisOutcome::Refused(format!("invalid frequency sweep: {error}")),
+        }
+    })
 }
 
 fn finite<'a>(mut values: impl Iterator<Item = &'a f64>) -> bool {

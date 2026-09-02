@@ -192,7 +192,7 @@ pub(super) fn run_disto(
         );
     }
 
-    let frequencies = generate_frequency_sweep(variation, points, start_freq, stop_freq);
+    let frequencies = generate_frequency_sweep(variation, points, start_freq, stop_freq)?;
     let result = ctx
         .engine
         .run_distortion_with_abort(
@@ -646,7 +646,7 @@ pub(super) fn run_ac(
         );
     }
 
-    let frequencies = generate_frequency_sweep(variation, points, start_freq, stop_freq);
+    let frequencies = generate_frequency_sweep(variation, points, start_freq, stop_freq)?;
     run_ac_frequencies(ctx, frequencies)
 }
 
@@ -949,7 +949,7 @@ pub(super) fn run_noise(
         });
     }
 
-    let frequencies = generate_frequency_sweep(variation, points, start_freq, stop_freq);
+    let frequencies = generate_frequency_sweep(variation, points, start_freq, stop_freq)?;
     let execution = ctx.engine.run_noise_named_with_input_source_and_abort(
         ctx.netlist,
         output_node,
@@ -1464,13 +1464,7 @@ pub(super) fn run_sensitivity_from_command(
     let output_unit = if output_is_current { "A" } else { "V" };
 
     if let Some(ac) = ac_sweep {
-        let freqs = generate_frequency_sweep(ac.variation, ac.points, ac.start_freq, ac.stop_freq);
-        if freqs.is_empty() {
-            return Err(CliError::SimulationError {
-                message: "Invalid .SENS AC frequency sweep configuration".to_string(),
-                analysis: Some("Sensitivity".to_string()),
-            });
-        }
+        let freqs = generate_frequency_sweep(ac.variation, ac.points, ac.start_freq, ac.stop_freq)?;
 
         if !ctx.quiet {
             println!(

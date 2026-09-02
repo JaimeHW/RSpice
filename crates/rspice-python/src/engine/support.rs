@@ -95,14 +95,30 @@ pub(super) fn sweep_frequencies(
     points: usize,
     start: f64,
     stop: f64,
+    max_points: usize,
 ) -> PyResult<Vec<f64>> {
-    let frequencies = ac_sweep_frequencies(variation, points, start, stop);
-    if frequencies.is_empty() {
-        return Err(crate::errors::value_error(format!(
-            "invalid frequency sweep: {variation:?} {points} points from {start} to {stop} Hz"
-        )));
-    }
-    Ok(frequencies)
+    rspice_core::analysis::ac::try_ac_sweep_frequencies_bounded_with_abort(
+        variation,
+        points,
+        start,
+        stop,
+        max_points,
+        &rspice_core::abort_signal::NoAbort,
+    )
+    .map_err(|error| match error {
+        rspice_core::analysis::FrequencyGridError::LimitExceeded { requested, limit } => {
+            crate::errors::simulation_error_to_pyerr(
+                rspice_core::engine::SimulationError::ResourceLimit(
+                    rspice_core::resource::ResourceLimitError {
+                        resource: rspice_core::resource::ResourceKind::AnalysisPoints,
+                        requested,
+                        limit,
+                    },
+                ),
+            )
+        }
+        _ => crate::errors::value_error(format!("invalid frequency sweep: {error}")),
+    })
 }
 
 pub(super) fn ac_data_frequencies(

@@ -4,6 +4,10 @@ use super::*;
 // AC Transfer Function (XF Analysis)
 //=============================================================================
 
+use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::analysis::frequency_grid::{
+    FrequencyGridError, FrequencyGridScale, generate_frequency_grid, validate_generated_sweep,
+};
 use num_complex::Complex64;
 use std::f64::consts::PI;
 
@@ -453,82 +457,48 @@ impl AcTransferConfig {
     }
 
     /// Validate sweep configuration.
-    pub fn validate(&self) -> Result<(), String> {
-        if self.points_per_decade == 0 {
-            return Err("AC transfer sweep must have at least one point".to_string());
-        }
-        if !self.freq_start.is_finite() {
-            return Err("AC transfer start frequency must be finite".to_string());
-        }
-        if !self.freq_stop.is_finite() || self.freq_stop < self.freq_start {
-            return Err("AC transfer stop frequency must be finite and >= start".to_string());
-        }
+    pub fn validate(&self) -> Result<(), FrequencyGridError> {
+        validate_generated_sweep(
+            self.freq_start,
+            self.freq_stop,
+            self.points_per_decade,
+            self.grid_scale(),
+            true,
+        )
+    }
 
+    /// Generate frequency points while preserving validation and resource failures.
+    pub fn frequency_points(&self) -> Result<Vec<Value>, FrequencyGridError> {
+        self.try_frequency_points()
+    }
+
+    /// Generate frequency points without a cancellation source.
+    pub fn try_frequency_points(&self) -> Result<Vec<Value>, FrequencyGridError> {
+        self.try_frequency_points_with_abort(&NoAbort)
+    }
+
+    /// Generate frequency points with cooperative cancellation.
+    pub fn try_frequency_points_with_abort(
+        &self,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, FrequencyGridError> {
+        generate_frequency_grid(
+            self.freq_start,
+            self.freq_stop,
+            self.points_per_decade,
+            self.grid_scale(),
+            true,
+            1,
+            abort,
+        )
+    }
+
+    fn grid_scale(&self) -> FrequencyGridScale {
         match self.sweep_type {
-            AcSweepType::Linear if self.freq_start < 0.0 => {
-                Err("AC transfer start frequency must be non-negative".to_string())
-            }
-            AcSweepType::Decade | AcSweepType::Octave if self.freq_start <= 0.0 => Err(
-                "AC transfer start frequency must be positive for logarithmic sweeps".to_string(),
-            ),
-            _ => Ok(()),
+            AcSweepType::Linear => FrequencyGridScale::Linear,
+            AcSweepType::Decade => FrequencyGridScale::Decade,
+            AcSweepType::Octave => FrequencyGridScale::Octave,
         }
-    }
-
-    /// Generate frequency points
-    pub fn frequency_points(&self) -> Vec<Value> {
-        self.try_frequency_points().unwrap_or_default()
-    }
-
-    /// Generate frequency points, preserving validation failures for callers
-    /// that need to distinguish invalid input from an empty result.
-    pub fn try_frequency_points(&self) -> Result<Vec<Value>, String> {
-        self.validate()?;
-
-        Ok(match self.sweep_type {
-            AcSweepType::Linear => {
-                let n = self.points_per_decade;
-                if n <= 1 {
-                    vec![self.freq_start]
-                } else {
-                    let step = (self.freq_stop - self.freq_start) / (n - 1) as Value;
-                    (0..n)
-                        .map(|i| self.freq_start + i as Value * step)
-                        .collect()
-                }
-            }
-            AcSweepType::Decade => {
-                let log_start = self.freq_start.log10();
-                let log_stop = self.freq_stop.log10();
-                let num_decades = log_stop - log_start;
-                let total_points = (num_decades * self.points_per_decade as f64).ceil() as usize;
-                let total_points = total_points.max(1);
-
-                (0..total_points)
-                    .map(|i| {
-                        let log_f = log_start
-                            + (log_stop - log_start) * i as f64 / (total_points - 1).max(1) as f64;
-                        10.0_f64.powf(log_f)
-                    })
-                    .collect()
-            }
-            AcSweepType::Octave => {
-                let log2_start = self.freq_start.log2();
-                let log2_stop = self.freq_stop.log2();
-                let num_octaves = log2_stop - log2_start;
-                let total_points = (num_octaves * self.points_per_decade as f64).ceil() as usize;
-                let total_points = total_points.max(1);
-
-                (0..total_points)
-                    .map(|i| {
-                        let log2_f = log2_start
-                            + (log2_stop - log2_start) * i as f64
-                                / (total_points - 1).max(1) as f64;
-                        2.0_f64.powf(log2_f)
-                    })
-                    .collect()
-            }
-        })
     }
 }
 
@@ -546,19 +516,44 @@ impl AcTransferAnalyzer {
     /// Analyze using a transfer function evaluator
     ///
     /// The evaluator should return H(jω) for given frequency
-    pub fn analyze<F>(&self, mut evaluator: F) -> AcTransferResult
+    pub fn analyze<F>(&self, evaluator: F) -> Result<AcTransferResult, FrequencyGridError>
     where
         F: FnMut(Value) -> Complex64,
     {
-        let mut result = AcTransferResult::new(&self.config.output_node, &self.config.input_source);
+        self.analyze_with_abort(evaluator, &NoAbort)
+    }
 
-        for freq in self.config.frequency_points() {
+    /// Analyze using a cancellable transfer-function evaluator sweep.
+    pub fn analyze_with_abort<F>(
+        &self,
+        mut evaluator: F,
+        abort: &dyn AbortSignal,
+    ) -> Result<AcTransferResult, FrequencyGridError>
+    where
+        F: FnMut(Value) -> Complex64,
+    {
+        let frequencies = self.config.try_frequency_points_with_abort(abort)?;
+        let mut result = AcTransferResult::new(&self.config.output_node, &self.config.input_source);
+        result
+            .points
+            .try_reserve_exact(frequencies.len())
+            .map_err(|_| FrequencyGridError::Allocation {
+                requested: frequencies.len(),
+            })?;
+
+        for (index, freq) in frequencies.into_iter().enumerate() {
+            if index % 256 == 0 && abort.is_aborted() {
+                return Err(FrequencyGridError::Aborted);
+            }
             let h = evaluator(freq);
             result.add_point(AcTransferPoint::new(freq, h));
         }
+        if abort.is_aborted() {
+            return Err(FrequencyGridError::Aborted);
+        }
 
         result.compute_characteristics();
-        result
+        Ok(result)
     }
 }
 
@@ -579,12 +574,12 @@ mod tests {
             .expect_err("invalid AC transfer sweep should return a validation error");
 
         assert!(
-            err.contains("start frequency"),
+            matches!(err, FrequencyGridError::InvalidStartFrequency),
             "unexpected AC transfer error: {err}"
         );
-        assert!(
-            config.frequency_points().is_empty(),
-            "legacy frequency_points should expose invalid grids as empty"
+        assert_eq!(
+            config.frequency_points(),
+            Err(FrequencyGridError::InvalidStartFrequency)
         );
     }
 
@@ -596,10 +591,45 @@ mod tests {
             AcTransferConfig::decade("out", "vin", 1.0e6, 1.0, 10),
             AcTransferConfig::linear("out", "vin", 1.0, 1.0e6, 0),
         ] {
-            assert!(
-                config.frequency_points().is_empty(),
-                "invalid AC transfer sweep config produced points: {config:?}"
-            );
+            assert!(config.frequency_points().is_err());
         }
+    }
+
+    #[test]
+    fn frequency_points_preserve_ordinary_grid_and_fail_before_extreme_allocation() {
+        assert_eq!(
+            AcTransferConfig::linear("out", "vin", 1.0, 2.0, 3)
+                .frequency_points()
+                .expect("ordinary linear grid"),
+            vec![1.0, 1.5, 2.0]
+        );
+        assert!(matches!(
+            AcTransferConfig::linear("out", "vin", 1.0, 2.0, usize::MAX).frequency_points(),
+            Err(FrequencyGridError::Allocation { .. })
+        ));
+        assert_eq!(
+            AcTransferConfig::decade("out", "vin", 1.0e3, 1.0e3, 10)
+                .frequency_points()
+                .expect("equal AC transfer endpoints remain valid"),
+            vec![1.0e3]
+        );
+    }
+
+    #[test]
+    fn frequency_points_and_analyzer_propagate_abort() {
+        let config = AcTransferConfig::linear("out", "vin", 1.0, 2.0, 3);
+        assert_eq!(
+            config.try_frequency_points_with_abort(&crate::abort_signal::ImmediateAbort),
+            Err(FrequencyGridError::Aborted)
+        );
+        assert_eq!(
+            AcTransferAnalyzer::new(config)
+                .analyze_with_abort(
+                    |_| Complex64::new(1.0, 0.0),
+                    &crate::abort_signal::ImmediateAbort,
+                )
+                .expect_err("aborted transfer analysis"),
+            FrequencyGridError::Aborted
+        );
     }
 }

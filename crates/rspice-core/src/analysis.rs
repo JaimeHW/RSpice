@@ -28,6 +28,7 @@ pub mod dc;
 pub mod distortion;
 pub mod floquet;
 pub mod fourier;
+pub mod frequency_grid;
 pub mod harmonic_balance;
 pub mod measure;
 mod measure_file;
@@ -55,6 +56,7 @@ pub use floquet::{
     FloquetSpectrumEvidence, FloquetStabilityVerdict, classify_floquet_stability,
     select_autonomous_phase_mode,
 };
+pub use frequency_grid::{FrequencyGridError, FrequencyGridScale};
 pub use monte_carlo::{
     Distribution, MonteCarloConfig, MonteCarloResult, MonteCarloRunner, Tolerance,
     VariableStatistics, VariationSet,

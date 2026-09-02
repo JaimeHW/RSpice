@@ -6,6 +6,11 @@
 //! - Accuracy and convergence controls
 
 use crate::Value;
+use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::analysis::frequency_grid::{
+    FrequencyGridError, FrequencyGridScale, frequency_point_count, generate_frequency_grid,
+    validate_generated_sweep,
+};
 
 //=============================================================================
 // Frequency Sweep Type
@@ -186,91 +191,43 @@ impl PacConfig {
         self
     }
 
-    /// Generate frequency points based on sweep configuration
-    pub fn frequency_points(&self) -> Vec<Value> {
-        self.try_frequency_points().unwrap_or_default()
+    /// Generate frequency points while preserving validation and resource failures.
+    pub fn frequency_points(&self) -> Result<Vec<Value>, FrequencyGridError> {
+        self.try_frequency_points()
     }
 
-    /// Generate frequency points, preserving validation failures for callers
-    /// that need to distinguish invalid input from a deliberately empty grid.
-    pub fn try_frequency_points(&self) -> Result<Vec<Value>, String> {
-        self.validate()?;
+    /// Generate frequency points without a cancellation source.
+    pub fn try_frequency_points(&self) -> Result<Vec<Value>, FrequencyGridError> {
+        self.try_frequency_points_with_abort(&NoAbort)
+    }
 
-        Ok(match self.sweep_type {
-            PacSweepType::Linear => self.linear_points(),
-            PacSweepType::Decade => self.decade_points(),
-            PacSweepType::Octave => self.octave_points(),
-        })
+    /// Generate frequency points with cooperative cancellation.
+    pub fn try_frequency_points_with_abort(
+        &self,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, FrequencyGridError> {
+        generate_frequency_grid(
+            self.sweep_start,
+            self.sweep_stop,
+            self.num_points,
+            self.grid_scale(),
+            false,
+            1,
+            abort,
+        )
     }
 
     /// Number of points the configured sweep will generate, without
     /// allocating the frequency vector.
-    pub fn frequency_point_count(&self) -> Result<usize, String> {
-        self.validate()?;
-        let count = match self.sweep_type {
-            PacSweepType::Linear => self.num_points,
-            PacSweepType::Decade => ((self.sweep_stop.log10() - self.sweep_start.log10())
-                * self.num_points as Value)
-                .ceil() as usize,
-            PacSweepType::Octave => ((self.sweep_stop.log2() - self.sweep_start.log2())
-                * self.num_points as Value)
-                .ceil() as usize,
-        };
-        Ok(count.max(1))
-    }
-
-    /// Generate linear frequency sweep points
-    fn linear_points(&self) -> Vec<Value> {
-        if self.num_points <= 1 {
-            return vec![self.sweep_start];
-        }
-
-        let step = (self.sweep_stop - self.sweep_start) / (self.num_points - 1) as Value;
-        (0..self.num_points)
-            .map(|i| self.sweep_start + step * i as Value)
-            .collect()
-    }
-
-    /// Generate logarithmic (decade) frequency sweep points
-    fn decade_points(&self) -> Vec<Value> {
-        if self.sweep_start <= 0.0 || self.sweep_stop <= 0.0 {
-            return self.linear_points();
-        }
-
-        let log_start = self.sweep_start.log10();
-        let log_stop = self.sweep_stop.log10();
-        let num_decades = log_stop - log_start;
-        let total_points = (num_decades * self.num_points as Value).ceil() as usize;
-
-        if total_points <= 1 {
-            return vec![self.sweep_start];
-        }
-
-        let log_step = (log_stop - log_start) / (total_points - 1) as Value;
-        (0..total_points)
-            .map(|i| 10.0_f64.powf(log_start + log_step * i as Value))
-            .collect()
-    }
-
-    /// Generate octave frequency sweep points
-    fn octave_points(&self) -> Vec<Value> {
-        if self.sweep_start <= 0.0 || self.sweep_stop <= 0.0 {
-            return self.linear_points();
-        }
-
-        let log2_start = self.sweep_start.log2();
-        let log2_stop = self.sweep_stop.log2();
-        let num_octaves = log2_stop - log2_start;
-        let total_points = (num_octaves * self.num_points as Value).ceil() as usize;
-
-        if total_points <= 1 {
-            return vec![self.sweep_start];
-        }
-
-        let log_step = (log2_stop - log2_start) / (total_points - 1) as Value;
-        (0..total_points)
-            .map(|i| 2.0_f64.powf(log2_start + log_step * i as Value))
-            .collect()
+    pub fn frequency_point_count(&self) -> Result<usize, FrequencyGridError> {
+        self.validate_frequency_sweep()?;
+        frequency_point_count(
+            self.sweep_start,
+            self.sweep_stop,
+            self.num_points,
+            self.grid_scale(),
+            1,
+        )
     }
 
     /// Get the number of sidebands being analyzed
@@ -286,15 +243,8 @@ impl PacConfig {
 
     /// Validate configuration
     pub fn validate(&self) -> Result<(), String> {
-        if !self.sweep_start.is_finite() || self.sweep_start <= 0.0 {
-            return Err("Sweep start frequency must be positive and finite".to_string());
-        }
-        if !self.sweep_stop.is_finite() || self.sweep_stop < self.sweep_start {
-            return Err("Sweep stop frequency must be finite and >= start".to_string());
-        }
-        if self.num_points == 0 {
-            return Err("Number of frequency points must be at least 1".to_string());
-        }
+        self.validate_frequency_sweep()
+            .map_err(|error| error.to_string())?;
         if self.sideband_min > self.sideband_max {
             return Err("Sideband min must be <= sideband max".to_string());
         }
@@ -306,6 +256,24 @@ impl PacConfig {
             return Err("Tolerances must be positive and finite".to_string());
         }
         Ok(())
+    }
+
+    fn validate_frequency_sweep(&self) -> Result<(), FrequencyGridError> {
+        validate_generated_sweep(
+            self.sweep_start,
+            self.sweep_stop,
+            self.num_points,
+            self.grid_scale(),
+            false,
+        )
+    }
+
+    fn grid_scale(&self) -> FrequencyGridScale {
+        match self.sweep_type {
+            PacSweepType::Linear => FrequencyGridScale::Linear,
+            PacSweepType::Decade => FrequencyGridScale::Decade,
+            PacSweepType::Octave => FrequencyGridScale::Octave,
+        }
     }
 }
 
@@ -353,12 +321,48 @@ mod tests {
             .expect_err("invalid PAC sweep should return the validation error");
 
         assert!(
-            err.contains("Sweep stop frequency"),
+            matches!(err, FrequencyGridError::InvalidStopFrequency),
             "unexpected PAC frequency error: {err}"
         );
-        assert!(
-            config.frequency_points().is_empty(),
-            "legacy frequency_points keeps returning an empty grid for invalid configs"
+        assert_eq!(
+            config.frequency_points(),
+            Err(FrequencyGridError::InvalidStopFrequency)
+        );
+    }
+
+    #[test]
+    fn frequency_grid_is_checked_fallible_and_cancellable() {
+        assert_eq!(
+            PacConfig::new()
+                .with_sweep(1.0, 2.0, 3)
+                .with_sweep_type(PacSweepType::Linear)
+                .frequency_points()
+                .expect("ordinary PAC grid"),
+            vec![1.0, 1.5, 2.0]
+        );
+        assert!(matches!(
+            PacConfig::new()
+                .with_sweep(1.0, 2.0, usize::MAX)
+                .with_sweep_type(PacSweepType::Linear)
+                .frequency_points(),
+            Err(FrequencyGridError::Allocation { .. })
+        ));
+        assert_eq!(
+            PacConfig::new().try_frequency_points_with_abort(&crate::abort_signal::ImmediateAbort),
+            Err(FrequencyGridError::Aborted)
+        );
+        assert_eq!(
+            PacConfig::new()
+                .with_sweep(f64::MIN_POSITIVE, f64::MAX, usize::MAX)
+                .frequency_point_count(),
+            Err(FrequencyGridError::PointCountOverflow)
+        );
+        assert_eq!(
+            PacConfig::new()
+                .with_sweep(1.0e3, 1.0e3, 10)
+                .frequency_points()
+                .expect("equal PAC endpoints remain valid"),
+            vec![1.0e3]
         );
     }
 }

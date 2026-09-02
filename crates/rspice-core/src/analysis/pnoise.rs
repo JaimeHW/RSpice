@@ -29,7 +29,7 @@ mod floquet;
 mod result;
 mod solver;
 
-pub use config::{NoiseOutputNode, PnoiseConfig, PnoiseSideband, PnoiseSweep};
+pub use config::{NoiseOutputNode, PnoiseConfig, PnoiseConfigError, PnoiseSideband, PnoiseSweep};
 pub use floquet::{FloquetAnalyzer, FloquetMode, TransferFunction};
 pub use result::{NoiseContributor, PhaseNoisePoint, PnoiseResult};
-pub use solver::{PnoiseSolver, PnoiseState};
+pub use solver::{PnoiseError, PnoiseSolver, PnoiseState};

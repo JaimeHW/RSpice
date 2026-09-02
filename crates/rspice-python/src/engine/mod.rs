@@ -20,7 +20,6 @@
 use numpy::{PyArray1, ToPyArray};
 use pyo3::prelude::*;
 use rspice_core::analysis::PssConfig;
-use rspice_core::analysis::ac::ac_sweep_frequencies;
 use rspice_core::analysis::harmonic_balance::{HbConfig, HbTone};
 use rspice_core::analysis::pac::{PacConfig, PacSweepType};
 use rspice_core::analysis::stb::{StbConfig, StbSweepType};
@@ -454,7 +453,12 @@ impl PyEngine {
         stop_freq: f64,
     ) -> PyResult<PyAcResult> {
         let variation = parse_variation(variation)?;
-        let frequencies = sweep_frequencies(variation, points, start_freq, stop_freq)?;
+        let max_points = self
+            .engine_for_netlist(&netlist.inner)
+            .config()
+            .resource_limits
+            .max_analysis_points;
+        let frequencies = sweep_frequencies(variation, points, start_freq, stop_freq, max_points)?;
         self.ac_impl(py, netlist, frequencies)
     }
 
@@ -488,7 +492,12 @@ impl PyEngine {
         f2_over_f1: Option<f64>,
     ) -> PyResult<PyDistortionResult> {
         let variation = parse_variation(variation)?;
-        let frequencies = sweep_frequencies(variation, points, start_freq, stop_freq)?;
+        let max_points = self
+            .engine_for_netlist(&netlist.inner)
+            .config()
+            .resource_limits
+            .max_analysis_points;
+        let frequencies = sweep_frequencies(variation, points, start_freq, stop_freq, max_points)?;
         self.distortion_impl(py, netlist, frequencies, f2_over_f1)
     }
 
@@ -526,7 +535,12 @@ impl PyEngine {
         let variation = parse_variation(variation)?;
         // Reuse the shared sweep generator for strict argument validation and
         // exact DEC/OCT/LIN point semantics before starting the analysis.
-        sweep_frequencies(variation, points, start_freq, stop_freq)?;
+        let max_points = self
+            .engine_for_netlist(&netlist.inner)
+            .config()
+            .resource_limits
+            .max_analysis_points;
+        sweep_frequencies(variation, points, start_freq, stop_freq, max_points)?;
         self.stb_impl(py, netlist, probe, variation, points, start_freq, stop_freq)
     }
 

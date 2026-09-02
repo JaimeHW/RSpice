@@ -184,8 +184,24 @@ pub(super) fn generate_frequency_sweep(
     points: usize,
     start_freq: f64,
     stop_freq: f64,
-) -> Vec<f64> {
-    rspice_core::analysis::ac::ac_sweep_frequencies(variation, points, start_freq, stop_freq)
+) -> Result<Vec<f64>, CliError> {
+    rspice_core::analysis::ac::try_ac_sweep_frequencies_with_abort(
+        variation,
+        points,
+        start_freq,
+        stop_freq,
+        &crate::abort::ProcessAbort,
+    )
+    .map_err(|error| match error {
+        rspice_core::analysis::FrequencyGridError::Aborted => CliError::Interrupted,
+        _ => CliError::InvalidArgument {
+            message: format!("invalid frequency sweep: {error}"),
+            suggestion: Some(
+                "Use a finite ascending range, a positive point count, and positive log-sweep frequencies"
+                    .to_string(),
+            ),
+        },
+    })
 }
 
 pub(super) fn map_hdf5_output_error(path: &Path, err: crate::hdf5::Hdf5Error) -> CliError {

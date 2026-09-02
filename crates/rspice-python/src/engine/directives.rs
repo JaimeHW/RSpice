@@ -622,6 +622,13 @@ fn execute(
     out: &mut DirectiveOutcomes,
 ) -> PyResult<()> {
     let net = &netlist.inner;
+    let max_analysis_points = || {
+        py_engine
+            .engine_for_netlist(net)
+            .config()
+            .resource_limits
+            .max_analysis_points
+    };
 
     match analysis {
         AnalysisCommand::Op => {
@@ -701,7 +708,13 @@ fn execute(
             start_freq,
             stop_freq,
         } => {
-            let frequencies = sweep_frequencies(*variation, *points, *start_freq, *stop_freq)?;
+            let frequencies = sweep_frequencies(
+                *variation,
+                *points,
+                *start_freq,
+                *stop_freq,
+                max_analysis_points(),
+            )?;
             let result = py_engine.ac_impl(py, netlist, frequencies)?;
             let handle = Py::new(py, result)?;
             out.ac.push_with(handle, |handle| handle.clone_ref(py));
@@ -766,7 +779,13 @@ fn execute(
             stop_freq,
             f2_over_f1,
         } => {
-            let frequencies = sweep_frequencies(*variation, *points, *start_freq, *stop_freq)?;
+            let frequencies = sweep_frequencies(
+                *variation,
+                *points,
+                *start_freq,
+                *stop_freq,
+                max_analysis_points(),
+            )?;
             let result = py_engine.distortion_impl(py, netlist, frequencies, *f2_over_f1)?;
             let handle = Py::new(py, result)?;
             out.distortion
@@ -783,7 +802,13 @@ fn execute(
             stop_freq,
             do_noise,
         } => {
-            let frequencies = sweep_frequencies(*variation, *points, *start_freq, *stop_freq)?;
+            let frequencies = sweep_frequencies(
+                *variation,
+                *points,
+                *start_freq,
+                *stop_freq,
+                max_analysis_points(),
+            )?;
             out.s_parameters.push(py_engine.sparameter_impl(
                 py,
                 netlist,
@@ -826,7 +851,13 @@ fn execute(
                 )?),
                 None => None,
             };
-            let frequencies = sweep_frequencies(*variation, *points, *start_freq, *stop_freq)?;
+            let frequencies = sweep_frequencies(
+                *variation,
+                *points,
+                *start_freq,
+                *stop_freq,
+                max_analysis_points(),
+            )?;
             let source = if input_source.is_empty() {
                 None
             } else {
@@ -984,12 +1015,13 @@ fn execute(
             ac_sweep,
         } => {
             if let Some(sweep) = ac_sweep {
-                let frequencies = ac_sweep_frequencies(
+                let frequencies = sweep_frequencies(
                     sweep.variation,
                     sweep.points,
                     sweep.start_freq,
                     sweep.stop_freq,
-                );
+                    max_analysis_points(),
+                )?;
                 let output = NodeIdentifier::Name(output_node.clone());
                 let reference = reference_node
                     .as_ref()

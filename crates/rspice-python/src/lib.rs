@@ -79,13 +79,15 @@ fn ac_frequencies<'py>(
             )));
         }
     };
-    let frequencies =
-        rspice_core::analysis::ac::ac_sweep_frequencies(variation, points, start_freq, stop_freq);
-    if frequencies.is_empty() {
-        return Err(crate::errors::value_error(format!(
-            "invalid frequency sweep: {points} points from {start_freq} to {stop_freq} Hz"
-        )));
-    }
+    let frequencies = rspice_core::analysis::ac::try_ac_sweep_frequencies_bounded_with_abort(
+        variation,
+        points,
+        start_freq,
+        stop_freq,
+        rspice_core::resource::ResourceLimits::default().max_analysis_points,
+        &rspice_core::abort_signal::NoAbort,
+    )
+    .map_err(|error| crate::errors::value_error(format!("invalid frequency sweep: {error}")))?;
     Ok(frequencies.to_pyarray(py))
 }
 

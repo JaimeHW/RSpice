@@ -30,6 +30,11 @@
 //! frequency pair related by the LO frequency.
 
 use crate::Value;
+use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::analysis::frequency_grid::{
+    FrequencyGridError, FrequencyGridScale, frequency_point_count, generate_frequency_grid,
+    validate_generated_sweep,
+};
 use num_complex::Complex64;
 use std::f64::consts::PI;
 
@@ -153,89 +158,69 @@ impl PxfConfig {
         self
     }
 
-    /// Generate frequency points based on sweep type
-    pub fn frequency_points(&self) -> Vec<Value> {
-        self.try_frequency_points().unwrap_or_default()
+    /// Generate frequency points while preserving validation and resource failures.
+    pub fn frequency_points(&self) -> Result<Vec<Value>, PxfError> {
+        self.try_frequency_points()
     }
 
     /// Generate frequency points, preserving validation failures for callers
     /// that need to distinguish invalid input from a deliberately empty grid.
     pub fn try_frequency_points(&self) -> Result<Vec<Value>, PxfError> {
-        self.validate()?;
-
-        Ok(match self.sweep_type {
-            PxfSweepType::Linear => self.linear_points(),
-            PxfSweepType::Decade => self.decade_points(),
-            PxfSweepType::Octave => self.octave_points(),
-        })
+        self.try_frequency_points_with_abort(&NoAbort)
     }
 
-    fn linear_points(&self) -> Vec<Value> {
-        if self.num_points <= 1 {
-            return vec![self.freq_start];
-        }
-        let step = (self.freq_stop - self.freq_start) / (self.num_points - 1) as Value;
-        (0..self.num_points)
-            .map(|i| self.freq_start + i as Value * step)
-            .collect()
+    /// Generate frequency points with cooperative cancellation.
+    pub fn try_frequency_points_with_abort(
+        &self,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, PxfError> {
+        generate_frequency_grid(
+            self.freq_start,
+            self.freq_stop,
+            self.num_points,
+            self.grid_scale(),
+            false,
+            1,
+            abort,
+        )
+        .map_err(PxfError::FrequencyGrid)
     }
 
-    fn decade_points(&self) -> Vec<Value> {
-        if self.freq_start <= 0.0 || self.freq_stop <= 0.0 {
-            return vec![self.freq_start.max(1e-15)];
-        }
-        let log_start = self.freq_start.log10();
-        let log_stop = self.freq_stop.log10();
-        let num_decades = log_stop - log_start;
-        let total_points = (num_decades * self.num_points as f64).ceil() as usize;
-        let total_points = total_points.max(1);
-
-        (0..total_points)
-            .map(|i| {
-                let log_f = log_start
-                    + (log_stop - log_start) * i as f64 / (total_points - 1).max(1) as f64;
-                10.0_f64.powf(log_f)
-            })
-            .collect()
+    /// Number of points the configured sweep will retain without allocating it.
+    pub fn frequency_point_count(&self) -> Result<usize, PxfError> {
+        self.validate_frequency_sweep()?;
+        frequency_point_count(
+            self.freq_start,
+            self.freq_stop,
+            self.num_points,
+            self.grid_scale(),
+            1,
+        )
+        .map_err(PxfError::FrequencyGrid)
     }
 
-    fn octave_points(&self) -> Vec<Value> {
-        if self.freq_start <= 0.0 || self.freq_stop <= 0.0 {
-            return vec![self.freq_start.max(1e-15)];
+    fn grid_scale(&self) -> FrequencyGridScale {
+        match self.sweep_type {
+            PxfSweepType::Linear => FrequencyGridScale::Linear,
+            PxfSweepType::Decade => FrequencyGridScale::Decade,
+            PxfSweepType::Octave => FrequencyGridScale::Octave,
         }
-        let log2_start = self.freq_start.log2();
-        let log2_stop = self.freq_stop.log2();
-        let num_octaves = log2_stop - log2_start;
-        let total_points = (num_octaves * self.num_points as f64).ceil() as usize;
-        let total_points = total_points.max(1);
-
-        (0..total_points)
-            .map(|i| {
-                let log2_f = log2_start
-                    + (log2_stop - log2_start) * i as f64 / (total_points - 1).max(1) as f64;
-                2.0_f64.powf(log2_f)
-            })
-            .collect()
     }
 
     /// Validate configuration
     pub fn validate(&self) -> Result<(), PxfError> {
-        if !self.freq_start.is_finite() || self.freq_start <= 0.0 {
-            return Err(PxfError::InvalidFrequency(
-                "Start frequency must be positive and finite".into(),
-            ));
-        }
-        if !self.freq_stop.is_finite() || self.freq_stop < self.freq_start {
-            return Err(PxfError::InvalidFrequency(
-                "Stop frequency must be finite and >= start".into(),
-            ));
-        }
-        if self.num_points == 0 {
-            return Err(PxfError::InvalidConfiguration(
-                "Must have at least one point".into(),
-            ));
-        }
-        Ok(())
+        self.validate_frequency_sweep()
+    }
+
+    fn validate_frequency_sweep(&self) -> Result<(), PxfError> {
+        validate_generated_sweep(
+            self.freq_start,
+            self.freq_stop,
+            self.num_points,
+            self.grid_scale(),
+            false,
+        )
+        .map_err(PxfError::FrequencyGrid)
     }
 }
 
@@ -246,6 +231,8 @@ impl PxfConfig {
 /// Errors during PXF analysis
 #[derive(Debug, Clone)]
 pub enum PxfError {
+    /// Frequency-grid validation, capacity, allocation, or cancellation failure.
+    FrequencyGrid(FrequencyGridError),
     /// Invalid frequency specification
     InvalidFrequency(String),
     /// Invalid configuration
@@ -259,6 +246,7 @@ pub enum PxfError {
 impl std::fmt::Display for PxfError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            PxfError::FrequencyGrid(error) => write!(f, "PXF frequency grid: {error}"),
             PxfError::InvalidFrequency(s) => write!(f, "Invalid frequency: {}", s),
             PxfError::InvalidConfiguration(s) => write!(f, "Invalid configuration: {}", s),
             PxfError::MissingPssSolution(s) => write!(f, "Missing PSS solution: {}", s),
@@ -532,13 +520,55 @@ mod tests {
             .try_frequency_points()
             .expect_err("invalid PXF sweep should return the validation error");
 
-        assert!(
-            err.to_string().contains("Stop frequency"),
-            "unexpected PXF frequency error: {err}"
+        assert!(matches!(
+            err,
+            PxfError::FrequencyGrid(FrequencyGridError::InvalidStopFrequency)
+        ));
+        assert!(matches!(
+            config.frequency_points(),
+            Err(PxfError::FrequencyGrid(
+                FrequencyGridError::InvalidStopFrequency
+            ))
+        ));
+    }
+
+    #[test]
+    fn frequency_grid_is_checked_fallible_and_cancellable() {
+        assert_eq!(
+            PxfConfig::new()
+                .with_sweep(1.0, 2.0, 3)
+                .with_sweep_type(PxfSweepType::Linear)
+                .frequency_points()
+                .expect("ordinary PXF grid"),
+            vec![1.0, 1.5, 2.0]
         );
-        assert!(
-            config.frequency_points().is_empty(),
-            "legacy frequency_points keeps returning an empty grid for invalid configs"
+        assert!(matches!(
+            PxfConfig::new()
+                .with_sweep(1.0, 2.0, usize::MAX)
+                .with_sweep_type(PxfSweepType::Linear)
+                .frequency_points(),
+            Err(PxfError::FrequencyGrid(
+                FrequencyGridError::Allocation { .. }
+            ))
+        ));
+        assert!(matches!(
+            PxfConfig::new().try_frequency_points_with_abort(&crate::abort_signal::ImmediateAbort),
+            Err(PxfError::FrequencyGrid(FrequencyGridError::Aborted))
+        ));
+        assert!(matches!(
+            PxfConfig::new()
+                .with_sweep(f64::MIN_POSITIVE, f64::MAX, usize::MAX)
+                .frequency_point_count(),
+            Err(PxfError::FrequencyGrid(
+                FrequencyGridError::PointCountOverflow
+            ))
+        ));
+        assert_eq!(
+            PxfConfig::new()
+                .with_sweep(1.0e3, 1.0e3, 10)
+                .frequency_points()
+                .expect("equal PXF endpoints remain valid"),
+            vec![1.0e3]
         );
     }
 }

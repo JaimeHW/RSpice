@@ -10,6 +10,8 @@ use super::config::PnoiseConfig;
 use super::floquet::FloquetAnalyzer;
 use super::result::{NoiseContributor, PhaseNoisePoint, PnoiseResult};
 use crate::Value;
+use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::analysis::FrequencyGridError;
 use std::f64::consts::PI;
 
 /// Phase noise solver state
@@ -262,6 +264,18 @@ impl PnoiseSolver {
 
     /// Compute phase noise at all offset frequencies
     pub fn compute(&mut self) -> Result<PnoiseResult, PnoiseError> {
+        self.compute_with_abort(&NoAbort)
+    }
+
+    /// Compute phase noise with cancellation through grid construction and
+    /// each retained offset/contributor scan.
+    pub fn compute_with_abort(
+        &mut self,
+        abort: &dyn AbortSignal,
+    ) -> Result<PnoiseResult, PnoiseError> {
+        if abort.is_aborted() {
+            return Err(PnoiseError::Aborted);
+        }
         // Validate
         if !self.state.carrier_freq.is_finite() || self.state.carrier_freq <= 0.0 {
             return Err(PnoiseError::InvalidCarrier);
@@ -279,10 +293,10 @@ impl PnoiseSolver {
         }
 
         // Get offset frequencies
-        let offsets = self.config.offset_frequencies();
-        if offsets.is_empty() {
-            return Err(PnoiseError::InvalidSweep);
-        }
+        let offsets = self
+            .config
+            .try_offset_frequencies_with_abort(abort)
+            .map_err(PnoiseError::FrequencyGrid)?;
 
         // Create result
         let mut result =
@@ -299,15 +313,24 @@ impl PnoiseSolver {
 
         // Compute phase noise at each offset
         for &offset in &offsets {
+            if abort.is_aborted() {
+                return Err(PnoiseError::Aborted);
+            }
             let pn = self.compute_at_offset(floquet, offset);
             result.add_point(pn);
         }
 
         // Add contributor breakdown
         for noise in &self.state.device_noise {
+            if abort.is_aborted() {
+                return Err(PnoiseError::Aborted);
+            }
             let mut contributor = NoiseContributor::new(&noise.name, &noise.device_type);
 
             for &offset in &offsets {
+                if abort.is_aborted() {
+                    return Err(PnoiseError::Aborted);
+                }
                 let contrib = self.compute_device_contribution(floquet, noise, offset);
                 contributor.add_contribution(offset, contrib);
             }
@@ -395,6 +418,10 @@ impl PnoiseSolver {
 /// PNoise solver errors
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PnoiseError {
+    /// Frequency-grid validation, allocation, or cancellation failure.
+    FrequencyGrid(FrequencyGridError),
+    /// The caller cancelled phase-noise projection.
+    Aborted,
     /// Invalid carrier/reference frequency
     InvalidCarrier,
     /// No nodes in circuit
@@ -414,6 +441,8 @@ pub enum PnoiseError {
 impl std::fmt::Display for PnoiseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::FrequencyGrid(error) => write!(f, "Invalid offset frequency sweep: {error}"),
+            Self::Aborted => write!(f, "Phase-noise analysis aborted"),
             Self::InvalidCarrier => write!(f, "Invalid carrier frequency"),
             Self::NoNodes => write!(f, "No nodes in circuit"),
             Self::NoNoiseSources => write!(f, "No noise sources defined"),

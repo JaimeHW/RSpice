@@ -7,6 +7,11 @@
 //! - Integration bandwidth for RMS jitter calculation
 
 use crate::Value;
+use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::analysis::frequency_grid::{
+    FrequencyGridError, FrequencyGridScale, copy_explicit_frequency_grid, frequency_point_count,
+    generate_frequency_grid, validate_generated_sweep,
+};
 
 /// Phase noise analysis configuration
 #[derive(Debug, Clone)]
@@ -86,21 +91,33 @@ impl PnoiseConfig {
 
     /// Validate configuration
     pub fn validate(&self) -> Result<(), PnoiseConfigError> {
-        if !self.sweep.is_valid() {
-            return Err(PnoiseConfigError::Sweep);
-        }
+        self.sweep
+            .validate()
+            .map_err(PnoiseConfigError::FrequencyGrid)?;
         if self.max_sidebands == 0 {
             return Err(PnoiseConfigError::Sidebands);
         }
-        if self.reltol <= 0.0 || self.abstol < 0.0 {
+        if !self.reltol.is_finite()
+            || !self.abstol.is_finite()
+            || self.reltol <= 0.0
+            || self.abstol < 0.0
+        {
             return Err(PnoiseConfigError::Tolerance);
         }
         Ok(())
     }
 
     /// Generate offset frequency points for the sweep
-    pub fn offset_frequencies(&self) -> Vec<Value> {
-        self.sweep.generate_points(self.points_per_decade)
+    pub fn offset_frequencies(&self) -> Result<Vec<Value>, FrequencyGridError> {
+        self.try_offset_frequencies_with_abort(&NoAbort)
+    }
+
+    /// Generate offset frequencies with cooperative cancellation.
+    pub fn try_offset_frequencies_with_abort(
+        &self,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, FrequencyGridError> {
+        self.sweep.generate_points_with_abort(abort)
     }
 }
 
@@ -187,78 +204,144 @@ impl PnoiseSweep {
 
     /// Check if sweep is valid
     pub fn is_valid(&self) -> bool {
+        self.validate().is_ok()
+    }
+
+    /// Validate the authored sweep without allocating its retained grid.
+    pub fn validate(&self) -> Result<(), FrequencyGridError> {
         match self {
             Self::Log {
                 start,
                 stop,
                 points_per_decade,
-            } => *start > 0.0 && *stop > *start && *points_per_decade > 0,
+            } => {
+                validate_generated_sweep(
+                    *start,
+                    *stop,
+                    *points_per_decade,
+                    FrequencyGridScale::Decade,
+                    false,
+                )?;
+                if stop == start {
+                    return Err(FrequencyGridError::NonIncreasingSweep);
+                }
+                Ok(())
+            }
             Self::Linear {
                 start,
                 stop,
                 num_points,
-            } => *start >= 0.0 && *stop > *start && *num_points > 0,
-            Self::List(freqs) => !freqs.is_empty() && freqs.iter().all(|&f| f > 0.0),
+            } => {
+                validate_generated_sweep(
+                    *start,
+                    *stop,
+                    *num_points,
+                    FrequencyGridScale::Linear,
+                    true,
+                )?;
+                if stop == start {
+                    return Err(FrequencyGridError::NonIncreasingSweep);
+                }
+                Ok(())
+            }
+            Self::List(frequencies) => {
+                if frequencies.is_empty() {
+                    return Err(FrequencyGridError::EmptySweep);
+                }
+                if let Some(index) = frequencies
+                    .iter()
+                    .position(|frequency| !frequency.is_finite() || *frequency <= 0.0)
+                {
+                    return Err(FrequencyGridError::InvalidExplicitFrequency { index });
+                }
+                Ok(())
+            }
         }
     }
 
-    /// Generate frequency points
-    pub fn generate_points(&self, default_ppd: usize) -> Vec<Value> {
+    /// Generate frequency points while preserving validation and resource failures.
+    pub fn generate_points(&self) -> Result<Vec<Value>, FrequencyGridError> {
+        self.generate_points_with_abort(&NoAbort)
+    }
+
+    /// Generate frequency points with cooperative cancellation.
+    pub fn generate_points_with_abort(
+        &self,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, FrequencyGridError> {
+        self.validate()?;
         match self {
             Self::Log {
                 start,
                 stop,
                 points_per_decade,
-            } => {
-                let ppd = if *points_per_decade > 0 {
-                    *points_per_decade
-                } else {
-                    default_ppd
-                };
-                let log_start = start.log10();
-                let log_stop = stop.log10();
-                let decades = log_stop - log_start;
-                let total_points = ((decades * ppd as f64).ceil() as usize).max(2);
-
-                (0..total_points)
-                    .map(|i| {
-                        let t = i as f64 / (total_points - 1) as f64;
-                        10.0_f64.powf(log_start + t * decades)
-                    })
-                    .collect()
-            }
+            } => generate_frequency_grid(
+                *start,
+                *stop,
+                *points_per_decade,
+                FrequencyGridScale::Decade,
+                false,
+                2,
+                abort,
+            ),
             Self::Linear {
                 start,
                 stop,
                 num_points,
-            } => {
-                let n = (*num_points).max(2);
-                (0..n)
-                    .map(|i| {
-                        let t = i as f64 / (n - 1) as f64;
-                        start + t * (stop - start)
-                    })
-                    .collect()
-            }
-            Self::List(freqs) => freqs.clone(),
+            } => generate_frequency_grid(
+                *start,
+                *stop,
+                (*num_points).max(2),
+                FrequencyGridScale::Linear,
+                true,
+                2,
+                abort,
+            ),
+            Self::List(frequencies) => copy_explicit_frequency_grid(frequencies, abort),
+        }
+    }
+
+    /// Return the generated point count without allocating the grid.
+    pub fn point_count(&self) -> Result<usize, FrequencyGridError> {
+        self.validate()?;
+        match self {
+            Self::Log {
+                start,
+                stop,
+                points_per_decade,
+            } => frequency_point_count(
+                *start,
+                *stop,
+                *points_per_decade,
+                FrequencyGridScale::Decade,
+                2,
+            ),
+            Self::Linear { num_points, .. } => Ok((*num_points).max(2)),
+            Self::List(frequencies) => Ok(frequencies.len()),
         }
     }
 
     /// Get start frequency
-    pub fn start_freq(&self) -> Value {
+    pub fn start_freq(&self) -> Result<Value, FrequencyGridError> {
+        self.validate()?;
         match self {
-            Self::Log { start, .. } => *start,
-            Self::Linear { start, .. } => *start,
-            Self::List(freqs) => freqs.first().copied().unwrap_or(1.0),
+            Self::Log { start, .. } | Self::Linear { start, .. } => Ok(*start),
+            Self::List(frequencies) => frequencies
+                .first()
+                .copied()
+                .ok_or(FrequencyGridError::EmptySweep),
         }
     }
 
     /// Get stop frequency
-    pub fn stop_freq(&self) -> Value {
+    pub fn stop_freq(&self) -> Result<Value, FrequencyGridError> {
+        self.validate()?;
         match self {
-            Self::Log { stop, .. } => *stop,
-            Self::Linear { stop, .. } => *stop,
-            Self::List(freqs) => freqs.last().copied().unwrap_or(1e6),
+            Self::Log { stop, .. } | Self::Linear { stop, .. } => Ok(*stop),
+            Self::List(frequencies) => frequencies
+                .last()
+                .copied()
+                .ok_or(FrequencyGridError::EmptySweep),
         }
     }
 }
@@ -278,6 +361,8 @@ pub enum PnoiseSideband {
 /// Configuration errors
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PnoiseConfigError {
+    /// Frequency-grid validation failure.
+    FrequencyGrid(FrequencyGridError),
     /// Invalid sweep specification
     Sweep,
     /// Invalid sideband count
@@ -289,6 +374,7 @@ pub enum PnoiseConfigError {
 impl std::fmt::Display for PnoiseConfigError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::FrequencyGrid(error) => write!(f, "Invalid offset frequency sweep: {error}"),
             Self::Sweep => write!(f, "Invalid offset frequency sweep"),
             Self::Sidebands => write!(f, "Invalid sideband configuration"),
             Self::Tolerance => write!(f, "Invalid tolerance values"),
@@ -301,3 +387,79 @@ impl std::error::Error for PnoiseConfigError {}
 // =============================================================================
 // Tests
 // =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checked_offset_grids_preserve_ordinary_sweeps() {
+        let logarithmic = PnoiseSweep::log(1.0, 100.0, 10)
+            .generate_points()
+            .expect("ordinary PNoise log grid");
+        assert_eq!(logarithmic.len(), 20);
+        assert_eq!(logarithmic.first(), Some(&1.0));
+        assert_eq!(logarithmic.last(), Some(&100.0));
+
+        assert_eq!(
+            PnoiseSweep::linear(0.0, 1.0, 1)
+                .generate_points()
+                .expect("one authored point preserves legacy two-point minimum"),
+            vec![0.0, 1.0]
+        );
+    }
+
+    #[test]
+    fn checked_offset_grids_reject_invalid_overflow_and_allocation_cases() {
+        assert_eq!(
+            PnoiseSweep::log(0.0, 1.0, 10).generate_points(),
+            Err(FrequencyGridError::InvalidStartFrequency)
+        );
+        assert_eq!(
+            PnoiseSweep::list(vec![1.0, f64::NAN]).generate_points(),
+            Err(FrequencyGridError::InvalidExplicitFrequency { index: 1 })
+        );
+        for sweep in [
+            PnoiseSweep::log(1.0, 1.0, 10),
+            PnoiseSweep::linear(1.0, 1.0, 10),
+        ] {
+            assert_eq!(
+                sweep.generate_points(),
+                Err(FrequencyGridError::NonIncreasingSweep)
+            );
+        }
+        assert_eq!(
+            PnoiseSweep::log(f64::MIN_POSITIVE, f64::MAX, usize::MAX).point_count(),
+            Err(FrequencyGridError::PointCountOverflow)
+        );
+        assert!(matches!(
+            PnoiseSweep::linear(0.0, 1.0, usize::MAX / 2).generate_points(),
+            Err(FrequencyGridError::Allocation { .. })
+        ));
+    }
+
+    #[test]
+    fn checked_offset_grids_propagate_cancellation() {
+        assert_eq!(
+            PnoiseSweep::log(1.0, 100.0, 10)
+                .generate_points_with_abort(&crate::abort_signal::ImmediateAbort),
+            Err(FrequencyGridError::Aborted)
+        );
+    }
+
+    #[test]
+    fn config_validation_rejects_non_finite_tolerances() {
+        for config in [
+            PnoiseConfig {
+                reltol: f64::NAN,
+                ..PnoiseConfig::default()
+            },
+            PnoiseConfig {
+                abstol: f64::INFINITY,
+                ..PnoiseConfig::default()
+            },
+        ] {
+            assert_eq!(config.validate(), Err(PnoiseConfigError::Tolerance));
+        }
+    }
+}

@@ -1301,15 +1301,7 @@ pub(super) fn run_sparam_from_command(
     do_noise: bool,
 ) -> Result<(), CliError> {
     ensure_not_cancelled(ctx)?;
-    let frequencies = generate_frequency_sweep(variation, points, start_freq, stop_freq);
-    if frequencies.is_empty() {
-        return Err(CliError::SimulationError {
-            message:
-                ".SP produced no frequency points; check sweep type, count, and frequency range"
-                    .to_string(),
-            analysis: Some("S-Parameters".to_string()),
-        });
-    }
+    let frequencies = generate_frequency_sweep(variation, points, start_freq, stop_freq)?;
     let ports = s_param::collect_ports(ctx.netlist).map_err(sparameter_error)?;
     if !ctx.quiet {
         println!(
@@ -1715,7 +1707,7 @@ pub(super) fn run_sparam(ctx: &RunContext<'_>, ports_spec: &str, z0: f64) -> Res
         });
     };
     let frequencies =
-        super::shared::generate_frequency_sweep(variation, points, start_freq, stop_freq);
+        super::shared::generate_frequency_sweep(variation, points, start_freq, stop_freq)?;
 
     let source = ctx
         .netlist
