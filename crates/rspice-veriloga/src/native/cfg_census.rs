@@ -1176,7 +1176,7 @@ enum EmittedOperator {
 
 /// One slot the generator's integration counter handed out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Emission {
+pub(super) struct Emission {
     context: EmissionContext,
     operator: EmittedOperator,
 }
@@ -1230,7 +1230,7 @@ fn tag_assignment_steps(
 /// `jacobian_programs` holds **two entries per compiled derivative** — the
 /// positive and negative KCL rows share one `compile_expr` result by `clone()`
 /// — so scanning both would count every re-emission twice.
-fn integration_emission_contexts(model: &CompiledModel) -> Vec<Emission> {
+pub(super) fn integration_emission_contexts(model: &CompiledModel) -> Vec<Emission> {
     let mut tags = Vec::new();
 
     for parameter in &model.parameters {
@@ -1303,7 +1303,7 @@ fn integration_emission_contexts(model: &CompiledModel) -> Vec<Emission> {
 
 /// What the emission sequence does to the per-site numbering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PrefixShape {
+pub(super) enum PrefixShape {
     /// The two numberings are the same length and the same order.
     Identical,
     /// Slots `0..per_site` mean the same thing under both numberings and the
@@ -1326,7 +1326,11 @@ enum PrefixShape {
 /// `statements` emissions all come from the assignment pass and the next
 /// `contributions` all come from an equation's own value program — which is
 /// what this checks, tag by tag, rather than inferring it from the counts.
-fn prefix_shape(tags: &[Emission], statements: usize, contributions: usize) -> PrefixShape {
+pub(super) fn prefix_shape(
+    tags: &[Emission],
+    statements: usize,
+    contributions: usize,
+) -> PrefixShape {
     let sites = statements + contributions;
     let prefix_holds = tags.len() >= sites
         && tags[..statements]

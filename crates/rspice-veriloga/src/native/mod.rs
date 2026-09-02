@@ -16,6 +16,8 @@ mod cfg_census;
 mod code_identity;
 mod model;
 mod runtime;
+#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
+mod state_pairing_census;
 mod target;
 pub mod x64;
 
