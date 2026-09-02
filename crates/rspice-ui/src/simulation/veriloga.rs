@@ -769,3 +769,112 @@ fn model_library_virtual_compile_limits() -> rspice_veriloga::VirtualCompileLimi
         max_module_name_bytes: 128,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{PreparedVerilogARuntime, project_virtual_compile_limits};
+
+    /// Constants whose shortest decimal form `serde_json` does *not* parse back
+    /// exactly unless the `float_roundtrip` feature is on. `1.3806505e-23` is
+    /// Boltzmann's constant verbatim from shipped Verilog-A models; without the
+    /// feature it reads back as `1.3806504999999999e-23`.
+    const LOSSY_MODEL_CONSTANTS: [(&str, f64); 3] = [
+        ("kb", 1.380_650_5e-23),
+        ("q", 1.602_176_634e-19),
+        ("scale", 6.25e41),
+    ];
+
+    const EXACT_CONSTANT_SOURCE: &str = r#"
+`include "disciplines.vams"
+module rspice_float_roundtrip_probe(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real kb = 1.3806505e-23;
+  parameter real q = 1.602176634e-19;
+  parameter real scale = 6.25e41;
+  analog I(p, n) <+ (kb + q + scale) * V(p, n);
+endmodule
+"#;
+
+    fn seal_probe_runtime() -> PreparedVerilogARuntime {
+        let bundle = rspice_veriloga::VirtualSourceBundle::new(
+            "probe.va",
+            [rspice_veriloga::VirtualSourceFile::new(
+                "probe.va",
+                EXACT_CONSTANT_SOURCE,
+            )],
+        )
+        .expect("probe bundle is well formed");
+        let compilation = rspice_veriloga::VerilogACompiler::default()
+            .compile_virtual_runtime(
+                &bundle,
+                "rspice_float_roundtrip_probe",
+                project_virtual_compile_limits(),
+            )
+            .expect("probe module compiles");
+        PreparedVerilogARuntime::try_from_virtual_compilation(
+            "__rspice_project__/float-roundtrip/probe.va".to_owned(),
+            crate::product::ContentDigest::from_bytes([0x7c; 32]),
+            "rspice_float_roundtrip_probe".to_owned(),
+            &compilation,
+        )
+        .expect("probe compilation seals into a prepared runtime")
+    }
+
+    /// A sealed runtime stores its `CompiledModel` as JSON and every consumer —
+    /// `registration`, `terminal_names`, `validate`, and the browser worker's
+    /// `compile_wasm_jit_artifact` — parses that string back. The parse has to
+    /// be bit exact, or a device built through the browser WASM JIT is built
+    /// from constants one unit in the last place away from the ones the native
+    /// path uses, for the same source and the same `artifact_digest`. The
+    /// digest cannot catch that: the JSON text is intact and only the parse is
+    /// lossy. Workspace `serde_json` carries `float_roundtrip` for this reason;
+    /// removing it fails here rather than silently perturbing device physics.
+    #[test]
+    fn sealed_model_constants_survive_the_json_the_runtime_ships() {
+        let runtime = seal_probe_runtime();
+        let decoded: rspice_veriloga::CompiledModel =
+            serde_json::from_str(runtime.model_json.as_str()).expect("sealed model payload parses");
+
+        for (name, expected) in LOSSY_MODEL_CONSTANTS {
+            let parameter = decoded
+                .parameters
+                .iter()
+                .find(|parameter| parameter.name.as_str() == name)
+                .unwrap_or_else(|| panic!("probe model declares parameter '{name}'"));
+            assert_eq!(
+                parameter.default.to_bits(),
+                expected.to_bits(),
+                "parameter '{name}' came back as {:e} instead of {expected:e}",
+                parameter.default
+            );
+        }
+    }
+
+    /// The same guarantee for the canonical IR, which is what the browser JIT
+    /// lowers. Both payloads travel together, but they are separate strings
+    /// with separate parses.
+    #[test]
+    fn sealed_canonical_ir_constants_survive_the_json_the_runtime_ships() {
+        let runtime = seal_probe_runtime();
+        let decoded: rspice_veriloga::canonical_ir::CanonicalIrArtifact =
+            serde_json::from_str(runtime.canonical_ir_json.as_str())
+                .expect("sealed canonical IR payload parses");
+
+        for (name, expected) in LOSSY_MODEL_CONSTANTS {
+            let default = decoded
+                .hir
+                .parameters
+                .iter()
+                .find(|parameter| parameter.name.as_str() == name)
+                .unwrap_or_else(|| panic!("probe IR declares parameter '{name}'"))
+                .default
+                .expect("probe parameters declare a literal default");
+            assert_eq!(
+                default.to_bits(),
+                expected.to_bits(),
+                "IR parameter '{name}' came back as {default:e} instead of {expected:e}"
+            );
+        }
+    }
+}
