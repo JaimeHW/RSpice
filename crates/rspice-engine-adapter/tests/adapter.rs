@@ -6,6 +6,9 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
+use rspice_engine_adapter::axis_execution_document::{
+    AxisAnalysisKind, AxisAssignmentKind, AxisExecutionDocument,
+};
 use rspice_engine_adapter::fft_result_document::{
     FFT_RESULT_DOCUMENT_CONTENT_TYPE, FftCompatibilityMode, FftPhysicalType, FftSourceKind,
     FftUnit, TransientFftResultDocument,
@@ -182,6 +185,11 @@ fn typed_result(job: &Job, response: &Value, file_name: &str) -> AnalogResultDoc
     AnalogResultDocument::from_json(&content).expect("typed result validates")
 }
 
+fn typed_result_at_path(job: &Job, path: &str) -> AnalogResultDocument {
+    let content = std::fs::read_to_string(job.root.join(path)).expect("read typed result path");
+    AnalogResultDocument::from_json(&content).expect("typed result path validates")
+}
+
 fn typed_fft_result(job: &Job, response: &Value, file_name: &str) -> TransientFftResultDocument {
     let path = format!("results/{file_name}");
     let descriptor = response["result_artifacts"]
@@ -204,6 +212,11 @@ fn signal<'a>(
         .iter()
         .find(|signal| signal.canonical_name.eq_ignore_ascii_case(canonical_name))
         .unwrap_or_else(|| panic!("signal {canonical_name} missing"))
+}
+
+fn axis_execution(response: &Value) -> AxisExecutionDocument {
+    AxisExecutionDocument::from_value(response["result_manifest"]["axis_execution"].clone())
+        .expect("strict axis execution contract validates")
 }
 
 #[test]
@@ -245,6 +258,7 @@ fn a_resistive_divider_operating_point_reports_exact_measurements() {
     );
     let response = parse_stdout(&job.run(&request));
     assert_eq!(response["status"], "succeeded");
+    assert_eq!(response["result_manifest"]["format"], "rspice-result-v1");
 
     let out = measurement(&response, "v(out)");
     assert_eq!(out["unit"], "V");
@@ -344,6 +358,26 @@ fn a_transient_run_declares_and_writes_its_waveform_artifact() {
     assert_eq!(
         signal(&document, "i(v1)").kind,
         AnalogSignalKind::BranchCurrent
+    );
+}
+
+#[test]
+fn invalid_explicit_transient_tmax_is_a_bounded_configuration_failure() {
+    let job = Job::new("invalid-transient-tmax");
+    let deck = "invalid TMAX\nV1 in 0 1\nR1 in 0 1k\n.tran 1u 1m 0 0\n.end\n";
+    let request = build_request(
+        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
+        json!({"kind": "transient"}),
+        Vec::new(),
+    );
+    let response = parse_stdout(&job.run(&request));
+    assert_eq!(response["status"], "failed", "response: {response}");
+    assert_eq!(response["failure_code"], "analysis.invalid_configuration");
+    assert_eq!(
+        std::fs::read_dir(job.root.join("results"))
+            .expect("read results")
+            .count(),
+        0
     );
 }
 
@@ -552,6 +586,294 @@ fn noise_result_preserves_complex_solution_densities_and_contributors() {
 }
 
 #[test]
+fn step_wraps_transient_with_canonical_namespaces_and_no_extra_op() {
+    let job = Job::new("step-transient");
+    let deck = "stepped transient\n\
+                .param rval=1k\n\
+                V1 in 0 PULSE(0 1 0 1u 1u 20u 50u)\n\
+                R1 in out {rval}\n\
+                C1 out 0 1n\n\
+                .step param rval list 1k 2k\n\
+                .tran 1u 20u\n\
+                .end\n";
+    let request = build_request(
+        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
+        json!({"kind": "transient"}),
+        Vec::new(),
+    );
+    let response = parse_stdout(&job.run(&request));
+    assert_eq!(response["status"], "succeeded", "response: {response}");
+    assert_eq!(response["result_manifest"]["format"], "rspice-result-v2");
+    assert_eq!(
+        response["result_manifest"]["measurements"],
+        json!([]),
+        "axis measurements must live under their coordinate/analysis provenance"
+    );
+    let execution = axis_execution(&response);
+    assert_eq!(execution.analysis_kind, AxisAnalysisKind::Transient);
+    assert_eq!(execution.coordinate_count, 2);
+    assert_eq!(execution.execution_count, 2);
+
+    let mut coordinate_ids = std::collections::HashSet::new();
+    let mut paths = std::collections::HashSet::new();
+    for run in &execution.runs {
+        assert!(coordinate_ids.insert(run.coordinate_id.clone()));
+        assert_eq!(run.assignments.len(), 1);
+        assert_eq!(run.assignments[0].kind, AxisAssignmentKind::Step);
+        assert_eq!(run.analyses.len(), 1, "no implicit OP may be added");
+        assert_eq!(run.analyses[0].analysis_id, "tran-001");
+        assert!(!run.analyses[0].measurements.is_empty());
+        for path in &run.analyses[0].artifacts {
+            assert!(paths.insert(path.clone()));
+            assert!(path.contains(&run.coordinate_namespace));
+            assert!(path.contains("tran-001"));
+        }
+    }
+    assert_eq!(paths.len(), 4);
+}
+
+#[test]
+fn temp_wraps_ac_and_repeated_directives_keep_stable_ordered_ids() {
+    let job = Job::new("temp-repeated-ac");
+    let deck = "temperature AC\n\
+                V1 in 0 AC 1\n\
+                R1 in out 1k\n\
+                C1 out 0 1u\n\
+                .temp 25 75\n\
+                .ac LIN 2 1k 2k\n\
+                .ac LIN 3 2k 4k\n\
+                .end\n";
+    let request = build_request(
+        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
+        json!({"kind": "ac_small_signal"}),
+        Vec::new(),
+    );
+    let response = parse_stdout(&job.run(&request));
+    assert_eq!(response["status"], "succeeded", "response: {response}");
+    let execution = axis_execution(&response);
+    assert_eq!(execution.analysis_kind, AxisAnalysisKind::AcSmallSignal);
+    assert_eq!(execution.coordinate_count, 2);
+    assert_eq!(execution.execution_count, 4);
+    let mut artifacts = std::collections::HashSet::new();
+    for run in &execution.runs {
+        assert_eq!(run.assignments[0].kind, AxisAssignmentKind::Temperature);
+        assert_eq!(
+            run.analyses
+                .iter()
+                .map(|analysis| analysis.analysis_id.as_str())
+                .collect::<Vec<_>>(),
+            ["ac-001", "ac-002"]
+        );
+        for analysis in &run.analyses {
+            for path in &analysis.artifacts {
+                assert!(artifacts.insert(path.clone()), "duplicate path {path}");
+            }
+        }
+    }
+    assert_eq!(artifacts.len(), 8);
+}
+
+#[test]
+fn dc_step_and_noise_temperature_axes_retain_every_coordinate() {
+    let dc_job = Job::new("step-dc");
+    let dc_deck = "stepped DC\n\
+                   .param load=1k\n\
+                   V1 in 0 0\n\
+                   R1 in 0 {load}\n\
+                   .step param load list 1k 2k\n\
+                   .dc V1 0 1 1\n\
+                   .end\n";
+    let dc_request = build_request(
+        json!({"schema": "rspice-circuit-v1", "netlist_utf8": dc_deck}),
+        json!({"kind": "dc_sweep"}),
+        Vec::new(),
+    );
+    let dc_response = parse_stdout(&dc_job.run(&dc_request));
+    assert_eq!(dc_response["status"], "succeeded", "{dc_response}");
+    let dc_execution = axis_execution(&dc_response);
+    assert_eq!(dc_execution.analysis_kind, AxisAnalysisKind::DcSweep);
+    assert_eq!(dc_execution.coordinate_count, 2);
+    assert!(
+        dc_execution
+            .runs
+            .iter()
+            .all(|run| run.analyses[0].analysis_id == "dc-001")
+    );
+
+    let noise_job = Job::new("temp-noise");
+    let noise_deck = "temperature noise\n\
+                      V1 in 0 AC 1\n\
+                      R1 in out 1k\n\
+                      R2 out 0 1k\n\
+                      .temp 0 100\n\
+                      .noise V(out) V1 LIN 1 1k 1k\n\
+                      .end\n";
+    let noise_request = build_request(
+        json!({"schema": "rspice-circuit-v1", "netlist_utf8": noise_deck}),
+        json!({"kind": "noise"}),
+        Vec::new(),
+    );
+    let noise_response = parse_stdout(&noise_job.run(&noise_request));
+    assert_eq!(noise_response["status"], "succeeded", "{noise_response}");
+    let noise_execution = axis_execution(&noise_response);
+    assert_eq!(noise_execution.analysis_kind, AxisAnalysisKind::Noise);
+    assert_eq!(noise_execution.coordinate_count, 2);
+    let densities = noise_execution
+        .runs
+        .iter()
+        .map(|run| {
+            let path = run.analyses[0]
+                .artifacts
+                .iter()
+                .find(|path| path.ends_with(".result.json"))
+                .expect("typed noise artifact");
+            let document = typed_result_at_path(&noise_job, path);
+            let SignalValues::Real { samples } = &signal(&document, "output_noise_density").values
+            else {
+                panic!("noise density must be real")
+            };
+            samples[0].expect("noise density sample")
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        densities[1] > densities[0],
+        "thermal noise must increase with TEMP: {densities:?}"
+    );
+}
+
+#[test]
+fn step_only_operating_point_executes_the_canonical_implicit_op() {
+    let job = Job::new("step-implicit-op");
+    let deck = "implicit stepped OP\n\
+                .param rval=1k\n\
+                V1 in 0 1\n\
+                R1 in 0 {rval}\n\
+                .step param rval list 1k 2k\n\
+                .end\n";
+    let request = build_request(
+        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
+        json!({"kind": "operating_point"}),
+        Vec::new(),
+    );
+    let response = parse_stdout(&job.run(&request));
+    assert_eq!(response["status"], "succeeded", "response: {response}");
+    let execution = axis_execution(&response);
+    assert_eq!(execution.analysis_kind, AxisAnalysisKind::OperatingPoint);
+    assert!(execution.runs.iter().all(|run| {
+        run.analyses.len() == 1 && run.analyses[0].analysis_id == "implicit-op-001"
+    }));
+}
+
+#[test]
+fn axisless_deck_without_analysis_executes_implicit_op_in_scalar_v1_shape() {
+    let job = Job::new("scalar-implicit-op");
+    let deck = "implicit scalar OP\nV1 in 0 1\nR1 in 0 1k\n.end\n";
+    let request = build_request(
+        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
+        json!({"kind": "operating_point"}),
+        Vec::new(),
+    );
+    let response = parse_stdout(&job.run(&request));
+    assert_eq!(response["status"], "succeeded", "response: {response}");
+    assert_eq!(response["result_manifest"]["format"], "rspice-result-v1");
+    assert!(response["result_manifest"].get("axis_execution").is_none());
+    assert!(
+        response["result_artifacts"]
+            .as_array()
+            .expect("scalar artifacts")
+            .iter()
+            .any(|artifact| artifact["path"] == "results/operating_point-1.result.json")
+    );
+}
+
+#[test]
+fn conditional_topology_and_analysis_signature_fail_closed_without_artifacts() {
+    for (name, deck, failure_code) in [
+        (
+            "conditional-topology",
+            "conditional topology\n\
+             .param mode=0\n\
+             V1 in 0 1\n\
+             R1 in out 1k\n\
+             .if (mode==1)\n\
+             R2 out 0 2k\n\
+             .else\n\
+             R3 out 0 3k\n\
+             R4 out 0 4k\n\
+             .endif\n\
+             .step param mode list 0 1\n\
+             .op\n\
+             .end\n",
+            "results.conditional_topology",
+        ),
+        (
+            "conditional-analysis",
+            "conditional analysis\n\
+             .param mode=0\n\
+             V1 in 0 AC 1\n\
+             R1 in 0 1k\n\
+             .if (mode==0)\n\
+             .ac LIN 2 1k 2k\n\
+             .else\n\
+             .tran 1u 10u\n\
+             .endif\n\
+             .step param mode list 0 1\n\
+             .end\n",
+            "analysis.axis_materialization",
+        ),
+    ] {
+        let job = Job::new(name);
+        let request = build_request(
+            json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
+            if name == "conditional-topology" {
+                json!({"kind": "operating_point"})
+            } else {
+                json!({"kind": "ac_small_signal"})
+            },
+            Vec::new(),
+        );
+        let response = parse_stdout(&job.run(&request));
+        assert_eq!(response["status"], "failed", "response: {response}");
+        assert_eq!(
+            response["failure_code"], failure_code,
+            "response: {response}"
+        );
+        assert_eq!(
+            std::fs::read_dir(job.root.join("results"))
+                .expect("read results")
+                .count(),
+            0
+        );
+    }
+}
+
+#[test]
+fn alter_and_mixed_signal_axes_are_explicitly_unsupported() {
+    for (name, deck, kind) in [
+        (
+            "alter-axis",
+            "ALTER deck\nV1 in 0 1\nR1 in 0 1k\n.op\n.alter second\nR1 in 0 2k\n.end\n",
+            "operating_point",
+        ),
+        (
+            "mixed-axis",
+            "mixed axis\n.param r=1k\nV1 in 0 1\nR1 in 0 {r}\n.step param r list 1k 2k\n.tran 1u 10u\n.end\n",
+            "mixed_signal",
+        ),
+    ] {
+        let job = Job::new(name);
+        let request = build_request(
+            json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
+            json!({"kind": kind}),
+            Vec::new(),
+        );
+        let response = parse_stdout(&job.run(&request));
+        assert_eq!(response["status"], "failed", "response: {response}");
+        assert_eq!(response["failure_code"], "analysis.axis_unsupported");
+    }
+}
+
+#[test]
 fn wrong_analysis_kind_for_the_deck_is_a_bounded_failure() {
     let job = Job::new("kind-mismatch");
     let deck = "divider\nV1 in 0 DC 10\nR1 in out 1k\nR2 out 0 1k\n.op\n.end\n";
@@ -662,6 +984,10 @@ fn component_info_states_the_reviewed_identity() {
     assert_eq!(info["protocol_versions"], json!([3]));
     assert_eq!(
         info["result_schemas"],
-        json!(["rspice-analog-result-v1", "rspice-transient-fft-result-v1"])
+        json!([
+            "rspice-analog-result-v1",
+            "rspice-transient-fft-result-v1",
+            "rspice-axis-execution-v1"
+        ])
     );
 }

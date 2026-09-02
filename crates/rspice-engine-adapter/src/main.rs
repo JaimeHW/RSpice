@@ -58,7 +58,8 @@ fn main() -> ExitCode {
                     "document_schemas": ["rspice-circuit-v1"],
                     "result_schemas": [
                         "rspice-analog-result-v1",
-                        "rspice-transient-fft-result-v1"
+                        "rspice-transient-fft-result-v1",
+                        "rspice-axis-execution-v1"
                     ],
                 })
             );
