@@ -679,6 +679,44 @@ mod runtime_checkpoint_codec_tests {
         );
     }
 
+    /// Version 7 is the one legacy payload whose *words* are current: every
+    /// field, in the same order, with the same encoding. What it does not carry
+    /// is the numbering — its slot arrays are indexed by the bytecode
+    /// generator's per-emission allocation rather than the canonical per-site
+    /// one — so the payload has to validate for diagnostics and refuse to
+    /// resume, and nothing but the version word can tell the two apart.
+    #[test]
+    fn legacy_v7_payload_validates_but_cannot_be_read_as_the_per_site_numbering() {
+        let checkpoint = checkpoint_with_slew_entries();
+        let words = checkpoint.to_legacy_v7_words_for_test();
+        VerilogADeviceCheckpoint::validate_legacy_v7_words(&words)
+            .expect("a complete legacy v7 payload validates");
+
+        let current = checkpoint.to_words();
+        assert_eq!(
+            words.len(),
+            current.len(),
+            "v7 and v8 encode the same fields; only the meaning of the indices differs"
+        );
+        assert_eq!(
+            &words[1..],
+            &current[1..],
+            "the version word is the only difference between the two encodings"
+        );
+
+        assert!(
+            VerilogADeviceCheckpoint::from_words(
+                checkpoint.instance_name.clone(),
+                checkpoint.model_name.clone(),
+                checkpoint.source_digest.clone(),
+                checkpoint.shape_identity.clone(),
+                &words,
+            )
+            .expect_err("v7 state slots are numbered per emission and cannot be resumed")
+            .contains("unsupported runtime Verilog-A state version 7")
+        );
+    }
+
     #[test]
     fn current_runtime_word_payload_rejects_inconsistent_laplace_history_lanes() {
         let mut checkpoint = checkpoint_with_slew_entries();

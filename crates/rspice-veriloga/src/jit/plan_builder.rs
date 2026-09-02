@@ -8,9 +8,9 @@ use super::assignment::NativeAssignment;
 use super::current_dependencies::JitCurrentDependencies as NativeCurrentDependencies;
 use super::expr::{
     BranchUnknownRuntimeMapping, CanonicalDerivativeAxis, EntryKind, NativeIdentifierIndex,
-    NativeLoweringLimits, NativeOp, NativeProgram, PriorCurrentProbe,
-    canonical_state_site_scan, canonical_table_lookup_slots_for_equation,
-    constant_dynamic_variable_slot, native_op_stack_effect, pair_canonical_state_slots,
+    NativeLoweringLimits, NativeOp, NativeProgram, PriorCurrentProbe, canonical_state_site_scan,
+    canonical_table_lookup_slots_for_equation, constant_dynamic_variable_slot,
+    native_op_stack_effect, pair_canonical_state_slots,
 };
 use super::model_plan::NativeModelPlan;
 use super::{JitError, JitResult};
