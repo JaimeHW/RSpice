@@ -643,11 +643,26 @@ impl StateSlotMapping {
 
     /// Pair a whole assignment pass against the module's statement sites.
     ///
-    /// The pass-level pairing is the pairing function's own rule applied to the
-    /// concatenation: within one family the *k*-th emission is the *k*-th site,
-    /// and a length disagreement is a refusal rather than a tolerance. Spelled
-    /// against [`CanonicalStateLayout::statement_prefix`] rather than against a
-    /// scan because the layout is the numbering the rewrite writes *into*.
+    /// Spelled against [`CanonicalStateLayout::statement_prefix`] rather than
+    /// against a scan because the layout is the numbering the rewrite writes
+    /// *into*, so a pass that pairs here pairs against the thing that will
+    /// consume it.
+    ///
+    /// # Which emissions count
+    ///
+    /// For a family the generator allocates per *emission* — `ddt`, `idt`,
+    /// `idtmod`, `$limit`, `cross`, `above`, `timer` — every state instruction
+    /// in the pass names a record of its own, so the *k*-th emission is the
+    /// *k*-th site and a length disagreement is a refusal.
+    ///
+    /// For the rest the generator allocates through a site map, and one site
+    /// answers to several instructions: a `laplace` in an assignment emits
+    /// `LaplaceState` for the value and `LaplaceStateDerivative` for each
+    /// small-signal shadow, all naming the one slot the site map gave it.
+    /// Counting instructions there would refuse a module for having a
+    /// derivative. Those families pair by *distinct slot in order of first
+    /// appearance*, which is the order the site map hands them out in and the
+    /// order the canonical walk visits the sites in.
     fn pair_assignment_pass(
         &mut self,
         layout: &CanonicalStateLayout,
@@ -669,10 +684,14 @@ impl StateSlotMapping {
                 .filter(|site| site.kind == operator)
                 .map(|site| site.operator)
                 .collect::<Vec<_>>();
-            let slots = emitted
+            let mut slots = emitted
                 .iter()
                 .filter_map(|instruction| operator.bytecode_slot(instruction))
                 .collect::<Vec<_>>();
+            if !operator.family().allocates_per_emission() {
+                let mut seen = HashSet::new();
+                slots.retain(|slot| seen.insert(*slot));
+            }
             if sites.len() != slots.len() {
                 paired = false;
                 self.mismatches.push(format!(
@@ -986,6 +1005,160 @@ fn for_each_program_mut(model: &mut CompiledModel, visit: &mut impl FnMut(&mut B
         for injection in source.injections.iter_mut() {
             visit(&mut injection.gain_program);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A mapping that renumbers one family and nothing else.
+    fn mapping(family: CanonicalStateFamily, pairs: &[(usize, u32)]) -> StateSlotMapping {
+        let mut mapping = StateSlotMapping::default();
+        for &(emitted, site) in pairs {
+            // Keyed by the site rather than by position: two emissions of one
+            // site carry one `ExprId`, which is the whole point of the
+            // numbering.
+            mapping
+                .map
+                .insert((family, emitted), (ExprId::new(site), site));
+            mapping.allocated.insert((family, emitted));
+        }
+        mapping
+    }
+
+    #[test]
+    fn an_identity_map_leaves_a_compiled_array_alone() {
+        let mapping = mapping(CanonicalStateFamily::LookupTable, &[(0, 0), (1, 1)]);
+        let mut items = vec!["first", "second"];
+        permute(
+            CanonicalStateFamily::LookupTable,
+            &mapping,
+            "module",
+            &mut items,
+        )
+        .expect("an identity permutation applies");
+        assert_eq!(items, vec!["first", "second"]);
+    }
+
+    #[test]
+    fn a_renumbered_family_moves_the_data_it_names() {
+        let mapping = mapping(CanonicalStateFamily::LaplaceFilter, &[(0, 1), (1, 0)]);
+        let mut items = vec!["first", "second"];
+        permute(
+            CanonicalStateFamily::LaplaceFilter,
+            &mapping,
+            "module",
+            &mut items,
+        )
+        .expect("a swap applies");
+        assert_eq!(
+            items,
+            vec!["second", "first"],
+            "entry 0 renumbers to slot 1, so the instruction now reading slot 1 must find it"
+        );
+    }
+
+    #[test]
+    fn two_entries_renumbering_to_one_slot_refuse_rather_than_drop_one() {
+        let mapping = mapping(CanonicalStateFamily::ZiFilter, &[(0, 0), (1, 0)]);
+        let mut items = vec!["first", "second"];
+        let error = permute(
+            CanonicalStateFamily::ZiFilter,
+            &mapping,
+            "collider",
+            &mut items,
+        )
+        .expect_err("two entries cannot share one compiled slot");
+        assert!(
+            matches!(
+                error,
+                StateRenumberingError::BackedArrayNotPermutable { ref module, .. }
+                    if module == "collider"
+            ),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_site_slot_past_the_compiled_entries_refuses() {
+        let mapping = mapping(CanonicalStateFamily::LookupTable, &[(0, 4)]);
+        let mut items = vec!["only"];
+        let error = permute(
+            CanonicalStateFamily::LookupTable,
+            &mapping,
+            "outsider",
+            &mut items,
+        )
+        .expect_err("a canonical slot outside the array cannot be filled");
+        assert!(
+            matches!(
+                error,
+                StateRenumberingError::BackedArrayNotPermutable { ref detail, .. }
+                    if detail.contains('4')
+            ),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn every_defect_names_the_module_it_refuses() {
+        let module = "refused";
+
+        let mut unpairable = StateSlotMapping::default();
+        unpairable.mismatches.push("stamp[0].value: too few".into());
+        assert!(matches!(
+            unpairable.refusal(module),
+            Some(StateRenumberingError::PairingIncomplete { .. })
+        ));
+
+        let mut conflicting = StateSlotMapping::default();
+        conflicting.conflicts.push("slot 0 twice".into());
+        assert!(matches!(
+            conflicting.refusal(module),
+            Some(StateRenumberingError::SlotClaimedTwice { .. })
+        ));
+
+        let mut unnumbered = StateSlotMapping::default();
+        unnumbered.unnumbered.push("site 7 unnumbered".into());
+        assert!(matches!(
+            unnumbered.refusal(module),
+            Some(StateRenumberingError::SiteNotNumbered { .. })
+        ));
+
+        let mut unclaimed = StateSlotMapping::default();
+        unclaimed
+            .allocated
+            .insert((CanonicalStateFamily::Integration, 3));
+        assert!(matches!(
+            unclaimed.refusal(module),
+            Some(StateRenumberingError::SlotUnclaimed {
+                family: CanonicalStateFamily::Integration,
+                slot: 3,
+                ..
+            })
+        ));
+
+        // A program carrying state with no canonical root is not by itself a
+        // refusal: a reactive Jacobian's table-lookup slot is claimed by the
+        // equation's own value program, and the unreached tally is what
+        // decides whether anything was left behind.
+        let mut unrooted = StateSlotMapping::default();
+        unrooted
+            .unrooted
+            .push("reactive-derivative stamp[0]: carries table_model state".into());
+        assert!(unrooted.refusal(module).is_none());
+    }
+
+    #[test]
+    fn a_clean_mapping_refuses_nothing() {
+        let mapping = mapping(CanonicalStateFamily::Integration, &[(0, 0), (1, 0)]);
+        assert!(mapping.refusal("clean").is_none());
+        assert_eq!(
+            mapping.moved(),
+            1,
+            "emitted slot 1 belongs to site slot 0, so exactly one pair moves"
+        );
     }
 }
 
