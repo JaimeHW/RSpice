@@ -100,20 +100,20 @@ struct DirectiveOutcomes {
     tran: LastAndAll<Py<PyTransientResult>>,
     ac: LastAndAll<Py<PyAcResult>>,
     noise: LastAndAll<Vec<PyNoiseResult>>,
-    distortion: Option<Py<PyDistortionResult>>,
-    hb: Option<PyHbResult>,
-    s_parameters: Option<PySParameterResult>,
+    distortion: LastAndAll<Py<PyDistortionResult>>,
+    hb: LastAndAll<PyHbResult>,
+    s_parameters: LastAndAll<PySParameterResult>,
     /// Retained separately from `noise` because `.MEAS` evaluates against
     /// core's result type, not the Python projection.
     noise_core: Option<Vec<rspice_core::analysis::NoiseResult>>,
-    tf: Option<PyTransferFunctionResult>,
-    stb: Option<PyStbResult>,
-    pz: Option<PyPoleZeroResult>,
-    monte_carlo: Option<PyMonteCarloResult>,
+    tf: LastAndAll<PyTransferFunctionResult>,
+    stb: LastAndAll<PyStbResult>,
+    pz: LastAndAll<PyPoleZeroResult>,
+    monte_carlo: LastAndAll<PyMonteCarloResult>,
     step_result: Option<PyDcSweepResult>,
     temperature: Option<PyDcSweepResult>,
-    sensitivity: Option<PySensitivityResult>,
-    sensitivity_ac: Option<PyAcSensitivityResult>,
+    sensitivity: LastAndAll<PySensitivityResult>,
+    sensitivity_ac: LastAndAll<PyAcSensitivityResult>,
     fourier: Vec<PyFourierResult>,
     /// `(fundamental, outputs, harmonics)` per `.four` card, evaluated after
     /// the loop.
@@ -131,18 +131,18 @@ impl DirectiveOutcomes {
         self.tran.append(other.tran);
         self.ac.append(other.ac);
         self.noise.append(other.noise);
-        replace_if_some(&mut self.distortion, other.distortion);
-        replace_if_some(&mut self.hb, other.hb);
-        replace_if_some(&mut self.s_parameters, other.s_parameters);
+        self.distortion.append(other.distortion);
+        self.hb.append(other.hb);
+        self.s_parameters.append(other.s_parameters);
         replace_if_some(&mut self.noise_core, other.noise_core);
-        replace_if_some(&mut self.tf, other.tf);
-        replace_if_some(&mut self.stb, other.stb);
-        replace_if_some(&mut self.pz, other.pz);
-        replace_if_some(&mut self.monte_carlo, other.monte_carlo);
+        self.tf.append(other.tf);
+        self.stb.append(other.stb);
+        self.pz.append(other.pz);
+        self.monte_carlo.append(other.monte_carlo);
         replace_if_some(&mut self.step_result, other.step_result);
         replace_if_some(&mut self.temperature, other.temperature);
-        replace_if_some(&mut self.sensitivity, other.sensitivity);
-        replace_if_some(&mut self.sensitivity_ac, other.sensitivity_ac);
+        self.sensitivity.append(other.sensitivity);
+        self.sensitivity_ac.append(other.sensitivity_ac);
         self.fourier.append(&mut other.fourier);
         self.pending_fourier.append(&mut other.pending_fourier);
     }
@@ -500,24 +500,33 @@ fn into_report(out: DirectiveOutcomes, measurements: Vec<PyMeasurement>) -> PyRu
     let (tran, all_tran) = out.tran.into_parts();
     let (ac, all_ac) = out.ac.into_parts();
     let (noise, all_noise) = out.noise.into_parts();
+    let (distortion, all_distortion) = out.distortion.into_parts();
+    let (hb, all_hb) = out.hb.into_parts();
+    let (s_parameters, all_s_parameters) = out.s_parameters.into_parts();
+    let (tf, all_tf) = out.tf.into_parts();
+    let (stb, all_stb) = out.stb.into_parts();
+    let (pz, all_pz) = out.pz.into_parts();
+    let (monte_carlo, all_monte_carlo) = out.monte_carlo.into_parts();
+    let (sensitivity, all_sensitivity) = out.sensitivity.into_parts();
+    let (sensitivity_ac, all_sensitivity_ac) = out.sensitivity_ac.into_parts();
 
     PyRunReport {
         op,
         dc,
         tran,
         ac,
-        distortion: out.distortion,
-        hb: out.hb,
-        s_parameters: out.s_parameters,
+        distortion,
+        hb,
+        s_parameters,
         noise,
-        tf: out.tf,
-        stb: out.stb,
-        pz: out.pz,
-        monte_carlo: out.monte_carlo,
+        tf,
+        stb,
+        pz,
+        monte_carlo,
         step: out.step_result,
         temperature: out.temperature,
-        sensitivity: out.sensitivity,
-        sensitivity_ac: out.sensitivity_ac,
+        sensitivity,
+        sensitivity_ac,
         fourier: out.fourier,
         records: out.records,
         measurements,
@@ -526,6 +535,15 @@ fn into_report(out: DirectiveOutcomes, measurements: Vec<PyMeasurement>) -> PyRu
         all_tran,
         all_ac,
         all_noise,
+        all_distortion,
+        all_hb,
+        all_s_parameters,
+        all_tf,
+        all_stb,
+        all_pz,
+        all_monte_carlo,
+        all_sensitivity,
+        all_sensitivity_ac,
     }
 }
 
@@ -670,7 +688,7 @@ fn execute(
             let result = run_interruptible(py, &py_engine.active_runs, |abort| {
                 engine.run_hb_with_abort(net, config, abort)
             })?;
-            out.hb = Some(PyHbResult::from_core(&result));
+            out.hb.push(PyHbResult::from_core(&result));
             out.records.push(PyAnalysisRecord::executed(
                 "hb",
                 describe_analysis(analysis),
@@ -685,7 +703,9 @@ fn execute(
         } => {
             let frequencies = sweep_frequencies(*variation, *points, *start_freq, *stop_freq)?;
             let result = py_engine.distortion_impl(py, netlist, frequencies, *f2_over_f1)?;
-            out.distortion = Some(Py::new(py, result)?);
+            let handle = Py::new(py, result)?;
+            out.distortion
+                .push_with(handle, |handle| handle.clone_ref(py));
             out.records.push(PyAnalysisRecord::executed(
                 "disto",
                 describe_analysis(analysis),
@@ -699,8 +719,12 @@ fn execute(
             do_noise,
         } => {
             let frequencies = sweep_frequencies(*variation, *points, *start_freq, *stop_freq)?;
-            out.s_parameters =
-                Some(py_engine.sparameter_impl(py, netlist, frequencies, *do_noise)?);
+            out.s_parameters.push(py_engine.sparameter_impl(
+                py,
+                netlist,
+                frequencies,
+                *do_noise,
+            )?);
             out.records.push(PyAnalysisRecord::executed(
                 "sp",
                 describe_analysis(analysis),
@@ -802,7 +826,7 @@ fn execute(
                 *output_is_current,
                 input_source,
             )?;
-            out.tf = Some(result);
+            out.tf.push(result);
             out.records.push(PyAnalysisRecord::executed(
                 "tf",
                 format!(".tf {output_node} {input_source}"),
@@ -824,7 +848,7 @@ fn execute(
                 *start_freq,
                 *stop_freq,
             )?;
-            out.stb = Some(result);
+            out.stb.push(result);
             out.records.push(PyAnalysisRecord::executed(
                 "stb",
                 describe_analysis(analysis),
@@ -854,7 +878,7 @@ fn execute(
                 compute_poles,
                 compute_zeros,
             )?;
-            out.pz = Some(result);
+            out.pz.push(result);
             out.records.push(PyAnalysisRecord::executed(
                 "pz",
                 describe_analysis(analysis),
@@ -876,7 +900,7 @@ fn execute(
                 command.relative_spread,
                 params,
             )?;
-            out.monte_carlo = Some(result);
+            out.monte_carlo.push(result);
             out.records.push(PyAnalysisRecord::executed(
                 "mc",
                 describe_analysis(analysis),
@@ -929,15 +953,16 @@ fn execute(
                 let reference = reference_node
                     .as_ref()
                     .map(|name| NodeIdentifier::Name(name.clone()));
-                out.sensitivity_ac = Some(py_engine.sensitivity_ac_complete_impl(
-                    py,
-                    netlist,
-                    &output,
-                    reference.as_ref(),
-                    *output_is_current,
-                    &frequencies,
-                    filters,
-                )?);
+                out.sensitivity_ac
+                    .push(py_engine.sensitivity_ac_complete_impl(
+                        py,
+                        netlist,
+                        &output,
+                        reference.as_ref(),
+                        *output_is_current,
+                        &frequencies,
+                        filters,
+                    )?);
                 out.records.push(PyAnalysisRecord::executed(
                     "sens_ac",
                     describe_analysis(analysis),
@@ -947,7 +972,7 @@ fn execute(
                 let reference = reference_node
                     .as_ref()
                     .map(|name| NodeIdentifier::Name(name.clone()));
-                out.sensitivity = Some(py_engine.sensitivity_dc_complete_impl(
+                out.sensitivity.push(py_engine.sensitivity_dc_complete_impl(
                     py,
                     netlist,
                     &output,

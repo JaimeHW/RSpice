@@ -244,6 +244,30 @@ R1 out 0 1k
         ] == [1, 2]
         assert all(measurement.passed for measurement in report.measurements)
 
+    def test_advanced_results_are_retained_for_every_coordinate(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* stepped transfer functions
+.param rval=1k
+V1 in 0 1
+R1 in out {rval}
+R2 out 0 1k
+.step param rval list 1k 2k
+.tf V(out) V1
+.end
+"""
+        )
+
+        report = engine.run(netlist)
+
+        assert len(report.all_tf) == 2
+        assert [result.gain for result in report.all_tf] == pytest.approx([0.5, 1 / 3])
+        assert report.tf.gain == pytest.approx(report.all_tf[-1].gain)
+        assert [record.analysis_id for record in report.records] == ["tf-001"] * 2
+        assert [record.coordinate.assignments[0].value for record in report.records] == [
+            1e3,
+            2e3,
+        ]
+
     def test_step_varies_results(self, engine, param_divider):
         results = engine.run_step(param_divider, "rval", [1e3, 2e3, 5e3])
         assert len(results) == 3

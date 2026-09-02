@@ -551,6 +551,33 @@ pub struct PyRunReport {
     /// Every `.noise`/`.noise data` sweep, in deck order. `noise` is the last.
     #[pyo3(get)]
     pub all_noise: Vec<Vec<PyNoiseResult>>,
+    /// Every `.disto` result, in deck/coordinate order.
+    #[pyo3(get)]
+    pub all_distortion: Vec<Py<PyDistortionResult>>,
+    /// Every harmonic-balance result, in deck/coordinate order.
+    #[pyo3(get)]
+    pub all_hb: Vec<PyHbResult>,
+    /// Every S-parameter result, including attached port-noise data.
+    #[pyo3(get)]
+    pub all_s_parameters: Vec<PySParameterResult>,
+    /// Every transfer-function result, in deck/coordinate order.
+    #[pyo3(get)]
+    pub all_tf: Vec<PyTransferFunctionResult>,
+    /// Every loop-stability result, in deck/coordinate order.
+    #[pyo3(get)]
+    pub all_stb: Vec<PyStbResult>,
+    /// Every pole-zero result, in deck/coordinate order.
+    #[pyo3(get)]
+    pub all_pz: Vec<PyPoleZeroResult>,
+    /// Every Monte Carlo result, in deck/coordinate order.
+    #[pyo3(get)]
+    pub all_monte_carlo: Vec<PyMonteCarloResult>,
+    /// Every DC sensitivity result, in deck/coordinate order.
+    #[pyo3(get)]
+    pub all_sensitivity: Vec<PySensitivityResult>,
+    /// Every AC sensitivity result, in deck/coordinate order.
+    #[pyo3(get)]
+    pub all_sensitivity_ac: Vec<PyAcSensitivityResult>,
 }
 
 #[pymethods]
