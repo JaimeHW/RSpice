@@ -5,6 +5,15 @@
 //! code generation never has to trust an implicit operand stack.  Expressions
 //! are single-block today; keeping the block and terminator explicit makes
 //! control-flow extension possible without changing the value model.
+//!
+//! The block model here is complete — typed block parameters, `Jump` and
+//! `Branch` terminators, a verifier, and three backends that emit real
+//! branches for it — but nothing outside the tests that qualify it builds a
+//! multi-block program yet. The shipped route is still the postfix lift and
+//! its select form of a conditional, so the items marked
+//! `cfg_attr(not(test), allow(dead_code))` below are the ones whose only
+//! constructor today is a test. W-C3 (digital process control flow) and
+//! W-D/W-F (the flip) are what give them a shipped one.
 
 #![cfg_attr(not(feature = "native"), allow(dead_code))]
 
@@ -70,13 +79,10 @@ pub(crate) struct BlockParameter {
     value_type: ValueType,
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 impl BlockParameter {
     pub(crate) fn value(self) -> ValueId {
         self.value
-    }
-
-    pub(crate) fn value_type(self) -> ValueType {
-        self.value_type
     }
 }
 
@@ -87,6 +93,7 @@ pub(crate) struct Edge {
     arguments: Box<[ValueId]>,
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 impl Edge {
     pub(crate) fn new(target: BlockId, arguments: impl Into<Box<[ValueId]>>) -> Self {
         Self {
@@ -99,12 +106,15 @@ impl Edge {
         self.target
     }
 
+    /// Read by the WebAssembly backend, which binds an edge structurally.
+    #[cfg_attr(not(feature = "wasm-jit"), allow(dead_code))]
     pub(crate) fn arguments(&self) -> &[ValueId] {
         &self.arguments
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) enum Terminator {
     Return(ValueId),
     Jump(Edge),
@@ -116,6 +126,7 @@ pub(crate) enum Terminator {
 }
 
 impl Terminator {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn edge_count(&self) -> usize {
         match self {
             Self::Return(_) => 0,
@@ -396,6 +407,7 @@ impl Program {
         &self.blocks
     }
 
+    #[cfg_attr(not(feature = "wasm-jit"), allow(dead_code))]
     pub(crate) fn entry(&self) -> BlockId {
         self.entry
     }
@@ -404,6 +416,7 @@ impl Program {
         self.blocks.len() == 1
     }
 
+    #[cfg_attr(not(feature = "wasm-jit"), allow(dead_code))]
     pub(crate) fn block(&self, id: BlockId) -> JitResult<&BasicBlock> {
         self.blocks
             .get(id.index())
@@ -417,6 +430,7 @@ impl Program {
         &self.block_parameters[block.parameter_start..block.parameter_end]
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn block_parameter_count(&self) -> usize {
         self.block_parameters.len()
     }
@@ -481,9 +495,12 @@ impl Program {
         for block in &self.blocks {
             for edge in block.terminator.edges() {
                 let target = &self.blocks[edge.target.index()];
-                for parameter in target.parameter_start..target.parameter_end {
-                    let position = positions[parameter].unwrap_or(block.instruction_end);
-                    positions[parameter] = Some(position.min(block.instruction_end));
+                for position in &mut positions[target.parameter_start..target.parameter_end] {
+                    *position = Some(
+                        position
+                            .unwrap_or(block.instruction_end)
+                            .min(block.instruction_end),
+                    );
                 }
             }
         }
@@ -636,13 +653,11 @@ impl Program {
     /// check, and a compact model splits thousands of conditionals.
     fn definition_blocks(&self) -> Vec<BlockId> {
         let mut blocks = vec![BlockId(0); self.value_count()];
+        let parameter_base = self.instructions.len();
         for block in &self.blocks {
-            for index in block.instruction_start..block.instruction_end {
-                blocks[index] = block.id;
-            }
-            for parameter in block.parameter_start..block.parameter_end {
-                blocks[self.instructions.len() + parameter] = block.id;
-            }
+            blocks[block.instruction_start..block.instruction_end].fill(block.id);
+            blocks[parameter_base + block.parameter_start..parameter_base + block.parameter_end]
+                .fill(block.id);
         }
         blocks
     }
@@ -701,12 +716,14 @@ impl Program {
                 continue;
             }
             let join = self.branch_join(block)?;
-            for inside in (block.id.index() + 1)..join.index() {
-                if idom[inside].is_none_or(|dominator| dominator < block.id) {
+            let first_inside = block.id.index() + 1;
+            for (offset, dominator) in idom[first_inside..join.index()].iter().enumerate() {
+                if dominator.is_none_or(|dominator| dominator < block.id) {
                     return Err(JitError::Verifier {
                         model: MODEL.into(),
                         detail: format!(
-                            "SSA block {inside} is entered from outside the region branching from block {}",
+                            "SSA block {} is entered from outside the region branching from block {}",
+                            first_inside + offset,
                             block.id.index()
                         )
                         .into(),
@@ -1065,6 +1082,7 @@ impl DominatorTree {
 
 /// Which conditional arm exclusively consumes an instruction's result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(not(test), allow(dead_code))]
 struct ArmOwner {
     conditional: usize,
     taken: bool,
@@ -1088,6 +1106,7 @@ impl Program {
     /// Values agree bit-for-bit with the select form whenever both arms are
     /// pure, and the conditional's own truthiness (nonzero, NaN included) is
     /// unchanged; the backends realize it with the same comparison.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn with_branching_conditionals(&self) -> JitResult<Self> {
         if !self.is_single_block() {
             return Err(JitError::Verifier {
@@ -1112,6 +1131,7 @@ impl Program {
     /// pass reaches the fixed point: an instruction belongs to an arm exactly
     /// when every one of its use sites is either that conditional's arm
     /// operand or another instruction already attributed to the same arm.
+    #[cfg_attr(not(test), allow(dead_code))]
     fn conditional_arm_owners(&self) -> Vec<Option<ArmOwner>> {
         enum UseSite {
             /// The arm operand of a conditional: the use happens only when
@@ -1184,6 +1204,7 @@ impl Program {
 /// closed before the next block opens. A branch's terminator is written after
 /// its arms are laid out, which is the only point at which the join block's
 /// identity is known.
+#[cfg_attr(not(test), allow(dead_code))]
 struct ConditionalSplitter<'a> {
     source: &'a Program,
     /// Every `IfElse` becomes a terminator rather than an instruction, so the
@@ -1198,6 +1219,7 @@ struct ConditionalSplitter<'a> {
     current: BlockId,
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 impl<'a> ConditionalSplitter<'a> {
     fn new(source: &'a Program, owners: &[Option<ArmOwner>]) -> JitResult<Self> {
         let mut regions: HashMap<ArmOwner, Vec<usize>> = HashMap::new();

@@ -198,6 +198,10 @@ pub(crate) fn encode_value_program(program: &NativeProgram) -> WasmJitResult<Vec
 }
 
 /// Wrap one encoded value body in a single-entry module.
+///
+/// Single-entry modules exist for the encoder tests; production publishes the
+/// whole model as one module.
+#[cfg(test)]
 fn encode_value_module(body: Function) -> WasmJitResult<Vec<u8>> {
     let mut module = Module::new();
 
