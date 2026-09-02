@@ -538,11 +538,25 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
     let multi_run = plan.len() > 1;
     if multi_run {
         // One Xyce-compatible sibling name cannot safely represent several
-        // rewritten .ALTER/.DATA decks. Reject before workers start so no
-        // run can race another or leave a misleading partial artifact.
+        // rewritten .ALTER/.DATA decks. Preflight every outer variant and its
+        // complete Cartesian child-run count before workers start, so a late
+        // materialization error or aggregate-budget failure cannot leave an
+        // earlier variant's artifact behind.
+        let mut concrete_runs = 0usize;
         for deck in &plan {
             let netlist = load_netlist_from_source(&deck.source, &args, config, false)?;
-            validate_step_frontend_compatibility(&netlist, &args, deck.label.as_deref())?;
+            let deck_runs = preflight_deck_run_count(&netlist, &args, config)?;
+            concrete_runs =
+                concrete_runs
+                    .checked_add(deck_runs)
+                    .ok_or_else(|| CliError::ResourceLimit {
+                        path: args.input.clone(),
+                        source: rspice_core::ResourceLimitError {
+                            resource: rspice_core::ResourceKind::BatchRuns,
+                            requested: usize::MAX,
+                            limit: resource_limits.max_batch_runs,
+                        },
+                    })?;
             if netlist
                 .options
                 .add_resistors
@@ -558,6 +572,16 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
                     ),
                 });
             }
+        }
+        if concrete_runs > resource_limits.max_batch_runs {
+            return Err(CliError::ResourceLimit {
+                path: args.input.clone(),
+                source: rspice_core::ResourceLimitError {
+                    resource: rspice_core::ResourceKind::BatchRuns,
+                    requested: concrete_runs,
+                    limit: resource_limits.max_batch_runs,
+                },
+            });
         }
     }
     if multi_run && !quiet {
@@ -635,7 +659,7 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
                 println!("\n=== run: {} ===", deck.label.as_deref().unwrap_or("base"));
             }
             let netlist = load_netlist_from_source(&deck.source, &args, config, !quiet)?;
-            validate_step_frontend_compatibility(&netlist, &args, deck.label.as_deref())?;
+            validate_step_frontend_compatibility(&netlist, &args)?;
             let addresistors_artifact =
                 materialize_addresistors_artifact(&netlist, &args.input, from_stdin, args.timeout)?;
             let outcome = run_deck(
@@ -1212,11 +1236,7 @@ fn step_analysis_signature(netlist: &Netlist) -> Result<Vec<&'static str>, CliEr
     Ok(signature)
 }
 
-fn validate_step_frontend_compatibility(
-    netlist: &Netlist,
-    args: &RunArgs,
-    run_label: Option<&str>,
-) -> Result<(), CliError> {
+fn validate_step_frontend_compatibility(netlist: &Netlist, args: &RunArgs) -> Result<(), CliError> {
     let steps = step_commands(netlist);
     if steps.is_empty() {
         return Ok(());
@@ -1235,16 +1255,6 @@ fn validate_step_frontend_compatibility(
             message: ".STEP cannot share one --checkpoint/--resume path across several coordinates"
                 .to_string(),
             suggestion: Some("run one materialized coordinate per checkpoint file".to_string()),
-        });
-    }
-    if run_label.is_some() {
-        return Err(CliError::InvalidArgument {
-            message: ".ALTER/.DATA textual multi-run expansion cannot yet be composed with .STEP"
-                .to_string(),
-            suggestion: Some(
-                "run each expanded outer deck separately so the global batch budget and output namespace remain unambiguous"
-                    .to_string(),
-            ),
         });
     }
     if netlist
@@ -1632,9 +1642,80 @@ fn preflight_step_coordinates(
     Ok(signatures)
 }
 
+/// Preflight one already-expanded `.ALTER`/textual-`.DATA` variant without
+/// solving it or publishing output. The returned count is the number of
+/// concrete Cartesian coordinates this outer variant will execute.
+fn preflight_deck_run_count(
+    netlist: &Netlist,
+    args: &RunArgs,
+    config: &Config,
+) -> Result<usize, CliError> {
+    let temperature_normalized = normalize_temperature_axis(netlist)?;
+    let executable_netlist = temperature_normalized.as_ref().unwrap_or(netlist);
+    validate_step_frontend_compatibility(executable_netlist, args)?;
+
+    let resource_limits = config.resources.limits();
+    let canonical_plan = DeckPlan::from_netlist_run_axes_with_abort(
+        netlist,
+        &resource_limits,
+        &crate::abort::ProcessAbort,
+    )
+    .map_err(|error| map_deck_plan_error(error, args))?;
+    let Some(canonical_plan) = canonical_plan else {
+        return Ok(1);
+    };
+    let coordinates = canonical_plan
+        .coordinates_with_abort(&resource_limits, &crate::abort::ProcessAbort)
+        .map_err(|error| map_deck_plan_error(error, args))?;
+
+    let steps = canonical_materializer_steps(executable_netlist);
+    if steps.is_empty() {
+        if coordinates.len() != 1 {
+            return Err(CliError::InternalError {
+                message: format!(
+                    "canonical outer-run preflight found {} coordinates but no materializable run axis",
+                    coordinates.len()
+                ),
+            });
+        }
+        return Ok(1);
+    }
+
+    let base_signature = step_analysis_signature(executable_netlist)?;
+    let engine = Engine::try_new(build_sim_config(args, config, executable_netlist))?;
+    let materializer = engine
+        .plan_step_commands_with_abort(
+            executable_netlist,
+            &steps,
+            StepPlanLimits::from_resource_limits(resource_limits),
+            &crate::abort::ProcessAbort,
+        )
+        .map_err(|error| map_step_core_error(error, args.timeout, "Step planning preflight"))?;
+    let aggregate_report_values = base_signature
+        .is_empty()
+        .then(|| 1usize.saturating_add(executable_netlist.measurements.len().saturating_mul(3)));
+    preflight_step_coordinates(
+        &engine,
+        &materializer,
+        &coordinates,
+        &base_signature,
+        aggregate_report_values,
+        args,
+    )?;
+    Ok(coordinates.len())
+}
+
 fn step_run_label(run_index: usize, total_runs: usize) -> String {
     let width = total_runs.to_string().len().max(6);
     format!("step-{:0width$}", run_index + 1)
+}
+
+fn compose_run_label(outer: Option<&str>, inner: Option<&str>) -> Option<String> {
+    match (outer, inner) {
+        (Some(outer), Some(inner)) => Some(format!("{outer} · {inner}")),
+        (Some(label), None) | (None, Some(label)) => Some(label.to_string()),
+        (None, None) => None,
+    }
 }
 
 fn step_target_description(step: &rspice_core::netlist::StepCommand) -> String {
@@ -1682,6 +1763,7 @@ fn run_implicit_step_op_table(
     engine: &Engine,
     plan: &StepPlan<'_>,
     coordinates: &[RunCoordinate],
+    run_label: Option<&str>,
 ) -> Result<DeckOutcome, CliError> {
     let step = plan
         .steps()
@@ -1690,7 +1772,7 @@ fn run_implicit_step_op_table(
             message: "implicit STEP materializer has no command".to_string(),
         })?;
     let target = step_target_description(step);
-    let ctx = RunContext::new(engine, netlist, args, config, verbose, quiet, None)?;
+    let ctx = RunContext::new(engine, netlist, args, config, verbose, quiet, run_label)?;
     let start_time = Instant::now();
     let mut retained_values = 0usize;
     let mut preflight = Vec::with_capacity(coordinates.len());
@@ -1879,7 +1961,7 @@ fn run_implicit_step_op_table(
             .collect::<Vec<_>>();
         advanced::export_step_sweep(&ctx, &step_scale_name(step), &results)?;
         outputs.extend(ctx.outputs.borrow().iter().cloned());
-    } else if let Some(base_output) = resolve_output_path(args.output.clone(), config)? {
+    } else if let Some(base_output) = ctx.output.clone() {
         // Flat artifacts stay coordinate-local when topology changes.  Every
         // coordinate was solved and schema-checked above, before this first
         // write, so coordinate order can neither select columns nor leave a
@@ -1908,9 +1990,13 @@ fn run_implicit_step_op_table(
         .filter(|stem| *stem != "-")
         .unwrap_or("stdin")
         .to_string();
+    let report_name = match run_label {
+        Some(label) => format!("{base_name} [{label}]"),
+        None => base_name,
+    };
     Ok(DeckOutcome {
         reports: vec![SimulationReport {
-            name: base_name,
+            name: report_name,
             netlist: args.input.display().to_string(),
             passed: measurements.iter().all(|measurement| measurement.passed),
             duration_secs: start_time.elapsed().as_secs_f64(),
@@ -2094,7 +2180,7 @@ fn run_deck(
 ) -> Result<DeckOutcome, CliError> {
     let temperature_normalized = normalize_temperature_axis(netlist)?;
     let executable_netlist = temperature_normalized.as_ref().unwrap_or(netlist);
-    validate_step_frontend_compatibility(executable_netlist, args, run_label)?;
+    validate_step_frontend_compatibility(executable_netlist, args)?;
 
     let resource_limits = config.resources.limits();
     let canonical_plan = DeckPlan::from_netlist_run_axes_with_abort(
@@ -2167,6 +2253,7 @@ fn run_deck(
             &engine,
             &materializer,
             &coordinates,
+            run_label,
         );
     }
 
@@ -2219,7 +2306,12 @@ fn run_deck(
                 ),
             });
         }
-        let label = step_run_label(run_index, coordinates.len());
+        let step_label = step_run_label(run_index, coordinates.len());
+        let label = compose_run_label(run_label, Some(&step_label)).ok_or_else(|| {
+            CliError::InternalError {
+                message: "STEP coordinate unexpectedly has no output namespace".to_string(),
+            }
+        })?;
         if verbose && !quiet {
             println!(
                 "\n=== {label} ({}): {} ===",

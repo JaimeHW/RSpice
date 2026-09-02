@@ -224,6 +224,16 @@ fn assert_conditional_implicit_step_topology_is_typed(
     semantic
 }
 
+fn tagged_output(base: &Path, tag: &str) -> PathBuf {
+    let stem = base.file_stem().expect("output stem").to_string_lossy();
+    base.with_file_name(format!(
+        "{stem}.{tag}.{}",
+        base.extension()
+            .expect("output extension")
+            .to_string_lossy()
+    ))
+}
+
 fn metadata_artifact(metadata: &serde_json::Value) -> &str {
     metadata["artifact"]
         .as_str()
@@ -776,7 +786,7 @@ fn conditional_child_analysis_change_fails_before_any_step_output() {
 }
 
 #[test]
-fn outer_alter_step_incompatibility_is_rejected_before_base_output() {
+fn outer_alter_and_inner_step_compose_unique_output_namespaces() {
     let dir = test_dir("alter_preflight");
     let deck = dir.join("alter_step.sp");
     let output_path = dir.join("alter_step.csv");
@@ -802,19 +812,88 @@ fn outer_alter_step_incompatibility_is_rejected_before_base_output() {
         "-f",
         "csv",
     ]);
-    assert_eq!(
-        run.status.code(),
-        Some(2),
-        "stdout: {}; stderr: {}",
+    assert!(
+        run.status.success(),
+        "outer/inner run axes must compose; stdout: {}; stderr: {}",
         String::from_utf8_lossy(&run.stdout),
         String::from_utf8_lossy(&run.stderr)
     );
-    assert!(
-        String::from_utf8_lossy(&run.stderr).contains("cannot yet be composed with .STEP"),
-        "stderr: {}",
-        String::from_utf8_lossy(&run.stderr)
-    );
     assert!(!output_path.exists());
+    let base_output = tagged_output(&output_path, "base");
+    let first_step = tagged_output(&output_path, "stepped_step_000001");
+    let second_step = tagged_output(&output_path, "stepped_step_000002");
+    for path in [&base_output, &first_step, &second_step] {
+        assert!(path.exists(), "missing composed output {}", path.display());
+    }
+    let base_current = scalar_csv_value(
+        &std::fs::read_to_string(base_output).expect("base output"),
+        "I(V1)",
+    );
+    let first_current = scalar_csv_value(
+        &std::fs::read_to_string(first_step).expect("first STEP output"),
+        "I(V1)",
+    );
+    let second_current = scalar_csv_value(
+        &std::fs::read_to_string(second_step).expect("second STEP output"),
+        "I(V1)",
+    );
+    assert!((base_current + 1.0e-3).abs() < 1.0e-12);
+    assert!((first_current + 1.0e-3).abs() < 1.0e-12);
+    assert!((second_current + 0.5e-3).abs() < 1.0e-12);
+    assert_eq!(
+        std::fs::read_dir(&dir)
+            .expect("read test directory")
+            .filter_map(Result::ok)
+            .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "csv"))
+            .count(),
+        3,
+        "one outer base artifact and two inner coordinate artifacts are required"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn outer_alter_step_cross_product_obeys_one_global_batch_budget() {
+    let dir = test_dir("alter_step_batch_limit");
+    let deck = dir.join("bounded_alter_step.sp");
+    let config = dir.join("rspice.toml");
+    let output_path = dir.join("bounded_alter_step.csv");
+    std::fs::write(
+        &deck,
+        "* aggregate outer/inner batch budget\n\
+         .param r=1k\n\
+         V1 in 0 1\n\
+         R1 in 0 {r}\n\
+         .step param r list 1k 2k\n\
+         .op\n\
+         .alter second\n\
+         V1 in 0 2\n\
+         .end\n",
+    )
+    .expect("write bounded ALTER STEP deck");
+    std::fs::write(&config, "[resources]\nmax_batch_runs = 3\n").expect("write resource config");
+
+    let run = run_rspice(&[
+        "--config",
+        config.to_str().unwrap(),
+        "--error-format",
+        "json",
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "-o",
+        output_path.to_str().unwrap(),
+        "-f",
+        "csv",
+    ]);
+    assert_eq!(run.status.code(), Some(65));
+    let diagnostic: serde_json::Value =
+        serde_json::from_slice(&run.stderr).expect("structured diagnostic");
+    assert_eq!(diagnostic["error"]["code"], "resource_limit");
+    assert_eq!(diagnostic["error"]["resource"], "batch_runs");
+    assert_eq!(diagnostic["error"]["requested"], 4);
+    assert_eq!(diagnostic["error"]["limit"], 3);
     assert_eq!(
         std::fs::read_dir(&dir)
             .expect("read test directory")
@@ -822,7 +901,7 @@ fn outer_alter_step_incompatibility_is_rejected_before_base_output() {
             .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "csv"))
             .count(),
         0,
-        "global preflight must prevent every outer-run output"
+        "aggregate preflight must reject before any outer artifact"
     );
 
     let _ = std::fs::remove_dir_all(&dir);
