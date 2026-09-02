@@ -2029,6 +2029,7 @@ impl Netlist {
         ),
         ParseWithAbortError,
     > {
+        let implicit_title = expanded.implicit_title().map(str::to_owned);
         let mut walk = ControlRegionWalk::default();
         for (index, item) in expanded.items.iter().enumerate() {
             poll_parse_abort(abort, index)?;
@@ -2050,6 +2051,9 @@ impl Netlist {
             .collect::<Vec<_>>();
 
         let mut output = include::ExpandedSource::default();
+        if let Some(title) = implicit_title {
+            output.set_implicit_title(title);
+        }
         let diagnostics = control_disposition_diagnostics(&dispositions);
         let mut in_control = false;
         let mut opened_at = None;

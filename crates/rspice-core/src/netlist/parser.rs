@@ -356,7 +356,7 @@ pub fn parse_netlist_with_options_and_abort(
     options: NetlistParseOptions,
     abort: &dyn AbortSignal,
 ) -> Result<Netlist, ParseWithAbortError> {
-    parse_netlist_impl(input, options, None, abort)
+    parse_netlist_impl(input, options, None, None, abort)
 }
 
 pub(crate) fn parse_expanded_netlist_with_options_and_abort(
@@ -369,6 +369,7 @@ pub(crate) fn parse_expanded_netlist_with_options_and_abort(
         &rendered,
         options,
         Some(SourceEventSchedule::from_expanded(expanded)),
+        expanded.implicit_title(),
         abort,
     )
 }
@@ -399,6 +400,7 @@ fn parse_netlist_impl(
     input: &str,
     options: NetlistParseOptions,
     mut source_schedule: Option<SourceEventSchedule>,
+    implicit_title: Option<&str>,
     abort: &dyn AbortSignal,
 ) -> Result<Netlist, ParseWithAbortError> {
     ensure_parse_not_aborted(abort)?;
@@ -421,13 +423,19 @@ fn parse_netlist_impl(
     }
 
     if original_lines.is_empty() {
-        return Ok(Netlist::default());
+        let mut netlist = Netlist::default();
+        if let Some(title) = implicit_title {
+            netlist.title = title.to_owned();
+        }
+        return Ok(netlist);
     }
+    let body_start = usize::from(implicit_title.is_none());
     let xyce_syntax = options.expression_dialect == ExpressionDialect::Xyce;
     let allow_non_semicolon_comments = !xyce_syntax;
     let preprocess = prescan_root_preprocess_with_dialect(
         &original_lines,
         source_schedule.as_ref(),
+        body_start,
         allow_non_semicolon_comments,
         xyce_syntax,
         abort,
@@ -436,6 +444,7 @@ fn parse_netlist_impl(
         input,
         &original_lines,
         source_schedule.as_ref(),
+        body_start,
         preprocess.replace_ground == Some(true),
         allow_non_semicolon_comments,
         xyce_syntax,
@@ -444,8 +453,10 @@ fn parse_netlist_impl(
     let parse_input = transformed_input.as_str();
     let lines = parse_input.lines().collect::<Vec<_>>();
 
-    // First line is the title
-    let title = lines[0].to_string();
+    // SPICE consumes the first physical record as a mandatory title. Native
+    // Spectre roots have no title card, so their file-backed expansion carries
+    // an out-of-band title and parsing begins at physical line one.
+    let title = implicit_title.map_or_else(|| lines[0].to_string(), str::to_owned);
     let mut state = ParseState::new();
     state.max_analysis_points = options.resource_limits.max_analysis_points;
     state.allow_unmatched_subckt_ends = options.expression_dialect == ExpressionDialect::Xyce;
@@ -482,6 +493,7 @@ fn parse_netlist_impl(
     );
     state.spectre_statistics = prescan_spectre_statistics_with_abort(
         &lines,
+        body_start,
         allow_non_semicolon_comments,
         xyce_syntax,
         abort,
@@ -500,21 +512,26 @@ fn parse_netlist_impl(
     // Seed the statistical expression functions before any parameter
     // evaluation so the deck behaves identically regardless of where the
     // `.options seed=` line appears.
-    if let Some(seed) =
-        prescan_random_seed_with_abort(&lines, allow_non_semicolon_comments, xyce_syntax, abort)?
-    {
+    if let Some(seed) = prescan_random_seed_with_abort(
+        &lines,
+        body_start,
+        allow_non_semicolon_comments,
+        xyce_syntax,
+        abort,
+    )? {
         state.params.set_random_seed(seed);
         log::info!("statistical expression functions seeded with {seed} (.options seed)");
     }
     prescan_temperature_options_with_abort(
         &lines,
+        body_start,
         &mut state,
         allow_non_semicolon_comments,
         xyce_syntax,
         abort,
     )?;
 
-    let mut line_num = 1;
+    let mut line_num = body_start;
     let mut continuation = String::new();
     let mut continuation_line = None;
     let mut continuation_origin = None;
@@ -536,8 +553,7 @@ fn parse_netlist_impl(
         abort,
     )?;
 
-    for (line_index, line) in lines.iter().skip(1).enumerate() {
-        let zero_based_line = line_index + 1;
+    for (zero_based_line, line) in lines.iter().enumerate().skip(body_start) {
         process_source_events_at(
             source_schedule.as_mut(),
             zero_based_line,
@@ -549,7 +565,7 @@ fn parse_netlist_impl(
             &mut state,
             abort,
         )?;
-        poll_parse_abort(abort, line_index)?;
+        poll_parse_abort(abort, zero_based_line)?;
         poll_parse_text(abort, line)?;
         line_num += 1;
         let origin = source_schedule
@@ -780,12 +796,13 @@ fn parse_netlist_impl(
 
 fn prescan_spectre_statistics_with_abort(
     lines: &[&str],
+    body_start: usize,
     allow_non_semicolon_comments: bool,
     xyce_syntax: bool,
     abort: &dyn AbortSignal,
 ) -> Result<SpectreStatisticsPlan, ParseWithAbortError> {
     let mut combined = SpectreStatisticsPlan::default();
-    for (index, raw) in lines.iter().enumerate().skip(1) {
+    for (index, raw) in lines.iter().enumerate().skip(body_start) {
         poll_parse_abort(abort, index)?;
         if xyce_syntax && xyce_physical_line_is_comment(raw) {
             continue;
@@ -990,6 +1007,7 @@ fn apply_root_preprocessing(
     input: &str,
     lines: &[&str],
     source_schedule: Option<&SourceEventSchedule>,
+    body_start: usize,
     replace_ground: bool,
     allow_non_semicolon_comments: bool,
     xyce_syntax: bool,
@@ -1072,7 +1090,7 @@ fn apply_root_preprocessing(
         if !is_comment_or_blank && !is_continuation && !is_indented_preprocess_comment {
             logical_policy = logical_line_policy(line, is_root, allow_non_semicolon_comments);
         }
-        if index == 0 {
+        if index < body_start {
             logical_policy = LogicalLinePolicy::Rewrite;
         }
 
@@ -1083,7 +1101,7 @@ fn apply_root_preprocessing(
             // expansion in Xyce. Drop the entire included logical card so it
             // cannot be parsed later as an active root command.
         } else if replace_ground
-            && index != 0
+            && index >= body_start
             && logical_policy == LogicalLinePolicy::Rewrite
             && !is_comment_or_blank
         {
@@ -1266,7 +1284,7 @@ mod replaceground_lexical_tests {
             );
             let lines = source.lines().collect::<Vec<_>>();
             let transformed =
-                apply_root_preprocessing(&source, &lines, None, true, true, true, &NoAbort)
+                apply_root_preprocessing(&source, &lines, None, 1, true, true, true, &NoAbort)
                     .expect("NoAbort cannot cancel preprocessing");
             assert!(
                 transformed.contains("+ GND GROUND"),
@@ -2012,6 +2030,7 @@ struct RootPreprocessPolicy {
 fn prescan_root_preprocess_with_dialect(
     lines: &[&str],
     source_schedule: Option<&SourceEventSchedule>,
+    body_start: usize,
     allow_non_semicolon_comments: bool,
     xyce_syntax: bool,
     abort: &dyn AbortSignal,
@@ -2027,9 +2046,9 @@ fn prescan_root_preprocess_with_dialect(
     for (index, line) in lines.iter().enumerate() {
         poll_parse_abort(abort, index)?;
         poll_parse_text(abort, line)?;
-        // The root's first physical record is always its title. Xyce consumes
-        // it before parsePreprocess(), so title text can never select policy.
-        if index == 0 {
+        // SPICE root records before `body_start` are title text. Xyce consumes
+        // them before parsePreprocess(), so title text can never select policy.
+        if index < body_start {
             continue;
         }
         let mut physical_line = index + 1;
@@ -2752,6 +2771,176 @@ mod source_mapping_tests {
             Some(NetlistSourceLocation::in_file(&canonical_child, 1))
         );
         let _ = std::fs::remove_dir_all(&directory);
+    }
+}
+
+#[cfg(test)]
+mod spectre_root_title_tests {
+    use super::*;
+    use crate::netlist::SealedSourceBundle;
+
+    fn unique_root(name: &str, extension: &str) -> std::path::PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        std::env::temp_dir()
+            .join(format!(
+                "rspice-spectre-root-title-{}-{unique}",
+                std::process::id()
+            ))
+            .join(format!("{name}.{extension}"))
+    }
+
+    #[test]
+    fn root_scs_first_model_is_not_consumed_as_a_spice_title() {
+        let root = unique_root("first-model", "scs");
+        let netlist = Netlist::parse_with_path(
+            "model diode_a diode is=1e-14\nmodel diode_b diode is=2e-14\n",
+            &root,
+        )
+        .expect("native Spectre roots have no physical title card");
+
+        assert_eq!(
+            netlist
+                .models
+                .iter()
+                .map(|model| model.name.to_ascii_lowercase())
+                .collect::<Vec<_>>(),
+            ["diode_a", "diode_b"]
+        );
+        assert_eq!(netlist.title, format!("Spectre source: {}", root.display()));
+    }
+
+    #[test]
+    fn root_scs_first_parameter_is_executable() {
+        let root = unique_root("first-parameter", "scs");
+        let netlist = Netlist::parse_with_path(
+            "parameters first=7 second=8\nR1 (out 0) resistor r=first\n",
+            &root,
+        )
+        .expect("first Spectre parameters statement is executable");
+
+        assert_eq!(netlist.params.get("first"), Some(7.0));
+        assert_eq!(netlist.params.get("second"), Some(8.0));
+        assert_eq!(netlist.elements.len(), 1);
+    }
+
+    #[test]
+    fn root_scs_first_subcircuit_is_retained() {
+        let root = unique_root("first-subcircuit", "scs");
+        let netlist = Netlist::parse_with_path(
+            "subckt cell (a b)\nR1 (a b) resistor r=1k\nends cell\nX1 (out 0) cell\n",
+            &root,
+        )
+        .expect("first Spectre subcircuit statement is executable");
+
+        assert_eq!(netlist.subcircuits.len(), 1);
+        assert!(netlist.subcircuits[0].name.eq_ignore_ascii_case("cell"));
+        assert_eq!(netlist.subcircuits[0].elements.len(), 1);
+        assert_eq!(netlist.elements.len(), 1);
+    }
+
+    #[test]
+    fn root_scs_first_instance_is_retained() {
+        let root = unique_root("first-instance", "scs");
+        let netlist = Netlist::parse_with_path(
+            "first (out 0) resistor r=2k\nsecond (out 0) resistor r=3k\n",
+            &root,
+        )
+        .expect("first Spectre instance statement is executable");
+
+        assert_eq!(
+            netlist
+                .elements
+                .iter()
+                .map(|element| element.name.to_ascii_lowercase())
+                .collect::<Vec<_>>(),
+            ["rfirst", "rsecond"]
+        );
+    }
+
+    #[test]
+    fn path_backed_spice_still_consumes_its_first_line_as_title() {
+        let root = unique_root("ordinary-title", "cir");
+        let netlist = Netlist::parse_with_path("Rtitle 9 0 9\nRbody 1 0 1\n.end\n", &root)
+            .expect("ordinary SPICE retains mandatory title semantics");
+
+        assert_eq!(netlist.title, "Rtitle 9 0 9");
+        assert_eq!(netlist.elements.len(), 1);
+        assert!(netlist.elements[0].name.eq_ignore_ascii_case("Rbody"));
+    }
+
+    #[test]
+    fn root_scs_first_card_error_retains_physical_line_one() {
+        let root = unique_root("root-error", "scs");
+        let error = Netlist::parse_with_path("bad (out 0) resistor\n", &root)
+            .expect_err("malformed first-card semantics fail closed");
+
+        match error {
+            ParseError::Syntax { line, message } => {
+                assert_eq!(line, 1, "root physical line must not shift: {message}");
+                assert!(
+                    message.starts_with(&format!("{}:1:", root.display())),
+                    "root source identity was not retained: {message}"
+                );
+            }
+            other => panic!("expected a source-located syntax error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn included_scs_first_card_retains_child_path_and_line() {
+        let root = unique_root("include-root", "cir");
+        let directory = root.parent().expect("root path has a parent");
+        std::fs::create_dir_all(directory).expect("create include fixture directory");
+        let child = directory.join("child.scs");
+        std::fs::write(&child, "bad (out 0) resistor\n")
+            .expect("write invalid child Spectre source");
+
+        let error =
+            Netlist::parse_with_path("ordinary root title\n.include \"child.scs\"\n.end\n", &root)
+                .expect_err("unsupported included first card fails closed");
+        let canonical_child = child.canonicalize().expect("canonicalize child source");
+        let _ = std::fs::remove_dir_all(directory);
+
+        match error {
+            ParseError::Syntax { line, message } => {
+                assert_eq!(line, 2, "outer include directive remains root line two");
+                assert!(
+                    message.contains(&format!("{}:1:", canonical_child.display())),
+                    "child source identity and physical line were not retained: {message}"
+                );
+            }
+            other => panic!("expected a source-located include error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sealed_spectre_replay_preserves_implicit_title_policy() {
+        let root = unique_root("sealed-replay", "SCS");
+        let source = "model first diode is=1e-14\nmodel second diode is=2e-14\n";
+        let sources = SealedSourceBundle::try_new([(root.clone(), source.to_owned())])
+            .expect("construct authenticated source bundle");
+        let netlist = Netlist::parse_with_path_and_sealed_sources_and_options_and_abort(
+            source,
+            &root,
+            sources,
+            NetlistParseOptions::default(),
+            &NoAbort,
+        )
+        .expect("sealed native Spectre root parses");
+        let replayed = netlist
+            .replay_root_source_with_options_and_abort(
+                source,
+                NetlistParseOptions::default(),
+                &NoAbort,
+            )
+            .expect("sealed native Spectre root replays");
+
+        assert_eq!(replayed.title, netlist.title);
+        assert_eq!(replayed.models.len(), 2);
+        assert!(replayed.models[0].name.eq_ignore_ascii_case("first"));
     }
 }
 
@@ -3806,6 +3995,7 @@ fn is_dot_command_head(head: &str) -> bool {
 
 fn prescan_temperature_options_with_abort(
     lines: &[&str],
+    body_start: usize,
     state: &mut ParseState,
     allow_non_semicolon_comments: bool,
     xyce_syntax: bool,
@@ -3814,12 +4004,10 @@ fn prescan_temperature_options_with_abort(
     let mut continuation = String::new();
     let mut continuation_line = None;
     let mut in_options = false;
-    let mut line_num = 1usize;
-
-    for (index, line) in lines.iter().skip(1).enumerate() {
+    for (index, line) in lines.iter().enumerate().skip(body_start) {
         poll_parse_abort(abort, index)?;
         poll_parse_text(abort, line)?;
-        line_num += 1;
+        let line_num = index + 1;
         if xyce_syntax && xyce_physical_line_is_comment(line) {
             continue;
         }
@@ -3981,18 +4169,17 @@ fn process_line_gated(
 /// is ignored here — `parse_options_command` emits the warning for it.
 fn prescan_random_seed_with_abort(
     lines: &[&str],
+    body_start: usize,
     allow_non_semicolon_comments: bool,
     xyce_syntax: bool,
     abort: &dyn AbortSignal,
 ) -> Result<Option<u64>, ParseWithAbortError> {
     let mut seed = None;
     let mut in_options = false;
-    let mut line_num = 1usize;
-
-    for (index, line) in lines.iter().skip(1).enumerate() {
+    for (index, line) in lines.iter().enumerate().skip(body_start) {
         poll_parse_abort(abort, index)?;
         poll_parse_text(abort, line)?;
-        line_num += 1;
+        let line_num = index + 1;
         if xyce_syntax && xyce_physical_line_is_comment(line) {
             continue;
         }

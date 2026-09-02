@@ -50,9 +50,18 @@ pub(crate) enum ExpandedSourceItem {
 pub(crate) struct ExpandedSource {
     pub(crate) items: Vec<ExpandedSourceItem>,
     rendered_bytes: usize,
+    implicit_title: Option<String>,
 }
 
 impl ExpandedSource {
+    pub(crate) fn implicit_title(&self) -> Option<&str> {
+        self.implicit_title.as_deref()
+    }
+
+    pub(crate) fn set_implicit_title(&mut self, title: String) {
+        self.implicit_title = Some(title);
+    }
+
     pub(crate) fn render(&self) -> String {
         let mut output = String::with_capacity(self.rendered_bytes);
         for item in &self.items {
@@ -754,7 +763,20 @@ impl IncludeProcessor {
         abort: &dyn AbortSignal,
     ) -> Result<ExpandedSource, ParseWithAbortError> {
         self.begin_source_operation();
-        self.expand_content_from_mapped_with_abort(content, current_path, None, false, false, abort)
+        let native_spectre =
+            super::spectre_adapter::is_native_spectre_source(current_path, content);
+        let mut expanded = self.expand_content_from_mapped_with_abort(
+            content,
+            current_path,
+            None,
+            false,
+            false,
+            abort,
+        )?;
+        if native_spectre {
+            expanded.set_implicit_title(format!("Spectre source: {}", current_path.display()));
+        }
+        Ok(expanded)
     }
 
     /// Resolve a filename to an absolute path, recording the chain walked.

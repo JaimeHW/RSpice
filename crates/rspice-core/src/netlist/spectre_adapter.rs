@@ -103,20 +103,32 @@ struct SpectreSymbols {
 
 /// Adapt a supported Spectre model-library source without changing its line
 /// count. Plain SPICE sources are returned by reference.
-pub fn adapt_spectre_model_library<'a>(
-    path: &Path,
-    source: &'a str,
-) -> Result<Cow<'a, str>, SpectreModelAdapterError> {
+pub(crate) fn is_native_spectre_source(path: &Path, source: &str) -> bool {
     let is_scs = path
         .extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| extension.eq_ignore_ascii_case("scs"));
-    let has_language_boundary = source.lines().any(|line| {
-        line.trim()
+    if is_scs {
+        return true;
+    }
+
+    // A language boundary inside a line or block comment is inert. Keep this
+    // lightweight recognition in lockstep with the adapter without requiring
+    // a successful full Spectre comment pass merely to select the dialect.
+    let mut in_block_comment = false;
+    source.lines().enumerate().any(|(line_index, line)| {
+        strip_spectre_comments_from_line(line, &mut in_block_comment, line_index + 1, None)
+            .trim()
             .to_ascii_lowercase()
             .starts_with("simulator lang=")
-    });
-    if !is_scs && !has_language_boundary {
+    })
+}
+
+pub fn adapt_spectre_model_library<'a>(
+    path: &Path,
+    source: &'a str,
+) -> Result<Cow<'a, str>, SpectreModelAdapterError> {
+    if !is_native_spectre_source(path, source) {
         return Ok(Cow::Borrowed(source));
     }
 
@@ -1842,6 +1854,22 @@ fn error(line: usize, message: impl Into<String>) -> SpectreModelAdapterError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_spectre_detection_is_case_insensitive_and_comment_aware() {
+        assert!(is_native_spectre_source(
+            Path::new("model.SCS"),
+            "model junction diode is=1e-14\n"
+        ));
+        assert!(is_native_spectre_source(
+            Path::new("model.lib"),
+            "SiMuLaToR LaNg=SpEcTrE\n"
+        ));
+        assert!(!is_native_spectre_source(
+            Path::new("model.lib"),
+            "// simulator lang=spectre\n/*\nsimulator lang=spectre\n*/\n* simulator lang=spectre\n"
+        ));
+    }
 
     #[test]
     fn native_sections_and_multiline_models_adapt_without_losing_lines() {
