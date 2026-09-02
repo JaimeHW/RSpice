@@ -7,6 +7,22 @@
 
 use super::*;
 
+fn fft_value_unit(
+    physical_type: &str,
+    format: rspice_core::netlist::FftFormat,
+) -> Result<Option<&'static str>, String> {
+    let physical_unit = match physical_type {
+        "voltage" => Some("V"),
+        "current" => Some("A"),
+        "parameter" => None,
+        other => return Err(format!("unsupported transient FFT physical type '{other}'")),
+    };
+    Ok(match format {
+        rspice_core::netlist::FftFormat::Normalized => Some("1"),
+        rspice_core::netlist::FftFormat::Unnormalized => physical_unit,
+    })
+}
+
 #[pyclass(name = "FftBin", module = "rspice", from_py_object)]
 #[derive(Debug, Clone)]
 pub struct PyTransientFftBin {
@@ -387,6 +403,15 @@ impl PyTransientFftResult {
         self.inner.physical_type
     }
 
+    /// Effective unit of the complex coefficients, magnitudes, and
+    /// magnitude-like metrics. Normalization makes the values dimensionless
+    /// without erasing the source quantity reported by `physical_type`.
+    #[getter]
+    fn value_unit(&self) -> PyResult<Option<&'static str>> {
+        fft_value_unit(self.inner.physical_type, self.inner.format)
+            .map_err(crate::errors::value_error)
+    }
+
     #[getter]
     fn start_time(&self) -> f64 {
         self.inner.start_time
@@ -576,5 +601,22 @@ impl PyTransientFftResult {
             unpickler::<Self>(py)?,
             (transient_fft_result_state(&self.inner)?,),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rspice_core::netlist::FftFormat::{Normalized, Unnormalized};
+
+    #[test]
+    fn value_units_preserve_quantity_provenance_and_transform_semantics() {
+        assert_eq!(fft_value_unit("voltage", Normalized).unwrap(), Some("1"));
+        assert_eq!(fft_value_unit("current", Normalized).unwrap(), Some("1"));
+        assert_eq!(fft_value_unit("parameter", Normalized).unwrap(), Some("1"));
+        assert_eq!(fft_value_unit("voltage", Unnormalized).unwrap(), Some("V"));
+        assert_eq!(fft_value_unit("current", Unnormalized).unwrap(), Some("A"));
+        assert_eq!(fft_value_unit("parameter", Unnormalized).unwrap(), None);
+        assert!(fft_value_unit("unsupported", Normalized).is_err());
     }
 }

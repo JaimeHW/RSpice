@@ -44,6 +44,7 @@ def assert_fft_equal(actual, expected):
         "source",
         "output_name",
         "physical_type",
+        "value_unit",
         "start_time",
         "stop_time",
         "sample_interval",
@@ -116,6 +117,7 @@ def test_full_and_compressed_results_expose_identical_typed_fft(engine, fft_netl
         "parameter",
         "current",
     ]
+    assert [fft.value_unit for fft in full.fft_results] == ["V", "1", "A"]
     assert [fft.output_name for fft in full.fft_results] == [
         "V(OUT)",
         "{2*V(out)}",
@@ -178,7 +180,9 @@ def test_transient_pickle_rejects_legacy_and_future_fft_state(
     else:
         original = engine.run_tran(fft_netlist, stop_time=1e-3, max_step=1e-6)
     unpickler, state = original.__reduce__()
-    fft_index = -2 if compressed else -1
+    # Compressed state appends the FFT contract before the analog-inventory
+    # and compression-certificate contracts. Full transient state ends with it.
+    fft_index = -3 if compressed else -1
 
     legacy_state = list(state)
     legacy_state[fft_index] = None
@@ -210,3 +214,44 @@ def test_fft_pickle_rejects_malformed_enum_and_bin_shape(engine, fft_netlist):
 
     with pytest.raises(ValueError, match="has 64 bins, expected 65"):
         unpickler((source, sampling, configuration, axes, bins[:-1], metrics))
+
+
+def test_fft_value_units_cover_normalized_and_unnormalized_quantities(engine):
+    netlist = rspice.Netlist.parse(
+        """V1 out 0 SIN(0 1 1k)
+R1 out 0 1k
+.save I(V1)
+.options fft fft_accurate=0
+.tran 1u 1m
+.fft V(out) np=32 format=norm window=rect
+.fft V(out) np=32 format=unorm window=rect
+.fft I(V1) np=32 format=norm window=rect
+.fft I(V1) np=32 format=unorm window=rect
+.fft {2*V(out)} np=32 format=norm window=rect
+.fft {2*V(out)} np=32 format=unorm window=rect
+.end
+"""
+    )
+    result = engine.run_tran(netlist, stop_time=1e-3, max_step=1e-6)
+    actual = [
+        (fft.physical_type, fft.format, fft.value_unit)
+        for fft in result.fft_results
+    ]
+    assert actual == [
+        ("voltage", "normalized", "1"),
+        ("voltage", "unnormalized", "V"),
+        ("current", "normalized", "1"),
+        ("current", "unnormalized", "A"),
+        ("parameter", "normalized", "1"),
+        ("parameter", "unnormalized", None),
+    ]
+
+    restored = round_trip(result)
+    assert [fft.value_unit for fft in restored.fft_results] == [
+        "1",
+        "V",
+        "1",
+        "A",
+        "1",
+        None,
+    ]

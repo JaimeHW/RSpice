@@ -373,7 +373,10 @@ tran.fourier_current("V1", 1e3)                # branch-current .FOUR
 # and retains source/configuration metadata and calibrated complex bins.
 fft = tran.fft(0)                               # same objects as tran.fft_results
 fft.source, fft.window, fft.format, fft.mode
+fft.physical_type, fft.value_unit               # e.g. ("voltage", "V")
 fft.frequencies, fft.complex_bins               # float64 and complex128 arrays
+# Normalized spectra retain physical_type provenance but use value_unit "1";
+# an unnormalized parameter/expression has value_unit None.
 # .OPTIONS FFT FFTOUT=1 additionally populates fft.metrics.
 if fft.metrics is not None:
     print(fft.metrics.thd_ratio, fft.metrics.largest_harmonics)

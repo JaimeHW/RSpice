@@ -621,6 +621,10 @@ pub struct TransientFftSnapshot {
     /// Resolved scalar result-column spelling.
     pub output_name: String,
     pub physical_type: String,
+    /// Effective unit of Cartesian coefficients, magnitudes, and
+    /// magnitude-like metrics. Normalized spectra use `1` while retaining
+    /// `physical_type`; an unnormalized parameter has no known unit.
+    pub value_unit: Option<String>,
     pub start_time: f64,
     pub stop_time: f64,
     pub sample_interval: f64,
@@ -1804,13 +1808,29 @@ fn fft_metrics_snapshot(metrics: &TransientFftMetrics) -> TransientFftMetricsSna
     }
 }
 
+fn fft_value_unit(physical_type: &str, format: FftFormat) -> Result<Option<&'static str>, String> {
+    let physical_unit = match physical_type {
+        "voltage" => Some("V"),
+        "current" => Some("A"),
+        "parameter" => None,
+        other => {
+            return Err(format!("unsupported transient FFT physical type '{other}'"));
+        }
+    };
+    Ok(match format {
+        FftFormat::Normalized => Some("1"),
+        FftFormat::Unnormalized => physical_unit,
+    })
+}
+
 fn fft_snapshot(
     result: &TransientFftResult,
     ordinal: usize,
     parent_analysis_id: &str,
-) -> TransientFftSnapshot {
+) -> Result<TransientFftSnapshot, String> {
     let (source_kind, source_text, authored_output) = fft_output_identity(&result.output);
-    TransientFftSnapshot {
+    let value_unit = fft_value_unit(result.physical_type, result.format)?;
+    Ok(TransientFftSnapshot {
         analysis_id: format!("fft-{ordinal:03}"),
         parent_analysis_id: parent_analysis_id.to_owned(),
         ordinal,
@@ -1819,6 +1839,7 @@ fn fft_snapshot(
         authored_output,
         output_name: result.output_name.clone(),
         physical_type: result.physical_type.to_string(),
+        value_unit: value_unit.map(str::to_string),
         start_time: result.start_time,
         stop_time: result.stop_time,
         sample_interval: result.sample_interval,
@@ -1843,7 +1864,7 @@ fn fft_snapshot(
             phase_degrees: result.bins.iter().map(|bin| bin.phase_degrees).collect(),
         },
         metrics: result.metrics.as_ref().map(fft_metrics_snapshot),
-    }
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1988,7 +2009,7 @@ pub fn transient_snapshot_from_result(
         .iter()
         .enumerate()
         .map(|(index, result)| fft_snapshot(result, index + 1, "tran-001"))
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(TransientSnapshot {
         time: result.time,
         step_sizes: result.step_sizes,
@@ -2027,7 +2048,7 @@ pub fn transient_snapshot_from_compressed_result(
         .iter()
         .enumerate()
         .map(|(index, result)| fft_snapshot(result, index + 1, "tran-001"))
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(TransientSnapshot {
         time: result.time,
         step_sizes: result.step_sizes,
@@ -3654,6 +3675,10 @@ mod tests {
         assert!(wasm.ordinal > 0);
         assert_eq!(wasm.output_name, core.output_name);
         assert_eq!(wasm.physical_type, core.physical_type);
+        assert_eq!(
+            wasm.value_unit.as_deref(),
+            fft_value_unit(core.physical_type, core.format).unwrap()
+        );
         assert_eq!(wasm.start_time, core.start_time);
         assert_eq!(wasm.stop_time, core.stop_time);
         assert_eq!(wasm.sample_interval, core.sample_interval);
@@ -3746,6 +3771,32 @@ mod tests {
         assert_eq!(wasm.fft_results[1].ordinal, 2);
         assert_eq!(wasm.fft_results[0].output_name, "V(OUT)");
         assert_eq!(wasm.fft_results[1].output_name, "{2*v(out)}");
+    }
+
+    #[test]
+    fn transient_fft_value_units_cover_every_supported_quantity_and_format() {
+        use FftFormat::{Normalized, Unnormalized};
+
+        assert_eq!(fft_value_unit("voltage", Normalized).unwrap(), Some("1"));
+        assert_eq!(fft_value_unit("current", Normalized).unwrap(), Some("1"));
+        assert_eq!(fft_value_unit("parameter", Normalized).unwrap(), Some("1"));
+        assert_eq!(fft_value_unit("voltage", Unnormalized).unwrap(), Some("V"));
+        assert_eq!(fft_value_unit("current", Unnormalized).unwrap(), Some("A"));
+        assert_eq!(fft_value_unit("parameter", Unnormalized).unwrap(), None);
+        assert!(fft_value_unit("unsupported", Normalized).is_err());
+    }
+
+    #[test]
+    fn transient_fft_snapshot_conversion_rejects_unsupported_physical_type() {
+        let netlist = Netlist::parse(FFT_PARITY_DECK).expect("FFT parity deck parses in core");
+        let mut core = Engine::new(SimulationConfig::default())
+            .run_tran(&netlist, 1.0e-3, 1.0e-6)
+            .expect("FFT parity deck executes in core");
+        core.fft_results[0].physical_type = "unsupported";
+
+        let error = transient_snapshot_from_result(core)
+            .expect_err("unknown FFT physical types must fail snapshot conversion");
+        assert!(error.contains("unsupported transient FFT physical type 'unsupported'"));
     }
 
     #[test]
@@ -4039,6 +4090,7 @@ mod tests {
             "authored_output",
             "output_name",
             "physical_type",
+            "value_unit",
             "start_time",
             "stop_time",
             "sample_interval",
@@ -4117,6 +4169,10 @@ mod tests {
         assert_object_fields(&encoded, TRANSIENT_FIELDS);
         let first = &encoded["fft_results"][0];
         assert_object_fields(first, FFT_FIELDS);
+        assert_eq!(first["physical_type"], "voltage");
+        assert_eq!(first["value_unit"], "V");
+        assert_eq!(encoded["fft_results"][1]["physical_type"], "parameter");
+        assert_eq!(encoded["fft_results"][1]["value_unit"], "1");
         assert_object_fields(&first["bins"], BIN_FIELDS);
         assert_object_fields(&first["metrics"], METRIC_FIELDS);
         assert_object_fields(&first["metrics"]["largest_harmonics"], HARMONIC_FIELDS);
@@ -4125,10 +4181,17 @@ mod tests {
             serde_json::from_value(encoded).expect("deserialize transient FFT DTO");
         assert_eq!(decoded, snapshot);
 
-        let mut without_metrics = snapshot;
+        let mut without_metrics = snapshot.clone();
         without_metrics.fft_results[0].metrics = None;
         let encoded = serde_json::to_value(without_metrics).expect("serialize absent metrics");
         assert!(encoded["fft_results"][0]["metrics"].is_null());
+
+        let mut unnormalized_parameter = snapshot;
+        unnormalized_parameter.fft_results[1].format = "unnormalized".to_string();
+        unnormalized_parameter.fft_results[1].value_unit = None;
+        let encoded = serde_json::to_value(unnormalized_parameter)
+            .expect("serialize unnormalized parameter FFT unit");
+        assert!(encoded["fft_results"][1]["value_unit"].is_null());
 
         let analog =
             transient_snapshot_from_compressed_result(synthetic_compressed_analog_result())

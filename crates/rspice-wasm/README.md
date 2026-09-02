@@ -72,14 +72,18 @@ rejected. `maximumInterval: 0` disables the time-axis gap ceiling.
 Each transient FFT entry exposes the complete authored and resolved identity
 (`analysis_id`, `parent_analysis_id`, one-based `ordinal`, `source_kind`,
 `source_text`, `authored_output`, `output_name`,
-`physical_type`), sampling/calibration metadata (`start_time`, `stop_time`,
+`physical_type`, `value_unit`), sampling/calibration metadata (`start_time`, `stop_time`,
 `sample_interval`, `point_count`, `accurate_sampling`, `coherent_gain`,
 `frequency_resolution`), mode selection (`format`, `mode`, `window`,
 `window_name`, `alpha`), and metric-bin selection (`fundamental_bin`,
 `minimum_metric_bin`, `maximum_metric_bin`). Its `bins` object contains aligned
 `indices`, `frequencies`, `real`, `imaginary`, `magnitudes`, and
 `phase_degrees` typed arrays. `metrics` is explicitly `null` unless `FFTOUT=1`;
-when present it contains `fundamental_magnitude`, `thd_ratio`, `thd_db`,
+`value_unit` is `"1"` for normalized spectra, `"V"`/`"A"` for unnormalized
+voltage/current spectra, and `null` for an unnormalized parameter spectrum;
+`physical_type` always retains the source quantity provenance. Unknown physical
+types fail snapshot conversion rather than receiving an invented unit. When
+present, `metrics` contains `fundamental_magnitude`, `thd_ratio`, `thd_db`,
 `sndr_db`, `enob_bits`, `snr_db`, `sfdr_db`, the optional
 `sfdr_spur_bin`/`sfdr_spur_frequency`, and aligned typed arrays under
 `largest_harmonics` for `ranks`, `bins`, `frequencies`, `magnitudes`,
