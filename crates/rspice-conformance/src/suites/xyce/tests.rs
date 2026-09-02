@@ -8,6 +8,17 @@
 use super::output::XyceGeneratedVbicNoiseIssue;
 use super::*;
 
+fn assert_passing_continuous_record_without_fail_value(
+    record: &rspice_core::analysis::ContinuousMeasureRecord,
+    expected_raw_value: Value,
+) {
+    assert_eq!(record.raw_value.to_bits(), expected_raw_value.to_bits());
+    assert_eq!(record.failure_limit, None);
+    assert!(!record.failure_limit_exceeded);
+    assert!(record.passed);
+    assert_eq!(record.verification_failure, None);
+}
+
 #[test]
 fn xyce_runner_retains_one_mismatch_when_configured_limit_is_zero() {
     let runner = XyceTestRunner::new(
@@ -2431,17 +2442,31 @@ fn accepted_point_activation_follows_descending_nested_sweep_traversal() {
     let segment_starts = [3];
     let first = rspice_core::analysis::ContinuousMeasureRecord {
         value: 1.5,
+        raw_value: 1.5,
         event_axis: Some(1.5),
         trigger_axis: None,
         target_axis: None,
+        failure_limit: None,
+        failure_limit_exceeded: false,
+        passed: true,
+        verification_failure: None,
     };
     let second = first;
     let delay = rspice_core::analysis::ContinuousMeasureRecord {
         value: -1.0,
+        raw_value: -1.0,
         event_axis: None,
         trigger_axis: Some(2.5),
         target_axis: Some(1.5),
+        failure_limit: None,
+        failure_limit_exceeded: false,
+        passed: true,
+        verification_failure: None,
     };
+
+    assert_passing_continuous_record_without_fail_value(&first, 1.5);
+    assert_passing_continuous_record_without_fail_value(&second, 1.5);
+    assert_passing_continuous_record_without_fail_value(&delay, -1.0);
 
     assert_eq!(
         XyceTestRunner::continuous_record_activation_index(&axis, &segment_starts, &first, 0,),
@@ -2471,23 +2496,41 @@ fn generic_live_measurement_projection_preserves_scalar_continuous_and_rolling_s
     let records = vec![
         rspice_core::analysis::ContinuousMeasureRecord {
             value: 10.0,
+            raw_value: 10.0,
             event_axis: Some(1.5),
             trigger_axis: None,
             target_axis: None,
+            failure_limit: None,
+            failure_limit_exceeded: false,
+            passed: true,
+            verification_failure: None,
         },
         rspice_core::analysis::ContinuousMeasureRecord {
             value: 30.0,
+            raw_value: 30.0,
             event_axis: Some(2.5),
             trigger_axis: None,
             target_axis: None,
+            failure_limit: None,
+            failure_limit_exceeded: false,
+            passed: true,
+            verification_failure: None,
         },
         rspice_core::analysis::ContinuousMeasureRecord {
             value: 50.0,
+            raw_value: 50.0,
             event_axis: Some(3.5),
             trigger_axis: None,
             target_axis: None,
+            failure_limit: None,
+            failure_limit_exceeded: false,
+            passed: true,
+            verification_failure: None,
         },
     ];
+    for (record, expected_raw_value) in records.iter().zip([10.0, 30.0, 50.0]) {
+        assert_passing_continuous_record_without_fail_value(record, expected_raw_value);
+    }
 
     let traces = XyceTestRunner::measurement_output_traces(
         &netlist,
@@ -2703,13 +2746,19 @@ fn continuous_measurement_comparison_checks_trigger_and_target_metadata() {
         name: "delay".to_string(),
         records: vec![rspice_core::analysis::ContinuousMeasureRecord {
             value: -0.15,
+            raw_value: -0.15,
             event_axis: None,
             trigger_axis: Some(0.4),
             target_axis: Some(0.25),
+            failure_limit: None,
+            failure_limit_exceeded: false,
+            passed: true,
+            verification_failure: None,
         }],
         failure: None,
         failure_metadata: None,
     };
+    assert_passing_continuous_record_without_fail_value(&actual.records[0], -0.15);
     let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
 
     let matching = runner
@@ -2766,15 +2815,25 @@ fn mixed_measurement_comparison_preserves_duplicate_names_and_omits_non_file_pol
             records: vec![
                 rspice_core::analysis::ContinuousMeasureRecord {
                     value: 2.0,
+                    raw_value: 2.0,
                     event_axis: Some(2.0),
                     trigger_axis: None,
                     target_axis: None,
+                    failure_limit: None,
+                    failure_limit_exceeded: false,
+                    passed: true,
+                    verification_failure: None,
                 },
                 rspice_core::analysis::ContinuousMeasureRecord {
                     value: 3.0,
+                    raw_value: 3.0,
                     event_axis: Some(3.0),
                     trigger_axis: None,
                     target_axis: None,
+                    failure_limit: None,
+                    failure_limit_exceeded: false,
+                    passed: true,
+                    verification_failure: None,
                 },
             ],
             failure: None,
@@ -2787,6 +2846,9 @@ fn mixed_measurement_comparison_preserves_duplicate_names_and_omits_non_file_pol
             failure_metadata: None,
         },
     ];
+    for (record, expected_raw_value) in continuous[0].records.iter().zip([2.0, 3.0]) {
+        assert_passing_continuous_record_without_fail_value(record, expected_raw_value);
+    }
     let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
 
     let mismatches = runner
@@ -2907,9 +2969,14 @@ fn generic_continuous_sidecar_comparison_honors_print_policy() {
             name: "visible".to_string(),
             records: vec![rspice_core::analysis::ContinuousMeasureRecord {
                 value: 2.0,
+                raw_value: 2.0,
                 event_axis: Some(2.0),
                 trigger_axis: None,
                 target_axis: None,
+                failure_limit: None,
+                failure_limit_exceeded: false,
+                passed: true,
+                verification_failure: None,
             }],
             failure: None,
             failure_metadata: None,
@@ -2921,6 +2988,7 @@ fn generic_continuous_sidecar_comparison_honors_print_policy() {
             failure_metadata: None,
         },
     ];
+    assert_passing_continuous_record_without_fail_value(&continuous[0].records[0], 2.0);
     let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
 
     let mismatches = runner
