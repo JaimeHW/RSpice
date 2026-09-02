@@ -1,15 +1,15 @@
 //! One front-end compile of the shipped model set, shared by every census.
 //!
-//! Three release-qualification censuses walk the same 43 shipped modules:
+//! Five release-qualification censuses walk the same 43 shipped modules:
 //! [`code_identity`](super::code_identity),
-//! [`branch_agreement`](super::branch_agreement) and
-//! [`cfg_census`](super::cfg_census). Each one used to open by compiling the
-//! whole corpus from source, and the front end is by far the expensive half —
-//! measured at 836 s of a 1001 s identity census, with one model alone
-//! costing 241 s. Running the three censuses therefore paid for the same
-//! compile three times.
+//! [`branch_agreement`](super::branch_agreement), and the residual, Jacobian
+//! and state-slot censuses in [`cfg_census`](super::cfg_census). Each one used
+//! to open by compiling the whole corpus from source, and the front end is by
+//! far the expensive half — measured at 836 s of a 1001 s identity census,
+//! with one model alone costing 241 s. Running them therefore paid for that
+//! same compile once per census.
 //!
-//! [`shipped_census_models`] is the single provider all three now consume. It
+//! [`shipped_census_models`] is the single provider they all now consume. It
 //! yields one module at a time, front-end compiled, and keeps the artifacts in
 //! an on-disk cache under the cargo target directory.
 //!
@@ -50,6 +50,18 @@
 //!
 //! Set `RSPICE_CENSUS_CACHE=0` to compile from source and write nothing, which
 //! is how a cached census is checked against an uncached one.
+//!
+//! # This module requires `serde_json`'s `float_roundtrip` feature
+//!
+//! It is declared in this crate's `[dev-dependencies]` and must stay there.
+//! `serde_json`'s default float parser is *not* correctly rounded, and the
+//! shipped models are full of constants it reads back wrong by one unit in the
+//! last place: `1.3806505e-23` returns as `1.3806504999999999e-23`. That is
+//! enough to move the canonical IR's own HIR digest, so without the feature
+//! this cache hands back artifacts that are not what the compiler produced and
+//! the censuses fail on the first cache hit. The feature pulls in no crate and
+//! does not move `Cargo.lock`. `finite_floats_survive_the_encoding_the_cache_uses`
+//! fails without it, so it cannot be dropped as unused silently.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
