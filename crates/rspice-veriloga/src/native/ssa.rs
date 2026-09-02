@@ -17,6 +17,8 @@
 
 #![cfg_attr(not(feature = "native"), allow(dead_code))]
 
+#[cfg(test)]
+use crate::jit::expr::CompareOp;
 use crate::jit::expr::{
     IntegerBinaryOp, NativeOp, NativeProgram, UnaryMathOp, native_op_stack_effect,
 };
@@ -54,7 +56,7 @@ pub(crate) enum ValueType {
 pub(crate) struct BlockId(u32);
 
 impl BlockId {
-    fn new(index: usize) -> JitResult<Self> {
+    pub(crate) fn new(index: usize) -> JitResult<Self> {
         u32::try_from(index)
             .map(Self)
             .map_err(|_| JitError::Verifier {
@@ -374,6 +376,94 @@ impl Program {
         Ok(program)
     }
 
+    /// The loop fixture all three backends' tests share.
+    ///
+    /// One program that exercises every part of loop support at once, so a
+    /// backend that gets any of it wrong produces a wrong number rather than
+    /// merely a different encoding:
+    ///
+    /// ```text
+    /// k = 3.0; i = 0; a = param0; b = param1;
+    /// while (i < limit) { i, a, b = i + (a + b) * k, b, a }
+    /// return a * i;
+    /// ```
+    ///
+    /// * the back edge itself, and a header whose three parameters are all
+    ///   loop-carried;
+    /// * a genuine permutation cycle on that edge — `a` and `b` exchange
+    ///   locations, which no forward edge can produce and which a naive
+    ///   sequence of moves loses;
+    /// * `k`, defined before the loop and read in the middle of the body,
+    ///   whose location must survive to the next iteration even though a
+    ///   linear scan sees its last use pass;
+    /// * header parameters read *after* the loop, in the exit block.
+    #[cfg(test)]
+    pub(crate) fn loop_fixture_for_test(limit: f64, k: f64) -> JitResult<Self> {
+        let mut builder =
+            ProgramBuilder::new(&[Vec::new(), vec![ValueType::F64; 3], Vec::new(), Vec::new()])?;
+        let entry = BlockId::new(0)?;
+        let header = BlockId::new(1)?;
+        let body = BlockId::new(2)?;
+        let exit = BlockId::new(3)?;
+
+        builder.begin_block(entry)?;
+        let scale = builder.push(NativeOp::Const(k), &[], ValueType::F64)?;
+        let zero = builder.push(NativeOp::Const(0.0), &[], ValueType::F64)?;
+        let first = builder.push(NativeOp::LoadParam(0), &[], ValueType::F64)?;
+        let second = builder.push(NativeOp::LoadParam(1), &[], ValueType::F64)?;
+        builder.end_block(BuilderTerminator::Jump {
+            target: header,
+            arguments: vec![zero, first, second],
+        })?;
+
+        let counter = builder.parameter(header, 0)?;
+        let left = builder.parameter(header, 1)?;
+        let right = builder.parameter(header, 2)?;
+        builder.begin_block(header)?;
+        let test = builder.push(
+            NativeOp::CompareConst(CompareOp::Lt, limit),
+            &[counter],
+            ValueType::F64,
+        )?;
+        builder.end_block(BuilderTerminator::Branch {
+            condition: test,
+            then_target: body,
+            then_arguments: Vec::new(),
+            else_target: exit,
+            else_arguments: Vec::new(),
+        })?;
+
+        builder.begin_block(body)?;
+        let sum = builder.push(NativeOp::Add, &[left, right], ValueType::F64)?;
+        let step = builder.push(NativeOp::Mul, &[sum, scale], ValueType::F64)?;
+        let advanced = builder.push(NativeOp::Add, &[counter, step], ValueType::F64)?;
+        builder.end_block(BuilderTerminator::Jump {
+            target: header,
+            arguments: vec![advanced, right, left],
+        })?;
+
+        builder.begin_block(exit)?;
+        let result = builder.push(NativeOp::Mul, &[left, counter], ValueType::F64)?;
+        builder.end_block(BuilderTerminator::Return(result))?;
+        builder.finish(entry, exit)
+    }
+
+    /// What [`Self::loop_fixture_for_test`] must compute.
+    #[cfg(test)]
+    pub(crate) fn loop_fixture_expectation(limit: f64, k: f64, first: f64, second: f64) -> f64 {
+        let mut counter = 0.0_f64;
+        let mut left = first;
+        let mut right = second;
+        while counter < limit {
+            let advanced = counter + (left + right) * k;
+            let (next_left, next_right) = (right, left);
+            counter = advanced;
+            left = next_left;
+            right = next_right;
+        }
+        left * counter
+    }
+
     #[cfg(all(test, target_arch = "x86_64"))]
     pub(crate) fn from_ssa_for_test(
         operations: Vec<(NativeOp, Vec<usize>)>,
@@ -414,6 +504,20 @@ impl Program {
 
     pub(crate) fn is_single_block(&self) -> bool {
         self.blocks.len() == 1
+    }
+
+    /// The natural loops of a program the verifier has already admitted.
+    ///
+    /// Recomputed rather than cached on the program: it is one dominator pass
+    /// over the block list, the two consumers each need it once, and a cached
+    /// field would be a second authority on a question `validate` answers.
+    pub(crate) fn loop_ranges(&self) -> JitResult<Vec<LoopRange>> {
+        if self.is_single_block() {
+            return Ok(Vec::new());
+        }
+        let predecessors = self.predecessors();
+        let idom = self.immediate_dominators(&predecessors);
+        self.natural_loops(&DominatorTree::new(&idom, self.entry), &predecessors)
     }
 
     #[cfg_attr(not(feature = "wasm-jit"), allow(dead_code))]
@@ -614,9 +718,101 @@ impl Program {
         self.validate_edges()?;
         let idom = self.immediate_dominators(&predecessors);
         let dominance = DominatorTree::new(&idom, self.entry);
+        let loops = self.natural_loops(&dominance, &predecessors)?;
+        self.validate_reaches_exit(&predecessors)?;
         self.validate_dominance(&dominance)?;
-        self.validate_structured_regions(&idom)?;
-        self.validate_effect_discipline(&dominance)
+        self.validate_structured_regions(&dominance)?;
+        self.validate_effect_discipline(&dominance, &loops)
+    }
+
+    /// The natural loops of this program, one per back edge, as contiguous
+    /// layout ranges.
+    ///
+    /// A back edge is an edge whose target does not follow its source in
+    /// layout order. Admitting one is the whole of loop support, and it is
+    /// admitted on exactly two conditions.
+    ///
+    /// *Reducibility.* The target must dominate the source, which is what
+    /// makes the edge the latch of a natural loop rather than a second entry
+    /// into the middle of one. Verilog-A's `for`, `while` and `repeat` are
+    /// reducible by construction — the language has no `goto` and no `break` —
+    /// so an irreducible graph reaching here is a lowering bug, and it is
+    /// refused by name rather than structurized.
+    ///
+    /// *Contiguity.* The loop's blocks — the header, plus everything that
+    /// reaches the latch without passing back through the header — must be
+    /// exactly the layout range from header to latch, with nothing else inside
+    /// it. Two consumers depend on that: the allocator extends live intervals
+    /// across a range, and the WebAssembly structurizer emits one `loop`
+    /// around a range and decides which of the header's two edges leaves the
+    /// loop by asking whether its target is inside. A layout that interleaves
+    /// a loop with blocks outside it is refused here rather than silently
+    /// mis-structured downstream.
+    fn natural_loops(
+        &self,
+        dominance: &DominatorTree,
+        predecessors: &[Vec<BlockId>],
+    ) -> JitResult<Vec<LoopRange>> {
+        let verifier = |detail: String| JitError::Verifier {
+            model: MODEL.into(),
+            detail: detail.into(),
+        };
+        let mut loops: Vec<LoopRange> = Vec::new();
+        for block in &self.blocks {
+            for edge in block.terminator.edges() {
+                if edge.target > block.id {
+                    continue;
+                }
+                if !dominance.dominates(edge.target, block.id) {
+                    return Err(verifier(format!(
+                        "SSA block {} has a back edge to block {}, which does not dominate it; the control-flow graph is irreducible",
+                        block.id.index(),
+                        edge.target.index()
+                    )));
+                }
+                let body = self.natural_loop_body(edge.target, block.id, predecessors);
+                let range = edge.target.index()..=block.id.index();
+                if let Some(stranger) = body.iter().enumerate().find_map(|(index, member)| {
+                    (*member != range.contains(&index)).then_some(index)
+                }) {
+                    return Err(verifier(format!(
+                        "SSA block {stranger} puts the loop headed by block {} out of step with its layout range, which ends at its latch, block {}; the loop is not laid out contiguously",
+                        edge.target.index(),
+                        block.id.index()
+                    )));
+                }
+                loops.push(LoopRange {
+                    header: edge.target,
+                    latch: block.id,
+                });
+            }
+        }
+        Ok(loops)
+    }
+
+    /// Membership in the natural loop closed by `latch -> header`.
+    fn natural_loop_body(
+        &self,
+        header: BlockId,
+        latch: BlockId,
+        predecessors: &[Vec<BlockId>],
+    ) -> Vec<bool> {
+        let mut member = vec![false; self.blocks.len()];
+        member[header.index()] = true;
+        let mut work = Vec::new();
+        if latch != header {
+            member[latch.index()] = true;
+            work.push(latch);
+        }
+        while let Some(block) = work.pop() {
+            for predecessor in predecessors[block.index()].iter().copied() {
+                if !member[predecessor.index()] {
+                    member[predecessor.index()] = true;
+                    work.push(predecessor);
+                }
+            }
+        }
+        member
     }
 
     /// The whole verification for a program with one block.
@@ -709,26 +905,52 @@ impl Program {
     /// a relooper, and it costs nothing, because structured Verilog-A control
     /// flow is the only thing that lowers here. The check is that nothing
     /// outside a branch's region enters it, which is exactly that every block
-    /// strictly inside is dominated by the branch.
-    fn validate_structured_regions(&self, idom: &[Option<BlockId>]) -> JitResult<()> {
-        for block in &self.blocks {
+    /// the branch reaches before its join is dominated by the branch: a block
+    /// with a predecessor outside the region could not be dominated by the
+    /// block the region starts at.
+    fn validate_structured_regions(&self, dominance: &DominatorTree) -> JitResult<()> {
+        // The region is what the branch *reaches* before its join, not what
+        // the layout happens to place between the two. The distinction is
+        // real: the CFG level splices out empty blocks, which collapses an
+        // inner conditional's join into the enclosing one, and the enclosing
+        // conditional's other arm then sits between the inner branch and the
+        // join they now share. That arm is not in the inner branch's region,
+        // and the structural walk never enters it from there.
+        let mut visited = vec![u32::MAX; self.blocks.len()];
+        let mut stack: Vec<BlockId> = Vec::new();
+        for (stamp, block) in self.blocks.iter().enumerate() {
             if !matches!(block.terminator, Terminator::Branch { .. }) {
                 continue;
             }
+            let stamp = u32::try_from(stamp).map_err(|_| JitError::Verifier {
+                model: MODEL.into(),
+                detail: "SSA block count exceeds the region-walk stamp space".into(),
+            })?;
             let join = self.branch_join(block)?;
-            let first_inside = block.id.index() + 1;
-            for (offset, dominator) in idom[first_inside..join.index()].iter().enumerate() {
-                if dominator.is_none_or(|dominator| dominator < block.id) {
+            stack.clear();
+            stack.extend(block.terminator.edges().map(|edge| edge.target));
+            while let Some(inside) = stack.pop() {
+                if inside == join || visited[inside.index()] == stamp {
+                    continue;
+                }
+                visited[inside.index()] = stamp;
+                if !dominance.dominates(block.id, inside) {
                     return Err(JitError::Verifier {
                         model: MODEL.into(),
                         detail: format!(
                             "SSA block {} is entered from outside the region branching from block {}",
-                            first_inside + offset,
+                            inside.index(),
                             block.id.index()
                         )
                         .into(),
                     });
                 }
+                stack.extend(
+                    self.blocks[inside.index()]
+                        .terminator
+                        .edges()
+                        .map(|edge| edge.target),
+                );
             }
         }
         Ok(())
@@ -821,13 +1043,14 @@ impl Program {
         Ok(())
     }
 
-    /// The CFG must be acyclic and every block both reachable from the entry
-    /// and able to reach the single exit.
+    /// Every edge names a defined block, every block is reachable from the
+    /// entry, and every block either returns or has a successor.
     ///
-    /// Loops are out of scope here on purpose: nothing lowers to a back edge
-    /// yet, and the allocator's linear live intervals and the WebAssembly
-    /// structurizer both rely on the layout order being topological. Digital
-    /// process control flow (W-C3) is what lifts this.
+    /// Back edges are admitted here and classified in [`Self::natural_loops`],
+    /// which needs dominance and therefore cannot run before this. What this
+    /// pass still relies on is that every *forward* edge runs forward in
+    /// layout order, which is what makes the one-pass reachability sweep and
+    /// the one-pass dominator computation total.
     fn predecessors_checked(&self) -> JitResult<Vec<Vec<BlockId>>> {
         let verifier = |detail: String| JitError::Verifier {
             model: MODEL.into(),
@@ -838,13 +1061,6 @@ impl Program {
                 if edge.target.index() >= self.blocks.len() {
                     return Err(verifier(format!(
                         "SSA block {} branches to undefined block {}",
-                        block.id.index(),
-                        edge.target.index()
-                    )));
-                }
-                if edge.target <= block.id {
-                    return Err(verifier(format!(
-                        "SSA block {} has a back edge to block {}; loops are not yet lowered",
                         block.id.index(),
                         edge.target.index()
                     )));
@@ -872,25 +1088,39 @@ impl Program {
                 reachable[edge.target.index()] = true;
             }
         }
+        Ok(self.predecessors())
+    }
+
+    /// Every block reaches the single exit.
+    ///
+    /// A backwards sweep from the exit over the predecessor map rather than
+    /// one reverse pass over the layout: a latch's only successor is its
+    /// header, which the layout has already passed, so a single reverse pass
+    /// would report every loop as unable to reach the exit.
+    fn validate_reaches_exit(&self, predecessors: &[Vec<BlockId>]) -> JitResult<()> {
         let mut reaches_exit = vec![false; self.blocks.len()];
         reaches_exit[self.exit.index()] = true;
-        for block in self.blocks.iter().rev() {
-            if matches!(block.terminator, Terminator::Return(_)) {
-                continue;
+        let mut work = vec![self.exit];
+        while let Some(block) = work.pop() {
+            for predecessor in predecessors[block.index()].iter().copied() {
+                if !reaches_exit[predecessor.index()] {
+                    reaches_exit[predecessor.index()] = true;
+                    work.push(predecessor);
+                }
             }
-            let reaches = block
-                .terminator
-                .edges()
-                .any(|edge| reaches_exit[edge.target.index()]);
-            if !reaches {
-                return Err(verifier(format!(
-                    "SSA block {} cannot reach the exit block",
-                    block.id.index()
-                )));
-            }
-            reaches_exit[block.id.index()] = true;
         }
-        Ok(self.predecessors())
+        if let Some(block) = self
+            .blocks
+            .iter()
+            .find(|block| !reaches_exit[block.id.index()])
+        {
+            return Err(JitError::Verifier {
+                model: MODEL.into(),
+                detail: format!("SSA block {} cannot reach the exit block", block.id.index())
+                    .into(),
+            });
+        }
+        Ok(())
     }
 
     fn validate_edges(&self) -> JitResult<()> {
@@ -989,33 +1219,100 @@ impl Program {
         Ok(())
     }
 
-    /// A state write must execute on every evaluation.
+    /// A state write must execute exactly once per evaluation.
     ///
     /// Verilog-A analog operators carry per-evaluation state whose continuity
     /// the solver depends on, so sinking one into a conditional arm silently
     /// desynchronizes it. Requiring its block to dominate the exit block is
-    /// exactly the condition that it runs unconditionally, and it is the rule
+    /// exactly the condition that it runs *at least* once, and it is the rule
     /// that keeps the conditional-splitting transform sound.
-    fn validate_effect_discipline(&self, dominance: &DominatorTree) -> JitResult<()> {
+    ///
+    /// Loops make "at least once" insufficient, so a state write inside one is
+    /// refused as well — including in a loop header, which dominates the exit
+    /// and still runs once per iteration. The reason is the state layout, not
+    /// this verifier: `CanonicalStateLayout` gives one record to each analog
+    /// operator *site*, so a `ddt` inside a loop is one operator holding one
+    /// history for every trip the loop takes, which is the right number of
+    /// records for exactly one trip and the wrong number for every other. The
+    /// language agrees — Verilog-AMS LRM 2.4 section 4.4.1 admits an analog
+    /// operator inside a loop only where the iteration count is a constant
+    /// expression, whose elaborated form is unrolled into distinct operator
+    /// sites. A front end that unrolls such a loop before this level therefore
+    /// reaches here with distinct sites and no loop, and is admitted; anything
+    /// else is refused by name rather than silently sharing one history.
+    fn validate_effect_discipline(
+        &self,
+        dominance: &DominatorTree,
+        loops: &[LoopRange],
+    ) -> JitResult<()> {
         for block in &self.blocks {
-            if dominance.dominates(block.id, self.exit) {
+            let inside_loop = loops
+                .iter()
+                .find(|range| range.contains(block.id))
+                .map(|range| range.header);
+            if inside_loop.is_none() && dominance.dominates(block.id, self.exit) {
                 continue;
             }
             for instruction in &self.instructions[block.instruction_start..block.instruction_end] {
                 if instruction.effects.writes_state() {
-                    return Err(JitError::Verifier {
-                        model: MODEL.into(),
-                        detail: format!(
+                    let detail = match inside_loop {
+                        Some(header) => format!(
+                            "SSA block {} runs once per iteration of the loop headed by block {} but writes state with {:?}",
+                            block.id.index(),
+                            header.index(),
+                            instruction.op
+                        ),
+                        None => format!(
                             "SSA block {} executes conditionally but writes state with {:?}",
                             block.id.index(),
                             instruction.op
-                        )
-                        .into(),
+                        ),
+                    };
+                    return Err(JitError::Verifier {
+                        model: MODEL.into(),
+                        detail: detail.into(),
                     });
                 }
             }
         }
         Ok(())
+    }
+}
+
+/// One natural loop, as the contiguous layout range its blocks occupy.
+///
+/// Header and latch rather than a block set: [`Program::natural_loops`] has
+/// already proved every block between them belongs to the loop, so the range
+/// *is* the membership test, and both consumers — the allocator's interval
+/// extension and the WebAssembly structurizer — want a range rather than a set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct LoopRange {
+    header: BlockId,
+    latch: BlockId,
+}
+
+impl LoopRange {
+    pub(crate) fn header(self) -> BlockId {
+        self.header
+    }
+
+    /// The block whose back edge closes the loop.
+    #[cfg_attr(not(feature = "wasm-jit"), allow(dead_code))]
+    pub(crate) fn latch(self) -> BlockId {
+        self.latch
+    }
+
+    /// Whether `block` lies in the loop's layout range.
+    ///
+    /// The range *is* the membership test: [`Program::natural_loops`] admits
+    /// a back edge only after proving every block between the header and the
+    /// latch belongs to the loop.
+    pub(crate) fn contains_layout(self, block: BlockId) -> bool {
+        self.header <= block && block <= self.latch
+    }
+
+    fn contains(self, block: BlockId) -> bool {
+        self.contains_layout(block)
     }
 }
 
@@ -1657,6 +1954,286 @@ impl AssignmentProgram {
     }
 }
 
+/// One value while a [`ProgramBuilder`] is still open.
+///
+/// A block parameter's final [`ValueId`] is `instructions.len() + k`, which is
+/// not known until the last instruction is emitted, so a builder cannot hand
+/// out final identities as it goes. Naming the two spaces separately and
+/// resolving both in [`ProgramBuilder::finish`] keeps that rule in the one
+/// module that owns it, rather than obliging every producer to reproduce it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) enum BuilderValue {
+    Instruction(usize),
+    Parameter(usize),
+}
+
+/// How a block under construction ends.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) enum BuilderTerminator {
+    Return(BuilderValue),
+    Jump {
+        target: BlockId,
+        arguments: Vec<BuilderValue>,
+    },
+    Branch {
+        condition: BuilderValue,
+        then_target: BlockId,
+        then_arguments: Vec<BuilderValue>,
+        else_target: BlockId,
+        else_arguments: Vec<BuilderValue>,
+    },
+}
+
+#[derive(Debug)]
+#[cfg_attr(not(test), allow(dead_code))]
+struct BuilderBlock {
+    parameter_start: usize,
+    parameter_end: usize,
+    instruction_start: usize,
+    instruction_end: usize,
+    terminator: Option<BuilderTerminator>,
+}
+
+#[derive(Debug)]
+#[cfg_attr(not(test), allow(dead_code))]
+struct BuilderInstruction {
+    op: NativeOp,
+    operands: Box<[BuilderValue]>,
+    value_type: ValueType,
+}
+
+/// Construct a multi-block [`Program`] directly, rather than by lifting a
+/// postfix stream.
+///
+/// The block list and every block's parameters are fixed when the builder is
+/// created, because the identity rules make both positional: a block owns a
+/// contiguous instruction range in layout order, and the flat parameter vector
+/// is laid out in the same order. Filling the blocks afterwards, in order, is
+/// what keeps those two facts true by construction instead of by assertion.
+#[derive(Debug)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) struct ProgramBuilder {
+    blocks: Vec<BuilderBlock>,
+    parameter_types: Vec<ValueType>,
+    instructions: Vec<BuilderInstruction>,
+    open: Option<usize>,
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+impl ProgramBuilder {
+    /// Open a builder over `blocks` blocks, the n-th taking the parameter
+    /// types in `parameters[n]`.
+    pub(crate) fn new(parameters: &[Vec<ValueType>]) -> JitResult<Self> {
+        if parameters.is_empty() {
+            return Err(JitError::Verifier {
+                model: MODEL.into(),
+                detail: "SSA program builder declares no blocks".into(),
+            });
+        }
+        let mut parameter_types = Vec::new();
+        let blocks = parameters
+            .iter()
+            .map(|types| {
+                let parameter_start = parameter_types.len();
+                parameter_types.extend(types.iter().copied());
+                BuilderBlock {
+                    parameter_start,
+                    parameter_end: parameter_types.len(),
+                    instruction_start: 0,
+                    instruction_end: 0,
+                    terminator: None,
+                }
+            })
+            .collect();
+        Ok(Self {
+            blocks,
+            parameter_types,
+            instructions: Vec::new(),
+            open: None,
+        })
+    }
+
+    /// The `index`-th parameter of `block`.
+    pub(crate) fn parameter(&self, block: BlockId, index: usize) -> JitResult<BuilderValue> {
+        let block = self
+            .blocks
+            .get(block.index())
+            .ok_or_else(|| self.verifier(format!("SSA builder has no block {}", block.index())))?;
+        let flat = block.parameter_start + index;
+        if flat >= block.parameter_end {
+            return Err(self.verifier(format!(
+                "SSA builder block declares {} parameters, not {}",
+                block.parameter_end - block.parameter_start,
+                index + 1
+            )));
+        }
+        Ok(BuilderValue::Parameter(flat))
+    }
+
+    /// Start filling `block`. Blocks must be filled in layout order.
+    pub(crate) fn begin_block(&mut self, block: BlockId) -> JitResult<()> {
+        if self.open.is_some() {
+            return Err(self.verifier(format!(
+                "SSA builder block {} is still open",
+                self.open.unwrap_or_default()
+            )));
+        }
+        let expected = self
+            .blocks
+            .iter()
+            .position(|candidate| candidate.terminator.is_none())
+            .unwrap_or(self.blocks.len());
+        if block.index() != expected {
+            return Err(self.verifier(format!(
+                "SSA builder block {} was filled out of layout order; block {expected} is next",
+                block.index()
+            )));
+        }
+        let start = self.instructions.len();
+        let entry = &mut self.blocks[block.index()];
+        entry.instruction_start = start;
+        entry.instruction_end = start;
+        self.open = Some(block.index());
+        Ok(())
+    }
+
+    /// Append one instruction to the open block.
+    pub(crate) fn push(
+        &mut self,
+        op: NativeOp,
+        operands: &[BuilderValue],
+        value_type: ValueType,
+    ) -> JitResult<BuilderValue> {
+        if self.open.is_none() {
+            return Err(self.verifier("SSA builder has no open block".to_string()));
+        }
+        let index = self.instructions.len();
+        self.instructions.push(BuilderInstruction {
+            op,
+            operands: operands.to_vec().into_boxed_slice(),
+            value_type,
+        });
+        Ok(BuilderValue::Instruction(index))
+    }
+
+    /// Close the open block with its terminator.
+    pub(crate) fn end_block(&mut self, terminator: BuilderTerminator) -> JitResult<()> {
+        let open = self
+            .open
+            .take()
+            .ok_or_else(|| self.verifier("SSA builder has no open block to end".to_string()))?;
+        let end = self.instructions.len();
+        let block = &mut self.blocks[open];
+        block.instruction_end = end;
+        block.terminator = Some(terminator);
+        Ok(())
+    }
+
+    pub(crate) fn finish(self, entry: BlockId, exit: BlockId) -> JitResult<Program> {
+        if self.open.is_some() {
+            return Err(self.verifier("SSA builder finished with an open block".to_string()));
+        }
+        let instruction_count = self.instructions.len();
+        let resolve = |value: BuilderValue| -> JitResult<ValueId> {
+            match value {
+                BuilderValue::Instruction(index) => ValueId::new(index),
+                BuilderValue::Parameter(index) => ValueId::new(instruction_count + index),
+            }
+        };
+        let resolve_all = |values: &[BuilderValue]| -> JitResult<Vec<ValueId>> {
+            values.iter().copied().map(resolve).collect()
+        };
+        let maximum_stack_depth = self
+            .instructions
+            .iter()
+            .map(|instruction| instruction.operands.len().max(1))
+            .max()
+            .unwrap_or(1);
+        let instructions = self
+            .instructions
+            .iter()
+            .enumerate()
+            .map(|(index, instruction)| {
+                Ok(Instruction {
+                    result: ValueId::new(index)?,
+                    value_type: instruction.value_type,
+                    op: instruction.op,
+                    operands: resolve_all(&instruction.operands)?.into_boxed_slice(),
+                    effects: Effects::for_op(instruction.op),
+                })
+            })
+            .collect::<JitResult<Vec<_>>>()?;
+        let block_parameters = self
+            .parameter_types
+            .iter()
+            .enumerate()
+            .map(|(index, value_type)| {
+                Ok(BlockParameter {
+                    value: ValueId::new(instruction_count + index)?,
+                    value_type: *value_type,
+                })
+            })
+            .collect::<JitResult<Vec<_>>>()?;
+        let blocks = self
+            .blocks
+            .iter()
+            .enumerate()
+            .map(|(index, block)| {
+                let terminator = block
+                    .terminator
+                    .as_ref()
+                    .ok_or_else(|| JitError::Verifier {
+                        model: MODEL.into(),
+                        detail: format!("SSA builder block {index} was never terminated").into(),
+                    })?;
+                Ok(BasicBlock {
+                    id: BlockId::new(index)?,
+                    parameter_start: block.parameter_start,
+                    parameter_end: block.parameter_end,
+                    instruction_start: block.instruction_start,
+                    instruction_end: block.instruction_end,
+                    terminator: match terminator {
+                        BuilderTerminator::Return(value) => Terminator::Return(resolve(*value)?),
+                        BuilderTerminator::Jump { target, arguments } => {
+                            Terminator::Jump(Edge::new(*target, resolve_all(arguments)?))
+                        }
+                        BuilderTerminator::Branch {
+                            condition,
+                            then_target,
+                            then_arguments,
+                            else_target,
+                            else_arguments,
+                        } => Terminator::Branch {
+                            condition: resolve(*condition)?,
+                            then_edge: Edge::new(*then_target, resolve_all(then_arguments)?),
+                            else_edge: Edge::new(*else_target, resolve_all(else_arguments)?),
+                        },
+                    },
+                })
+            })
+            .collect::<JitResult<Vec<_>>>()?;
+        let program = Program {
+            entry,
+            exit,
+            blocks,
+            block_parameters,
+            instructions,
+            maximum_stack_depth,
+        };
+        program.validate()?;
+        Ok(program)
+    }
+
+    fn verifier(&self, detail: String) -> JitError {
+        JitError::Verifier {
+            model: MODEL.into(),
+            detail: detail.into(),
+        }
+    }
+}
+
 fn eliminate_dead_instructions(
     program: Program,
     outputs: &mut [AssignmentOutput],
@@ -1927,32 +2504,59 @@ impl EdgeMove {
     }
 }
 
-/// Reduce a sequenced parallel move to plain moves, refusing a plan that needs
-/// the cycle-breaking scratch.
+/// Reduce a sequenced parallel move to plain moves, realizing the
+/// cycle-breaking scratch as one reserved spill slot.
 ///
-/// A block parameter takes its location at the earliest predecessor terminator
-/// that binds it, while every argument bound on that edge is still live and so
-/// still owns its own location. No argument can therefore already sit in a
-/// parameter's location, which is precisely the condition under which a
-/// permutation cycle forms. A loop back edge is the shape that breaks the
-/// argument-still-live premise, and loops are what W-C3 introduces; until then
-/// a plan that needs the scratch is an allocator invariant violation rather
-/// than a case for the encoders to realize.
-fn scratch_free_edge_moves(steps: &[MoveStep]) -> JitResult<Box<[EdgeMove]>> {
+/// On a forward edge no cycle can form: a block parameter takes its location
+/// at the earliest predecessor terminator that binds it, while every argument
+/// bound on that edge is still live and so still owns its own location, so no
+/// argument can already sit in a parameter's location. A loop back edge breaks
+/// that premise — a header parameter's location was fixed at the preheader and
+/// the latch's arguments are the parameters themselves — and `x, y = y, x`
+/// across one is a genuine permutation cycle.
+///
+/// The scratch is a spill slot rather than a register because a spill slot is
+/// the one storage class all three backends already move to and from: x64 and
+/// AArch64 each have a `Spill`/`Register` move for every combination, and the
+/// WebAssembly encoder gives every value its own local. Reserving a register
+/// instead would take one from a bank the widest operation already sizes
+/// exactly. The slot is allocated once for the whole function and only when
+/// some edge needs it, so a program without a cycle keeps the frame it had.
+fn realize_edge_moves(steps: &[MoveStep], scratch: Option<usize>) -> JitResult<Box<[EdgeMove]>> {
     steps
         .iter()
-        .map(|step| match *step {
-            MoveStep::Move { from, to } => Ok(EdgeMove { from, to }),
-            MoveStep::SaveToScratch { .. } | MoveStep::RestoreFromScratch { .. } => {
-                Err(JitError::RegisterAllocation {
-                    model: MODEL.into(),
-                    detail: "SSA edge move needs a cycle break, which no acyclic CFG can produce"
-                        .into(),
-                })
+        .map(|step| {
+            let scratch = || {
+                scratch
+                    .map(ValueLocation::Spill)
+                    .ok_or(JitError::RegisterAllocation {
+                        model: MODEL.into(),
+                        detail:
+                            "SSA edge move needs a cycle break but no scratch slot was reserved"
+                                .into(),
+                    })
+            };
+            match *step {
+                MoveStep::Move { from, to } => Ok(EdgeMove { from, to }),
+                MoveStep::SaveToScratch { from } => Ok(EdgeMove {
+                    from,
+                    to: scratch()?,
+                }),
+                MoveStep::RestoreFromScratch { to } => Ok(EdgeMove {
+                    from: scratch()?,
+                    to,
+                }),
             }
         })
         .collect::<JitResult<Vec<_>>>()
         .map(Vec::into_boxed_slice)
+}
+
+/// Whether a sequenced parallel move needs the cycle-breaking scratch.
+fn needs_scratch(steps: &[MoveStep]) -> bool {
+    steps
+        .iter()
+        .any(|step| matches!(step, MoveStep::SaveToScratch { .. }))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2190,6 +2794,63 @@ impl RegisterAllocation {
             last_use_position[value.index()] = last_use_position[value.index()].max(use_position);
         }
 
+        // A linear scan expires a value after its last use in *layout* order,
+        // which is its last use in execution order only while control runs
+        // forward. Inside a loop it does not: a value defined before the loop
+        // and read at its top is read again on the next iteration, after the
+        // scan has already handed its register to something defined lower in
+        // the body. Extending every interval that reaches into a loop to the
+        // loop's end restores the invariant the scan needs — the standard
+        // treatment of loops in a linear-scan allocator — at the cost of
+        // holding a location across the whole loop, which is exactly what a
+        // value live around the back edge occupies anyway.
+        let loops = program.loop_ranges()?;
+        if !loops.is_empty() {
+            // Where each value first holds its definition, on the same scale
+            // as `last_use_position`. A value defined inside a loop is
+            // redefined on every iteration and needs no extension; only one
+            // that enters the loop already defined can be read after the scan
+            // has released it.
+            let definition_position: Vec<usize> = (0..value_count)
+                .map(|index| {
+                    if index < instruction_count {
+                        index * 2
+                    } else {
+                        parameter_definition[index - instruction_count] * 2
+                    }
+                })
+                .collect();
+            let extent = |range: &LoopRange| {
+                let blocks = program.blocks();
+                (
+                    blocks[range.header().index()].instruction_start * 2,
+                    blocks[range.latch().index()].instruction_end * 2,
+                )
+            };
+            // Extending one value across an inner loop can carry it into an
+            // enclosing one, so the sweep repeats until it is stable. Loops
+            // nest, so the number of rounds is bounded by the nesting depth
+            // and the bound below is only a backstop.
+            for _ in 0..=loops.len() {
+                let mut changed = false;
+                for range in &loops {
+                    let (start, end) = extent(range);
+                    for (value, position) in last_use_position.iter_mut().enumerate() {
+                        if definition_position[value] < start
+                            && *position >= start
+                            && *position < end
+                        {
+                            *position = end;
+                            changed = true;
+                        }
+                    }
+                }
+                if !changed {
+                    break;
+                }
+            }
+        }
+
         let mut call_prefix = Vec::with_capacity(instruction_count + 1);
         call_prefix.push(0_usize);
         for instruction in &program.instructions {
@@ -2222,8 +2883,7 @@ impl RegisterAllocation {
         let mut spill_owners: Vec<Option<ValueId>> = Vec::new();
         let mut instructions = Vec::with_capacity(instruction_count);
         let mut used_register_count = 0;
-        let mut edge_moves: Vec<Box<[Box<[EdgeMove]>]>> =
-            Vec::with_capacity(program.blocks().len());
+        let mut move_plans: Vec<Vec<Vec<MoveStep>>> = Vec::with_capacity(program.blocks().len());
 
         for block in program.blocks() {
             expire_owners(
@@ -2381,10 +3041,33 @@ impl RegisterAllocation {
                         })?;
                     pairs.push((from, to));
                 }
-                block_edge_moves.push(scratch_free_edge_moves(&sequence_parallel_move(&pairs)?)?);
+                block_edge_moves.push(sequence_parallel_move(&pairs)?);
             }
-            edge_moves.push(block_edge_moves.into_boxed_slice());
+            move_plans.push(block_edge_moves);
         }
+
+        // One reserved slot serves every cycle in the function: the sequencer
+        // keeps at most one value outstanding, and each edge's plan restores
+        // it before the branch. Reserving it only when some plan asks keeps a
+        // program without a back edge on exactly the frame it had.
+        let scratch_slot = move_plans
+            .iter()
+            .flatten()
+            .any(|steps| needs_scratch(steps))
+            .then(|| {
+                spill_owners.push(None);
+                spill_owners.len() - 1
+            });
+        let edge_moves = move_plans
+            .iter()
+            .map(|block| {
+                block
+                    .iter()
+                    .map(|steps| realize_edge_moves(steps, scratch_slot))
+                    .collect::<JitResult<Vec<_>>>()
+                    .map(Vec::into_boxed_slice)
+            })
+            .collect::<JitResult<Vec<_>>>()?;
 
         let required_register_count = instructions
             .iter()
@@ -2758,10 +3441,10 @@ fn unary_math_uses_helper(op: UnaryMathOp) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        ALLOCATABLE_VALUE_REGISTERS, AllocatedInstruction, AssignmentProgram, BlockId, Edge,
-        Effects, Instruction, MoveStep, Program, RegisterAllocation, RegisterBank, Terminator,
-        ValueId, ValueLocation, ValueType, plan_shared_outputs, required_register_count,
-        sequence_parallel_move,
+        ALLOCATABLE_VALUE_REGISTERS, AllocatedInstruction, AssignmentProgram, BlockId,
+        BuilderTerminator, Edge, Effects, Instruction, MoveStep, Program, ProgramBuilder,
+        RegisterAllocation, RegisterBank, Terminator, ValueId, ValueLocation, ValueType,
+        plan_shared_outputs, required_register_count, sequence_parallel_move,
     };
     use crate::jit::expr::{NativeOp, NativeProgram, native_op_stack_effect};
     use std::collections::HashMap;
@@ -3451,19 +4134,25 @@ mod tests {
     }
 
     #[test]
-    fn verifier_rejects_back_edges_unreachable_blocks_and_edge_arity() {
+    fn verifier_rejects_unstructured_back_edges_unreachable_blocks_and_edge_arity() {
         let split = conditional_with_a_failing_arm()
             .with_branching_conditionals()
             .expect("split conditional");
 
+        // The *second* arm of a diamond jumping back to the block that
+        // branched into it is a back edge to a block that dominates it, so it
+        // closes a natural loop — but the first arm then sits inside that
+        // loop's layout range without belonging to it, which is the shape the
+        // contiguity rule exists to refuse. (The first arm jumping back would
+        // be an ordinary `while`, and is admitted.)
         let mut back_edge = split.clone();
-        back_edge.blocks[1].terminator = Terminator::Jump(Edge::new(BlockId(0), Vec::new()));
+        back_edge.blocks[2].terminator = Terminator::Jump(Edge::new(BlockId(0), Vec::new()));
         assert!(
             back_edge
                 .validate()
-                .expect_err("loops are not lowered yet")
+                .expect_err("a loop that is not laid out contiguously is refused")
                 .to_string()
-                .contains("back edge")
+                .contains("not laid out contiguously")
         );
 
         let mut arity = split.clone();
@@ -3552,12 +4241,188 @@ mod tests {
     }
 
     #[test]
-    fn an_edge_move_plan_that_needs_the_scratch_is_an_allocator_invariant_violation() {
+    fn a_natural_loop_validates_and_reports_its_layout_range() {
+        let program = Program::loop_fixture_for_test(20.0, 3.0).expect("validated loop program");
+        let loops = program.loop_ranges().expect("loop ranges");
+        assert_eq!(loops.len(), 1);
+        assert_eq!(loops[0].header(), BlockId::new(1).expect("header"));
+        assert_eq!(loops[0].latch(), BlockId::new(2).expect("latch"));
+    }
+
+    #[test]
+    fn a_loop_back_edge_is_where_the_allocator_reserves_the_cycle_scratch() {
+        let program = Program::loop_fixture_for_test(20.0, 3.0).expect("validated loop program");
+        let allocation =
+            RegisterAllocation::build(&program, CALLER_SAVED_BANK).expect("allocated loop");
+        let latch = BlockId::new(2).expect("latch");
+        let moves = allocation.edge_moves(latch, 0).expect("back-edge plan");
+        let scratch = allocation.spill_slot_count();
+        assert!(scratch > 0, "the cycle reserves one spill slot");
+        assert!(
+            moves
+                .iter()
+                .any(|step| step.to() == ValueLocation::Spill(scratch - 1))
+                && moves
+                    .iter()
+                    .any(|step| step.from() == ValueLocation::Spill(scratch - 1)),
+            "the back edge stages one value through the reserved slot: {moves:?}"
+        );
+    }
+
+    #[test]
+    fn a_value_read_inside_a_loop_keeps_its_location_across_the_whole_loop() {
+        // `k` is defined before the loop and last read in the middle of the
+        // body. Everything the body defines after that read would be free to
+        // take its register under a plain linear scan, and would then be
+        // reading its own result on the next iteration.
+        let program = Program::loop_fixture_for_test(20.0, 3.0).expect("validated loop program");
+        let allocation =
+            RegisterAllocation::build(&program, CALLER_SAVED_BANK).expect("allocated loop");
+        let scale = allocation
+            .location(ValueId::new(0).expect("k"))
+            .expect("k location");
+        for value in [1_usize, 5, 6, 7] {
+            let other = allocation
+                .location(ValueId::new(value).expect("value"))
+                .expect("value location");
+            assert_ne!(
+                other, scale,
+                "value {value} took the location a loop-carried read still needs"
+            );
+        }
+    }
+
+    #[test]
+    fn an_irreducible_back_edge_is_refused_by_name() {
+        // Two entries into one cycle: block 1 and block 2 each branch into the
+        // other, and neither dominates the other.
+        let mut builder = ProgramBuilder::new(&[Vec::new(), Vec::new(), Vec::new(), Vec::new()])
+            .expect("builder");
+        let entry = BlockId::new(0).expect("entry");
+        let left = BlockId::new(1).expect("left");
+        let right = BlockId::new(2).expect("right");
+        let exit = BlockId::new(3).expect("exit");
+        builder.begin_block(entry).expect("open entry");
+        let condition = builder
+            .push(NativeOp::Const(1.0), &[], ValueType::F64)
+            .expect("condition");
+        builder
+            .end_block(BuilderTerminator::Branch {
+                condition,
+                then_target: left,
+                then_arguments: Vec::new(),
+                else_target: right,
+                else_arguments: Vec::new(),
+            })
+            .expect("close entry");
+        builder.begin_block(left).expect("open left");
+        builder
+            .end_block(BuilderTerminator::Jump {
+                target: right,
+                arguments: Vec::new(),
+            })
+            .expect("close left");
+        builder.begin_block(right).expect("open right");
+        builder
+            .end_block(BuilderTerminator::Branch {
+                condition,
+                then_target: left,
+                then_arguments: Vec::new(),
+                else_target: exit,
+                else_arguments: Vec::new(),
+            })
+            .expect("close right");
+        builder.begin_block(exit).expect("open exit");
+        builder
+            .end_block(BuilderTerminator::Return(condition))
+            .expect("close exit");
+        let error = builder
+            .finish(entry, exit)
+            .expect_err("an irreducible graph is not admitted");
+        assert!(
+            error.to_string().contains("irreducible"),
+            "unexpected refusal: {error}"
+        );
+    }
+
+    #[test]
+    fn a_state_write_inside_a_loop_is_refused_by_name() {
+        let mut builder = ProgramBuilder::new(&[Vec::new(), Vec::new(), Vec::new(), Vec::new()])
+            .expect("builder");
+        let entry = BlockId::new(0).expect("entry");
+        let header = BlockId::new(1).expect("header");
+        let body = BlockId::new(2).expect("body");
+        let exit = BlockId::new(3).expect("exit");
+        builder.begin_block(entry).expect("open entry");
+        let one = builder
+            .push(NativeOp::Const(1.0), &[], ValueType::F64)
+            .expect("constant");
+        builder
+            .end_block(BuilderTerminator::Jump {
+                target: header,
+                arguments: Vec::new(),
+            })
+            .expect("close entry");
+        builder.begin_block(header).expect("open header");
+        builder
+            .end_block(BuilderTerminator::Branch {
+                condition: one,
+                then_target: body,
+                then_arguments: Vec::new(),
+                else_target: exit,
+                else_arguments: Vec::new(),
+            })
+            .expect("close header");
+        builder.begin_block(body).expect("open body");
+        builder
+            .push(NativeOp::DdtState(0), &[one], ValueType::F64)
+            .expect("ddt inside the loop");
+        builder
+            .end_block(BuilderTerminator::Jump {
+                target: header,
+                arguments: Vec::new(),
+            })
+            .expect("close body");
+        builder.begin_block(exit).expect("open exit");
+        builder
+            .end_block(BuilderTerminator::Return(one))
+            .expect("close exit");
+        let error = builder
+            .finish(entry, exit)
+            .expect_err("an analog operator's record cannot advance once per iteration");
+        assert!(
+            error.to_string().contains("once per iteration"),
+            "unexpected refusal: {error}"
+        );
+    }
+
+    #[test]
+    fn an_edge_move_plan_that_needs_the_scratch_realizes_it_as_the_reserved_spill_slot() {
         let cycle =
             sequence_parallel_move(&[(register(0), register(1)), (register(1), register(0))])
                 .expect("sequenced swap");
-        let error = super::scratch_free_edge_moves(&cycle)
-            .expect_err("no acyclic CFG produces a permutation cycle on an edge");
-        assert!(error.to_string().contains("cycle break"));
+        assert!(super::needs_scratch(&cycle));
+        let moves = super::realize_edge_moves(&cycle, Some(7)).expect("realized swap");
+        assert_eq!(
+            moves
+                .iter()
+                .map(|step| (step.from(), step.to()))
+                .collect::<Vec<_>>(),
+            vec![
+                (register(0), ValueLocation::Spill(7)),
+                (register(1), register(0)),
+                (ValueLocation::Spill(7), register(1)),
+            ],
+        );
+    }
+
+    #[test]
+    fn realizing_a_cycle_without_a_reserved_slot_is_refused_by_name() {
+        let cycle =
+            sequence_parallel_move(&[(register(0), register(1)), (register(1), register(0))])
+                .expect("sequenced swap");
+        let error = super::realize_edge_moves(&cycle, None)
+            .expect_err("a cycle cannot be realized without the reserved slot");
+        assert!(error.to_string().contains("no scratch slot was reserved"));
     }
 }

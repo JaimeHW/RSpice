@@ -4797,11 +4797,12 @@ mod tests {
         I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64, INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN,
         LITERAL_POOL_ALIGNMENT, NativeAssignment, OperandContextFilterHelper, PARAMS_OFFSET,
         Q_ELECTRON, ROUND_TEMP_FRAME_BYTES, STACK_PROBE_INTERVAL_BYTES, THERMAL_VOLTAGE_PER_K,
-        TableHelper, VECTOR_LITERAL_ALIGNMENT, VOLTAGES_OFFSET, X64Encoder, XMM_STACK, Xmm,
-        assignment_uses_helper_calls, call_result_disp, compile_assignment_function,
-        compile_assignment_pass_function, compile_value_function, entry_ctx_arg_reg,
-        entry_vars_arg_reg, native_op_reads_entry_args, native_op_uses_helper_call,
-        program_uses_helper_calls, rspice_exp, value_program_needs_saved_entry_args,
+        TableHelper, VECTOR_LITERAL_ALIGNMENT, VOLTAGES_OFFSET, X64Encoder, X64SsaProgram,
+        XMM_STACK, Xmm, assignment_uses_helper_calls, call_result_disp,
+        compile_assignment_function, compile_assignment_pass_function, compile_value_function,
+        compile_value_function_artifact_from_ssa, entry_ctx_arg_reg, entry_vars_arg_reg,
+        native_op_reads_entry_args, native_op_uses_helper_call, program_uses_helper_calls,
+        rspice_exp, value_program_needs_saved_entry_args,
     };
     use crate::codegen::{BytecodeProgram, Instruction, LookupTable};
     use crate::laplace::StateSpaceFilter;
@@ -5121,6 +5122,44 @@ mod tests {
             (actual - expected).abs() <= 1.0e-14,
             "swapped helper arguments changed the result: expected={expected:.17e} actual={actual:.17e}"
         );
+    }
+
+    /// A loop with a genuine permutation on its back edge, executed.
+    ///
+    /// Two things can only be checked by running it. The back edge exchanges
+    /// two loop-carried parameters, which the allocator has to sequence
+    /// through its reserved scratch slot rather than overwrite in place; and a
+    /// constant defined before the loop is read in the middle of the body, so
+    /// its register has to survive to the next iteration even though a linear
+    /// scan has passed its last use. Either mistake produces a number, not a
+    /// crash, which is why the assertion is on the value.
+    #[test]
+    fn a_loop_with_a_swapping_back_edge_computes_what_it_says() {
+        for (limit, scale, first, second) in [
+            (20.0_f64, 3.0_f64, 1.0_f64, 2.0_f64),
+            (100.0, 0.5, -4.0, 7.5),
+            (1.0, 1.0, 0.25, 0.75),
+            // Zero trips: the body never runs and the exit reads the header
+            // parameters the preheader bound.
+            (-1.0, 3.0, 6.0, 9.0),
+        ] {
+            let ssa =
+                X64SsaProgram::loop_fixture_for_test(limit, scale).expect("build the loop program");
+            let artifact =
+                compile_value_function_artifact_from_ssa(&ssa).expect("compile the loop program");
+            let memory = ExecutableMemory::allocate(artifact.bytes()).expect("publish the loop");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let params = [first, second];
+            let context = eval_context(&params, &[], &[], &[]);
+            let expected = X64SsaProgram::loop_fixture_expectation(limit, scale, first, second);
+            assert_eq!(
+                function(&context, std::ptr::null()).to_bits(),
+                expected.to_bits(),
+                "loop with limit={limit} scale={scale} first={first} second={second}"
+            );
+        }
     }
 
     #[test]

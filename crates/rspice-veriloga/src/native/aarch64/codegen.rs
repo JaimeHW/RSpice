@@ -3195,6 +3195,38 @@ mod cross_target_contract_tests {
         verify_exact_function(&branch, "branch-form scalar value function")
             .expect("the independent A64 decoder accepts the branch form");
     }
+
+    /// A loop, encoded and decoded.
+    ///
+    /// The host running this is x86-64, so the assertion is on the image
+    /// rather than on a number: an unconditional branch to an offset already
+    /// emitted is the back edge, and the reserved spill slot the swapping
+    /// edge needs has to appear as a store/load pair the independent decoder
+    /// accepts. The value itself is checked where it can be executed, in the
+    /// x64 and WebAssembly backends' own loop tests, over the same fixture.
+    #[test]
+    fn a_loop_encodes_a_backward_branch_and_its_cycle_scratch() {
+        let ssa = crate::native::ssa::Program::loop_fixture_for_test(20.0, 3.0)
+            .expect("build the loop program");
+        let bytes =
+            super::compile_value_function_from_ssa(&ssa).expect("encode and verify the loop");
+        let backwards = bytes
+            .chunks_exact(4)
+            .enumerate()
+            .filter(|(index, word)| {
+                let word = u32::from_le_bytes((*word).try_into().expect("aligned word"));
+                // B with a negative 26-bit signed word offset lands before the
+                // instruction that made it, and only a back edge does that.
+                let offset = ((word & 0x03FF_FFFF) << 6) as i32 >> 6;
+                word & 0xFC00_0000 == 0x1400_0000
+                    && offset < 0
+                    && (*index as i64 + i64::from(offset)) >= 0
+            })
+            .count();
+        assert_eq!(backwards, 1, "the latch branches back to the loop header");
+        verify_exact_function(&bytes, "loop-form scalar value function")
+            .expect("the independent A64 decoder accepts the loop form");
+    }
 }
 
 #[cfg(all(test, target_arch = "aarch64"))]

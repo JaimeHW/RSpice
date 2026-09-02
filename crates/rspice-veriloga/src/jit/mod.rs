@@ -6,6 +6,8 @@
 
 #[path = "../native/assignment.rs"]
 pub(crate) mod assignment;
+#[path = "../native/cfg_program.rs"]
+pub(crate) mod cfg_program;
 pub(crate) mod coverage;
 pub(crate) mod current_dependencies;
 #[path = "../native/error.rs"]
