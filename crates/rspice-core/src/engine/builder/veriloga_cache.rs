@@ -180,7 +180,17 @@ use super::*;
 // only useful reading. `CANONICAL_IR_SCHEMA_VERSION` would refuse such a record
 // on its own; this constant moves with it so the refusal happens at the cache
 // boundary, where the diagnostic names the cache file.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 38;
+//
+// Version 39 re-indexes the compiled model itself. The bytecode generator
+// numbered a module's analog-operator records once per *emission*; the compiler
+// now rewrites every slot index into the canonical per-*site* numbering before
+// the model leaves `compile_file_runtime_with_metadata`. A version-38 record
+// holds a `CompiledModel` whose `DdtState`, `CrossState`, `LaplaceState` and
+// sibling instructions carry the emission numbers, and nothing in the record
+// says which numbering it is in. Deserializing one beside a runtime that
+// allocates per site would read a record at one index and write it at another,
+// so the record has to be rebuilt rather than reinterpreted.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 39;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

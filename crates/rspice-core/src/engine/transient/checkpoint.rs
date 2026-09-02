@@ -150,7 +150,10 @@ fn checkpoint_operation_result<T>(
 /// accepted TEAM resistance-noise PRNG, dwell, level, factor, and provenance.
 /// Version 33 adds accepted solution-dependent capacitor charge,
 /// linearization, and effective-capacitance state.
-const FORMAT_VERSION: u32 = 33;
+/// Version 34 renumbers the runtime Verilog-A accepted-state arrays from the
+/// bytecode generator's per-emission slots to the canonical per-site ones,
+/// moving `RUNTIME_CHECKPOINT_STATE_VERSION` from 7 to 8.
+const FORMAT_VERSION: u32 = 34;
 const XYCE_TEAM_RESISTANCE_NOISE_FORMAT_VERSION: u32 = 32;
 const SOLUTION_DEPENDENT_CAPACITOR_FORMAT_VERSION: u32 = 33;
 const RUNTIME_VERILOGA_FORMAT_VERSION: u32 = 17;
@@ -166,6 +169,8 @@ const RUNTIME_VERILOGA_TRANSITION_QUEUE_FORMAT_VERSION: u32 = 29;
 const RUNTIME_VERILOGA_ABSDELAY_CONFIGURATION_FORMAT_VERSION: u32 = 30;
 #[cfg(feature = "veriloga")]
 const RUNTIME_VERILOGA_LAPLACE_HISTORY_FORMAT_VERSION: u32 = 31;
+#[cfg(feature = "veriloga")]
+const RUNTIME_VERILOGA_CANONICAL_SITE_STATE_FORMAT_VERSION: u32 = 34;
 const CONTROLLER_PHASE_FORMAT_VERSION: u32 = 18;
 const NATIVE_NONLINEAR_FORMAT_VERSION: u32 = 19;
 const ACCEPTED_JUNCTION_HISTORY_FORMAT_VERSION: u32 = 20;
@@ -3371,6 +3376,8 @@ fn read_runtime_veriloga_states(
             Some(5)
         } else if checkpoint_version < RUNTIME_VERILOGA_LAPLACE_HISTORY_FORMAT_VERSION {
             Some(6)
+        } else if checkpoint_version < RUNTIME_VERILOGA_CANONICAL_SITE_STATE_FORMAT_VERSION {
+            Some(7)
         } else {
             None
         };
@@ -3459,6 +3466,7 @@ fn read_runtime_veriloga_states(
                 4 => VerilogADeviceCheckpoint::validate_legacy_v4_words(&words),
                 5 => VerilogADeviceCheckpoint::validate_legacy_v5_words(&words),
                 6 => VerilogADeviceCheckpoint::validate_legacy_v6_words(&words),
+                7 => VerilogADeviceCheckpoint::validate_legacy_v7_words(&words),
                 _ => unreachable!("known legacy runtime Verilog-A state version"),
             }
             .map_err(|error| {
@@ -3488,9 +3496,12 @@ fn read_runtime_veriloga_states(
     // origin. Version 5 retained `absdelay` samples but not the frozen fixed
     // delay or maximum-delay bound. Version 6 retained only the latest
     // accepted Laplace state, not the older state and previous physical
-    // derivative required by Gear-2 and trapezoidal integration. All remain
-    // fully parseable for diagnostics but cannot be promoted into exact
-    // current accepted state.
+    // derivative required by Gear-2 and trapezoidal integration. Version 7
+    // carried every field version 8 does, but indexed by the bytecode
+    // generator's per-emission state slots rather than the canonical per-site
+    // ones the compiler now numbers records with, so a record it holds cannot
+    // be told which operator owns it. All remain fully parseable for
+    // diagnostics but cannot be promoted into exact current accepted state.
     Ok((states, legacy_state_version.is_some() && count != 0))
 }
 

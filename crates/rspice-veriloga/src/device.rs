@@ -1113,7 +1113,22 @@ pub struct VerilogADevice {
     prev_discontinuity: bool,
 }
 
-pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 7;
+/// The accepted-state payload's own version, independent of the outer
+/// checkpoint file format.
+///
+/// Version 8 changes no field and no encoding: it changes what the *indices*
+/// mean. Through version 7 a module's `state_values_prev`, `cross_detectors`
+/// and sibling arrays were indexed by the bytecode generator's per-*emission*
+/// slot, which gave one source operator several records when the generator
+/// compiled it more than once. The compiler now renumbers every slot to the
+/// canonical per-*site* numbering, so those arrays are shorter for twelve of
+/// the forty-three shipped modules and, more importantly, a given index names a
+/// different operator's record than it did.
+///
+/// `checkpoint_shape_identity` already refuses a version-7 payload for those
+/// twelve on array length alone. The version is the explicit statement, and it
+/// is what refuses the modules whose length happens not to move.
+pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 8;
 
 /// Versioned accepted runtime state for one compiled Verilog-A instance.
 /// Compiled programs, topology, and solver caches are intentionally absent.
@@ -1729,6 +1744,26 @@ impl VerilogADeviceCheckpoint {
         .map(drop)
     }
 
+    /// Validate and consume a complete legacy version-7 runtime payload.
+    ///
+    /// Version 7 carries every field version 8 does, in the same order and the
+    /// same encoding. What it does not carry is the *numbering*: its slot
+    /// arrays are indexed by the bytecode generator's per-emission allocation,
+    /// so a record it holds cannot be told which operator site owns it without
+    /// the model that produced it. It parses for diagnostics; it cannot be
+    /// promoted into current accepted state.
+    pub fn validate_legacy_v7_words(words: &[u64]) -> Result<(), String> {
+        Self::from_words_with_expected_version(
+            SmolStr::new_inline("legacy"),
+            SmolStr::new_inline("legacy"),
+            SmolStr::new_inline("legacy"),
+            SmolStr::new_inline("legacy"),
+            words,
+            7,
+        )
+        .map(drop)
+    }
+
     #[cfg(test)]
     fn to_legacy_v2_words_for_test(&self) -> Vec<u64> {
         self.to_words_with_format(2, false, false)
@@ -1752,6 +1787,14 @@ impl VerilogADeviceCheckpoint {
     #[cfg(test)]
     fn to_legacy_v6_words_for_test(&self) -> Vec<u64> {
         self.to_words_with_format(6, true, true)
+    }
+
+    /// Version 7's words are version 8's words under a different reading of the
+    /// indices, so the encoder needs no arm of its own — only the stamped
+    /// version differs.
+    #[cfg(test)]
+    fn to_legacy_v7_words_for_test(&self) -> Vec<u64> {
+        self.to_words_with_format(7, true, true)
     }
 
     pub fn retained_value_count(&self) -> usize {
