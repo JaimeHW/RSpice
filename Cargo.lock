@@ -5308,6 +5308,7 @@ dependencies = [
  "portable-atomic",
  "rayon",
  "rspice-matrix",
+ "rspice-output",
  "rspice-veriloga",
  "rspice-veriloga-models",
  "rspice-veriloga-runtime",

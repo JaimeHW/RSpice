@@ -280,6 +280,7 @@ libm = "0.2"
 rustfft.workspace = true
 rustc-hash.workspace = true
 rspice-matrix.workspace = true
+rspice-output.workspace = true
 rspice-veriloga-runtime.workspace = true
 rspice-veriloga-models = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }

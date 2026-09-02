@@ -21,8 +21,8 @@
 //! ```
 
 use crate::Value;
-use std::fs::File;
-use std::io::{self, BufWriter, Write};
+use rspice_output::{AtomicArtifactError, AtomicArtifactOptions, Durability, write_atomic};
+use std::io::{self, Write};
 use std::path::Path;
 
 /// Export format for raw files
@@ -167,13 +167,11 @@ impl RawExporter {
 
     /// Write to file in specified format
     pub fn write_to_file<P: AsRef<Path>>(&self, path: P, format: RawFormat) -> io::Result<()> {
-        let file = File::create(path)?;
-        let mut writer = BufWriter::new(file);
-        self.write(&mut writer, format)
+        publish_raw_file(path.as_ref(), |writer| self.write(writer, format))
     }
 
     /// Write to any writer
-    pub fn write<W: Write>(&self, writer: &mut W, format: RawFormat) -> io::Result<()> {
+    pub fn write<W: Write + ?Sized>(&self, writer: &mut W, format: RawFormat) -> io::Result<()> {
         self.validate_data_shape()?;
         self.write_header(writer)?;
 
@@ -208,7 +206,7 @@ impl RawExporter {
     /// dependent variable. This is distinct from the row-oriented ASCII
     /// layout emitted by [`RawFormat::Ascii`], while sharing the same header
     /// and typed variable schema.
-    pub fn write_xyce_ascii<W: Write>(&self, writer: &mut W) -> io::Result<()> {
+    pub fn write_xyce_ascii<W: Write + ?Sized>(&self, writer: &mut W) -> io::Result<()> {
         self.validate_data_shape()?;
         self.write_header(writer)?;
         writeln!(writer, "Values:")?;
@@ -227,7 +225,7 @@ impl RawExporter {
         Ok(())
     }
 
-    fn write_header<W: Write>(&self, writer: &mut W) -> io::Result<()> {
+    fn write_header<W: Write + ?Sized>(&self, writer: &mut W) -> io::Result<()> {
         writeln!(writer, "Title: {}", self.title)?;
         writeln!(writer, "Date: {}", chrono_date())?;
         writeln!(writer, "Plotname: {}", self.plot_name)?;
@@ -259,6 +257,28 @@ impl RawExporter {
         }
         Ok(())
     }
+}
+
+fn publish_raw_file(
+    destination: &Path,
+    write: impl FnOnce(&mut dyn Write) -> io::Result<()>,
+) -> io::Result<()> {
+    write_atomic(
+        destination,
+        AtomicArtifactOptions::new(Durability::SyncFileAndParent),
+        write,
+    )
+    .map_err(atomic_artifact_io_error)
+}
+
+fn atomic_artifact_io_error(error: AtomicArtifactError<io::Error>) -> io::Error {
+    let kind = match &error {
+        AtomicArtifactError::Prepare(source) | AtomicArtifactError::Write(source) => source.kind(),
+        AtomicArtifactError::Flush { source, .. } | AtomicArtifactError::Commit { source, .. } => {
+            source.kind()
+        }
+    };
+    io::Error::new(kind, error)
 }
 
 fn invalid_data(message: impl Into<String>) -> io::Error {
@@ -347,13 +367,13 @@ pub fn export_transient<P: AsRef<Path>>(
     waveforms: &[Vec<Value>],
     format: RawFormat,
 ) -> io::Result<()> {
-    let file = File::create(path)?;
-    let mut writer = BufWriter::new(file);
-    write_transient(&mut writer, times, node_names, waveforms, format)
+    publish_raw_file(path.as_ref(), |writer| {
+        write_transient(writer, times, node_names, waveforms, format)
+    })
 }
 
 /// Write transient results to any writer.
-pub fn write_transient<W: Write>(
+pub fn write_transient<W: Write + ?Sized>(
     writer: &mut W,
     times: &[Value],
     node_names: &[String],
@@ -379,20 +399,20 @@ pub fn export_dc_sweep<P: AsRef<Path>>(
     results: &[Vec<Value>],
     format: RawFormat,
 ) -> io::Result<()> {
-    let file = File::create(path)?;
-    let mut writer = BufWriter::new(file);
-    write_dc_sweep(
-        &mut writer,
-        sweep_values,
-        sweep_name,
-        node_names,
-        results,
-        format,
-    )
+    publish_raw_file(path.as_ref(), |writer| {
+        write_dc_sweep(
+            writer,
+            sweep_values,
+            sweep_name,
+            node_names,
+            results,
+            format,
+        )
+    })
 }
 
 /// Write DC sweep results to any writer.
-pub fn write_dc_sweep<W: Write>(
+pub fn write_dc_sweep<W: Write + ?Sized>(
     writer: &mut W,
     sweep_values: &[Value],
     sweep_name: &str,
@@ -451,7 +471,75 @@ mod date_tests {
 mod export_tests {
     use super::*;
     use crate::io::parse_raw_reader;
+    use rspice_output::stale_artifacts;
+    use std::fs;
     use std::io::Cursor;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_TEST_DIRECTORY: AtomicU64 = AtomicU64::new(0);
+
+    struct TestDirectory(PathBuf);
+
+    impl TestDirectory {
+        fn new(tag: &str) -> Self {
+            let serial = NEXT_TEST_DIRECTORY.fetch_add(1, Ordering::Relaxed);
+            let directory = std::env::temp_dir().join(format!(
+                "rspice-raw-export-{tag}-{}-{serial}",
+                std::process::id()
+            ));
+            fs::create_dir(&directory).expect("create raw-export test directory");
+            Self(directory)
+        }
+
+        fn destination(&self, file_name: &str) -> PathBuf {
+            self.0.join(file_name)
+        }
+    }
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn seed_existing(destination: &Path) {
+        fs::write(destination, b"old complete raw artifact").expect("seed existing raw artifact");
+    }
+
+    fn assert_existing_preserved(destination: &Path) {
+        assert_eq!(
+            fs::read(destination).expect("read preserved raw artifact"),
+            b"old complete raw artifact"
+        );
+        assert!(
+            stale_artifacts(destination)
+                .expect("inspect raw staging artifacts")
+                .is_empty(),
+            "failed export left a staging artifact"
+        );
+    }
+
+    fn assert_committed_raw(
+        destination: &Path,
+        expected_plot_name: &str,
+        expected_variables: usize,
+        expected_points: usize,
+    ) {
+        let bytes = fs::read(destination).expect("read committed raw artifact");
+        assert_ne!(bytes, b"old complete raw artifact");
+        let parsed =
+            parse_raw_reader(&mut Cursor::new(bytes)).expect("parse committed raw artifact");
+        assert_eq!(parsed.header.plotname, expected_plot_name);
+        assert_eq!(parsed.header.no_variables, expected_variables);
+        assert_eq!(parsed.header.no_points, expected_points);
+        assert!(
+            stale_artifacts(destination)
+                .expect("inspect raw staging artifacts")
+                .is_empty(),
+            "successful export left a staging artifact"
+        );
+    }
 
     #[test]
     fn xyce_ascii_export_uses_vertical_layout_and_roundtrips() {
@@ -526,5 +614,93 @@ mod export_tests {
             err.to_string().contains("V(out)"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn direct_file_exports_preserve_existing_destination_on_serialization_failure() {
+        let directory = TestDirectory::new("preserve");
+
+        let destination = directory.destination("exporter.raw");
+        seed_existing(&destination);
+        let malformed_exporter = RawExporter {
+            title: "Malformed".to_string(),
+            plot_name: "Transient Analysis".to_string(),
+            variables: vec![RawVariable::time(), RawVariable::voltage("out")],
+            data: vec![vec![0.0]],
+        };
+        let error = malformed_exporter
+            .write_to_file(&destination, RawFormat::Ascii)
+            .expect_err("malformed exporter must not replace the destination");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_existing_preserved(&destination);
+
+        let destination = directory.destination("transient.raw");
+        seed_existing(&destination);
+        let error = export_transient(
+            &destination,
+            &[0.0, 1.0],
+            &["out".to_string()],
+            &[vec![0.0]],
+            RawFormat::Binary,
+        )
+        .expect_err("malformed transient data must not replace the destination");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_existing_preserved(&destination);
+
+        let destination = directory.destination("dc.raw");
+        seed_existing(&destination);
+        let error = export_dc_sweep(
+            &destination,
+            &[0.0, 1.0],
+            "vin",
+            &["out".to_string()],
+            &[vec![0.0]],
+            RawFormat::Ascii,
+        )
+        .expect_err("malformed DC data must not replace the destination");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_existing_preserved(&destination);
+    }
+
+    #[test]
+    fn direct_file_exports_atomically_replace_existing_destination_on_success() {
+        let directory = TestDirectory::new("success");
+
+        let destination = directory.destination("exporter.raw");
+        seed_existing(&destination);
+        let mut exporter = RawExporter::new_transient("Exporter");
+        exporter.add_voltage("out");
+        exporter
+            .add_transient_data(&[0.0, 1.0], &[vec![0.0, 2.0]])
+            .expect("add shaped exporter data");
+        exporter
+            .write_to_file(&destination, RawFormat::Binary)
+            .expect("publish exporter RAW");
+        assert_committed_raw(&destination, "Transient Analysis", 2, 2);
+
+        let destination = directory.destination("transient.raw");
+        seed_existing(&destination);
+        export_transient(
+            &destination,
+            &[0.0, 1.0],
+            &["out".to_string()],
+            &[vec![0.0, 2.0]],
+            RawFormat::Ascii,
+        )
+        .expect("publish transient RAW");
+        assert_committed_raw(&destination, "Transient Analysis", 2, 2);
+
+        let destination = directory.destination("dc.raw");
+        seed_existing(&destination);
+        export_dc_sweep(
+            &destination,
+            &[0.0, 1.0],
+            "vin",
+            &["out".to_string()],
+            &[vec![1.0, 2.0]],
+            RawFormat::Binary,
+        )
+        .expect("publish DC RAW");
+        assert_committed_raw(&destination, "DC transfer characteristic", 2, 2);
     }
 }
