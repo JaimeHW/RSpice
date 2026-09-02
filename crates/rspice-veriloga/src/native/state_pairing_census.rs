@@ -414,32 +414,46 @@ fn census_model(model: &CompiledModel, hir: &HirModel, mir: &MirModel) -> ModelC
 
     for (index, parameter) in model.parameters.iter().enumerate() {
         let canonical = mir.parameters.get(index);
-        let roots = canonical.map(|parameter| {
-            let mut roots: Vec<Option<ExprId>> =
-                vec![parameter.default_expr.as_ref().map(|e| e.id)];
-            if let Some(range) = &parameter.range {
-                roots.push(range.min_expression.as_ref().map(|e| e.id));
-                roots.push(range.max_expression.as_ref().map(|e| e.id));
-                roots.extend(range.exclude_expressions.iter().map(|e| Some(e.id)));
-            }
-            roots
-        });
-        let programs: Vec<&BytecodeProgram> = std::iter::empty()
-            .chain(parameter.default_program.iter())
-            .chain(parameter.min_program.iter())
-            .chain(parameter.max_program.iter())
-            .chain(parameter.exclude_programs.iter())
-            .collect();
-        // The two lists line up only when the parameter has every optional
-        // program its canonical slot has an expression for; where they do not,
-        // the program is still walked for its slots and reported as unrooted
-        // rather than paired against the wrong expression.
-        for (position, program) in programs.into_iter().enumerate() {
-            let label = format!("parameter[{index}].program[{position}]");
-            match roots
-                .as_ref()
-                .and_then(|roots| roots.get(position).copied().flatten())
-            {
+        let range = canonical.and_then(|parameter| parameter.range.as_ref());
+        // Named slots rather than two collected lists. A parameter with a
+        // constant default and an expression-valued bound compiles a `min`
+        // program and no `default` program, so a positional zip over the
+        // *present* programs would hand the bound program the default's
+        // expression — a pairing that could refuse a module for a mistake made
+        // here rather than by the generator.
+        let mut slots: Vec<(String, &BytecodeProgram, Option<ExprId>)> = Vec::new();
+        if let Some(program) = parameter.default_program.as_ref() {
+            slots.push((
+                format!("parameter[{index}].default"),
+                program,
+                canonical.and_then(|parameter| parameter.default_expr.as_ref().map(|expr| expr.id)),
+            ));
+        }
+        if let Some(program) = parameter.min_program.as_ref() {
+            slots.push((
+                format!("parameter[{index}].min"),
+                program,
+                range.and_then(|range| range.min_expression.as_ref().map(|expr| expr.id)),
+            ));
+        }
+        if let Some(program) = parameter.max_program.as_ref() {
+            slots.push((
+                format!("parameter[{index}].max"),
+                program,
+                range.and_then(|range| range.max_expression.as_ref().map(|expr| expr.id)),
+            ));
+        }
+        for (position, program) in parameter.exclude_programs.iter().enumerate() {
+            slots.push((
+                format!("parameter[{index}].exclude[{position}]"),
+                program,
+                range
+                    .and_then(|range| range.exclude_expressions.get(position))
+                    .map(|expr| expr.id),
+            ));
+        }
+        for (label, program, root) in slots {
+            match root {
                 Some(root) => pair_rooted_program(
                     &mut census,
                     &model.name,
