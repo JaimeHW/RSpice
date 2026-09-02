@@ -105,10 +105,24 @@ fn canonical_temperature_axis_still_completes_and_publishes_each_coordinate() {
         "the canonical multi-run axis must not overwrite the unqualified base path"
     );
 
-    for ordinal in 1..=2 {
-        let artifact = directory
-            .path()
-            .join(format!("temperature.step_{ordinal:06}.json"));
+    let mut artifacts = std::fs::read_dir(directory.path())
+        .expect("list successful temperature artifacts")
+        .map(|entry| entry.expect("temperature directory entry").path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| {
+                    name.starts_with("temperature.run_") && name.ends_with(".op-001.json")
+                })
+        })
+        .collect::<Vec<_>>();
+    artifacts.sort();
+    assert_eq!(
+        artifacts.len(),
+        2,
+        "stable coordinate artifacts: {artifacts:?}"
+    );
+    for artifact in artifacts {
         let document: Value = serde_json::from_slice(
             &std::fs::read(&artifact)
                 .unwrap_or_else(|error| panic!("read {}: {error}", artifact.display())),

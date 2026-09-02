@@ -24,9 +24,9 @@ use crate::report::{
 use crate::cli::{
     CliError, Config, MeasFormat, OutputFormat, PzTransferMode, RunArgs, map_atomic_output_error,
 };
-use rspice_core::engine::{StepPlan, StepPlanLimits};
 use rspice_core::execution::{
-    AxisAssignment, AxisKind, DeckPlan, DeckPlanError, RunAxisValue, RunCoordinate, StepAxisTarget,
+    AxisAssignment, AxisKind, DeckPlan, DeckPlanError, DeckPlanMaterializer, MaterializedAnalysis,
+    MaterializedRunError, RunAxisValue, RunCoordinate, StepAxisTarget,
 };
 use rspice_core::netlist::AnalysisCommand;
 use rspice_core::{
@@ -86,6 +86,16 @@ struct RunContext<'a> {
     output_tag_multiplicities: std::collections::HashMap<&'static str, usize>,
     /// Next output ordinal for every repeated analysis tag.
     next_output_tag_ordinal: std::cell::RefCell<std::collections::HashMap<&'static str, usize>>,
+    /// Stable materializer-owned output identities, consumed in authored
+    /// analysis order by the legacy per-analysis exporters.
+    materialized_output_ids: std::cell::RefCell<
+        std::collections::HashMap<&'static str, std::collections::VecDeque<String>>,
+    >,
+    /// Stable transient identities used by checkpoint and post-processing
+    /// namespaces. Empty for scalar runs outside a materialized deck plan.
+    materialized_transient_ids: Vec<String>,
+    materialized_namespace_required: bool,
+    materialized_namespace_error: std::cell::RefCell<Option<String>>,
     verbose: bool,
     quiet: bool,
     /// .MEAS results collected while analyses run, for CI/CD reporting
@@ -141,7 +151,9 @@ impl<'a> RunContext<'a> {
         quiet: bool,
         run_label: Option<&str>,
         coordinate: Option<&RunCoordinate>,
+        materialized_analyses: Option<&[MaterializedAnalysis]>,
     ) -> Result<Self, CliError> {
+        validate_materialized_namespaces(coordinate, materialized_analyses)?;
         let format = match args.format {
             Some(format) => format,
             None => parse_format_name(&config.output.format)?,
@@ -180,10 +192,18 @@ impl<'a> RunContext<'a> {
             // `.FFT` is retained outside `Netlist::analyses`, but publishing
             // its typed result adds an independent artifact beside the
             // parent transient and therefore also requires tagged paths.
-            multi_analysis: netlist.analyses.len() > 1 || !netlist.fft_analyses.is_empty(),
+            multi_analysis: coordinate.is_some()
+                || netlist.analyses.len() > 1
+                || !netlist.fft_analyses.is_empty(),
             coordinate: coordinate.map(ArtifactCoordinate::from_run_coordinate),
             output_tag_multiplicities: analysis_output_tag_multiplicities(netlist),
             next_output_tag_ordinal: std::cell::RefCell::new(std::collections::HashMap::new()),
+            materialized_output_ids: std::cell::RefCell::new(materialized_output_id_queues(
+                materialized_analyses,
+            )),
+            materialized_transient_ids: materialized_analysis_ids(materialized_analyses, "tran"),
+            materialized_namespace_required: materialized_analyses.is_some(),
+            materialized_namespace_error: std::cell::RefCell::new(None),
             verbose,
             quiet,
             measurements: std::cell::RefCell::new(Vec::new()),
@@ -290,19 +310,35 @@ impl<'a> RunContext<'a> {
     /// Every resolved path is remembered for the `--summary` manifest.
     fn output_path_for(&self, tag: &str) -> Option<std::path::PathBuf> {
         let path = self.output.clone()?;
+        let materialized_id = self
+            .materialized_output_ids
+            .borrow_mut()
+            .get_mut(tag)
+            .and_then(std::collections::VecDeque::pop_front);
+        if materialized_id.is_none()
+            && self.materialized_namespace_required
+            && is_physical_output_tag(tag)
+        {
+            self.materialized_namespace_error.replace(Some(format!(
+                "materialized analysis namespace queue has no remaining '{tag}' identity"
+            )));
+            return None;
+        }
         let repeated_tag = self
             .output_tag_multiplicities
             .get_key_value(tag)
             .and_then(|(registered_tag, count)| (*count > 1).then_some(*registered_tag));
-        let qualified_tag = repeated_tag.map_or_else(
-            || tag.to_string(),
-            |registered_tag| {
-                let mut ordinals = self.next_output_tag_ordinal.borrow_mut();
-                let ordinal = ordinals.entry(registered_tag).or_default();
-                *ordinal = ordinal.saturating_add(1);
-                format!("{tag}-{:03}", *ordinal)
-            },
-        );
+        let qualified_tag = materialized_id.unwrap_or_else(|| {
+            repeated_tag.map_or_else(
+                || tag.to_string(),
+                |registered_tag| {
+                    let mut ordinals = self.next_output_tag_ordinal.borrow_mut();
+                    let ordinal = ordinals.entry(registered_tag).or_default();
+                    *ordinal = ordinal.saturating_add(1);
+                    format!("{tag}-{:03}", *ordinal)
+                },
+            )
+        });
         let resolved = if !self.multi_analysis {
             path
         } else {
@@ -321,6 +357,30 @@ impl<'a> RunContext<'a> {
         Some(resolved)
     }
 
+    fn ensure_materialized_namespaces_consumed(&self) -> Result<(), CliError> {
+        if let Some(message) = self.materialized_namespace_error.borrow_mut().take() {
+            return Err(CliError::InternalError { message });
+        }
+        if !self.materialized_namespace_required || self.output.is_none() {
+            return Ok(());
+        }
+        let unconsumed = self
+            .materialized_output_ids
+            .borrow()
+            .iter()
+            .filter_map(|(tag, ids)| (!ids.is_empty()).then_some((*tag, ids.len())))
+            .collect::<Vec<_>>();
+        if unconsumed.is_empty() {
+            Ok(())
+        } else {
+            Err(CliError::InternalError {
+                message: format!(
+                    "materialized analysis namespace queue retained unconsumed identities: {unconsumed:?}"
+                ),
+            })
+        }
+    }
+
     /// Resolve the checkpoint namespace of the transient currently entering
     /// the dispatcher. The dispatcher advances `next_transient_ordinal`
     /// before calling the transient executor, so its value is the one-based
@@ -330,6 +390,19 @@ impl<'a> RunContext<'a> {
         path: Option<&std::path::Path>,
     ) -> Option<std::path::PathBuf> {
         let path = path?.to_path_buf();
+        let ordinal = self.next_transient_ordinal.get();
+        if let Some(analysis_id) = ordinal
+            .checked_sub(1)
+            .and_then(|index| self.materialized_transient_ids.get(index as usize))
+        {
+            return Some(tag_output_path(&path, analysis_id));
+        }
+        if self.materialized_namespace_required {
+            self.materialized_namespace_error.replace(Some(format!(
+                "materialized transient checkpoint namespace has no identity for ordinal {ordinal}"
+            )));
+            return None;
+        }
         if self
             .output_tag_multiplicities
             .get("tran")
@@ -337,7 +410,6 @@ impl<'a> RunContext<'a> {
         {
             return Some(path);
         }
-        let ordinal = self.next_transient_ordinal.get();
         Some(tag_output_path(&path, &format!("tran-{ordinal:03}")))
     }
 
@@ -349,7 +421,20 @@ impl<'a> RunContext<'a> {
                     .to_string(),
             });
         }
-        Ok(format!("tran-{ordinal:03}"))
+        if let Some(analysis_id) = ordinal
+            .checked_sub(1)
+            .and_then(|index| self.materialized_transient_ids.get(index as usize))
+        {
+            Ok(analysis_id.clone())
+        } else if self.materialized_namespace_required {
+            Err(CliError::InternalError {
+                message: format!(
+                    "materialized transient namespace has no identity for ordinal {ordinal}"
+                ),
+            })
+        } else {
+            Ok(format!("tran-{ordinal:03}"))
+        }
     }
 
     /// One FFT artifact contains every source-authored directive for one
@@ -402,7 +487,7 @@ impl<'a> RunContext<'a> {
                     *uic,
                 )?;
                 self.last_transient.replace(Some(RetainedTransient {
-                    analysis_id: format!("tran-{:03}", u64::from(ordinal) + 1),
+                    analysis_id: self.current_transient_analysis_id()?,
                     result,
                 }));
             }
@@ -573,6 +658,25 @@ fn analysis_output_tag(analysis: &AnalysisCommand) -> Option<&'static str> {
     }
 }
 
+fn is_physical_output_tag(tag: &str) -> bool {
+    matches!(
+        tag,
+        "op" | "dc"
+            | "ac"
+            | "tran"
+            | "noise"
+            | "sp"
+            | "stb"
+            | "disto"
+            | "pz"
+            | "sens"
+            | "tf"
+            | "hb"
+            | "mc"
+            | "temp"
+    )
+}
+
 fn analysis_output_tag_multiplicities(
     netlist: &Netlist,
 ) -> std::collections::HashMap<&'static str, usize> {
@@ -582,6 +686,68 @@ fn analysis_output_tag_multiplicities(
         *count = count.saturating_add(1);
     }
     counts
+}
+
+fn materialized_output_id_queues(
+    analyses: Option<&[MaterializedAnalysis]>,
+) -> std::collections::HashMap<&'static str, std::collections::VecDeque<String>> {
+    let mut ids = std::collections::HashMap::new();
+    for analysis in analyses.into_iter().flatten() {
+        let Some(tag) = analysis.command().and_then(analysis_output_tag) else {
+            continue;
+        };
+        ids.entry(tag)
+            .or_insert_with(std::collections::VecDeque::new)
+            .push_back(analysis.output_namespace().analysis_component());
+    }
+    ids
+}
+
+fn validate_materialized_namespaces(
+    coordinate: Option<&RunCoordinate>,
+    analyses: Option<&[MaterializedAnalysis]>,
+) -> Result<(), CliError> {
+    let Some(analyses) = analyses else {
+        return Ok(());
+    };
+    let coordinate = coordinate.ok_or_else(|| CliError::InternalError {
+        message: "materialized analyses were supplied without their run coordinate".to_string(),
+    })?;
+    for analysis in analyses {
+        let output = analysis.output_namespace();
+        let checkpoint = analysis.checkpoint_namespace();
+        if output.coordinate_id() != coordinate.stable_id()
+            || checkpoint.coordinate_id() != coordinate.stable_id()
+            || output.analysis_id() != analysis.id()
+            || checkpoint.analysis_id() != analysis.id()
+        {
+            return Err(CliError::InternalError {
+                message: format!(
+                    "materialized output/checkpoint namespace disagrees with coordinate {} and analysis {}",
+                    coordinate.stable_id(),
+                    analysis.id()
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn materialized_analysis_ids(
+    analyses: Option<&[MaterializedAnalysis]>,
+    requested_tag: &str,
+) -> Vec<String> {
+    analyses
+        .into_iter()
+        .flatten()
+        .filter(|analysis| {
+            analysis
+                .command()
+                .and_then(analysis_output_tag)
+                .is_some_and(|tag| tag == requested_tag)
+        })
+        .map(|analysis| analysis.checkpoint_namespace().analysis_component())
+        .collect()
 }
 
 fn cancellation_cli_error(timeout_seconds: Option<f64>) -> CliError {
@@ -1305,65 +1471,6 @@ fn step_commands(netlist: &Netlist) -> Vec<rspice_core::netlist::StepCommand> {
         .collect()
 }
 
-/// Normalize `.TEMP` for the legacy coordinate materializer.
-///
-/// The parser already folds a single-valued card into `options.temp`; keeping
-/// the analysis card would also launch an unrelated operating-point sweep.
-/// A multi-valued card is instead one `StepTarget::Temp` dimension wrapping
-/// every authored physical analysis. Canonical axis ordering and identity are
-/// owned by `DeckPlan`; this normalized command exists only so the current
-/// engine materializer can apply each already-planned temperature coordinate.
-fn normalize_temperature_axis(netlist: &Netlist) -> Result<Option<Netlist>, CliError> {
-    let temperature_cards = netlist
-        .analyses
-        .iter()
-        .filter_map(|analysis| match analysis {
-            AnalysisCommand::Temp { temperatures } => Some(temperatures),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    let Some(temperatures) = temperature_cards.first() else {
-        return Ok(None);
-    };
-    if temperature_cards.len() != 1 {
-        return Err(CliError::InvalidArgument {
-            message: format!(
-                "deck contains {} .TEMP cards; one run cannot have multiple temperature axes",
-                temperature_cards.len()
-            ),
-            suggestion: Some("combine the values into one .TEMP card".to_string()),
-        });
-    }
-
-    let mut normalized = netlist.clone();
-    normalized
-        .analyses
-        .retain(|analysis| !matches!(analysis, AnalysisCommand::Temp { .. }));
-    if temperatures.len() > 1 {
-        if normalized.analyses.iter().any(|analysis| {
-            matches!(
-                analysis,
-                AnalysisCommand::Step(command)
-                    if command.target == rspice_core::netlist::StepTarget::Temp
-            )
-        }) {
-            return Err(CliError::InvalidArgument {
-                message: ".TEMP and .STEP TEMP both define the temperature run axis".to_string(),
-                suggestion: Some("keep exactly one temperature sweep form".to_string()),
-            });
-        }
-        normalized
-            .analyses
-            .push(AnalysisCommand::Step(rspice_core::netlist::StepCommand {
-                target: rspice_core::netlist::StepTarget::Temp,
-                name: "TEMP".to_string(),
-                param_name: None,
-                sweep: rspice_core::netlist::StepSweep::List((*temperatures).clone()),
-            }));
-    }
-    Ok(Some(normalized))
-}
-
 fn step_analysis_signature(netlist: &Netlist) -> Result<Vec<&'static str>, CliError> {
     let mut signature = Vec::new();
     for analysis in &netlist.analyses {
@@ -1377,12 +1484,16 @@ fn step_analysis_signature(netlist: &Netlist) -> Result<Vec<&'static str>, CliEr
 
 fn validate_step_frontend_compatibility(netlist: &Netlist, args: &RunArgs) -> Result<(), CliError> {
     let steps = step_commands(netlist);
-    if steps.is_empty() {
+    let has_temperature_axis = netlist
+        .analyses
+        .iter()
+        .any(|analysis| matches!(analysis, AnalysisCommand::Temp { .. }));
+    if steps.is_empty() && !has_temperature_axis {
         return Ok(());
     }
     if let Some(mode) = requested_mode_name(args) {
         return Err(CliError::InvalidArgument {
-            message: format!("{mode} cannot be combined with an authored .STEP deck"),
+            message: format!("{mode} cannot be combined with authored .STEP/.TEMP run axes"),
             suggestion: Some(
                 "encode the desired supported physical child analysis in the deck".to_string(),
             ),
@@ -1415,13 +1526,6 @@ fn validate_step_frontend_compatibility(netlist: &Netlist, args: &RunArgs) -> Re
             suggestion: Some(
                 "add at least one .TRAN card or remove the transient checkpoint option".to_string(),
             ),
-        });
-    }
-    if signature.is_empty() && steps.len() != 1 {
-        return Err(CliError::InvalidArgument {
-            message: "a multi-dimensional .STEP deck requires an explicit child analysis"
-                .to_string(),
-            suggestion: Some("add a supported physical analysis to the deck".to_string()),
         });
     }
     Ok(())
@@ -1459,29 +1563,42 @@ fn map_deck_plan_error(error: DeckPlanError, args: &RunArgs) -> CliError {
     }
 }
 
-/// Return the materializer's STEP commands in the same semantic order as
-/// `DeckPlan`: DATA rows, authored numeric STEP dimensions, then temperature.
-fn canonical_materializer_steps(netlist: &Netlist) -> Vec<rspice_core::netlist::StepCommand> {
-    use rspice_core::netlist::{StepSweep, StepTarget};
-
-    let mut data = Vec::new();
-    let mut numeric = Vec::new();
-    let mut temperature = Vec::new();
-    for command in &netlist.analyses {
-        let AnalysisCommand::Step(step) = command else {
-            continue;
-        };
-        if matches!(&step.sweep, StepSweep::Data { .. }) {
-            data.push(step.clone());
-        } else if step.target == StepTarget::Temp {
-            temperature.push(step.clone());
-        } else {
-            numeric.push(step.clone());
+fn map_materialized_run_error(
+    error: MaterializedRunError,
+    args: &RunArgs,
+    analysis: impl Into<String>,
+) -> CliError {
+    match error {
+        MaterializedRunError::Aborted => cancellation_cli_error(args.timeout),
+        MaterializedRunError::DeckPlan(error) => map_deck_plan_error(error, args),
+        MaterializedRunError::Simulation(error) => {
+            map_step_core_error(error, args.timeout, analysis)
         }
+        MaterializedRunError::AlterUnsupported => CliError::InvalidArgument {
+            message: "textual .ALTER must be expanded before canonical deck materialization"
+                .to_string(),
+            suggestion: Some(
+                "run the source through the CLI multi-run expander before materializing coordinates"
+                .to_string(),
+            ),
+        },
+        MaterializedRunError::AnalysisIdentityMismatch {
+            coordinate,
+            expected,
+            actual,
+        } => CliError::InvalidArgument {
+            message: format!(
+                ".STEP coordinate {coordinate} conditionally changes the child-analysis signature from {expected:?} to {actual:?}"
+            ),
+            suggestion: Some(
+                "keep the authored physical-analysis and post-processing card set unconditional across every coordinate"
+                    .to_string(),
+            ),
+        },
+        error => CliError::InternalError {
+            message: format!("canonical deck materialization failed: {error}"),
+        },
     }
-    data.extend(numeric);
-    data.extend(temperature);
-    data
 }
 
 fn canonical_coordinate_description(coordinate: &RunCoordinate) -> String {
@@ -1533,180 +1650,14 @@ fn canonical_assignment_target(assignment: &AxisAssignment) -> String {
     }
 }
 
-fn validate_canonical_materializer_alignment(
-    materializer: &StepPlan<'_>,
-    coordinates: &[RunCoordinate],
-) -> Result<(), CliError> {
-    if materializer.total_runs() != coordinates.len() {
-        return Err(CliError::InternalError {
-            message: format!(
-                "legacy coordinate materializer planned {} run(s), but canonical DeckPlan planned {}",
-                materializer.total_runs(),
-                coordinates.len()
-            ),
-        });
-    }
-    for (run_index, coordinate) in coordinates.iter().enumerate() {
-        let values =
-            materializer
-                .step_values(run_index)
-                .ok_or_else(|| CliError::InternalError {
-                    message: format!(
-                        "legacy materializer omitted canonical coordinate {} ({})",
-                        run_index + 1,
-                        coordinate.stable_tag()
-                    ),
-                })?;
-        validate_materialized_coordinate(coordinate, materializer.steps(), &values)?;
-    }
-    Ok(())
-}
-
-fn validate_materialized_coordinate(
-    coordinate: &RunCoordinate,
-    steps: &[rspice_core::netlist::StepCommand],
-    values: &[f64],
-) -> Result<(), CliError> {
-    if values.len() != steps.len() {
-        return Err(CliError::InternalError {
-            message: format!(
-                "canonical coordinate {} materialized {} value(s) for {} STEP command(s)",
-                coordinate.stable_tag(),
-                values.len(),
-                steps.len()
-            ),
-        });
-    }
-    if coordinate.assignments().len() < steps.len()
-        || coordinate.assignments().len() > steps.len().saturating_add(1)
-    {
-        return Err(CliError::InternalError {
-            message: format!(
-                "canonical coordinate {} has {} assignment(s) for {} materialized STEP command(s)",
-                coordinate.stable_tag(),
-                coordinate.assignments().len(),
-                steps.len()
-            ),
-        });
-    }
-    if coordinate.assignments().len() == steps.len() + 1 {
-        let Some(singleton_temperature) = coordinate.assignments().last() else {
-            return Err(CliError::InternalError {
-                message: "canonical coordinate unexpectedly has no assignments".to_string(),
-            });
-        };
-        if singleton_temperature.kind() != AxisKind::Temperature
-            || singleton_temperature.value_index() != 0
-            || steps
-                .iter()
-                .any(|step| step.target == rspice_core::netlist::StepTarget::Temp)
-        {
-            return Err(CliError::InternalError {
-                message: format!(
-                    "canonical coordinate {} contains an unmaterialized non-singleton axis",
-                    coordinate.stable_tag()
-                ),
-            });
-        }
-    }
-
-    for ((assignment, step), actual) in coordinate
-        .assignments()
-        .iter()
-        .zip(steps)
-        .zip(values.iter().copied())
-    {
-        if !canonical_assignment_matches_step(assignment, step) {
-            return Err(CliError::InternalError {
-                message: format!(
-                    "legacy materializer target {} does not match canonical axis '{}' in coordinate {}",
-                    step_target_description(step),
-                    assignment.name(),
-                    coordinate.stable_tag()
-                ),
-            });
-        }
-        let matches = match assignment.value() {
-            RunAxisValue::Numeric(expected) => actual == *expected,
-            RunAxisValue::DataRow(_) => actual == assignment.value_index() as f64,
-            RunAxisValue::AlterVariant { .. } => false,
-            _ => false,
-        };
-        if !matches {
-            return Err(CliError::InternalError {
-                message: format!(
-                    "legacy materializer changed canonical coordinate {} at {}: planned {:?}, materialized {actual}",
-                    coordinate.stable_tag(),
-                    step_target_description(step),
-                    assignment.value()
-                ),
-            });
-        }
-    }
-    Ok(())
-}
-
-fn canonical_assignment_matches_step(
-    assignment: &AxisAssignment,
-    step: &rspice_core::netlist::StepCommand,
-) -> bool {
-    use rspice_core::netlist::{StepSweep, StepTarget};
-
-    match (assignment.value(), assignment.step_target(), step.target) {
-        (RunAxisValue::DataRow(_), None, StepTarget::Param) => {
-            matches!(
-                &step.sweep,
-                StepSweep::Data { table_name }
-                    if table_name.eq_ignore_ascii_case(assignment.name())
-            )
-        }
-        (RunAxisValue::Numeric(_), Some(StepAxisTarget::Parameter { name }), StepTarget::Param) => {
-            name.eq_ignore_ascii_case(&step.name) && !matches!(&step.sweep, StepSweep::Data { .. })
-        }
-        (
-            RunAxisValue::Numeric(_),
-            Some(StepAxisTarget::Device { name, parameter }),
-            StepTarget::Device,
-        ) => {
-            name.eq_ignore_ascii_case(&step.name)
-                && option_names_equal(parameter.as_deref(), step.param_name.as_deref())
-        }
-        (
-            RunAxisValue::Numeric(_),
-            Some(StepAxisTarget::Model { name, parameter }),
-            StepTarget::Model,
-        ) => {
-            name.eq_ignore_ascii_case(&step.name)
-                && step
-                    .param_name
-                    .as_deref()
-                    .is_some_and(|candidate| candidate.eq_ignore_ascii_case(parameter))
-        }
-        (RunAxisValue::Numeric(_), Some(StepAxisTarget::Temperature) | None, StepTarget::Temp) => {
-            assignment.kind() == AxisKind::Temperature
-        }
-        _ => false,
-    }
-}
-
-fn option_names_equal(first: Option<&str>, second: Option<&str>) -> bool {
-    match (first, second) {
-        (Some(first), Some(second)) => first.eq_ignore_ascii_case(second),
-        (None, None) => true,
-        (Some(_), None) | (None, Some(_)) => false,
-    }
-}
-
 fn preflight_step_coordinates(
     engine: &Engine,
-    plan: &StepPlan<'_>,
-    coordinates: &[RunCoordinate],
+    materializer: &DeckPlanMaterializer<'_>,
     base_signature: &[&'static str],
     aggregate_report_values: Option<usize>,
     args: &RunArgs,
 ) -> Result<Vec<Vec<&'static str>>, CliError> {
-    validate_canonical_materializer_alignment(plan, coordinates)?;
-    let mut signatures = Vec::with_capacity(coordinates.len());
+    let mut signatures = Vec::with_capacity(materializer.len());
     let mut retained_report_values = aggregate_report_values.unwrap_or(0);
     let retained_limit = engine.config().resource_limits.max_result_values;
     if retained_report_values > retained_limit {
@@ -1720,29 +1671,21 @@ fn preflight_step_coordinates(
             "Step reporting preflight",
         ));
     }
-    for (run_index, canonical_coordinate) in coordinates.iter().enumerate() {
+    for (run_index, canonical_coordinate) in materializer.coordinates().iter().enumerate() {
         let coordinate = canonical_coordinate_description(canonical_coordinate);
-        let materialized = engine
-            .materialize_step_run_with_abort(plan, run_index, &crate::abort::ProcessAbort)
+        let materialized = materializer
+            .materialize_run_with_abort(run_index, &crate::abort::ProcessAbort)
             .map_err(|error| {
-                map_step_core_error(
+                map_materialized_run_error(
                     error,
-                    args.timeout,
+                    args,
                     format!(
                         ".STEP {} ({coordinate}) preflight",
                         canonical_coordinate.stable_tag()
                     ),
                 )
             })?;
-        let (values, mut stepped) = materialized.into_parts();
-        validate_materialized_coordinate(canonical_coordinate, plan.steps(), &values)?;
-        stepped.analyses.retain(|analysis| {
-            !matches!(
-                analysis,
-                AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. }
-            )
-        });
-        let signature = step_analysis_signature(&stepped)?;
+        let signature = step_analysis_signature(materialized.netlist())?;
         if signature != base_signature {
             return Err(CliError::InvalidArgument {
                 message: format!(
@@ -1765,7 +1708,7 @@ fn preflight_step_coordinates(
         if aggregate_report_values.is_none() {
             retained_report_values = retained_report_values
                 .saturating_add(1)
-                .saturating_add(stepped.measurements.len().saturating_mul(3));
+                .saturating_add(materialized.netlist().measurements.len().saturating_mul(3));
             if retained_report_values > retained_limit {
                 return Err(map_step_core_error(
                     rspice_core::SimulationError::ResourceLimit(rspice_core::ResourceLimitError {
@@ -1790,64 +1733,36 @@ fn preflight_deck_run_count(
     args: &RunArgs,
     config: &Config,
 ) -> Result<usize, CliError> {
-    let temperature_normalized = normalize_temperature_axis(netlist)?;
-    let executable_netlist = temperature_normalized.as_ref().unwrap_or(netlist);
-    validate_step_frontend_compatibility(executable_netlist, args)?;
+    validate_step_frontend_compatibility(netlist, args)?;
 
     let resource_limits = config.resources.limits();
-    let canonical_plan = DeckPlan::from_netlist_run_axes_with_abort(
-        netlist,
-        &resource_limits,
-        &crate::abort::ProcessAbort,
-    )
-    .map_err(|error| map_deck_plan_error(error, args))?;
-    let Some(canonical_plan) = canonical_plan else {
-        return Ok(1);
-    };
-    let coordinates = canonical_plan
-        .coordinates_with_abort(&resource_limits, &crate::abort::ProcessAbort)
-        .map_err(|error| map_deck_plan_error(error, args))?;
-
-    let steps = canonical_materializer_steps(executable_netlist);
-    if steps.is_empty() {
-        if coordinates.len() != 1 {
-            return Err(CliError::InternalError {
-                message: format!(
-                    "canonical outer-run preflight found {} coordinates but no materializable run axis",
-                    coordinates.len()
-                ),
-            });
-        }
+    let canonical_plan =
+        DeckPlan::from_netlist_with_abort(netlist, &resource_limits, &crate::abort::ProcessAbort)
+            .map_err(|error| map_deck_plan_error(error, args))?;
+    if canonical_plan.axes().is_empty() {
         return Ok(1);
     }
 
-    let base_signature = step_analysis_signature(executable_netlist)?;
-    let engine = Engine::try_new(build_sim_config(args, config, executable_netlist))?;
+    let base_signature = step_analysis_signature(netlist)?;
+    let engine = Engine::try_new(build_sim_config(args, config, netlist))?;
     let materializer = engine
-        .plan_step_commands_with_abort(
-            executable_netlist,
-            &steps,
-            StepPlanLimits::from_resource_limits(resource_limits),
+        .prepare_deck_plan_materializer_with_abort(
+            netlist,
+            &canonical_plan,
             &crate::abort::ProcessAbort,
         )
-        .map_err(|error| map_step_core_error(error, args.timeout, "Step planning preflight"))?;
+        .map_err(|error| map_materialized_run_error(error, args, "Step planning preflight"))?;
     let aggregate_report_values = base_signature
         .is_empty()
-        .then(|| 1usize.saturating_add(executable_netlist.measurements.len().saturating_mul(3)));
+        .then(|| 1usize.saturating_add(netlist.measurements.len().saturating_mul(3)));
     preflight_step_coordinates(
         &engine,
         &materializer,
-        &coordinates,
         &base_signature,
         aggregate_report_values,
         args,
     )?;
-    Ok(coordinates.len())
-}
-
-fn step_run_label(run_index: usize, total_runs: usize) -> String {
-    let width = total_runs.to_string().len().max(6);
-    format!("step-{:0width$}", run_index + 1)
+    Ok(materializer.len())
 }
 
 fn compose_run_label(outer: Option<&str>, inner: Option<&str>) -> Option<String> {
@@ -1858,38 +1773,55 @@ fn compose_run_label(outer: Option<&str>, inner: Option<&str>) -> Option<String>
     }
 }
 
-fn step_target_description(step: &rspice_core::netlist::StepCommand) -> String {
-    use rspice_core::netlist::{StepSweep, StepTarget};
+fn implicit_axis_assignment(coordinate: &RunCoordinate) -> Result<&AxisAssignment, CliError> {
+    let [assignment] = coordinate.assignments() else {
+        return Err(CliError::InternalError {
+            message: format!(
+                "implicit operating-point aggregation requires exactly one run axis, but coordinate {} has {}",
+                coordinate.stable_tag(),
+                coordinate.assignments().len()
+            ),
+        });
+    };
+    Ok(assignment)
+}
 
-    if let StepSweep::Data { table_name } = &step.sweep {
-        return format!("DATA {table_name}");
-    }
-    match step.target {
-        StepTarget::Param => format!("PARAM {}", step.name),
-        StepTarget::Device => match &step.param_name {
-            Some(param) => format!("DEVICE {}.{param}", step.name),
-            None => format!("DEVICE {}", step.name),
-        },
-        StepTarget::Model => match &step.param_name {
-            Some(param) => format!("MODEL {}.{param}", step.name),
-            None => format!("MODEL {}", step.name),
-        },
-        StepTarget::Temp => "TEMP".to_string(),
+fn implicit_axis_value(assignment: &AxisAssignment) -> Result<f64, CliError> {
+    match assignment.value() {
+        RunAxisValue::Numeric(value) => Ok(*value),
+        RunAxisValue::DataRow(_) => Ok(assignment.value_index() as f64),
+        RunAxisValue::AlterVariant { .. } => Err(CliError::InvalidArgument {
+            message: "textual .ALTER cannot drive an implicit operating-point table".to_string(),
+            suggestion: Some("expand each .ALTER variant before execution".to_string()),
+        }),
+        value => Err(CliError::InternalError {
+            message: format!("unsupported implicit run-axis value {value:?}"),
+        }),
     }
 }
 
-fn step_scale_name(step: &rspice_core::netlist::StepCommand) -> String {
-    use rspice_core::netlist::{StepSweep, StepTarget};
-
-    if let StepSweep::Data { table_name } = &step.sweep {
-        return format!("DATA({table_name})");
-    }
-    match step.target {
-        StepTarget::Temp => "TEMP".to_string(),
-        StepTarget::Param => step.name.clone(),
-        StepTarget::Device | StepTarget::Model => match &step.param_name {
-            Some(param) => format!("{}:{param}", step.name),
-            None => step.name.clone(),
+fn implicit_axis_scale_name(assignment: &AxisAssignment) -> String {
+    match assignment.value() {
+        RunAxisValue::DataRow(_) => format!("DATA({})", assignment.name()),
+        _ => match assignment.step_target() {
+            Some(StepAxisTarget::Parameter { name }) => name.clone(),
+            Some(StepAxisTarget::Device {
+                name,
+                parameter: Some(parameter),
+            })
+            | Some(StepAxisTarget::Model { name, parameter }) => {
+                format!("{name}:{parameter}")
+            }
+            Some(StepAxisTarget::Device {
+                name,
+                parameter: None,
+            }) => name.clone(),
+            Some(StepAxisTarget::Temperature) | None
+                if assignment.kind() == AxisKind::Temperature =>
+            {
+                "TEMP".to_string()
+            }
+            None | Some(_) => assignment.name().to_string(),
         },
     }
 }
@@ -1901,80 +1833,73 @@ fn run_implicit_step_op_table(
     verbose: bool,
     quiet: bool,
     engine: &Engine,
-    plan: &StepPlan<'_>,
-    coordinates: &[RunCoordinate],
+    materializer: &DeckPlanMaterializer<'_>,
     run_label: Option<&str>,
 ) -> Result<DeckOutcome, CliError> {
-    let step = plan
-        .steps()
-        .first()
-        .ok_or_else(|| CliError::InternalError {
-            message: "implicit STEP materializer has no command".to_string(),
-        })?;
-    let target = step_target_description(step);
+    let first_coordinate =
+        materializer
+            .coordinates()
+            .first()
+            .ok_or_else(|| CliError::InternalError {
+                message: "implicit deck materializer has no coordinate".to_string(),
+            })?;
+    let one_dimensional = first_coordinate.assignments().len() == 1;
+    let (target, scale_name) = if one_dimensional {
+        let first_assignment = implicit_axis_assignment(first_coordinate)?;
+        (
+            canonical_assignment_target(first_assignment),
+            Some(implicit_axis_scale_name(first_assignment)),
+        )
+    } else {
+        ("Cartesian run axes".to_string(), None)
+    };
     let ctx = RunContext::new(
-        engine, netlist, args, config, verbose, quiet, run_label, None,
+        engine, netlist, args, config, verbose, quiet, run_label, None, None,
     )?;
     let start_time = Instant::now();
     let mut retained_values = 0usize;
-    let mut preflight = Vec::with_capacity(coordinates.len());
+    let mut preflight = Vec::with_capacity(materializer.len());
 
-    for (run_index, canonical_coordinate) in coordinates.iter().enumerate() {
+    for run_index in 0..materializer.len() {
         if crate::abort::reason().is_some() {
             break;
         }
-        let value = plan
-            .step_values(run_index)
-            .and_then(|values| values.first().copied())
-            .ok_or_else(|| CliError::InternalError {
-                message: format!(
-                    "single-dimensional .STEP plan omitted coordinate {}",
-                    run_index + 1
-                ),
-            })?;
-        let materialized = match engine.materialize_step_run_with_abort(
-            plan,
-            run_index,
-            &crate::abort::ProcessAbort,
-        ) {
-            Ok(materialized) => materialized,
-            Err(rspice_core::SimulationError::Aborted) if crate::abort::reason().is_some() => {
-                break;
-            }
-            Err(error) => {
-                return Err(CliError::simulation_error_in(
-                    format!(".STEP {target} = {value}: {error}"),
-                    "Step",
-                ));
-            }
-        };
-        if materialized.step_values() != [value] {
+        let materialized =
+            match materializer.materialize_run_with_abort(run_index, &crate::abort::ProcessAbort) {
+                Ok(materialized) => materialized,
+                Err(MaterializedRunError::Aborted) if crate::abort::reason().is_some() => {
+                    break;
+                }
+                Err(error) => {
+                    return Err(map_materialized_run_error(error, args, "Step"));
+                }
+            };
+        let canonical_coordinate = materialized.coordinate();
+        let value = one_dimensional
+            .then(|| implicit_axis_assignment(canonical_coordinate))
+            .transpose()?
+            .map(implicit_axis_value)
+            .transpose()?;
+        let [implicit_analysis] = materialized.analyses() else {
             return Err(CliError::InternalError {
                 message: format!(
-                    ".STEP coordinate {} changed between planning and materialization",
-                    run_index + 1
+                    "implicit coordinate {} materialized {} analysis identities",
+                    canonical_coordinate.stable_id(),
+                    materialized.analyses().len()
+                ),
+            });
+        };
+        if implicit_analysis.command().is_some() {
+            return Err(CliError::InternalError {
+                message: format!(
+                    "implicit coordinate {} unexpectedly owns an authored analysis command",
+                    canonical_coordinate.stable_id()
                 ),
             });
         }
-        validate_materialized_coordinate(
-            canonical_coordinate,
-            plan.steps(),
-            materialized.step_values(),
-        )?;
         let coordinate_engine =
             Engine::try_new(build_sim_config(args, config, materialized.netlist()))?;
-        let topology = coordinate_engine
-            .topology_fingerprint_with_abort(materialized.netlist(), &crate::abort::ProcessAbort)
-            .map_err(|error| {
-                map_step_core_error(
-                    error,
-                    args.timeout,
-                    format!(
-                        ".STEP {} ({target} = {value}) topology preflight",
-                        canonical_coordinate.stable_tag()
-                    ),
-                )
-            })?;
+        let topology = materialized.topology_fingerprint();
         let result = match coordinate_engine
             .run_dc_op_with_abort(materialized.netlist(), &crate::abort::ProcessAbort)
         {
@@ -1983,9 +1908,13 @@ fn run_implicit_step_op_table(
                 break;
             }
             Err(error) => {
+                let coordinate_context = value.map_or_else(
+                    || canonical_coordinate_description(canonical_coordinate),
+                    |value| format!("{target} = {value}"),
+                );
                 return Err(CliError::simulation_error_in(
                     format!(
-                        ".STEP {} ({target} = {value}): {error}",
+                        ".STEP {} ({coordinate_context}): {error}",
                         canonical_coordinate.stable_tag()
                     ),
                     "Step",
@@ -2038,6 +1967,8 @@ fn run_implicit_step_op_table(
         preflight.push(ImplicitStepCoordinate {
             value,
             coordinate_id: canonical_coordinate.stable_id(),
+            coordinate_tag: canonical_coordinate.stable_tag(),
+            analysis_id: implicit_analysis.output_namespace().analysis_component(),
             coordinate: canonical_coordinate_description(canonical_coordinate),
             topology,
             result,
@@ -2046,7 +1977,7 @@ fn run_implicit_step_op_table(
             validity: Vec::new(),
         });
     }
-    if preflight.len() != coordinates.len() {
+    if preflight.len() != materializer.len() {
         return Err(cancellation_cli_error(args.timeout));
     }
 
@@ -2096,21 +2027,36 @@ fn run_implicit_step_op_table(
             .all(|run| run.topology == first.topology && run.schema == first.schema)
     });
     let mut outputs = Vec::new();
-    if stable_topology_and_schema {
+    if one_dimensional && stable_topology_and_schema {
+        let scale_name = scale_name
+            .as_deref()
+            .ok_or_else(|| CliError::InternalError {
+                message: "one-dimensional implicit plan has no scale name".to_string(),
+            })?;
         let results = preflight
             .iter()
-            .map(|run| (run.value, run.result.clone()))
-            .collect::<Vec<_>>();
-        advanced::export_step_sweep(&ctx, &step_scale_name(step), &results)?;
+            .map(|run| {
+                run.value
+                    .map(|value| (value, run.result.clone()))
+                    .ok_or_else(|| CliError::InternalError {
+                        message: format!(
+                            "one-dimensional implicit coordinate {} has no scalar axis value",
+                            run.coordinate_id
+                        ),
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        advanced::export_step_sweep(&ctx, scale_name, &results)?;
         outputs.extend(ctx.outputs.borrow().iter().cloned());
     } else if let Some(base_output) = ctx.output.clone() {
         // Flat artifacts stay coordinate-local when topology changes.  Every
         // coordinate was solved and schema-checked above, before this first
         // write, so coordinate order can neither select columns nor leave a
         // partial batch due to a late schema mismatch.
-        for (run_index, run) in preflight.iter().enumerate() {
-            let label = sanitize_run_tag(&step_run_label(run_index, preflight.len()));
-            let path = tag_output_path(&base_output, &label);
+        for run in &preflight {
+            let coordinate_path =
+                tag_output_path(&base_output, &sanitize_run_tag(&run.coordinate_tag));
+            let path = tag_output_path(&coordinate_path, &run.analysis_id);
             basic::write_dc_op_output(&path, &run.signals, ctx.format)?;
             outputs.push(path);
         }
@@ -2151,8 +2097,10 @@ fn run_implicit_step_op_table(
 }
 
 struct ImplicitStepCoordinate {
-    value: f64,
+    value: Option<f64>,
     coordinate_id: rspice_core::execution::RunCoordinateId,
+    coordinate_tag: String,
+    analysis_id: String,
     coordinate: String,
     topology: rspice_core::execution::TopologyFingerprint,
     result: rspice_core::solver::SimulationResult,
@@ -2203,6 +2151,7 @@ fn write_conditional_step_schema_manifest(
                 })?;
             Ok(serde_json::json!({
                 "coordinate_id": coordinate.coordinate_id.to_string(),
+                "analysis_id": coordinate.analysis_id,
                 "assignment": coordinate.coordinate,
                 "topology_fingerprint": coordinate.topology.to_string(),
                 "validity": coordinate.validity,
@@ -2320,83 +2269,37 @@ fn run_deck(
     quiet: bool,
     run_label: Option<&str>,
 ) -> Result<DeckOutcome, CliError> {
-    let temperature_normalized = normalize_temperature_axis(netlist)?;
-    let executable_netlist = temperature_normalized.as_ref().unwrap_or(netlist);
-    validate_step_frontend_compatibility(executable_netlist, args)?;
+    validate_step_frontend_compatibility(netlist, args)?;
 
     let resource_limits = config.resources.limits();
-    let canonical_plan = DeckPlan::from_netlist_run_axes_with_abort(
-        netlist,
-        &resource_limits,
-        &crate::abort::ProcessAbort,
-    )
-    .map_err(|error| map_deck_plan_error(error, args))?;
-    let Some(canonical_plan) = canonical_plan else {
-        let (report, outputs) = run_concrete_deck(
-            executable_netlist,
-            args,
-            config,
-            verbose,
-            quiet,
-            run_label,
-            None,
-        )?;
-        return Ok(DeckOutcome {
-            reports: vec![report],
-            outputs,
-        });
-    };
-    let coordinates = canonical_plan
-        .coordinates_with_abort(&resource_limits, &crate::abort::ProcessAbort)
-        .map_err(|error| map_deck_plan_error(error, args))?;
-
-    let steps = canonical_materializer_steps(executable_netlist);
-    if steps.is_empty() {
-        if coordinates.len() != 1 {
-            return Err(CliError::InternalError {
-                message: format!(
-                    "canonical temperature plan contains {} coordinates but its normalized materializer has no run axis",
-                    coordinates.len()
-                ),
-            });
-        }
-        let coordinate = coordinates.first().ok_or_else(|| CliError::InternalError {
-            message: "canonical singleton run plan contains no coordinate".to_string(),
-        })?;
-        let (report, outputs) = run_concrete_deck(
-            executable_netlist,
-            args,
-            config,
-            verbose,
-            quiet,
-            run_label,
-            Some(coordinate),
-        )?;
+    let canonical_plan =
+        DeckPlan::from_netlist_with_abort(netlist, &resource_limits, &crate::abort::ProcessAbort)
+            .map_err(|error| map_deck_plan_error(error, args))?;
+    if canonical_plan.axes().is_empty() {
+        let (report, outputs) =
+            run_concrete_deck(netlist, args, config, verbose, quiet, run_label, None, None)?;
         return Ok(DeckOutcome {
             reports: vec![report],
             outputs,
         });
     }
 
-    let base_signature = step_analysis_signature(executable_netlist)?;
-    let sim_config = build_sim_config(args, config, executable_netlist);
+    let base_signature = step_analysis_signature(netlist)?;
+    let sim_config = build_sim_config(args, config, netlist);
     let engine = Engine::try_new(sim_config)?;
-    let limits = StepPlanLimits::from_resource_limits(resource_limits);
     let materializer = engine
-        .plan_step_commands_with_abort(
-            executable_netlist,
-            &steps,
-            limits,
+        .prepare_deck_plan_materializer_with_abort(
+            netlist,
+            &canonical_plan,
             &crate::abort::ProcessAbort,
         )
-        .map_err(|error| map_step_core_error(error, args.timeout, "Step planning"))?;
+        .map_err(|error| map_materialized_run_error(error, args, "Step planning"))?;
     let aggregate_report_values = base_signature
         .is_empty()
-        .then(|| 1usize.saturating_add(executable_netlist.measurements.len().saturating_mul(3)));
+        .then(|| 1usize.saturating_add(netlist.measurements.len().saturating_mul(3)));
     let coordinate_signatures = preflight_step_coordinates(
         &engine,
         &materializer,
-        &coordinates,
         &base_signature,
         aggregate_report_values,
         args,
@@ -2404,14 +2307,13 @@ fn run_deck(
 
     if base_signature.is_empty() {
         return run_implicit_step_op_table(
-            executable_netlist,
+            netlist,
             args,
             config,
             verbose,
             quiet,
             &engine,
             &materializer,
-            &coordinates,
             run_label,
         );
     }
@@ -2420,53 +2322,43 @@ fn run_deck(
         println!(
             "Canonical Cartesian run plan: {} dimension(s), {} run(s); first canonical dimension varies fastest",
             canonical_plan.axes().len(),
-            coordinates.len()
+            materializer.len()
         );
     }
-    let mut reports = Vec::with_capacity(coordinates.len());
+    let mut reports = Vec::with_capacity(materializer.len());
     let mut outputs = Vec::new();
-    for (run_index, canonical_coordinate) in coordinates.iter().enumerate() {
+    for (run_index, expected_signature) in coordinate_signatures.iter().enumerate() {
         if crate::abort::reason().is_some() {
             break;
         }
-        let materialized = match engine.materialize_step_run_with_abort(
-            &materializer,
-            run_index,
-            &crate::abort::ProcessAbort,
-        ) {
-            Ok(materialized) => materialized,
-            Err(rspice_core::SimulationError::Aborted) if crate::abort::reason().is_some() => {
-                break;
-            }
-            Err(error) => {
-                return Err(map_step_core_error(
-                    error,
-                    args.timeout,
-                    format!("Step coordinate {}", run_index + 1),
-                ));
-            }
-        };
-        let (values, mut stepped) = materialized.into_parts();
-        validate_materialized_coordinate(canonical_coordinate, &steps, &values)?;
-        stepped.analyses.retain(|analysis| {
-            !matches!(
-                analysis,
-                AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. }
-            )
-        });
-        let materialized_signature = step_analysis_signature(&stepped)?;
-        if materialized_signature != coordinate_signatures[run_index] {
+        let materialized =
+            match materializer.materialize_run_with_abort(run_index, &crate::abort::ProcessAbort) {
+                Ok(materialized) => materialized,
+                Err(MaterializedRunError::Aborted) if crate::abort::reason().is_some() => {
+                    break;
+                }
+                Err(error) => {
+                    return Err(map_materialized_run_error(
+                        error,
+                        args,
+                        format!("Step coordinate {}", run_index + 1),
+                    ));
+                }
+            };
+        let canonical_coordinate = materialized.coordinate();
+        let materialized_signature = step_analysis_signature(materialized.netlist())?;
+        if &materialized_signature != expected_signature {
             return Err(CliError::InternalError {
                 message: format!(
                     ".STEP coordinate {} changed its preflight physical-analysis signature from {:?} to {:?}",
                     run_index + 1,
-                    coordinate_signatures[run_index],
+                    expected_signature,
                     materialized_signature
                 ),
             });
         }
-        let step_label = step_run_label(run_index, coordinates.len());
-        let label = compose_run_label(run_label, Some(&step_label)).ok_or_else(|| {
+        let coordinate_label = canonical_coordinate.stable_tag();
+        let label = compose_run_label(run_label, Some(&coordinate_label)).ok_or_else(|| {
             CliError::InternalError {
                 message: "STEP coordinate unexpectedly has no output namespace".to_string(),
             }
@@ -2479,13 +2371,14 @@ fn run_deck(
             );
         }
         let (report, run_outputs) = match run_concrete_deck(
-            &stepped,
+            materialized.netlist(),
             args,
             config,
             verbose,
             quiet,
             Some(&label),
             Some(canonical_coordinate),
+            Some(materialized.analyses()),
         ) {
             Ok(outcome) => outcome,
             Err(_) if crate::abort::reason().is_some() => break,
@@ -2497,12 +2390,12 @@ fn run_deck(
             break;
         }
     }
-    if reports.len() != coordinates.len() && crate::abort::reason().is_none() {
+    if reports.len() != materializer.len() && crate::abort::reason().is_none() {
         return Err(CliError::InternalError {
             message: format!(
                 ".STEP completed {} of {} planned coordinates without a cancellation or error",
                 reports.len(),
-                coordinates.len()
+                materializer.len()
             ),
         });
     }
@@ -2521,6 +2414,7 @@ fn run_concrete_deck(
     quiet: bool,
     run_label: Option<&str>,
     coordinate: Option<&RunCoordinate>,
+    materialized_analyses: Option<&[MaterializedAnalysis]>,
 ) -> Result<(SimulationReport, Vec<PathBuf>), CliError> {
     if verbose {
         println!("Title: {}", netlist.title);
@@ -2531,7 +2425,15 @@ fn run_concrete_deck(
     let sim_config = build_sim_config(args, config, netlist);
     let engine = Engine::try_new(sim_config)?;
     let ctx = RunContext::new(
-        &engine, netlist, args, config, verbose, quiet, run_label, coordinate,
+        &engine,
+        netlist,
+        args,
+        config,
+        verbose,
+        quiet,
+        run_label,
+        coordinate,
+        materialized_analyses,
     )?;
 
     let base_name = args
@@ -2552,6 +2454,7 @@ fn run_concrete_deck(
         if requested_mode.needs_measurement_finalization() {
             ctx.record_unevaluated_measurements();
         }
+        ctx.ensure_materialized_namespaces_consumed()?;
         let measurements = ctx.measurements.borrow().clone();
         let passed = measurements.iter().all(|meas| meas.passed);
         return Ok((
@@ -2631,6 +2534,9 @@ fn run_concrete_deck(
         println!("  No .MEAS statements found in netlist");
     }
     ctx.record_unevaluated_measurements();
+    if simulation_error.is_none() {
+        ctx.ensure_materialized_namespaces_consumed()?;
+    }
 
     let duration = start_time.elapsed().as_secs_f64();
     let measurements = ctx.measurements.borrow().clone();

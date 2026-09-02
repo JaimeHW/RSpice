@@ -62,6 +62,49 @@ fn read_json(path: &Path) -> Value {
         .expect("parse JSON output")
 }
 
+fn tag_output_path(path: &Path, tag: &str) -> PathBuf {
+    let stem = path.file_stem().expect("output stem").to_string_lossy();
+    path.with_file_name(format!(
+        "{stem}.{tag}.{}",
+        path.extension()
+            .expect("output extension")
+            .to_string_lossy()
+    ))
+}
+
+fn sanitize_coordinate_tag(tag: &str) -> String {
+    tag.chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn planned_artifacts(deck: &Path, requested: &Path) -> Vec<PathBuf> {
+    let source = std::fs::read_to_string(deck).expect("read planned deck");
+    let netlist = rspice_core::Netlist::parse(&source).expect("parse planned deck");
+    let limits = rspice_core::ResourceLimits::default();
+    let plan = rspice_core::execution::DeckPlan::from_netlist(&netlist, &limits)
+        .expect("plan artifact namespaces");
+    plan.coordinates_with_abort(&limits, &rspice_core::NoAbort)
+        .expect("plan coordinates")
+        .iter()
+        .flat_map(|coordinate| {
+            let coordinate_path = tag_output_path(
+                requested,
+                &sanitize_coordinate_tag(&coordinate.stable_tag()),
+            );
+            plan.analyses()
+                .iter()
+                .map(move |analysis| tag_output_path(&coordinate_path, &analysis.id().tag()))
+        })
+        .collect()
+}
+
 fn signal_real_values(document: &Value, name: &str) -> Vec<f64> {
     let signal = document["signals"]
         .as_array()
@@ -95,12 +138,7 @@ fn multi_temperature_wraps_every_authored_analysis_without_extra_runs() {
     );
     assert!(!requested.exists(), "multi-run base path was overwritten");
 
-    let expected = [
-        dir.join("results.step_000001.tran.json"),
-        dir.join("results.step_000001.ac.json"),
-        dir.join("results.step_000002.tran.json"),
-        dir.join("results.step_000002.ac.json"),
-    ];
+    let expected = planned_artifacts(&fixture("temp_wraps_tran_ac.cir"), &requested);
     let mut actual = std::fs::read_dir(&*dir)
         .expect("list temperature outputs")
         .map(|entry| entry.expect("directory entry").path())
@@ -112,7 +150,7 @@ fn multi_temperature_wraps_every_authored_analysis_without_extra_runs() {
 
     for path in &expected {
         let document = read_json(path);
-        let expected_analysis = if path.to_string_lossy().contains(".tran.") {
+        let expected_analysis = if path.to_string_lossy().contains(".tran-") {
             "transient"
         } else {
             "ac"
@@ -149,6 +187,160 @@ fn single_temperature_configures_transient_without_running_a_temp_op() {
         .expect("list outputs")
         .map(|entry| entry.expect("directory entry").path())
         .collect::<Vec<_>>();
-    assert_eq!(files.as_slice(), std::slice::from_ref(&requested));
-    assert_eq!(read_json(&requested)["analysis"], "transient");
+    let expected = planned_artifacts(&fixture("temp_single_tran.cir"), &requested);
+    assert_eq!(files.as_slice(), expected.as_slice());
+    assert_eq!(read_json(&expected[0])["analysis"], "transient");
+}
+
+#[test]
+fn single_temperature_rejects_an_explicit_cli_analysis_mode() {
+    let dir = test_dir("single_requested_mode");
+    let deck = dir.join("single_temperature.cir");
+    std::fs::write(
+        &deck,
+        "Single temperature with an incompatible requested mode\n\
+         V1 out 0 1\n\
+         R1 out 0 1k\n\
+         .TEMP 25\n\
+         .END\n",
+    )
+    .expect("write single-temperature deck");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "--quiet",
+            "run",
+            deck.to_str().expect("UTF-8 deck path"),
+            "--monte-carlo",
+            "2",
+        ])
+        .output()
+        .expect("run incompatible single-temperature deck");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("cannot be combined with authored .STEP/.TEMP run axes"),
+        "explicit mode must fail before the temperature coordinate is simulated: {stderr}"
+    );
+}
+
+#[test]
+fn repeated_ac_cards_keep_stable_analysis_namespaces_at_each_temperature() {
+    let dir = test_dir("repeated_ac");
+    let deck = dir.join("repeated_ac.cir");
+    let requested = dir.join("response.json");
+    std::fs::write(
+        &deck,
+        "Repeated AC temperature namespaces\n\
+         V1 in 0 AC 1\n\
+         R1 in out 1k\n\
+         C1 out 0 1n\n\
+         .TEMP 25 85\n\
+         .AC LIN 1 1k 1k\n\
+         .AC LIN 1 10k 10k\n\
+         .SAVE V(out)\n\
+         .END\n",
+    )
+    .expect("write repeated-AC temperature deck");
+
+    let output = run(&deck, &requested);
+    assert!(
+        output.status.success(),
+        "repeated-AC temperature deck failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!requested.exists(), "multi-run base path was overwritten");
+
+    let mut expected = planned_artifacts(&deck, &requested);
+    for pair in expected.chunks_exact(2) {
+        let first = &pair[0];
+        let second = &pair[1];
+        let first_document = read_json(first);
+        let second_document = read_json(second);
+        assert_eq!(first_document["analysis"], "ac");
+        assert_eq!(second_document["analysis"], "ac");
+        let first_values = signal_real_values(&first_document, "V(out)");
+        let second_values = signal_real_values(&second_document, "V(out)");
+        assert_eq!(first_values.len(), 1);
+        assert_eq!(second_values.len(), 1);
+        assert_ne!(
+            first_values, second_values,
+            "the two authored AC configurations collapsed into one result"
+        );
+    }
+
+    let mut actual = std::fs::read_dir(&*dir)
+        .expect("list repeated-AC outputs")
+        .map(|entry| entry.expect("directory entry").path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "json")
+        })
+        .collect::<Vec<_>>();
+    actual.sort();
+    expected.sort();
+    assert_eq!(actual, expected, "unexpected OP or colliding AC artifact");
+}
+
+#[test]
+fn two_axis_implicit_op_uses_coordinate_artifacts_and_union_manifest() {
+    let dir = test_dir("implicit_cartesian");
+    let deck = dir.join("implicit_cartesian.cir");
+    let requested = dir.join("operating_points.json");
+    std::fs::write(
+        &deck,
+        "Two-dimensional implicit operating points\n\
+         .param resistance=1k\n\
+         V1 out 0 1\n\
+         R1 out 0 {resistance}\n\
+         .STEP PARAM resistance LIST 1k 2k\n\
+         .TEMP 25 85\n\
+         .SAVE V(out) I(V1)\n\
+         .END\n",
+    )
+    .expect("write implicit Cartesian deck");
+
+    let output = run(&deck, &requested);
+    assert!(
+        output.status.success(),
+        "implicit Cartesian deck failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!requested.exists(), "Cartesian run overwrote the base path");
+
+    let expected = planned_artifacts(&deck, &requested);
+    assert_eq!(expected.len(), 4);
+    for artifact in &expected {
+        assert!(artifact.exists(), "missing {}", artifact.display());
+        assert!(
+            artifact
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.contains(".run_") && name.contains(".implicit-op-001."))
+        );
+        assert_eq!(read_json(artifact)["analysis"], "dc_op");
+    }
+
+    let manifest_path = dir.join("operating_points.step_schema.json");
+    let manifest = read_json(&manifest_path);
+    assert_eq!(manifest["analysis"], "implicit_op");
+    assert_eq!(manifest["aggregation"], "coordinate_local");
+    assert_eq!(manifest["missingness"], "union_validity_bitmap");
+    let coordinates = manifest["coordinates"]
+        .as_array()
+        .expect("manifest coordinates");
+    assert_eq!(coordinates.len(), 4);
+    for coordinate in coordinates {
+        assert_eq!(coordinate["analysis_id"], "implicit-op-001");
+        assert_eq!(
+            coordinate["validity"].as_array().expect("validity").len(),
+            manifest["union_schema"]
+                .as_array()
+                .expect("union schema")
+                .len()
+        );
+        let artifact = coordinate["artifact"].as_str().expect("artifact filename");
+        assert!(artifact.contains(".run_") && artifact.contains(".implicit-op-001."));
+    }
 }

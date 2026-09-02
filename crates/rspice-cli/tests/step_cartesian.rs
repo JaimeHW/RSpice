@@ -22,29 +22,92 @@ fn run_rspice(args: &[&str]) -> std::process::Output {
         .expect("run rspice")
 }
 
-fn step_output(base: &Path, one_based_index: usize) -> PathBuf {
+fn tag_output_path(base: &Path, tag: &str) -> PathBuf {
     let stem = base.file_stem().expect("output stem").to_string_lossy();
     base.with_file_name(format!(
-        "{stem}.step_{one_based_index:06}.{}",
+        "{stem}.{tag}.{}",
         base.extension()
             .expect("output extension")
             .to_string_lossy()
     ))
 }
 
+fn sanitize_coordinate_tag(tag: &str) -> String {
+    tag.chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn planned_coordinate(base: &Path, one_based_index: usize) -> Option<(String, Vec<String>)> {
+    let parent = base.parent().expect("output parent");
+    let deck = std::fs::read_dir(parent)
+        .expect("list test directory")
+        .map(|entry| entry.expect("test directory entry").path())
+        .find(|path| {
+            path.extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| {
+                    extension.eq_ignore_ascii_case("sp") || extension.eq_ignore_ascii_case("cir")
+                })
+        })
+        .expect("test deck beside output");
+    let source = std::fs::read_to_string(deck).expect("read test deck");
+    let netlist = rspice_core::Netlist::parse(&source).expect("parse test deck");
+    let limits = rspice_core::ResourceLimits::default();
+    let plan =
+        rspice_core::execution::DeckPlan::from_netlist(&netlist, &limits).expect("plan test deck");
+    let coordinates = plan
+        .coordinates_with_abort(&limits, &rspice_core::NoAbort)
+        .expect("plan test coordinates");
+    coordinates
+        .get(one_based_index.checked_sub(1)?)
+        .map(|coordinate| {
+            (
+                coordinate.stable_tag(),
+                plan.analyses()
+                    .iter()
+                    .map(|analysis| analysis.id().tag())
+                    .collect(),
+            )
+        })
+}
+
+fn step_output(base: &Path, one_based_index: usize) -> PathBuf {
+    let Some((coordinate, analyses)) = planned_coordinate(base, one_based_index) else {
+        return tag_output_path(base, &format!("missing-coordinate-{one_based_index}"));
+    };
+    let [analysis] = analyses.as_slice() else {
+        panic!("step_output requires exactly one planned analysis, got {analyses:?}");
+    };
+    tag_output_path(
+        &tag_output_path(base, &sanitize_coordinate_tag(&coordinate)),
+        analysis,
+    )
+}
+
+fn coordinate_output(base: &Path, one_based_index: usize) -> PathBuf {
+    let (coordinate, _) = planned_coordinate(base, one_based_index)
+        .unwrap_or_else(|| panic!("missing planned coordinate {one_based_index}"));
+    tag_output_path(base, &sanitize_coordinate_tag(&coordinate))
+}
+
 fn step_analysis_output(base: &Path, one_based_index: usize, analysis_id: &str) -> PathBuf {
-    let coordinate = step_output(base, one_based_index);
-    let stem = coordinate
-        .file_stem()
-        .expect("coordinate output stem")
-        .to_string_lossy();
-    coordinate.with_file_name(format!(
-        "{stem}.{analysis_id}.{}",
-        coordinate
-            .extension()
-            .expect("coordinate output extension")
-            .to_string_lossy()
-    ))
+    let (coordinate, analyses) = planned_coordinate(base, one_based_index)
+        .unwrap_or_else(|| panic!("missing planned coordinate {one_based_index}"));
+    assert!(
+        analyses.iter().any(|planned| planned == analysis_id),
+        "analysis {analysis_id} is not planned in {analyses:?}"
+    );
+    tag_output_path(
+        &tag_output_path(base, &sanitize_coordinate_tag(&coordinate)),
+        analysis_id,
+    )
 }
 
 fn csv_column(csv: &str, name: &str) -> Vec<f64> {
@@ -399,15 +462,12 @@ fn canonical_data_step_temp_order_drives_cli_coordinate_namespaces() {
 fn verbose_coordinate_ids(stdout: &[u8]) -> Vec<String> {
     String::from_utf8_lossy(stdout)
         .lines()
-        .filter(|line| line.starts_with("=== step-"))
+        .filter(|line| line.starts_with("=== run-"))
         .map(|line| {
-            let (_, suffix) = line
-                .split_once("(run-")
-                .unwrap_or_else(|| panic!("missing canonical run ID in '{line}'"));
-            let (id, _) = suffix
-                .split_once(')')
-                .unwrap_or_else(|| panic!("unterminated canonical run ID in '{line}'"));
-            format!("run-{id}")
+            line.split_ascii_whitespace()
+                .nth(1)
+                .unwrap_or_else(|| panic!("missing canonical run ID in '{line}'"))
+                .to_string()
         })
         .collect()
 }
@@ -659,7 +719,7 @@ fn repeated_ac_cards_use_analysis_ordinals_inside_each_step_coordinate() {
         assert_eq!(csv_column(&first_csv, "frequency"), vec![1.0e3]);
         assert_eq!(csv_column(&second_csv, "frequency"), vec![1.0e4]);
     }
-    assert!(!step_output(&output_path, 1).exists());
+    assert!(!coordinate_output(&output_path, 1).exists());
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -933,26 +993,38 @@ fn outer_alter_and_inner_step_compose_unique_output_namespaces() {
     );
     assert!(!output_path.exists());
     let base_output = tagged_output(&output_path, "base");
-    let first_step = tagged_output(&output_path, "stepped_step_000001");
-    let second_step = tagged_output(&output_path, "stepped_step_000002");
-    for path in [&base_output, &first_step, &second_step] {
-        assert!(path.exists(), "missing composed output {}", path.display());
-    }
+    assert!(base_output.exists(), "missing base output");
+    let mut step_outputs = std::fs::read_dir(&dir)
+        .expect("read ALTER output directory")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| {
+                    name.starts_with("alter_step.stepped_run_") && name.ends_with(".op-001.csv")
+                })
+        })
+        .collect::<Vec<_>>();
+    step_outputs.sort();
+    assert_eq!(step_outputs.len(), 2, "stable inner namespaces");
     let base_current = scalar_csv_value(
         &std::fs::read_to_string(base_output).expect("base output"),
         "I(V1)",
     );
-    let first_current = scalar_csv_value(
-        &std::fs::read_to_string(first_step).expect("first STEP output"),
-        "I(V1)",
-    );
-    let second_current = scalar_csv_value(
-        &std::fs::read_to_string(second_step).expect("second STEP output"),
-        "I(V1)",
-    );
+    let mut step_currents = step_outputs
+        .iter()
+        .map(|path| {
+            scalar_csv_value(
+                &std::fs::read_to_string(path).expect("STEP output"),
+                "I(V1)",
+            )
+        })
+        .collect::<Vec<_>>();
+    step_currents.sort_by(f64::total_cmp);
     assert!((base_current + 1.0e-3).abs() < 1.0e-12);
-    assert!((first_current + 1.0e-3).abs() < 1.0e-12);
-    assert!((second_current + 0.5e-3).abs() < 1.0e-12);
+    assert!((step_currents[0] + 1.0e-3).abs() < 1.0e-12);
+    assert!((step_currents[1] + 0.5e-3).abs() < 1.0e-12);
     assert_eq!(
         std::fs::read_dir(&dir)
             .expect("read test directory")
@@ -1049,8 +1121,8 @@ fn transient_step_checkpoints_are_coordinate_local_and_resumable() {
         "coordinate checkpoints must save; stderr: {}",
         String::from_utf8_lossy(&initial.stderr)
     );
-    let first = tagged_output(&checkpoint, "step_000001");
-    let second = tagged_output(&checkpoint, "step_000002");
+    let first = step_output(&checkpoint, 1);
+    let second = step_output(&checkpoint, 2);
     assert!(
         first.exists(),
         "missing first checkpoint {}",
@@ -1115,15 +1187,11 @@ fn repeated_transient_checkpoints_compose_analysis_and_coordinate_ids() {
         String::from_utf8_lossy(&initial.stderr)
     );
     for coordinate in 1..=2 {
-        let coordinate_path = tagged_output(&checkpoint, &format!("step_{coordinate:06}"));
         for analysis in 1..=2 {
-            let path = tagged_output(&coordinate_path, &format!("tran-{analysis:03}"));
+            let path =
+                step_analysis_output(&checkpoint, coordinate, &format!("tran-{analysis:03}"));
             assert!(path.exists(), "missing checkpoint {}", path.display());
         }
-        assert!(
-            !coordinate_path.exists(),
-            "coordinate-only checkpoint path would collide"
-        );
     }
     assert!(!checkpoint.exists());
 
@@ -1253,15 +1321,21 @@ fn stepped_measurement_exports_identify_every_coordinate_run() {
             .expect("parse measurement JSON");
     let measurements = json["measurements"].as_array().expect("measurement array");
     assert_eq!(measurements.len(), 2);
+    let first_coordinate = planned_coordinate(&json_path, 1)
+        .expect("first coordinate")
+        .0;
+    let second_coordinate = planned_coordinate(&json_path, 2)
+        .expect("second coordinate")
+        .0;
     assert!(
         measurements[0]["run"]
             .as_str()
-            .is_some_and(|run| run.ends_with("[step-000001]"))
+            .is_some_and(|run| run.ends_with(&format!("[{first_coordinate}]")))
     );
     assert!(
         measurements[1]["run"]
             .as_str()
-            .is_some_and(|run| run.ends_with("[step-000002]"))
+            .is_some_and(|run| run.ends_with(&format!("[{second_coordinate}]")))
     );
 
     let csv_run = run_rspice(&[
@@ -1292,13 +1366,13 @@ fn stepped_measurement_exports_identify_every_coordinate_run() {
         lines[1]
             .split(',')
             .nth(run_column)
-            .is_some_and(|run| run.ends_with("[step-000001]"))
+            .is_some_and(|run| run.ends_with(&format!("[{first_coordinate}]")))
     );
     assert!(
         lines[2]
             .split(',')
             .nth(run_column)
-            .is_some_and(|run| run.ends_with("[step-000002]"))
+            .is_some_and(|run| run.ends_with(&format!("[{second_coordinate}]")))
     );
 
     let _ = std::fs::remove_dir_all(&dir);
