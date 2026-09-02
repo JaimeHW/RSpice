@@ -1693,7 +1693,7 @@ fn run_implicit_step_op_table(
     let ctx = RunContext::new(engine, netlist, args, config, verbose, quiet, None)?;
     let start_time = Instant::now();
     let mut retained_values = 0usize;
-    let mut results = Vec::with_capacity(coordinates.len());
+    let mut preflight = Vec::with_capacity(coordinates.len());
 
     for (run_index, canonical_coordinate) in coordinates.iter().enumerate() {
         if crate::abort::reason().is_some() {
@@ -1739,6 +1739,18 @@ fn run_implicit_step_op_table(
         )?;
         let coordinate_engine =
             Engine::try_new(build_sim_config(args, config, materialized.netlist()))?;
+        let topology = coordinate_engine
+            .topology_fingerprint_with_abort(materialized.netlist(), &crate::abort::ProcessAbort)
+            .map_err(|error| {
+                map_step_core_error(
+                    error,
+                    args.timeout,
+                    format!(
+                        ".STEP {} ({target} = {value}) topology preflight",
+                        canonical_coordinate.stable_tag()
+                    ),
+                )
+            })?;
         let result = match coordinate_engine
             .run_dc_op_with_abort(materialized.netlist(), &crate::abort::ProcessAbort)
         {
@@ -1756,17 +1768,33 @@ fn run_implicit_step_op_table(
                 ));
             }
         };
+        let signals = crate::commands::run_signals::dc_operating_point_export_signals(
+            &result,
+            &materialized.netlist().saves,
+        )
+        .map_err(|source| CliError::CoreSimulationError {
+            source,
+            analysis: Some(format!(
+                ".STEP {} output-schema preflight",
+                canonical_coordinate.stable_tag()
+            )),
+        })?;
+        let schema =
+            crate::commands::run_signals::scalar_signal_schema(&signals).map_err(|error| {
+                CliError::CoreSimulationError {
+                    source: rspice_core::SimulationError::Circuit(format!(
+                        ".STEP {} has an invalid coordinate-local signal schema: {error}",
+                        canonical_coordinate.stable_tag()
+                    )),
+                    analysis: Some("Step output-schema preflight".to_string()),
+                }
+            })?;
         shared::ensure_finite_series(
             args.allow_nonfinite,
             "Step",
-            (1..result.node_voltages.len()).map(|node| {
-                let name = result
-                    .node_names
-                    .get(node)
-                    .map(String::as_str)
-                    .unwrap_or("node");
-                (name, std::slice::from_ref(&result.node_voltages[node]))
-            }),
+            signals
+                .iter()
+                .map(|signal| (signal.display_name.as_str(), signal.values.as_slice())),
         )?;
         retained_values = retained_values
             .saturating_add(result.retained_value_count())
@@ -1783,10 +1811,94 @@ fn run_implicit_step_op_table(
                 "Step result aggregation",
             ));
         }
-        results.push((value, result));
+        preflight.push(ImplicitStepCoordinate {
+            value,
+            coordinate_id: canonical_coordinate.stable_id(),
+            coordinate: canonical_coordinate_description(canonical_coordinate),
+            topology,
+            result,
+            signals,
+            schema,
+            validity: Vec::new(),
+        });
+    }
+    if preflight.len() != coordinates.len() {
+        return Err(cancellation_cli_error(args.timeout));
     }
 
-    advanced::export_step_sweep(&ctx, &step_scale_name(step), &results)?;
+    let schema_union =
+        rspice_core::execution::SignalSchema::union(preflight.iter().map(|run| {
+            rspice_core::execution::CoordinateSchema::new(run.coordinate_id, &run.schema)
+        }))
+        .map_err(|error| CliError::CoreSimulationError {
+            source: rspice_core::SimulationError::Circuit(format!(
+                ".STEP coordinate schemas cannot form a typed union: {error}"
+            )),
+            analysis: Some("Step output-schema preflight".to_string()),
+        })?;
+    for run in &mut preflight {
+        let values = run
+            .signals
+            .iter()
+            .map(|signal| {
+                signal
+                    .values
+                    .first()
+                    .copied()
+                    .ok_or_else(|| CliError::CoreSimulationError {
+                        source: rspice_core::SimulationError::Circuit(format!(
+                            ".STEP {} signal '{}' has no operating-point value",
+                            run.coordinate_id, signal.display_name
+                        )),
+                        analysis: Some("Step output-schema preflight".to_string()),
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let aligned = schema_union
+            .align_values(run.coordinate_id, &values)
+            .map_err(|error| CliError::CoreSimulationError {
+                source: rspice_core::SimulationError::Circuit(format!(
+                    ".STEP {} cannot align its coordinate-local values to the union schema: {error}",
+                    run.coordinate_id
+                )),
+                analysis: Some("Step output-schema preflight".to_string()),
+            })?;
+        run.validity = aligned.iter().map(Option::is_some).collect();
+    }
+
+    let stable_topology_and_schema = preflight.first().is_none_or(|first| {
+        preflight
+            .iter()
+            .all(|run| run.topology == first.topology && run.schema == first.schema)
+    });
+    let mut outputs = Vec::new();
+    if stable_topology_and_schema {
+        let results = preflight
+            .iter()
+            .map(|run| (run.value, run.result.clone()))
+            .collect::<Vec<_>>();
+        advanced::export_step_sweep(&ctx, &step_scale_name(step), &results)?;
+        outputs.extend(ctx.outputs.borrow().iter().cloned());
+    } else if let Some(base_output) = resolve_output_path(args.output.clone(), config)? {
+        // Flat artifacts stay coordinate-local when topology changes.  Every
+        // coordinate was solved and schema-checked above, before this first
+        // write, so coordinate order can neither select columns nor leave a
+        // partial batch due to a late schema mismatch.
+        for (run_index, run) in preflight.iter().enumerate() {
+            let label = sanitize_run_tag(&step_run_label(run_index, preflight.len()));
+            let path = tag_output_path(&base_output, &label);
+            basic::write_dc_op_output(&path, &run.signals, ctx.format)?;
+            outputs.push(path);
+        }
+        let manifest_path = conditional_step_schema_path(&base_output);
+        write_conditional_step_schema_manifest(
+            &manifest_path,
+            &schema_union,
+            &preflight,
+            &outputs,
+        )?;
+        outputs.push(manifest_path);
+    }
     ctx.record_unevaluated_measurements();
     let measurements = ctx.measurements.borrow().clone();
     let base_name = args
@@ -1806,8 +1918,170 @@ fn run_implicit_step_op_table(
             error_details: None,
             measurements,
         }],
-        outputs: ctx.outputs.into_inner(),
+        outputs,
     })
+}
+
+struct ImplicitStepCoordinate {
+    value: f64,
+    coordinate_id: rspice_core::execution::RunCoordinateId,
+    coordinate: String,
+    topology: rspice_core::execution::TopologyFingerprint,
+    result: rspice_core::solver::SimulationResult,
+    signals: Vec<crate::commands::run_signals::ScalarSignal>,
+    schema: rspice_core::execution::SignalSchema,
+    validity: Vec<bool>,
+}
+
+fn conditional_step_schema_path(base: &std::path::Path) -> PathBuf {
+    let mut path = tag_output_path(base, "step_schema");
+    path.set_extension("json");
+    path
+}
+
+fn write_conditional_step_schema_manifest(
+    path: &std::path::Path,
+    union: &rspice_core::execution::SchemaUnion,
+    coordinates: &[ImplicitStepCoordinate],
+    artifacts: &[PathBuf],
+) -> Result<(), CliError> {
+    if artifacts.len() != coordinates.len() {
+        return Err(CliError::InternalError {
+            message: format!(
+                "conditional STEP manifest has {} coordinate(s) but {} artifact path(s)",
+                coordinates.len(),
+                artifacts.len()
+            ),
+        });
+    }
+    let descriptors = union
+        .schema()
+        .descriptors()
+        .iter()
+        .map(signal_descriptor_json)
+        .collect::<Vec<_>>();
+    let coordinate_documents = coordinates
+        .iter()
+        .zip(artifacts)
+        .map(|(coordinate, artifact)| {
+            let artifact = artifact
+                .file_name()
+                .and_then(std::ffi::OsStr::to_str)
+                .ok_or_else(|| CliError::InternalError {
+                    message: format!(
+                        "conditional STEP artifact '{}' has no portable UTF-8 filename",
+                        artifact.display()
+                    ),
+                })?;
+            Ok(serde_json::json!({
+                "coordinate_id": coordinate.coordinate_id.to_string(),
+                "assignment": coordinate.coordinate,
+                "topology_fingerprint": coordinate.topology.to_string(),
+                "validity": coordinate.validity,
+                "artifact": artifact,
+            }))
+        })
+        .collect::<Result<Vec<_>, CliError>>()?;
+    let document = serde_json::json!({
+        "schema_version": 1,
+        "analysis": "implicit_op",
+        "aggregation": "coordinate_local",
+        "missingness": "union_validity_bitmap",
+        "union_schema": descriptors,
+        "coordinates": coordinate_documents,
+    });
+    let text = serde_json::to_string_pretty(&document)
+        .map_err(|error| CliError::output_json_error(path, error))?
+        + "\n";
+    write_atomic(
+        path,
+        AtomicArtifactOptions::new(Durability::SyncFileAndParent),
+        |writer| {
+            writer
+                .write_all(text.as_bytes())
+                .map_err(|error| CliError::output_error(path, error))
+        },
+    )
+    .map_err(|error| map_atomic_output_error(path, error))?;
+    Ok(())
+}
+
+fn signal_descriptor_json(
+    descriptor: &rspice_core::execution::SignalDescriptor,
+) -> serde_json::Value {
+    serde_json::json!({
+        "canonical_name": descriptor.canonical_name(),
+        "display_name": descriptor.display_name(),
+        "kind": execution_signal_kind_name(descriptor.kind()),
+        "unit": execution_signal_unit_name(descriptor.unit()),
+        "value_type": execution_signal_value_type_name(descriptor.value_type()),
+        "shape": execution_signal_shape_name(descriptor.shape()),
+        "owner": execution_signal_owner_json(descriptor.owner()),
+    })
+}
+
+fn execution_signal_kind_name(kind: rspice_core::execution::SignalKind) -> &'static str {
+    use rspice_core::execution::SignalKind;
+    match kind {
+        SignalKind::Voltage => "voltage",
+        SignalKind::Current => "current",
+        SignalKind::DeviceObservable => "device_observable",
+        SignalKind::Scalar => "scalar",
+        SignalKind::Digital => "digital",
+        _ => "unknown",
+    }
+}
+
+fn execution_signal_unit_name(unit: &rspice_core::execution::SignalUnit) -> String {
+    use rspice_core::execution::SignalUnit;
+    match unit {
+        SignalUnit::Volt => "volt".to_string(),
+        SignalUnit::Ampere => "ampere".to_string(),
+        SignalUnit::Ohm => "ohm".to_string(),
+        SignalUnit::Siemens => "siemens".to_string(),
+        SignalUnit::Watt => "watt".to_string(),
+        SignalUnit::Hertz => "hertz".to_string(),
+        SignalUnit::Second => "second".to_string(),
+        SignalUnit::Degree => "degree".to_string(),
+        SignalUnit::Radian => "radian".to_string(),
+        SignalUnit::Dimensionless => "dimensionless".to_string(),
+        SignalUnit::Logic => "logic".to_string(),
+        SignalUnit::Custom(name) => format!("custom:{name}"),
+        _ => "unknown".to_string(),
+    }
+}
+
+fn execution_signal_value_type_name(
+    value_type: rspice_core::execution::SignalValueType,
+) -> &'static str {
+    use rspice_core::execution::SignalValueType;
+    match value_type {
+        SignalValueType::Real => "real",
+        SignalValueType::Complex => "complex",
+        SignalValueType::Logic => "logic",
+        _ => "unknown",
+    }
+}
+
+fn execution_signal_shape_name(shape: rspice_core::execution::SignalShape) -> &'static str {
+    use rspice_core::execution::SignalShape;
+    match shape {
+        SignalShape::Scalar => "scalar",
+        SignalShape::Vector => "vector",
+        SignalShape::Matrix => "matrix",
+        _ => "unknown",
+    }
+}
+
+fn execution_signal_owner_json(owner: &rspice_core::execution::SignalOwner) -> serde_json::Value {
+    use rspice_core::execution::SignalOwner;
+    match owner {
+        SignalOwner::Node(name) => serde_json::json!({"kind": "node", "name": name}),
+        SignalOwner::Branch(name) => serde_json::json!({"kind": "branch", "name": name}),
+        SignalOwner::Device(name) => serde_json::json!({"kind": "device", "name": name}),
+        SignalOwner::Analysis => serde_json::json!({"kind": "analysis"}),
+        _ => serde_json::json!({"kind": "unknown"}),
+    }
 }
 
 fn run_deck(

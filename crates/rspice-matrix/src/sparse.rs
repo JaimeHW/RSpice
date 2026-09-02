@@ -1154,6 +1154,22 @@ fn fill_correction_rhs(
 }
 
 impl StaticMatrix {
+    /// Visit every row/column position in the frozen symbolic sparsity pattern.
+    ///
+    /// The traversal is deterministic CSC order and exposes no numeric matrix
+    /// values. Circuit orchestration uses it to identify an elaborated solver
+    /// topology without making a parameter-only change look structural.
+    pub fn stored_positions(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
+        let column_offsets = self.csc.col_ptr();
+        let row_indices = self.csc.row_idx();
+        (0..self.ncols).flat_map(move |column| {
+            row_indices[column_offsets[column]..column_offsets[column + 1]]
+                .iter()
+                .copied()
+                .map(move |row| (row, column))
+        })
+    }
+
     /// Create a zero-valued matrix with the same sparsity structure.
     ///
     /// This is used for residual probes that must stamp into an independent

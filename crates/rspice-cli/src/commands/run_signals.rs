@@ -48,6 +48,87 @@ pub(crate) struct ComplexSignal {
     pub(crate) imag: Vec<Value>,
 }
 
+/// Describe one already-projected scalar result without inspecting its
+/// numeric values.  STEP preflight unions these descriptors across every
+/// coordinate before any artifact is committed, so absent signals become
+/// explicit validity bits instead of zeroes or first-coordinate columns.
+pub(crate) fn scalar_signal_schema(
+    signals: &[ScalarSignal],
+) -> Result<rspice_core::execution::SignalSchema, rspice_core::execution::SignalSchemaError> {
+    use rspice_core::execution::{
+        SignalDescriptor, SignalKind as ExecutionSignalKind, SignalOwner, SignalShape, SignalUnit,
+        SignalValueType,
+    };
+
+    let descriptors = signals
+        .iter()
+        .map(|signal| {
+            let (kind, unit, owner) = match signal.kind {
+                SignalKind::Voltage => (
+                    ExecutionSignalKind::Voltage,
+                    SignalUnit::Volt,
+                    SignalOwner::Node(signal.raw_name.clone()),
+                ),
+                SignalKind::Current => (
+                    ExecutionSignalKind::Current,
+                    SignalUnit::Ampere,
+                    SignalOwner::Branch(signal.raw_name.clone()),
+                ),
+                SignalKind::Digital => (
+                    ExecutionSignalKind::Digital,
+                    SignalUnit::Logic,
+                    SignalOwner::Node(signal.raw_name.clone()),
+                ),
+                SignalKind::Scalar => scalar_signal_identity(signal),
+            };
+            let value_type = if kind == ExecutionSignalKind::Digital {
+                SignalValueType::Logic
+            } else {
+                SignalValueType::Real
+            };
+            SignalDescriptor::new(
+                signal.display_name.clone(),
+                signal.display_name.clone(),
+                kind,
+                unit,
+                value_type,
+                SignalShape::Scalar,
+                owner,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    rspice_core::execution::SignalSchema::new(descriptors)
+}
+
+fn scalar_signal_identity(
+    signal: &ScalarSignal,
+) -> (
+    rspice_core::execution::SignalKind,
+    rspice_core::execution::SignalUnit,
+    rspice_core::execution::SignalOwner,
+) {
+    use rspice_core::execution::{SignalKind, SignalOwner, SignalUnit};
+
+    let device = signal
+        .raw_name
+        .strip_prefix('@')
+        .and_then(|name| name.split_once('['))
+        .map(|(device, _)| device.trim())
+        .filter(|device| !device.is_empty());
+    match device {
+        Some(device) => (
+            SignalKind::DeviceObservable,
+            SignalUnit::Dimensionless,
+            SignalOwner::Device(device.to_string()),
+        ),
+        None => (
+            SignalKind::Scalar,
+            SignalUnit::Dimensionless,
+            SignalOwner::Analysis,
+        ),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DeviceParamRequest {
     device: String,

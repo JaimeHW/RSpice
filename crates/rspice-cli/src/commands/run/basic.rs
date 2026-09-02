@@ -197,7 +197,7 @@ fn print_device_op_report(report: &rspice_core::circuit::DeviceOpReport, verbose
     }
 }
 
-fn write_dc_op_output(
+pub(super) fn write_dc_op_output(
     path: &Path,
     signals: &[crate::commands::run_signals::ScalarSignal],
     format: OutputFormat,

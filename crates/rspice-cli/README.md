@@ -99,6 +99,17 @@ With `-o`, every run mode writes machine-readable results. When a deck runs seve
 | `.SP` | `sp` | `S_i_j` complex columns for the deck's N ports (Touchstone instead when `-o` ends in a matching `.sNp`) |
 | `--sparam` | `sparam` | `S11`/`S21`/`S12`/`S22` complex columns over frequency (Touchstone instead when `-o` ends in `.s2p`) |
 
+An implicit `.STEP` whose topology and complete signal schema are identical at
+every coordinate retains the single wide `step` table above. If a conditional
+changes either contract, RSpice writes one coordinate-local artifact
+(`out.step_000001.csv`, and so on) plus `out.step_schema.json`. The companion
+manifest records each deterministic coordinate ID, its topology fingerprint,
+the union signal schema, its artifact path, and a validity bitmap. A signal
+absent at one coordinate is omitted from that coordinate's artifact and marked
+invalid in the bitmap; it is never inferred from the first coordinate or
+fabricated as zero. This policy applies to every selected output format; the
+companion manifest is JSON.
+
 TF, pole-zero, and sensitivity tables have no natural HDF5 section and reject `-f hdf5` with a clear error; use `csv`, `json`, or `raw`.
 
 `.FOUR` and `.TEMP` are harmonic and sweep tables rather than waveforms, so they do not use the waveform writers. `.FOUR` honors `csv`/`tsv` and writes JSON for every other format; `.TEMP` honors `csv` and `json`, and writes a plain-text dump otherwise. Ask for `csv` or `json` explicitly with these two.

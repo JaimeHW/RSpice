@@ -50,16 +50,17 @@ fn csv_column(csv: &str, name: &str) -> Vec<f64> {
         .collect()
 }
 
+fn optional_scalar_csv_value(csv: &str, name: &str) -> Option<f64> {
+    csv.lines().skip(1).find_map(|line| {
+        let (signal, value) = line.split_once(',')?;
+        signal
+            .eq_ignore_ascii_case(name)
+            .then(|| value.parse().expect("numeric scalar CSV value"))
+    })
+}
+
 fn scalar_csv_value(csv: &str, name: &str) -> f64 {
-    csv.lines()
-        .skip(1)
-        .find_map(|line| {
-            let (signal, value) = line.split_once(',')?;
-            signal
-                .eq_ignore_ascii_case(name)
-                .then(|| value.parse().expect("numeric scalar CSV value"))
-        })
-        .unwrap_or_else(|| panic!("missing {name} in {csv}"))
+    optional_scalar_csv_value(csv, name).unwrap_or_else(|| panic!("missing {name} in {csv}"))
 }
 
 fn complex_csv_value_at(csv: &str, name: &str, frequency: f64) -> (f64, f64) {
@@ -78,7 +79,18 @@ fn complex_csv_magnitude_at(csv: &str, name: &str, frequency: f64) -> f64 {
     real.hypot(imaginary)
 }
 
-fn assert_conditional_implicit_step_topology_fails_closed(tag: &str, values: &str) {
+#[derive(Debug)]
+struct ConditionalCoordinateResult {
+    out: f64,
+    extra: Option<f64>,
+    coordinate_id: String,
+    topology_fingerprint: String,
+}
+
+fn assert_conditional_implicit_step_topology_is_typed(
+    tag: &str,
+    values: &str,
+) -> std::collections::BTreeMap<i32, ConditionalCoordinateResult> {
     let dir = test_dir(tag);
     let deck = dir.join("conditional_topology.sp");
     let output_path = dir.join("conditional_topology.csv");
@@ -111,34 +123,134 @@ fn assert_conditional_implicit_step_topology_fails_closed(tag: &str, values: &st
         "csv",
     ]);
     assert!(
-        !run.status.success(),
-        "conditional topology must fail until coordinate-local schemas are exported; stdout: {}; stderr: {}",
+        run.status.success(),
+        "conditional topology must execute with coordinate-local schemas; stdout: {}; stderr: {}",
         String::from_utf8_lossy(&run.stdout),
         String::from_utf8_lossy(&run.stderr)
     );
-    assert_ne!(
-        run.status.code(),
-        Some(101),
-        "authored topology must never cause a Rust panic: {}",
-        String::from_utf8_lossy(&run.stderr)
-    );
-    let stderr = String::from_utf8_lossy(&run.stderr);
-    assert!(
-        stderr.contains("result schema changes") && stderr.contains("V(extra)"),
-        "schema diagnostic must identify the conditional signal: {stderr}"
-    );
     assert!(
         !output_path.exists(),
-        "a rejected aggregation must not publish an output"
+        "changing topology must not reuse an unqualified wide artifact"
+    );
+
+    let modes = values
+        .split_ascii_whitespace()
+        .map(|value| value.parse::<i32>().expect("integer mode"))
+        .collect::<Vec<_>>();
+    let manifest_path = output_path.with_file_name("conditional_topology.step_schema.json");
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&manifest_path).expect("conditional schema manifest must exist"),
+    )
+    .expect("conditional schema manifest must be JSON");
+    assert_eq!(manifest["aggregation"], "coordinate_local");
+    assert_eq!(manifest["missingness"], "union_validity_bitmap");
+    let union_schema = manifest["union_schema"]
+        .as_array()
+        .expect("union schema array");
+    let extra_index = union_schema
+        .iter()
+        .position(|descriptor| {
+            descriptor["display_name"]
+                .as_str()
+                .is_some_and(|name| name.eq_ignore_ascii_case("V(extra)"))
+        })
+        .expect("union schema retains conditional V(extra)");
+    let manifest_coordinates = manifest["coordinates"]
+        .as_array()
+        .expect("coordinate metadata array");
+    assert_eq!(manifest_coordinates.len(), modes.len());
+
+    let mut semantic = std::collections::BTreeMap::new();
+    for (index, mode) in modes.into_iter().enumerate() {
+        let path = step_output(&output_path, index + 1);
+        assert_eq!(
+            metadata_artifact(&manifest_coordinates[index]),
+            path.file_name()
+                .and_then(std::ffi::OsStr::to_str)
+                .expect("portable coordinate artifact filename"),
+            "manifest must identify the coordinate-local artifact by portable filename"
+        );
+        let csv = std::fs::read_to_string(&path).unwrap_or_else(|error| {
+            panic!("coordinate artifact {} is missing: {error}", path.display())
+        });
+        let out = scalar_csv_value(&csv, "V(out)");
+        let extra = optional_scalar_csv_value(&csv, "V(extra)");
+        let metadata = &manifest_coordinates[index];
+        let validity = metadata["validity"]
+            .as_array()
+            .expect("coordinate validity bitmap");
+        assert_eq!(
+            validity[extra_index].as_bool(),
+            Some(mode == 1),
+            "V(extra) validity must follow its coordinate topology"
+        );
+        assert_eq!(
+            extra.is_some(),
+            mode == 1,
+            "a missing conditional node must be absent, never fabricated as zero"
+        );
+        if mode == 0 {
+            assert!((out - 0.5).abs() < 1.0e-12);
+        } else {
+            assert!((out - 2.0 / 3.0).abs() < 1.0e-12);
+            assert!((extra.expect("mode 1 has V(extra)") - 1.0 / 3.0).abs() < 1.0e-12);
+        }
+        semantic.insert(
+            mode,
+            ConditionalCoordinateResult {
+                out,
+                extra,
+                coordinate_id: metadata["coordinate_id"]
+                    .as_str()
+                    .expect("coordinate ID")
+                    .to_string(),
+                topology_fingerprint: metadata["topology_fingerprint"]
+                    .as_str()
+                    .expect("topology fingerprint")
+                    .to_string(),
+            },
+        );
+    }
+    assert_ne!(
+        semantic[&0].topology_fingerprint, semantic[&1].topology_fingerprint,
+        "conditional component/node membership must change topology identity"
+    );
+    assert!(
+        !step_output(&output_path, modes_len(values) + 1).exists(),
+        "only planned coordinate artifacts may be published"
     );
 
     let _ = std::fs::remove_dir_all(&dir);
+    semantic
+}
+
+fn metadata_artifact(metadata: &serde_json::Value) -> &str {
+    metadata["artifact"]
+        .as_str()
+        .expect("coordinate artifact path")
+}
+
+fn modes_len(values: &str) -> usize {
+    values.split_ascii_whitespace().count()
 }
 
 #[test]
-fn conditional_implicit_step_topology_fails_closed_in_both_coordinate_orders() {
-    assert_conditional_implicit_step_topology_fails_closed("topology_forward", "0 1");
-    assert_conditional_implicit_step_topology_fails_closed("topology_reverse", "1 0");
+fn conditional_implicit_step_topology_is_order_independent_and_never_fabricates_data() {
+    let forward = assert_conditional_implicit_step_topology_is_typed("topology_forward", "0 1");
+    let reverse = assert_conditional_implicit_step_topology_is_typed("topology_reverse", "1 0");
+
+    for mode in [0, 1] {
+        assert!((forward[&mode].out - reverse[&mode].out).abs() < 1.0e-15);
+        assert_eq!(forward[&mode].extra, reverse[&mode].extra);
+        assert_eq!(
+            forward[&mode].coordinate_id, reverse[&mode].coordinate_id,
+            "semantic coordinate identity must not depend on enumeration order"
+        );
+        assert_eq!(
+            forward[&mode].topology_fingerprint, reverse[&mode].topology_fingerprint,
+            "the same materialized topology must have the same fingerprint"
+        );
+    }
 }
 
 #[test]
