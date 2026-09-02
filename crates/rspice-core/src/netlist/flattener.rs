@@ -1183,19 +1183,26 @@ impl<'a> Flattener<'a> {
         directive: &str,
         node: &str,
     ) -> Result<Value, ParseError> {
-        let Some(expr) = voltage_expr else {
-            return Ok(voltage);
+        let value = match voltage_expr {
+            Some(expr) => resolve_parametric_value(
+                &ParametricValue::Expression(expr.to_string()),
+                scope,
+                &self.random,
+            )
+            .map_err(|err| {
+                ParseError::InvalidValue(format!(
+                    "{directive} for node '{node}' could not resolve expression '{expr}': {err}"
+                ))
+            })?,
+            None => voltage,
         };
-        resolve_parametric_value(
-            &ParametricValue::Expression(expr.to_string()),
-            scope,
-            &self.random,
-        )
-        .map_err(|err| {
-            ParseError::InvalidValue(format!(
-                "{directive} for node '{node}' could not resolve expression '{expr}': {err}"
-            ))
-        })
+        if value.is_finite() {
+            Ok(value)
+        } else {
+            Err(ParseError::InvalidValue(format!(
+                "{directive} for node '{node}' resolved to non-finite voltage {value}"
+            )))
+        }
     }
 
     /// Remap an element's nodes using the current prefix and node map

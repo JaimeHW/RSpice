@@ -1,5 +1,5 @@
 use rspice_core::engine::{Engine, SimulationConfig};
-use rspice_core::netlist::Netlist;
+use rspice_core::netlist::{Netlist, ParseError, StartupDirectiveKind};
 
 fn waveform_at_zero(result: &rspice_core::engine::TransientResult, node: &str) -> f64 {
     result
@@ -141,5 +141,130 @@ fn differential_nodeset_is_a_released_guess_not_a_final_dc_constraint() {
     assert!(
         (difference - 0.1).abs() > 0.05,
         "NODESET remained installed in the final DC equations: {difference:e}"
+    );
+}
+
+#[test]
+fn consistent_duplicate_and_reversed_constraints_are_equivalent() {
+    let baseline = Netlist::parse(
+        "baseline differential UIC\n\
+         C1 a 0 1u\n\
+         C2 b 0 1u\n\
+         .IC V(a,b)=1.25\n\
+         .TRAN 1u 1u UIC\n\
+         .END\n",
+    )
+    .expect("baseline constraint parses");
+    let duplicate = Netlist::parse(
+        "duplicate differential UIC\n\
+         C1 a 0 1u\n\
+         C2 b 0 1u\n\
+         .IC V(a,b)=1.25 V(a,b)=1.25 V(b,a)=-1.25\n\
+         .TRAN 1u 1u UIC\n\
+         .END\n",
+    )
+    .expect("consistent duplicate constraints parse");
+    let engine = Engine::new(SimulationConfig::default());
+    let baseline = engine
+        .run_tran(&baseline, 1e-6, 1e-6)
+        .expect("baseline UIC transient solves");
+    let duplicate = engine
+        .run_tran(&duplicate, 1e-6, 1e-6)
+        .expect("duplicate UIC transient solves");
+    for node in ["a", "b"] {
+        assert_eq!(
+            waveform_at_zero(&duplicate, node).to_bits(),
+            waveform_at_zero(&baseline, node).to_bits(),
+            "duplicate constraint changed {node}"
+        );
+    }
+}
+
+#[test]
+fn inconsistent_duplicate_constraint_reports_both_source_lines() {
+    let error = Netlist::parse(
+        "duplicate conflict\n\
+         R1 a 0 1k\n\
+         R2 b 0 1k\n\
+         .IC V(a,b)=1\n\
+         .IC V(b,a)=-2\n\
+         .END\n",
+    )
+    .expect_err("inconsistent duplicate constraint must fail");
+    let ParseError::StartupConstraintConflict(conflict) = error else {
+        panic!("expected typed startup conflict, got {error}");
+    };
+    assert_eq!(conflict.kind, StartupDirectiveKind::Ic);
+    assert_eq!(conflict.established.line, 4);
+    assert_eq!(conflict.conflicting.line, 5);
+    assert_eq!(conflict.positive, "B");
+    assert_eq!(conflict.negative, "A");
+    assert_eq!(conflict.expected.to_bits(), (-1.0f64).to_bits());
+    assert_eq!(conflict.actual.to_bits(), (-2.0f64).to_bits());
+}
+
+#[test]
+fn malformed_or_nonfinite_voltage_targets_fail_at_the_authored_line() {
+    for (directive, expected) in [
+        (".IC V(a,b) 1", "requires '=value'"),
+        (".NODESET V(a,b) 1", "requires '=value'"),
+        (".IC V(a,b)=1e309", "must be finite"),
+        (".NODESET V(a,b)=-1e309", "must be finite"),
+        (".IC V(a,b,c)=1", "Expected ')'"),
+        (".NODESET V(a,)=1", "Expected node"),
+    ] {
+        let source =
+            format!("malformed differential startup\nR1 a 0 1k\nR2 b 0 1k\n{directive}\n.END\n");
+        let error = Netlist::parse(&source)
+            .expect_err("malformed differential startup syntax must fail")
+            .to_string();
+        assert!(
+            error.contains("line 4") && error.contains(expected),
+            "{directive} returned the wrong diagnostic: {error}"
+        );
+    }
+}
+
+#[test]
+fn scoped_differential_nodeset_matches_the_flat_constraint_and_is_released() {
+    let flat = Netlist::parse(
+        "flat differential nodeset\n\
+         V1 in 0 1\n\
+         R1 in a 1k\n\
+         D1 a b DTEST\n\
+         R2 b 0 1k\n\
+         .MODEL DTEST D(IS=1e-12 N=1)\n\
+         .NODESET V(a,b)=0.1\n\
+         .OP\n\
+         .END\n",
+    )
+    .expect("flat nodeset parses");
+    let scoped = Netlist::parse(
+        "scoped differential nodeset\n\
+         V1 in 0 1\n\
+         X1 in 0 CELL PARAMS: GUESS=0.1\n\
+         .SUBCKT CELL p n PARAMS: GUESS=0\n\
+         R1 p a 1k\n\
+         D1 a b DTEST\n\
+         R2 b n 1k\n\
+         .MODEL DTEST D(IS=1e-12 N=1)\n\
+         .NODESET V(a,b)={GUESS}\n\
+         .ENDS\n\
+         .OP\n\
+         .END\n",
+    )
+    .expect("scoped nodeset parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let flat = engine.run_dc_op(&flat).expect("flat nodeset OP solves");
+    let scoped = engine.run_dc_op(&scoped).expect("scoped nodeset OP solves");
+    let flat_difference = dc_voltage(&flat, "a") - dc_voltage(&flat, "b");
+    let scoped_difference = dc_voltage(&scoped, "X1.A") - dc_voltage(&scoped, "X1.B");
+    assert!(
+        (flat_difference - scoped_difference).abs() <= 1e-12,
+        "flat={flat_difference:e}, scoped={scoped_difference:e}"
+    );
+    assert!(
+        (scoped_difference - 0.1).abs() > 0.05,
+        "scoped NODESET remained installed: {scoped_difference:e}"
     );
 }

@@ -1308,9 +1308,10 @@ pub(super) fn parse_nodeset_command(
             break;
         };
 
-        stream.consume(&TokenKind::Equals);
+        require_voltage_hint_assignment(stream, line_num, ".NODESET", &target)?;
         let (voltage, voltage_expr) =
             parse_voltage_hint_value(stream, line_num, params, defer_values)?;
+        validate_voltage_hint_value(voltage, defer_values, line_num, ".NODESET")?;
         node_sets.push(NodeSet {
             node: target.node,
             reference: target.reference,
@@ -1345,9 +1346,10 @@ pub(super) fn parse_ic_command(
             break;
         };
 
-        stream.consume(&TokenKind::Equals);
+        require_voltage_hint_assignment(stream, line_num, ".IC", &target)?;
         let (voltage, voltage_expr) =
             parse_voltage_hint_value(stream, line_num, params, defer_values)?;
+        validate_voltage_hint_value(voltage, defer_values, line_num, ".IC")?;
         initial_conditions.push(InitialCondition {
             node: target.node,
             reference: target.reference,
@@ -1472,6 +1474,47 @@ struct VoltageHintTarget {
     reference: Option<String>,
     authored_node: String,
     authored_reference: Option<String>,
+    wrapped: bool,
+}
+
+fn require_voltage_hint_assignment(
+    stream: &mut TokenStream,
+    line_num: usize,
+    directive: &str,
+    target: &VoltageHintTarget,
+) -> Result<(), ParseError> {
+    if stream.consume(&TokenKind::Equals) || !target.wrapped {
+        return Ok(());
+    }
+    let rendered = match target.authored_reference.as_deref() {
+        Some(reference) => format!("V({},{reference})", target.authored_node),
+        None => format!("V({})", target.authored_node),
+    };
+    Err(ParseError::Syntax {
+        line: line_num,
+        message: format!(
+            "{directive} voltage target {rendered} requires '=value' syntax; use the bare '<node> <value>' form when omitting '='"
+        ),
+    })
+}
+
+fn validate_voltage_hint_value(
+    voltage: Value,
+    deferred_value: bool,
+    line_num: usize,
+    directive: &str,
+) -> Result<(), ParseError> {
+    // A scoped unresolved parameter is represented internally by NaN until
+    // each concrete instance's parameter scope is available. Every resolved
+    // authored value, including infinities parsed from overflowed literals,
+    // must fail here instead of disappearing from the engine hint vector.
+    if voltage.is_finite() || deferred_value && voltage.is_nan() {
+        return Ok(());
+    }
+    Err(ParseError::Syntax {
+        line: line_num,
+        message: format!("{directive} voltage value must be finite, found {voltage}"),
+    })
 }
 
 fn parse_voltage_hint_target(
@@ -1510,6 +1553,7 @@ fn parse_voltage_hint_target(
             reference,
             authored_node,
             authored_reference,
+            wrapped: true,
         }));
     }
 
@@ -1519,6 +1563,7 @@ fn parse_voltage_hint_target(
         reference: None,
         authored_node,
         authored_reference: None,
+        wrapped: false,
     }))
 }
 

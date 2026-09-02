@@ -5824,6 +5824,19 @@ fn split_subcircuit_instance_fields(
                 .to_string(),
         });
     }
+    if let Some(ambiguous) = actual_nodes.iter().find(|node| {
+        node.contains('=')
+            || node.contains(['{', '}', '\'', '"'])
+            || node.eq_ignore_ascii_case("PARAMS")
+            || node.eq_ignore_ascii_case("PARAMS:")
+    }) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "ambiguous token '{ambiguous}' in parenthesized subcircuit-instance actual-node list; parameter markers, assignments, expressions, and quoted names belong after the subcircuit reference"
+            ),
+        });
+    }
 
     let after_close = close + ')'.len_utf8();
     if let Some(character) = trimmed[after_close..].chars().next()
@@ -5835,7 +5848,9 @@ fn split_subcircuit_instance_fields(
                 .to_string(),
         });
     }
-    let tail = coalesce_assignment_fields(split_subckt_header_tail_fields(&trimmed[after_close..]));
+    let tail_source = &trimmed[after_close..];
+    validate_parenthesized_subcircuit_instance_tail(tail_source, line_num)?;
+    let tail = coalesce_assignment_fields(split_subckt_header_tail_fields(tail_source));
     let Some(subckt_name) = tail.first() else {
         return Err(ParseError::Syntax {
             line: line_num,
@@ -5872,6 +5887,167 @@ fn split_subcircuit_instance_fields(
     fields.extend(actual_nodes);
     fields.extend(tail);
     Ok((fields, Some(actual_node_count)))
+}
+
+/// Validate the non-structural X-instance tail before its whitespace is
+/// normalized. This keeps malformed parameter expressions from being
+/// mistaken for opaque strings when the referenced subcircuit does not happen
+/// to consume the parameter.
+fn validate_parenthesized_subcircuit_instance_tail(
+    source: &str,
+    line_num: usize,
+) -> Result<(), ParseError> {
+    let mut single_quote = false;
+    let mut double_quote = false;
+    let mut brace_depth = 0usize;
+    let mut parenthesis_depth = 0usize;
+    for character in source.chars() {
+        match character {
+            '\'' if !double_quote => single_quote = !single_quote,
+            '"' if !single_quote => double_quote = !double_quote,
+            '{' if !single_quote && !double_quote => brace_depth += 1,
+            '}' if !single_quote && !double_quote => {
+                brace_depth = brace_depth
+                    .checked_sub(1)
+                    .ok_or_else(|| ParseError::Syntax {
+                        line: line_num,
+                        message:
+                            "unexpected '}' in parenthesized subcircuit-instance parameter tail"
+                                .to_string(),
+                    })?;
+            }
+            '(' if !single_quote && !double_quote && brace_depth == 0 => {
+                parenthesis_depth += 1;
+            }
+            ')' if !single_quote && !double_quote && brace_depth == 0 => {
+                parenthesis_depth =
+                    parenthesis_depth
+                        .checked_sub(1)
+                        .ok_or_else(|| ParseError::Syntax {
+                            line: line_num,
+                            message:
+                                "unexpected ')' in parenthesized subcircuit-instance parameter tail"
+                                    .to_string(),
+                        })?;
+            }
+            _ => {}
+        }
+    }
+    let unclosed = if single_quote {
+        Some("single-quoted string")
+    } else if double_quote {
+        Some("double-quoted string")
+    } else if brace_depth != 0 {
+        Some("braced expression")
+    } else if parenthesis_depth != 0 {
+        Some("parenthesized parameter expression")
+    } else {
+        None
+    };
+    if let Some(unclosed) = unclosed {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "unterminated {unclosed} in parenthesized subcircuit-instance parameter tail"
+            ),
+        });
+    }
+
+    let raw_fields = split_subckt_header_tail_fields(source);
+    for (index, field) in raw_fields.iter().enumerate().skip(1) {
+        let separated_equals = field == "=";
+        let assignment_awaits_value = field.len() > 1 && field.ends_with('=');
+        if separated_equals || assignment_awaits_value {
+            let next_is_value = raw_fields.get(index + 1).is_some_and(|next| {
+                !looks_like_top_level_parameter_assignment(next)
+                    && !next.eq_ignore_ascii_case("PARAMS")
+                    && !next.eq_ignore_ascii_case("PARAMS:")
+            });
+            let has_separated_name = !separated_equals
+                || index > 1
+                    && !raw_fields[index - 1].contains('=')
+                    && !raw_fields[index - 1].eq_ignore_ascii_case("PARAMS")
+                    && !raw_fields[index - 1].eq_ignore_ascii_case("PARAMS:");
+            if !next_is_value || !has_separated_name {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "malformed parenthesized subcircuit-instance parameter assignment near '{field}'; expected NAME=value"
+                    ),
+                });
+            }
+        }
+    }
+    let fields = coalesce_assignment_fields(raw_fields);
+    let mut saw_params_marker = false;
+    let mut saw_assignment = false;
+    for field in fields.iter().skip(1) {
+        if field.eq_ignore_ascii_case("PARAMS") || field.eq_ignore_ascii_case("PARAMS:") {
+            if saw_params_marker || saw_assignment {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: "parenthesized subcircuit instance permits at most one PARAMS marker, before all parameter assignments"
+                        .to_string(),
+                });
+            }
+            saw_params_marker = true;
+            continue;
+        }
+        saw_assignment = true;
+        let Some((name, value)) = field.split_once('=') else {
+            // The caller emits the more specific unexpected-trailing-token
+            // diagnostic after it has identified the subcircuit reference.
+            continue;
+        };
+        if name.is_empty() || value.is_empty() || value.starts_with('=') {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "malformed parenthesized subcircuit-instance parameter assignment '{field}'; expected NAME=value"
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Distinguish a following `Q=2` assignment from a legitimate value such as
+/// `if(a==b, 1, 0)`. The tail splitter keeps quoted, braced, and parenthesized
+/// expressions in one field, so only a top-level `=` can begin another
+/// assignment.
+fn looks_like_top_level_parameter_assignment(field: &str) -> bool {
+    let mut single_quote = false;
+    let mut double_quote = false;
+    let mut brace_depth = 0usize;
+    let mut parenthesis_depth = 0usize;
+    for (index, character) in field.char_indices() {
+        match character {
+            '\'' if !double_quote => single_quote = !single_quote,
+            '"' if !single_quote => double_quote = !double_quote,
+            '{' if !single_quote && !double_quote => brace_depth += 1,
+            '}' if !single_quote && !double_quote => {
+                brace_depth = brace_depth.saturating_sub(1);
+            }
+            '(' if !single_quote && !double_quote && brace_depth == 0 => {
+                parenthesis_depth += 1;
+            }
+            ')' if !single_quote && !double_quote && brace_depth == 0 => {
+                parenthesis_depth = parenthesis_depth.saturating_sub(1);
+            }
+            '=' if !single_quote && !double_quote && brace_depth == 0 && parenthesis_depth == 0 => {
+                let name = &field[..index];
+                let value = &field[index + '='.len_utf8()..];
+                return !name.is_empty()
+                    && name.chars().all(|character| {
+                        character.is_ascii_alphanumeric() || matches!(character, '_' | '.' | '$')
+                    })
+                    && !value.is_empty()
+                    && !value.starts_with('=');
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 //=============================================================================

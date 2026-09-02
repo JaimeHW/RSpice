@@ -82,7 +82,7 @@ fn parameter_function_parentheses_after_the_subcircuit_name_remain_expressions()
          .SUBCKT CELL p n PARAMS: SCALE=1\n\
          R1 p n {{1000*SCALE}}\n\
          .ENDS CELL\n\
-         X1 (in 0) CELL PARAMS: SCALE = pow(2, 3)\n\
+         X1 (in 0) CELL PARAMS: SCALE = if(1==1, pow(2, 3), 0)\n\
          .END\n",
     )
     .expect("parameter function after ')' parses as an expression");
@@ -92,7 +92,7 @@ fn parameter_function_parentheses_after_the_subcircuit_name_remain_expressions()
     };
     assert!(params.iter().any(|(name, value)| {
         name.eq_ignore_ascii_case("SCALE")
-            && matches!(value, ParametricValue::Expression(expression) if expression == "pow(2, 3)")
+            && matches!(value, ParametricValue::Expression(expression) if expression == "if(1==1, pow(2, 3), 0)")
     }));
     let flattened = flatten_netlist_with_models(&parsed).expect("parameterized instance flattens");
     let ElementKind::Resistor { value, .. } = &flattened.elements[0].kind else {
@@ -121,6 +121,17 @@ fn malformed_parenthesized_actual_node_forms_fail_at_the_instance_line() {
         ),
         ("X1 (in 0) CELL extra", "unexpected trailing token"),
         ("X1 (in 0)) CELL", "separated by whitespace"),
+        ("X1 (in P=1) CELL", "ambiguous token"),
+        ("X1 (in {N}) CELL", "ambiguous token"),
+        ("X1 (in 0) CELL P=", "malformed"),
+        ("X1 (in 0) CELL P= Q=2", "malformed"),
+        ("X1 (in 0) CELL P = Q=2", "malformed"),
+        ("X1 (in 0) CELL P==1", "malformed"),
+        ("X1 (in 0) CELL PARAMS: PARAMS: P=1", "at most one"),
+        ("X1 (in 0) CELL P=1 PARAMS:", "before all"),
+        ("X1 (in 0) CELL P=pow(2,3", "unterminated"),
+        ("X1 (in 0) CELL P={1+2", "Unterminated"),
+        ("X1 (in 0) CELL P='1+2", "Unterminated"),
     ] {
         let source = format!(
             "malformed parenthesized actual nodes\n\
@@ -138,6 +149,28 @@ fn malformed_parenthesized_actual_node_forms_fail_at_the_instance_line() {
             "'{instance}' returned the wrong diagnostic: {error}"
         );
     }
+}
+
+#[test]
+fn continued_parenthesized_reference_keeps_its_editor_source_span() {
+    let source = "parenthesized source span\n\
+                  X1\n\
+                  + (in 0)\n\
+                  + CELL PARAMS: SCALE=pow(2, 3)\n\
+                  .SUBCKT CELL p n PARAMS: SCALE=1\n\
+                  R1 p n {SCALE}\n\
+                  .ENDS\n\
+                  .END\n";
+    parse_xyce(source).expect("continued parenthesized instance parses");
+
+    let map = rspice_core::netlist::source_map_for_editor(source);
+    let reference = map
+        .references
+        .iter()
+        .find(|reference| reference.kind == rspice_core::netlist::ReferenceKind::Subcircuit)
+        .expect("subcircuit reference is mapped");
+    assert_eq!(&source[reference.span.clone()], "CELL");
+    assert_eq!(source[..reference.span.start].lines().count(), 4);
 }
 
 #[test]
