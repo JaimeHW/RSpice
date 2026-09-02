@@ -559,11 +559,20 @@ pub(super) fn run_transient(
             ),
         });
     }
+    let resolved_static_solver_ceiling = [
+        Some(internal_max_step),
+        Some(ctx.engine.config().max_timestep),
+        ctx.engine.config().transient_timeint_max_timestep,
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|step| step.is_finite() && *step > 0.0)
+    .fold(f64::INFINITY, f64::min);
     let compression_config = || rspice_core::engine::CompressionConfig {
         enabled: true,
         abs_tol: ctx.compress_tol,
         rel_tol: ctx.compress_tol,
-        min_interval: tstep / 10.0,
+        min_interval: resolved_static_solver_ceiling,
     };
     let result = if let Some(restart) = authored_restart {
         let restart_run =

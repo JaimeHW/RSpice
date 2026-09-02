@@ -80,6 +80,46 @@ fn last_vout(path: &std::path::Path) -> (f64, f64) {
     )
 }
 
+fn csv_times(path: &std::path::Path) -> Vec<f64> {
+    std::fs::read_to_string(path)
+        .expect("read csv")
+        .lines()
+        .skip(1)
+        .map(|line| {
+            line.split(',')
+                .next()
+                .expect("time column")
+                .parse()
+                .expect("numeric time")
+        })
+        .collect()
+}
+
+fn assert_retained_gaps_at_most(path: &std::path::Path, maximum_interval: f64) {
+    let times = csv_times(path);
+    assert!(
+        times.len() >= 2,
+        "{} must contain a time series",
+        path.display()
+    );
+    for window in times.windows(2) {
+        let gap = window[1] - window[0];
+        let scale = window[0]
+            .abs()
+            .max(window[1].abs())
+            .max(maximum_interval.abs())
+            .max(f64::MIN_POSITIVE);
+        let tolerance = 64.0 * f64::EPSILON * scale;
+        assert!(
+            gap <= maximum_interval + tolerance,
+            "{} retained gap {gap:.17e}s from {:.17e}s to {:.17e}s exceeds {maximum_interval:.17e}s (64-ULP-scale tolerance {tolerance:.17e}s)",
+            path.display(),
+            window[0],
+            window[1]
+        );
+    }
+}
+
 const BUG_1284_FIRST: &str =
     include_str!("../../../tests/xyce/Netlists/Certification_Tests/BUG_1284/bug_1284_first.cir");
 const BUG_1284_RESTARTED: &str = include_str!(
@@ -491,6 +531,136 @@ fn checkpoint_resume_matches_uninterrupted_run() {
         stderr.contains("different netlist"),
         "refusal should explain the fingerprint mismatch: {stderr}"
     );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn compression_uses_static_solver_ceiling_across_widened_checkpoint_resume() {
+    let dir = test_dir("compression_interval_ceiling");
+    let deck = dir.join("rc.sp");
+    std::fs::write(
+        &deck,
+        "compression interval ceiling\n\
+         V1 in 0 SIN(0 1 100meg)\n\
+         R1 in out 1k\n\
+         C1 out 0 1p\n\
+         .tran 10n 20n\n\
+         .end\n",
+    )
+    .expect("write compression interval deck");
+
+    let first_csv = dir.join("first.csv");
+    let first_checkpoint = dir.join("first.ckpt");
+    let output = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "--tran-stop",
+        "10n",
+        "--max-step",
+        "2n",
+        "--checkpoint",
+        first_checkpoint.to_str().unwrap(),
+        "-o",
+        first_csv.to_str().unwrap(),
+        "-f",
+        "csv",
+    ]);
+    assert!(
+        output.status.success(),
+        "ordinary first segment failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let compressed_first_csv = dir.join("compressed-first.csv");
+    let compressed_first_checkpoint = dir.join("compressed-first.ckpt");
+    let output = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "--tran-stop",
+        "10n",
+        "--max-step",
+        "2n",
+        "--checkpoint",
+        compressed_first_checkpoint.to_str().unwrap(),
+        "--compress",
+        "-o",
+        compressed_first_csv.to_str().unwrap(),
+        "-f",
+        "csv",
+    ]);
+    assert!(
+        output.status.success(),
+        "compressed first segment failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        std::fs::read(&compressed_first_checkpoint).expect("read compressed first checkpoint"),
+        std::fs::read(&first_checkpoint).expect("read ordinary first checkpoint"),
+        "compression must preserve byte-exact solver state at the 2ns ceiling"
+    );
+    assert_retained_gaps_at_most(&first_csv, 2.0e-9);
+    assert_retained_gaps_at_most(&compressed_first_csv, 2.0e-9);
+
+    let resumed_csv = dir.join("resumed.csv");
+    let resumed_checkpoint = dir.join("resumed.ckpt");
+    let output = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "--resume",
+        first_checkpoint.to_str().unwrap(),
+        "--max-step",
+        "4n",
+        "--checkpoint",
+        resumed_checkpoint.to_str().unwrap(),
+        "-o",
+        resumed_csv.to_str().unwrap(),
+        "-f",
+        "csv",
+    ]);
+    assert!(
+        output.status.success(),
+        "ordinary widened resume failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let compressed_resumed_csv = dir.join("compressed-resumed.csv");
+    let compressed_resumed_checkpoint = dir.join("compressed-resumed.ckpt");
+    let output = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "--resume",
+        compressed_first_checkpoint.to_str().unwrap(),
+        "--max-step",
+        "4n",
+        "--checkpoint",
+        compressed_resumed_checkpoint.to_str().unwrap(),
+        "--compress",
+        "-o",
+        compressed_resumed_csv.to_str().unwrap(),
+        "-f",
+        "csv",
+    ]);
+    assert!(
+        output.status.success(),
+        "compressed widened resume failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        std::fs::read(&compressed_resumed_checkpoint).expect("read compressed resumed checkpoint"),
+        std::fs::read(&resumed_checkpoint).expect("read ordinary resumed checkpoint"),
+        "compression must preserve byte-exact solver state after widening the ceiling to 4ns"
+    );
+    let ordinary_final = last_vout(&resumed_csv);
+    let compressed_final = last_vout(&compressed_resumed_csv);
+    assert_eq!(ordinary_final.0.to_bits(), compressed_final.0.to_bits());
+    assert_eq!(ordinary_final.1.to_bits(), compressed_final.1.to_bits());
+    assert_retained_gaps_at_most(&resumed_csv, 4.0e-9);
+    assert_retained_gaps_at_most(&compressed_resumed_csv, 4.0e-9);
 
     let _ = std::fs::remove_dir_all(&dir);
 }
