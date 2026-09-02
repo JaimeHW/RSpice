@@ -382,7 +382,7 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
         ),
         python: python_mapped_axes(),
         wasm: wasm_direct_only(),
-        engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
+        engine_adapter: adapter_typed_scalar_only(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::MonteCarlo,

@@ -6,6 +6,10 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
+use rspice_engine_adapter::fft_result_document::{
+    FFT_RESULT_DOCUMENT_CONTENT_TYPE, FftCompatibilityMode, FftPhysicalType, FftSourceKind,
+    FftUnit, TransientFftResultDocument,
+};
 use rspice_engine_adapter::result_document::{
     AnalogAnalysisKind, AnalogResultDocument, AnalogSignalKind, RESULT_DOCUMENT_CONTENT_TYPE,
     SignalUnit, SignalValues,
@@ -178,6 +182,19 @@ fn typed_result(job: &Job, response: &Value, file_name: &str) -> AnalogResultDoc
     AnalogResultDocument::from_json(&content).expect("typed result validates")
 }
 
+fn typed_fft_result(job: &Job, response: &Value, file_name: &str) -> TransientFftResultDocument {
+    let path = format!("results/{file_name}");
+    let descriptor = response["result_artifacts"]
+        .as_array()
+        .expect("declared result artifacts")
+        .iter()
+        .find(|artifact| artifact["path"] == path)
+        .unwrap_or_else(|| panic!("typed FFT result descriptor {path} missing"));
+    assert_eq!(descriptor["content_type"], FFT_RESULT_DOCUMENT_CONTENT_TYPE);
+    let content = std::fs::read_to_string(job.root.join(&path)).expect("read typed FFT result");
+    TransientFftResultDocument::from_json(&content).expect("typed FFT result validates")
+}
+
 fn signal<'a>(
     document: &'a AnalogResultDocument,
     canonical_name: &str,
@@ -327,6 +344,123 @@ fn a_transient_run_declares_and_writes_its_waveform_artifact() {
     assert_eq!(
         signal(&document, "i(v1)").kind,
         AnalogSignalKind::BranchCurrent
+    );
+}
+
+#[test]
+fn transient_fft_artifacts_preserve_parent_order_ragged_bins_units_and_metrics() {
+    let job = Job::new("transient-fft");
+    let deck = "typed transient FFT results\n\
+                V1 out 0 SIN(0 1 1k)\n\
+                R1 out 0 1k\n\
+                .options fft fftout=1\n\
+                .tran 1u 1m\n\
+                .tran 2u 1m\n\
+                .fft v(out) np=8 format=unorm window=rect freq=1k\n\
+                .fft i(V1) np=16 window=hann freq=1k\n\
+                .end\n";
+    let request = build_request(
+        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
+        json!({"kind": "transient"}),
+        Vec::new(),
+    );
+    let response = parse_stdout(&job.run(&request));
+    assert_eq!(response["status"], "succeeded", "response: {response}");
+    assert_eq!(
+        response["result_manifest"]["typed_fft_result_schema"],
+        json!({"name": "rspice-transient-fft-result", "version": 1})
+    );
+    assert_eq!(
+        response["result_artifacts"]
+            .as_array()
+            .expect("result artifacts")
+            .len(),
+        6
+    );
+
+    let first = typed_fft_result(&job, &response, "transient-1.fft.result.json");
+    let second = typed_fft_result(&job, &response, "transient-2.fft.result.json");
+    assert_eq!(first.parent_analysis.id, "tran-001");
+    assert_eq!(second.parent_analysis.id, "tran-002");
+    for document in [&first, &second] {
+        assert_eq!(document.result_count, 2);
+        assert_eq!(document.results[0].analysis_id, "fft-001");
+        assert_eq!(document.results[1].analysis_id, "fft-002");
+        assert_eq!(
+            document.results[0].parent_analysis_id,
+            document.parent_analysis.id
+        );
+        assert_eq!(document.results[0].source.kind, FftSourceKind::Probe);
+        assert_eq!(document.results[0].source.authored_output, "V(OUT)");
+        assert_eq!(
+            document.results[0].authored.compatibility_mode,
+            FftCompatibilityMode::HspiceCompatible
+        );
+        assert_eq!(
+            document.results[0].signal.physical_type,
+            FftPhysicalType::Voltage
+        );
+        assert_eq!(document.results[0].signal.unit, Some(FftUnit::Volt));
+        assert_eq!(
+            document.results[0]
+                .metrics
+                .as_ref()
+                .expect("unnormalized metrics")
+                .units
+                .fundamental_magnitude,
+            Some(FftUnit::Volt)
+        );
+        assert_eq!(
+            document.results[1].signal.physical_type,
+            FftPhysicalType::Current
+        );
+        assert_eq!(
+            document.results[1].signal.unit,
+            Some(FftUnit::Dimensionless)
+        );
+        assert_eq!(
+            document.results[1]
+                .metrics
+                .as_ref()
+                .expect("normalized metrics")
+                .units
+                .fundamental_magnitude,
+            Some(FftUnit::Dimensionless)
+        );
+        assert_eq!(document.results[0].spectrum.bins.len(), 5);
+        assert_eq!(document.results[1].spectrum.bins.len(), 9);
+        assert!(
+            document
+                .results
+                .iter()
+                .all(|result| result.metrics.is_some())
+        );
+    }
+}
+
+#[test]
+fn failed_fft_execution_publishes_no_waveform_fft_or_staging_artifact() {
+    let job = Job::new("transient-fft-failure");
+    let deck = "unresolvable transient FFT output\n\
+                V1 out 0 SIN(0 1 1k)\n\
+                R1 out 0 1k\n\
+                .tran 1u 1m\n\
+                .fft v(missing) np=8\n\
+                .end\n";
+    let request = build_request(
+        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
+        json!({"kind": "transient"}),
+        Vec::new(),
+    );
+    let response = parse_stdout(&job.run(&request));
+    assert_eq!(response["status"], "failed", "response: {response}");
+    let entries = std::fs::read_dir(job.root.join("results"))
+        .expect("read empty results directory")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("collect results directory");
+    assert!(
+        entries.is_empty(),
+        "failed run published artifacts: {entries:?}"
     );
 }
 
@@ -526,5 +660,8 @@ fn component_info_states_the_reviewed_identity() {
     assert_eq!(info["engine_name"], "rspice");
     assert_eq!(info["runtime_mode"], "self_contained");
     assert_eq!(info["protocol_versions"], json!([3]));
-    assert_eq!(info["result_schemas"], json!(["rspice-analog-result-v1"]));
+    assert_eq!(
+        info["result_schemas"],
+        json!(["rspice-analog-result-v1", "rspice-transient-fft-result-v1"])
+    );
 }

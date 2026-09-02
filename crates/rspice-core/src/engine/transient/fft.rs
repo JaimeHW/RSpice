@@ -639,6 +639,41 @@ fn window_coefficient(window: FftWindow, index: usize, points: usize, denominato
     }
 }
 
+/// Compute the coherent gain of the exact FFT window convention used by the
+/// transient engine. Public result adapters use this to validate that
+/// serialized window metadata describes the coefficients the engine applied.
+pub fn transient_fft_window_coherent_gain(
+    window: FftWindow,
+    mode: XyceFftMode,
+    points: usize,
+    abort: &dyn AbortSignal,
+) -> Result<Value, SimulationError> {
+    if points < 4 || !points.is_power_of_two() {
+        return Err(SimulationError::Circuit(
+            "FFT coherent gain requires a power-of-two point count of at least four".to_owned(),
+        ));
+    }
+    let denominator = if mode.uses_periodic_windows() {
+        points as Value
+    } else {
+        (points - 1) as Value
+    };
+    let mut window_sum = 0.0;
+    for index in 0..points {
+        if index.is_multiple_of(64) && abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        window_sum += window_coefficient(window, index, points, denominator);
+    }
+    let coherent_gain = window_sum / points as Value;
+    if !coherent_gain.is_finite() || coherent_gain <= 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "FFT window coherent gain is invalid ({coherent_gain})"
+        )));
+    }
+    Ok(coherent_gain)
+}
+
 fn rounded_frequency_bin(
     request_index: usize,
     name: &str,
@@ -721,6 +756,35 @@ mod tests {
                 assert!((pair.0 - pair.1).abs() < 1.0e-14, "{window:?}");
             }
         }
+    }
+
+    #[test]
+    fn public_window_gain_preserves_periodic_and_symmetric_conventions() {
+        let symmetric = transient_fft_window_coherent_gain(
+            FftWindow::Hann,
+            XyceFftMode::HspiceCompatible,
+            8,
+            &NoAbort,
+        )
+        .expect("symmetric Hann gain");
+        let periodic = transient_fft_window_coherent_gain(
+            FftWindow::Hann,
+            XyceFftMode::SpectreCompatible,
+            8,
+            &NoAbort,
+        )
+        .expect("periodic Hann gain");
+        assert!((symmetric - 7.0 / 16.0).abs() < 1.0e-14);
+        assert!((periodic - 0.5).abs() < 1.0e-14);
+        assert!(
+            transient_fft_window_coherent_gain(
+                FftWindow::Rectangular,
+                XyceFftMode::HspiceCompatible,
+                6,
+                &NoAbort,
+            )
+            .is_err()
+        );
     }
 
     #[test]

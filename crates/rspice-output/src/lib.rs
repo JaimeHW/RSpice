@@ -559,6 +559,50 @@ fn destination_parent(destination: &Path) -> &Path {
     }
 }
 
+/// Synchronize the directory entry containing an artifact where the host
+/// exposes a directory durability primitive. Multi-file publishers use this
+/// after rollback or recovery namespace changes before reporting completion.
+pub fn sync_artifact_parent(destination: &Path) -> io::Result<()> {
+    sync_parent_directory(destination)
+}
+
+/// Replace `destination` with a complete same-filesystem recovery file using
+/// the platform's durable atomic-replace path. On success, `recovery` has
+/// been consumed.
+pub fn restore_artifact_durably(recovery: &Path, destination: &Path) -> io::Result<()> {
+    reject_symlink_destination(destination)?;
+    commit_staging_file(recovery, destination, Durability::SyncFileAndParent)?;
+    sync_parent_directory(destination)
+}
+
+/// Remove an artifact with a durable destination-absence transition.
+///
+/// Windows first moves the file to a uniquely created RSpice staging name
+/// with `MOVEFILE_WRITE_THROUGH`, then deletes that tombstone. If the final
+/// tombstone deletion is interrupted, ordinary stale-artifact recovery can
+/// remove it without resurrecting the public destination.
+pub fn remove_artifact_durably(destination: &Path) -> io::Result<()> {
+    remove_artifact_durably_impl(destination)
+}
+
+#[cfg(not(windows))]
+fn remove_artifact_durably_impl(destination: &Path) -> io::Result<()> {
+    std::fs::remove_file(destination)?;
+    sync_parent_directory(destination)
+}
+
+#[cfg(windows)]
+fn remove_artifact_durably_impl(destination: &Path) -> io::Result<()> {
+    let (tombstone, reservation) = create_staging_file(destination)?;
+    drop(reservation);
+    if let Err(error) = commit_staging_file(destination, &tombstone, Durability::SyncFileAndParent)
+    {
+        let _ = std::fs::remove_file(&tombstone);
+        return Err(error);
+    }
+    std::fs::remove_file(tombstone)
+}
+
 fn reject_symlink_destination(destination: &Path) -> io::Result<()> {
     match std::fs::symlink_metadata(destination) {
         Ok(metadata) if metadata.file_type().is_symlink() => Err(io::Error::new(
@@ -734,6 +778,47 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn explicit_parent_synchronization_accepts_an_artifact_destination() {
+        let directory = TestDirectory::new("parent-sync");
+        let destination = directory.destination();
+        std::fs::write(&destination, b"complete").expect("write synchronized fixture");
+        sync_artifact_parent(&destination).expect("synchronize artifact parent");
+    }
+
+    #[test]
+    fn durable_recovery_replace_consumes_the_predecessor_snapshot() {
+        let directory = TestDirectory::new("durable-restore");
+        let destination = directory.destination();
+        let recovery = directory.0.join("recovery.csv");
+        std::fs::write(&destination, b"successor").expect("write successor");
+        std::fs::write(&recovery, b"predecessor").expect("write recovery snapshot");
+
+        restore_artifact_durably(&recovery, &destination).expect("restore predecessor durably");
+
+        assert_eq!(
+            std::fs::read(&destination).expect("read restored predecessor"),
+            b"predecessor"
+        );
+        assert!(!recovery.exists());
+    }
+
+    #[test]
+    fn durable_remove_leaves_no_public_or_staging_artifact() {
+        let directory = TestDirectory::new("durable-remove");
+        let destination = directory.destination();
+        std::fs::write(&destination, b"published").expect("write published artifact");
+
+        remove_artifact_durably(&destination).expect("remove artifact durably");
+
+        assert!(!destination.exists());
+        assert!(
+            stale_artifacts(&destination)
+                .expect("list durable-remove stages")
+                .is_empty()
+        );
     }
 
     #[test]

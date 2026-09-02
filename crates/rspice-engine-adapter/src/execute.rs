@@ -1,29 +1,43 @@
 //! Deck execution: analysis-kind gating, engine invocation, measurement
 //! extraction, and bounded result-artifact emission.
 
-use std::collections::BTreeMap;
-use std::io::Write;
-use std::path::Path;
+use std::collections::{BTreeMap, HashSet};
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::circuit::DeviceOpReport;
 use rspice_core::engine::{SimulationConfig, SpiceDialect};
-use rspice_core::netlist::{AnalysisCommand, DcSweepSpec, ElementKind};
+use rspice_core::netlist::{AnalysisCommand, DcSweepSpec, ElementKind, FftFormat};
 use rspice_core::solver::SimulationResult;
 use rspice_core::{Engine, Netlist, SimulationError};
-use rspice_output::{AtomicArtifactError, AtomicArtifactOptions, Durability, write_atomic};
+#[cfg(test)]
+use rspice_output::write_atomic;
+use rspice_output::{
+    AtomicArtifactError, AtomicArtifactFile, AtomicArtifactOptions, DestinationState, Durability,
+    PreparedAtomicArtifact, remove_artifact_durably, restore_artifact_durably,
+    sync_artifact_parent,
+};
 use serde::Deserialize;
 use serde_json::Value;
 
 use crate::document::CircuitContent;
+use crate::fft_result_document::{
+    FFT_RESULT_DOCUMENT_CONTENT_TYPE, FFT_RESULT_DOCUMENT_SCHEMA, FFT_RESULT_DOCUMENT_VERSION,
+    FftResultDocumentError, TransientFftResultDocument,
+};
 use crate::measure::{Measurement, canonical_decimal, finalize_measurements, measurement_name};
 use crate::result_document::{
     AnalogAnalysisKind, AnalogResultDocument, AnalogSignalKind, AxisDocument, ComplexSample,
     DeviceStateSeries, RESULT_DOCUMENT_CONTENT_TYPE, RESULT_DOCUMENT_SCHEMA,
     RESULT_DOCUMENT_VERSION, SignalDocument, SignalOwner, SignalUnit, SignalValues,
 };
-use crate::wire::{EngineResponse, EngineResultArtifactDescriptor};
+use crate::wire::{
+    EngineResponse, EngineResultArtifactDescriptor, MAX_ENGINE_ARTIFACT_BYTES,
+    MAX_ENGINE_RESULT_ARTIFACTS, valid_result_path,
+};
 
 /// Wall-clock ceiling for all engine work in one request. The worker holds
 /// the authoritative external deadline; this internal one exists so a
@@ -208,6 +222,32 @@ pub fn execute(analysis: &Value, content: &CircuitContent, engine_build: &str) -
     for (ordinal, directive) in directives.iter().enumerate() {
         match run_directive(&engine, &netlist, directive, kind, ordinal, &deadline) {
             Ok(outcome) => {
+                let Some(combined_count) = artifacts.len().checked_add(outcome.artifacts.len())
+                else {
+                    return Execution::failed(
+                        "resource.result_artifact_limit",
+                        "The run produced more result artifacts than the protocol permits.",
+                    );
+                };
+                if let Err(failure) = validate_artifact_budget(
+                    combined_count,
+                    artifacts
+                        .iter()
+                        .chain(&outcome.artifacts)
+                        .map(|artifact| artifact.content.len() as u64),
+                ) {
+                    return match failure {
+                        DirectiveFailure::ResultArtifactLimit => Execution::failed(
+                            "resource.result_artifact_limit",
+                            "The run produced more result artifacts than the protocol permits.",
+                        ),
+                        DirectiveFailure::ResultArtifactBytes => Execution::failed(
+                            "resource.result_artifact_bytes",
+                            "A result artifact exceeds the protocol byte limit.",
+                        ),
+                        _ => unreachable!("artifact budget only returns resource failures"),
+                    };
+                }
                 measurements.extend(outcome.measurements);
                 artifacts.extend(outcome.artifacts);
             }
@@ -229,7 +269,33 @@ pub fn execute(analysis: &Value, content: &CircuitContent, engine_build: &str) -
             Err(DirectiveFailure::ResultDocument(detail)) => {
                 return Execution::failed("results.schema_mismatch", &detail);
             }
+            Err(DirectiveFailure::ResultArtifactLimit) => {
+                return Execution::failed(
+                    "resource.result_artifact_limit",
+                    "The run produced more result artifacts than the protocol permits.",
+                );
+            }
+            Err(DirectiveFailure::ResultArtifactBytes) => {
+                return Execution::failed(
+                    "resource.result_artifact_bytes",
+                    "A result artifact exceeds the protocol byte limit.",
+                );
+            }
         }
+    }
+
+    if let Err(failure) = validate_pending_artifact_budget(&artifacts) {
+        return match failure {
+            DirectiveFailure::ResultArtifactLimit => Execution::failed(
+                "resource.result_artifact_limit",
+                "The run produced more result artifacts than the protocol permits.",
+            ),
+            DirectiveFailure::ResultArtifactBytes => Execution::failed(
+                "resource.result_artifact_bytes",
+                "A result artifact exceeds the protocol byte limit.",
+            ),
+            _ => unreachable!("pending artifact budget only returns resource failures"),
+        };
     }
 
     let directive_count = directives.len();
@@ -239,6 +305,31 @@ pub fn execute(analysis: &Value, content: &CircuitContent, engine_build: &str) -
         finalize_measurements(measurements),
         artifacts,
         directive_count,
+    )
+}
+
+fn validate_artifact_budget(
+    artifact_count: usize,
+    byte_lengths: impl IntoIterator<Item = u64>,
+) -> Result<(), DirectiveFailure> {
+    if artifact_count > MAX_ENGINE_RESULT_ARTIFACTS {
+        return Err(DirectiveFailure::ResultArtifactLimit);
+    }
+    if byte_lengths
+        .into_iter()
+        .any(|length| !(1..=MAX_ENGINE_ARTIFACT_BYTES).contains(&length))
+    {
+        return Err(DirectiveFailure::ResultArtifactBytes);
+    }
+    Ok(())
+}
+
+fn validate_pending_artifact_budget(artifacts: &[PendingArtifact]) -> Result<(), DirectiveFailure> {
+    validate_artifact_budget(
+        artifacts.len(),
+        artifacts
+            .iter()
+            .map(|artifact| artifact.content.len() as u64),
     )
 }
 
@@ -262,11 +353,21 @@ enum DirectiveFailure {
     NonFinite,
     SeriesBudget,
     ResultDocument(String),
+    ResultArtifactLimit,
+    ResultArtifactBytes,
 }
 
 impl From<SimulationError> for DirectiveFailure {
     fn from(error: SimulationError) -> Self {
         Self::Engine(error)
+    }
+}
+
+fn map_fft_document_error(error: FftResultDocumentError) -> DirectiveFailure {
+    match error {
+        FftResultDocumentError::Aborted => DirectiveFailure::Engine(SimulationError::Aborted),
+        FftResultDocumentError::ArtifactTooLarge { .. } => DirectiveFailure::ResultArtifactBytes,
+        other => DirectiveFailure::ResultDocument(other.to_string()),
     }
 }
 
@@ -301,6 +402,75 @@ fn add_typed_artifact(
         content,
     });
     Ok(())
+}
+
+fn add_fft_typed_artifact(
+    outcome: &mut DirectiveOutcome,
+    ordinal: usize,
+    document: TransientFftResultDocument,
+    abort: &dyn AbortSignal,
+) -> Result<(), DirectiveFailure> {
+    let content = document
+        .to_json_with_abort(abort, MAX_ENGINE_ARTIFACT_BYTES)
+        .map_err(map_fft_document_error)?;
+    outcome.artifacts.push(PendingArtifact {
+        file_name: format!("transient-{}.fft.result.json", ordinal + 1),
+        content_type: FFT_RESULT_DOCUMENT_CONTENT_TYPE,
+        content,
+    });
+    Ok(())
+}
+
+fn validate_fft_result_sequence(
+    netlist: &Netlist,
+    results: &[rspice_core::engine::TransientFftResult],
+    transient_stop: f64,
+    abort: &dyn AbortSignal,
+) -> Result<(), DirectiveFailure> {
+    if results.len() != netlist.fft_analyses.len() {
+        return Err(DirectiveFailure::ResultDocument(
+            "transient FFT results do not match the source directive count".to_owned(),
+        ));
+    }
+    let expected_mode = netlist.options.fft_mode.unwrap_or_default();
+    let expected_accurate = netlist.options.fft_accurate.unwrap_or(true)
+        && netlist.options.output_interval_schedule.is_none();
+    let expected_metrics = netlist.options.fft_output_metrics.unwrap_or(false);
+    for (result, authored) in results.iter().zip(&netlist.fft_analyses) {
+        if abort.is_aborted() {
+            return Err(DirectiveFailure::Engine(SimulationError::Aborted));
+        }
+        let expected_format = authored.format.unwrap_or(match expected_mode {
+            rspice_core::netlist::XyceFftMode::HspiceCompatible => FftFormat::Normalized,
+            rspice_core::netlist::XyceFftMode::SpectreCompatible => FftFormat::Unnormalized,
+        });
+        if result.output != authored.output
+            || result.point_count != authored.points
+            || !fft_float_equal(result.start_time, authored.start.unwrap_or(0.0))
+            || !fft_float_equal(result.stop_time, authored.stop.unwrap_or(transient_stop))
+            || result.format != expected_format
+            || result.mode != expected_mode
+            || result.accurate_sampling != expected_accurate
+            || result.window != authored.window
+            || result.window_name != authored.window_name
+            || !fft_float_equal(result.alpha, authored.alpha)
+            || result.metrics.is_some() != expected_metrics
+        {
+            return Err(DirectiveFailure::ResultDocument(
+                "transient FFT result controls do not match their source directive".to_owned(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn fft_float_equal(left: f64, right: f64) -> bool {
+    let scale = left.abs().max(right.abs());
+    if scale == 0.0 {
+        left == right
+    } else {
+        (left - right).abs() <= 1.0e-12 * scale
+    }
 }
 
 struct RealSolutionPoint<'a> {
@@ -786,7 +956,7 @@ fn run_directive(
     directive: &AnalysisCommand,
     kind: AnalysisKind,
     ordinal: usize,
-    deadline: &SolveDeadline,
+    deadline: &dyn AbortSignal,
 ) -> Result<DirectiveOutcome, DirectiveFailure> {
     match directive {
         AnalysisCommand::Op => {
@@ -981,6 +1151,7 @@ fn run_directive(
             if result.time.len() > MAX_SERIES_SAMPLES {
                 return Err(DirectiveFailure::SeriesBudget);
             }
+            validate_fft_result_sequence(netlist, &result.fft_results, *stop, deadline)?;
             let mut columns: Vec<(String, &'static str, Vec<f64>)> = Vec::new();
             columns.push(("time".to_owned(), "s", result.time.clone()));
             for (index, name) in result.node_names.iter().enumerate() {
@@ -1101,7 +1272,19 @@ fn run_directive(
                         },
                     });
                 }
+                let parent_analysis = document.analysis.clone();
                 add_typed_artifact(&mut outcome, kind, ordinal, document)?;
+                if !result.fft_results.is_empty() {
+                    let fft_document = TransientFftResultDocument::from_engine_results_with_abort(
+                        parent_analysis,
+                        &result.fft_results,
+                        &netlist.fft_analyses,
+                        netlist.options.fft_mode.unwrap_or_default(),
+                        deadline,
+                    )
+                    .map_err(map_fft_document_error)?;
+                    add_fft_typed_artifact(&mut outcome, ordinal, fft_document, deadline)?;
+                }
             }
             Ok(outcome)
         }
@@ -1392,7 +1575,7 @@ fn succeeded(
     artifacts: Vec<PendingArtifact>,
     directive_count: usize,
 ) -> Execution {
-    let manifest = serde_json::json!({
+    let mut manifest = serde_json::json!({
         "format": "rspice-result-v1",
         "analysis_kind": kind.as_str(),
         "engine": {"name": "rspice", "build": engine_build},
@@ -1406,6 +1589,15 @@ fn succeeded(
             .map(Measurement::to_manifest_value)
             .collect::<Vec<_>>(),
     });
+    if artifacts
+        .iter()
+        .any(|artifact| artifact.content_type == FFT_RESULT_DOCUMENT_CONTENT_TYPE)
+    {
+        manifest["typed_fft_result_schema"] = serde_json::json!({
+            "name": FFT_RESULT_DOCUMENT_SCHEMA,
+            "version": FFT_RESULT_DOCUMENT_VERSION,
+        });
+    }
     let descriptors = artifacts
         .iter()
         .map(|artifact| EngineResultArtifactDescriptor {
@@ -1433,20 +1625,246 @@ fn failure_execution(error: &SimulationError) -> Execution {
     Execution::failed(&code, &error.to_string())
 }
 
-/// Atomically publishes every staged artifact under the pre-created
-/// `results/` directory. A publication failure here is a sandbox-authority
-/// fault, surfaced as a process error rather than a customer outcome.
+/// Stages the complete response-gated artifact set, atomically replaces each
+/// member, and restores every predecessor on a returned commit failure. The
+/// caller emits the success manifest only after this function completes, so
+/// an interrupted process never advertises a partial set.
 pub fn write_artifacts(results_dir: &Path, artifacts: &[PendingArtifact]) -> Result<(), String> {
+    validate_pending_artifact_budget(artifacts)
+        .map_err(|_| "result artifact set exceeds the protocol budget".to_owned())?;
+    let mut names = HashSet::new();
     for artifact in artifacts {
-        let path = results_dir.join(&artifact.file_name);
-        publish_artifact(&path, |writer| {
-            writer.write_all(artifact.content.as_bytes())
-        })
-        .map_err(|error| format!("failed to publish {}: {error}", path.display()))?;
+        let result_path = format!("results/{}", artifact.file_name);
+        if !valid_result_path(&result_path) {
+            return Err("result artifact set contains an invalid destination name".to_owned());
+        }
+        if !names.insert(artifact.file_name.to_ascii_lowercase()) {
+            return Err("result artifact set contains duplicate destinations".to_owned());
+        }
+    }
+
+    let options = AtomicArtifactOptions::new(Durability::SyncFileAndParent);
+    let mut prepared = Vec::new();
+    prepared
+        .try_reserve_exact(artifacts.len())
+        .map_err(|error| format!("cannot allocate result transaction: {error}"))?;
+    for artifact in artifacts {
+        let destination = results_dir.join(&artifact.file_name);
+        let mut staged = AtomicArtifactFile::prepare(&destination, options)
+            .map_err(|error| format!("failed to stage {}: {error}", destination.display()))?;
+        staged
+            .write_all(artifact.content.as_bytes())
+            .map_err(|error| format!("failed to write {}: {error}", destination.display()))?;
+        let staged = staged.prepare_for_commit().map_err(|error| {
+            format!(
+                "failed to synchronize staged artifact {}: {error}",
+                destination.display()
+            )
+        })?;
+        prepared.push(PreparedResultArtifact {
+            destination,
+            staged: Some(staged),
+            predecessor: Predecessor::Absent,
+            committed: false,
+        });
+    }
+
+    for index in 0..prepared.len() {
+        match capture_predecessor(&prepared[index].destination) {
+            Ok(predecessor) => prepared[index].predecessor = predecessor,
+            Err(error) => {
+                return match cleanup_result_backups(&mut prepared) {
+                    Ok(()) => Err(error),
+                    Err(cleanup_error) => Err(format!(
+                        "{error}; rollback snapshot cleanup also failed: {cleanup_error}"
+                    )),
+                };
+            }
+        }
+    }
+
+    for index in 0..prepared.len() {
+        let staged = prepared[index]
+            .staged
+            .take()
+            .expect("prepared result artifact is consumed once");
+        if let Err(error) = staged.commit() {
+            if commit_error_published(&error) {
+                prepared[index].committed = true;
+            }
+            let rollback = rollback_result_transaction(&mut prepared);
+            return Err(match rollback {
+                Ok(()) => format!(
+                    "failed to commit result artifact {}: {error}; the predecessor set was restored",
+                    prepared[index].destination.display()
+                ),
+                Err(rollback_error) => format!(
+                    "failed to commit result artifact {}: {error}; rollback also failed: {rollback_error}",
+                    prepared[index].destination.display()
+                ),
+            });
+        }
+        prepared[index].committed = true;
+    }
+
+    cleanup_result_backups(&mut prepared)?;
+    Ok(())
+}
+
+fn commit_error_published(error: &AtomicArtifactError<io::Error>) -> bool {
+    matches!(
+        error,
+        AtomicArtifactError::Commit {
+            destination_state: DestinationState::PublishedDurabilityUncertain,
+            ..
+        }
+    )
+}
+
+struct PreparedResultArtifact {
+    destination: PathBuf,
+    staged: Option<PreparedAtomicArtifact>,
+    predecessor: Predecessor,
+    committed: bool,
+}
+
+enum Predecessor {
+    Absent,
+    File { backup: PathBuf },
+    Directory,
+}
+
+impl Predecessor {
+    fn remove_backup(&mut self) -> Result<(), String> {
+        if let Self::File { backup } = self {
+            remove_artifact_durably(&*backup)
+                .map_err(|error| format!("failed to remove rollback backup: {error}"))?;
+            *self = Self::Absent;
+        }
+        Ok(())
+    }
+}
+
+fn cleanup_result_backups(members: &mut [PreparedResultArtifact]) -> Result<(), String> {
+    let mut failures = Vec::new();
+    for member in members.iter_mut() {
+        if let Err(error) = member.predecessor.remove_backup() {
+            failures.push(format!("{}: {error}", member.destination.display()));
+        }
+    }
+    if let Err(error) = sync_result_parents(members) {
+        failures.push(error);
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("; "))
+    }
+}
+
+static NEXT_ROLLBACK_BACKUP: AtomicU64 = AtomicU64::new(0);
+
+fn capture_predecessor(destination: &Path) -> Result<Predecessor, String> {
+    let metadata = match std::fs::symlink_metadata(destination) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Predecessor::Absent),
+        Err(error) => {
+            return Err(format!(
+                "cannot inspect predecessor {}: {error}",
+                destination.display()
+            ));
+        }
+    };
+    if metadata.file_type().is_dir() {
+        // A regular file cannot atomically replace a directory, so retaining
+        // the directory is a safe way for commit to report an unchanged
+        // destination. Other non-regular objects (devices, FIFOs, sockets)
+        // can be replaced by rename on Unix and therefore must fail closed.
+        return Ok(Predecessor::Directory);
+    }
+    if !metadata.file_type().is_file() {
+        return Err(format!(
+            "result predecessor {} is not a regular file or directory",
+            destination.display()
+        ));
+    }
+    let parent = destination
+        .parent()
+        .ok_or_else(|| "result destination has no parent".to_owned())?;
+    let name = destination
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "result destination name is not UTF-8".to_owned())?;
+    for _ in 0..1_024 {
+        let serial = NEXT_ROLLBACK_BACKUP.fetch_add(1, Ordering::Relaxed);
+        let backup = parent.join(format!(
+            ".{name}.rspice-adapter-rollback-{}-{serial}",
+            std::process::id()
+        ));
+        match std::fs::hard_link(destination, &backup) {
+            Ok(()) => return Ok(Predecessor::File { backup }),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(format!(
+                    "cannot create exact rollback snapshot for {}: {error}",
+                    destination.display()
+                ));
+            }
+        }
+    }
+    Err("cannot allocate a unique result rollback backup".to_owned())
+}
+
+fn rollback_result_transaction(members: &mut [PreparedResultArtifact]) -> Result<(), String> {
+    let mut failures = Vec::new();
+    for member in members.iter_mut().rev() {
+        let result = match &member.predecessor {
+            Predecessor::Absent if member.committed => remove_artifact_durably(&member.destination),
+            Predecessor::Absent | Predecessor::Directory => Ok(()),
+            Predecessor::File { backup } => {
+                if member.committed {
+                    restore_artifact_durably(backup, &member.destination)
+                } else {
+                    remove_artifact_durably(backup)
+                }
+            }
+        };
+        if let Err(error) = result {
+            failures.push(format!("{}: {error}", member.destination.display()));
+        }
+        member.staged.take();
+    }
+    if let Err(error) = sync_result_parents(members) {
+        failures.push(error);
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("; "))
+    }
+}
+
+fn sync_result_parents(members: &[PreparedResultArtifact]) -> Result<(), String> {
+    let mut synchronized = HashSet::new();
+    for member in members {
+        let parent = member
+            .destination
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf();
+        if synchronized.insert(parent) {
+            sync_artifact_parent(&member.destination).map_err(|error| {
+                format!(
+                    "failed to synchronize result transaction directory for {}: {error}",
+                    member.destination.display()
+                )
+            })?;
+        }
     }
     Ok(())
 }
 
+#[cfg(test)]
 fn publish_artifact<E>(
     destination: &Path,
     write: impl FnOnce(&mut dyn Write) -> Result<(), E>,
@@ -1470,6 +1888,14 @@ mod artifact_publication_tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static NEXT_TEST_DIRECTORY: AtomicU64 = AtomicU64::new(0);
+
+    struct AlwaysAbort;
+
+    impl AbortSignal for AlwaysAbort {
+        fn is_aborted(&self) -> bool {
+            true
+        }
+    }
 
     struct TestDirectory(PathBuf);
 
@@ -1564,6 +1990,194 @@ mod artifact_publication_tests {
                     .is_empty(),
                 "successful publication left a staging artifact"
             );
+        }
+    }
+
+    #[test]
+    fn result_artifact_count_and_byte_budgets_accept_only_the_exact_boundaries() {
+        assert!(
+            validate_artifact_budget(MAX_ENGINE_RESULT_ARTIFACTS, [MAX_ENGINE_ARTIFACT_BYTES])
+                .is_ok()
+        );
+        assert!(matches!(
+            validate_artifact_budget(MAX_ENGINE_RESULT_ARTIFACTS + 1, [0]),
+            Err(DirectiveFailure::ResultArtifactLimit)
+        ));
+        assert!(matches!(
+            validate_artifact_budget(1, [MAX_ENGINE_ARTIFACT_BYTES + 1]),
+            Err(DirectiveFailure::ResultArtifactBytes)
+        ));
+        assert!(matches!(
+            validate_artifact_budget(1, [0]),
+            Err(DirectiveFailure::ResultArtifactBytes)
+        ));
+    }
+
+    #[test]
+    fn result_artifact_destinations_are_single_component_and_case_unique() {
+        let directory = TestDirectory::new("destination-validation");
+        for invalid in [
+            "../escape.json",
+            "sub/escape.json",
+            "sub\\escape.json",
+            "C:escape",
+        ] {
+            let artifact = PendingArtifact {
+                file_name: invalid.to_owned(),
+                content_type: "application/json",
+                content: "complete".to_owned(),
+            };
+            let error = write_artifacts(&directory.0, &[artifact])
+                .expect_err("invalid artifact destination must fail closed");
+            assert!(error.contains("invalid destination name"), "{error}");
+        }
+
+        let duplicate = [
+            PendingArtifact {
+                file_name: "Result.json".to_owned(),
+                content_type: "application/json",
+                content: "first".to_owned(),
+            },
+            PendingArtifact {
+                file_name: "result.json".to_owned(),
+                content_type: "application/json",
+                content: "second".to_owned(),
+            },
+        ];
+        let error = write_artifacts(&directory.0, &duplicate)
+            .expect_err("case-folded duplicate destinations must fail closed");
+        assert!(error.contains("duplicate destinations"), "{error}");
+        assert!(
+            std::fs::read_dir(&directory.0)
+                .expect("read destination-validation directory")
+                .next()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn later_commit_failure_rolls_back_absent_and_preexisting_predecessors() {
+        for preexisting in [false, true] {
+            let directory = TestDirectory::new("set-rollback");
+            let first = directory.0.join("first.json");
+            seed(&first, preexisting);
+            let invalid_second = directory.0.join("second.json");
+            std::fs::create_dir(&invalid_second).expect("create commit-failing destination");
+            let artifacts = [
+                PendingArtifact {
+                    file_name: "first.json".to_owned(),
+                    content_type: "application/json",
+                    content: "new first".to_owned(),
+                },
+                PendingArtifact {
+                    file_name: "second.json".to_owned(),
+                    content_type: "application/json",
+                    content: "new second".to_owned(),
+                },
+            ];
+
+            let error = write_artifacts(&directory.0, &artifacts)
+                .expect_err("second destination must fail commit");
+            assert!(error.contains("predecessor set was restored"), "{error}");
+            assert_old_or_absent(&first, preexisting);
+            assert!(invalid_second.is_dir());
+            let names = std::fs::read_dir(&directory.0)
+                .expect("read transaction directory")
+                .map(|entry| entry.expect("read transaction entry").file_name())
+                .collect::<Vec<_>>();
+            assert!(
+                names
+                    .iter()
+                    .all(|name| !name.to_string_lossy().contains("rspice-adapter-rollback")),
+                "rollback backup remained: {names:?}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_regular_predecessors_fail_before_any_destination_is_committed() {
+        use std::os::unix::net::UnixListener;
+
+        let directory = TestDirectory::new("non-regular-predecessor");
+        let first = directory.0.join("first.json");
+        std::fs::write(&first, b"old first").expect("seed first predecessor");
+        let socket = directory.0.join("second.json");
+        let _listener = UnixListener::bind(&socket).expect("bind predecessor socket");
+        let artifacts = [
+            PendingArtifact {
+                file_name: "first.json".to_owned(),
+                content_type: "application/json",
+                content: "new first".to_owned(),
+            },
+            PendingArtifact {
+                file_name: "second.json".to_owned(),
+                content_type: "application/json",
+                content: "new second".to_owned(),
+            },
+        ];
+
+        let error = write_artifacts(&directory.0, &artifacts)
+            .expect_err("a socket predecessor must fail closed");
+        assert!(error.contains("not a regular file or directory"), "{error}");
+        assert_eq!(
+            std::fs::read(&first).expect("read untouched first predecessor"),
+            b"old first"
+        );
+        assert!(socket.exists());
+    }
+
+    #[test]
+    fn durability_uncertain_commit_errors_are_treated_as_published_for_rollback() {
+        let error = AtomicArtifactError::Commit {
+            operation: rspice_output::CommitOperation::SyncParent,
+            destination_state: DestinationState::PublishedDurabilityUncertain,
+            recovery_path: None,
+            source: io::Error::other("injected parent sync failure"),
+        };
+        assert!(commit_error_published(&error));
+
+        let unchanged = AtomicArtifactError::Commit {
+            operation: rspice_output::CommitOperation::Replace,
+            destination_state: DestinationState::Unchanged,
+            recovery_path: None,
+            source: io::Error::other("injected replace failure"),
+        };
+        assert!(!commit_error_published(&unchanged));
+    }
+
+    #[test]
+    fn cancelled_transient_fft_returns_no_partial_directive_outcome() {
+        let netlist = Netlist::parse_validated(
+            "cancelled transient FFT\n\
+             V1 out 0 SIN(0 1 1k)\n\
+             R1 out 0 1k\n\
+             .tran 1u 1m\n\
+             .fft v(out) np=8\n\
+             .end\n",
+        )
+        .expect("cancelled FFT fixture parses");
+        let directive = netlist
+            .analyses
+            .iter()
+            .find(|directive| matches!(directive, AnalysisCommand::Tran { .. }))
+            .expect("transient directive");
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Ngspice,
+            ..SimulationConfig::default()
+        });
+
+        match run_directive(
+            &engine,
+            &netlist,
+            directive,
+            AnalysisKind::Transient,
+            0,
+            &AlwaysAbort,
+        ) {
+            Err(DirectiveFailure::Engine(SimulationError::Aborted)) => {}
+            Err(_) => panic!("cancellation returned the wrong bounded failure"),
+            Ok(_) => panic!("cancellation returned a partially completed directive outcome"),
         }
     }
 }

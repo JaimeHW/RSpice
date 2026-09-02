@@ -403,6 +403,7 @@ use checkpoint::{
 pub(crate) use checkpoint::{
     netlist_checkpoint_identity, restart_checkpoint_identity, simulation_checkpoint_identity,
 };
+pub use fft::transient_fft_window_coherent_gain;
 
 mod history;
 pub(self) use history::*;

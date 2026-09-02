@@ -5,6 +5,7 @@
 
 pub mod document;
 pub mod execute;
+pub mod fft_result_document;
 pub mod measure;
 pub mod result_document;
 pub mod wire;

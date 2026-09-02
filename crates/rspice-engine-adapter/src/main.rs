@@ -17,6 +17,7 @@ use rspice_engine_adapter::document::{CircuitContent, IncludeSources, interpret_
 use rspice_engine_adapter::execute::{self, Execution};
 use rspice_engine_adapter::wire::{
     self, EngineResponse, MAX_ENGINE_REQUEST_BYTES, MAX_ENGINE_RESPONSE_BYTES,
+    MAX_ENGINE_RESULT_MANIFEST_BYTES,
 };
 
 /// The launch environment did not match the reviewed self-contained contract.
@@ -55,7 +56,10 @@ fn main() -> ExitCode {
                     "runtime_mode": "self_contained",
                     "protocol_versions": [3],
                     "document_schemas": ["rspice-circuit-v1"],
-                    "result_schemas": ["rspice-analog-result-v1"],
+                    "result_schemas": [
+                        "rspice-analog-result-v1",
+                        "rspice-transient-fft-result-v1"
+                    ],
                 })
             );
             ExitCode::SUCCESS
@@ -144,6 +148,32 @@ fn run(analysis: &serde_json::Value, content: &CircuitContent) -> Execution {
     // artifacts. An oversized manifest is a bounded customer outcome: the
     // waveform data still exists conceptually, but this run cannot represent
     // it within the reviewed protocol, and saying so beats truncating.
+    if let EngineResponse::Succeeded {
+        result_manifest, ..
+    } = &execution.response
+    {
+        match serde_json::to_vec(result_manifest) {
+            Ok(bytes) if result_manifest_size_allowed(bytes.len()) => {}
+            Ok(_) => {
+                return Execution {
+                    response: EngineResponse::failed(
+                        "results.manifest_too_large",
+                        "The result manifest exceeds its protocol byte limit; reduce the number of saved signals in the deck.",
+                    ),
+                    artifacts: Vec::new(),
+                };
+            }
+            Err(_) => {
+                return Execution {
+                    response: EngineResponse::failed(
+                        "results.manifest_invalid",
+                        "The result manifest could not be serialized.",
+                    ),
+                    artifacts: Vec::new(),
+                };
+            }
+        }
+    }
     match serde_json::to_vec(&execution.response) {
         Ok(bytes) if bytes.len() <= MAX_ENGINE_RESPONSE_BYTES => execution,
         Ok(_) => Execution {
@@ -162,6 +192,10 @@ fn run(analysis: &serde_json::Value, content: &CircuitContent) -> Execution {
             artifacts: Vec::new(),
         },
     }
+}
+
+const fn result_manifest_size_allowed(serialized_bytes: usize) -> bool {
+    serialized_bytes <= MAX_ENGINE_RESULT_MANIFEST_BYTES
 }
 
 fn emit(response: &EngineResponse) -> ExitCode {
@@ -218,5 +252,20 @@ fn expect_env(name: &str, expected: &str) -> Result<(), String> {
         Err(_) => Err(format!(
             "{name} is unset; this executor requires {expected:?}"
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn result_manifest_byte_limit_accepts_the_boundary_only() {
+        assert!(result_manifest_size_allowed(
+            MAX_ENGINE_RESULT_MANIFEST_BYTES
+        ));
+        assert!(!result_manifest_size_allowed(
+            MAX_ENGINE_RESULT_MANIFEST_BYTES + 1
+        ));
     }
 }

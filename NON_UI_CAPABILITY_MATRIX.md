@@ -21,7 +21,7 @@ This is an adapter inventory, not a claim of numerical qualification. `mapped` m
 | `sensitivity` | partial / partial / partial | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
 | `pole-zero` | partial / partial / partial | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
 | `fourier` | partial / partial / partial | mapped / mapped / mapped | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
-| `fft` | mapped / mapped / mapped | mapped / mapped / mapped | mapped / unsupported / unsupported | unsupported / unsupported / unsupported |
+| `fft` | mapped / mapped / mapped | mapped / mapped / mapped | mapped / unsupported / unsupported | mapped / unsupported / unsupported |
 | `monte-carlo` | partial / unsupported / unsupported | mapped / partial / partial | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
 | `pss` | partial / unsupported / unsupported | mapped / unsupported / unsupported | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
 | `pac` | unsupported / unsupported / unsupported | mapped / unsupported / unsupported | unsupported / unsupported / unsupported | unsupported / unsupported / unsupported |
@@ -88,7 +88,7 @@ Repeated forms with the same declaration are grouped. Every non-mapped declarati
 | `fourier` | WASM | scalar, STEP, TEMP | unsupported | browser API has no result adapter for this family |
 | `fourier` | Engine adapter | scalar, STEP, TEMP | unsupported | protocol-3 adapter has no result mapping for this family |
 | `fft` | WASM | STEP, TEMP | unsupported | browser API does not consume DeckPlan axes |
-| `fft` | Engine adapter | scalar, STEP, TEMP | unsupported | protocol-3 adapter has no result mapping for this family |
+| `fft` | Engine adapter | STEP, TEMP | unsupported | protocol-3 adapter does not consume DeckPlan axes |
 | `monte-carlo` | CLI | scalar | partial | CSV/text artifact exists, but no shared typed result document |
 | `monte-carlo` | CLI | STEP, TEMP | unsupported | CLI has no authored deck-axis route for this analysis family |
 | `monte-carlo` | Python | STEP | partial | nested STEP executes, but coordinate-derived Monte Carlo seed semantics are undefined |
