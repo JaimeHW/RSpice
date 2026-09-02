@@ -60,10 +60,14 @@
 //! It is not the legacy bytecode slot. The two spaces are genuinely different
 //! sizes, and the difference is structural rather than incidental: the bytecode
 //! generator allocates a fresh scalar-state slot at each *emission* of an
-//! integration operator, and a module with noise in an assignment is emitted
-//! twice — once as `assignment_steps` and again as `noise_assignment_steps`
-//! (`DeviceIR::noise_assignments` is a clone of `assignments` carrying noise
-//! shadows). One canonical `ddt` site therefore owns two bytecode slots.
+//! integration operator, and the generator compiles the same source operator
+//! more than once in two different ways. A statement is compiled twice when the
+//! module has noise — once as `assignment_steps` and again as
+//! `noise_assignment_steps`, `DeviceIR::noise_assignments` being a clone of
+//! `assignments` carrying noise shadows — and a contribution's operator is
+//! compiled again inside each Jacobian entry that the product rule leaves it
+//! in. One canonical `ddt` site therefore owns two or more bytecode slots.
+//! [`CfgStateAllocation`] carries the measurement over the shipped corpus.
 //!
 //! So a CFG-sourced backend cannot adopt the bytecode numbering; it allocates
 //! from this layout, and the point at which shipped code does that is the point
@@ -77,6 +81,7 @@ use std::collections::{HashMap, HashSet};
 use super::cfg::{CfgFunction, CfgStateSite};
 use super::hir::{HirAnalogOperator, HirExprKind, HirExpression, HirModel, HirStatement};
 use super::ids::ExprId;
+use super::noise::contains_noise;
 use crate::ir::TransitionSiteId;
 
 /// Which runtime array a site's record lives in.
@@ -147,6 +152,29 @@ impl CanonicalStateFamily {
     /// reserving storage, or it reserves an array for a scalar.
     pub fn has_per_slot_record(self) -> bool {
         !matches!(self, Self::TimerEvent)
+    }
+
+    /// Whether the bytecode generator takes a fresh slot at every *emission* of
+    /// an operator in this family, rather than one per source site.
+    ///
+    /// The distinction is in `codegen::generator` and it is mechanical: three
+    /// families are allocated by a bare monotonic counter — `limit_state_count`
+    /// for [`Self::Integration`], `cross_detector_count` for
+    /// [`Self::CrossDetector`], `timer_state_count` for [`Self::TimerEvent`] —
+    /// so compiling one operator twice reserves two records. The rest go
+    /// through a site map (`absdelay_sites`, `transition_sites`, `slew_sites`,
+    /// `laplace_sites`, `zi_sites`) or are deduplicated by content
+    /// (`register_lookup_table`), so a second compilation of the same operator
+    /// returns the slot the first one took.
+    ///
+    /// This is what decides whether a module's per-site numbering can differ
+    /// from the generator's at all: see
+    /// [`CfgStateAllocation::agrees_with_emission_allocation`].
+    pub fn allocates_per_emission(self) -> bool {
+        matches!(
+            self,
+            Self::Integration | Self::CrossDetector | Self::TimerEvent
+        )
     }
 
     /// Whether the family's per-slot record has a length fixed at compile time.
@@ -614,16 +642,27 @@ impl CanonicalStateLayout {
     /// the arena's integrity is [`HirModel::validate`]'s subject, and a layout
     /// that panicked on a malformed module would turn a diagnostic into a crash.
     pub fn from_hir(hir: &HirModel) -> Self {
-        let mut roots = Vec::new();
-        for statement in &hir.statements {
-            collect_statement_roots(statement, &mut roots);
-        }
+        let mut roots = statement_roots(hir);
         roots.extend(
             hir.contributions
                 .iter()
                 .map(|contribution| contribution.expression.id),
         );
         Self::for_roots(&hir.expressions, roots)
+    }
+
+    /// Number only the sites the module's *statements* own — the prefix of
+    /// [`Self::from_hir`]'s walk, before it reaches the contributions.
+    ///
+    /// The split matters to anyone comparing this numbering against the
+    /// bytecode generator's: the generator compiles `ir.assignments` (the
+    /// statements) and `ir.equations` (the contributions) in two separate
+    /// passes with a replay in between, so where a module's sites fall across
+    /// that boundary is what decides whether the two numberings share a prefix.
+    /// Exposed rather than reconstructed by the caller so that the boundary is
+    /// read off the one walk instead of a second copy of it.
+    pub fn statement_prefix(hir: &HirModel) -> Self {
+        Self::for_roots(&hir.expressions, statement_roots(hir))
     }
 
     /// Number the state-bearing operators reachable from `roots`, in the order
@@ -662,6 +701,15 @@ impl CanonicalStateLayout {
             .filter(|site| site.family() == family)
             .count()
     }
+}
+
+/// Every expression the module's statements evaluate, in evaluation order.
+fn statement_roots(hir: &HirModel) -> Vec<ExprId> {
+    let mut roots = Vec::new();
+    for statement in &hir.statements {
+        collect_statement_roots(statement, &mut roots);
+    }
+    roots
 }
 
 /// The expressions one statement evaluates, in evaluation order.
@@ -850,12 +898,11 @@ impl std::fmt::Display for CfgStateAllocationError {
 /// ## Checkpoint compatibility
 ///
 /// Compatible with (1) by construction wherever the two spaces coincide, and
-/// *not* compatible where they do not — a module with noise in an assignment
-/// carrying an integration operator. Nothing here silently reconciles them:
+/// *not* compatible where they do not. Nothing here silently reconciles them:
 /// [`Self::agrees_with_emission_allocation`] answers whether a given module is
 /// one of the coinciding ones, so a caller decides rather than assumes.
 ///
-/// ## Which numbering the JIT runtime owns (W-D's ruling, for W-F to land)
+/// ## Which numbering the JIT runtime owns (W-D's ruling; W-E's measurement)
 ///
 /// **Per site — this type's numbering (2) — is what the JIT runtime takes when
 /// the CFG route becomes the default.** Three reasons, in the order they
@@ -868,92 +915,80 @@ impl std::fmt::Display for CfgStateAllocationError {
 ///    whether or not the module also declares noise. Numbering (1) breaks that
 ///    correspondence for exactly the modules where it is hardest to notice.
 /// 2. The CFG route has no per-emission numbering to adopt. Emission order is a
-///    property of the bytecode generator's two passes over `assignments` and
-///    `noise_assignments`; a CFG has one body and one traversal, so reproducing
-///    (1) would mean re-deriving the generator's replay in a level that does
-///    not have it.
-/// 3. The disagreement is a double *allocation*, not a different order. The
-///    generator takes a fresh slot at each emission, so a module in the
-///    affected set reserves slots no evaluation ever addresses. Adopting (2)
-///    shrinks the state vector rather than permuting it.
+///    property of the bytecode generator's passes over `assignments`,
+///    `noise_assignments`, and each equation's derivative programs; a CFG has
+///    one body and one traversal, so reproducing (1) would mean re-deriving the
+///    generator's replay in a level that does not have it.
+/// 3. The disagreement is a double *allocation*. The generator takes a fresh
+///    slot at each emission, so a module in the affected set reserves slots no
+///    evaluation ever addresses.
 ///
-/// ### What that costs, measured — and a correction to the paragraph above
+/// ### What that costs, measured
 ///
 /// `the_two_state_slot_numberings_are_censused_over_the_shipped_corpus`
-/// (`native::cfg_census`) is the census: it reads the per-emission count off
-/// the *compiled* model with `NativeRequiredStorage::for_model` — the largest
-/// slot the emitted instruction stream actually addresses — and compares it
-/// against [`Self::family_len`] for [`CanonicalStateFamily::Integration`],
-/// which is the family `ddt`, `idt`, `idtmod` and `$limit` share.
+/// (`native::cfg_census`) is the census. W-E rebuilt it to read the generator's
+/// slot counter back off the compiled model *context by context* rather than to
+/// take the largest slot addressed, which is what makes the table below able to
+/// say where each extra slot came from and whether it displaces a site's own.
 ///
-/// **The measurement contradicts the sufficient condition stated above, and the
-/// paragraph above is the one that is wrong.** Every shipped module carrying
-/// noise sources allocates *more* emission slots than it has sites, and
-/// [`Self::agrees_with_emission_allocation`] reports `true` for most of them:
+/// Twelve of the forty-three shipped modules differ, not seven, and only **two**
+/// of them append:
 ///
-/// | module | per site | per emission | predicate | noise sources |
-/// | :--- | ---: | ---: | :--- | ---: |
-/// | `bjt505_va` | 10 | 20 | `true` | 28 |
-/// | `bjt505t_va` | 11 | 23 | `false` | 28 |
-/// | `bjtd505_va` | 9 | 18 | `true` | 25 |
-/// | `bjtd505t_va` | 10 | 21 | `false` | 25 |
-/// | `asmesd` | 13 | 15 | `true` | 6 |
-/// | `asmesd_dio` | 6 | 8 | `true` | 4 |
-/// | `asmhemt` | 121 | 141 | `true` | 8 |
+/// | module | per site | per emission | assign | noise-assign | eq. primal | eq. derivative | shape |
+/// | :--- | ---: | ---: | ---: | ---: | ---: | ---: | :--- |
+/// | `bjt505_va` | 10 | 20 | 0 | 0 | 10 | 10 | append |
+/// | `bjtd505_va` | 9 | 18 | 0 | 0 | 9 | 9 | append |
+/// | `angelov_gan` | 17 | 18 | 1 | 1 | 16 | 0 | interleave |
+/// | `bjt505t_va` | 11 | 23 | 1 | 1 | 10 | 11 | interleave |
+/// | `bjtd505t_va` | 10 | 21 | 1 | 1 | 9 | 10 | interleave |
+/// | `asmesd` | 13 | 15 | 0 | 0 | 13 | 2 | interleave |
+/// | `asmesd_dio` | 6 | 8 | 0 | 0 | 6 | 2 | interleave |
+/// | `asmhemt` | 121 | 141 | 0 | 0 | 121 | 20 | interleave |
+/// | `hicumL0va` | 9 | 10 | 1 | 1 | 8 | 0 | interleave |
+/// | `hicumL2va` | 20 | 38 | 0 | 0 | 20 | 18 | interleave |
+/// | `mvsg_cmc` | 146 | 148 | 0 | 0 | 146 | 2 | interleave |
+/// | `ekv_va` | 5 | 7 | 2 | 2 | 3 | 0 | interleave |
 ///
-/// The predicate asks only whether an *assignment* owns a state record, because
-/// `DeviceIR::noise_assignments` is the replay it was written against. That is
-/// not the only place the generator emits an operator twice: `generate_from_ir`
-/// walks assignments, noise assignments, every equation, and then every
-/// noise-source PSD program, and `allocate_slot` takes a fresh slot at each
-/// occurrence in each. A module whose assignments own nothing can still emit a
-/// contribution's `$limit` or `ddt` a second time while compiling the PSD
-/// programs that re-evaluate the same operating point — which is exactly the
-/// shape of every row above. So the predicate is sound where it answers `false`
-/// and *not* sufficient where it answers `true`, and a caller resuming a
-/// foreign checkpoint on the strength of a `true` is relying on more than it
-/// says.
+/// The other thirty-one modules emit exactly their site count in exactly the
+/// site order. No module emits a state slot from a parameter program, and — the
+/// correction that matters most — **no module emits one from a noise PSD
+/// program either**: that column is zero on all forty-three.
 ///
-/// ### Why the ruling survives the correction
+/// ### Two corrections to W-D's note
 ///
-/// The extra slots are *appended*, not interleaved, wherever the predicate says
-/// `true`: `allocate_slot` is a monotonic counter, the PSD programs are
-/// compiled after the assignments and equations, and a module whose assignments
-/// own nothing adds nothing during the noise-assignment replay that would
-/// displace an equation's slot. So for those modules slots `0..per_site` mean
-/// the same thing under both numberings and only the array is longer — which is
-/// what makes adopting (2) a *shrink* rather than a renumbering, and reason (3)
-/// above is the one that carries the decision.
+/// 1. **The PSD programs are not a re-emitting context.** W-D's note said a
+///    module whose assignments own nothing could still emit a contribution's
+///    operator again "while compiling the PSD programs". Measured, that never
+///    happens. The context W-D's note omitted is the one doing all the work: an
+///    equation's **derivative programs**. `codegen::autodiff`'s product rule is
+///    `d(l·r) = dl·r + l·dr`, which keeps `l` and `r`, so a contribution
+///    spelled `I(a,b) <+ f(V) * ddt(q)` re-emits its primal `ddt` into the
+///    Jacobian entry. Nine of the twelve rows above are that.
+/// 2. **"The extra slots are appended, not interleaved" is false for ten of the
+///    twelve.** Only `bjt505_va` and `bjtd505_va` append. The reason is
+///    structural: `compile_equation` compiles equation *i*'s derivatives before
+///    equation *i+1*'s value program, so one re-emission anywhere but in the
+///    last state-owning equation displaces every contribution slot after it.
+///    W-D's note reasoned that the extra slots must come after everything
+///    because the PSD programs are compiled last; with the derivative programs
+///    in the picture that argument does not hold. `asmesd`, `asmesd_dio` and
+///    `asmhemt` — three of the modules W-D's predicate called `true` and
+///    therefore "appending" — all interleave.
 ///
-/// The two modules answering `false` — `bjt505t_va` and `bjtd505t_va` — are not
-/// covered by that argument and have not been shown to append rather than
-/// interleave. They are the ones to settle before anything moves.
+/// ### What W-F's numbering move is, exactly
 ///
-/// ### What W-F's first commit is
+/// A **renumbering**, not a shrink, and therefore a shipped-behaviour change:
 ///
-/// Not the numbering change. It is the two things this census showed are
-/// missing, in order:
+/// * for thirty-one modules the two numberings are already identical and
+///   nothing moves;
+/// * for `bjt505_va` and `bjtd505_va` slots `0..per_site` keep their meaning
+///   and the array merely shortens;
+/// * for the remaining ten the arrays *permute*, so a checkpoint written by the
+///   bytecode runtime cannot be read by a per-site runtime without a mapping.
 ///
-/// 1. **Widen [`Self::agrees_with_emission_allocation`] to the condition it
-///    claims.** It must count emissions across every context
-///    `generate_from_ir` compiles — assignments, noise assignments, equations,
-///    PSD programs — rather than inspecting assignments alone, and answer
-///    `false` for all seven modules above. Until it does, its `true` is an
-///    unsound licence and nothing should be built on it.
-/// 2. **Establish, for `bjt505t_va` and `bjtd505t_va`, whether the extra slots
-///    append or interleave.** Appending makes the move a shrink; interleaving
-///    makes it a renumbering, and a renumbering is a shipped-behaviour change
-///    that needs `RUNTIME_CHECKPOINT_STATE_VERSION` moved with the reason
-///    recorded in place.
-///
-/// Only then does the constructor that allocates through this type become
-/// safe to write. W-D deliberately did not implement the change: the condition
-/// it was given — that the affected set is empty or the change byte-identical
-/// for every shipped checkpoint pin — is *not* met, and the array length moves
-/// for at least seven modules.
-///
-/// Note what is *not* in scope either way: the generated bundle keeps numbering
-/// (3), which is neither of these two spaces, so
+/// So W-F moves `RUNTIME_CHECKPOINT_STATE_VERSION`, with those ten modules
+/// named as the reason in place. The generated bundle keeps numbering (3),
+/// which is neither of these two spaces, so
 /// `contracts_bug325_son::GENERATED_CHECKPOINT_IDENTITY` does not move.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CfgStateAllocation {
@@ -1065,27 +1100,159 @@ impl CfgStateAllocation {
     /// generator's per-emission numbering, so a checkpoint written by one
     /// runtime means the same thing to the other.
     ///
-    /// A *sufficient* condition, deliberately, and stated as one: true when no
-    /// assignment in the module owns any state record at all. The replay that
-    /// separates the two spaces is `DeviceIR::noise_assignments`, a clone of
-    /// `assignments` carrying noise shadows, and the generator allocates a fresh
-    /// slot at each emission — so a module whose assignments own nothing has
-    /// nothing to double-allocate, whatever its contributions do. A module that
-    /// answers `false` may still coincide; it is not asserted to differ, only
+    /// Delegates to [`EmissionCensus`], which counts the state sites of every
+    /// context `generate_from_ir` compiles and reports which of them re-emit.
+    /// See that type for what each context is and why it counts.
+    ///
+    /// Still a *sufficient* condition, and still stated as one: a module that
+    /// answers `false` may coincide anyway — it is not asserted to differ, only
     /// not proven to agree, which is the reading a caller resuming a foreign
-    /// checkpoint needs. A caller that allocates its own state does not need to
-    /// ask at all.
+    /// checkpoint needs. What changed in W-E is that a `true` is now sound.
+    /// The previous spelling inspected `hir.statements` alone and answered
+    /// `true` for five of the seven shipped modules whose two numberings
+    /// measurably differ.
     pub fn agrees_with_emission_allocation(&self, hir: &HirModel) -> bool {
-        let mut roots = Vec::new();
-        for statement in &hir.statements {
-            collect_statement_roots(statement, &mut roots);
-        }
-        let mut owns_state = false;
-        for root in roots {
-            let _ = visit_state_sites(&hir.expressions, root, &mut |_, _| owns_state = true);
-        }
-        !owns_state
+        EmissionCensus::of(hir).agrees()
     }
+}
+
+/// The state sites of every context the bytecode generator compiles, counted
+/// where the generator's numbering can be displaced.
+///
+/// `codegen::generator::generate_from_ir` compiles, in this order:
+///
+/// 1. every parameter's `default_expr`, `min_expr`, `max_expr` and each
+///    `exclude_exprs` entry;
+/// 2. `ir.assignments` — the module's statements;
+/// 3. `ir.noise_assignments` — *a clone of* `ir.assignments` carrying noise
+///    shadows, built only when the module has noise sources;
+/// 4. every equation: its value program, its peeled static condition, each
+///    resistive `derivatives[i].expr` and each `reactive_derivatives[i].expr`;
+/// 5. every noise source: its `psd`, its `exponent`, and each injection's
+///    `gain`.
+///
+/// `allocate_slot` is a bare counter for three families
+/// ([`CanonicalStateFamily::allocates_per_emission`]), so an operator compiled
+/// in two of those contexts reserves two records; the other families go through
+/// a site map and reserve one however often they are compiled.
+///
+/// ## Why the contribution count is fatal on its own
+///
+/// W-D's ruling recorded the noise-assignment clone (3) and the PSD programs
+/// (5) as the re-emitting contexts. **The derivative programs in (4) are the
+/// third, and they are the one that makes a contribution-borne site unsafe by
+/// itself.** `codegen::autodiff`'s product rule is
+/// `d(l·r) = dl·r + l·dr`, which *keeps* `l` and `r`; so a contribution
+/// spelled `I(a,b) <+ f(V) * ddt(q)` differentiates to
+/// `df/dV · ddt(q) + f · ddt_companion(dq/dV)`, and the primal `ddt` is
+/// emitted again — once per Jacobian axis whose term the simplifier does not
+/// fold away. Which terms survive is `autodiff::simplify`'s answer, not a
+/// property of the HIR, so this level cannot bound it and does not pretend to:
+/// any counter-family site in a contribution answers `false`.
+///
+/// A contribution-borne site that is only ever *accumulated* — reached from the
+/// contribution root through `+`, `-` and unary sign alone — does vanish from
+/// its own derivative, because `d(ddt(q))` is a companion and carries no primal
+/// copy. Refusing those too is deliberate precision loss rather than an
+/// oversight: which terms survive is `autodiff::simplify`'s answer, and the
+/// noise PSD and injection-gain programs compile sub-expressions of the same
+/// trees under rules of their own, so a predicate that had to be right about
+/// all of them would be a second copy of the generator.
+///
+/// The loss is measured rather than assumed. Over the shipped corpus this
+/// answers `false` for thirty of the thirty-one modules whose two numberings do
+/// coincide, and `true` only for `r2_cmc`, which owns no state at all. The
+/// census `the_two_state_slot_numberings_are_censused_over_the_shipped_corpus`
+/// (`native::cfg_census`) reports that figure and asserts the soundness
+/// direction — `true` implies the counts coincide — on every module.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EmissionCensus {
+    /// Sites reachable from a parameter's default, bound or exclude
+    /// expression, in any family. Compiled first, so one of these displaces
+    /// every slot the module allocates afterwards — including the site-mapped
+    /// families, whose slot is fixed by first emission.
+    pub parameters: usize,
+    /// Counter-family sites reachable from the module's statements. Emitted
+    /// twice when [`Self::has_noise`], once otherwise.
+    pub statements: usize,
+    /// Counter-family sites reachable from the module's contributions.
+    pub contributions: usize,
+    /// Whether `ir.noise_assignments` exists at all: the generator builds it
+    /// only when the module has at least one noise source.
+    pub has_noise: bool,
+}
+
+impl EmissionCensus {
+    /// Count the contexts of one module.
+    pub fn of(hir: &HirModel) -> Self {
+        let mut parameters = 0usize;
+        for parameter in &hir.parameters {
+            let mut roots: Vec<ExprId> =
+                parameter.default_expr.iter().map(|expr| expr.id).collect();
+            if let Some(range) = &parameter.range {
+                roots.extend(range.min_expression.iter().map(|expr| expr.id));
+                roots.extend(range.max_expression.iter().map(|expr| expr.id));
+                roots.extend(range.exclude_expressions.iter().map(|expr| expr.id));
+            }
+            for root in roots {
+                parameters += count_sites(hir, root, |_| true);
+            }
+        }
+
+        let statement_roots = statement_roots(hir);
+        let statements = statement_roots
+            .iter()
+            .map(|root| count_sites(hir, *root, |kind| kind.family().allocates_per_emission()))
+            .sum();
+        let contributions = hir
+            .contributions
+            .iter()
+            .map(|contribution| {
+                count_sites(hir, contribution.expression.id, |kind| {
+                    kind.family().allocates_per_emission()
+                })
+            })
+            .sum();
+
+        let has_noise = hir
+            .contributions
+            .iter()
+            .map(|contribution| contribution.expression.id)
+            .chain(statement_roots.iter().copied())
+            .any(|root| contains_noise(hir, root));
+
+        Self {
+            parameters,
+            statements,
+            contributions,
+            has_noise,
+        }
+    }
+
+    /// Whether nothing in the module can be emitted into a second record.
+    pub fn agrees(&self) -> bool {
+        self.parameters == 0 && self.contributions == 0 && (!self.has_noise || self.statements == 0)
+    }
+}
+
+/// How many state sites `root` reaches whose operator `wanted` accepts.
+///
+/// Counted per *occurrence* of an operator expression, which is what
+/// `allocate_slot` does. A malformed arena is HIR validation's diagnostic, not
+/// this walk's panic; whatever the traversal reached before a dangling id is
+/// still counted.
+fn count_sites(
+    hir: &HirModel,
+    root: ExprId,
+    wanted: impl Fn(CanonicalStateOperator) -> bool,
+) -> usize {
+    let mut count = 0usize;
+    let _ = visit_state_sites(&hir.expressions, root, &mut |_, kind| {
+        if wanted(kind) {
+            count += 1;
+        }
+    });
+    count
 }
 
 #[cfg(test)]

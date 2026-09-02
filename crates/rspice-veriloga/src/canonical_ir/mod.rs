@@ -94,5 +94,5 @@ pub use schedule::{
 };
 pub use state::{
     CanonicalStateFamily, CanonicalStateLayout, CanonicalStateOperator, CanonicalStateSite,
-    CfgStateAllocation, CfgStateAllocationError,
+    CfgStateAllocation, CfgStateAllocationError, EmissionCensus,
 };
