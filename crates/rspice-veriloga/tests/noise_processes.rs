@@ -652,9 +652,19 @@ endmodule
         let canonical = compiler
             .compile_canonical_ir(source)
             .expect("mixed operator canonical IR compiles");
-        let error =
+        // The artifact matches the model, so the instance is sound for every
+        // analysis that does not read noise metadata and must construct. What
+        // the CFG cannot lower is the metadata itself, and that refusal
+        // belongs to noise.
+        let mut device =
             VerilogADevice::try_new_with_canonical_ir("A1", Arc::new(model), &canonical, &[1, 0])
-                .expect_err("zero-primal substitution must not corrupt later PSD metadata");
+                .expect("unlowerable noise metadata must not block construction");
+        device
+            .try_set_analysis_type(3)
+            .expect("noise analysis configures");
+        let error = device
+            .try_noise_processes_at_frequency(&[0.0], 1.0e3)
+            .expect_err("zero-primal substitution must not corrupt later PSD metadata");
         assert!(
             error
                 .to_string()
@@ -682,13 +692,23 @@ endmodule
         let canonical = compiler
             .compile_canonical_ir(source)
             .expect("indexed canonical IR compiles");
+        // Two separate refusals stand between this model and a PSD, and which
+        // one lands first depends on the configured backend: the native
+        // backend will not compile an indexed assignment of a noise value at
+        // all, and the canonical CFG will not lower the run-time index behind
+        // the metadata. The contract is that neither is skipped, so drive the
+        // model all the way to a noise evaluation and require that some
+        // refusal, naming the array, stops it.
         let error =
             VerilogADevice::try_new_with_canonical_ir("A1", Arc::new(model), &canonical, &[1, 0])
+                .and_then(|mut device| {
+                    device.try_set_analysis_type(3)?;
+                    device
+                        .try_noise_processes_at_frequency(&[0.0], 1.0e3)
+                        .map(|_| ())
+                })
                 .expect_err("runtime-indexed grouped-noise metadata must fail closed");
-        assert!(
-            error.to_string().contains("run-time array index"),
-            "{error}"
-        );
+        assert!(error.to_string().contains("values"), "{error}");
     }
 
     #[test]

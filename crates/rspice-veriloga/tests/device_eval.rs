@@ -717,7 +717,7 @@ endmodule
 }
 
 #[test]
-fn grouped_noise_rejects_runtime_array_metadata_before_evaluation() {
+fn try_noise_sources_reports_runtime_array_index_errors() {
     let model = compile(
         r#"
 `include "disciplines.vams"
@@ -736,9 +736,81 @@ endmodule
 "#,
     );
 
-    let err = model
+    // The index is in range everywhere except noise, so the instance is a
+    // working device for every other analysis and must construct.
+    let mut device = model
         .try_device("X1", &[1, 0])
-        .expect_err("runtime-indexed grouped-noise metadata must fail closed");
+        .expect("an index that only leaves the array under noise must still construct");
+    device
+        .try_set_analysis_type(3)
+        .expect("noise analysis configures");
+
+    // The scalar entry point is called here for its diagnostic only. It is
+    // not the route a schema-1 model takes for physics, and the point of
+    // calling it is that the fault lives in the model body, ahead of anything
+    // either noise path decides.
+    let err = device
+        .try_noise_sources(&[0.0])
+        .expect_err("checked noise evaluation must report runtime array bounds errors");
+    let text = err.to_string();
+    assert!(
+        text.contains("Array index 5") || text.contains("[1:4]"),
+        "diagnostic should identify the runtime array bounds error, got: {text}"
+    );
+
+    // The grouped path is the one the engine uses, and it must report the
+    // model's own fault rather than the planning failure behind it.
+    let err = device
+        .try_noise_processes_at_frequency(&[0.0], 1.0e3)
+        .expect_err("the grouped path must report the same runtime array bounds error");
+    let text = err.to_string();
+    assert!(
+        text.contains("Array index 5") || text.contains("[1:4]"),
+        "diagnostic should identify the runtime array bounds error, got: {text}"
+    );
+}
+
+#[test]
+fn grouped_noise_without_a_runtime_plan_fails_closed_at_noise_time() {
+    // Same unlowerable shape as above, but every index the model can produce
+    // is inside the array, so nothing faults at run time. What is left is the
+    // planning failure itself, and it must surface as an error rather than as
+    // PSDs taken from the scalar path, which has neither the CFG's activation
+    // nor its reaching definitions.
+    let model = compile(
+        r#"
+`include "disciplines.vams"
+
+module noise_runtime_indexed(p, n);
+    inout p, n;
+    electrical p, n;
+    real w[1:4];
+    integer i;
+    analog begin
+        i = analysis("noise") ? 3 : 1;
+        w[i] = 1.0e-18;
+        I(p, n) <+ V(p, n) * 1.0e-3 + white_noise(w[i], "bad");
+    end
+endmodule
+"#,
+    );
+
+    let mut device = model
+        .try_device("X1", &[1, 0])
+        .expect("runtime-indexed noise metadata must not block construction");
+
+    // Everything that does not read noise metadata still works.
+    device.update_voltages(&[1.0]);
+    device
+        .try_compute_jacobian()
+        .expect("the operating point is unaffected by unlowerable noise metadata");
+
+    device
+        .try_set_analysis_type(3)
+        .expect("noise analysis configures");
+    let err = device
+        .try_noise_processes_at_frequency(&[0.0], 1.0e3)
+        .expect_err("an unlowerable grouped-noise plan must fail closed at noise time");
     let text = err.to_string();
     assert!(
         text.contains("canonical grouped-noise CFG lowering failed")

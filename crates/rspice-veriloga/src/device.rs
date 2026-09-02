@@ -1099,8 +1099,9 @@ pub struct VerilogADevice {
     #[cfg(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32")))]
     fused_stamp_jacobians: Vec<f64>,
     /// Shared canonical CFG slice that evaluates raw grouped-noise metadata
-    /// with exact source control flow and reaching definitions.
-    canonical_noise_plan: Option<std::sync::Arc<CanonicalNoiseRuntimePlan>>,
+    /// with exact source control flow and reaching definitions, or the reason
+    /// one could not be built.
+    canonical_noise_plan: CanonicalNoisePlan,
     /// Native compiled model. In native mode this is required: construction
     /// fails if a complete native image cannot be produced.
     #[cfg(feature = "native")]
@@ -1929,6 +1930,68 @@ struct CanonicalNoiseRuntimePlan {
     used_branch_flows: std::collections::HashSet<usize>,
 }
 
+/// Why a grouped-noise runtime plan could not be built.
+///
+/// The two arms are not degrees of severity, they are different facts, and
+/// they are reported at different times.
+enum NoisePlanFailure {
+    /// The canonical artifact does not describe this compiled model: the
+    /// identities disagree, the terminal layout differs, or the noise
+    /// injections do not route the way the stamp programs do. Nothing about
+    /// such an instance can be trusted, noise or otherwise, so construction
+    /// refuses.
+    Artifact(VmError),
+    /// The artifact is the right one, and the canonical CFG cannot represent
+    /// this model's *noise metadata* — a run-time array index behind a PSD,
+    /// say, or metadata that reaches dynamic state. Only noise depends on
+    /// that lowering, so the model is left constructible and the refusal
+    /// moves to noise.
+    Unlowerable(VmError),
+}
+
+/// What a device instance holds in place of a grouped-noise runtime plan.
+///
+/// Planning is a property of the model's noise metadata alone, so it is
+/// decided once at construction. A [`NoisePlanFailure::Unlowerable`] outcome
+/// is *carried* rather than raised there: the same instance still stamps DC,
+/// transient, and AC, none of which read noise metadata, and refusing to
+/// build the device would take those analyses down over a construct only
+/// noise depends on.
+///
+/// [`Self::Unavailable`] is never downgraded to the eager scalar PSD path.
+/// That path evaluates each source's PSD without the CFG's activation and
+/// reaching definitions, so a schema-1 model would silently get different
+/// physics rather than an error.
+#[derive(Debug, Clone)]
+enum CanonicalNoisePlan {
+    /// Not a grouped-noise instance: schema 0, or no syntactic noise source.
+    NotRequired,
+    Ready(std::sync::Arc<CanonicalNoiseRuntimePlan>),
+    /// Planning failed; the stored error is what noise reports.
+    Unavailable(std::sync::Arc<VmError>),
+}
+
+impl CanonicalNoisePlan {
+    /// Whether this model's noise must be evaluated through a canonical plan.
+    /// Decided from the model alone so that construction and the per-frequency
+    /// noise entry point cannot disagree about which path applies.
+    fn required_for(model: &CompiledModel) -> bool {
+        model.noise_process_schema >= 1 && !model.noise_sources.is_empty()
+    }
+
+    fn is_required(&self) -> bool {
+        !matches!(self, Self::NotRequired)
+    }
+
+    /// Reported when a required plan has no canonical IR to be built from.
+    fn missing_artifact() -> VmError {
+        VmError::InvalidModel(
+            "grouped Verilog-A noise requires canonical IR metadata; no legacy fallback is permitted"
+                .into(),
+        )
+    }
+}
+
 #[derive(Debug, Clone)]
 struct EvaluatedCanonicalNoiseProcess {
     process_id: usize,
@@ -1938,14 +2001,17 @@ struct EvaluatedCanonicalNoiseProcess {
 }
 
 impl CanonicalNoiseRuntimePlan {
-    fn build(artifact: &CanonicalIrArtifact, model: &CompiledModel) -> Result<Self, VmError> {
+    fn build(
+        artifact: &CanonicalIrArtifact,
+        model: &CompiledModel,
+    ) -> Result<Self, NoisePlanFailure> {
         crate::canonical_compat::validate_canonical_artifact_identity_for_model(model, artifact)
             .map_err(|detail| {
-                VmError::InvalidModel(format!(
+                NoisePlanFailure::Artifact(VmError::InvalidModel(format!(
                     "canonical grouped-noise artifact/model mismatch: {detail}"
-                ))
+                )))
             })?;
-        Self::validate_compiled_injections(artifact, model)?;
+        Self::validate_compiled_injections(artifact, model).map_err(NoisePlanFailure::Artifact)?;
         if artifact.hir.module_name != model.name
             || artifact.hir.ports.len() != model.num_terminals
             || artifact
@@ -1955,23 +2021,23 @@ impl CanonicalNoiseRuntimePlan {
                 .zip(&model.terminal_names)
                 .any(|(canonical, compiled)| canonical.name != *compiled)
         {
-            return Err(VmError::InvalidModel(
+            return Err(NoisePlanFailure::Artifact(VmError::InvalidModel(
                 "canonical grouped-noise HIR terminal layout does not match compiled model".into(),
-            ));
+            )));
         }
         let cfg =
             crate::canonical_ir::CfgModel::noise_metadata_from_hir(&artifact.hir, &artifact.mir)
                 .map_err(|diagnostics| {
-                    VmError::InvalidModel(format!(
+                    NoisePlanFailure::Unlowerable(VmError::InvalidModel(format!(
                         "canonical grouped-noise CFG lowering failed: {diagnostics:?}"
-                    ))
+                    )))
                 })?;
         if cfg.noise_processes.len() != model.noise_sources.len() {
-            return Err(VmError::InvalidModel(format!(
+            return Err(NoisePlanFailure::Artifact(VmError::InvalidModel(format!(
                 "canonical grouped-noise process count {} does not match compiled count {}",
                 cfg.noise_processes.len(),
                 model.noise_sources.len()
-            )));
+            ))));
         }
 
         let mut wanted = Vec::new();
@@ -1983,10 +2049,10 @@ impl CanonicalNoiseRuntimePlan {
             .enumerate()
         {
             if lowered.process_id as usize != expected || compiled.process_id != expected {
-                return Err(VmError::InvalidModel(format!(
+                return Err(NoisePlanFailure::Artifact(VmError::InvalidModel(format!(
                     "grouped-noise process IDs must be dense and identical at index {expected}: canonical={}, compiled={}",
                     lowered.process_id, compiled.process_id
-                )));
+                ))));
             }
             let compiled_kind = if compiled.table.is_some() {
                 crate::canonical_ir::CanonicalNoiseSourceKind::Table
@@ -2009,9 +2075,9 @@ impl CanonicalNoiseRuntimePlan {
                         .as_ref()
                         .map_or(0, |(points, _)| points.len().saturating_mul(2))
             {
-                return Err(VmError::InvalidModel(format!(
+                return Err(NoisePlanFailure::Artifact(VmError::InvalidModel(format!(
                     "canonical grouped-noise metadata shape disagrees for process {expected}"
-                )));
+                ))));
             }
             let mut place = |value| {
                 wanted.push(value);
@@ -2054,10 +2120,10 @@ impl CanonicalNoiseRuntimePlan {
                     | CfgValueKind::LimitPrevious { .. }
                     | CfgValueKind::Ddx { .. }
             ) {
-                return Err(VmError::InvalidModel(
+                return Err(NoisePlanFailure::Unlowerable(VmError::InvalidModel(
                     "grouped-noise PSD/exponent metadata reaches unsupported dynamic/history state"
                         .into(),
-                ));
+                )));
             }
         }
         let used_branch_flows = function
@@ -2569,20 +2635,30 @@ impl VerilogADevice {
         context.zi_filters = model.zi_filters.clone();
         Self::preallocate_vm_runtime_state(&mut context, &model)?;
 
-        let canonical_noise_plan = if model.noise_process_schema >= 1
-            && !model.noise_sources.is_empty()
-        {
-            let artifact = canonical_artifact.ok_or_else(|| {
-                VmError::InvalidModel(
-                    "grouped Verilog-A noise requires canonical IR metadata; no legacy fallback is permitted"
-                        .into(),
-                )
-            })?;
-            Some(std::sync::Arc::new(CanonicalNoiseRuntimePlan::build(
-                artifact, &model,
-            )?))
+        // Planned eagerly, because the outcome depends only on the model and
+        // the artifact, but a lowering failure is *reported* lazily. A model
+        // whose noise metadata the canonical CFG cannot represent is still a
+        // valid device for every analysis that never reads that metadata, so
+        // that failure is carried on the instance and raised when noise is
+        // actually requested. An artifact that does not describe this model
+        // still refuses here, because it invalidates the whole instance. What
+        // does not change either way is the landing contract: a schema-1
+        // instance never falls back to the eager scalar PSD path.
+        let canonical_noise_plan = if CanonicalNoisePlan::required_for(&model) {
+            match canonical_artifact {
+                Some(artifact) => match CanonicalNoiseRuntimePlan::build(artifact, &model) {
+                    Ok(plan) => CanonicalNoisePlan::Ready(std::sync::Arc::new(plan)),
+                    Err(NoisePlanFailure::Artifact(error)) => return Err(error),
+                    Err(NoisePlanFailure::Unlowerable(error)) => {
+                        CanonicalNoisePlan::Unavailable(std::sync::Arc::new(error))
+                    }
+                },
+                None => CanonicalNoisePlan::Unavailable(std::sync::Arc::new(
+                    CanonicalNoisePlan::missing_artifact(),
+                )),
+            }
         } else {
-            None
+            CanonicalNoisePlan::NotRequired
         };
 
         #[cfg(feature = "native")]
@@ -6843,9 +6919,20 @@ impl VerilogADevice {
                 "noise multiplicity must be finite and positive, got {multiplicity}"
             )));
         }
-        let plan = self.canonical_noise_plan.as_ref().ok_or_else(|| {
-            VmError::InvalidModel("grouped-noise canonical runtime plan is missing".into())
-        })?;
+        // Deliberately after the operating point above: when the model's own
+        // body faults at the noise bias — an out-of-range array index, a
+        // non-finite intermediate — that fault is the honest diagnostic, and
+        // reporting a planning failure ahead of it would name the wrong
+        // cause.
+        let plan = match &self.canonical_noise_plan {
+            CanonicalNoisePlan::Ready(plan) => plan,
+            CanonicalNoisePlan::Unavailable(error) => return Err((**error).clone()),
+            CanonicalNoisePlan::NotRequired => {
+                return Err(VmError::InvalidModel(
+                    "grouped-noise canonical runtime plan is missing".into(),
+                ));
+            }
+        };
         let metadata = plan.evaluate(&self.context)?;
         if metadata.len() != self.model.noise_sources.len() {
             return Err(VmError::InvalidModel(
@@ -7016,7 +7103,11 @@ impl VerilogADevice {
                 "noise frequency must be finite and nonnegative, got {frequency_hz}"
             )));
         }
-        if self.canonical_noise_plan.is_some() {
+        // Routed on whether a plan is *required*, not on whether one was
+        // built: an instance whose plan could not be built stays on the
+        // grouped path and reports why, instead of quietly taking the scalar
+        // one.
+        if self.canonical_noise_plan.is_required() {
             return self
                 .try_grouped_noise_processes_from_canonical_cfg(circuit_voltages, frequency_hz);
         }
@@ -8315,6 +8406,17 @@ endmodule
         VerilogADevice::preallocate_vm_runtime_state(&mut context, &model)
             .expect("native test model runtime state preallocates");
 
+        // Exactly what `try_new` would decide here: this helper builds a
+        // device straight from a `CompiledModel` with no canonical IR
+        // artifact, so a model that needs a grouped-noise plan records that it
+        // has none. The native tests below drive stamping and dispatch, never
+        // noise.
+        let canonical_noise_plan = if CanonicalNoisePlan::required_for(&model) {
+            CanonicalNoisePlan::Unavailable(Arc::new(CanonicalNoisePlan::missing_artifact()))
+        } else {
+            CanonicalNoisePlan::NotRequired
+        };
+
         let mut device = VerilogADevice {
             name: SmolStr::new("NTEST"),
             model,
@@ -8338,11 +8440,7 @@ endmodule
             )),
             fused_program_active: vec![1; num_stamp_programs],
             fused_stamp_jacobians: vec![0.0; native_jacobian_count],
-            // None, exactly as `try_new` would decide here: this helper builds
-            // a device straight from a `CompiledModel` with no canonical IR
-            // artifact, and a grouped-noise plan is built only from one. The
-            // native tests below drive stamping and dispatch, never noise.
-            canonical_noise_plan: None,
+            canonical_noise_plan,
             prev_discontinuity: false,
         };
         device.context.branch_current_values = vec![0.0; num_branch_unknowns];
