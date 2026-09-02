@@ -4,10 +4,17 @@
 //! analysis identity, Cartesian coordinate order, topology identity, or how a
 //! signal that is absent at one coordinate is represented.
 
+mod capability;
 mod plan;
 mod schema;
 mod topology;
 
+pub use capability::{
+    ANALYSIS_CAPABILITY_MATRIX, AnalysisResultCapability, AnalysisResultKind, MappingStatus,
+    NonUiSurface, SIGNAL_CAPABILITY_MATRIX, SignalCapability, SurfaceCapability,
+    analysis_result_capability, analysis_result_kind, render_non_ui_capability_matrix,
+    signal_capability,
+};
 pub use plan::{
     AnalysisInstanceId, AnalysisKind, AnalysisRequest, AxisAssignment, AxisKind, DataBinding,
     DeckPlan, DeckPlanError, PlannedAnalysis, RunAxis, RunAxisValue, RunCoordinate,
