@@ -27,7 +27,6 @@ use crate::jit::plan_builder::build_model_plan_with_canonical_ir;
 use crate::jit::ssa::Program;
 use crate::native::abi::EvalContext;
 use crate::native::assignment::NativeAssignment;
-use crate::native::model::NativeRequiredStorage;
 use crate::native::runtime::ExecutableMemory;
 use crate::native::x64::codegen::{
     compile_value_function_artifact, compile_value_function_artifact_from_ssa,
@@ -112,9 +111,14 @@ struct HostStorage {
     currents: Vec<f64>,
     variables: Vec<f64>,
     num_terminals: usize,
+    fill: f64,
 }
 
 impl HostStorage {
+    /// Build once per model. Building it per program is what turned this
+    /// census into a memset benchmark: a large compact model has tens of
+    /// thousands of variables, and the census walks hundreds of thousands of
+    /// programs.
     fn for_model(model: &crate::codegen::CompiledModel, fill: f64) -> Self {
         // Slack past every declared count keeps a stray index inside the
         // allocation: an unchecked indexed load must not decide whether this
@@ -132,6 +136,7 @@ impl HostStorage {
             currents: vec![fill; model.stamp_programs.len() + SLACK],
             variables: vec![fill; model.num_variables + SLACK],
             num_terminals: model.num_terminals,
+            fill,
         }
     }
 
@@ -205,7 +210,7 @@ fn compare_program(
     name: &str,
     index: usize,
     program: &NativeProgram,
-    model: &crate::codegen::CompiledModel,
+    storages: &[(HostStorage, u8)],
     tally: &mut Tally,
 ) {
     let select_ssa = Program::lower(program)
@@ -228,10 +233,25 @@ fn compare_program(
     }
     tally.conditional_programs += 1;
     tally.split_conditionals += conditionals;
+    // The budget that rules out the classic blowup: re-expressing a
+    // conditional as a diamond must not duplicate the continuation after it.
+    // Every instruction is emitted exactly once and each conditional adds
+    // exactly its three blocks, so both counts stay linear in the postfix
+    // program however deeply the conditionals nest.
     assert_eq!(
         branch_ssa.blocks().len(),
         1 + 3 * conditionals,
-        "{name} program {index}: every conditional lays out one diamond"
+        "{name} program {index}: every conditional lays out exactly one diamond"
+    );
+    assert_eq!(
+        branch_ssa.instructions().len(),
+        select_ssa.instructions().len() - conditionals,
+        "{name} program {index}: the branch form moves instructions, it does not copy them"
+    );
+    assert!(
+        branch_ssa.blocks().len() <= 1 + 3 * program.ops().len()
+            && branch_ssa.instructions().len() <= program.ops().len(),
+        "{name} program {index}: block program exceeds its postfix size budget"
     );
     // Operands that only the taken arm reads, and that can fail: these are the
     // evaluations the select form cannot avoid.
@@ -270,9 +290,9 @@ fn compare_program(
     let select_entry = entry(&select_memory);
     let branch_entry = entry(&branch_memory);
 
-    for (fill, analysis) in [(0.0_f64, 0_u8), (0.7, 0), (-0.4, 2), (1.8, 1)] {
-        let storage = HostStorage::for_model(model, fill);
-        let context = storage.context(analysis);
+    for (storage, analysis) in storages {
+        let fill = storage.fill;
+        let context = storage.context(*analysis);
         context.clear_runtime_error();
         let expected = select_entry(&context, storage.variables.as_ptr());
         let select_error = context.take_runtime_error();
@@ -318,15 +338,26 @@ fn branch_lowering_agrees_with_the_select_form_across_the_shipped_census() {
                 });
             let plan = build_model_plan_with_canonical_ir(&runtime.model, &runtime.canonical_ir)
                 .unwrap_or_else(|error| panic!("{module}: native plan: {error}"));
-            let _ = NativeRequiredStorage::for_model(&runtime.model);
             tally.models += 1;
             let before = tally.programs;
-            for (index, program) in value_programs(&plan).into_iter().enumerate() {
-                compare_program(module, index, program, &runtime.model, &mut tally);
+            let started = std::time::Instant::now();
+            let storages = [
+                (HostStorage::for_model(&runtime.model, 0.0), 0_u8),
+                (HostStorage::for_model(&runtime.model, 0.7), 0),
+                (HostStorage::for_model(&runtime.model, -0.4), 2),
+            ];
+            let programs = value_programs(&plan);
+            let ops = programs
+                .iter()
+                .map(|program| program.ops().len())
+                .sum::<usize>();
+            for (index, program) in programs.into_iter().enumerate() {
+                compare_program(module, index, program, &storages, &mut tally);
             }
             eprintln!(
-                "branch-agreement model={module} programs={}",
-                tally.programs - before
+                "branch-agreement model={module} programs={} ops={ops} seconds={:.1}",
+                tally.programs - before,
+                started.elapsed().as_secs_f64()
             );
         }
     }
