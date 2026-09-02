@@ -76,6 +76,13 @@ impl<T> LastAndAll<T> {
     fn into_parts(self) -> (Option<T>, Vec<T>) {
         (self.last, self.all)
     }
+
+    fn append(&mut self, mut other: Self) {
+        if other.last.is_some() {
+            self.last = other.last.take();
+        }
+        self.all.append(&mut other.all);
+    }
 }
 
 impl<T: Clone> LastAndAll<T> {
@@ -113,6 +120,40 @@ struct DirectiveOutcomes {
     pending_fourier: Vec<PendingFourier>,
 }
 
+impl DirectiveOutcomes {
+    /// Merge one coordinate-local execution into the deck-wide report without
+    /// letting a result from an earlier coordinate satisfy a failed analysis
+    /// in a later coordinate.
+    fn append(&mut self, mut other: Self) {
+        self.records.append(&mut other.records);
+        self.op.append(other.op);
+        self.dc.append(other.dc);
+        self.tran.append(other.tran);
+        self.ac.append(other.ac);
+        self.noise.append(other.noise);
+        replace_if_some(&mut self.distortion, other.distortion);
+        replace_if_some(&mut self.hb, other.hb);
+        replace_if_some(&mut self.s_parameters, other.s_parameters);
+        replace_if_some(&mut self.noise_core, other.noise_core);
+        replace_if_some(&mut self.tf, other.tf);
+        replace_if_some(&mut self.stb, other.stb);
+        replace_if_some(&mut self.pz, other.pz);
+        replace_if_some(&mut self.monte_carlo, other.monte_carlo);
+        replace_if_some(&mut self.step_result, other.step_result);
+        replace_if_some(&mut self.temperature, other.temperature);
+        replace_if_some(&mut self.sensitivity, other.sensitivity);
+        replace_if_some(&mut self.sensitivity_ac, other.sensitivity_ac);
+        self.fourier.append(&mut other.fourier);
+        self.pending_fourier.append(&mut other.pending_fourier);
+    }
+}
+
+fn replace_if_some<T>(target: &mut Option<T>, incoming: Option<T>) {
+    if incoming.is_some() {
+        *target = incoming;
+    }
+}
+
 /// Run every analysis directive the deck declares, then its `.MEAS` statements.
 pub(super) fn run(
     py_engine: &PyEngine,
@@ -131,7 +172,7 @@ pub(super) fn run(
         )
         .map_err(deck_plan_simulation_error)
     })?;
-    if plan.axes().is_empty() {
+    let mut measurements = if plan.axes().is_empty() {
         run_directives(
             py_engine,
             py,
@@ -145,11 +186,14 @@ pub(super) fn run(
             &mut out,
         )?;
         evaluate_pending_fourier(py, &mut out);
+        let mut measurements = evaluate_measurements(py, net, &out);
+        set_measurement_execution_context(&mut measurements, &plan, None);
+        measurements
     } else {
-        run_axis_plan(py_engine, py, netlist, &plan, continue_on_error, &mut out)?;
-    }
+        run_axis_plan(py_engine, py, netlist, &plan, continue_on_error, &mut out)?
+    };
 
-    let measurements = evaluate_measurements(py, net, &out);
+    measurements.shrink_to_fit();
     Ok(into_report(out, measurements))
 }
 
@@ -216,7 +260,7 @@ fn run_axis_plan(
     plan: &rspice_core::execution::DeckPlan,
     continue_on_error: bool,
     out: &mut DirectiveOutcomes,
-) -> PyResult<()> {
+) -> PyResult<Vec<PyMeasurement>> {
     let coordinates = run_interruptible(py, &py_engine.active_runs, |abort| {
         plan.coordinates_with_abort(&netlist.resource_limits, abort)
             .map_err(deck_plan_simulation_error)
@@ -249,6 +293,7 @@ fn run_axis_plan(
     let compatibility_axis = implicit_op.then(|| single_legacy_axis(plan)).flatten();
     let mut compatibility_operating_points = Vec::new();
     let mut compatibility_complete = compatibility_axis.is_some();
+    let mut measurements = Vec::new();
 
     for (run_index, core_coordinate) in coordinates.into_iter().enumerate() {
         let materialized_run = run_interruptible(py, &py_engine.active_runs, |abort| {
@@ -268,6 +313,7 @@ fn run_axis_plan(
             inner: materialized_netlist,
             resource_limits: netlist.resource_limits,
         };
+        let mut coordinate_out = DirectiveOutcomes::default();
 
         if implicit_op {
             let context = ExecutionContext {
@@ -282,10 +328,12 @@ fn run_axis_plan(
                         compatibility_complete = false;
                     }
                     let handle = Py::new(py, result)?;
-                    out.op.push_with(handle, |handle| handle.clone_ref(py));
+                    coordinate_out
+                        .op
+                        .push_with(handle, |handle| handle.clone_ref(py));
                     let mut record = PyAnalysisRecord::executed("op", ".op (implicit)".to_string());
                     record.set_execution_context(context.analysis_id, context.coordinate);
-                    out.records.push(record);
+                    coordinate_out.records.push(record);
                 }
                 Err(error) if continue_on_error => {
                     compatibility_complete = false;
@@ -295,7 +343,7 @@ fn run_axis_plan(
                         &crate::errors::describe_pyerr(py, &error),
                     );
                     record.set_execution_context(context.analysis_id, context.coordinate);
-                    out.records.push(record);
+                    coordinate_out.records.push(record);
                 }
                 Err(error) => return Err(error),
             }
@@ -310,11 +358,16 @@ fn run_axis_plan(
                     coordinate: Some(&coordinate),
                     analyses: plan.analyses(),
                 },
-                out,
+                &mut coordinate_out,
             )?;
         }
 
-        evaluate_pending_fourier(py, out);
+        evaluate_pending_fourier(py, &mut coordinate_out);
+        let mut coordinate_measurements =
+            evaluate_measurements(py, &materialized.inner, &coordinate_out);
+        set_measurement_execution_context(&mut coordinate_measurements, plan, Some(&coordinate));
+        measurements.append(&mut coordinate_measurements);
+        out.append(coordinate_out);
     }
 
     if compatibility_complete
@@ -331,7 +384,7 @@ fn run_axis_plan(
             _ => {}
         }
     }
-    Ok(())
+    Ok(measurements)
 }
 
 fn deck_plan_simulation_error(
@@ -405,6 +458,38 @@ fn legacy_coordinate_value(coordinate: &rspice_core::execution::RunCoordinate) -
         rspice_core::execution::RunAxisValue::DataRow(_) => Some(assignment.value_index() as f64),
         rspice_core::execution::RunAxisValue::AlterVariant { .. } => None,
         _ => None,
+    }
+}
+
+fn set_measurement_execution_context(
+    measurements: &mut [PyMeasurement],
+    plan: &rspice_core::execution::DeckPlan,
+    coordinate: Option<&PyRunCoordinate>,
+) {
+    for measurement in measurements {
+        let kind = match measurement.analysis.as_str() {
+            analysis if analysis.eq_ignore_ascii_case("TRAN") => {
+                Some(rspice_core::execution::AnalysisKind::Tran)
+            }
+            analysis if analysis.eq_ignore_ascii_case("DC") => {
+                Some(rspice_core::execution::AnalysisKind::Dc)
+            }
+            analysis if analysis.eq_ignore_ascii_case("AC") => {
+                Some(rspice_core::execution::AnalysisKind::Ac)
+            }
+            analysis if analysis.eq_ignore_ascii_case("NOISE") => {
+                Some(rspice_core::execution::AnalysisKind::Noise)
+            }
+            _ => None,
+        };
+        let analysis_id = kind.and_then(|kind| {
+            plan.analyses()
+                .iter()
+                .rev()
+                .find(|analysis| analysis.id().kind() == kind)
+                .map(|analysis| analysis.id().tag())
+        });
+        measurement.set_execution_context(analysis_id, coordinate.cloned());
     }
 }
 

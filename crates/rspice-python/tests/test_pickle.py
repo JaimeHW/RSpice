@@ -380,6 +380,8 @@ class TestResults:
         assert restored.failure_limit_exceeded == measurement.failure_limit_exceeded
         assert restored.passed == measurement.passed
         assert restored.analysis == measurement.analysis
+        assert restored.analysis_id == measurement.analysis_id
+        assert restored.coordinate == measurement.coordinate
 
         record = round_trip(report.records[0])
         assert record.kind == report.records[0].kind
@@ -402,6 +404,8 @@ class TestResults:
         assert restored.failure_limit == pytest.approx(2.0)
         assert restored.failure_limit_exceeded
         assert not restored.passed
+        assert restored.analysis_id is None
+        assert restored.coordinate is None
 
         legacy = rspice.Measurement._unpickle(
             "legacy", "DC", 1.25, None, (None, None), True

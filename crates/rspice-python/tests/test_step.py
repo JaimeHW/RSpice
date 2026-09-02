@@ -215,6 +215,35 @@ R1 out 0 1k
             record.coordinate.assignments[2].value for record in report.records
         ] == [25, 25, 25, 25, 100, 100, 100, 100]
 
+    def test_measurements_are_evaluated_per_coordinate_without_stale_results(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* coordinate-local measurements
+.param amplitude=1
+V1 out 0 {amplitude}
+R1 out 0 1k
+.step param amplitude list 1 2
+.tran 1n 2n
+.meas tran vmax MAX V(out)
+.end
+"""
+        )
+
+        report = engine.run(netlist)
+
+        assert len(report.measurements) == 2
+        assert [measurement.value for measurement in report.measurements] == pytest.approx(
+            [1, 2]
+        )
+        assert [measurement.analysis_id for measurement in report.measurements] == [
+            "tran-001",
+            "tran-001",
+        ]
+        assert [
+            measurement.coordinate.assignments[0].value
+            for measurement in report.measurements
+        ] == [1, 2]
+        assert all(measurement.passed for measurement in report.measurements)
+
     def test_step_varies_results(self, engine, param_divider):
         results = engine.run_step(param_divider, "rval", [1e3, 2e3, 5e3])
         assert len(results) == 3

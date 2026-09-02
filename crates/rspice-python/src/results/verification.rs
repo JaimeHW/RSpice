@@ -48,6 +48,12 @@ pub struct PyMeasurement {
     /// Whether the raw magnitude met or exceeded FAILVALUE.
     #[pyo3(get)]
     pub failure_limit_exceeded: bool,
+    /// Stable authored analysis instance evaluated by this measurement.
+    #[pyo3(get)]
+    pub analysis_id: Option<String>,
+    /// Materialized run coordinate evaluated by this measurement.
+    #[pyo3(get)]
+    pub coordinate: Option<PyRunCoordinate>,
     pub(crate) ok: bool,
 }
 
@@ -63,6 +69,8 @@ impl PyMeasurement {
             tolerance: result.tolerance,
             failure_limit: result.failure_limit,
             failure_limit_exceeded: result.failure_limit_exceeded,
+            analysis_id: None,
+            coordinate: None,
             ok: result.passed,
         }
     }
@@ -78,8 +86,19 @@ impl PyMeasurement {
             tolerance: None,
             failure_limit: None,
             failure_limit_exceeded: false,
+            analysis_id: None,
+            coordinate: None,
             ok: false,
         }
+    }
+
+    pub(crate) fn set_execution_context(
+        &mut self,
+        analysis_id: Option<String>,
+        coordinate: Option<PyRunCoordinate>,
+    ) {
+        self.analysis_id = analysis_id;
+        self.coordinate = coordinate;
     }
 
     fn failure_message(&self) -> String {
@@ -144,7 +163,7 @@ impl PyMeasurement {
     /// Rebuild from pickled state. Not part of the public API.
     #[staticmethod]
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (name, analysis, value, error, goal, ok, verification=None))]
+    #[pyo3(signature = (name, analysis, value, error, goal, ok, verification=None, execution=None))]
     fn _unpickle(
         name: String,
         analysis: String,
@@ -153,10 +172,12 @@ impl PyMeasurement {
         goal: (Option<f64>, Option<f64>),
         ok: bool,
         verification: Option<(Option<f64>, Option<f64>, bool)>,
+        execution: Option<(Option<String>, Option<PyRunCoordinate>)>,
     ) -> Self {
         let (expected, tolerance) = goal;
         let (raw_value, failure_limit, failure_limit_exceeded) =
             verification.unwrap_or((value, None, false));
+        let (analysis_id, coordinate) = execution.unwrap_or((None, None));
         Self {
             name,
             analysis,
@@ -167,6 +188,8 @@ impl PyMeasurement {
             tolerance,
             failure_limit,
             failure_limit_exceeded,
+            analysis_id,
+            coordinate,
             ok,
         }
     }
@@ -185,6 +208,7 @@ impl PyMeasurement {
             (Option<f64>, Option<f64>),
             bool,
             (Option<f64>, Option<f64>, bool),
+            (Option<String>, Option<PyRunCoordinate>),
         ),
     )> {
         Ok((
@@ -201,6 +225,7 @@ impl PyMeasurement {
                     self.failure_limit,
                     self.failure_limit_exceeded,
                 ),
+                (self.analysis_id.clone(), self.coordinate.clone()),
             ),
         ))
     }
