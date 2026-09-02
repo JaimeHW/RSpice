@@ -49,6 +49,7 @@ enum SpectreStatementKind {
     Model {
         name: String,
         canonical_type: String,
+        source_family: String,
         lowered: String,
     },
     Subcircuit {
@@ -98,6 +99,7 @@ struct SpectreStatisticsBlock {
 #[derive(Debug, Default)]
 struct SpectreSymbols {
     models: HashMap<String, String>,
+    bsimsoi_models: HashSet<String>,
     subcircuits: HashSet<String>,
 }
 
@@ -268,7 +270,7 @@ fn parse_spectre_statements(
                 adapt_include(rest, line_number)?,
             )),
             "model" => {
-                let (adapted, consumed) = adapt_model(lines, index)?;
+                let (adapted, source_family, consumed) = adapt_model(lines, index)?;
                 let (name, canonical_type) = adapted_model_identity(&adapted, line_number)?;
                 statements.push(SpectreStatement {
                     line: line_number,
@@ -276,6 +278,7 @@ fn parse_spectre_statements(
                     kind: SpectreStatementKind::Model {
                         name,
                         canonical_type,
+                        source_family,
                         lowered: adapted,
                     },
                 });
@@ -890,9 +893,13 @@ impl SpectreSymbols {
                 SpectreStatementKind::Model {
                     name,
                     canonical_type,
+                    source_family,
                     ..
                 } => {
                     let key = name.to_ascii_lowercase();
+                    if source_family.eq_ignore_ascii_case("bsimsoi") {
+                        symbols.bsimsoi_models.insert(key.clone());
+                    }
                     if let Some(existing) = symbols.models.insert(key, canonical_type.clone())
                         && !existing.eq_ignore_ascii_case(canonical_type)
                     {
@@ -1110,6 +1117,16 @@ fn lower_spectre_instance(
         }
         _ if symbols.models.contains_key(&master) => {
             let canonical = &symbols.models[&master];
+            if symbols.bsimsoi_models.contains(&master) && !matches!(instance.nodes.len(), 4 | 5) {
+                return Err(error(
+                    line,
+                    format!(
+                        "Spectre BSIMSOI instance '{}' has {} nodes; the native BSIM3-SOI route supports exactly four terminals or five terminals with a body contact, while six/seven-terminal forms are not yet represented",
+                        instance.name,
+                        instance.nodes.len()
+                    ),
+                ));
+            }
             let prefix = canonical_instance_prefix(canonical).ok_or_else(|| {
                 error(
                     line,
@@ -1364,63 +1381,63 @@ fn adapt_ahdl_include(rest: &str, line: usize) -> Result<String, SpectreModelAda
     Ok(format!(".veriloga \"{path}\""))
 }
 
-fn adapt_model(lines: &[&str], start: usize) -> Result<(String, usize), SpectreModelAdapterError> {
+fn adapt_model(
+    lines: &[&str],
+    start: usize,
+) -> Result<(String, String, usize), SpectreModelAdapterError> {
     let line_number = start + 1;
     let first = lines[start].trim();
     let (_, rest) = split_head(first);
     let (name, rest) = take_token(rest)
         .ok_or_else(|| error(line_number, "Spectre model declaration has no name"))?;
-    let (model_type, mut parameters) = take_token(rest)
+    let (model_type, parameters) = take_token(rest)
         .ok_or_else(|| error(line_number, "Spectre model declaration has no model type"))?;
+    let mut parameters = parameters.to_owned();
     let mut consumed = 1usize;
-    let mut brace_depth = brace_delta(parameters);
+    let mut brace_depth = brace_delta(&parameters);
     if brace_depth < 0 {
         return Err(error(
             line_number,
             "Spectre model declaration closes an unopened brace",
         ));
     }
-    while brace_depth > 0 {
-        let next = lines.get(start + consumed).ok_or_else(|| {
-            error(
-                line_number,
-                "Spectre model declaration has an unterminated parameter block",
-            )
-        })?;
-        parameters = parameters.trim_end();
-        let mut joined = parameters.to_owned();
-        joined.push(' ');
-        joined.push_str(next.trim());
-        // Keep the owned join alive by leaking only into the next iteration is
-        // not acceptable; switch to the final owned accumulator below.
-        let mut accumulator = joined;
-        consumed += 1;
-        brace_depth += brace_delta(next);
-        while brace_depth > 0 {
-            let next = lines.get(start + consumed).ok_or_else(|| {
-                error(
+
+    loop {
+        let Some(next) = lines.get(start + consumed) else {
+            if brace_depth > 0 {
+                return Err(error(
                     line_number,
                     "Spectre model declaration has an unterminated parameter block",
-                )
-            })?;
-            accumulator.push(' ');
-            accumulator.push_str(next.trim());
-            brace_depth += brace_delta(next);
-            consumed += 1;
+                ));
+            }
+            break;
+        };
+        let trimmed = next.trim();
+        let fragment = if brace_depth > 0 {
+            trimmed
+        } else if let Some(fragment) = trimmed.strip_prefix('+') {
+            fragment.trim_start()
+        } else {
+            break;
+        };
+
+        if !parameters.trim_end().is_empty() && !fragment.is_empty() {
+            parameters.push(' ');
         }
+        parameters.push_str(fragment);
+        consumed += 1;
+        brace_depth += brace_delta(fragment);
         if brace_depth < 0 {
             return Err(error(
                 start + consumed,
                 "Spectre model declaration closes too many braces",
             ));
         }
-        return Ok((
-            render_model(name, model_type, &accumulator, line_number)?,
-            consumed,
-        ));
     }
+
     Ok((
-        render_model(name, model_type, parameters, line_number)?,
+        render_model(name, model_type, &parameters, line_number)?,
+        model_type.to_ascii_lowercase(),
         consumed,
     ))
 }
@@ -1646,6 +1663,7 @@ fn canonical_model_type(
         "bsim2" => Some(5),
         "bsim3" | "bsim3v3" => Some(8),
         "bsim4" | "bsim4v8" => Some(54),
+        "bsimsoi" => Some(10),
         "ekv" | "ekv26" => Some(260),
         "ekv3" => Some(301),
         _ => None,
@@ -1673,8 +1691,38 @@ fn canonical_model_type(
             ),
         )
     })?;
+    if model_type_lower == "bsimsoi" {
+        validate_bsimsoi_version(assignments, line)?;
+    }
     ensure_model_level(assignments, level, line, model_type)?;
     Ok(canonical_type.to_owned())
+}
+
+fn validate_bsimsoi_version(
+    assignments: &[SpectreModelAssignment],
+    line: usize,
+) -> Result<(), SpectreModelAdapterError> {
+    let Some(version) = assignments
+        .iter()
+        .find(|assignment| assignment.name.eq_ignore_ascii_case("version"))
+    else {
+        return Ok(());
+    };
+    let value = version.value.trim_matches(['\'', '"']);
+    let supported = value
+        .parse::<f64>()
+        .is_ok_and(|value| value.is_finite() && (value - 3.2).abs() <= f64::EPSILON * 8.0);
+    if supported {
+        Ok(())
+    } else {
+        Err(error(
+            line,
+            format!(
+                "Spectre model family 'bsimsoi' requests unsupported VERSION={}; the native BSIM3-SOI route is qualified for VERSION=3.2",
+                version.value
+            ),
+        ))
+    }
 }
 
 fn validate_and_remove_redundant_polarity(
@@ -1904,6 +1952,112 @@ mod tests {
         .expect_err("polarity cannot be guessed");
         assert_eq!(error.line, 2);
         assert!(error.message.contains("explicit type=n or type=p"));
+    }
+
+    #[test]
+    fn bsimsoi_n_and_p_models_lower_with_line_preserving_continuations() {
+        let source = "simulator lang=spectre\nmodel nfet bsimsoi\n+ type=n\n+ version=3.2\n+ tox=8e-9\nmodel pfet bsimsoi type=p version=3.2 tox=8e-9\n";
+        let adapted = adapt_spectre_model_library(Path::new("bsimsoi.scs"), source)
+            .expect("qualified Spectre BSIMSOI models lower to native BSIM3-SOI cards");
+
+        assert_eq!(adapted.lines().count(), source.lines().count());
+        assert!(
+            adapted.contains(".model nfet NMOS ( level=10 version=3.2 tox=8e-9 )"),
+            "{adapted}"
+        );
+        assert!(
+            adapted.contains(".model pfet PMOS ( level=10 version=3.2 tox=8e-9 )"),
+            "{adapted}"
+        );
+        assert_eq!(
+            adapted
+                .lines()
+                .filter(|line| line.contains("spectre-model/2 continuation line"))
+                .count(),
+            3,
+            "{adapted}"
+        );
+    }
+
+    #[test]
+    fn malformed_or_unsupported_bsimsoi_cards_fail_at_the_model_source_line() {
+        for (source, expected) in [
+            (
+                "simulator lang=spectre\nmodel nfet bsimsoi version=3.2\n",
+                "requires explicit type=n or type=p",
+            ),
+            (
+                "simulator lang=spectre\nmodel nfet bsimsoi type=ambipolar version=3.2\n",
+                "unsupported polarity",
+            ),
+            (
+                "simulator lang=spectre\nmodel nfet bsimsoi type=n level=55 version=3.2\n",
+                "conflicts with LEVEL=55; expected LEVEL=10",
+            ),
+            (
+                "simulator lang=spectre\nmodel nfet bsimsoi type=n version=4.0\n",
+                "qualified for VERSION=3.2",
+            ),
+            (
+                "simulator lang=spectre\nmodel nfet bsimsoi\n+ type=n\n+ tox\n",
+                "parameter 'tox' has no '=' assignment",
+            ),
+        ] {
+            let error = adapt_spectre_model_library(Path::new("bsimsoi.scs"), source)
+                .expect_err("unsupported BSIMSOI semantics must not be approximated");
+            assert_eq!(error.line, 2, "{error}");
+            assert!(error.message.contains(expected), "{error}");
+        }
+    }
+
+    #[test]
+    fn unrepresented_bsimsoi_terminal_forms_fail_at_the_instance_source_line() {
+        let source = "simulator lang=spectre\nmodel nfet bsimsoi type=n version=3.2\nn1 (d g s e p b) nfet w=1u l=0.5u\n";
+        let error = adapt_spectre_model_library(Path::new("bsimsoi.scs"), source)
+            .expect_err("six-terminal BSIMSOI must not silently discard a node");
+
+        assert_eq!(error.line, 3, "{error}");
+        assert!(error.message.contains("has 6 nodes"), "{error}");
+        assert!(error.message.contains("not yet represented"), "{error}");
+
+        let canonical = crate::Netlist::parse(
+            "six-terminal BSIMSOI backstop\n\
+             m1 d g s e p b nmod w=1u l=0.5u\n\
+             vd d 0 1\n\
+             vg g 0 0.8\n\
+             .model nmod nmos level=10 version=3.2\n\
+             .end\n",
+        )
+        .expect("canonical six-terminal fixture parses");
+        let message = crate::engine::Engine::new(crate::engine::SimulationConfig::default())
+            .run_dc_op(&canonical)
+            .expect_err("the builder must independently reject unrepresented BSIMSOI nodes")
+            .to_string();
+        assert!(message.contains("6 terminals"), "{message}");
+        assert!(message.contains("not yet represented"), "{message}");
+    }
+
+    #[test]
+    fn lowered_bsimsoi_instances_execute_on_the_native_pd_route() {
+        let source = "simulator lang=spectre\nmodel nfet bsimsoi\n+ type=n\n+ version=3.2\n+ tox=8e-9\nmodel pfet bsimsoi type=p version=3.2 tox=8e-9\nvdd (vdd 0) vsource dc=1.8\nvdn (dn 0) vsource dc=1\nvdp (dp 0) vsource dc=0.8\nvgn (gn 0) vsource dc=0.8\nvgp (gp 0) vsource dc=1\nn1 (dn gn 0 0) nfet w=1u l=0.5u\np1 (dp gp vdd vdd) pfet w=1u l=0.5u\n";
+        let adapted = adapt_spectre_model_library(Path::new("bsimsoi.scs"), source)
+            .expect("qualified Spectre BSIMSOI fixture lowers");
+        let deck = crate::Netlist::parse(&format!(
+            "native Spectre BSIMSOI route\n{adapted}.op\n.end\n"
+        ))
+        .expect("lowered BSIMSOI fixture parses as canonical SPICE");
+        let (_, report) = crate::engine::Engine::new(crate::engine::SimulationConfig::default())
+            .run_dc_op_with_report(&deck)
+            .expect("lowered n/p BSIMSOI instances execute natively");
+
+        for name in ["Mn1", "Mp1"] {
+            let entry = report
+                .entries
+                .iter()
+                .find(|entry| entry.name.eq_ignore_ascii_case(name))
+                .unwrap_or_else(|| panic!("missing operating-point entry for {name}"));
+            assert_eq!(entry.device_kind, "B3SOIPD", "{name} must use LEVEL=10");
+        }
     }
 
     #[test]

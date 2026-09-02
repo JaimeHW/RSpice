@@ -8162,16 +8162,22 @@ impl Engine {
                     // uses SOIMOD to select the same native family.
                     if is_bsimsoi_level(level) {
                         if let Some(params_map) = params_map.as_ref() {
-                            reject_deferred_native_mos_model_params(
+                            if element.nodes.len() > 5 {
+                                return Err(SimulationError::Circuit(format!(
+                                    "MOSFET '{}': native BSIMSOI supports four terminals or five terminals with a body contact; {} terminals were provided, and six/seven-terminal forms are not yet represented",
+                                    element.name,
+                                    element.nodes.len()
+                                )));
+                            }
+                            let bsimsoi_params = native_bsimsoi_model_params_upper_map(
                                 &element.name,
                                 model,
-                                "BSIMSOI",
                                 params_map,
                                 native_expr_params,
                                 native_string_params,
                             )?;
                             let native_level =
-                                native_bsimsoi_level_for(level, params_map, instance_params)
+                                native_bsimsoi_level_for(level, &bsimsoi_params, instance_params)
                                     .map_err(|err| {
                                         SimulationError::Circuit(format!(
                                             "MOSFET '{}': model '{}' {err}",
@@ -8186,7 +8192,7 @@ impl Engine {
                                         element,
                                         resolved_mos_type,
                                         model,
-                                        params_map,
+                                        &bsimsoi_params,
                                         instance_params,
                                         deferred_params,
                                         self.config.temperature,
@@ -8199,7 +8205,7 @@ impl Engine {
                                         element,
                                         resolved_mos_type,
                                         model,
-                                        params_map,
+                                        &bsimsoi_params,
                                         instance_params,
                                         deferred_params,
                                         self.config.temperature,
@@ -8212,7 +8218,7 @@ impl Engine {
                                         element,
                                         resolved_mos_type,
                                         model,
-                                        params_map,
+                                        &bsimsoi_params,
                                         instance_params,
                                         deferred_params,
                                         self.config.temperature,

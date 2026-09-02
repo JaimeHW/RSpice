@@ -1273,6 +1273,61 @@ pub(super) fn reject_deferred_native_mos_model_params(
     Ok(())
 }
 
+pub(super) fn native_bsimsoi_model_params_upper_map(
+    element_name: &str,
+    model: &str,
+    params: &HashMap<String, f64>,
+    expr_params: &[(String, String)],
+    string_params: &[(String, String)],
+) -> Result<HashMap<String, f64>, SimulationError> {
+    let mut resolved = params.clone();
+
+    for (name, expr) in expr_params {
+        let param = name.to_ascii_uppercase();
+        return Err(SimulationError::Circuit(format!(
+            "MOSFET '{element_name}': native BSIMSOI model '{model}' uses unresolved model parameter {param}={expr}; \
+             native BSIMSOI model parameters must be finite numeric literals, except VERSION=3.2 metadata"
+        )));
+    }
+
+    for (name, value) in string_params {
+        let param = name.to_ascii_uppercase();
+        if param == "VERSION" {
+            let version = parse_dotted_version_metadata(value).ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "MOSFET '{element_name}': native BSIMSOI model '{model}' has invalid VERSION=\"{value}\"; \
+                     the qualified BSIM3-SOI route requires VERSION=3.2"
+                ))
+            })?;
+            if (version - 3.2).abs() > f64::EPSILON * 8.0 {
+                return Err(SimulationError::Circuit(format!(
+                    "MOSFET '{element_name}': native BSIMSOI model '{model}' requests unsupported VERSION=\"{value}\"; \
+                     the qualified BSIM3-SOI route requires VERSION=3.2"
+                )));
+            }
+            resolved.insert(param, version);
+            continue;
+        }
+
+        return Err(SimulationError::Circuit(format!(
+            "MOSFET '{element_name}': native BSIMSOI model '{model}' uses non-numeric model parameter {param}=\"{value}\"; \
+             native BSIMSOI model parameters must be finite numeric literals, except VERSION=3.2 metadata"
+        )));
+    }
+
+    for (name, value) in &resolved {
+        if !value.is_finite() {
+            let param = name.to_ascii_uppercase();
+            return Err(SimulationError::Circuit(format!(
+                "MOSFET '{element_name}': native BSIMSOI model '{model}' uses non-finite model parameter {param}={value}; \
+                 native BSIMSOI model parameters must be finite numeric literals"
+            )));
+        }
+    }
+
+    Ok(resolved)
+}
+
 pub(super) fn native_bsim3_model_params_upper_map(
     element_name: &str,
     model: &str,
@@ -1534,5 +1589,33 @@ mod tests {
             message.contains("VAF, VA, VBF"),
             "the diagnostic must identify the complete alias family: {message}"
         );
+    }
+
+    #[test]
+    fn native_bsimsoi_version_metadata_is_resolved_only_for_the_qualified_version() {
+        let params = diode_params(&[("LEVEL", 10.0)]);
+        let resolved = native_bsimsoi_model_params_upper_map(
+            "M1",
+            "NSOI",
+            &params,
+            &[],
+            &[("VERSION".to_string(), "3.2".to_string())],
+        )
+        .expect("VERSION=3.2 dotted metadata is part of the qualified route");
+        assert_eq!(resolved.get("VERSION"), Some(&3.2));
+
+        for version in ["4.0", "3.2.1", "latest"] {
+            let error = native_bsimsoi_model_params_upper_map(
+                "M1",
+                "NSOI",
+                &params,
+                &[],
+                &[("VERSION".to_string(), version.to_string())],
+            )
+            .expect_err("unqualified BSIMSOI version metadata must fail closed");
+            let message = error.to_string();
+            assert!(message.contains("VERSION"), "{message}");
+            assert!(message.contains("requires VERSION=3.2"), "{message}");
+        }
     }
 }
