@@ -227,7 +227,7 @@ impl<'a> Scalarizer<'a> {
                         // neither needs an id reserved ahead of its operands.
                         continue;
                     }
-                    for lane in shape.to_vec() {
+                    for lane in shape.iter().copied() {
                         let id = ValueId::from(self.values.len());
                         self.values.push(CfgValue {
                             id,
@@ -321,7 +321,7 @@ impl<'a> Scalarizer<'a> {
                     ) {
                         continue;
                     }
-                    for lane in shape.to_vec() {
+                    for lane in shape.iter().copied() {
                         let kind = self.lane_kind(source, lane)?;
                         let id = self.lane_of(source.id, lane, 0)?;
                         self.values[usize::from(id)].kind = kind;
