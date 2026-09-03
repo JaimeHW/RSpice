@@ -1372,8 +1372,13 @@ pub fn validate_output_symbols_with_abort(
             })?;
             expanded_dependencies.extend(extract_output_dependencies_with_context(&expanded, true));
         }
-        let mut ordered = validation_order(request);
-        ordered.extend(expanded_dependencies.iter());
+        let ordered = if request.directive.is_direct_output() {
+            let mut ordered = direct_output_validation_order(request);
+            ordered.extend(expanded_dependencies.iter());
+            ordered
+        } else {
+            authored_validation_order(request, &expanded_dependencies)
+        };
         let mut seen = HashSet::new();
         for dependency in ordered {
             poll_parse_text(abort, &dependency.symbol)?;
@@ -1636,14 +1641,46 @@ pub fn validate_output_symbols(netlist: &Netlist) -> Result<(), ParseError> {
     ))
 }
 
-fn validation_order(request: &OutputRequest) -> Vec<&OutputSymbolDependency> {
-    if !request.directive.is_direct_output() {
-        return request
-            .dependencies
-            .iter()
-            .filter(|dependency| request.expressions.is_empty() || !dependency.expression)
-            .collect();
+/// Order the dependencies of a request that is not a direct output.
+///
+/// `.FOUR`, `.FFT` and `.MEASURE` report an unresolved symbol in the order the
+/// card authored it. Xyce builds one operator per operand in sequence and
+/// reports each failure as it reaches it, so
+/// `.FOUR 1KHZ I(D1) P(D2) W(D3) V(2)` names `I(D1)`, then `P(D2)`, then
+/// `W(D3)`, then `V(2)`. An operand RSpice cannot classify as a probe — `P`
+/// and `W` are exactly that — is still an authored operand at its authored
+/// position, so it must not be deferred behind the operands that did classify.
+///
+/// User-function expansion can introduce circuit symbols the authored text
+/// never names. Those follow, in expansion order, and only when no authored
+/// dependency already covers them: expanding `{f(V(1))}` reproduces `V(1)`,
+/// which is one reference, not two.
+fn authored_validation_order<'a>(
+    request: &'a OutputRequest,
+    expanded: &'a [OutputSymbolDependency],
+) -> Vec<&'a OutputSymbolDependency> {
+    let mut ordered = request.dependencies.iter().collect::<Vec<_>>();
+    let mut authored = ordered
+        .iter()
+        .map(|dependency| dependency_identity(dependency))
+        .collect::<HashSet<_>>();
+    for dependency in expanded {
+        if authored.insert(dependency_identity(dependency)) {
+            ordered.push(dependency);
+        }
     }
+    ordered
+}
+
+fn dependency_identity(dependency: &OutputSymbolDependency) -> (OutputSymbolKind, String, String) {
+    (
+        dependency.kind,
+        dependency.operator.to_ascii_uppercase(),
+        canonical_symbol(&dependency.symbol),
+    )
+}
+
+fn direct_output_validation_order(request: &OutputRequest) -> Vec<&OutputSymbolDependency> {
     // Xyce creates direct lead-current operators before solution-vector node
     // operators. Keep lexical order within each namespace.
     let mut devices = request
