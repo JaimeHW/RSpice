@@ -284,9 +284,18 @@ fn encode_windows_xdata(
     }
     let function_words = function_len / 4;
     if function_words > 0x3ffff {
-        return Err(unwind_error(
-            "Windows ARM64 function exceeds the 1 MiB full-xdata limit",
-        ));
+        // The one size an A64 function still cannot exceed, and the only place
+        // it is real. The ABI's answer is to describe such a function as
+        // several fragments, each with its own `.pdata` entry and a `.xdata`
+        // record that says the prologue is elsewhere; until that encoding is
+        // written and validated on an ARM64 Windows host it is refused by
+        // name rather than guessed at. Every other platform's unwind format
+        // takes the same function unchanged.
+        return Err(unwind_error(format!(
+            "Windows ARM64 function of {function_len} bytes exceeds the {} bytes one .xdata \
+             record can describe, and fragmented unwind data is not emitted",
+            0x3ffff * 4
+        )));
     }
     if epilogue_start >= function_len || epilogue_start / 4 > 0x3ffff {
         return Err(unwind_error(

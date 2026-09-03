@@ -24,9 +24,18 @@ use crate::native::{JitError, JitResult};
 
 const MODEL: &str = "native-aarch64-image";
 const ENTRY_ALIGNMENT: usize = 16;
-// Windows ARM64 full xdata has an 18-bit instruction-count field. Keeping
-// every entry within that architectural limit also bounds local B/BL reach on
-// every host and makes the emitted image identical across desktop platforms.
+// The largest function one Windows ARM64 `.xdata` record can describe: its
+// Function Length field is an 18-bit instruction count.
+//
+// This is the *only* size that still binds an A64 function, and it binds one
+// platform's unwind metadata rather than the code. Nothing in the instruction
+// stream stops earlier: `B`/`BL` carry an imm26 word displacement and reach
+// 128 MiB, `B.cond`/`CBZ`/`CBNZ` are always emitted in the long form (the
+// inverse condition over an unconditional `B`, see `A64Encoder`), and `LDR`
+// (literal) reaches its constants through inline islands. So an entry over
+// this size is *segmented where its form allows it* — a postfix program can be
+// cut, a block program cannot — and is otherwise emitted whole, leaving the
+// refusal to `append_windows_unwind_data`, which is where the limit is real.
 pub(crate) const MAX_A64_FUNCTION_BYTES: usize = 0x3ffff * 4;
 const A64_NOP: [u8; 4] = 0xD503_201F_u32.to_le_bytes();
 const A64_BTI_C: [u8; 4] = 0xD503_245F_u32.to_le_bytes();
@@ -81,17 +90,6 @@ impl A64ImageBuilder {
                 self.image.len()
             )));
         }
-        if bytes.len() > MAX_A64_FUNCTION_BYTES {
-            return Err(JitError::Encoding {
-                model: MODEL.into(),
-                detail: format!(
-                    "AArch64 {entry_kind} is {} bytes, exceeding the {}-byte portable function limit",
-                    bytes.len(),
-                    MAX_A64_FUNCTION_BYTES
-                )
-                .into(),
-            });
-        }
         if bytes.get(..A64_BTI_C.len()) != Some(A64_BTI_C.as_slice()) {
             return Err(JitError::Verifier {
                 model: MODEL.into(),
@@ -120,12 +118,14 @@ impl A64ImageBuilder {
     /// entry is lifted into SSA as it always was, a block entry is already
     /// there.
     ///
-    /// The one thing only a postfix entry can do is *segment*. An A64 function
-    /// has an architectural size ceiling, and an entry over it is split into
-    /// numbered pieces behind a driver — a rewrite of the operand stream that
-    /// has no block-form counterpart, because a block program's control flow
-    /// does not survive being cut at an arbitrary operation. An oversized block
-    /// entry is therefore refused by name rather than mis-segmented.
+    /// The one thing only a postfix entry can do is *segment*. A postfix entry
+    /// over [`MAX_A64_FUNCTION_BYTES`] is split into numbered pieces behind a
+    /// driver — a rewrite of the operand stream that has no block-form
+    /// counterpart, because a block program's control flow does not survive
+    /// being cut at an arbitrary operation. A block entry over that size is
+    /// emitted whole: the code is correct at any length, and the only thing
+    /// that cannot describe it is one platform's unwind metadata, which is
+    /// where that refusal belongs.
     pub(super) fn append_value(
         &mut self,
         program: PlanProgramRef<'_>,
@@ -138,21 +138,12 @@ impl A64ImageBuilder {
             PlanProgramRef::Postfix(program) => compile_value_function(program)?,
             PlanProgramRef::Blocks(program) => compile_value_function_from_ssa(program.ssa())?,
         };
-        let offset = if bytes.len() <= MAX_A64_FUNCTION_BYTES {
-            self.append_function(bytes, entry_kind)
-        } else {
-            match program {
-                PlanProgramRef::Postfix(postfix) => {
-                    self.append_segmented_value(postfix, entry_kind)
-                }
-                PlanProgramRef::Blocks(_) => Err(program.unsupported(
-                    MODEL,
-                    &format!(
-                        "{entry_kind} needs {} bytes, over the {MAX_A64_FUNCTION_BYTES}-byte A64 \
-                         function ceiling, and only the postfix form can be segmented",
-                        bytes.len()
-                    ),
-                )),
+        let offset = match program {
+            PlanProgramRef::Postfix(postfix) if bytes.len() > MAX_A64_FUNCTION_BYTES => {
+                self.append_segmented_value(postfix, entry_kind)
+            }
+            PlanProgramRef::Postfix(_) | PlanProgramRef::Blocks(_) => {
+                self.append_function(bytes, entry_kind)
             }
         }?;
         self.value_entries.insert(program, offset);

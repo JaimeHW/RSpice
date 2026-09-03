@@ -33,9 +33,9 @@
 
 #![cfg_attr(not(feature = "native"), allow(dead_code))]
 
+use super::JitResult;
 use super::expr::{NativeOp, NativeProgram, collect_op_dependencies};
 use super::ssa;
-use super::{JitError, JitResult};
 use crate::canonical_ir::state::{CanonicalStateFamily, CanonicalStateOperator};
 use crate::codegen::StateRenumberingError;
 use crate::codegen::state_renumbering::StateSlotMapping;
@@ -281,18 +281,10 @@ impl<'a> PlanProgramRef<'a> {
         }
     }
 
-    /// Refuse this entry by name, for a backend that cannot take its form.
-    ///
-    /// Named refusal, not `todo!`: a backend that meets a form it cannot emit
-    /// says which backend, which form and why, and the caller gets an error it
-    /// can report rather than a panic.
-    pub(crate) fn unsupported(self, backend: &str, detail: &str) -> JitError {
-        JitError::unsupported_native_coverage(
-            backend,
-            format!("a {} value entry: {detail}", self.form_name()),
-        )
-    }
-
+    /// Which lowering this entry carries. Reported by the plan censuses; no
+    /// backend refuses an entry for its form any more, so nothing in the
+    /// shipping path reads it.
+    #[cfg(test)]
     pub(crate) fn form_name(self) -> &'static str {
         match self {
             Self::Postfix(_) => "postfix",
