@@ -49,6 +49,13 @@ num-complex = { version = "0.4", features = ["serde"] }
 qd = "0.8"
 rustfft = "=6.4.1"
 
+# Property testing. `default-features = false` with only `std` keeps this
+# dev-dependency to the strategy engine and its shrinker: no process forking,
+# no wall-clock timeouts and no entropy source, so a property case is a plain
+# in-process call and a failure reproduces from the fixed seed each test
+# declares.
+proptest = { version = "1", default-features = false, features = ["std"] }
+
 # Parallel computation
 rayon = "1.10"
 portable-atomic = { version = "1.10", features = ["float"] }

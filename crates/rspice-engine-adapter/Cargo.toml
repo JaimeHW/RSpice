@@ -19,6 +19,9 @@ sha2 = "0.10"
 thiserror.workspace = true
 uuid = { version = "1.0", default-features = false, features = ["serde", "std"] }
 
+[dev-dependencies]
+proptest.workspace = true
+
 [target.'cfg(not(windows))'.dependencies]
 # `termination` widens the handler past SIGINT to the SIGTERM a supervising
 # worker actually sends, which is the stop request this executor must honor.

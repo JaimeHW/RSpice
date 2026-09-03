@@ -307,6 +307,9 @@ wide = { version = "1.5", optional = true }
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
+# `execution_properties` states the planner, schema and bounded-IO laws as
+# properties over generated inputs instead of hand-picked cases.
+proptest.workspace = true
 # `abort_iteration_bounds` pins the compute pool to one thread so an
 # iteration bound is an exact number rather than a function of core count.
 rayon.workspace = true

@@ -12,6 +12,9 @@ rust-version.workspace = true
 [dependencies]
 thiserror.workspace = true
 
+[dev-dependencies]
+proptest.workspace = true
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
