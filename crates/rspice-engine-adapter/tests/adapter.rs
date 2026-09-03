@@ -959,6 +959,54 @@ fn launch_contract_violations_exit_nonzero_without_a_response() {
     assert!(delegating.stdout.is_empty());
 }
 
+/// The solve budget is a launch input the worker owns, not a compiled-in
+/// constant, and the two ways of getting it wrong are told apart: a budget
+/// that expires is a customer outcome on stdout, a budget that does not parse
+/// is a controller fault on the exit status.
+#[test]
+fn the_solve_budget_is_a_launch_input_with_a_bounded_outcome() {
+    let job = Job::new("solve-budget");
+    let deck = "budget exhaustion\n\
+                V1 in 0 PULSE(0 1 0 1n 1n 1u 2u)\n\
+                R1 in out 1k\n\
+                C1 out 0 1n\n\
+                .tran 1n 10m\n\
+                .end\n";
+    let request = build_request(
+        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
+        json!({"kind": "transient"}),
+        Vec::new(),
+    );
+
+    let expired = job.run_with(
+        &request,
+        &[("RSPICE_ENGINE_SOLVE_BUDGET_SECONDS", "0.001")],
+        &[],
+    );
+    assert_eq!(expired.status.code(), Some(0));
+    let response = parse_stdout(&expired);
+    assert_eq!(response["status"], "failed");
+    assert_eq!(
+        response["failure_code"], "engine.time_limit",
+        "an expired budget is a time limit, not a cancellation"
+    );
+
+    for malformed in ["0", "-5", "abc", ""] {
+        let refused = job.run_with(
+            &request,
+            &[("RSPICE_ENGINE_SOLVE_BUDGET_SECONDS", malformed)],
+            &[],
+        );
+        assert_eq!(
+            refused.status.code(),
+            Some(10),
+            "budget {malformed:?} must be a launch-contract violation rather than a \
+             silent fall back to the default"
+        );
+        assert!(refused.stdout.is_empty());
+    }
+}
+
 #[test]
 fn a_tampered_request_exits_nonzero_without_a_response() {
     let job = Job::new("tampered-request");
