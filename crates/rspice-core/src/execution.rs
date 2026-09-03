@@ -9,6 +9,7 @@ mod capability;
 mod fingerprint;
 mod materialized;
 mod plan;
+mod projection;
 pub mod result_document;
 mod schema;
 mod topology;
@@ -30,6 +31,10 @@ pub use plan::{
     AnalysisInstanceId, AnalysisKind, AnalysisRequest, AxisAssignment, AxisKind, DataBinding,
     DeckPlan, DeckPlanError, PlannedAnalysis, RunAxis, RunAxisValue, RunCoordinate,
     RunCoordinateId, StepAxisTarget, numeric_run_coordinate_id,
+};
+pub use projection::{
+    ProjectedSignal, ProjectedSignals, ProjectionSource, ProjectionSourceSignal, ProjectionValues,
+    SignalProjection, projection_analysis_kind, signal_descriptor,
 };
 pub use result_document::{
     ANALYSIS_RESULT_DOCUMENT_SCHEMA, ANALYSIS_RESULT_DOCUMENT_VERSION, AnalysisResultDocument,
