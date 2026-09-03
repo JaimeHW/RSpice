@@ -2519,12 +2519,14 @@ mod tests {
         assert_eq!(offset_of!(EvalContext, state_candidate_valid_len), 464);
         assert_eq!(offset_of!(EvalContext, state_older_candidate), 472);
         assert_eq!(offset_of!(EvalContext, state_older_candidate_len), 480);
+        assert_eq!(offset_of!(EvalContext, prelude_slots), 488);
+        assert_eq!(offset_of!(EvalContext, prelude_slots_len), 496);
         assert_eq!(offset_of!(NativeRuntimeStatus, failed), 0);
         assert_eq!(
             NativeRuntimeStatus::failed_offset(),
             offset_of!(NativeRuntimeStatus, failed)
         );
-        assert_eq!(size_of::<EvalContext>(), 488);
+        assert_eq!(size_of::<EvalContext>(), 504);
         assert_eq!(align_of::<EvalContext>(), 8);
     }
 
