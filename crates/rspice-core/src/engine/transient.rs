@@ -384,7 +384,9 @@ mod state_recovery;
 mod state_transmission_lines;
 mod step_control;
 mod truncation;
-use truncation::NgspiceChargeTruncationContext;
+use truncation::{
+    NgspiceChargeTruncationContext, NgspiceTruncationTolerances, TruncationStep, VoltageLteConfig,
+};
 mod vbic;
 use vbic::{VbicChargeStep, VbicPredictorHistory};
 
@@ -5210,10 +5212,12 @@ impl Engine {
                     mosfet_history.accepted_dt_prev_prev,
                     effective_companion_method,
                     step_trap_order,
-                    transient_lte_reltol,
-                    self.current_abstol(),
-                    self.charge_abstol(),
-                    self.transient_trtol(),
+                    NgspiceTruncationTolerances {
+                        reltol: transient_lte_reltol,
+                        current_abstol: self.current_abstol(),
+                        charge_abstol: self.charge_abstol(),
+                        trtol: self.transient_trtol(),
+                    },
                 )
             } else {
                 None
@@ -6842,16 +6846,20 @@ impl Engine {
                 Self::bjt_ngspice_truncation_limit(
                     &circuit,
                     &new_solution,
-                    current_method,
-                    step_trap_order,
-                    dt,
+                    TruncationStep {
+                        method: current_method,
+                        trap_order: step_trap_order,
+                        dt,
+                    },
                     &bjt_history,
                     &vbic_snapshot_cache,
                     self.voltage_abstol(),
-                    transient_lte_reltol,
-                    self.current_abstol(),
-                    self.charge_abstol(),
-                    self.transient_trtol(),
+                    NgspiceTruncationTolerances {
+                        reltol: transient_lte_reltol,
+                        current_abstol: self.current_abstol(),
+                        charge_abstol: self.charge_abstol(),
+                        trtol: self.transient_trtol(),
+                    },
                 )
                 .filter(|limit| limit.is_finite() && *limit > 0.0)
             } else {
@@ -6866,15 +6874,19 @@ impl Engine {
                     self.capacitor_ngspice_truncation_limit_parallel(
                         &circuit,
                         &new_solution,
-                        current_method,
-                        step_trap_order,
-                        dt,
+                        TruncationStep {
+                            method: current_method,
+                            trap_order: step_trap_order,
+                            dt,
+                        },
                         mosfet_history.accepted_dt_prev,
                         mosfet_history.accepted_dt_prev_prev,
-                        transient_lte_reltol,
-                        self.current_abstol(),
-                        self.charge_abstol(),
-                        self.transient_trtol(),
+                        NgspiceTruncationTolerances {
+                            reltol: transient_lte_reltol,
+                            current_abstol: self.current_abstol(),
+                            charge_abstol: self.charge_abstol(),
+                            trtol: self.transient_trtol(),
+                        },
                         worker_count,
                         &mut capacitor_accepted_states_scratch,
                     )
@@ -6882,15 +6894,19 @@ impl Engine {
                     Self::capacitor_ngspice_truncation_limit(
                         &circuit,
                         &new_solution,
-                        current_method,
-                        step_trap_order,
-                        dt,
+                        TruncationStep {
+                            method: current_method,
+                            trap_order: step_trap_order,
+                            dt,
+                        },
                         mosfet_history.accepted_dt_prev,
                         mosfet_history.accepted_dt_prev_prev,
-                        transient_lte_reltol,
-                        self.current_abstol(),
-                        self.charge_abstol(),
-                        self.transient_trtol(),
+                        NgspiceTruncationTolerances {
+                            reltol: transient_lte_reltol,
+                            current_abstol: self.current_abstol(),
+                            charge_abstol: self.charge_abstol(),
+                            trtol: self.transient_trtol(),
+                        },
                         Some(&mut capacitor_accepted_states_scratch),
                     )
                 };
@@ -6898,15 +6914,19 @@ impl Engine {
                 let limit = Self::capacitor_ngspice_truncation_limit(
                     &circuit,
                     &new_solution,
-                    current_method,
-                    step_trap_order,
-                    dt,
+                    TruncationStep {
+                        method: current_method,
+                        trap_order: step_trap_order,
+                        dt: dt,
+                    },
                     mosfet_history.accepted_dt_prev,
                     mosfet_history.accepted_dt_prev_prev,
-                    transient_lte_reltol,
-                    self.current_abstol(),
-                    self.charge_abstol(),
-                    self.transient_trtol(),
+                    NgspiceTruncationTolerances {
+                        reltol: transient_lte_reltol,
+                        current_abstol: self.current_abstol(),
+                        charge_abstol: self.charge_abstol(),
+                        trtol: self.transient_trtol(),
+                    },
                     Some(&mut capacitor_accepted_states_scratch),
                 );
                 capacitor_accepted_states_valid =
@@ -6922,15 +6942,19 @@ impl Engine {
                 Self::inductor_ngspice_truncation_limit(
                     &circuit,
                     &new_solution,
-                    current_method,
-                    step_trap_order,
-                    dt,
+                    TruncationStep {
+                        method: current_method,
+                        trap_order: step_trap_order,
+                        dt,
+                    },
                     mosfet_history.accepted_dt_prev,
                     mosfet_history.accepted_dt_prev_prev,
-                    transient_lte_reltol,
-                    self.current_abstol(),
-                    self.charge_abstol(),
-                    self.transient_trtol(),
+                    NgspiceTruncationTolerances {
+                        reltol: transient_lte_reltol,
+                        current_abstol: self.current_abstol(),
+                        charge_abstol: self.charge_abstol(),
+                        trtol: self.transient_trtol(),
+                    },
                 )
                 .filter(|limit| limit.is_finite() && *limit > 0.0)
             } else {
@@ -6943,15 +6967,19 @@ impl Engine {
                 Self::jfet_ngspice_truncation_limit(
                     &circuit,
                     &new_solution,
-                    current_method,
-                    step_trap_order,
-                    dt,
+                    TruncationStep {
+                        method: current_method,
+                        trap_order: step_trap_order,
+                        dt,
+                    },
                     &jfet_history,
                     suppress_gate_charge,
-                    transient_lte_reltol,
-                    self.current_abstol(),
-                    self.charge_abstol(),
-                    self.transient_trtol(),
+                    NgspiceTruncationTolerances {
+                        reltol: transient_lte_reltol,
+                        current_abstol: self.current_abstol(),
+                        charge_abstol: self.charge_abstol(),
+                        trtol: self.transient_trtol(),
+                    },
                 )
                 .filter(|limit| limit.is_finite() && *limit > 0.0)
             } else {
@@ -6964,14 +6992,18 @@ impl Engine {
                 Self::diode_ngspice_truncation_limit(
                     &circuit,
                     &new_solution,
-                    current_method,
-                    step_trap_order,
-                    dt,
+                    TruncationStep {
+                        method: current_method,
+                        trap_order: step_trap_order,
+                        dt,
+                    },
                     &diode_history,
-                    transient_lte_reltol,
-                    self.current_abstol(),
-                    self.charge_abstol(),
-                    self.transient_trtol(),
+                    NgspiceTruncationTolerances {
+                        reltol: transient_lte_reltol,
+                        current_abstol: self.current_abstol(),
+                        charge_abstol: self.charge_abstol(),
+                        trtol: self.transient_trtol(),
+                    },
                 )
                 .filter(|limit| limit.is_finite() && *limit > 0.0)
             } else {
@@ -7000,14 +7032,18 @@ impl Engine {
                     Self::mosfet_ngspice_truncation_limit(
                         &circuit,
                         &new_solution,
-                        current_method,
-                        step_trap_order,
-                        dt,
+                        TruncationStep {
+                            method: current_method,
+                            trap_order: step_trap_order,
+                            dt,
+                        },
                         &mosfet_history,
-                        transient_lte_reltol,
-                        self.current_abstol(),
-                        self.charge_abstol(),
-                        self.transient_trtol(),
+                        NgspiceTruncationTolerances {
+                            reltol: transient_lte_reltol,
+                            current_abstol: self.current_abstol(),
+                            charge_abstol: self.charge_abstol(),
+                            trtol: self.transient_trtol(),
+                        },
                         Some((&mut mosfet_caps_scratch, mosfet_caps_valid)),
                     )
                 }
@@ -7024,14 +7060,18 @@ impl Engine {
                 Self::vdmos_ngspice_truncation_limit(
                     &circuit,
                     &new_solution,
-                    current_method,
-                    step_trap_order,
-                    dt,
+                    TruncationStep {
+                        method: current_method,
+                        trap_order: step_trap_order,
+                        dt,
+                    },
                     &vdmos_history,
-                    transient_lte_reltol,
-                    self.current_abstol(),
-                    self.charge_abstol(),
-                    self.transient_trtol(),
+                    NgspiceTruncationTolerances {
+                        reltol: transient_lte_reltol,
+                        current_abstol: self.current_abstol(),
+                        charge_abstol: self.charge_abstol(),
+                        trtol: self.transient_trtol(),
+                    },
                 )
                 .filter(|limit| limit.is_finite() && *limit > 0.0)
             } else {
@@ -7044,14 +7084,18 @@ impl Engine {
                 Self::b3soi_ngspice_truncation_limit(
                     &circuit,
                     &new_solution,
-                    current_method,
-                    step_trap_order,
-                    dt,
+                    TruncationStep {
+                        method: current_method,
+                        trap_order: step_trap_order,
+                        dt,
+                    },
                     &b3soi_history,
-                    transient_lte_reltol,
-                    self.current_abstol(),
-                    self.charge_abstol(),
-                    self.transient_trtol(),
+                    NgspiceTruncationTolerances {
+                        reltol: transient_lte_reltol,
+                        current_abstol: self.current_abstol(),
+                        charge_abstol: self.charge_abstol(),
+                        trtol: self.transient_trtol(),
+                    },
                 )
                 .filter(|limit| limit.is_finite() && *limit > 0.0)
             } else {
@@ -7064,14 +7108,18 @@ impl Engine {
                 Self::bsim3_ngspice_truncation_limit(
                     &circuit,
                     &new_solution,
-                    current_method,
-                    step_trap_order,
-                    dt,
+                    TruncationStep {
+                        method: current_method,
+                        trap_order: step_trap_order,
+                        dt,
+                    },
                     &bsim3_history,
-                    transient_lte_reltol,
-                    self.current_abstol(),
-                    self.charge_abstol(),
-                    self.transient_trtol(),
+                    NgspiceTruncationTolerances {
+                        reltol: transient_lte_reltol,
+                        current_abstol: self.current_abstol(),
+                        charge_abstol: self.charge_abstol(),
+                        trtol: self.transient_trtol(),
+                    },
                 )
                 .filter(|limit| limit.is_finite() && *limit > 0.0)
             } else {
@@ -7084,14 +7132,18 @@ impl Engine {
                 Self::bsim4_ngspice_truncation_limit(
                     &circuit,
                     &new_solution,
-                    current_method,
-                    step_trap_order,
-                    dt,
+                    TruncationStep {
+                        method: current_method,
+                        trap_order: step_trap_order,
+                        dt,
+                    },
                     &bsim4_history,
-                    transient_lte_reltol,
-                    self.current_abstol(),
-                    self.charge_abstol(),
-                    self.transient_trtol(),
+                    NgspiceTruncationTolerances {
+                        reltol: transient_lte_reltol,
+                        current_abstol: self.current_abstol(),
+                        charge_abstol: self.charge_abstol(),
+                        trtol: self.transient_trtol(),
+                    },
                 )
                 .filter(|limit| limit.is_finite() && *limit > 0.0)
             } else {
@@ -7257,13 +7309,17 @@ impl Engine {
                     &circuit,
                     &new_solution,
                     lte_predicted_solution.as_deref(),
-                    dt,
-                    current_method,
-                    step_trap_order,
+                    TruncationStep {
+                        method: current_method,
+                        trap_order: step_trap_order,
+                        dt,
+                    },
                     is_strictly_linear_transient,
-                    &lte_estimator,
-                    &voltage_lte_excluded_nodes,
-                    &xyce_lte_excluded_indices,
+                    VoltageLteConfig {
+                        estimator: &lte_estimator,
+                        excluded_nodes: &voltage_lte_excluded_nodes,
+                        xyce_excluded_indices: &xyce_lte_excluded_indices,
+                    },
                 )
             };
             // Xyce CONSTSTEP still evaluates LTE for integration-order
@@ -7570,16 +7626,20 @@ impl Engine {
                         Self::bjt_ngspice_truncation_limit(
                             &circuit,
                             &new_solution,
-                            current_method,
-                            accepted_step_trap_order,
-                            dt,
+                            TruncationStep {
+                                method: current_method,
+                                trap_order: accepted_step_trap_order,
+                                dt,
+                            },
                             &bjt_history,
                             &vbic_snapshot_cache,
                             self.voltage_abstol(),
-                            transient_lte_reltol,
-                            self.current_abstol(),
-                            self.charge_abstol(),
-                            self.transient_trtol(),
+                            NgspiceTruncationTolerances {
+                                reltol: transient_lte_reltol,
+                                current_abstol: self.current_abstol(),
+                                charge_abstol: self.charge_abstol(),
+                                trtol: self.transient_trtol(),
+                            },
                         )
                         .filter(|limit| limit.is_finite() && *limit > 0.0)
                     } else {
@@ -7589,15 +7649,19 @@ impl Engine {
                         Self::jfet_ngspice_truncation_limit(
                             &circuit,
                             &new_solution,
-                            current_method,
-                            accepted_step_trap_order,
-                            dt,
+                            TruncationStep {
+                                method: current_method,
+                                trap_order: accepted_step_trap_order,
+                                dt,
+                            },
                             &jfet_history,
                             suppress_gate_charge,
-                            transient_lte_reltol,
-                            self.current_abstol(),
-                            self.charge_abstol(),
-                            self.transient_trtol(),
+                            NgspiceTruncationTolerances {
+                                reltol: transient_lte_reltol,
+                                current_abstol: self.current_abstol(),
+                                charge_abstol: self.charge_abstol(),
+                                trtol: self.transient_trtol(),
+                            },
                         )
                         .filter(|limit| limit.is_finite() && *limit > 0.0)
                     } else {
@@ -7608,15 +7672,19 @@ impl Engine {
                         Self::capacitor_ngspice_truncation_limit(
                             &circuit,
                             &new_solution,
-                            current_method,
-                            accepted_step_trap_order,
-                            dt,
+                            TruncationStep {
+                                method: current_method,
+                                trap_order: accepted_step_trap_order,
+                                dt,
+                            },
                             mosfet_history.accepted_dt_prev,
                             mosfet_history.accepted_dt_prev_prev,
-                            transient_lte_reltol,
-                            self.current_abstol(),
-                            self.charge_abstol(),
-                            self.transient_trtol(),
+                            NgspiceTruncationTolerances {
+                                reltol: transient_lte_reltol,
+                                current_abstol: self.current_abstol(),
+                                charge_abstol: self.charge_abstol(),
+                                trtol: self.transient_trtol(),
+                            },
                             None,
                         )
                         .filter(|limit| limit.is_finite() && *limit > 0.0)
@@ -7627,15 +7695,19 @@ impl Engine {
                         Self::inductor_ngspice_truncation_limit(
                             &circuit,
                             &new_solution,
-                            current_method,
-                            accepted_step_trap_order,
-                            dt,
+                            TruncationStep {
+                                method: current_method,
+                                trap_order: accepted_step_trap_order,
+                                dt,
+                            },
                             mosfet_history.accepted_dt_prev,
                             mosfet_history.accepted_dt_prev_prev,
-                            transient_lte_reltol,
-                            self.current_abstol(),
-                            self.charge_abstol(),
-                            self.transient_trtol(),
+                            NgspiceTruncationTolerances {
+                                reltol: transient_lte_reltol,
+                                current_abstol: self.current_abstol(),
+                                charge_abstol: self.charge_abstol(),
+                                trtol: self.transient_trtol(),
+                            },
                         )
                         .filter(|limit| limit.is_finite() && *limit > 0.0)
                     } else {
@@ -7645,14 +7717,18 @@ impl Engine {
                         Self::diode_ngspice_truncation_limit(
                             &circuit,
                             &new_solution,
-                            current_method,
-                            accepted_step_trap_order,
-                            dt,
+                            TruncationStep {
+                                method: current_method,
+                                trap_order: accepted_step_trap_order,
+                                dt,
+                            },
                             &diode_history,
-                            transient_lte_reltol,
-                            self.current_abstol(),
-                            self.charge_abstol(),
-                            self.transient_trtol(),
+                            NgspiceTruncationTolerances {
+                                reltol: transient_lte_reltol,
+                                current_abstol: self.current_abstol(),
+                                charge_abstol: self.charge_abstol(),
+                                trtol: self.transient_trtol(),
+                            },
                         )
                         .filter(|limit| limit.is_finite() && *limit > 0.0)
                     } else {
@@ -7663,14 +7739,18 @@ impl Engine {
                             Self::mosfet_ngspice_truncation_limit(
                                 &circuit,
                                 &new_solution,
-                                current_method,
-                                accepted_step_trap_order,
-                                dt,
+                                TruncationStep {
+                                    method: current_method,
+                                    trap_order: accepted_step_trap_order,
+                                    dt,
+                                },
                                 &mosfet_history,
-                                transient_lte_reltol,
-                                self.current_abstol(),
-                                self.charge_abstol(),
-                                self.transient_trtol(),
+                                NgspiceTruncationTolerances {
+                                    reltol: transient_lte_reltol,
+                                    current_abstol: self.current_abstol(),
+                                    charge_abstol: self.charge_abstol(),
+                                    trtol: self.transient_trtol(),
+                                },
                                 None,
                             )
                             .filter(|limit| limit.is_finite() && *limit > 0.0)
@@ -7681,14 +7761,18 @@ impl Engine {
                         Self::vdmos_ngspice_truncation_limit(
                             &circuit,
                             &new_solution,
-                            current_method,
-                            accepted_step_trap_order,
-                            dt,
+                            TruncationStep {
+                                method: current_method,
+                                trap_order: accepted_step_trap_order,
+                                dt,
+                            },
                             &vdmos_history,
-                            transient_lte_reltol,
-                            self.current_abstol(),
-                            self.charge_abstol(),
-                            self.transient_trtol(),
+                            NgspiceTruncationTolerances {
+                                reltol: transient_lte_reltol,
+                                current_abstol: self.current_abstol(),
+                                charge_abstol: self.charge_abstol(),
+                                trtol: self.transient_trtol(),
+                            },
                         )
                         .filter(|limit| limit.is_finite() && *limit > 0.0)
                     } else {
@@ -7698,14 +7782,18 @@ impl Engine {
                         Self::b3soi_ngspice_truncation_limit(
                             &circuit,
                             &new_solution,
-                            current_method,
-                            accepted_step_trap_order,
-                            dt,
+                            TruncationStep {
+                                method: current_method,
+                                trap_order: accepted_step_trap_order,
+                                dt,
+                            },
                             &b3soi_history,
-                            transient_lte_reltol,
-                            self.current_abstol(),
-                            self.charge_abstol(),
-                            self.transient_trtol(),
+                            NgspiceTruncationTolerances {
+                                reltol: transient_lte_reltol,
+                                current_abstol: self.current_abstol(),
+                                charge_abstol: self.charge_abstol(),
+                                trtol: self.transient_trtol(),
+                            },
                         )
                         .filter(|limit| limit.is_finite() && *limit > 0.0)
                     } else {
@@ -7715,14 +7803,18 @@ impl Engine {
                         Self::bsim3_ngspice_truncation_limit(
                             &circuit,
                             &new_solution,
-                            current_method,
-                            accepted_step_trap_order,
-                            dt,
+                            TruncationStep {
+                                method: current_method,
+                                trap_order: accepted_step_trap_order,
+                                dt,
+                            },
                             &bsim3_history,
-                            transient_lte_reltol,
-                            self.current_abstol(),
-                            self.charge_abstol(),
-                            self.transient_trtol(),
+                            NgspiceTruncationTolerances {
+                                reltol: transient_lte_reltol,
+                                current_abstol: self.current_abstol(),
+                                charge_abstol: self.charge_abstol(),
+                                trtol: self.transient_trtol(),
+                            },
                         )
                         .filter(|limit| limit.is_finite() && *limit > 0.0)
                     } else {
@@ -7732,14 +7824,18 @@ impl Engine {
                         Self::bsim4_ngspice_truncation_limit(
                             &circuit,
                             &new_solution,
-                            current_method,
-                            accepted_step_trap_order,
-                            dt,
+                            TruncationStep {
+                                method: current_method,
+                                trap_order: accepted_step_trap_order,
+                                dt,
+                            },
                             &bsim4_history,
-                            transient_lte_reltol,
-                            self.current_abstol(),
-                            self.charge_abstol(),
-                            self.transient_trtol(),
+                            NgspiceTruncationTolerances {
+                                reltol: transient_lte_reltol,
+                                current_abstol: self.current_abstol(),
+                                charge_abstol: self.charge_abstol(),
+                                trtol: self.transient_trtol(),
+                            },
                         )
                         .filter(|limit| limit.is_finite() && *limit > 0.0)
                     } else {
@@ -8233,15 +8329,19 @@ impl Engine {
                         &b3soi_history,
                         &bsim3_history,
                         &bsim4_history,
-                        &lte_estimator,
-                        &voltage_lte_excluded_nodes,
-                        &xyce_lte_excluded_indices,
+                        VoltageLteConfig {
+                            estimator: &lte_estimator,
+                            excluded_nodes: &voltage_lte_excluded_nodes,
+                            xyce_excluded_indices: &xyce_lte_excluded_indices,
+                        },
                         &vbic_snapshot_cache,
                         self.voltage_abstol(),
-                        transient_lte_reltol,
-                        self.current_abstol(),
-                        self.charge_abstol(),
-                        self.transient_trtol(),
+                        NgspiceTruncationTolerances {
+                            reltol: transient_lte_reltol,
+                            current_abstol: self.current_abstol(),
+                            charge_abstol: self.charge_abstol(),
+                            trtol: self.transient_trtol(),
+                        },
                     )
                 }
             } else {
@@ -8532,9 +8632,11 @@ impl Engine {
                         &mut timestep,
                         &lte_estimator,
                         &new_solution,
-                        current_method,
-                        step_trap_order,
-                        dt,
+                        TruncationStep {
+                            method: current_method,
+                            trap_order: step_trap_order,
+                            dt,
+                        },
                         accepted_max_step,
                         is_strictly_linear_transient,
                         expected_source_delta,

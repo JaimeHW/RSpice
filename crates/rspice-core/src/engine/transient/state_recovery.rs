@@ -8,15 +8,18 @@ impl Engine {
         timestep: &mut TimestepController,
         lte_estimator: &LteEstimator,
         accepted_solution: &[Value],
-        active_method: IntegrationMethod,
-        active_order: u8,
-        dt: Value,
+        step: TruncationStep,
         max_step: Value,
         is_strictly_linear_transient: bool,
         expected_source_delta: Value,
         source_activity_growth_cap_enabled: bool,
         accepted_scale: Option<Value>,
     ) {
+        let TruncationStep {
+            method: active_method,
+            trap_order: active_order,
+            dt,
+        } = step;
         // Native strictly linear steps are solved directly, so they can recover
         // from breakpoint restart steps faster than Newton-limited nonlinear
         // decks. Xyce accepted-solution LTE remains authoritative even on a
@@ -324,9 +327,11 @@ mod tests {
             &mut timestep,
             &estimator,
             &[1.0],
-            IntegrationMethod::Trapezoidal,
-            2,
-            1.0,
+            TruncationStep {
+                method: IntegrationMethod::Trapezoidal,
+                trap_order: 2,
+                dt: 1.0,
+            },
             10.0,
             true,
             0.0,
@@ -350,13 +355,15 @@ mod tests {
                 &mut timestep,
                 &estimator,
                 &[1.0],
-                method,
-                if method == IntegrationMethod::BackwardEuler {
-                    1
-                } else {
-                    2
+                TruncationStep {
+                    method,
+                    trap_order: if method == IntegrationMethod::BackwardEuler {
+                        1
+                    } else {
+                        2
+                    },
+                    dt: 1.0,
                 },
-                1.0,
                 10.0,
                 true,
                 0.0,
@@ -377,9 +384,11 @@ mod tests {
             &mut timestep,
             &estimator,
             &[1.0],
-            IntegrationMethod::Gear2,
-            2,
-            1.0,
+            TruncationStep {
+                method: IntegrationMethod::Gear2,
+                trap_order: 2,
+                dt: 1.0,
+            },
             10.0,
             true,
             0.0,
@@ -399,9 +408,11 @@ mod tests {
             &mut timestep,
             &estimator,
             &[1.0],
-            IntegrationMethod::Gear2,
-            1,
-            1.0,
+            TruncationStep {
+                method: IntegrationMethod::Gear2,
+                trap_order: 1,
+                dt: 1.0,
+            },
             10.0,
             true,
             0.0,
@@ -423,9 +434,11 @@ mod tests {
             &mut timestep,
             &estimator,
             &[1.0],
-            trapgear.current_method(),
-            2,
-            1.0,
+            TruncationStep {
+                method: trapgear.current_method(),
+                trap_order: 2,
+                dt: 1.0,
+            },
             10.0,
             true,
             0.0,

@@ -3066,10 +3066,12 @@ M1 d g 0 0 NM W=10u L=1u
             dt,
             IntegrationMethod::BackwardEuler,
             1,
-            1.0e-3,
-            1.0e-12,
-            1.0e-14,
-            7.0,
+            NgspiceTruncationTolerances {
+                reltol: 1.0e-3,
+                current_abstol: 1.0e-12,
+                charge_abstol: 1.0e-14,
+                trtol: 7.0,
+            },
         )
         .expect("limited-candidate truncation context is valid");
         let limited_evaluation = engine
@@ -3162,14 +3164,18 @@ M1 d g 0 0 NM W=10u L=1u
         let canonical_limit = Engine::mosfet_ngspice_truncation_limit(
             &circuit,
             &limited_solution,
-            IntegrationMethod::BackwardEuler,
-            1,
-            dt,
+            TruncationStep {
+                method: IntegrationMethod::BackwardEuler,
+                trap_order: 1,
+                dt,
+            },
             &limited_history,
-            1.0e-3,
-            1.0e-12,
-            1.0e-14,
-            7.0,
+            NgspiceTruncationTolerances {
+                reltol: 1.0e-3,
+                current_abstol: 1.0e-12,
+                charge_abstol: 1.0e-14,
+                trtol: 7.0,
+            },
             Some((&mut companion_caps, true)),
         );
         assert!(!limited_evaluation.truncation_evaluated);
