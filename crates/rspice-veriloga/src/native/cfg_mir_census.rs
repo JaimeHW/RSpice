@@ -1381,8 +1381,7 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
             // — it repeats the lower/differentiate/scalarize passes rather than
             // borrowing the plan builder's — and not about the route.
             let cfg_candidate = cfg_here.and_then(|values| values.get(&entry)).copied();
-            let cfg_dd = cfg_candidate
-                .filter(|value| same_reading(value.narrow(), cfg));
+            let cfg_dd = cfg_candidate.filter(|value| same_reading(value.narrow(), cfg));
             let diverged = cfg_candidate.is_some() && cfg_dd.is_none();
             let comparison = Comparison {
                 entry,
