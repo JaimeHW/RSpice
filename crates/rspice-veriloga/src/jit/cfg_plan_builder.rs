@@ -385,12 +385,14 @@ const DERIVATIVE_RULE_HOLES: &[CfgBinaryOp] = &[CfgBinaryOp::Hypot, CfgBinaryOp:
 /// itself, which is the `LoadVariable` the postfix route's own read lowers to —
 /// `CfgLowerMode::frozen_event_state` in `canonical_ir::cfg_lower` is where the
 /// two consumers part company, and why.
-/// A **prologue-only definition** —
-/// a localparam or a declaration initializer the body reads — took Verilog-AMS
-/// zero because the CFG had no definition of it at all; W-F4b gave the
-/// executable lowering the module prologue, so the entry block writes what the
-/// initializer wrote and the body overwrites it exactly where a later statement
-/// would ([`crate::canonical_ir::HirModel::prologue_statements`]).
+///
+/// A **prologue-only definition** — a localparam or a declaration initializer
+/// the body reads — took Verilog-AMS zero because the CFG had no definition of
+/// it at all; W-F4b gave the executable lowering the module prologue, so the
+/// entry block writes what the initializer wrote and the body overwrites it
+/// exactly where a later statement would
+/// ([`crate::canonical_ir::HirModel::prologue_statements`]).
+///
 /// `$port_connected` folded to `1.0`
 /// because the generated backend builds every instance it evaluates;
 /// [`CfgModel::from_hir_for_executable_backend`](crate::canonical_ir::CfgModel::from_hir_for_executable_backend)
@@ -407,6 +409,19 @@ const DERIVATIVE_RULE_HOLES: &[CfgBinaryOp] = &[CfgBinaryOp::Hypot, CfgBinaryOp:
 ///   measured 4.5 against 2.5 on one entry. Detected as a shipped value entry
 ///   with a non-empty contribution-current read set, which is what "this entry
 ///   probes a current" means in the plan.
+///
+///   Closing it means the same thing closing the other four meant: give the
+///   CFG route the decision the MIR route made. The MIR route's read is
+///   `NativeOp::LoadCurrent(pair)` or `LoadPriorCurrent(index)`, chosen in
+///   [`crate::native`]'s `lower_branch_access` from the compiled model's
+///   terminal pairing — knowledge the CFG level must not have. So the leaf
+///   [`CfgLowerer::contributed_flow`](crate::canonical_ir::cfg_lower) emits has
+///   to name the node pair canonically and
+///   [`CfgRuntimeBindings`](crate::jit::cfg_program::CfgRuntimeBindings) has to
+///   carry the translation, exactly as it already carries the branch-unknown
+///   and event-state maps. The derivative then needs no rule: a leaf's
+///   derivative is zero, which is what "frozen" means. The generated backend
+///   keeps inlining — it has no prior-current runtime to read.
 ///
 /// # This list is empirical, and that is a bound on what it is worth
 ///
@@ -957,31 +972,37 @@ pub(crate) enum PlanRoute {
 /// [`a_closed_divergence_takes_the_cfg_route`] is where they moved to:
 /// `$port_connected` is a runtime leaf for a backend that evaluates instances
 /// it did not build, and `$simparam` reads the same default table on both
-/// routes. [`route_divergence`] and [`DERIVATIVE_RULE_HOLES`] screen the other
-/// four, and with them the estate is green — 2080 tests, `--test-threads=1`,
-/// `--features native`, exit 0 with this constant reading `Cfg`.
+/// routes. W-F4b closed two more, the way this section says to: a body read of
+/// a **prologue-only definition** now sees the prologue, evaluated into the
+/// entry block, and a read of an **event-controlled variable** is the entry
+/// block's leaf rather than a second application of the event body.
+/// [`route_divergence`] and [`DERIVATIVE_RULE_HOLES`] screen the other two, and
+/// with them the estate is green — `--test-threads=1`, `--features native`,
+/// `--no-fail-fast`, fifty-seven test binaries, exit 0 with this constant
+/// reading `Cfg`.
 ///
-/// The fallback census taken on that run, against W-F3c's:
+/// The fallback census taken on that run, against W-F4's and W-F3c's:
 ///
 /// ```text
-///                          W-F3c   W-F4
-/// lowering                    63     63
-/// cfg-lowering                24     24
-/// known-divergence            28     15
-/// derivative-rule-missing      7      7
-///                            ---    ---
-///                            122    109
+///                          W-F3c   W-F4  W-F4b
+/// lowering                    63     63     63
+/// cfg-lowering                24     24     24
+/// known-divergence            28     15     11
+/// derivative-rule-missing      7      7      7
+///                            ---    ---    ---
+///                            122    109    105
 /// ```
 ///
-/// The thirteen are the two closed constructs and the array screen's
+/// W-F4's thirteen were its two closed constructs and the array screen's
 /// over-refusal: the prologue screen named a variable rather than counting a
 /// module's arrays, so `polysum`, `gsel`, `desc` and `lpsize` — which declare
 /// arrays and fill every element inside the analog block — took the CFG route
-/// from W-F4 on. What was left under `known-divergence` was eleven
-/// contribution-current probes, three event-controlled variables, and `cinit`,
-/// whose array really is filled by a declaration initializer.
+/// from W-F4 on. W-F4b's four are `cinit`, whose array really is filled by a
+/// declaration initializer, and the three event-controlled variables. Every one
+/// of the eleven left is a contribution-current probe: that class is now the
+/// whole of what [`route_divergence`] names.
 ///
-/// # The screen is empirical, and W-F4 measured what that costs
+/// # The screen is empirical, and that is a bound on what it is worth
 ///
 /// It names what about twelve hundred tests happened to expose, not what a
 /// proof would name. W-F4 went looking for what they did not: a module-scope
@@ -996,8 +1017,9 @@ pub(crate) enum PlanRoute {
 /// run past nine modules.
 ///
 /// So the switch sits here at `Postfix` until that census runs 43/43 and the
-/// remaining classes are closed rather than screened. Flipping it is a one-line
-/// change and everything behind [`PlanRoute::Cfg`] is live, tested and pinned.
+/// contribution-current probe is closed rather than screened. Flipping it is a
+/// one-line change and everything behind [`PlanRoute::Cfg`] is live, tested and
+/// pinned.
 ///
 /// # What `Postfix` reaches, and why the shipped plan is byte-identical
 ///
