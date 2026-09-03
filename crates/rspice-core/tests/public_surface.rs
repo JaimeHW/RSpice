@@ -279,7 +279,100 @@ use rspice_core::analysis::harmonic_balance::{
 // ResultSchemaMismatchError is part of the cross-surface typed failure
 // contract, so its type, constructor, and SimulationError constructor are
 // intentionally public.
-const MAX_PUBLIC_ITEMS: usize = 4438;
+//
+// 2026-09-03, +478 (4,438 -> 4,916): the visibility-narrowing pass over
+// everything the non-UI production-readiness program added since `c7c86ae33`,
+// and the single raise that records what is left standing.
+//
+// The tree stood at 5,060 when this pass began — 622 over the ceiling, with
+// this test red on `main`. 144 of those statements are gone; the other 478 are
+// the raise. Every one of the 144 was decided by compiling `rspice-cli`,
+// `rspice-conformance`, `rspice-engine-adapter`, `rspice-python`,
+// `rspice-wasm`, `rspice-bench` and `rspice-ui` with `--all-targets` against
+// the narrowed item, not by grepping for its name: a grouped `pub use` lets a
+// frontend reach an item through a path the declaration never spells, so the
+// compiler is the only witness.
+//
+// Narrowed to `pub(crate)`, by module:
+//
+// - `device` and `circuit`, -63. C1's argument records — `B3SoiDdNodes`,
+//   `B3SoiPdNodes`, `SoiCompanionCurrents`, `VoltageControlledNodes`,
+//   `CoupledWinding`, `ResistorValues`, `SourceExcitation`,
+//   `SolutionDependentCompanionStep`, `DistributedRlgc`,
+//   `XyceCoreCompanionMode`, `MosfetIndices`, `MosRegion`,
+//   `MosBodyJunctionModel`, `MosfetOpValues` — plus the stamping,
+//   construction and operating-point methods that carry them. They were `pub`
+//   only because `private_interfaces` requires an argument type to be at least
+//   as public as its function.
+// - `execution`, -30. The `serde(with = ...)` bridge in
+//   `result_document/wire.rs` is 22 of it: `serialize`/`deserialize` pairs
+//   inside `pub(super) mod` blocks, spelled `pub` out of habit and reachable
+//   only from `execution::result_document`. The rest is `payload_ref`,
+//   `replace_payload`, `numeric_columns`, `ScalarUnavailability::classify`,
+//   `ResultPayload::value_count`, `PlannedPostProcess::with_upstream`,
+//   `transient_output_unit`, and the `probe_specification_error` re-export.
+// - `analysis` and `netlist`, -39. The periodic-card defaults in `ast.rs`
+//   (`DEFAULT_HARMONICS`, `DEFAULT_RELTOL`, `DEFAULT_SIDEBAND_MAX`, ...), the
+//   Spectre statistics sampling methods, `probe_specification_error`, the
+//   frequency-grid helpers, and the `_with_abort` sweep-point overloads on the
+//   PAC, PNOISE, PXF, STB and transfer configs.
+// - `engine`, `numerics` and `xspice`, -12. `TransientChannelOwner`'s
+//   constructors, `parse_integration_method`, `LtePrefixWindow`,
+//   `CodeModelVectorParams` and `XspiceEventInputs`.
+//
+// Deleted, because narrowing made `-D warnings` say the item had no caller at
+// all: `Mosfet::qgs`, `qgd` and `qgb`; `Engine::resolve_node_with_abort`,
+// whose own doc comment sends callers to `NodeResolver::build_with_abort`; and
+// the whole `LossyTransmissionLine` module, which nothing in the workspace
+// constructed — the lossy lines the product runs are the LTRA and
+// distributed-RLC kernels in `transmission_line/line.rs`.
+//
+// Marked `#[cfg(test)]` rather than narrowed, because the only callers are
+// this crate's own unit tests: `Mosfet::is_initially_off`, `uses_legacy_bsim`,
+// the two `add_with_ac_and_spec` source overloads, `assemble_port_noise` (the
+// uncancellable twin of `assemble_port_noise_with_abort`), and
+// `XspiceInstance::update_inputs`, whose production form is
+// `update_inputs_with_analog_transitions`.
+//
+// What stayed public, and who needs it:
+//
+// - `execution/result_document/payload.rs`, 87 statements, and the sample and
+//   window types beside them in `result_document.rs`. `ResultPayload` is a
+//   public enum that `rspice-python`, `rspice-wasm` and
+//   `rspice-engine-adapter` all match on, and every payload document is one of
+//   its variant fields, so `private_interfaces` makes this surface public by
+//   construction rather than by choice.
+// - `execution/result_document.rs` and `builders.rs`. All 24 `from_*`
+//   constructors have a frontend caller: the CLI's periodic runners, the
+//   engine adapter's family dispatch, the Python result wrappers and the WASM
+//   deck runner between them name every one.
+// - `ArtifactNamespace` and the materializer entry points. The CLI and the
+//   engine adapter reach the namespace through
+//   `MaterializedAnalysis::output_namespace()` without ever spelling its name,
+//   which is exactly the case a grep would have got wrong.
+// - The capability matrices (`ANALYSIS_CAPABILITY_MATRIX`,
+//   `SIGNAL_CAPABILITY_MATRIX`, `SurfaceCapability`), the checkpoint
+//   capability vocabulary, `evaluate_transient_post_results`,
+//   `evaluate_transient_fourier_results`, `SignalProjection::keeps_everything`
+//   and the `CountingAbort`/`ImmediateAbort` observation accessors. Their only
+//   callers are integration tests under `crates/rspice-core/tests/` —
+//   `qualification_baseline`, `transient_checkpoint`,
+//   `transient_compression_container`, `planned_post_process`,
+//   `save_directives`, `abort_iteration_bounds` — and an integration test is
+//   an external crate, so `pub(crate)` would make them uncompilable.
+// - `netlist/ast.rs`'s analysis cards and `spectre_statistics`'s plan
+//   vocabulary: the conformance suite reads the cards, and the plan types are
+//   the types of `Netlist`'s own public fields.
+//
+// Six items are public with no caller anywhere, and are named here rather than
+// hidden: `Mosfet::gate_charges`, `transient_fft_window_coherent_gain`,
+// `planned_transient_fft_spectra` with `PlannedFftSpectrum`,
+// `BoundedAbortWriter::byte_limit` and `SurfaceCapability::unsupported`.
+// Narrowing each one turns it into dead code that `-D warnings` then deletes,
+// and each is either a physical model or an execution-contract entry point
+// whose consumer is another package's work in flight. Deleting them is a
+// decision for the package that owns the consumer, not for a visibility pass.
+const MAX_PUBLIC_ITEMS: usize = 4916;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
