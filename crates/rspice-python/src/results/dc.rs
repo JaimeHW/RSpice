@@ -19,14 +19,18 @@ use super::*;
 #[pyclass(name = "SimulationResult", module = "rspice")]
 pub struct PySimulationResult {
     pub(crate) inner: SimulationResult,
-    device_operating_points: Vec<PyDeviceOperatingPoint>,
+    /// `None` when the producing analysis captured no device operating-point
+    /// report at all, which is a different fact from "the circuit has no
+    /// devices with operating points". An empty list means the latter.
+    device_operating_points: Option<Vec<PyDeviceOperatingPoint>>,
 }
 
 impl PySimulationResult {
+    /// A solution whose producer captured no device operating-point report.
     pub fn new(inner: SimulationResult) -> Self {
         Self {
             inner,
-            device_operating_points: Vec::new(),
+            device_operating_points: None,
         }
     }
 
@@ -36,17 +40,19 @@ impl PySimulationResult {
     ) -> Self {
         Self {
             inner,
-            device_operating_points: report
-                .entries
-                .into_iter()
-                .map(PyDeviceOperatingPoint::from_core)
-                .collect(),
+            device_operating_points: Some(
+                report
+                    .entries
+                    .into_iter()
+                    .map(PyDeviceOperatingPoint::from_core)
+                    .collect(),
+            ),
         }
     }
 
     fn new_with_device_operating_points(
         inner: SimulationResult,
-        device_operating_points: Vec<PyDeviceOperatingPoint>,
+        device_operating_points: Option<Vec<PyDeviceOperatingPoint>>,
     ) -> Self {
         Self {
             inner,
@@ -124,14 +130,34 @@ impl PySimulationResult {
     }
 
     /// Per-device operating-point summaries captured by DC OP analysis.
+    ///
+    /// `None` when the analysis that produced this solution captured no
+    /// report; an empty list when it captured one and the circuit has no
+    /// device with an operating point. The two are not the same fact.
     #[getter]
-    fn device_operating_points(&self) -> Vec<PyDeviceOperatingPoint> {
+    fn device_operating_points(&self) -> Option<Vec<PyDeviceOperatingPoint>> {
         self.device_operating_points.clone()
     }
 
+    /// Whether this solution carries a device operating-point report.
+    #[getter]
+    fn has_device_operating_points(&self) -> bool {
+        self.device_operating_points.is_some()
+    }
+
     /// Look up one device's operating-point summary (case-insensitive).
+    ///
+    /// Raises `KeyError` naming the absent report rather than the device when
+    /// the producing analysis captured none, so "this run did not record them"
+    /// never reads as "your circuit does not contain that device".
     fn device_operating_point(&self, name: &str) -> PyResult<PyDeviceOperatingPoint> {
-        self.device_operating_points
+        let entries = self.device_operating_points.as_ref().ok_or_else(|| {
+            crate::errors::key_error(
+                "this result carries no device operating-point report; it was produced by an \
+                 analysis that does not capture one",
+            )
+        })?;
+        entries
             .iter()
             .find(|entry| entry.name.eq_ignore_ascii_case(name))
             .cloned()
@@ -171,7 +197,7 @@ impl PySimulationResult {
     #[staticmethod]
     fn _unpickle(
         state: SimulationResultState,
-        device_operating_points: Vec<PyDeviceOperatingPoint>,
+        device_operating_points: Option<Vec<PyDeviceOperatingPoint>>,
     ) -> Self {
         Self::new_with_device_operating_points(
             rebuild_simulation_result(state),
@@ -185,7 +211,7 @@ impl PySimulationResult {
         py: Python<'py>,
     ) -> PyResult<(
         Bound<'py, PyAny>,
-        (SimulationResultState, Vec<PyDeviceOperatingPoint>),
+        (SimulationResultState, Option<Vec<PyDeviceOperatingPoint>>),
     )> {
         Ok((
             unpickler::<Self>(py)?,
@@ -317,7 +343,11 @@ impl PyDeviceOperatingPoint {
 #[derive(Clone)]
 pub struct PyDcSweepResult {
     pub(crate) results: Vec<(f64, SimulationResult)>,
-    device_operating_points: Vec<Vec<PyDeviceOperatingPoint>>,
+    /// `None` when the producing run captured no device operating-point
+    /// reports. When present it holds exactly one entry per sweep point, so a
+    /// point can never silently borrow another point's devices or be handed an
+    /// empty list that reads as "this point has no devices".
+    device_operating_points: Option<Vec<Vec<PyDeviceOperatingPoint>>>,
     primary_source: Option<String>,
     secondary_source: Option<String>,
     secondary_sweep_values: Option<Vec<f64>>,
@@ -327,10 +357,9 @@ pub struct PyDcSweepResult {
 impl PyDcSweepResult {
     pub fn new(results: Vec<(f64, SimulationResult)>) -> Self {
         let inner_points = results.len();
-        let device_operating_points = vec![Vec::new(); results.len()];
         Self {
             results,
-            device_operating_points,
+            device_operating_points: None,
             primary_source: None,
             secondary_source: None,
             secondary_sweep_values: None,
@@ -365,7 +394,7 @@ impl PyDcSweepResult {
             .unzip();
         Self {
             results: points,
-            device_operating_points,
+            device_operating_points: Some(device_operating_points),
             primary_source: Some(primary_source.to_string()),
             secondary_source: None,
             secondary_sweep_values: None,
@@ -391,7 +420,7 @@ impl PyDcSweepResult {
         let inner_points = results.len() / secondary_sweep_values.len();
         Ok(Self {
             results,
-            device_operating_points: vec![Vec::new(); inner_points * secondary_sweep_values.len()],
+            device_operating_points: None,
             primary_source: Some(primary_source.to_string()),
             secondary_source: Some(secondary_source.to_string()),
             secondary_sweep_values: Some(secondary_sweep_values),
@@ -431,7 +460,7 @@ impl PyDcSweepResult {
             .unzip();
         Ok(Self {
             results: points,
-            device_operating_points,
+            device_operating_points: Some(device_operating_points),
             primary_source: Some(primary_source.to_string()),
             secondary_source: Some(secondary_source.to_string()),
             secondary_sweep_values: Some(secondary_sweep_values),
@@ -443,6 +472,28 @@ impl PyDcSweepResult {
         self.results
             .get(index)
             .ok_or_else(|| invalid_sweep_index_error(index, self.results.len()))
+    }
+
+    /// Device operating-point report for one sweep point.
+    ///
+    /// `Ok(None)` means this sweep captured no reports at all. A point that is
+    /// missing from a captured report is a malformed result, not an empty
+    /// device list, so it fails instead of publishing one.
+    fn device_operating_points_for(
+        &self,
+        index: usize,
+    ) -> PyResult<Option<Vec<PyDeviceOperatingPoint>>> {
+        let Some(entries) = &self.device_operating_points else {
+            return Ok(None);
+        };
+        entries.get(index).cloned().map(Some).ok_or_else(|| {
+            crate::errors::SimulationError::new_err(format!(
+                "malformed DC sweep result: device operating-point reports cover {} of {} sweep points, \
+                 so point {index} has none",
+                entries.len(),
+                self.results.len()
+            ))
+        })
     }
 }
 
@@ -511,38 +562,43 @@ impl PyDcSweepResult {
     ///
     /// Returns:
     ///     list[tuple[float, SimulationResult]]: One entry per sweep point
-    pub fn points(&self) -> Vec<(f64, PySimulationResult)> {
+    pub fn points(&self) -> PyResult<Vec<(f64, PySimulationResult)>> {
         self.results
             .iter()
             .enumerate()
             .map(|(index, (value, result))| {
-                (
+                Ok((
                     *value,
                     PySimulationResult::new_with_device_operating_points(
                         result.clone(),
-                        self.device_operating_points
-                            .get(index)
-                            .cloned()
-                            .unwrap_or_default(),
+                        self.device_operating_points_for(index)?,
                     ),
-                )
+                ))
             })
             .collect()
     }
 
     /// Device operating-point data at one sweep point.
-    fn device_operating_points_at(&self, index: usize) -> PyResult<Vec<PyDeviceOperatingPoint>> {
+    ///
+    /// `None` when this sweep captured no reports; an empty list when it did
+    /// and this point has no device with an operating point.
+    fn device_operating_points_at(
+        &self,
+        index: usize,
+    ) -> PyResult<Option<Vec<PyDeviceOperatingPoint>>> {
         self.point(index).map_err(PyErr::from)?;
-        Ok(self
-            .device_operating_points
-            .get(index)
-            .cloned()
-            .unwrap_or_default())
+        self.device_operating_points_for(index)
+    }
+
+    /// Whether this sweep carries device operating-point reports.
+    #[getter]
+    fn has_device_operating_points(&self) -> bool {
+        self.device_operating_points.is_some()
     }
 
     /// Iterate over (value, SimulationResult) pairs
     fn __iter__(slf: PyRef<'_, Self>, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        let points = slf.points();
+        let points = slf.points()?;
         let list = points.into_pyobject(py)?;
         Ok(list.call_method0("__iter__")?.unbind())
     }
@@ -556,15 +612,13 @@ impl PyDcSweepResult {
         if idx < 0 || idx >= len {
             return Err(invalid_sweep_index_error(index.unsigned_abs(), self.results.len()).into());
         }
-        let (value, result) = &self.results[idx as usize];
+        let index = idx as usize;
+        let (value, result) = &self.results[index];
         Ok((
             *value,
             PySimulationResult::new_with_device_operating_points(
                 result.clone(),
-                self.device_operating_points
-                    .get(idx as usize)
-                    .cloned()
-                    .unwrap_or_default(),
+                self.device_operating_points_for(index)?,
             ),
         ))
     }
@@ -580,10 +634,7 @@ impl PyDcSweepResult {
         let (_, result) = self.point(index).map_err(PyErr::from)?;
         Ok(PySimulationResult::new_with_device_operating_points(
             result.clone(),
-            self.device_operating_points
-                .get(index)
-                .cloned()
-                .unwrap_or_default(),
+            self.device_operating_points_for(index)?,
         ))
     }
 
@@ -726,7 +777,7 @@ impl PyDcSweepResult {
     #[allow(clippy::too_many_arguments)]
     fn _unpickle(
         points: Vec<(f64, SimulationResultState)>,
-        device_operating_points: Vec<Vec<PyDeviceOperatingPoint>>,
+        device_operating_points: Option<Vec<Vec<PyDeviceOperatingPoint>>>,
         primary_source: Option<String>,
         secondary_source: Option<String>,
         secondary_sweep_values: Option<Vec<f64>>,
@@ -753,7 +804,7 @@ impl PyDcSweepResult {
         Bound<'py, PyAny>,
         (
             Vec<(f64, SimulationResultState)>,
-            Vec<Vec<PyDeviceOperatingPoint>>,
+            Option<Vec<Vec<PyDeviceOperatingPoint>>>,
             Option<String>,
             Option<String>,
             Option<Vec<f64>>,

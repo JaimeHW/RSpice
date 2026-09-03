@@ -73,7 +73,7 @@ use access::*;
 use export_bridge::*;
 use state::*;
 
-pub(crate) use ac::{PyAcResult, PyComplexValue};
+pub(crate) use ac::{PyAcResult, PyComplexValue, validated_ac_schema};
 pub(crate) use access::{NodeIdentifier, is_ground_name};
 pub(crate) use dc::{PyDcSweepResult, PyDeviceOperatingPoint, PySimulationResult};
 pub(crate) use distortion::PyDistortionResult;

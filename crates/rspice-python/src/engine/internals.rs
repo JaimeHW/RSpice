@@ -97,7 +97,7 @@ impl PyEngine {
         let results = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_ac_with_abort(&netlist.inner, &frequencies, abort)
         })?;
-        Ok(PyAcResult::new(frequencies, results))
+        PyAcResult::new(frequencies, results)
     }
 
     /// Core distortion runner shared by the direct and deck APIs.

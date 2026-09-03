@@ -6,6 +6,29 @@
 
 use super::*;
 
+/// Require one distortion response set to publish the fundamental's schema.
+///
+/// The result addresses every response through a single node/branch namespace,
+/// so a response that names different signals is a malformed result, not a
+/// response to be indexed positionally and hoped for.
+fn require_matching_distortion_schema(
+    response: &str,
+    expected: (&[String], &[String]),
+    actual: (&[String], &[String]),
+) -> PyResult<()> {
+    if expected.0 == actual.0 && expected.1 == actual.1 {
+        return Ok(());
+    }
+    Err(crate::errors::SimulationError::new_err(format!(
+        "malformed distortion result: the '{response}' response publishes \
+         {} node and {} branch signals, but the F1 fundamental publishes {} and {}",
+        actual.0.len(),
+        actual.1.len(),
+        expected.0.len(),
+        expected.1.len()
+    )))
+}
+
 /// Third-order Volterra distortion sweep.
 ///
 /// Every returned `AcResult` contains actual sinusoidal peak phasors at the
@@ -92,14 +115,35 @@ impl PyDistortionResult {
                 Ok((kind, rows))
             })
             .collect::<PyResult<Vec<_>>>()?;
-        let node_names = fundamental_f1
-            .first()
-            .map(|row| row.node_names.clone())
-            .unwrap_or_default();
-        let branch_names = fundamental_f1
-            .first()
-            .map(|row| row.branch_names.clone())
-            .unwrap_or_default();
+        // Every response this result publishes is addressed through one set of
+        // node and branch names, so every response must actually carry it. The
+        // fundamental establishes the schema and each F2 and product response
+        // is proved against it rather than indexed hopefully.
+        let (node_names, branch_names) =
+            crate::results::validated_ac_schema("distortion F1 fundamental", &fundamental_f1)
+                .map_err(crate::errors::SimulationError::new_err)?;
+        if let Some(rows) = &fundamental_f2 {
+            let (f2_nodes, f2_branches) =
+                crate::results::validated_ac_schema("distortion F2 fundamental", rows)
+                    .map_err(crate::errors::SimulationError::new_err)?;
+            require_matching_distortion_schema(
+                "F2 fundamental",
+                (&node_names, &branch_names),
+                (&f2_nodes, &f2_branches),
+            )?;
+        }
+        for (kind, rows) in &products {
+            let (product_nodes, product_branches) = crate::results::validated_ac_schema(
+                &format!("distortion '{}' product", kind.label()),
+                rows,
+            )
+            .map_err(crate::errors::SimulationError::new_err)?;
+            require_matching_distortion_schema(
+                kind.label(),
+                (&node_names, &branch_names),
+                (&product_nodes, &product_branches),
+            )?;
+        }
         Ok(Self {
             f2_over_f1: result.f2_over_f1,
             f1_frequencies,
@@ -321,7 +365,7 @@ impl PyDistortionResult {
 
     /// Actual first-order F1 response, aligned with `f1_frequencies`.
     #[getter]
-    fn fundamental_f1(&self) -> PyAcResult {
+    fn fundamental_f1(&self) -> PyResult<PyAcResult> {
         PyAcResult::new(self.f1_frequencies.clone(), self.fundamental_f1.clone())
     }
 
@@ -330,10 +374,13 @@ impl PyDistortionResult {
     /// F2 is fixed by SPICE's two-tone contract, so its frequency array
     /// repeats the same value. Returns None in harmonic mode.
     #[getter]
-    fn fundamental_f2(&self) -> Option<PyAcResult> {
-        self.fundamental_f2.as_ref().map(|rows| {
-            PyAcResult::new(rows.iter().map(|row| row.frequency).collect(), rows.clone())
-        })
+    fn fundamental_f2(&self) -> PyResult<Option<PyAcResult>> {
+        self.fundamental_f2
+            .as_ref()
+            .map(|rows| {
+                PyAcResult::new(rows.iter().map(|row| row.frequency).collect(), rows.clone())
+            })
+            .transpose()
     }
 
     /// Actual complex response for a spectral product.
@@ -341,10 +388,10 @@ impl PyDistortionResult {
         let product = self.parse_product(name)?;
         let rows = self.product_rows(product)?;
         self.validate_series_length(product.label(), rows)?;
-        Ok(PyAcResult::new(
+        PyAcResult::new(
             rows.iter().map(|row| row.frequency).collect(),
             rows.to_vec(),
-        ))
+        )
     }
 
     /// |V(product)| / |V(F1)| across the F1 sweep.
