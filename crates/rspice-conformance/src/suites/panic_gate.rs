@@ -37,12 +37,14 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 use std::sync::Mutex;
+use std::time::Instant;
 
 use rspice_core::ResourceLimits;
-use rspice_core::abort_signal::CountingAbort;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::execution::{DeckPlan, SignalProjection};
 use rspice_core::netlist::{Netlist, validate_output_symbols};
+
+use super::deadline::DeadlineAbort;
 
 /// One vendored corpus the gate sweeps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,6 +110,15 @@ pub const MAX_MATERIALIZED_SOURCE_BYTES: usize = 1024 * 1024;
 /// report a limit the product does not have — and a stack overflow is an abort
 /// that no `catch_unwind` can turn into a finding.
 pub const SWEEP_STACK_BYTES: usize = 32 * 1024 * 1024;
+
+/// Wall-clock budget one deck's elaboration may spend.
+///
+/// This gate asks whether a deck panics, not whether it elaborates quickly, so
+/// a deck that is merely slow is cancelled rather than allowed to dominate a
+/// sweep of thousands. Cancellation is a typed outcome the materializer
+/// already returns, so a budgeted deck lands in `refused` alongside every
+/// other typed refusal — which is exactly what it is, and not a failure.
+pub const MATERIALIZE_BUDGET_MS: u128 = 2_000;
 
 /// The pipeline stage a deck reached.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -182,6 +193,23 @@ pub struct PanicGateReport {
     pub materialization_skipped: usize,
     /// Every deck that panicked, in discovery order.
     pub panics: Vec<DeckPanic>,
+    /// Per-corpus label, deck count and wall clock, in sweep order.
+    ///
+    /// The gate is a per-commit job, so what it costs has to be visible in the
+    /// log that runs it: a corpus that grew into minutes is a decision to
+    /// make, not a slow build to wonder about.
+    pub corpora: Vec<CorpusTiming>,
+}
+
+/// What one corpus contributed, and what it cost.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CorpusTiming {
+    /// Human-readable corpus name.
+    pub label: &'static str,
+    /// Decks discovered in it.
+    pub decks: usize,
+    /// Wall clock the sweep spent on it.
+    pub elapsed_ms: u128,
 }
 
 impl PanicGateReport {
@@ -197,12 +225,26 @@ impl PanicGateReport {
         )
     }
 
+    /// One line per corpus, so a cost that moved is attributable.
+    pub fn corpus_lines(&self) -> Vec<String> {
+        self.corpora
+            .iter()
+            .map(|corpus| {
+                format!(
+                    "panic-gate: corpus {} decks={} elapsed_ms={}",
+                    corpus.label, corpus.decks, corpus.elapsed_ms
+                )
+            })
+            .collect()
+    }
+
     fn merge(&mut self, other: Self) {
         self.decks += other.decks;
         self.loaded += other.loaded;
         self.refused += other.refused;
         self.materialization_skipped += other.materialization_skipped;
         self.panics.extend(other.panics);
+        self.corpora.extend(other.corpora);
     }
 }
 
@@ -230,6 +272,7 @@ pub fn run_corpus(
     corpus: PanicGateCorpus,
     recorder: &PanicRecorder,
 ) -> PanicGateReport {
+    let started = Instant::now();
     let root = tests_dir.join(corpus.directory);
     let mut decks = Vec::new();
     collect(&root, &root, corpus.deck_extensions, &mut decks);
@@ -237,6 +280,11 @@ pub fn run_corpus(
 
     let mut report = PanicGateReport {
         decks: decks.len(),
+        corpora: vec![CorpusTiming {
+            label: corpus.label,
+            decks: decks.len(),
+            elapsed_ms: 0,
+        }],
         ..PanicGateReport::default()
     };
     for key in decks {
@@ -254,6 +302,9 @@ pub fn run_corpus(
                 message,
             }),
         }
+    }
+    if let Some(timing) = report.corpora.first_mut() {
+        timing.elapsed_ms = started.elapsed().as_millis();
     }
     report
 }
@@ -322,7 +373,7 @@ fn sweep_deck(path: &Path, recorder: &PanicRecorder) -> DeckOutcome {
     let materialized = expanded.len() <= MAX_MATERIALIZED_SOURCE_BYTES;
     if materialized {
         let engine = gate_engine();
-        let abort = CountingAbort::new(50_000);
+        let abort = DeadlineAbort::new(Instant::now(), MATERIALIZE_BUDGET_MS);
         stage!(PanicGateStage::Materialize, {
             engine
                 .prepare_deck_plan_materializer_with_abort(&netlist, &plan, &abort)

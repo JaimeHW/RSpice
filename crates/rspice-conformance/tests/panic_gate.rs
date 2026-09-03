@@ -44,14 +44,14 @@ fn no_vendored_deck_panics_during_ingestion_or_planning() {
     // output, and a gate that swept nothing must be visibly different from one
     // that swept everything.
     println!("{}", report.summary());
-    println!(
-        "panic-gate: elapsed_ms={} corpora={}",
-        started.elapsed().as_millis(),
-        PANIC_GATE_CORPORA
-            .iter()
-            .map(|corpus| corpus.label)
-            .collect::<Vec<_>>()
-            .join(", ")
+    println!("panic-gate: elapsed_ms={}", started.elapsed().as_millis());
+    for line in report.corpus_lines() {
+        println!("{line}");
+    }
+    assert_eq!(
+        report.corpora.len(),
+        PANIC_GATE_CORPORA.len(),
+        "every declared corpus must appear in the report, even an empty one"
     );
 
     assert!(
