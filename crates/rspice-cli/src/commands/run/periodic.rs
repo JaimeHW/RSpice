@@ -211,25 +211,22 @@ fn export_pac(
 ) -> Result<(), CliError> {
     let analysis_id = artifact.analysis;
     let frequencies = result.frequencies.clone();
-    let signals = pac_sideband_signals(result)?;
-    let signals = crate::commands::run_signals::complex_export_signals(
-        ctx.netlist,
-        AnalysisResultKind::Pac,
-        "PAC",
-        &frequencies,
-        &signals,
-        &crate::abort::ProcessAbort,
-    )
-    .map_err(|source| CliError::CoreSimulationError {
-        source,
-        analysis: Some("PAC output projection".to_string()),
-    })?;
+    let sidebands = pac_projected_sidebands(ctx, result)?;
+    let table = pac_export_table(&frequencies, &sidebands);
+    let schema = super::document::distinct_schema(table.columns.iter().map(|column| {
+        rspice_core::execution::signal_descriptor(
+            &column.name,
+            &column.name,
+            rspice_core::execution::SignalKind::Scalar,
+            rspice_core::execution::SignalValueType::Complex,
+        )
+    }))?;
 
     super::document::publish_analysis_result(
         ctx,
         path,
         analysis_id,
-        super::document::complex_schema(&signals)?,
+        schema,
         || {
             AnalysisResultDocument::from_pac(analysis_id, result)
                 .map(|builder| builder.parent_analysis(upstream))
@@ -240,24 +237,19 @@ fn export_pac(
                 data.title = "Periodic AC".to_string();
                 data.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
                 let mut section = crate::hdf5::Hdf5AcSection::new(frequencies.clone());
-                for signal in &signals {
-                    section.add_signal(
-                        signal.display_name.clone(),
-                        signal.real.clone(),
-                        signal.imag.clone(),
-                    );
+                for column in &table.columns {
+                    let ColumnData::Complex { real, imag } = &column.data else {
+                        return Err(CliError::InternalError {
+                            message: "a PAC sideband published a real response column".to_string(),
+                        });
+                    };
+                    section.add_signal(column.name.clone(), real.clone(), imag.clone());
                 }
                 data.ac = Some(section);
                 crate::hdf5::write_hdf5(path, &data)
                     .map_err(|error| super::shared::map_hdf5_output_error(path, error))
             } else {
-                crate::commands::export_table::complex_table(
-                    "pac",
-                    "Periodic AC",
-                    frequencies.clone(),
-                    &signals,
-                )
-                .write(path, format)
+                table.write(path, format)
             }
         },
     )?;
@@ -268,18 +260,27 @@ fn export_pac(
     Ok(())
 }
 
-/// One complex column per node voltage and branch current, per sideband.
+/// One sideband's projected response columns.
+struct PacSideband {
+    sideband: i32,
+    signals: Vec<ComplexSignal>,
+}
+
+/// Each sideband's node and branch responses, run through the deck's authored
+/// output contract.
 ///
-/// The sideband index is part of the column name because a PAC result carries
-/// the same node at every sideband: dropping it would publish several columns
-/// that differ only in a number the artifact no longer records.
-fn pac_sideband_signals(
+/// The projection is applied per sideband against the plain `V(node)`/`I(dev)`
+/// spellings, because that is what a `.PRINT`/`.SAVE` card names; the sideband
+/// index decorates the exported column afterwards. Composing it into the name
+/// first would make every authored probe unresolvable, and leaving it off
+/// entirely would publish columns that differ only in a number the artifact no
+/// longer records. `.DISTO` composes its product label the same way.
+fn pac_projected_sidebands(
+    ctx: &RunContext<'_>,
     result: &rspice_core::analysis::PacResult,
-) -> Result<Vec<ComplexSignal>, CliError> {
+) -> Result<Vec<PacSideband>, CliError> {
     let point_count = result.frequencies.len();
-    let mut signals = Vec::with_capacity(
-        result.sideband_indices().len() * (result.node_names.len() + result.branch_names.len()),
-    );
+    let mut sidebands = Vec::with_capacity(result.sideband_indices().len());
     for sideband in result.sideband_indices() {
         let mut node_columns = vec![(Vec::new(), Vec::new()); result.node_names.len()];
         let mut branch_columns = vec![(Vec::new(), Vec::new()); result.branch_names.len()];
@@ -307,9 +308,11 @@ fn pac_sideband_signals(
                 column.1.push(value.im);
             }
         }
+
+        let mut signals = Vec::with_capacity(node_columns.len() + branch_columns.len());
         for (name, (real, imag)) in result.node_names.iter().zip(node_columns) {
             signals.push(ComplexSignal {
-                display_name: format!("V({name}):sb{sideband}"),
+                display_name: format!("V({name})"),
                 raw_name: name.clone(),
                 kind: SignalKind::Voltage,
                 real,
@@ -318,15 +321,53 @@ fn pac_sideband_signals(
         }
         for (name, (real, imag)) in result.branch_names.iter().zip(branch_columns) {
             signals.push(ComplexSignal {
-                display_name: format!("I({name}):sb{sideband}"),
+                display_name: format!("I({name})"),
                 raw_name: name.clone(),
                 kind: SignalKind::Current,
                 real,
                 imag,
             });
         }
+        let signals = crate::commands::run_signals::complex_export_signals(
+            ctx.netlist,
+            AnalysisResultKind::Pac,
+            "PAC",
+            &result.frequencies,
+            &signals,
+            &crate::abort::ProcessAbort,
+        )
+        .map_err(|source| CliError::CoreSimulationError {
+            source,
+            analysis: Some(format!("PAC sideband {sideband} output projection")),
+        })?;
+        sidebands.push(PacSideband { sideband, signals });
     }
-    Ok(signals)
+    Ok(sidebands)
+}
+
+/// The flat PAC table: the offset-frequency scale and one complex column per
+/// projected signal per sideband, named `<signal>:sb<index>`.
+fn pac_export_table(frequencies: &[f64], sidebands: &[PacSideband]) -> ExportTable {
+    ExportTable {
+        analysis: "pac".to_string(),
+        plot_name: "Periodic AC".to_string(),
+        scale_name: "offset_frequency".to_string(),
+        scale_type: "frequency".to_string(),
+        scale: frequencies.to_vec(),
+        columns: sidebands
+            .iter()
+            .flat_map(|entry| {
+                entry.signals.iter().map(|signal| ExportColumn {
+                    name: format!("{}:sb{}", signal.display_name, entry.sideband),
+                    var_type: signal.raw_variable_type().to_string(),
+                    data: ColumnData::Complex {
+                        real: signal.real.clone(),
+                        imag: signal.imag.clone(),
+                    },
+                })
+            })
+            .collect(),
+    }
 }
 
 /// Publish one periodic-noise sweep over its offset-frequency axis.

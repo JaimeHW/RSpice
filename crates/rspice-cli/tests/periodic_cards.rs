@@ -35,9 +35,19 @@ const DIVIDER_CARRIER: &str = "* resistive divider under a periodic carrier\n\
                                R2 out 0 1k\n";
 
 fn run_deck(dir: &Path, circuit: &str, cards: &str, extra: &[&str]) -> (Output, PathBuf) {
+    run_deck_as(dir, circuit, cards, extra, "json")
+}
+
+fn run_deck_as(
+    dir: &Path,
+    circuit: &str,
+    cards: &str,
+    extra: &[&str],
+    format: &str,
+) -> (Output, PathBuf) {
     let deck = dir.join("deck.sp");
     std::fs::write(&deck, format!("{circuit}{cards}.END\n")).expect("write deck");
-    let output_path = dir.join("result.json");
+    let output_path = dir.join(format!("result.{format}"));
     let mut args: Vec<String> = vec![
         "--quiet".to_string(),
         "--error-format".to_string(),
@@ -47,7 +57,7 @@ fn run_deck(dir: &Path, circuit: &str, cards: &str, extra: &[&str]) -> (Output, 
         "-o".to_string(),
         output_path.to_string_lossy().into_owned(),
         "-f".to_string(),
-        "json".to_string(),
+        format.to_string(),
     ];
     args.extend(extra.iter().map(|arg| (*arg).to_string()));
     let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
@@ -415,6 +425,48 @@ fn a_stepped_monte_carlo_card_draws_a_distinct_reproducible_stream_per_coordinat
             );
         }
     }
+}
+
+/// The flat formats stay projection-driven for the periodic family too. A
+/// `.SAVE V(out)` names a signal, not a signal-and-sideband, so the projection
+/// is resolved against the plain spelling and the sideband decorates the
+/// exported column afterwards — the same composition `.DISTO` uses for its
+/// product labels. Composing the sideband in first would make every authored
+/// probe unresolvable and fail the run.
+#[test]
+fn an_authored_projection_selects_a_pac_signal_at_every_sideband() {
+    let dir = test_dir("pac_projection");
+    let (output, requested) = run_deck_as(
+        &dir,
+        &format!("{RC_CARRIER}.save V(out)\n"),
+        ".HB 1G\n.PAC DEC 2 1meg 10meg INPUT=V1 OUT=V(out) MAXSIDEBAND=1\n",
+        &[],
+        "csv",
+    );
+    assert_ran(&output);
+
+    let stem = requested
+        .file_stem()
+        .expect("output stem")
+        .to_string_lossy()
+        .into_owned();
+    let table = requested.with_file_name(format!("{stem}.pac-001.csv"));
+    let header = std::fs::read_to_string(&table)
+        .unwrap_or_else(|error| panic!("read {}: {error}", table.display()))
+        .lines()
+        .next()
+        .expect("a header row")
+        .to_ascii_lowercase();
+    for sideband in ["sb-1", "sb0", "sb1"] {
+        assert!(
+            header.contains(&format!("v(out):{sideband}")),
+            "the authored probe is missing at {sideband}: {header}"
+        );
+    }
+    assert!(
+        !header.contains("v(in)") && !header.contains("i(v1)"),
+        "the authored projection did not restrict the table: {header}"
+    );
 }
 
 /// A deck with two carriers binds each dependent card to the one the canonical

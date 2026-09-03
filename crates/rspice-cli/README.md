@@ -185,7 +185,7 @@ shapes:
 | Monte Carlo | Per-run samples, one column per tracked variable |
 | PSS | One period of the steady-state waveforms (time domain) |
 | HB | Complex spectrum per node over the harmonic frequencies |
-| `.PAC` | Complex node and branch columns per sideband (`V(out):sb0`) over the offset frequency |
+| `.PAC` | Complex node and branch columns per sideband (`V(out):sb0`) over the offset frequency. `.PRINT`/`.SAVE` names the signal, not the sideband, so a selected signal is exported at every sideband |
 | `.PNOISE` | Real density columns over the offset frequency: `output_noise` and each source's `contribution:<label>` for a driven carrier, `phase_noise` for an autonomous one |
 | `.ENVELOPE` | The continued slow-time trajectory, in the transient's own table shape |
 | `.STB` | Complex `loopgain` plus `loopgain_mag_db` and `loopgain_phase_deg` |
