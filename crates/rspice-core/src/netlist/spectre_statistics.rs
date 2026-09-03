@@ -5,10 +5,33 @@
 //! function of the authored seed, run coordinate, variation scope, instance
 //! identity, and variable index.  Scheduling and worker count therefore have
 //! no opportunity to perturb a statistical result.
+//!
+//! # The `.RSPICE_SPECTRE_STAT` carrier is a deliberate internal ABI
+//!
+//! The Spectre adapter is a source-text-in, source-text-out dialect
+//! front-end: the include expander runs it on every source it reads, before
+//! any card is parsed, and it must not change a source's line count. A
+//! `statistics` block therefore cannot hand the parser a typed value — the
+//! only thing that survives the round trip through `.include` expansion, and
+//! through the include cache, is a line of text.
+//!
+//! [`SPECTRE_STATISTICS_DIRECTIVE`] is that line. It is not authored syntax
+//! and is not documented for users; the payload is
+//! [`SpectreStatisticsPlan::encode_internal`]'s versioned, whitespace-free
+//! record list, which [`SpectreStatisticsPlan::decode_directive`] is the one
+//! place that decodes. The parser's whole-source prescan calls that decoder
+//! so declarations apply independent of library statement order, and the
+//! ordinary command dispatcher only consumes the line lexically — it never
+//! parses the payload a second time.
 
 use super::{ParamContext, expr::eval_expression};
 use crate::Value;
 use std::collections::{BTreeMap, BTreeSet};
+
+/// Internal directive carrying a lowered Spectre `statistics` block from the
+/// adapter to the parser. See the module documentation: this is an internal
+/// ABI, not authored netlist syntax.
+pub(crate) const SPECTRE_STATISTICS_DIRECTIVE: &str = ".RSPICE_SPECTRE_STAT";
 
 const STATISTICS_ENCODING_VERSION: &str = "S1";
 const PSD_TOLERANCE: Value = 1.0e-10;
@@ -536,7 +559,35 @@ impl SpectreStatisticsPlan {
         records.join("~")
     }
 
-    pub(crate) fn decode_internal(payload: &str) -> Result<Self, SpectreStatisticsError> {
+    /// Decode one `.RSPICE_SPECTRE_STAT` line, or report that the line is not
+    /// one.
+    ///
+    /// This is the only place the internal carrier documented at the top of
+    /// this module is interpreted. `rest` is everything after the directive
+    /// token; it must be exactly one versioned payload.
+    pub(crate) fn decode_directive(line: &str) -> Option<Result<Self, SpectreStatisticsError>> {
+        let mut fields = line.trim().splitn(2, char::is_whitespace);
+        if !fields
+            .next()
+            .is_some_and(|command| command.eq_ignore_ascii_case(SPECTRE_STATISTICS_DIRECTIVE))
+        {
+            return None;
+        }
+        let mut payload = fields.next().unwrap_or_default().split_whitespace();
+        let Some(encoded) = payload.next() else {
+            return Some(Err(SpectreStatisticsError::InvalidEncoding(format!(
+                "{SPECTRE_STATISTICS_DIRECTIVE} requires one versioned payload"
+            ))));
+        };
+        if payload.next().is_some() {
+            return Some(Err(SpectreStatisticsError::InvalidEncoding(format!(
+                "{SPECTRE_STATISTICS_DIRECTIVE} accepts exactly one versioned payload"
+            ))));
+        }
+        Some(Self::decode_internal(encoded))
+    }
+
+    fn decode_internal(payload: &str) -> Result<Self, SpectreStatisticsError> {
         let mut records = payload.split('~');
         if records.next() != Some(STATISTICS_ENCODING_VERSION) {
             return Err(SpectreStatisticsError::InvalidEncoding(

@@ -239,11 +239,15 @@ pub(super) fn parse_command(
         ".RSPICE_AUTO_BRIDGE_FAMILY" => {
             parse_rspice_auto_bridge_family_command(stream, line_num, params, options)?;
         }
-        ".RSPICE_SPECTRE_STAT" => {
-            // The versioned payload is decoded in a whole-source prescan so
-            // declarations apply independent of library statement order.
-            // Reaching this branch proves it was lexically consumed; trailing
-            // payload validation belongs to that prescan's strict decoder.
+        _ if cmd.eq_ignore_ascii_case(
+            crate::netlist::spectre_statistics::SPECTRE_STATISTICS_DIRECTIVE,
+        ) =>
+        {
+            // Internal Spectre-adapter ABI: the versioned payload is decoded
+            // once, by the whole-source prescan, so declarations apply
+            // independent of library statement order. Reaching this branch
+            // only proves the line was lexically consumed; it is never
+            // interpreted a second time here.
             stream.skip_to_eol();
         }
         ".CODEMODEL" | ".RSPICE_UNSUPPORTED_CODEMODEL" => {

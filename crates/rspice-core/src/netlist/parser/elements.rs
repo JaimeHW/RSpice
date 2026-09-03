@@ -4959,7 +4959,13 @@ pub(super) fn parse_lossless_tline(
     Ok(())
 }
 
-/// Parse lossy transmission line (Y element)
+/// Parse a `Y` line: either a keyword-style Xyce Y-device or the historical
+/// SPICE lossy transmission line whose instance name simply starts with `Y`.
+///
+/// Xyce resolves `Y<type> <name> ...` by looking `<type>` up in its device
+/// registry, so the keyword set is closed and known. Classifying the leading
+/// token first means an authored Y-device can never be silently re-read as a
+/// four-terminal transmission line with shifted nodes.
 pub(super) fn parse_lossy_tline(
     stream: &mut TokenStream,
     line_num: usize,
@@ -4968,70 +4974,496 @@ pub(super) fn parse_lossy_tline(
     defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
     let name = expect_element_name(stream, line_num)?;
-    if name.eq_ignore_ascii_case("YMEMRISTOR") {
-        return parse_xyce_memristor(stream, line_num, elements, params, defer_simple_param_refs);
-    }
-    if name.eq_ignore_ascii_case("YDFF") {
-        return parse_xyce_y_legacy_dff(stream, line_num, elements, params);
-    }
-    if name.eq_ignore_ascii_case("YNOT") {
-        if xyce_ydevice_remaining_fields(stream) < 6 {
-            return parse_xyce_y_legacy_gate(
-                stream,
-                line_num,
-                elements,
-                params,
-                defer_simple_param_refs,
-                "YNOT",
-            );
-        }
-        return parse_xyce_y_not(stream, line_num, elements);
-    }
-    if xyce_legacy_y_gate_spec(&name).is_some() {
-        return parse_xyce_y_legacy_gate(
+    if let Some(family) = XyceYDeviceFamily::classify(&name) {
+        return lower_xyce_ydevice(
+            family,
+            &name,
             stream,
             line_num,
             elements,
             params,
             defer_simple_param_refs,
-            &name,
         );
     }
-    if let Some(keyword) = xyce_ydevice_keyword(&name) {
-        return Err(ParseError::Syntax {
+    parse_yline_transmission_line(name, stream, line_num, elements, params)
+}
+
+/// Parse the historical `Y<name> p1+ p1- p2+ p2- ...` lossy transmission line.
+///
+/// The leading token has already been rejected as a Xyce Y-device keyword, so
+/// any failure here is reported with that fact attached: without it the reader
+/// sees a transmission-line diagnostic for a line that was never one.
+fn parse_yline_transmission_line(
+    name: String,
+    stream: &mut TokenStream,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+    params: &ParamContext,
+) -> Result<(), ParseError> {
+    let mut parse = || -> Result<(), ParseError> {
+        let port1_pos = expect_node(stream, line_num)?;
+        let port1_neg = expect_node(stream, line_num)?;
+        let port2_pos = expect_node(stream, line_num)?;
+        let port2_neg = expect_node(stream, line_num)?;
+
+        let parsed = parse_tline_params(stream, line_num, params, true)?;
+        if parsed.model.is_none() && parsed.z0.is_none() {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: "Y-line transmission line requires MODEL name or Z0".to_string(),
+            });
+        }
+
+        elements.push(Element {
+            name: name.clone(),
+            kind: ElementKind::TransmissionLine {
+                z0: parsed.z0,
+                td: parsed.td,
+                freq: parsed.freq,
+                nl: parsed.nl,
+                model: parsed.model,
+            },
+            nodes: vec![port1_pos, port1_neg, port2_pos, port2_neg],
+            provenance: crate::netlist::ElementProvenance::Authored,
+        });
+        Ok(())
+    };
+
+    parse().map_err(|error| match error {
+        ParseError::Syntax { line, message } => ParseError::Syntax {
+            line,
+            message: format!(
+                "'{name}' is not a recognized Xyce Y-device keyword, so this line must be a \
+                 legacy Y-line lossy transmission line, and it is not: {message}"
+            ),
+        },
+        other => other,
+    })
+}
+
+/// Every device type name Xyce's registry answers to in the `Y` namespace.
+///
+/// `N_IO_DeviceBlock::extractYDeviceData` strips the leading `Y` and resolves
+/// the remainder against the names passed to `registerDevice`, so this table
+/// is that name set: one variant per device, listing every spelling Xyce
+/// accepts for it. Keeping it exhaustive is what makes the `Y` router total —
+/// each variant must declare an owner below, so a new device cannot be added
+/// without deciding whether this plan lowers it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum XyceYDeviceFamily {
+    AcceleratedMass,
+    AnalogToDigitalConverter,
+    AntiWindupLimiter,
+    Battery,
+    Buffer,
+    DigitalAdder,
+    DigitalToAnalogConverter,
+    DLatch,
+    Delay,
+    ExternalSimulator,
+    FlipFlopD,
+    FlipFlopJk,
+    FlipFlopT,
+    GeneralExternal,
+    Ibis,
+    Inverter,
+    LinearNPort,
+    Memristor,
+    MutualInductorLinear,
+    MutualInductorNonlinear,
+    Neuron,
+    NeuronPopulation,
+    OpAmp,
+    Pde,
+    PowerGrid,
+    PowerGridBranch,
+    PowerGridBusShunt,
+    PowerGridGenBus,
+    PowerGridTransformer,
+    ReactionSet,
+    ReducedOrderModel,
+    Synapse,
+    TransmissionLineLumped,
+    GateAnd,
+    GateNand,
+    GateNor,
+    GateOr,
+    GateXnor,
+    GateXor,
+    PluginRlc2,
+    PluginVoltageSource,
+}
+
+/// Who owns a Y-device family, and how a line naming it is lowered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum XyceYDeviceOwnership {
+    /// Analog device lowered natively by this parser.
+    AnalogNative(XyceYDeviceLowering),
+    /// Analog device whose model program RSpice does not implement. The line
+    /// is rejected by family rather than guessed at.
+    AnalogModelProgramMissing,
+    /// Digital family already delivered through the XSPICE digital bridge.
+    DigitalXspiceBridge(XyceYDeviceLowering),
+    /// Digital or mixed-signal code model owned by the separate digital
+    /// effort. This plan neither parses nor lowers it.
+    DigitalSeparateEffort,
+    /// Device whose behavior lives outside the analog kernel — a Verilog-A
+    /// plugin or a coupled external simulator — and belongs to the separate
+    /// Verilog/AMS effort.
+    ExternalCouplingSeparateEffort,
+    /// Not an authored card. Xyce synthesizes it internally from a native
+    /// element that authored decks spell `canonical`.
+    InternalRewriteOfNativeElement { canonical: &'static str },
+}
+
+/// The concrete lowering a supported Y-device keyword runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum XyceYDeviceLowering {
+    Memristor,
+    /// Fixed-arity combinational gate on the legacy XSPICE digital bridge.
+    LegacyGate,
+    /// `YNOT`/`YINV`, which have both a legacy four-field form and Xyce's
+    /// rail-referenced six-field form.
+    Inverter,
+    LegacyFlipFlopD,
+}
+
+impl XyceYDeviceFamily {
+    /// Every family, in declaration order.
+    pub(super) const ALL: [Self; 41] = [
+        Self::AcceleratedMass,
+        Self::AnalogToDigitalConverter,
+        Self::AntiWindupLimiter,
+        Self::Battery,
+        Self::Buffer,
+        Self::DigitalAdder,
+        Self::DigitalToAnalogConverter,
+        Self::DLatch,
+        Self::Delay,
+        Self::ExternalSimulator,
+        Self::FlipFlopD,
+        Self::FlipFlopJk,
+        Self::FlipFlopT,
+        Self::GeneralExternal,
+        Self::Ibis,
+        Self::Inverter,
+        Self::LinearNPort,
+        Self::Memristor,
+        Self::MutualInductorLinear,
+        Self::MutualInductorNonlinear,
+        Self::Neuron,
+        Self::NeuronPopulation,
+        Self::OpAmp,
+        Self::Pde,
+        Self::PowerGrid,
+        Self::PowerGridBranch,
+        Self::PowerGridBusShunt,
+        Self::PowerGridGenBus,
+        Self::PowerGridTransformer,
+        Self::ReactionSet,
+        Self::ReducedOrderModel,
+        Self::Synapse,
+        Self::TransmissionLineLumped,
+        Self::GateAnd,
+        Self::GateNand,
+        Self::GateNor,
+        Self::GateOr,
+        Self::GateXnor,
+        Self::GateXor,
+        Self::PluginRlc2,
+        Self::PluginVoltageSource,
+    ];
+
+    /// Position in [`Self::ALL`]. The exhaustive match is what proves the
+    /// table lists every variant exactly once.
+    #[cfg(test)]
+    pub(super) const fn ordinal(self) -> usize {
+        match self {
+            Self::AcceleratedMass => 0,
+            Self::AnalogToDigitalConverter => 1,
+            Self::AntiWindupLimiter => 2,
+            Self::Battery => 3,
+            Self::Buffer => 4,
+            Self::DigitalAdder => 5,
+            Self::DigitalToAnalogConverter => 6,
+            Self::DLatch => 7,
+            Self::Delay => 8,
+            Self::ExternalSimulator => 9,
+            Self::FlipFlopD => 10,
+            Self::FlipFlopJk => 11,
+            Self::FlipFlopT => 12,
+            Self::GeneralExternal => 13,
+            Self::Ibis => 14,
+            Self::Inverter => 15,
+            Self::LinearNPort => 16,
+            Self::Memristor => 17,
+            Self::MutualInductorLinear => 18,
+            Self::MutualInductorNonlinear => 19,
+            Self::Neuron => 20,
+            Self::NeuronPopulation => 21,
+            Self::OpAmp => 22,
+            Self::Pde => 23,
+            Self::PowerGrid => 24,
+            Self::PowerGridBranch => 25,
+            Self::PowerGridBusShunt => 26,
+            Self::PowerGridGenBus => 27,
+            Self::PowerGridTransformer => 28,
+            Self::ReactionSet => 29,
+            Self::ReducedOrderModel => 30,
+            Self::Synapse => 31,
+            Self::TransmissionLineLumped => 32,
+            Self::GateAnd => 33,
+            Self::GateNand => 34,
+            Self::GateNor => 35,
+            Self::GateOr => 36,
+            Self::GateXnor => 37,
+            Self::GateXor => 38,
+            Self::PluginRlc2 => 39,
+            Self::PluginVoltageSource => 40,
+        }
+    }
+
+    /// Uppercase `Y`-prefixed spellings Xyce accepts for this family. The
+    /// first entry is the canonical one used in diagnostics.
+    pub(super) const fn keywords(self) -> &'static [&'static str] {
+        match self {
+            Self::AcceleratedMass => &["YACC"],
+            Self::AnalogToDigitalConverter => &["YADC"],
+            Self::AntiWindupLimiter => &["YAWL", "YANTIWINDUPLIMITER"],
+            Self::Battery => &["YBATTERY"],
+            Self::Buffer => &["YBUF"],
+            Self::DigitalAdder => &["YADD"],
+            Self::DigitalToAnalogConverter => &["YDAC"],
+            Self::DLatch => &["YDLTCH"],
+            Self::Delay => &["YDELAY"],
+            Self::ExternalSimulator => &["YEXT"],
+            Self::FlipFlopD => &["YDFF"],
+            Self::FlipFlopJk => &["YJKFF"],
+            Self::FlipFlopT => &["YTFF"],
+            Self::GeneralExternal => &["YGENEXT"],
+            Self::Ibis => &["YIBIS"],
+            Self::Inverter => &["YNOT", "YINV"],
+            Self::LinearNPort => &["YLIN"],
+            Self::Memristor => &["YMEMRISTOR"],
+            Self::MutualInductorLinear => &["YMIL"],
+            Self::MutualInductorNonlinear => &["YMIN"],
+            Self::Neuron => &["YNEURON"],
+            Self::NeuronPopulation => &["YNEURONPOP"],
+            Self::OpAmp => &["YOPAMP"],
+            Self::Pde => &["YPDE"],
+            Self::PowerGrid => &["YPOWERGRID"],
+            Self::PowerGridBranch => &["YPGBR", "YPOWERGRIDBRANCH"],
+            Self::PowerGridBusShunt => &["YPGBS", "YPOWERGRIDBUSSHUNT"],
+            Self::PowerGridGenBus => &["YPGGB", "YPOWERGRIDGENBUS"],
+            Self::PowerGridTransformer => &["YPGTR", "YPOWERGRIDTRANSFORMER"],
+            Self::ReactionSet => &["YRXN"],
+            Self::ReducedOrderModel => &["YROM"],
+            Self::Synapse => &["YSYNAPSE"],
+            Self::TransmissionLineLumped => &["YTRANSLINE"],
+            Self::GateAnd => &["YAND"],
+            Self::GateNand => &["YNAND"],
+            Self::GateNor => &["YNOR"],
+            Self::GateOr => &["YOR"],
+            Self::GateXnor => &["YNXOR", "YXNOR"],
+            Self::GateXor => &["YXOR"],
+            Self::PluginRlc2 => &["YRLC2"],
+            Self::PluginVoltageSource => &["YVSRC"],
+        }
+    }
+
+    /// Human-readable device name used in refusals.
+    pub(super) const fn description(self) -> &'static str {
+        match self {
+            Self::AcceleratedMass => "accelerated-mass integrator",
+            Self::AnalogToDigitalConverter => "analog-to-digital converter",
+            Self::AntiWindupLimiter => "anti-windup limiter",
+            Self::Battery => "battery macromodel",
+            Self::Buffer => "digital buffer",
+            Self::DigitalAdder => "digital adder",
+            Self::DigitalToAnalogConverter => "digital-to-analog converter",
+            Self::DLatch => "digital D latch",
+            Self::Delay => "ideal delay line",
+            Self::ExternalSimulator => "coupled external-simulator instance",
+            Self::FlipFlopD => "digital D flip-flop",
+            Self::FlipFlopJk => "digital JK flip-flop",
+            Self::FlipFlopT => "digital T flip-flop",
+            Self::GeneralExternal => "general external-code coupling instance",
+            Self::Ibis => "IBIS buffer",
+            Self::Inverter => "digital inverter",
+            Self::LinearNPort => "linear N-port from tabulated S/Y/Z data",
+            Self::Memristor => "memristor",
+            Self::MutualInductorLinear => "linear mutual inductor",
+            Self::MutualInductorNonlinear => "nonlinear mutual inductor",
+            Self::Neuron => "neuron membrane model",
+            Self::NeuronPopulation => "neuron population model",
+            Self::OpAmp => "operational-amplifier macromodel",
+            Self::Pde => "TCAD device-equation (PDE) device",
+            Self::PowerGrid => "power-grid aggregate",
+            Self::PowerGridBranch => "power-grid branch",
+            Self::PowerGridBusShunt => "power-grid bus shunt",
+            Self::PowerGridGenBus => "power-grid generator bus",
+            Self::PowerGridTransformer => "power-grid transformer",
+            Self::ReactionSet => "chemical reaction network",
+            Self::ReducedOrderModel => "reduced-order model",
+            Self::Synapse => "neuron synapse model",
+            Self::TransmissionLineLumped => "lumped transmission line",
+            Self::GateAnd => "digital AND gate",
+            Self::GateNand => "digital NAND gate",
+            Self::GateNor => "digital NOR gate",
+            Self::GateOr => "digital OR gate",
+            Self::GateXnor => "digital XNOR gate",
+            Self::GateXor => "digital XOR gate",
+            Self::PluginRlc2 => "Verilog-A plugin series RLC",
+            Self::PluginVoltageSource => "Verilog-A plugin voltage source",
+        }
+    }
+
+    pub(super) const fn ownership(self) -> XyceYDeviceOwnership {
+        use XyceYDeviceLowering as Lowering;
+        use XyceYDeviceOwnership as Ownership;
+        match self {
+            Self::Memristor => Ownership::AnalogNative(Lowering::Memristor),
+
+            Self::GateAnd
+            | Self::GateNand
+            | Self::GateNor
+            | Self::GateOr
+            | Self::GateXnor
+            | Self::GateXor => Ownership::DigitalXspiceBridge(Lowering::LegacyGate),
+            Self::Inverter => Ownership::DigitalXspiceBridge(Lowering::Inverter),
+            Self::FlipFlopD => Ownership::DigitalXspiceBridge(Lowering::LegacyFlipFlopD),
+
+            Self::AnalogToDigitalConverter
+            | Self::Buffer
+            | Self::DigitalAdder
+            | Self::DigitalToAnalogConverter
+            | Self::DLatch
+            | Self::FlipFlopJk
+            | Self::FlipFlopT => Ownership::DigitalSeparateEffort,
+
+            Self::ExternalSimulator
+            | Self::GeneralExternal
+            | Self::PluginRlc2
+            | Self::PluginVoltageSource => Ownership::ExternalCouplingSeparateEffort,
+
+            Self::MutualInductorLinear | Self::MutualInductorNonlinear => {
+                Ownership::InternalRewriteOfNativeElement { canonical: "K" }
+            }
+
+            Self::AcceleratedMass
+            | Self::AntiWindupLimiter
+            | Self::Battery
+            | Self::Delay
+            | Self::Ibis
+            | Self::LinearNPort
+            | Self::Neuron
+            | Self::NeuronPopulation
+            | Self::OpAmp
+            | Self::Pde
+            | Self::PowerGrid
+            | Self::PowerGridBranch
+            | Self::PowerGridBusShunt
+            | Self::PowerGridGenBus
+            | Self::PowerGridTransformer
+            | Self::ReactionSet
+            | Self::ReducedOrderModel
+            | Self::Synapse
+            | Self::TransmissionLineLumped => Ownership::AnalogModelProgramMissing,
+        }
+    }
+
+    /// Resolve a leading `Y` token to its family, or `None` when the token is
+    /// an ordinary transmission-line instance name.
+    pub(super) fn classify(token: &str) -> Option<Self> {
+        let upper = token.to_ascii_uppercase();
+        Self::ALL.into_iter().find(|family| {
+            family
+                .keywords()
+                .iter()
+                .any(|keyword| *keyword == upper.as_str())
+        })
+    }
+}
+
+fn lower_xyce_ydevice(
+    family: XyceYDeviceFamily,
+    keyword: &str,
+    stream: &mut TokenStream,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+    params: &ParamContext,
+    defer_simple_param_refs: bool,
+) -> Result<(), ParseError> {
+    let canonical = family.keywords()[0];
+    let description = family.description();
+    match family.ownership() {
+        XyceYDeviceOwnership::AnalogNative(lowering)
+        | XyceYDeviceOwnership::DigitalXspiceBridge(lowering) => match lowering {
+            XyceYDeviceLowering::Memristor => {
+                parse_xyce_memristor(stream, line_num, elements, params, defer_simple_param_refs)
+            }
+            XyceYDeviceLowering::LegacyGate => parse_xyce_y_legacy_gate(
+                stream,
+                line_num,
+                elements,
+                params,
+                defer_simple_param_refs,
+                family,
+            ),
+            XyceYDeviceLowering::Inverter => {
+                if xyce_ydevice_remaining_fields(stream) < 6 {
+                    parse_xyce_y_legacy_gate(
+                        stream,
+                        line_num,
+                        elements,
+                        params,
+                        defer_simple_param_refs,
+                        family,
+                    )
+                } else {
+                    parse_xyce_y_not(stream, line_num, elements, canonical)
+                }
+            }
+            XyceYDeviceLowering::LegacyFlipFlopD => {
+                parse_xyce_y_legacy_dff(stream, line_num, elements, params)
+            }
+        },
+        XyceYDeviceOwnership::AnalogModelProgramMissing => Err(ParseError::Syntax {
             line: line_num,
             message: format!(
-                "{keyword} is an unsupported Xyce Y-device keyword with no native implementation yet; refusing to parse it as a Y-line transmission line"
+                "unsupported capability: the Xyce Y-device keyword '{keyword}' names the \
+                 {description} family ({canonical}), which has no native RSpice model program; \
+                 refusing to parse it as a Y-line transmission line"
             ),
-        });
-    }
-    let port1_pos = expect_node(stream, line_num)?;
-    let port1_neg = expect_node(stream, line_num)?;
-    let port2_pos = expect_node(stream, line_num)?;
-    let port2_neg = expect_node(stream, line_num)?;
-
-    let parsed = parse_tline_params(stream, line_num, params, true)?;
-    if parsed.model.is_none() && parsed.z0.is_none() {
-        return Err(ParseError::Syntax {
+        }),
+        XyceYDeviceOwnership::DigitalSeparateEffort => Err(ParseError::Syntax {
             line: line_num,
-            message: "Y-line transmission line requires MODEL name or Z0".to_string(),
-        });
+            message: format!(
+                "unsupported capability: the Xyce Y-device keyword '{keyword}' names the \
+                 {description} family ({canonical}), which is owned by the separate \
+                 digital/mixed-signal effort and is not parsed by the analog netlist grammar"
+            ),
+        }),
+        XyceYDeviceOwnership::ExternalCouplingSeparateEffort => Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "unsupported capability: the Xyce Y-device keyword '{keyword}' names the \
+                 {description} family ({canonical}), which is owned by the separate \
+                 Verilog-A/external-coupling effort and is not parsed by the analog netlist \
+                 grammar"
+            ),
+        }),
+        XyceYDeviceOwnership::InternalRewriteOfNativeElement { canonical: element } => {
+            Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "unsupported capability: the Xyce Y-device keyword '{keyword}' names the \
+                     {description} family ({canonical}), which Xyce synthesizes internally from \
+                     a '{element}' card; write the canonical '{element}' element instead"
+                ),
+            })
+        }
     }
-
-    elements.push(Element {
-        name,
-        kind: ElementKind::TransmissionLine {
-            z0: parsed.z0,
-            td: parsed.td,
-            freq: parsed.freq,
-            nl: parsed.nl,
-            model: parsed.model,
-        },
-        nodes: vec![port1_pos, port1_neg, port2_pos, port2_neg],
-        provenance: crate::netlist::ElementProvenance::Authored,
-    });
-
-    Ok(())
 }
 
 fn xyce_ydevice_remaining_fields(stream: &TokenStream) -> usize {
@@ -5043,15 +5475,16 @@ fn xyce_ydevice_remaining_fields(stream: &TokenStream) -> usize {
         .count()
 }
 
-fn xyce_legacy_y_gate_spec(name: &str) -> Option<(&'static str, usize)> {
-    match name.to_ascii_uppercase().as_str() {
-        "YAND" => Some(("xyce_legacy_d_and", 2)),
-        "YNAND" => Some(("xyce_legacy_d_nand", 2)),
-        "YNOR" => Some(("xyce_legacy_d_nor", 2)),
-        "YOR" => Some(("xyce_legacy_d_or", 2)),
-        "YXNOR" => Some(("xyce_legacy_d_xnor", 2)),
-        "YXOR" => Some(("xyce_legacy_d_xor", 2)),
-        "YNOT" => Some(("xyce_legacy_d_inverter", 1)),
+/// XSPICE digital-bridge model and input arity for a legacy Xyce gate keyword.
+const fn xyce_legacy_y_gate_spec(family: XyceYDeviceFamily) -> Option<(&'static str, usize)> {
+    match family {
+        XyceYDeviceFamily::GateAnd => Some(("xyce_legacy_d_and", 2)),
+        XyceYDeviceFamily::GateNand => Some(("xyce_legacy_d_nand", 2)),
+        XyceYDeviceFamily::GateNor => Some(("xyce_legacy_d_nor", 2)),
+        XyceYDeviceFamily::GateOr => Some(("xyce_legacy_d_or", 2)),
+        XyceYDeviceFamily::GateXnor => Some(("xyce_legacy_d_xnor", 2)),
+        XyceYDeviceFamily::GateXor => Some(("xyce_legacy_d_xor", 2)),
+        XyceYDeviceFamily::Inverter => Some(("xyce_legacy_d_inverter", 1)),
         _ => None,
     }
 }
@@ -5062,12 +5495,15 @@ fn parse_xyce_y_legacy_gate(
     elements: &mut Vec<Element>,
     params: &ParamContext,
     defer_simple_param_refs: bool,
-    keyword: &str,
+    family: XyceYDeviceFamily,
 ) -> Result<(), ParseError> {
-    let Some((model, input_count)) = xyce_legacy_y_gate_spec(keyword) else {
+    let keyword = family.keywords()[0];
+    let Some((model, input_count)) = xyce_legacy_y_gate_spec(family) else {
         return Err(ParseError::Syntax {
             line: line_num,
-            message: format!("Unsupported legacy Xyce Y-device keyword '{keyword}'"),
+            message: format!(
+                "the Xyce Y-device family '{keyword}' has no legacy digital-gate lowering"
+            ),
         });
     };
     let instance_name = expect_element_name(stream, line_num)?;
@@ -5240,15 +5676,16 @@ fn parse_xyce_y_ic_value(token: &Token, params: &ParamContext) -> Option<Value> 
 
 /// Parse Xyce's legacy Y-device inverter keyword.
 ///
-/// `YNOT instance vlow vhigh input output model` uses explicit low/high
-/// reference rails, while the referenced DIG card supplies the input
-/// reference and analog timing/output parameters.  Lower it to the same
-/// typed XSPICE representation used for a PSpice U inverter; the builder
+/// `YNOT instance vlow vhigh input output model` (equivalently `YINV`) uses
+/// explicit low/high reference rails, while the referenced DIG card supplies
+/// the input reference and analog timing/output parameters.  Lower it to the
+/// same typed XSPICE representation used for a PSpice U inverter; the builder
 /// selects the analog Xyce DIG implementation from the retained metadata.
 fn parse_xyce_y_not(
     stream: &mut TokenStream,
     line_num: usize,
     elements: &mut Vec<Element>,
+    keyword: &str,
 ) -> Result<(), ParseError> {
     let instance_name = expect_element_name(stream, line_num)?;
     let dgnd = expect_node(stream, line_num)?;
@@ -5262,7 +5699,7 @@ fn parse_xyce_y_not(
         return Err(ParseError::Syntax {
             line: line_num,
             message: format!(
-                "Unexpected trailing token in YNOT inverter specification: {}",
+                "Unexpected trailing token in {keyword} inverter specification: {}",
                 stream.peek().kind
             ),
         });
@@ -5368,29 +5805,6 @@ fn parse_xyce_memristor(
         provenance: crate::netlist::ElementProvenance::Authored,
     });
     Ok(())
-}
-
-fn xyce_ydevice_keyword(name: &str) -> Option<&'static str> {
-    let upper = name.to_ascii_uppercase();
-    match upper.as_str() {
-        "YACC" => Some("YACC"),
-        "YADC" => Some("YADC"),
-        "YAND" => Some("YAND"),
-        "YDAC" => Some("YDAC"),
-        "YDELAY" => Some("YDELAY"),
-        "YDFF" => Some("YDFF"),
-        "YLIN" => Some("YLIN"),
-        "YNAND" => Some("YNAND"),
-        "YNEURON" => Some("YNEURON"),
-        "YNOT" => Some("YNOT"),
-        "YOR" => Some("YOR"),
-        "YPDE" => Some("YPDE"),
-        "YRXN" => Some("YRXN"),
-        "YSYNAPSE" => Some("YSYNAPSE"),
-        "YTRANSLINE" => Some("YTRANSLINE"),
-        "YXOR" => Some("YXOR"),
-        _ => None,
-    }
 }
 
 /// Parse Xyce RF ports or coupled transmission lines (P element).
@@ -5672,14 +6086,13 @@ pub(super) fn parse_subcircuit_instance(
 
     let subckt_name = fields[param_start - 1].clone();
     if parenthesized_node_count.is_none()
-        && params_ctx.expression_dialect() == ExpressionDialect::Xyce
         && fields[1..param_start - 1]
             .iter()
             .any(|field| field.contains(['(', ')']))
     {
         return Err(ParseError::Syntax {
             line: line_num,
-            message: "a Xyce parenthesized subcircuit-instance actual-node list must be one balanced outer list immediately after the instance name".to_string(),
+            message: "a parenthesized subcircuit-instance actual-node list must be one balanced outer list immediately after the instance name".to_string(),
         });
     }
     let nodes = fields[1..param_start - 1]
@@ -5714,75 +6127,85 @@ pub(super) fn parse_subcircuit_instance(
     Ok(())
 }
 
-/// Split an X-instance while recognizing Xyce's `Xname (actual ...) subckt`
-/// form as a structural actual-node list.
+/// How one structural parenthesized name group is spelled and diagnosed.
 ///
-/// Parentheses in the parameter tail are deliberately handled only after the
-/// subcircuit name. This prevents an expression such as `P=pow(2, 3)` from
-/// being mistaken for node-list syntax. Ordinary X-instance syntax uses the
-/// historical splitter unchanged.
-fn split_subcircuit_instance_fields(
-    line: &str,
+/// `.SUBCKT CELL (a b)` and `X1 (a b) CELL` are the same lexical construct
+/// around different heads, so both go through
+/// [`scan_parenthesized_name_group`]; only the nouns in the diagnostics and
+/// the comma rule differ.
+#[derive(Debug, Clone, Copy)]
+struct ParenthesizedGroupSyntax {
+    /// Noun for the group itself, e.g. `subcircuit-instance actual-node list`.
+    list: &'static str,
+    /// Noun for what the group must follow, e.g. `the instance name`.
+    head: &'static str,
+    /// Noun for what may follow the closing `)`, e.g. `the subcircuit name`.
+    tail: &'static str,
+    /// Xyce forbids a comma as a separator inside the group; the ngspice
+    /// front-end splits on commas everywhere and keeps that leniency.
+    reject_commas: bool,
+}
+
+/// One structural parenthesized name group, or its absence.
+#[derive(Debug)]
+enum ParenthesizedNameGroup<'a> {
+    /// No `(` followed the head. The caller keeps its ordinary field split.
+    Absent,
+    Present {
+        names: Vec<String>,
+        /// Everything after the closing `)`, still unsplit.
+        tail: &'a str,
+    },
+}
+
+/// Scan the structural parenthesized name group that may follow `head_end`.
+///
+/// `source` must already be left-trimmed and `head_end` must be the byte
+/// offset just past the head token. Only one balanced outer pair is
+/// structural: parentheses inside the tail belong to parameter expressions
+/// such as `P=pow(2, 3)` and are never consumed here.
+fn scan_parenthesized_name_group<'a>(
+    source: &'a str,
+    head_end: usize,
     line_num: usize,
-    xyce_syntax: bool,
-) -> Result<(Vec<String>, Option<usize>), ParseError> {
-    let ordinary = || coalesce_assignment_fields(split_spice_fields(line));
-    if !xyce_syntax {
-        return Ok((ordinary(), None));
-    }
-
-    let trimmed = line.trim_start();
-    let mut cursor = 0usize;
-    while cursor < trimmed.len() {
-        let character = trimmed[cursor..]
-            .chars()
-            .next()
-            .expect("cursor remains on a character boundary");
-        if character.is_whitespace() || character == ',' {
-            break;
-        }
-        cursor += character.len_utf8();
-    }
-    let instance_name = &trimmed[..cursor];
-    if instance_name.contains(['(', ')']) {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: "a parenthesized subcircuit-instance actual-node list must be separated from the instance name by whitespace".to_string(),
-        });
-    }
-
-    let separator_start = cursor;
-    let wrapper_may_follow = trimmed[cursor..]
+    syntax: ParenthesizedGroupSyntax,
+) -> Result<ParenthesizedNameGroup<'a>, ParseError> {
+    let ParenthesizedGroupSyntax {
+        list,
+        head,
+        tail: tail_noun,
+        reject_commas,
+    } = syntax;
+    let separator_is_whitespace = source[head_end..]
         .chars()
         .next()
         .is_some_and(char::is_whitespace);
-    cursor = skip_subckt_header_separators(trimmed, cursor);
-    let Some(first_after_name) = trimmed[cursor..].chars().next() else {
-        return Ok((ordinary(), None));
+    let group_start = skip_subckt_header_separators(source, head_end);
+    let Some(first_after_head) = source[group_start..].chars().next() else {
+        return Ok(ParenthesizedNameGroup::Absent);
     };
-    if first_after_name == ')' {
+    if first_after_head == ')' {
         return Err(ParseError::Syntax {
             line: line_num,
-            message:
-                "closing ')' has no matching parenthesized subcircuit-instance actual-node list"
-                    .to_string(),
+            message: format!("closing ')' has no matching parenthesized {list}"),
         });
     }
-    if first_after_name != '(' {
-        return Ok((ordinary(), None));
+    if first_after_head != '(' {
+        return Ok(ParenthesizedNameGroup::Absent);
     }
-    if !wrapper_may_follow || trimmed[separator_start..cursor].contains(',') {
+    if !separator_is_whitespace || source[head_end..group_start].contains(',') {
         return Err(ParseError::Syntax {
             line: line_num,
-            message: "a parenthesized subcircuit-instance actual-node list must be separated from the instance name by whitespace only".to_string(),
+            message: format!(
+                "a parenthesized {list} must be separated from {head} by whitespace only"
+            ),
         });
     }
 
-    let open = cursor;
-    cursor += '('.len_utf8();
+    let mut cursor = group_start + '('.len_utf8();
     let mut close = None;
-    while cursor < trimmed.len() {
-        let character = trimmed[cursor..]
+    while cursor < source.len() {
+        let character = source[cursor..]
             .chars()
             .next()
             .expect("cursor remains on a character boundary");
@@ -5790,8 +6213,7 @@ fn split_subcircuit_instance_fields(
             '(' => {
                 return Err(ParseError::Syntax {
                     line: line_num,
-                    message: "nested parentheses are not allowed in a subcircuit-instance actual-node list"
-                        .to_string(),
+                    message: format!("nested parentheses are not allowed in a {list}"),
                 });
             }
             ')' => {
@@ -5804,26 +6226,103 @@ fn split_subcircuit_instance_fields(
     let Some(close) = close else {
         return Err(ParseError::Syntax {
             line: line_num,
-            message: "unterminated parenthesized subcircuit-instance actual-node list".to_string(),
+            message: format!("unterminated parenthesized {list}"),
         });
     };
 
-    let actual_node_source = &trimmed[open + '('.len_utf8()..close];
-    if actual_node_source.contains(',') {
+    let group_source = &source[group_start + '('.len_utf8()..close];
+    if reject_commas && group_source.contains(',') {
         return Err(ParseError::Syntax {
             line: line_num,
-            message: "commas are not separators in a Xyce parenthesized subcircuit-instance actual-node list"
-                .to_string(),
+            message: format!("commas are not separators in a Xyce parenthesized {list}"),
         });
     }
-    let actual_nodes = split_spice_fields(actual_node_source);
-    if actual_nodes.is_empty() {
+    let names = split_spice_fields(group_source);
+    if names.is_empty() {
         return Err(ParseError::Syntax {
             line: line_num,
-            message: "parenthesized subcircuit-instance actual-node list cannot be empty"
-                .to_string(),
+            message: format!("parenthesized {list} cannot be empty"),
         });
     }
+
+    let after_close = close + ')'.len_utf8();
+    if let Some(character) = source[after_close..].chars().next()
+        && !character.is_whitespace()
+    {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "{tail_noun} after a parenthesized {list} must be separated by whitespace"
+            ),
+        });
+    }
+    Ok(ParenthesizedNameGroup::Present {
+        names,
+        tail: &source[after_close..],
+    })
+}
+
+/// Byte offset just past the first token of `source`, which must already be
+/// left-trimmed. Whitespace and commas both end a token.
+fn subckt_header_token_end(source: &str) -> usize {
+    let mut cursor = 0usize;
+    while cursor < source.len() {
+        let character = source[cursor..]
+            .chars()
+            .next()
+            .expect("cursor remains on a character boundary");
+        if character.is_whitespace() || character == ',' {
+            break;
+        }
+        cursor += character.len_utf8();
+    }
+    cursor
+}
+
+/// Split an X-instance while recognizing the `Xname (actual ...) subckt` form
+/// as a structural actual-node list.
+///
+/// Both reference front-ends accept it: Xyce parses it directly, and
+/// ngspice's `inp_subcktexpand` blanks the first balanced outer pair on every
+/// non-directive card before its own tokenizer runs. Reading it as two node
+/// names spelled `(IN` and `0)` is therefore a misparse in every dialect, not
+/// a dialect difference. Parentheses in the parameter tail are deliberately
+/// handled only after the subcircuit name so that an expression such as
+/// `P=pow(2, 3)` is never mistaken for node-list syntax.
+fn split_subcircuit_instance_fields(
+    line: &str,
+    line_num: usize,
+    xyce_syntax: bool,
+) -> Result<(Vec<String>, Option<usize>), ParseError> {
+    let trimmed = line.trim_start();
+    let name_end = subckt_header_token_end(trimmed);
+    let instance_name = &trimmed[..name_end];
+    if instance_name.contains(['(', ')']) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "a parenthesized subcircuit-instance actual-node list must be separated from the instance name by whitespace".to_string(),
+        });
+    }
+
+    let group = scan_parenthesized_name_group(
+        trimmed,
+        name_end,
+        line_num,
+        ParenthesizedGroupSyntax {
+            list: "subcircuit-instance actual-node list",
+            head: "the instance name",
+            tail: "the subcircuit name",
+            reject_commas: xyce_syntax,
+        },
+    )?;
+    let ParenthesizedNameGroup::Present {
+        names: actual_nodes,
+        tail: tail_source,
+    } = group
+    else {
+        return Ok((coalesce_assignment_fields(split_spice_fields(line)), None));
+    };
+
     if let Some(ambiguous) = actual_nodes.iter().find(|node| {
         node.contains('=')
             || node.contains(['{', '}', '\'', '"'])
@@ -5838,17 +6337,6 @@ fn split_subcircuit_instance_fields(
         });
     }
 
-    let after_close = close + ')'.len_utf8();
-    if let Some(character) = trimmed[after_close..].chars().next()
-        && !character.is_whitespace()
-    {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: "the subcircuit name after a parenthesized actual-node list must be separated by whitespace"
-                .to_string(),
-        });
-    }
-    let tail_source = &trimmed[after_close..];
     validate_parenthesized_subcircuit_instance_tail(tail_source, line_num)?;
     let tail = coalesce_assignment_fields(split_subckt_header_tail_fields(tail_source));
     let Some(subckt_name) = tail.first() else {
@@ -7932,7 +8420,8 @@ pub(super) fn parse_subckt_def(
 /// Only the outer formal-port delimiters are removed. Parentheses in default
 /// parameter expressions remain byte-for-byte intact for the expression
 /// parser, and malformed/nested lists are rejected rather than inheriting
-/// Xyce's historical blanket deletion of standalone parenthesis tokens.
+/// Xyce's historical blanket deletion of standalone parenthesis tokens. The
+/// group itself is scanned by the same primitive the X-instance form uses.
 fn split_subckt_definition_fields(
     line: &str,
     line_num: usize,
@@ -7941,10 +8430,8 @@ fn split_subckt_definition_fields(
     let trimmed = line.trim_start();
     let directive_end = trimmed.find(char::is_whitespace).unwrap_or(trimmed.len());
     let directive = &trimmed[..directive_end];
-    let mut cursor = directive_end;
-    let directive_separator_start = cursor;
-    cursor = skip_subckt_header_separators(trimmed, cursor);
-    if trimmed[directive_separator_start..cursor].contains(',') {
+    let name_start = skip_subckt_header_separators(trimmed, directive_end);
+    if trimmed[directive_end..name_start].contains(',') {
         return Err(ParseError::Syntax {
             line: line_num,
             message: ".SUBCKT name must be separated from the directive by whitespace only"
@@ -7952,121 +8439,37 @@ fn split_subckt_definition_fields(
         });
     }
 
-    if cursor >= trimmed.len() {
+    if name_start >= trimmed.len() {
         return Ok((split_spice_fields(line), None));
     }
-    let name_start = cursor;
-    while cursor < trimmed.len() {
-        let character = trimmed[cursor..]
-            .chars()
-            .next()
-            .expect("cursor remains on a character boundary");
-        if character.is_whitespace() || character == ',' {
-            break;
-        }
-        cursor += character.len_utf8();
-    }
-    let name = &trimmed[name_start..cursor];
-    let separator_start = cursor;
-    let wrapper_may_follow = trimmed[cursor..]
-        .chars()
-        .next()
-        .is_some_and(char::is_whitespace);
-    cursor = skip_subckt_header_separators(trimmed, cursor);
+    let name_end = name_start + subckt_header_token_end(&trimmed[name_start..]);
+    let name = &trimmed[name_start..name_end];
 
-    let Some(first_after_name) = trimmed[cursor..].chars().next() else {
+    let group = scan_parenthesized_name_group(
+        trimmed,
+        name_end,
+        line_num,
+        ParenthesizedGroupSyntax {
+            list: ".SUBCKT formal-port list",
+            head: "its name",
+            tail: "content",
+            reject_commas: xyce_syntax,
+        },
+    )?;
+    let ParenthesizedNameGroup::Present { names, tail } = group else {
         return Ok((
-            assemble_unwrapped_subckt_definition_fields(directive, name, ""),
+            assemble_unwrapped_subckt_definition_fields(directive, name, &trimmed[name_end..]),
             None,
         ));
     };
-    if first_after_name == ')' {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: "closing ')' has no matching parenthesized .SUBCKT formal-port list"
-                .to_string(),
-        });
-    }
-    if first_after_name != '(' || !wrapper_may_follow {
-        return Ok((
-            assemble_unwrapped_subckt_definition_fields(
-                directive,
-                name,
-                &trimmed[separator_start..],
-            ),
-            None,
-        ));
-    }
-    if trimmed[separator_start..cursor].contains(',') {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: "a parenthesized .SUBCKT formal-port list must be separated from its name by whitespace only"
-                .to_string(),
-        });
-    }
 
-    let open = cursor;
-    cursor += first_after_name.len_utf8();
-    let mut close = None;
-    while cursor < trimmed.len() {
-        let character = trimmed[cursor..]
-            .chars()
-            .next()
-            .expect("cursor remains on a character boundary");
-        match character {
-            '(' => {
-                return Err(ParseError::Syntax {
-                    line: line_num,
-                    message: "nested parentheses are not allowed in a .SUBCKT formal-port list"
-                        .to_string(),
-                });
-            }
-            ')' => {
-                close = Some(cursor);
-                break;
-            }
-            _ => cursor += character.len_utf8(),
-        }
-    }
-    let Some(close) = close else {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: "unterminated parenthesized .SUBCKT formal-port list".to_string(),
-        });
-    };
-
-    let formal_port_source = &trimmed[open + 1..close];
-    if xyce_syntax && formal_port_source.contains(',') {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: "commas are not separators in a Xyce parenthesized .SUBCKT formal-port list"
-                .to_string(),
-        });
-    }
-    let formal_ports = split_spice_fields(formal_port_source);
-    if formal_ports.is_empty() {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: "parenthesized .SUBCKT formal-port list cannot be empty".to_string(),
-        });
-    }
-
-    let mut fields = Vec::with_capacity(2 + formal_ports.len());
+    let mut fields = Vec::with_capacity(2 + names.len());
     fields.push(directive.to_string());
     fields.push(name.to_string());
-    fields.extend(formal_ports.iter().cloned());
-    let after_close = close + ')'.len_utf8();
-    if let Some(character) = trimmed[after_close..].chars().next()
-        && !character.is_whitespace()
-    {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: "content after a parenthesized .SUBCKT formal-port list must be separated by whitespace"
-                .to_string(),
-        });
-    }
-    fields.extend(split_subckt_header_tail_fields(&trimmed[after_close..]));
-    Ok((fields, Some(formal_ports.len())))
+    let formal_port_count = names.len();
+    fields.extend(names);
+    fields.extend(split_subckt_header_tail_fields(tail));
+    Ok((fields, Some(formal_port_count)))
 }
 
 fn assemble_unwrapped_subckt_definition_fields(
@@ -8355,4 +8758,78 @@ fn parse_string_field_value(raw_value: &str, params_ctx: &ParamContext) -> Optio
     }
     let expr = strip_wrapping_expression_delimiters(raw_value);
     params_ctx.get_string(expr).map(ToString::to_string)
+}
+
+#[cfg(test)]
+mod xyce_ydevice_table_tests {
+    use super::{XyceYDeviceFamily, XyceYDeviceOwnership, xyce_legacy_y_gate_spec};
+
+    #[test]
+    fn every_family_appears_in_the_table_exactly_once() {
+        for (index, family) in XyceYDeviceFamily::ALL.into_iter().enumerate() {
+            assert_eq!(
+                family.ordinal(),
+                index,
+                "{family:?} is listed out of order or twice in XyceYDeviceFamily::ALL"
+            );
+        }
+    }
+
+    #[test]
+    fn keywords_are_uppercase_y_prefixed_and_unambiguous() {
+        let mut seen = Vec::new();
+        for family in XyceYDeviceFamily::ALL {
+            let keywords = family.keywords();
+            assert!(
+                !keywords.is_empty(),
+                "{family:?} must declare at least one keyword spelling"
+            );
+            for keyword in keywords {
+                assert!(
+                    keyword.starts_with('Y') && *keyword == keyword.to_ascii_uppercase(),
+                    "{family:?} keyword '{keyword}' must be an uppercase Y-prefixed spelling"
+                );
+                assert!(
+                    !seen.contains(keyword),
+                    "keyword '{keyword}' is claimed by more than one Y-device family"
+                );
+                seen.push(keyword);
+            }
+        }
+    }
+
+    #[test]
+    fn classification_is_case_insensitive_and_closed() {
+        assert_eq!(
+            XyceYDeviceFamily::classify("ymemristor"),
+            Some(XyceYDeviceFamily::Memristor)
+        );
+        assert_eq!(
+            XyceYDeviceFamily::classify("YPowerGridBranch"),
+            Some(XyceYDeviceFamily::PowerGridBranch)
+        );
+        assert_eq!(
+            XyceYDeviceFamily::classify("YPGBR"),
+            Some(XyceYDeviceFamily::PowerGridBranch)
+        );
+        assert_eq!(XyceYDeviceFamily::classify("Y1"), None);
+        assert_eq!(XyceYDeviceFamily::classify("YFOO"), None);
+    }
+
+    #[test]
+    fn every_bridged_digital_family_has_a_gate_or_flip_flop_lowering() {
+        for family in XyceYDeviceFamily::ALL {
+            let has_gate_spec = xyce_legacy_y_gate_spec(family).is_some();
+            match family.ownership() {
+                XyceYDeviceOwnership::DigitalXspiceBridge(_) => assert!(
+                    has_gate_spec || family == XyceYDeviceFamily::FlipFlopD,
+                    "{family:?} is routed to the XSPICE digital bridge without a lowering"
+                ),
+                _ => assert!(
+                    !has_gate_spec,
+                    "{family:?} declares a digital-gate lowering it is not routed to"
+                ),
+            }
+        }
+    }
 }

@@ -101,6 +101,11 @@ struct SpectreSymbols {
     models: HashMap<String, String>,
     bsimsoi_models: HashSet<String>,
     subcircuits: HashSet<String>,
+    /// Lowercase Spectre instance name of every independent source, mapped to
+    /// the canonical card name it lowers to. A `dc dev=` or a `noise iprobe=`
+    /// names the Spectre instance, while the analysis card must name the
+    /// lowered one.
+    sources: HashMap<String, String>,
 }
 
 /// Adapt a supported Spectre model-library source without changing its line
@@ -362,10 +367,27 @@ fn parse_spectre_statements(
                 index += consumed;
                 continue;
             }
-            "saveoptions" | "simulatoroptions" | "altergroup" => {
-                return Err(error(
+            "save" => {
+                let (logical, consumed) = collect_continued_statement(lines, index, false);
+                let (_, entries) = split_head(&logical);
+                statements.push(SpectreStatement {
+                    line: line_number,
+                    consumed_lines: consumed,
+                    kind: SpectreStatementKind::Lowered(adapt_save(entries, line_number)?),
+                });
+                index += consumed;
+                continue;
+            }
+            _ if matches!(
+                SpectreConstruct::classify(SpectreNamespace::Statement, &head_lower)
+                    .map(SpectreConstruct::support),
+                Some(SpectreSupport::Unsupported(_))
+            ) =>
+            {
+                return Err(unsupported_construct(
+                    SpectreNamespace::Statement,
+                    head,
                     line_number,
-                    format!("unsupported native Spectre model-library statement '{head}'"),
                 ));
             }
             _ => {
@@ -874,7 +896,11 @@ fn lower_statistics(
     }
     plan.validate_structure()
         .map_err(|failure| error(0, failure.to_string()))?;
-    Ok(format!(".RSPICE_SPECTRE_STAT {}", plan.encode_internal()))
+    Ok(format!(
+        "{} {}",
+        super::spectre_statistics::SPECTRE_STATISTICS_DIRECTIVE,
+        plan.encode_internal()
+    ))
 }
 
 fn valid_spice_identifier(value: &str) -> bool {
@@ -883,6 +909,311 @@ fn valid_spice_identifier(value: &str) -> bool {
         .next()
         .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
         && characters.all(|character| character.is_ascii_alphanumeric() || character == '_')
+}
+
+//=============================================================================
+// Construct inventory
+//=============================================================================
+
+/// The namespace a Spectre name is resolved in.
+///
+/// The same word means different things in each: `d` is a diode model family
+/// and also a diode instance master, `resistor` is both a master and a model
+/// family, and `save` is only ever a statement keyword.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SpectreNamespace {
+    /// First token of a top-level statement.
+    Statement,
+    /// Master of a named statement: an instance primitive or an analysis.
+    Master,
+    /// Device family named by a `model` statement.
+    ModelFamily,
+}
+
+impl SpectreNamespace {
+    const fn description(self) -> &'static str {
+        match self {
+            Self::Statement => "model-library statement",
+            Self::Master => "instance master",
+            Self::ModelFamily => "model family",
+        }
+    }
+}
+
+/// What this adapter does with a recognized Spectre construct.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SpectreSupport {
+    /// Lowered to a canonical SPICE card.
+    Lowered,
+    /// Recognized and deliberately refused. The text says why, and becomes
+    /// the refusal a deck sees.
+    Unsupported(&'static str),
+    /// Preserved verbatim for a different effort, which the text names.
+    OwnedElsewhere(&'static str),
+}
+
+/// Declare the construct inventory once.
+///
+/// The macro derives the enum and its `ALL` list from the same table, so the
+/// list cannot fall behind the variants and every construct necessarily
+/// declares a namespace, a support decision, and its spellings.
+macro_rules! spectre_constructs {
+    ($($variant:ident => ($namespace:expr, $support:expr, [$($name:literal),+ $(,)?] $(,)?)),+ $(,)?) => {
+        /// Every Spectre statement keyword, instance master, and model family
+        /// this adapter knows.
+        ///
+        /// This is the inventory the three catch-all refusals answer from: a
+        /// name that is here is refused with the reason recorded beside it,
+        /// and a name that is not here is refused as unknown. Nothing is
+        /// silently discarded either way.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        enum SpectreConstruct {
+            $($variant,)+
+        }
+
+        impl SpectreConstruct {
+            const ALL: &'static [Self] = &[$(Self::$variant,)+];
+
+            const fn namespace(self) -> SpectreNamespace {
+                match self { $(Self::$variant => $namespace,)+ }
+            }
+
+            const fn support(self) -> SpectreSupport {
+                match self { $(Self::$variant => $support,)+ }
+            }
+
+            /// Lowercase spellings Spectre accepts. The first is canonical.
+            const fn names(self) -> &'static [&'static str] {
+                match self { $(Self::$variant => &[$($name,)+],)+ }
+            }
+        }
+    };
+}
+
+spectre_constructs! {
+    // -- statements ---------------------------------------------------------
+    StatementSimulator => (SpectreNamespace::Statement, SpectreSupport::Lowered, ["simulator"]),
+    StatementLibrary => (SpectreNamespace::Statement, SpectreSupport::Lowered, ["library"]),
+    StatementEndLibrary => (SpectreNamespace::Statement, SpectreSupport::Lowered, ["endlibrary"]),
+    StatementSection => (SpectreNamespace::Statement, SpectreSupport::Lowered, ["section"]),
+    StatementEndSection => (SpectreNamespace::Statement, SpectreSupport::Lowered, ["endsection"]),
+    StatementInclude => (SpectreNamespace::Statement, SpectreSupport::Lowered, ["include"]),
+    StatementModel => (SpectreNamespace::Statement, SpectreSupport::Lowered, ["model"]),
+    StatementParameters => (SpectreNamespace::Statement, SpectreSupport::Lowered, ["parameters"]),
+    StatementSubckt => (SpectreNamespace::Statement, SpectreSupport::Lowered, ["subckt"]),
+    StatementInline => (SpectreNamespace::Statement, SpectreSupport::Lowered, ["inline"]),
+    StatementEnds => (SpectreNamespace::Statement, SpectreSupport::Lowered, ["ends"]),
+    StatementGlobal => (SpectreNamespace::Statement, SpectreSupport::Lowered, ["global"]),
+    StatementStatistics => (SpectreNamespace::Statement, SpectreSupport::Lowered, ["statistics"]),
+    StatementSave => (SpectreNamespace::Statement, SpectreSupport::Lowered, ["save"]),
+    StatementAhdlInclude => (
+        SpectreNamespace::Statement,
+        SpectreSupport::OwnedElsewhere("the separate Verilog-A/AHDL effort"),
+        ["ahdl_include"],
+    ),
+    StatementSaveOptions => (
+        SpectreNamespace::Statement,
+        SpectreSupport::Unsupported(
+            "Spectre saveOptions selects output scope with simulator-specific policies that have \
+             no canonical .SAVE equivalent; name the signals with a save statement instead",
+        ),
+        ["saveoptions"],
+    ),
+    StatementSimulatorOptions => (
+        SpectreNamespace::Statement,
+        SpectreSupport::Unsupported(
+            "Spectre simulatorOptions carries solver tolerances whose meanings are not RSpice \
+             .OPTIONS meanings; accepting it would change numerical results without saying so",
+        ),
+        ["simulatoroptions"],
+    ),
+    StatementAlterGroup => (
+        SpectreNamespace::Statement,
+        SpectreSupport::Unsupported(
+            "Spectre altergroup re-elaborates a deck variant; RSpice has no ALTER variant axis in \
+             its deck plan yet",
+        ),
+        ["altergroup"],
+    ),
+
+    // -- instance masters ---------------------------------------------------
+    MasterResistor => (SpectreNamespace::Master, SpectreSupport::Lowered, ["resistor", "res"]),
+    MasterCapacitor => (SpectreNamespace::Master, SpectreSupport::Lowered, ["capacitor", "cap"]),
+    MasterInductor => (SpectreNamespace::Master, SpectreSupport::Lowered, ["inductor", "ind"]),
+    MasterVSource => (SpectreNamespace::Master, SpectreSupport::Lowered, ["vsource"]),
+    MasterISource => (SpectreNamespace::Master, SpectreSupport::Lowered, ["isource"]),
+    MasterVcvs => (SpectreNamespace::Master, SpectreSupport::Lowered, ["vcvs"]),
+    MasterVccs => (SpectreNamespace::Master, SpectreSupport::Lowered, ["vccs"]),
+    MasterBSource => (SpectreNamespace::Master, SpectreSupport::Lowered, ["bsource"]),
+    MasterDiode => (SpectreNamespace::Master, SpectreSupport::Lowered, ["diode", "d"]),
+    MasterMosfet => (SpectreNamespace::Master, SpectreSupport::Lowered, ["nmos", "pmos"]),
+    MasterBjt => (SpectreNamespace::Master, SpectreSupport::Lowered, ["npn", "pnp"]),
+    MasterJfet => (
+        SpectreNamespace::Master,
+        SpectreSupport::Lowered,
+        ["njf", "pjf", "njfet", "pjfet"],
+    ),
+    MasterTran => (SpectreNamespace::Master, SpectreSupport::Lowered, ["tran"]),
+    MasterDc => (SpectreNamespace::Master, SpectreSupport::Lowered, ["dc"]),
+    MasterAc => (SpectreNamespace::Master, SpectreSupport::Lowered, ["ac"]),
+    MasterNoise => (SpectreNamespace::Master, SpectreSupport::Lowered, ["noise"]),
+    MasterSweep => (SpectreNamespace::Master, SpectreSupport::Lowered, ["sweep"]),
+    MasterCcvs => (
+        SpectreNamespace::Master,
+        SpectreSupport::Unsupported(
+            "a Spectre ccvs senses the branch formed by its own control terminals, while the \
+             canonical H card senses a named voltage source; the adapter preserves one source \
+             line per input line and may not synthesize the extra zero-volt probe",
+        ),
+        ["ccvs"],
+    ),
+    MasterCccs => (
+        SpectreNamespace::Master,
+        SpectreSupport::Unsupported(
+            "a Spectre cccs senses the branch formed by its own control terminals, while the \
+             canonical F card senses a named voltage source; the adapter preserves one source \
+             line per input line and may not synthesize the extra zero-volt probe",
+        ),
+        ["cccs"],
+    ),
+    MasterSp => (
+        SpectreNamespace::Master,
+        SpectreSupport::Unsupported(
+            "a Spectre sp analysis names its ports on the analysis statement, while .SP takes its \
+             ports from P elements; no port mapping is defined",
+        ),
+        ["sp"],
+    ),
+    MasterPss => (
+        SpectreNamespace::Master,
+        SpectreSupport::OwnedElsewhere("the separate periodic/RF analysis-card work package"),
+        ["pss"],
+    ),
+    MasterPac => (
+        SpectreNamespace::Master,
+        SpectreSupport::OwnedElsewhere("the separate periodic/RF analysis-card work package"),
+        ["pac"],
+    ),
+    MasterPnoise => (
+        SpectreNamespace::Master,
+        SpectreSupport::OwnedElsewhere("the separate periodic/RF analysis-card work package"),
+        ["pnoise"],
+    ),
+    MasterOptions => (
+        SpectreNamespace::Master,
+        SpectreSupport::Unsupported(
+            "Spectre options statements carry solver tolerances whose meanings are not RSpice \
+             .OPTIONS meanings; accepting them would change numerical results without saying so",
+        ),
+        ["options"],
+    ),
+    MasterInfo => (
+        SpectreNamespace::Master,
+        SpectreSupport::Unsupported(
+            "a Spectre info statement requests a simulator-specific report artifact, not circuit \
+             or analysis semantics",
+        ),
+        ["info"],
+    ),
+    MasterMonteCarlo => (
+        SpectreNamespace::Master,
+        SpectreSupport::Unsupported(
+            "Spectre montecarlo scopes a nested analysis block; RSpice drives Monte Carlo from its \
+             runner rather than from a netlist card",
+        ),
+        ["montecarlo"],
+    ),
+
+    // -- model families -----------------------------------------------------
+    ModelDiode => (SpectreNamespace::ModelFamily, SpectreSupport::Lowered, ["d", "diode"]),
+    ModelNpn => (SpectreNamespace::ModelFamily, SpectreSupport::Lowered, ["npn"]),
+    ModelPnp => (SpectreNamespace::ModelFamily, SpectreSupport::Lowered, ["pnp"]),
+    ModelNmos => (SpectreNamespace::ModelFamily, SpectreSupport::Lowered, ["nmos"]),
+    ModelPmos => (SpectreNamespace::ModelFamily, SpectreSupport::Lowered, ["pmos"]),
+    ModelNjf => (SpectreNamespace::ModelFamily, SpectreSupport::Lowered, ["njf", "njfet"]),
+    ModelPjf => (SpectreNamespace::ModelFamily, SpectreSupport::Lowered, ["pjf", "pjfet"]),
+    ModelResistor => (
+        SpectreNamespace::ModelFamily,
+        SpectreSupport::Lowered,
+        ["r", "res", "resistor"],
+    ),
+    ModelCapacitor => (
+        SpectreNamespace::ModelFamily,
+        SpectreSupport::Lowered,
+        ["c", "capacitor"],
+    ),
+    ModelMos1 => (SpectreNamespace::ModelFamily, SpectreSupport::Lowered, ["mos1"]),
+    ModelMos2 => (SpectreNamespace::ModelFamily, SpectreSupport::Lowered, ["mos2"]),
+    ModelMos3 => (SpectreNamespace::ModelFamily, SpectreSupport::Lowered, ["mos3"]),
+    ModelMos6 => (SpectreNamespace::ModelFamily, SpectreSupport::Lowered, ["mos6"]),
+    ModelBsim1 => (SpectreNamespace::ModelFamily, SpectreSupport::Lowered, ["bsim1"]),
+    ModelBsim2 => (SpectreNamespace::ModelFamily, SpectreSupport::Lowered, ["bsim2"]),
+    ModelBsim3 => (
+        SpectreNamespace::ModelFamily,
+        SpectreSupport::Lowered,
+        ["bsim3", "bsim3v3"],
+    ),
+    ModelBsim4 => (
+        SpectreNamespace::ModelFamily,
+        SpectreSupport::Lowered,
+        ["bsim4", "bsim4v8"],
+    ),
+    ModelBsimSoi => (SpectreNamespace::ModelFamily, SpectreSupport::Lowered, ["bsimsoi"]),
+    ModelEkv => (
+        SpectreNamespace::ModelFamily,
+        SpectreSupport::Lowered,
+        ["ekv", "ekv26"],
+    ),
+    ModelEkv3 => (SpectreNamespace::ModelFamily, SpectreSupport::Lowered, ["ekv3"]),
+}
+
+impl SpectreConstruct {
+    /// Resolve one lowercase name inside a namespace.
+    fn classify(namespace: SpectreNamespace, name: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|construct| {
+            construct.namespace() == namespace
+                && construct
+                    .names()
+                    .iter()
+                    .any(|candidate| candidate.eq_ignore_ascii_case(name))
+        })
+    }
+}
+
+/// The refusal for a name this adapter does not lower, answered from the
+/// construct inventory so that a recognized-but-unsupported construct says
+/// why and an unknown one says it is unknown.
+fn unsupported_construct(
+    namespace: SpectreNamespace,
+    name: &str,
+    line: usize,
+) -> SpectreModelAdapterError {
+    let description = namespace.description();
+    match SpectreConstruct::classify(namespace, &name.to_ascii_lowercase())
+        .map(SpectreConstruct::support)
+    {
+        Some(SpectreSupport::Unsupported(reason)) => error(
+            line,
+            format!("unsupported native Spectre {description} '{name}': {reason}"),
+        ),
+        Some(SpectreSupport::OwnedElsewhere(owner)) => error(
+            line,
+            format!(
+                "unsupported native Spectre {description} '{name}': it is owned by {owner}; no statement was discarded"
+            ),
+        ),
+        Some(SpectreSupport::Lowered) => error(
+            line,
+            format!(
+                "native Spectre {description} '{name}' is lowered, but reached the refusal path; \
+                 this is an adapter defect, not a deck error"
+            ),
+        ),
+        None => error(
+            line,
+            format!("unknown native Spectre {description} '{name}'; no statement was discarded"),
+        ),
+    }
 }
 
 impl SpectreSymbols {
@@ -914,9 +1245,18 @@ impl SpectreSymbols {
                 SpectreStatementKind::Subcircuit { name, .. } => {
                     symbols.subcircuits.insert(name.to_ascii_lowercase());
                 }
-                SpectreStatementKind::Lowered(_)
-                | SpectreStatementKind::Statistics(_)
-                | SpectreStatementKind::Instance(_) => {}
+                SpectreStatementKind::Instance(instance) => {
+                    let prefix = match instance.master.to_ascii_lowercase().as_str() {
+                        "vsource" => "V",
+                        "isource" => "I",
+                        _ => continue,
+                    };
+                    symbols.sources.insert(
+                        instance.name.to_ascii_lowercase(),
+                        format!("{prefix}{}", instance.name),
+                    );
+                }
+                SpectreStatementKind::Lowered(_) | SpectreStatementKind::Statistics(_) => {}
             }
         }
         Ok(symbols)
@@ -1017,14 +1357,15 @@ fn parse_spectre_instance(
 ) -> Result<SpectreInstance, SpectreModelAdapterError> {
     let (name, remainder) = take_token(logical)
         .ok_or_else(|| error(line, "Spectre instance declaration has no name"))?;
-    let (nodes, remainder) = consume_parenthesized(remainder, line, "instance node list")?;
-    let nodes = split_node_list(&nodes, line)?;
-    if nodes.is_empty() {
-        return Err(error(
-            line,
-            format!("Spectre instance '{name}' has no connected nodes"),
-        ));
-    }
+    // An analysis statement is spelled like an instance without terminals
+    // (`tran1 tran stop=1m`), so an absent node list is structural rather than
+    // an error. Each master enforces its own arity below.
+    let (nodes, remainder) = if remainder.trim_start().starts_with('(') {
+        let (nodes, remainder) = consume_parenthesized(remainder, line, "instance node list")?;
+        (split_node_list(&nodes, line)?, remainder)
+    } else {
+        (Vec::new(), remainder)
+    };
     let (master, parameters) = take_token(remainder)
         .ok_or_else(|| error(line, format!("Spectre instance '{name}' has no master")))?;
     Ok(SpectreInstance {
@@ -1112,6 +1453,10 @@ fn lower_spectre_instance(
         "inductor" | "ind" => lower_two_terminal_primitive(instance, "L", "l", line),
         "vsource" => lower_independent_source(instance, "V", line),
         "isource" => lower_independent_source(instance, "I", line),
+        "vcvs" => lower_voltage_controlled_source(instance, "E", "gain", line),
+        "vccs" => lower_voltage_controlled_source(instance, "G", "gm", line),
+        "bsource" => lower_behavioral_source(instance, line),
+        "tran" | "dc" | "ac" | "noise" | "sweep" => lower_spectre_analysis(instance, symbols, line),
         _ if symbols.subcircuits.contains(&master) => {
             Ok(render_model_or_subcircuit_instance(instance, "X"))
         }
@@ -1142,14 +1487,406 @@ fn lower_spectre_instance(
         "nmos" | "pmos" => Ok(render_model_or_subcircuit_instance(instance, "M")),
         "npn" | "pnp" => Ok(render_model_or_subcircuit_instance(instance, "Q")),
         "njf" | "pjf" | "njfet" | "pjfet" => Ok(render_model_or_subcircuit_instance(instance, "J")),
-        _ => Err(error(
+        _ => Err(unsupported_construct(
+            SpectreNamespace::Master,
+            &instance.master,
+            line,
+        )),
+    }
+}
+
+/// Lower `vcvs`/`vccs`, whose four terminals are the two output nodes
+/// followed by the two control nodes — the same order the canonical `E` and
+/// `G` cards use.
+fn lower_voltage_controlled_source(
+    instance: &SpectreInstance,
+    prefix: &str,
+    value_name: &str,
+    line: usize,
+) -> Result<String, SpectreModelAdapterError> {
+    if instance.nodes.len() != 4 {
+        return Err(error(
             line,
             format!(
-                "unsupported native Spectre instance master '{}'; no statement was discarded",
-                instance.master
+                "Spectre {} instance '{}' requires exactly four nodes (out+ out- control+ control-), got {}",
+                instance.master,
+                instance.name,
+                instance.nodes.len()
+            ),
+        ));
+    }
+    let mut parameters = instance.parameters.clone();
+    let value = take_assignment(&mut parameters, value_name).ok_or_else(|| {
+        error(
+            line,
+            format!(
+                "Spectre {} instance '{}' requires {value_name}=",
+                instance.master, instance.name
+            ),
+        )
+    })?;
+    reject_remaining_parameters(&parameters, instance, line)?;
+    Ok(format!(
+        "{prefix}{} {} {}",
+        instance.name,
+        instance.nodes.join(" "),
+        value.value
+    ))
+}
+
+/// Lower `bsource`, whose behavioral equation is the canonical `B` card's.
+fn lower_behavioral_source(
+    instance: &SpectreInstance,
+    line: usize,
+) -> Result<String, SpectreModelAdapterError> {
+    if instance.nodes.len() != 2 {
+        return Err(error(
+            line,
+            format!(
+                "Spectre bsource instance '{}' requires exactly two nodes, got {}",
+                instance.name,
+                instance.nodes.len()
+            ),
+        ));
+    }
+    let mut parameters = instance.parameters.clone();
+    let voltage = take_assignment(&mut parameters, "v");
+    let current = take_assignment(&mut parameters, "i");
+    let (kind, equation) = match (voltage, current) {
+        (Some(voltage), None) => ("V", voltage.value),
+        (None, Some(current)) => ("I", current.value),
+        (Some(_), Some(_)) => {
+            return Err(error(
+                line,
+                format!(
+                    "Spectre bsource instance '{}' declares both v= and i=; a behavioral source is one or the other",
+                    instance.name
+                ),
+            ));
+        }
+        (None, None) => {
+            return Err(error(
+                line,
+                format!(
+                    "Spectre bsource instance '{}' requires v= or i=",
+                    instance.name
+                ),
+            ));
+        }
+    };
+    reject_remaining_parameters(&parameters, instance, line)?;
+    Ok(format!(
+        "B{} {} {kind}={{{}}}",
+        instance.name,
+        instance.nodes.join(" "),
+        equation.trim_matches(['\'', '"'])
+    ))
+}
+
+/// Lower a Spectre analysis statement to its canonical analysis card.
+///
+/// Spectre analyses carry simulator-control parameters beside the ones that
+/// define the analysis. Only the output-artifact and progress controls listed
+/// in [`ANALYSIS_TOOL_CONTROLS`] are dropped; anything else — a tolerance
+/// preset, an iteration limit, an integration method — would change results
+/// without saying so, and is refused by name.
+fn lower_spectre_analysis(
+    instance: &SpectreInstance,
+    symbols: &SpectreSymbols,
+    line: usize,
+) -> Result<String, SpectreModelAdapterError> {
+    let master = instance.master.to_ascii_lowercase();
+    let mut parameters = instance.parameters.clone();
+    for control in ANALYSIS_TOOL_CONTROLS {
+        let _ = take_assignment(&mut parameters, control);
+    }
+    let lowered = match master.as_str() {
+        "tran" => lower_spectre_transient(instance, &mut parameters, line)?,
+        "dc" => lower_spectre_dc(instance, symbols, &mut parameters, line)?,
+        "ac" => lower_spectre_ac(instance, &mut parameters, line)?,
+        "noise" => lower_spectre_noise(instance, symbols, &mut parameters, line)?,
+        "sweep" => lower_spectre_sweep(instance, &mut parameters, line)?,
+        _ => {
+            return Err(unsupported_construct(
+                SpectreNamespace::Master,
+                &instance.master,
+                line,
+            ));
+        }
+    };
+    reject_remaining_parameters(&parameters, instance, line)?;
+    Ok(lowered)
+}
+
+/// Spectre analysis parameters that select output artifacts or progress
+/// reporting. They name files and console annotation, never circuit or
+/// analysis semantics, so dropping them cannot change a result.
+const ANALYSIS_TOOL_CONTROLS: &[&str] = &["write", "writefinal", "annotate", "title"];
+
+fn lower_spectre_transient(
+    instance: &SpectreInstance,
+    parameters: &mut Vec<SpectreModelAssignment>,
+    line: usize,
+) -> Result<String, SpectreModelAdapterError> {
+    require_no_nodes(instance, line)?;
+    let stop = required_assignment(parameters, "stop", line, instance)?;
+    let step = optional_assignment(parameters, "step", "0");
+    let start = take_assignment(parameters, "start").map(|assignment| assignment.value);
+    let maxstep = take_assignment(parameters, "maxstep").map(|assignment| assignment.value);
+    let mut lowered = format!(".TRAN {step} {stop}");
+    match (start, maxstep) {
+        (None, None) => {}
+        (Some(start), None) => lowered.push_str(&format!(" {start}")),
+        // The canonical card positions the maximum step fourth, so an
+        // explicit start must be written even when the deck left it default.
+        (start, Some(maxstep)) => {
+            let start = start.unwrap_or_else(|| "0".to_owned());
+            lowered.push_str(&format!(" {start} {maxstep}"));
+        }
+    }
+    Ok(lowered)
+}
+
+fn lower_spectre_dc(
+    instance: &SpectreInstance,
+    symbols: &SpectreSymbols,
+    parameters: &mut Vec<SpectreModelAssignment>,
+    line: usize,
+) -> Result<String, SpectreModelAdapterError> {
+    require_no_nodes(instance, line)?;
+    if let Some(parameter) = take_assignment(parameters, "param") {
+        return Err(error(
+            line,
+            format!(
+                "Spectre dc analysis '{}' sweeps parameter '{}'; the canonical .DC card sweeps a source, so author .STEP for a parameter sweep",
+                instance.name, parameter.value
+            ),
+        ));
+    }
+    let device = take_assignment(parameters, "dev");
+    let start = take_assignment(parameters, "start").map(|assignment| assignment.value);
+    let stop = take_assignment(parameters, "stop").map(|assignment| assignment.value);
+    let step = take_assignment(parameters, "step").map(|assignment| assignment.value);
+    let Some(device) = device else {
+        if start.is_some() || stop.is_some() || step.is_some() {
+            return Err(error(
+                line,
+                format!(
+                    "Spectre dc analysis '{}' has a sweep range but names no dev= to sweep",
+                    instance.name
+                ),
+            ));
+        }
+        // A Spectre dc analysis with no sweep is an operating point.
+        return Ok(".OP".to_owned());
+    };
+    let (Some(start), Some(stop), Some(step)) = (start, stop, step) else {
+        return Err(error(
+            line,
+            format!(
+                "Spectre dc analysis '{}' sweeps '{}' but does not give start=, stop= and step=",
+                instance.name, device.value
+            ),
+        ));
+    };
+    let swept = symbols
+        .sources
+        .get(&device.value.to_ascii_lowercase())
+        .ok_or_else(|| {
+            error(
+                line,
+                format!(
+                    "Spectre dc analysis '{}' sweeps dev='{}', which is not an independent source declared in this source",
+                    instance.name, device.value
+                ),
+            )
+        })?;
+    Ok(format!(".DC LIN {swept} {start} {stop} {step}"))
+}
+
+fn lower_spectre_ac(
+    instance: &SpectreInstance,
+    parameters: &mut Vec<SpectreModelAssignment>,
+    line: usize,
+) -> Result<String, SpectreModelAdapterError> {
+    require_no_nodes(instance, line)?;
+    let start = required_assignment(parameters, "start", line, instance)?;
+    let stop = required_assignment(parameters, "stop", line, instance)?;
+    let (variation, points) = spectre_frequency_variation(instance, parameters, line)?;
+    Ok(format!(".AC {variation} {points} {start} {stop}"))
+}
+
+fn lower_spectre_noise(
+    instance: &SpectreInstance,
+    symbols: &SpectreSymbols,
+    parameters: &mut Vec<SpectreModelAssignment>,
+    line: usize,
+) -> Result<String, SpectreModelAdapterError> {
+    if instance.nodes.len() != 2 {
+        return Err(error(
+            line,
+            format!(
+                "Spectre noise analysis '{}' must name its output node pair as `({}  p n)`; the canonical .NOISE card measures a node pair, and probe-instance output has no defined mapping",
+                instance.name, instance.name
+            ),
+        ));
+    }
+    let start = required_assignment(parameters, "start", line, instance)?;
+    let stop = required_assignment(parameters, "stop", line, instance)?;
+    let (variation, points) = spectre_frequency_variation(instance, parameters, line)?;
+    let input = take_assignment(parameters, "iprobe").ok_or_else(|| {
+        error(
+            line,
+            format!(
+                "Spectre noise analysis '{}' requires iprobe= to name its input source",
+                instance.name
+            ),
+        )
+    })?;
+    let source = symbols
+        .sources
+        .get(&input.value.to_ascii_lowercase())
+        .ok_or_else(|| {
+            error(
+                line,
+                format!(
+                    "Spectre noise analysis '{}' names iprobe='{}', which is not an independent source declared in this source",
+                    instance.name, input.value
+                ),
+            )
+        })?;
+    Ok(format!(
+        ".NOISE V({},{}) {source} {variation} {points} {start} {stop}",
+        instance.nodes[0], instance.nodes[1]
+    ))
+}
+
+fn lower_spectre_sweep(
+    instance: &SpectreInstance,
+    parameters: &mut Vec<SpectreModelAssignment>,
+    line: usize,
+) -> Result<String, SpectreModelAdapterError> {
+    require_no_nodes(instance, line)?;
+    let parameter = take_assignment(parameters, "param").ok_or_else(|| {
+        error(
+            line,
+            format!(
+                "Spectre sweep '{}' requires param=; a dev= sweep is a dc analysis",
+                instance.name
+            ),
+        )
+    })?;
+    let start = required_assignment(parameters, "start", line, instance)?;
+    let stop = required_assignment(parameters, "stop", line, instance)?;
+    let step = required_assignment(parameters, "step", line, instance)?;
+    Ok(format!(
+        ".STEP PARAM {} {start} {stop} {step}",
+        parameter.value
+    ))
+}
+
+/// Read a Spectre frequency-sweep density as a canonical variation keyword
+/// and point count.
+fn spectre_frequency_variation(
+    instance: &SpectreInstance,
+    parameters: &mut Vec<SpectreModelAssignment>,
+    line: usize,
+) -> Result<(&'static str, String), SpectreModelAdapterError> {
+    let decade = take_assignment(parameters, "dec");
+    let linear = take_assignment(parameters, "lin");
+    match (decade, linear) {
+        (Some(decade), None) => Ok(("DEC", decade.value)),
+        (None, Some(linear)) => Ok(("LIN", linear.value)),
+        (Some(_), Some(_)) => Err(error(
+            line,
+            format!(
+                "Spectre {} analysis '{}' declares both dec= and lin=",
+                instance.master, instance.name
+            ),
+        )),
+        (None, None) => Err(error(
+            line,
+            format!(
+                "Spectre {} analysis '{}' requires dec= or lin=; a log= or values= sweep density has no canonical equivalent",
+                instance.master, instance.name
             ),
         )),
     }
+}
+
+fn require_no_nodes(
+    instance: &SpectreInstance,
+    line: usize,
+) -> Result<(), SpectreModelAdapterError> {
+    if instance.nodes.is_empty() {
+        return Ok(());
+    }
+    Err(error(
+        line,
+        format!(
+            "Spectre {} analysis '{}' does not take a node list",
+            instance.master, instance.name
+        ),
+    ))
+}
+
+fn reject_remaining_parameters(
+    parameters: &[SpectreModelAssignment],
+    instance: &SpectreInstance,
+    line: usize,
+) -> Result<(), SpectreModelAdapterError> {
+    if parameters.is_empty() {
+        return Ok(());
+    }
+    Err(error(
+        line,
+        format!(
+            "Spectre {} statement '{}' has unsupported parameters: {}",
+            instance.master,
+            instance.name,
+            parameters
+                .iter()
+                .map(|parameter| parameter.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    ))
+}
+
+/// Lower a Spectre `save` statement to the canonical `.SAVE` card.
+///
+/// Spectre names plain nets, terminal currents (`R1:1`), hierarchical paths
+/// and wildcard scopes in the same list. Only plain nets have a canonical
+/// `.SAVE` spelling; the rest are refused by entry rather than dropped, which
+/// would silently narrow the requested output set.
+fn adapt_save(rest: &str, line: usize) -> Result<String, SpectreModelAdapterError> {
+    let mut signals = Vec::new();
+    for entry in rest
+        .split(|character: char| character.is_whitespace() || character == ',')
+        .filter(|entry| !entry.is_empty())
+    {
+        if entry.contains('=') {
+            return Err(error(
+                line,
+                format!(
+                    "Spectre save option '{entry}' selects an output scope rather than a signal; the canonical .SAVE card names signals"
+                ),
+            ));
+        }
+        if entry.contains([':', '.', '*', '?', '[', ']']) {
+            return Err(error(
+                line,
+                format!(
+                    "Spectre save entry '{entry}' names a terminal current, a hierarchical path or a wildcard scope; the canonical .SAVE card has no equivalent selector and dropping the entry would narrow the requested output"
+                ),
+            ));
+        }
+        signals.push(format!("V({entry})"));
+    }
+    if signals.is_empty() {
+        return Err(error(line, "Spectre save statement names no signals"));
+    }
+    Ok(format!(".SAVE {}", signals.join(" ")))
 }
 
 fn lower_two_terminal_primitive(
@@ -1668,14 +2405,7 @@ fn canonical_model_type(
         "ekv3" => Some(301),
         _ => None,
     }
-    .ok_or_else(|| {
-        error(
-            line,
-            format!(
-                "unsupported native Spectre model family '{model_type}'; use a supported canonical model export"
-            ),
-        )
-    })?;
+    .ok_or_else(|| unsupported_construct(SpectreNamespace::ModelFamily, model_type, line))?;
     let polarity = take_assignment(assignments, "type").ok_or_else(|| {
         error(
             line,
@@ -2035,7 +2765,9 @@ mod tests {
         assert!(
             error
                 .message
-                .contains("unsupported native Spectre model family")
+                .contains("unknown native Spectre model family 'unverified_family'"),
+            "{}",
+            error.message
         );
     }
 
@@ -2220,6 +2952,59 @@ mod tests {
         .expect_err("unknown instance semantics cannot be guessed");
         assert_eq!(error.line, 2);
         assert!(error.message.contains("no statement was discarded"));
+    }
+
+    #[test]
+    fn the_construct_inventory_is_unambiguous_and_reachable() {
+        for construct in SpectreConstruct::ALL {
+            let names = construct.names();
+            assert!(
+                !names.is_empty(),
+                "{construct:?} declares no spelling to match on"
+            );
+            for name in names {
+                assert_eq!(
+                    *name,
+                    name.to_ascii_lowercase(),
+                    "{construct:?} spelling '{name}' must be lowercase for case-insensitive lookup"
+                );
+                let resolved = SpectreConstruct::classify(construct.namespace(), name);
+                assert_eq!(
+                    resolved,
+                    Some(*construct),
+                    "'{name}' in {:?} resolves to {resolved:?} instead of {construct:?}; two \
+                     constructs claim the same spelling in one namespace",
+                    construct.namespace()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn unsupported_constructs_report_their_recorded_reason_not_a_generic_refusal() {
+        for construct in SpectreConstruct::ALL {
+            let name = construct.names()[0];
+            let message = unsupported_construct(construct.namespace(), name, 7).message;
+            match construct.support() {
+                SpectreSupport::Lowered => assert!(
+                    message.contains("adapter defect"),
+                    "a lowered construct reaching the refusal path is a defect: {message}"
+                ),
+                SpectreSupport::Unsupported(reason) => assert!(
+                    message.contains(reason) && !message.contains("unknown native Spectre"),
+                    "{construct:?} must be refused with its recorded reason: {message}"
+                ),
+                SpectreSupport::OwnedElsewhere(owner) => assert!(
+                    message.contains(owner) && !message.contains("unknown native Spectre"),
+                    "{construct:?} must name its owner: {message}"
+                ),
+            }
+        }
+        assert!(
+            unsupported_construct(SpectreNamespace::Master, "nothing_like_this", 7)
+                .message
+                .contains("unknown native Spectre instance master")
+        );
     }
 
     #[test]

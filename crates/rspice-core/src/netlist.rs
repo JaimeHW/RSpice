@@ -890,9 +890,13 @@ pub struct Netlist {
     /// Native Spectre process/mismatch distributions retained as an
     /// executable, validated statistical plan.
     pub spectre_statistics: SpectreStatisticsPlan,
-    /// Optional explicit statistical run coordinate.  Monte Carlo drivers set
-    /// this per trial; ordinary STEP/TEMP builds derive their coordinate from
-    /// the effective parameter environment when it is absent.
+    /// Statistical run coordinate a Spectre `statistics` block draws from.
+    ///
+    /// Monte Carlo drivers set this per trial. Every other coordinate is
+    /// stamped by the deck-plan materializer from its own axes and
+    /// temperature. A build that finds it absent performs no statistical
+    /// sampling at all, so a deck with variations must never reach the
+    /// builder without one.
     pub spectre_statistical_coordinate: Option<SpectreStatisticalCoordinate>,
     /// Initial conditions from .IC statements
     pub initial_conditions: Vec<InitialCondition>,

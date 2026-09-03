@@ -812,29 +812,12 @@ fn prescan_spectre_statistics_with_abort(
             allow_non_semicolon_comments,
         )
         .trim();
-        let mut command_fields = line.splitn(2, char::is_whitespace);
-        let command = command_fields.next().unwrap_or_default();
-        if !command.eq_ignore_ascii_case(".RSPICE_SPECTRE_STAT") {
+        let Some(decoded) = SpectreStatisticsPlan::decode_directive(line) else {
             continue;
-        }
-        let payload = command_fields.next().unwrap_or_default();
-        let mut fields = payload.split_whitespace();
-        let encoded = fields.next().ok_or_else(|| ParseError::Syntax {
+        };
+        let decoded = decoded.map_err(|error| ParseError::Syntax {
             line: index + 1,
-            message: ".RSPICE_SPECTRE_STAT requires one versioned payload".to_owned(),
-        })?;
-        if fields.next().is_some() {
-            return Err(ParseError::Syntax {
-                line: index + 1,
-                message: ".RSPICE_SPECTRE_STAT accepts exactly one versioned payload".to_owned(),
-            }
-            .into());
-        }
-        let decoded = SpectreStatisticsPlan::decode_internal(encoded).map_err(|error| {
-            ParseError::Syntax {
-                line: index + 1,
-                message: error.to_string(),
-            }
+            message: error.to_string(),
         })?;
         combined.variations.extend(decoded.variations);
         combined.correlations.extend(decoded.correlations);
