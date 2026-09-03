@@ -38,24 +38,27 @@ use super::census_models::shipped_census_models;
 /// naming what changed the count. A count that *rises* because a plan field was
 /// added is as much a change as one that falls.
 ///
-/// # W-F3c's flip does not move these
+/// # What these count, and what would move them
 ///
-/// This census builds its corpus with
-/// [`build_model_plan_with_canonical_ir`] by name — the *postfix* constructor —
-/// not with the default plan production compiles. That is deliberate and not
-/// an oversight: the question here is whether the branch form of a conditional
-/// agrees with the select form of the *same postfix stream*, and an entry that
-/// was never a postfix stream has no select form to compare against. So the
-/// flip changes neither count, and `value_programs`'s refusal to accept a block
-/// entry stays exactly as strong as it was.
+/// One thing this census does *not* do is compare two backends, or a VM
+/// against a JIT. It takes one postfix program, lifts it to SSA once, and
+/// compares that lift's **select** form of each conditional against its
+/// **branch** form — `Program::with_branching_conditionals` re-expressed as a
+/// real diamond — with both compiled through the same x64 emitter and executed
+/// against the same three fills. The MIR route is on both sides of every
+/// comparison; the CFG route is on neither.
 ///
-/// What the flip *does* change is what the corpus stands for. Before it, every
-/// value entry production compiled was in here. Now the residual and Jacobian
-/// entries of a module the CFG route builds are block programs that this census
-/// never sees; what it still covers directly is the postfix form that ships for
-/// parameter defaults, static conditions, noise and the assignment passes on
-/// every module, and for every field of a module the CFG route refuses. The
-/// CFG route's own entries are measured against MIR's by
+/// That is why the corpus is built with [`build_model_plan_with_canonical_ir`]
+/// by name rather than with whatever
+/// [`crate::jit::cfg_plan_builder::build_default_model_plan`] returns. An entry
+/// that was never a postfix stream has no select form to compare against, so
+/// it does not belong here at all — which is exactly what `value_programs`'s
+/// block-entry refusal says.
+///
+/// So [`crate::jit::cfg_plan_builder::DEFAULT_PLAN_ROUTE`] does not enter into
+/// these two numbers, whichever way it points. What would move them is a change
+/// to the postfix lowering itself, or to which plan fields this census
+/// enumerates. The CFG route's own entries are measured against MIR's by
 /// [`super::cfg_mir_census`], which is the census that answers for them.
 const CENSUS_PROGRAMS: usize = 1_972_391;
 const CENSUS_EXECUTIONS: usize = 5_072_907;

@@ -38,44 +38,18 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// move this pin exists to prevent — it converts a detector into a rubber
 /// stamp.
 ///
-/// # This value is stale by construction, and was not re-measured
+/// The day [`crate::jit::cfg_plan_builder::DEFAULT_PLAN_ROUTE`] becomes
+/// `PlanRoute::Cfg`, this value moves — the census compiles through
+/// [`crate::native::x64::compile_model_with_canonical_ir`], which is the path
+/// that switch decides — and the evidence that re-baselines it is the same
+/// per-module list, read a particular way: every module the fallback logs by
+/// name (`[JIT] Model '…' takes the postfix plan`) must be digest *identical*,
+/// because nothing about its plan changed, and every module that does not move
+/// without appearing in that log did not take the CFG route after all.
 ///
-/// W-F3c flipped [`crate::jit::cfg_plan_builder::build_default_model_plan`] over
-/// to the CFG route for every module's `stamp_values`, `jacobians` and
-/// `reactive_jacobians`, and this census compiles through
-/// [`crate::native::x64::compile_model_with_canonical_ir`], which is that path.
-/// So every module the CFG route builds emits different machine code now, and
-/// the value below cannot be the answer.
-///
-/// It was not re-measured in that lane: a full census peaks near 24 GB of
-/// working set, and the box had 19.2 GB free with twenty-two peer `rustc`
-/// processes resident. Rather than stamp in an unmeasured number, the old value
-/// stands and the assertion fails loudly, which is the honest state.
-///
-/// What the next run has to do is more than copy the digest it prints. The
-/// per-module list is now evidence about the flip:
-///
-/// * a module the flip's fallback logs by name (`[JIT] Model '…' takes the
-///   postfix plan`) must be **digest identical**, because nothing about its
-///   plan changed;
-/// * every other module is expected to move, and a module that does *not* move
-///   means its residual and Jacobian entries did not take the CFG route after
-///   all;
-/// * a module that fails to compile at all is the flip's defect, not a
-///   re-baseline.
-///
-/// # How it is re-baselined
-///
-/// Only with evidence that names the modules that moved and why. The census
-/// prints a per-module digest before the combined one, so a run that changes
-/// this value already knows which modules are responsible; a re-baseline
-/// commit has to say which those were and what emitted-code change accounts
-/// for each. "The census turned red so the constant was updated" is the one
-/// move this pin exists to prevent — it converts a detector into a rubber
-/// stamp.
-///
-/// The value below was measured on the W-F3b tree, before the flip. The
-/// previous value, `fe9a2072…`, moved to `e00c6b88…` at W-F3a (`84ba2c2bb`),
+/// The value below was measured by the W-F3b lane and remains valid: production
+/// builds the postfix plan. The previous value, `fe9a2072…`, moved to
+/// `e00c6b88…` at W-F3a (`84ba2c2bb`),
 /// which ruled `limexp`'s threshold once for the whole estate: exactly five
 /// modules changed — `angelov`, `angelov_gan`, `hicumL0va`, `hicumL2va` and
 /// `vbic_4T_et_cf`, the five that call `limexp` — and the other thirty-eight

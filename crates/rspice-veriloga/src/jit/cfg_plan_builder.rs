@@ -9,9 +9,16 @@
 //! [`PlanProgram::Blocks`].
 //!
 //! [`build_default_model_plan`] is what x64, AArch64 and the WASM JIT now all
-//! call. It asks for the CFG form of a module's residual, Jacobian and
-//! reactive-Jacobian entries, keeps every other field postfix, and falls the
-//! whole module back to the postfix plan when the CFG route refuses it.
+//! call, and [`DEFAULT_PLAN_ROUTE`] is the one thing that decides what it
+//! builds. On [`PlanRoute::Cfg`] it takes the CFG form of a module's residual,
+//! Jacobian and reactive-Jacobian entries, keeps every other field postfix, and
+//! falls the whole module back to the postfix plan when the CFG route refuses
+//! it. On [`PlanRoute::Postfix`] it calls [`build_model_plan_with_canonical_ir`]
+//! and nothing else.
+//!
+//! **The constant reads `Postfix`.** Everything below is built, tested and
+//! pinned; what it is waiting on is the evidence, and [`DEFAULT_PLAN_ROUTE`]
+//! carries that argument in full.
 //!
 //! # What stays postfix, and why that is not a half measure
 //!
@@ -58,14 +65,16 @@
 //!
 //! # The fallback is loud
 //!
-//! A refused module still compiles: [`build_default_model_plan`] returns the
-//! postfix plan for it, which is the plan every backend shipped before the
-//! flip, so a refusal costs accuracy nowhere and coverage nothing. What it must
-//! not do is happen quietly — a module that stops taking the CFG route because
-//! a pass regressed would otherwise look exactly like one that never took it.
-//! So the refusal goes to the same `[JIT]` seam a failed native compile uses,
-//! naming the module and the refusal class, and
-//! [`build_default_model_plan_reported`] hands it back so a test can pin it.
+//! On [`PlanRoute::Cfg`], a refused module still compiles:
+//! [`build_default_model_plan`] returns the postfix plan for it, which is the
+//! plan every backend ships today, so a refusal costs accuracy nowhere and
+//! coverage nothing. What it must not do is happen quietly — a module that
+//! stops taking the CFG route because a pass regressed would otherwise look
+//! exactly like one that never took it. So the refusal goes to the same `[JIT]`
+//! seam a failed native compile uses, naming the module and the refusal class,
+//! and [`build_default_model_plan_reported`] hands it back so a test can pin
+//! it. Running the estate with the constant set to `Cfg` therefore censuses the
+//! fallback by class, which is how the counts in that lane's report were taken.
 //!
 //! # The one place a program is built rather than lowered
 //!
@@ -938,20 +947,77 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     Ok(CfgModelPlan { plan, report })
 }
 
-/// The plan every backend compiles.
+/// Which route builds a plan's `stamp_values`, `jacobians` and
+/// `reactive_jacobians`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlanRoute {
+    /// MIR's flat postfix stream, for every field.
+    Postfix,
+    /// The canonical CFG for those three fields, the postfix stream for the
+    /// rest, and the postfix plan entire for a module the CFG route refuses.
+    ///
+    /// Constructed by the pins below and by anyone who sets
+    /// [`DEFAULT_PLAN_ROUTE`] to it — which nothing does yet, so outside
+    /// `cfg(test)` this variant has no constructor and the attribute is the
+    /// honest statement of that rather than a silenced warning. It comes off
+    /// with the commit that flips the constant. Note that only the *variant* is
+    /// unconstructed: everything the `Cfg` arm reaches is compiled, warned
+    /// about normally, and exercised by the pins.
+    #[cfg_attr(not(test), allow(dead_code))]
+    Cfg,
+}
+
+/// The route production compiles, and the one thing that decides it.
 ///
-/// The CFG route for `stamp_values`, `jacobians` and `reactive_jacobians`; the
-/// postfix route for everything else, noise included; and the postfix plan
-/// entire for a module the CFG route refuses.
+/// # It is `Postfix`, and this is the evidence
 ///
-/// The refusal reaches the `[JIT]` log seam a failed native compile already
-/// uses, so a module that quietly stopped taking the CFG route is visible in
-/// the same place a module that quietly stopped compiling would be.
+/// W-F3c built the `Cfg` route into the default constructor and then measured
+/// it against the estate. Six tests turned red, and not one was rounding: each
+/// was a construct the CFG lowering treats differently from MIR, where the CFG
+/// plan *builds* and computes another number. `$port_connected` (6.0 against
+/// 0.0 on an omitted terminal), `$simparam` (0.0 against a gmin of 1e-12), a
+/// contribution-current probe (a Jacobian entry of 4.5 against 2.5), an array
+/// variable's declaration initializer, an event-controlled variable across a
+/// rejected step (2.0 against 1.0), and `hypot`/`atan2` under a `ddx`, where
+/// the scalar derivative rules fall through to a zero.
+///
+/// [`route_divergence`] and [`DERIVATIVE_RULE_HOLES`] screen all six, and with
+/// them the estate is green. But that screen is *empirical*: it names what
+/// about twelve hundred tests happened to expose, not what a proof would name,
+/// and finding six on the first pass over an estate never written to test this
+/// route is the reason it is not enough. The instrument that would bound the
+/// rest is the forty-three-module CFG-versus-MIR census
+/// ([`crate::native::cfg_mir_census`]), which has never run past nine modules.
+///
+/// So the switch sits here at `Postfix` until that census runs 43/43 and the
+/// six classes are *closed* rather than screened. Flipping it is a one-line
+/// change and everything behind [`PlanRoute::Cfg`] is live, tested and pinned.
+///
+/// # What `Postfix` reaches, and why the shipped plan is byte-identical
+///
+/// The `Postfix` arm of [`build_default_model_plan_reported`] calls
+/// [`build_model_plan_with_canonical_ir`] and nothing else — no wrapper, no
+/// post-pass, no field replaced afterwards. That constructor, and every
+/// function it reaches, is unchanged by this lane: the diff touches
+/// [`build_model_plan_from_canonical_cfg`] and the items below it in this
+/// module, [`crate::jit::plan_program`]'s documentation and one attribute,
+/// [`crate::native::ssa`]'s attributes, and the four call sites' choice of
+/// entry point. `jit::plan_builder` is untouched. A model therefore compiles to
+/// the same plan, and so to the same machine code, as it did before the lane —
+/// which is what keeps [`crate::native::code_identity`]'s digest valid.
+pub(crate) const DEFAULT_PLAN_ROUTE: PlanRoute = PlanRoute::Postfix;
+
+/// The plan every backend compiles: [`DEFAULT_PLAN_ROUTE`]'s.
+///
+/// A refusal on the [`PlanRoute::Cfg`] route reaches the `[JIT]` log seam a
+/// failed native compile already uses, so a module that quietly stopped taking
+/// the CFG route would be visible in the same place a module that quietly
+/// stopped compiling is.
 pub(crate) fn build_default_model_plan(
     model: &CompiledModel,
     artifact: &CanonicalIrArtifact,
 ) -> JitResult<NativeModelPlan> {
-    let (plan, refused) = build_default_model_plan_reported(model, artifact)?;
+    let (plan, refused) = build_default_model_plan_reported(model, artifact, DEFAULT_PLAN_ROUTE)?;
     if let Some(refused) = refused {
         log::warn!(
             "[JIT] Model '{}' takes the postfix plan: {} ({})",
@@ -970,23 +1036,37 @@ pub(crate) fn build_default_model_plan(
     Ok(plan)
 }
 
-/// [`build_default_model_plan`], handing the refusal back instead of logging
-/// it, so a test can pin which modules fall back and why.
+/// [`build_default_model_plan`] for a named route, handing the refusal back
+/// instead of logging it.
 ///
-/// The fallback rebuilds the postfix plan rather than recovering the one the
-/// CFG builder started from and threw away. That is one extra plan build, on
-/// the refusal path only, once per module per process — the native cache in
-/// [`crate::device`] keys on the module, so no model pays it twice — against a
-/// constructor whose refusals stay a single `?` each.
+/// The `route` is a parameter rather than a read of [`DEFAULT_PLAN_ROUTE`] for
+/// one reason: the tests below pin [`PlanRoute::Cfg`]'s behaviour, and a pin
+/// that only exercised whatever the constant happens to say would go vacuously
+/// green the moment the constant said `Postfix`. Production passes the
+/// constant; the pins pass `Cfg`.
+///
+/// On the `Cfg` route the fallback rebuilds the postfix plan rather than
+/// recovering the one the CFG builder started from and threw away. That is one
+/// extra plan build, on the refusal path only, once per module per process —
+/// the native cache in [`crate::device`] keys on the module, so no model pays
+/// it twice — against a constructor whose refusals stay a single `?` each.
 pub(crate) fn build_default_model_plan_reported(
     model: &CompiledModel,
     artifact: &CanonicalIrArtifact,
+    route: PlanRoute,
 ) -> JitResult<(NativeModelPlan, Option<CfgPlanRefused>)> {
-    match build_model_plan_from_canonical_cfg(model, artifact, CfgNoiseScope::Postfix) {
-        Ok(built) => Ok((built.plan, None)),
-        Err(refused) => {
-            let plan = build_model_plan_with_canonical_ir(model, artifact)?;
-            Ok((plan, Some(refused)))
+    match route {
+        // Nothing wraps this call. See [`DEFAULT_PLAN_ROUTE`] on why that is
+        // load-bearing rather than incidental.
+        PlanRoute::Postfix => Ok((build_model_plan_with_canonical_ir(model, artifact)?, None)),
+        PlanRoute::Cfg => {
+            match build_model_plan_from_canonical_cfg(model, artifact, CfgNoiseScope::Postfix) {
+                Ok(built) => Ok((built.plan, None)),
+                Err(refused) => {
+                    let plan = build_model_plan_with_canonical_ir(model, artifact)?;
+                    Ok((plan, Some(refused)))
+                }
+            }
         }
     }
 }
@@ -1018,7 +1098,7 @@ fn read_set_optional(
 
 #[cfg(all(test, feature = "native"))]
 mod tests {
-    use super::{CfgPlanRefusal, build_default_model_plan_reported};
+    use super::{CfgPlanRefusal, PlanRoute, build_default_model_plan_reported};
     use crate::canonical_ir::CanonicalIrArtifact;
     use crate::codegen::CompiledModel;
     use crate::jit::model_plan::NativeModelPlan;
@@ -1099,13 +1179,14 @@ endmodule
         forms
     }
 
-    /// The flip, stated as the shape of one plan: the CFG route owns the
-    /// residual and both Jacobians, the MIR route owns everything else.
+    /// The flip, stated as the shape of one plan built on [`PlanRoute::Cfg`]:
+    /// that route owns the residual and both Jacobians, the MIR route owns
+    /// everything else.
     #[test]
-    fn the_default_plan_takes_its_values_from_the_cfg_and_its_noise_from_mir() {
+    fn the_cfg_route_takes_its_values_from_the_cfg_and_its_noise_from_mir() {
         let (model, artifact) = compile(RESISTOR_WITH_CHARGE_AND_NOISE);
-        let (plan, refused) =
-            build_default_model_plan_reported(&model, &artifact).expect("the default plan builds");
+        let (plan, refused) = build_default_model_plan_reported(&model, &artifact, PlanRoute::Cfg)
+            .expect("the default plan builds");
         assert!(
             refused.is_none(),
             "a resistor with a charge and a noise source is not a module the CFG route refuses: \
@@ -1137,8 +1218,8 @@ endmodule
     #[test]
     fn a_module_the_cfg_route_refuses_takes_the_postfix_plan_whole() {
         let (model, artifact) = compile(OPERATOR_IN_A_CASE_SELECTOR);
-        let (plan, refused) =
-            build_default_model_plan_reported(&model, &artifact).expect("the default plan builds");
+        let (plan, refused) = build_default_model_plan_reported(&model, &artifact, PlanRoute::Cfg)
+            .expect("the default plan builds");
         let refused = refused.expect(
             "a canonical operator in a case selector has no executed counterpart, so the CFG \
              route cannot name its state record",
@@ -1184,8 +1265,8 @@ module cfg_plan_no_rule(p, n);
 endmodule
 "#;
         let (model, artifact) = compile(source);
-        let (plan, refused) =
-            build_default_model_plan_reported(&model, &artifact).expect("the default plan builds");
+        let (plan, refused) = build_default_model_plan_reported(&model, &artifact, PlanRoute::Cfg)
+            .expect("the default plan builds");
         let refused = refused.expect(
             "the CFG derivative pass has no rule for hypot, so a module differentiating one \
              cannot take the CFG route",
@@ -1257,8 +1338,9 @@ endmodule
         ];
         for (case, expected, source) in cases {
             let (model, artifact) = compile(source);
-            let (plan, refused) = build_default_model_plan_reported(&model, &artifact)
-                .unwrap_or_else(|error| panic!("{case}: the default plan builds: {error}"));
+            let (plan, refused) =
+                build_default_model_plan_reported(&model, &artifact, PlanRoute::Cfg)
+                    .unwrap_or_else(|error| panic!("{case}: the default plan builds: {error}"));
             let refused =
                 refused.unwrap_or_else(|| panic!("{case}: the CFG route must refuse this module"));
             assert_eq!(refused.class, CfgPlanRefusal::KnownDivergence, "{case}");
