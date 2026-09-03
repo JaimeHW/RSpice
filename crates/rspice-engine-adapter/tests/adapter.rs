@@ -890,7 +890,10 @@ R1 in 0 {r}
         );
         let response = parse_stdout(&job.run(&request));
         assert_eq!(response["status"], "failed", "response: {response}");
-        assert_eq!(response["failure_code"], failure_code, "response: {response}");
+        assert_eq!(
+            response["failure_code"], failure_code,
+            "response: {response}"
+        );
     }
 }
 
