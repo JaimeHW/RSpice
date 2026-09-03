@@ -32,15 +32,31 @@ use super::*;
 /// contract; `all` keeps every one in deck order. Holding both in one type
 /// stops the two from drifting apart, which is easy when they are two
 /// independent locals updated by hand at each of a dozen call sites.
-struct LastAndAll<T> {
+pub(super) struct LastAndAll<T> {
     last: Option<T>,
     all: Vec<T>,
+}
+
+/// Where a `.TRAN` execution's startup contract comes from.
+///
+/// A deck's own card states it: `UIC` or an operating-point start. A
+/// convenience call authors no card, so the contract is whatever the deck's
+/// `.TRAN` cards declare — which is core's rule, asked of core rather than
+/// restated here.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TransientStartup {
+    /// The executed card's own `UIC` flag.
+    Card,
+    /// No card was authored; the engine infers the deck's contract.
+    DeckInferred,
 }
 
 #[derive(Clone)]
 struct ExecutionContext {
     analysis_id: Option<String>,
     coordinate: Option<PyRunCoordinate>,
+    /// Startup contract for a `.TRAN` executed under this context.
+    transient_startup: TransientStartup,
     /// Canonical identity of the periodic large-signal analysis this card
     /// linearizes around, as `DeckPlan` bound it.
     ///
@@ -60,6 +76,7 @@ enum PeriodicOperatingPoint {
 struct PlannedDirectiveRun<'a> {
     coordinate: Option<&'a PyRunCoordinate>,
     analyses: &'a [rspice_core::execution::PlannedAnalysis],
+    transient_startup: TransientStartup,
 }
 
 struct PendingFourier {
@@ -104,6 +121,22 @@ impl<T> LastAndAll<T> {
         }
         self.all.append(&mut other.all);
     }
+
+    /// The one result a single-analysis execution produced.
+    ///
+    /// A convenience method asks for exactly one analysis, so anything other
+    /// than exactly one result is a defect in this module rather than in the
+    /// caller's circuit, and is reported as such instead of being silently
+    /// narrowed to "the last one".
+    pub(super) fn into_single(self, analysis: &str) -> PyResult<T> {
+        let produced = self.all.len();
+        match (self.last, produced) {
+            (Some(value), 1) => Ok(value),
+            (_, produced) => Err(crate::errors::SimulationError::new_err(format!(
+                "the {analysis} request produced {produced} results; expected exactly one"
+            ))),
+        }
+    }
 }
 
 impl<T: Clone> LastAndAll<T> {
@@ -114,18 +147,18 @@ impl<T: Clone> LastAndAll<T> {
 
 /// Everything the directive loop accumulates.
 #[derive(Default)]
-struct DirectiveOutcomes {
+pub(super) struct DirectiveOutcomes {
     records: Vec<PyAnalysisRecord>,
-    op: LastAndAll<Py<PySimulationResult>>,
-    dc: LastAndAll<Py<PyDcSweepResult>>,
-    tran: LastAndAll<Py<PyTransientResult>>,
+    pub(super) op: LastAndAll<Py<PySimulationResult>>,
+    pub(super) dc: LastAndAll<Py<PyDcSweepResult>>,
+    pub(super) tran: LastAndAll<Py<PyTransientResult>>,
     /// Identity of the transient trajectory stored in `tran.last`.
     tran_context: Option<ExecutionContext>,
-    ac: LastAndAll<Py<PyAcResult>>,
+    pub(super) ac: LastAndAll<Py<PyAcResult>>,
     noise: LastAndAll<Vec<PyNoiseResult>>,
-    distortion: LastAndAll<Py<PyDistortionResult>>,
+    pub(super) distortion: LastAndAll<Py<PyDistortionResult>>,
     hb: LastAndAll<PyHbResult>,
-    pss: LastAndAll<PyPssResult>,
+    pub(super) pss: LastAndAll<PyPssResult>,
     pac: LastAndAll<PyPacResult>,
     pnoise: LastAndAll<PyPeriodicNoiseResult>,
     envelope: LastAndAll<Py<PyEnvelopeResult>>,
@@ -137,14 +170,14 @@ struct DirectiveOutcomes {
     /// Retained separately from `noise` because `.MEAS` evaluates against
     /// core's result type, not the Python projection.
     noise_core: Option<Vec<rspice_core::analysis::NoiseResult>>,
-    tf: LastAndAll<PyTransferFunctionResult>,
-    stb: LastAndAll<PyStbResult>,
-    pz: LastAndAll<PyPoleZeroResult>,
-    monte_carlo: LastAndAll<PyMonteCarloResult>,
+    pub(super) tf: LastAndAll<PyTransferFunctionResult>,
+    pub(super) stb: LastAndAll<PyStbResult>,
+    pub(super) pz: LastAndAll<PyPoleZeroResult>,
+    pub(super) monte_carlo: LastAndAll<PyMonteCarloResult>,
     step_result: Option<PyDcSweepResult>,
     temperature: Option<PyDcSweepResult>,
-    sensitivity: LastAndAll<PySensitivityResult>,
-    sensitivity_ac: LastAndAll<PyAcSensitivityResult>,
+    pub(super) sensitivity: LastAndAll<PySensitivityResult>,
+    pub(super) sensitivity_ac: LastAndAll<PyAcSensitivityResult>,
     fourier: Vec<PyFourierResult>,
     /// `(fundamental, outputs, harmonics)` per `.four` card, evaluated after
     /// the loop.
@@ -221,6 +254,7 @@ pub(super) fn run(
             PlannedDirectiveRun {
                 coordinate: None,
                 analyses: plan.analyses(),
+                transient_startup: TransientStartup::Card,
             },
             &mut out,
         )?;
@@ -234,6 +268,82 @@ pub(super) fn run(
 
     measurements.shrink_to_fit();
     Ok(into_report(out, measurements))
+}
+
+/// Execute exactly one analysis through the path `Engine.run` uses.
+///
+/// Every convenience method is a thin constructor over this: it validates its
+/// Python arguments only by translating them into the authored card a deck
+/// would carry, then hands that card to this executor. The card is planned by
+/// core's own `DeckPlan`, so the call receives the same canonical
+/// `AnalysisRequest` identity the deck route assigns, and `run_tran(...)`
+/// cannot come to mean something different from `run(deck with .TRAN ...)`.
+///
+/// `continue_on_error` is deliberately false: a direct call has no report to
+/// record a skipped directive in, so its failure is the call's failure.
+fn run_one(
+    py_engine: &PyEngine,
+    py: Python<'_>,
+    netlist: &PyNetlist,
+    command: AnalysisCommand,
+    transient_startup: TransientStartup,
+) -> PyResult<DirectiveOutcomes> {
+    let mut planning_netlist = rspice_core::Netlist::default();
+    planning_netlist.analyses = vec![command.clone()];
+    // Planning one authored card reads only that card, so it is bounded work
+    // that holds the GIL for a constant time; the analysis it plans still runs
+    // on the interruptible worker.
+    let plan = rspice_core::execution::DeckPlan::from_netlist_with_abort(
+        &planning_netlist,
+        &netlist.resource_limits,
+        &rspice_core::NoAbort,
+    )
+    .map_err(|error| crate::errors::simulation_error_to_pyerr(deck_plan_simulation_error(error)))?;
+
+    let mut out = DirectiveOutcomes::default();
+    run_directives(
+        py_engine,
+        py,
+        netlist,
+        std::slice::from_ref(&command),
+        false,
+        PlannedDirectiveRun {
+            coordinate: None,
+            analyses: plan.analyses(),
+            transient_startup,
+        },
+        &mut out,
+    )?;
+    Ok(out)
+}
+
+/// Execute one authored card whose startup contract the card itself states.
+pub(super) fn run_one_card(
+    py_engine: &PyEngine,
+    py: Python<'_>,
+    netlist: &PyNetlist,
+    command: AnalysisCommand,
+) -> PyResult<DirectiveOutcomes> {
+    run_one(py_engine, py, netlist, command, TransientStartup::Card)
+}
+
+/// Execute one synthesized `.TRAN` whose startup contract the deck states.
+///
+/// `run_tran` authors no card, so its `uic` field carries no authority; the
+/// engine's own rule over the deck's `.TRAN` cards decides instead.
+pub(super) fn run_one_uncarded_transient(
+    py_engine: &PyEngine,
+    py: Python<'_>,
+    netlist: &PyNetlist,
+    command: AnalysisCommand,
+) -> PyResult<DirectiveOutcomes> {
+    run_one(
+        py_engine,
+        py,
+        netlist,
+        command,
+        TransientStartup::DeckInferred,
+    )
 }
 
 fn run_directives(
@@ -273,6 +383,7 @@ fn run_directives(
             (analysis_id.is_some() || planned_run.coordinate.is_some()).then(|| ExecutionContext {
                 analysis_id,
                 coordinate: planned_run.coordinate.cloned(),
+                transient_startup: planned_run.transient_startup,
                 upstream_analysis_id,
             });
         execute_directive(
@@ -307,6 +418,7 @@ fn run_materialized_directives(
         let context = ExecutionContext {
             analysis_id: Some(analysis.output_namespace().analysis_component()),
             coordinate: Some(coordinate.clone()),
+            transient_startup: TransientStartup::Card,
             upstream_analysis_id: analysis.planned().request().upstream().map(|id| id.tag()),
         };
         execute_directive(
@@ -329,6 +441,7 @@ fn run_materialized_directives(
             let context = ExecutionContext {
                 analysis_id: Some(format!("four-{next_fourier_ordinal:03}")),
                 coordinate: Some(coordinate.clone()),
+                transient_startup: TransientStartup::Card,
                 upstream_analysis_id: None,
             };
             next_fourier_ordinal += 1;
@@ -442,9 +555,10 @@ fn run_axis_plan(
             let context = ExecutionContext {
                 analysis_id: Some(implicit_analysis.output_namespace().analysis_component()),
                 coordinate: Some(coordinate.clone()),
+                transient_startup: TransientStartup::Card,
                 upstream_analysis_id: None,
             };
-            match py_engine.run_dc_op(py, &materialized) {
+            match py_engine.dc_op_impl(py, &materialized) {
                 Ok(result) => {
                     if let Some(value) = compatibility_value {
                         compatibility_operating_points.push((value, result.inner.clone()));
@@ -690,7 +804,7 @@ fn execute(
 
     match analysis {
         AnalysisCommand::Op => {
-            let result = py_engine.run_dc_op(py, netlist)?;
+            let result = py_engine.dc_op_impl(py, netlist)?;
             let handle = Py::new(py, result)?;
             out.op.push_with(handle, |handle| handle.clone_ref(py));
             out.records
@@ -747,14 +861,17 @@ fn execute(
                 *step, *stop, *start, *max_step,
             )
             .map_err(|error| crate::errors::value_error(error.to_string()))?;
-            let result = py_engine.tran_impl(
-                py,
-                netlist,
-                *stop,
-                resolved,
-                tstart,
-                Some(rspice_core::engine::TransientStartupMode::from_uic(*uic)),
-            )?;
+            let startup_mode =
+                match context.map_or(TransientStartup::Card, |context| context.transient_startup) {
+                    TransientStartup::Card => {
+                        Some(rspice_core::engine::TransientStartupMode::from_uic(*uic))
+                    }
+                    // `run_tran` authors no card, so the deck's own `.TRAN` cards
+                    // state the contract. Asking the engine keeps that rule in one
+                    // place instead of restating it on this surface.
+                    TransientStartup::DeckInferred => None,
+                };
+            let result = py_engine.tran_impl(py, netlist, *stop, resolved, tstart, startup_mode)?;
             let handle = Py::new(py, result)?;
             out.tran.push_with(handle, |handle| handle.clone_ref(py));
             let mut detail = format!(".tran {step} {stop}");
@@ -1052,21 +1169,7 @@ fn execute(
             ));
         }
         AnalysisCommand::MonteCarlo(command) => {
-            let distribution = match command.distribution {
-                rspice_core::netlist::MonteCarloDistribution::Gaussian => "gaussian",
-                rspice_core::netlist::MonteCarloDistribution::Uniform => "uniform",
-                rspice_core::netlist::MonteCarloDistribution::WorstCase => "worst_case",
-            };
-            let params = (!command.params.is_empty()).then(|| command.params.clone());
-            let result = py_engine.run_monte_carlo(
-                py,
-                netlist,
-                command.runs,
-                command.seed,
-                distribution,
-                command.relative_spread,
-                params,
-            )?;
+            let result = py_engine.monte_carlo_impl(py, netlist, command)?;
             out.monte_carlo.push(result);
             out.records.push(PyAnalysisRecord::executed(
                 "mc",

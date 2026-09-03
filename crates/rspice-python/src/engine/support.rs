@@ -21,6 +21,17 @@ pub(super) fn validate_frequencies(frequencies: &[f64]) -> PyResult<()> {
     Ok(())
 }
 
+/// Spell a node identifier the way an authored card names it.
+///
+/// A numeric index is a legal node name in SPICE, and `resolve_node` reads it
+/// back as one, so the round trip is exact rather than an approximation.
+pub(super) fn node_identifier_name(node: &NodeIdentifier) -> String {
+    match node {
+        NodeIdentifier::Index(index) => index.to_string(),
+        NodeIdentifier::Name(name) => name.clone(),
+    }
+}
+
 pub(super) fn parse_variation(variation: &str) -> PyResult<FreqVariation> {
     match variation.to_ascii_lowercase().as_str() {
         "dec" | "decade" => Ok(FreqVariation::Dec),

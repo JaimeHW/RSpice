@@ -2268,6 +2268,18 @@ class Engine:
         filters: Sequence[str] | None = None,
         output_is_current: bool = False,
     ) -> AcSensitivityResult: ...
+    def run_sensitivity_ac_sweep(
+        self,
+        netlist: Netlist,
+        output: int | str,
+        variation: str,
+        points: int,
+        start_freq: float,
+        stop_freq: float,
+        reference: int | str | None = None,
+        filters: Sequence[str] | None = None,
+        output_is_current: bool = False,
+    ) -> AcSensitivityResult: ...
     def run_step(
         self, netlist: Netlist, param_name: str, values: Sequence[float]
     ) -> list[tuple[float, SimulationResult]]: ...

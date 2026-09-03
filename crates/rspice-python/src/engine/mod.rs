@@ -19,14 +19,14 @@
 
 use numpy::{PyArray1, ToPyArray};
 use pyo3::prelude::*;
+use rspice_core::analysis::AcSensitivityOutput;
 use rspice_core::analysis::PssConfig;
 use rspice_core::analysis::harmonic_balance::{HbConfig, HbTone};
 use rspice_core::analysis::pac::{PacConfig, PacSweepType};
 use rspice_core::analysis::stb::{StbConfig, StbSweepType};
-use rspice_core::analysis::{AcSensitivityOutput, Distribution};
 use rspice_core::netlist::{
-    AnalysisCommand, DcSecondSweep, DcSweepMode, DcSweepSpec, FreqVariation, PoleZeroAnalysisType,
-    PoleZeroTransferType,
+    AnalysisCommand, DcSecondSweep, DcSweepMode, DcSweepSpec, FreqVariation,
+    MonteCarloDistribution, PoleZeroAnalysisType, PoleZeroTransferType,
 };
 use rspice_core::{
     AbortSignal, Engine, SimulationConfig, SimulationConfigOverrides, resolve_simulation_config,
@@ -242,15 +242,14 @@ impl PyEngine {
     /// Example:
     ///     >>> result = engine.run_dc_op(netlist)
     ///     >>> print(f"V(out) = {result.voltage('out'):.3f} V")
-    pub fn run_dc_op(&self, py: Python<'_>, netlist: &PyNetlist) -> PyResult<PySimulationResult> {
-        let engine = self.engine_for_netlist(&netlist.inner);
-        let (result, device_op_report) = run_interruptible(py, &self.active_runs, |abort| {
-            engine.run_dc_op_with_report_and_abort(&netlist.inner, abort)
-        })?;
-        Ok(PySimulationResult::new_with_report(
-            result,
-            device_op_report,
-        ))
+    pub fn run_dc_op(
+        &self,
+        py: Python<'_>,
+        netlist: &PyNetlist,
+    ) -> PyResult<Py<PySimulationResult>> {
+        directives::run_one_card(self, py, netlist, AnalysisCommand::Op)?
+            .op
+            .into_single(".op")
     }
 
     /// Run DC sweep analysis
@@ -284,35 +283,23 @@ impl PyEngine {
         start: f64,
         stop: f64,
         step: f64,
-    ) -> PyResult<PyDcSweepResult> {
-        if !start.is_finite() || !stop.is_finite() || !step.is_finite() {
-            return Err(crate::errors::value_error(format!(
-                "sweep bounds must be finite, got start={start}, stop={stop}, step={step}"
-            )));
-        }
-        if step == 0.0 {
-            return Err(crate::errors::value_error("sweep step must be non-zero"));
-        }
-        if (stop > start && step < 0.0) || (stop < start && step > 0.0) {
-            return Err(crate::errors::value_error(format!(
-                "sweep step sign must move from start toward stop, got start={start}, stop={stop}, step={step}"
-            )));
-        }
-        let engine = self.engine_for_netlist(&netlist.inner);
-        let results = run_interruptible(py, &self.active_runs, |abort| {
-            engine.run_dc_sweep_with_report_and_abort(
-                &netlist.inner,
-                source_name,
+    ) -> PyResult<Py<PyDcSweepResult>> {
+        require_linear_bounds(Some(start), Some(stop), Some(step))?;
+        directives::run_one_card(
+            self,
+            py,
+            netlist,
+            AnalysisCommand::Dc {
+                source: source_name.to_string(),
                 start,
                 stop,
                 step,
-                abort,
-            )
-        })?;
-        Ok(PyDcSweepResult::new_named_with_reports(
-            results,
-            source_name,
-        ))
+                mode: DcSweepMode::Linear,
+                sweep2: None,
+            },
+        )?
+        .dc
+        .into_single(".dc")
     }
 
     /// Run a DC sweep described by one or two `DcSweep` axes
@@ -346,7 +333,7 @@ impl PyEngine {
         netlist: &PyNetlist,
         sweep: &PyDcSweep,
         sweep2: Option<&PyDcSweep>,
-    ) -> PyResult<PyDcSweepResult> {
+    ) -> PyResult<Py<PyDcSweepResult>> {
         if let Some(outer) = sweep2
             && outer.source.eq_ignore_ascii_case(&sweep.source)
         {
@@ -356,36 +343,27 @@ impl PyEngine {
             )));
         }
 
-        let second = sweep2.map(|outer| DcSecondSweep {
-            source: outer.source.clone(),
-            start: outer.spec.start,
-            stop: outer.spec.stop,
-            step: outer.spec.step,
-            mode: outer.spec.mode.clone(),
-        });
-        let engine = self.engine_for_netlist(&netlist.inner);
-        let results = run_interruptible(py, &self.active_runs, |abort| {
-            engine.run_dc_sweep2_spec_with_report_and_abort(
-                &netlist.inner,
-                &sweep.source,
-                &sweep.spec,
-                second.as_ref(),
-                abort,
-            )
-        })?;
-
-        match sweep2 {
-            Some(outer) => PyDcSweepResult::new_nested_with_reports(
-                results,
-                &sweep.source,
-                &outer.source,
-                outer.spec.points(),
-            ),
-            None => Ok(PyDcSweepResult::new_named_with_reports(
-                results,
-                &sweep.source,
-            )),
-        }
+        directives::run_one_card(
+            self,
+            py,
+            netlist,
+            AnalysisCommand::Dc {
+                source: sweep.source.clone(),
+                start: sweep.spec.start,
+                stop: sweep.spec.stop,
+                step: sweep.spec.step,
+                mode: sweep.spec.mode.clone(),
+                sweep2: sweep2.map(|outer| DcSecondSweep {
+                    source: outer.source.clone(),
+                    start: outer.spec.start,
+                    stop: outer.spec.stop,
+                    step: outer.spec.step,
+                    mode: outer.spec.mode.clone(),
+                }),
+            },
+        )?
+        .dc
+        .into_single(".dc")
     }
 
     /// Run AC small-signal analysis at explicit frequencies
@@ -424,9 +402,17 @@ impl PyEngine {
         py: Python<'_>,
         netlist: &PyNetlist,
         table_name: &str,
-    ) -> PyResult<PyAcResult> {
-        let frequencies = ac_data_frequencies(&netlist.inner, table_name)?;
-        self.ac_impl(py, netlist, frequencies)
+    ) -> PyResult<Py<PyAcResult>> {
+        directives::run_one_card(
+            self,
+            py,
+            netlist,
+            AnalysisCommand::AcData {
+                table_name: table_name.to_string(),
+            },
+        )?
+        .ac
+        .into_single(".ac data")
     }
 
     /// Run AC analysis with a dec/oct/lin sweep specification
@@ -453,15 +439,20 @@ impl PyEngine {
         points: usize,
         start_freq: f64,
         stop_freq: f64,
-    ) -> PyResult<PyAcResult> {
-        let variation = parse_variation(variation)?;
-        let max_points = self
-            .engine_for_netlist(&netlist.inner)
-            .config()
-            .resource_limits
-            .max_analysis_points;
-        let frequencies = sweep_frequencies(variation, points, start_freq, stop_freq, max_points)?;
-        self.ac_impl(py, netlist, frequencies)
+    ) -> PyResult<Py<PyAcResult>> {
+        directives::run_one_card(
+            self,
+            py,
+            netlist,
+            AnalysisCommand::Ac {
+                variation: parse_variation(variation)?,
+                points,
+                start_freq,
+                stop_freq,
+            },
+        )?
+        .ac
+        .into_single(".ac")
     }
 
     /// Run third-order Volterra distortion analysis at explicit F1 frequencies.
@@ -492,15 +483,21 @@ impl PyEngine {
         start_freq: f64,
         stop_freq: f64,
         f2_over_f1: Option<f64>,
-    ) -> PyResult<PyDistortionResult> {
-        let variation = parse_variation(variation)?;
-        let max_points = self
-            .engine_for_netlist(&netlist.inner)
-            .config()
-            .resource_limits
-            .max_analysis_points;
-        let frequencies = sweep_frequencies(variation, points, start_freq, stop_freq, max_points)?;
-        self.distortion_impl(py, netlist, frequencies, f2_over_f1)
+    ) -> PyResult<Py<PyDistortionResult>> {
+        directives::run_one_card(
+            self,
+            py,
+            netlist,
+            AnalysisCommand::Disto {
+                variation: parse_variation(variation)?,
+                points,
+                start_freq,
+                stop_freq,
+                f2_over_f1,
+            },
+        )?
+        .distortion
+        .into_single(".disto")
     }
 
     /// Run N-port S-parameter analysis using annotated voltage-source ports.
@@ -534,16 +531,20 @@ impl PyEngine {
         start_freq: f64,
         stop_freq: f64,
     ) -> PyResult<PyStbResult> {
-        let variation = parse_variation(variation)?;
-        // Reuse the shared sweep generator for strict argument validation and
-        // exact DEC/OCT/LIN point semantics before starting the analysis.
-        let max_points = self
-            .engine_for_netlist(&netlist.inner)
-            .config()
-            .resource_limits
-            .max_analysis_points;
-        sweep_frequencies(variation, points, start_freq, stop_freq, max_points)?;
-        self.stb_impl(py, netlist, probe, variation, points, start_freq, stop_freq)
+        directives::run_one_card(
+            self,
+            py,
+            netlist,
+            AnalysisCommand::Stb {
+                variation: parse_variation(variation)?,
+                points,
+                start_freq,
+                stop_freq,
+                probe: probe.to_string(),
+            },
+        )?
+        .stb
+        .into_single(".stb")
     }
 
     /// Run transient time-domain analysis
@@ -580,7 +581,7 @@ impl PyEngine {
         stop_time: f64,
         max_step: Option<f64>,
         start_time: f64,
-    ) -> PyResult<PyTransientResult> {
+    ) -> PyResult<Py<PyTransientResult>> {
         if !stop_time.is_finite() || stop_time <= 0.0 {
             return Err(crate::errors::value_error(format!(
                 "stop_time must be a positive finite number of seconds, got {stop_time}"
@@ -598,8 +599,23 @@ impl PyEngine {
                 "start_time must be finite and satisfy 0 <= start_time < stop_time, got {start_time}"
             )));
         }
-        let max_step = max_step.unwrap_or((stop_time - start_time) / 50.0);
-        self.tran_impl(py, netlist, stop_time, max_step, start_time, None)
+        // A `.TRAN` card's TSTEP is a print cadence that only bounds TMAX; the
+        // default ceiling this method documents is a window fraction, so it is
+        // authored as the print step and core's own resolution reproduces it.
+        directives::run_one_uncarded_transient(
+            self,
+            py,
+            netlist,
+            AnalysisCommand::Tran {
+                step: (stop_time - start_time) / 50.0,
+                stop: stop_time,
+                start: Some(start_time),
+                max_step,
+                uic: false,
+            },
+        )?
+        .tran
+        .into_single(".tran")
     }
 
     /// Run transient analysis with error-bounded voltage waveform compression.
@@ -895,17 +911,42 @@ impl PyEngine {
                 )));
             }
         };
-        self.pz_impl(
+        // An omitted differential terminal is ground, which is exactly what a
+        // `.PZ` card spells as node "0": the card form carries all four
+        // terminals, so the omission is resolved here rather than being a
+        // second meaning of "no reference" further down.
+        directives::run_one_card(
+            self,
             py,
             netlist,
-            &input_node,
-            input_negative.as_ref(),
-            &output_node,
-            output_negative.as_ref(),
-            input_is_current,
-            compute_poles,
-            compute_zeros,
-        )
+            AnalysisCommand::PoleZero {
+                input_pos: node_identifier_name(&input_node),
+                input_neg: input_negative
+                    .as_ref()
+                    .map_or_else(|| "0".to_string(), node_identifier_name),
+                output_pos: node_identifier_name(&output_node),
+                output_neg: output_negative
+                    .as_ref()
+                    .map_or_else(|| "0".to_string(), node_identifier_name),
+                transfer_type: if input_is_current {
+                    PoleZeroTransferType::Current
+                } else {
+                    PoleZeroTransferType::Voltage
+                },
+                analysis_type: match (compute_poles, compute_zeros) {
+                    (true, true) => PoleZeroAnalysisType::PoleZero,
+                    (true, false) => PoleZeroAnalysisType::PolesOnly,
+                    (false, true) => PoleZeroAnalysisType::ZerosOnly,
+                    (false, false) => {
+                        return Err(crate::errors::value_error(
+                            "analysis must compute poles, zeros, or both",
+                        ));
+                    }
+                },
+            },
+        )?
+        .pz
+        .into_single(".pz")
     }
 
     /// Run shooting periodic steady-state analysis.
@@ -930,7 +971,7 @@ impl PyEngine {
         period_guess: Option<f64>,
         verbose: bool,
     ) -> PyResult<PyPssResult> {
-        let config = pss_config(
+        let card = pss_card(
             fundamental_frequency,
             harmonics,
             tstab,
@@ -946,11 +987,9 @@ impl PyEngine {
             period_guess,
             verbose,
         )?;
-        let engine = self.engine_for_netlist(&netlist.inner);
-        let result = run_interruptible(py, &self.active_runs, |abort| {
-            engine.run_pss_with_abort(&netlist.inner, config, abort)
-        })?;
-        Ok(PyPssResult::from_core(&result, harmonics))
+        directives::run_one_card(self, py, netlist, AnalysisCommand::Pss(Box::new(card)))?
+            .pss
+            .into_single(".pss")
     }
 
     /// Solve a periodic operating point once for reuse by PAC and PNoise
@@ -989,7 +1028,7 @@ impl PyEngine {
         period_guess: Option<f64>,
         verbose: bool,
     ) -> PyResult<PyPssOperatingPoint> {
-        let config = pss_config(
+        let card = pss_card(
             fundamental_frequency,
             harmonics,
             tstab,
@@ -1005,6 +1044,7 @@ impl PyEngine {
             period_guess,
             verbose,
         )?;
+        let config = PssConfig::from(&card);
         let engine = self.engine_for_netlist(&netlist.inner);
         let inner = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_pss_operating_point_with_abort(&netlist.inner, config, abort)
@@ -1046,7 +1086,7 @@ impl PyEngine {
         period_guess: Option<f64>,
         verbose: bool,
     ) -> PyResult<(PyPssResult, PyPssContinuationState)> {
-        let config = pss_config(
+        let card = pss_card(
             fundamental_frequency,
             harmonics,
             tstab,
@@ -1062,6 +1102,7 @@ impl PyEngine {
             period_guess,
             verbose,
         )?;
+        let config = PssConfig::from(&card);
         let frozen = frozen_sources.unwrap_or_default();
         let engine = self.engine_for_netlist(&netlist.inner);
         let (result, state) = run_interruptible(py, &self.active_runs, |abort| {
@@ -1630,32 +1671,29 @@ impl PyEngine {
             )));
         }
         let dist = match distribution.to_ascii_lowercase().as_str() {
-            "gaussian" | "normal" => Distribution::Gaussian { sigma: spread },
-            "uniform" => Distribution::Uniform { tolerance: spread },
-            "worst_case" | "worstcase" | "worst-case" => {
-                Distribution::WorstCase { tolerance: spread }
-            }
+            "gaussian" | "normal" => MonteCarloDistribution::Gaussian,
+            "uniform" => MonteCarloDistribution::Uniform,
+            "worst_case" | "worstcase" | "worst-case" => MonteCarloDistribution::WorstCase,
             other => {
                 return Err(crate::errors::value_error(format!(
                     "distribution must be 'gaussian', 'uniform', or 'worst_case', got '{other}'"
                 )));
             }
         };
-        let seed = seed.unwrap_or_else(|| RandomState::new().build_hasher().finish());
-
-        let engine = self.engine_for_netlist(&netlist.inner);
-        let result = run_interruptible(py, &self.active_runs, |abort| {
-            engine.run_monte_carlo_with_options_and_abort(
-                &netlist.inner,
-                num_runs,
+        directives::run_one_card(
+            self,
+            py,
+            netlist,
+            AnalysisCommand::MonteCarlo(rspice_core::netlist::MonteCarloCommand {
+                runs: num_runs,
                 seed,
-                dist,
-                params.as_deref(),
-                abort,
-            )
-        })?;
-
-        Ok(PyMonteCarloResult::from_core(&result))
+                distribution: dist,
+                relative_spread: spread,
+                params: params.unwrap_or_default(),
+            }),
+        )?
+        .monte_carlo
+        .into_single(".mc")
     }
 
     /// Run DC sensitivity analysis
@@ -1746,14 +1784,20 @@ impl PyEngine {
         filters: Option<Vec<String>>,
         output_is_current: bool,
     ) -> PyResult<PySensitivityResult> {
-        self.sensitivity_dc_complete_impl(
+        directives::run_one_card(
+            self,
             py,
             netlist,
-            &output,
-            reference.as_ref(),
-            output_is_current,
-            filters.as_deref().unwrap_or(&[]),
-        )
+            AnalysisCommand::Sensitivity {
+                output_node: node_identifier_name(&output),
+                reference_node: reference.as_ref().map(node_identifier_name),
+                output_is_current,
+                filters: filters.unwrap_or_default(),
+                ac_sweep: None,
+            },
+        )?
+        .sensitivity
+        .into_single(".sens")
     }
 
     /// Run AC sensitivity analysis
@@ -1852,6 +1896,54 @@ impl PyEngine {
         )
     }
 
+    /// Run complete netlist-wide complex AC sensitivity over a DEC/OCT/LIN
+    /// sweep, exactly as a `.SENS ... AC` card states it.
+    #[pyo3(signature = (
+        netlist,
+        output,
+        variation,
+        points,
+        start_freq,
+        stop_freq,
+        reference=None,
+        filters=None,
+        output_is_current=false
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn run_sensitivity_ac_sweep(
+        &self,
+        py: Python<'_>,
+        netlist: &PyNetlist,
+        output: NodeIdentifier,
+        variation: &str,
+        points: usize,
+        start_freq: f64,
+        stop_freq: f64,
+        reference: Option<NodeIdentifier>,
+        filters: Option<Vec<String>>,
+        output_is_current: bool,
+    ) -> PyResult<PyAcSensitivityResult> {
+        directives::run_one_card(
+            self,
+            py,
+            netlist,
+            AnalysisCommand::Sensitivity {
+                output_node: node_identifier_name(&output),
+                reference_node: reference.as_ref().map(node_identifier_name),
+                output_is_current,
+                filters: filters.unwrap_or_default(),
+                ac_sweep: Some(rspice_core::netlist::SensitivityAcSweep {
+                    variation: parse_variation(variation)?,
+                    points,
+                    start_freq,
+                    stop_freq,
+                }),
+            },
+        )?
+        .sensitivity_ac
+        .into_single(".sens ac")
+    }
+
     /// Run parametric step analysis
     ///
     /// Executes a DC operating point at each parameter value. The parameter
@@ -1928,14 +2020,19 @@ impl PyEngine {
         output_is_current: bool,
         reference_node: Option<&str>,
     ) -> PyResult<PyTransferFunctionResult> {
-        self.tf_impl(
+        directives::run_one_card(
+            self,
             py,
             netlist,
-            output_node,
-            reference_node,
-            output_is_current,
-            input_source,
-        )
+            AnalysisCommand::Tf {
+                output_node: output_node.to_string(),
+                reference_node: reference_node.map(str::to_string),
+                output_is_current,
+                input_source: input_source.to_string(),
+            },
+        )?
+        .tf
+        .into_single(".tf")
     }
 
     /// Get a copy of the current simulation configuration

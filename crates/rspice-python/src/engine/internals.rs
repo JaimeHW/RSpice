@@ -8,6 +8,7 @@
 //! implementation.
 
 use super::*;
+use rspice_core::analysis::Distribution;
 
 impl PyEngine {
     pub(super) fn engine_for_netlist(&self, netlist: &rspice_core::Netlist) -> Engine {
@@ -57,6 +58,63 @@ impl PyEngine {
                     })
             }
         }
+    }
+
+    /// Core operating-point runner shared by the `.op` card and implicit OP.
+    pub(super) fn dc_op_impl(
+        &self,
+        py: Python<'_>,
+        netlist: &PyNetlist,
+    ) -> PyResult<PySimulationResult> {
+        let engine = self.engine_for_netlist(&netlist.inner);
+        let (result, device_op_report) = run_interruptible(py, &self.active_runs, |abort| {
+            engine.run_dc_op_with_report_and_abort(&netlist.inner, abort)
+        })?;
+        Ok(PySimulationResult::new_with_report(
+            result,
+            device_op_report,
+        ))
+    }
+
+    /// Core Monte Carlo runner shared by `run_monte_carlo` and the `.mc` card.
+    ///
+    /// An unseeded request draws one seed here, so both surfaces are
+    /// reproducible in exactly the same way: a `.MC` card without `SEED=` and
+    /// a `run_monte_carlo(seed=None)` call are the same request.
+    pub(super) fn monte_carlo_impl(
+        &self,
+        py: Python<'_>,
+        netlist: &PyNetlist,
+        command: &rspice_core::netlist::MonteCarloCommand,
+    ) -> PyResult<PyMonteCarloResult> {
+        let spread = command.relative_spread;
+        let distribution = match command.distribution {
+            rspice_core::netlist::MonteCarloDistribution::Gaussian => {
+                Distribution::Gaussian { sigma: spread }
+            }
+            rspice_core::netlist::MonteCarloDistribution::Uniform => {
+                Distribution::Uniform { tolerance: spread }
+            }
+            rspice_core::netlist::MonteCarloDistribution::WorstCase => {
+                Distribution::WorstCase { tolerance: spread }
+            }
+        };
+        let seed = command
+            .seed
+            .unwrap_or_else(|| RandomState::new().build_hasher().finish());
+        let params = (!command.params.is_empty()).then(|| command.params.clone());
+        let engine = self.engine_for_netlist(&netlist.inner);
+        let result = run_interruptible(py, &self.active_runs, |abort| {
+            engine.run_monte_carlo_with_options_and_abort(
+                &netlist.inner,
+                command.runs,
+                seed,
+                distribution,
+                params.as_deref(),
+                abort,
+            )
+        })?;
+        Ok(PyMonteCarloResult::from_core(&result))
     }
 
     /// Core transient runner shared by `run_tran` and `run()`.

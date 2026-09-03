@@ -179,12 +179,13 @@ pub(super) fn configure_hb_numerics(
     Ok(())
 }
 
-/// Build and validate a shooting PSS configuration.
+/// Build and validate the authored `.PSS` card a direct call describes.
 ///
-/// Shared by every PSS entry point so the driven/autonomous rules and the
-/// numerical bounds are stated once; a second copy would drift.
+/// Every PSS entry point goes through this, and the shooting configuration is
+/// then core's own `PssConfig::from(&PssCard)` conversion, so a `.PSS` card in
+/// a deck and a `run_pss` call cannot resolve to different configurations.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn pss_config(
+pub(super) fn pss_card(
     fundamental_frequency: Option<f64>,
     harmonics: usize,
     tstab: f64,
@@ -199,7 +200,7 @@ pub(super) fn pss_config(
     autonomous: bool,
     period_guess: Option<f64>,
     verbose: bool,
-) -> PyResult<PssConfig> {
+) -> PyResult<rspice_core::netlist::PssCard> {
     if harmonics == 0 {
         return Err(crate::errors::value_error("harmonics must be at least 1"));
     }
@@ -223,40 +224,40 @@ pub(super) fn pss_config(
         )));
     }
 
-    let mut config = if autonomous {
-        PssConfig::autonomous()
+    let mut card = if autonomous {
+        rspice_core::netlist::PssCard::autonomous()
     } else {
         let frequency = fundamental_frequency.ok_or_else(|| {
             crate::errors::value_error("fundamental_frequency is required for driven PSS")
         })?;
-        PssConfig::new(frequency)
+        rspice_core::netlist::PssCard::driven(frequency)
     };
     if autonomous {
         if let Some(period) = period_guess {
-            config.period_guess = period;
-            config.fundamental_freq = 1.0 / period;
+            card.period_guess = period;
+            card.fundamental_freq = 1.0 / period;
         } else if let Some(frequency) = fundamental_frequency {
-            config.period_guess = 1.0 / frequency;
-            config.fundamental_freq = frequency;
+            card.period_guess = 1.0 / frequency;
+            card.fundamental_freq = frequency;
         }
     }
-    config.num_harmonics = harmonics;
-    config.tstab = tstab;
+    card.num_harmonics = harmonics;
+    card.tstab = tstab;
     if let Some(periods) = tstab_periods {
-        config.tstab_periods = periods;
+        card.tstab_periods = periods;
     }
-    config.max_iterations = max_iterations;
-    config.tolerance = tolerance;
-    config.abstol = abstol;
-    config.damping_factor = damping;
-    config.max_period_change = max_period_change;
-    config.points_per_period = points_per_period;
-    config.integration_method = integration_method.map(Into::into);
-    config.verbose = verbose;
-    config.validate().map_err(|message| {
+    card.max_iterations = max_iterations;
+    card.tolerance = tolerance;
+    card.abstol = abstol;
+    card.damping_factor = damping;
+    card.max_period_change = max_period_change;
+    card.points_per_period = points_per_period;
+    card.integration_method = integration_method.map(Into::into);
+    card.verbose = verbose;
+    PssConfig::from(&card).validate().map_err(|message| {
         crate::errors::value_error(format!("invalid PSS configuration: {message}"))
     })?;
-    Ok(config)
+    Ok(card)
 }
 
 /// Validate a continuation window shared by the PSS and HB envelope runners.
