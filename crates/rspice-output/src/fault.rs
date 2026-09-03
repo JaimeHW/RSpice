@@ -242,7 +242,10 @@ impl ArmedFaults {
 impl Drop for ArmedFaults {
     fn drop(&mut self) {
         let previous = self.previous.take();
-        ARMED.with(|slot| *slot.borrow_mut() = previous);
+        // `try_with` rather than `with`: a guard dropped while this thread's
+        // locals are already being destroyed must disarm quietly instead of
+        // panicking inside a `Drop`.
+        let _ = ARMED.try_with(|slot| *slot.borrow_mut() = previous);
     }
 }
 
@@ -255,15 +258,23 @@ impl std::fmt::Debug for ArmedFaults {
     }
 }
 
+/// The production path's read of this thread's armed fault.
+///
+/// `try_with` rather than `with`: publication can happen inside a `Drop` while
+/// a thread's locals are being destroyed, and an artifact write must not start
+/// panicking because a test-only slot is already gone. An unavailable slot is
+/// exactly the same answer as an empty one — nothing is armed.
 pub(crate) fn check_armed(point: FaultPoint) -> io::Result<()> {
-    ARMED.with(|slot| match slot.borrow_mut().as_mut() {
-        Some(state) => state.check(point),
-        None => Ok(()),
-    })
+    ARMED
+        .try_with(|slot| match slot.borrow_mut().as_mut() {
+            Some(state) => state.check(point),
+            None => Ok(()),
+        })
+        .unwrap_or(Ok(()))
 }
 
 pub(crate) fn enter_armed_member(index: usize) {
-    ARMED.with(|slot| {
+    let _ = ARMED.try_with(|slot| {
         if let Some(state) = slot.borrow_mut().as_mut() {
             state.current_member = index;
         }

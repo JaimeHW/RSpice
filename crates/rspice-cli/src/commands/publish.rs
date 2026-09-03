@@ -453,6 +453,83 @@ mod tests {
         );
     }
 
+    /// A coordinate set that fails while it is being published must leave the
+    /// destination directory exactly as the run found it.
+    ///
+    /// The timeout and kill cases are covered end-to-end by
+    /// `tests/step_set_transaction.rs`, which cancels a real swept run. What
+    /// no deck can produce on demand is a failure *inside* the commit — a full
+    /// device, a refused allocation, a replace that loses a race — so those
+    /// come from `rspice_output`'s qualification seam, armed on this thread
+    /// for the duration of the transaction.
+    #[test]
+    fn a_transaction_that_fails_mid_commit_leaves_every_predecessor_intact() {
+        use rspice_output::fault::{ArmedFaults, ArtifactFault, ArtifactFaultPoint};
+
+        for (tag, fault) in [
+            (
+                "replace",
+                ArtifactFault::io(ArtifactFaultPoint::Replace).on_member(1),
+            ),
+            (
+                "manifest",
+                ArtifactFault::allocation(ArtifactFaultPoint::CommitManifest),
+            ),
+            (
+                "predecessor",
+                ArtifactFault::io(ArtifactFaultPoint::CapturePredecessor).on_member(0),
+            ),
+        ] {
+            let directory = TestDirectory::new(tag);
+            let first = directory.join("coordinate-0.csv");
+            let second = directory.join("coordinate-1.csv");
+            let manifest = directory.join("set.json");
+            std::fs::write(&first, b"old first").expect("seed predecessor");
+            std::fs::write(&manifest, b"old manifest").expect("seed manifest predecessor");
+
+            let armed = ArmedFaults::arm(fault);
+            let transaction = begin().expect("open transaction");
+            publish(&first, b"new first").expect("stage first member");
+            publish(&second, b"new second").expect("stage second member");
+            set_manifest(&manifest, |writer| {
+                writer
+                    .write_all(b"{\"members\":2}")
+                    .map_err(|error| CliError::output_error(&manifest, error))
+            })
+            .map_err(|error| crate::cli::map_atomic_output_error(&manifest, error))
+            .expect("stage manifest");
+            let outcome = transaction.commit();
+            assert_eq!(armed.fired(), 1, "the {tag} fault never fired");
+            drop(armed);
+
+            assert!(outcome.is_err(), "the {tag} fault did not fail the commit");
+            assert_eq!(
+                std::fs::read(&first).expect("read the first predecessor"),
+                b"old first",
+                "the {tag} fault replaced a published coordinate"
+            );
+            assert!(
+                !second.exists(),
+                "the {tag} fault published a coordinate that had no predecessor"
+            );
+            assert_eq!(
+                std::fs::read(&manifest).expect("read the manifest predecessor"),
+                b"old manifest",
+                "the {tag} fault replaced the set manifest"
+            );
+            for destination in [&first, &second, &manifest] {
+                assert!(
+                    rspice_output::stale_artifacts(destination)
+                        .expect("list staging files")
+                        .is_empty(),
+                    "the {tag} fault left a staging file beside {}",
+                    destination.display()
+                );
+            }
+            assert!(current().is_none(), "the transaction stayed open");
+        }
+    }
+
     #[test]
     fn transactions_do_not_nest() {
         let _outer = begin().expect("open transaction");
