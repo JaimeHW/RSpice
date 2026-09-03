@@ -21,15 +21,17 @@
 //!    `MAX_A64_FUNCTION_BYTES` was named for.
 //!
 //! Constants now go into inline islands as the function grows, which removes
-//! the first. The second is one platform's unwind metadata, so the refusal
-//! moved to the Windows unwind publisher, where it is real; every other
-//! platform takes the function unchanged.
+//! the first. The second was never a limit on the code, only on how much of it
+//! one `.xdata` record can name: the Windows unwind publisher describes a
+//! longer function as several fragments, one `.pdata`/`.xdata` pair each, so
+//! it no longer refuses either. Every other platform takes the function
+//! unchanged.
 //!
 //! # What each line reports
 //!
 //! Per module: the A64 function bytes of the prelude, how many constant
 //! islands the emitter had to place, whether the image builder accepted the
-//! function, and what Windows ARM64 unwind data would say about it.
+//! function, and how many Windows ARM64 unwind fragments it takes.
 //!
 //! The same run re-encodes every value entry of the *shipped postfix plan* and
 //! asserts that none of them gained an island. That is the byte-identity
@@ -100,22 +102,21 @@ fn plan_value_entries(plan: &NativeModelPlan) -> Vec<&PlanProgram> {
     entries
 }
 
-/// What Windows ARM64 unwind data would say about a function of this shape.
-fn windows_unwind_verdict(bytes: &[u8]) -> String {
-    let verified = match verify_exact_function(bytes, "prelude") {
-        Ok(verified) => verified,
-        Err(error) => return format!("unverified({error})"),
-    };
-    let analyzed =
-        match analyze_function(CodeOffset::new(0), &bytes[..verified.code_bytes], "prelude") {
-            Ok(analyzed) => analyzed,
-            Err(error) => return format!("unanalyzed({error})"),
-        };
+/// How many `.pdata`/`.xdata` pairs Windows ARM64 needs for a function of this
+/// shape.
+///
+/// One per fragment: a function within what the `.xdata` header's 18-bit
+/// Function Length field can name is one fragment, and a longer one is
+/// described by several.
+fn windows_unwind_fragments(bytes: &[u8]) -> Result<usize, String> {
+    let verified =
+        verify_exact_function(bytes, "prelude").map_err(|error| format!("unverified({error})"))?;
+    let analyzed = analyze_function(CodeOffset::new(0), &bytes[..verified.code_bytes], "prelude")
+        .map_err(|error| format!("unanalyzed({error})"))?;
     let mut image = bytes[..verified.code_bytes].to_vec();
-    match append_windows_unwind_data(&mut image, &[analyzed]) {
-        Ok(_) => "ok".to_string(),
-        Err(error) => format!("refused({error})"),
-    }
+    append_windows_unwind_data(&mut image, &[analyzed])
+        .map(|table| table.len())
+        .map_err(|error| format!("refused({error})"))
 }
 
 #[test]
@@ -202,17 +203,27 @@ fn the_aarch64_prelude_encoding_census() {
             }
         };
 
+        // The Windows unwind publisher, which is what refused a prelude past a
+        // megabyte before it fragmented them.
+        let unwind = windows_unwind_fragments(&bytes);
+        if let Err(detail) = &unwind {
+            refused.push((module.clone(), detail.clone()));
+        }
+        let windows_unwind = match &unwind {
+            Ok(fragments) => format!("fragments={fragments}"),
+            Err(detail) => detail.clone(),
+        };
+
         encoded += 1;
         println!(
             "a64-prelude model={module} slots={} block_instructions={} function_bytes={} \
-             over_xdata_limit={} islands={} image={published} windows_unwind={} \
+             over_xdata_limit={} islands={} image={published} windows_unwind={windows_unwind} \
              seconds={encode_seconds:.1}",
             prelude.slot_count(),
             prelude.program().ssa().instructions().len(),
             bytes.len(),
             bytes.len() > MAX_A64_FUNCTION_BYTES,
             constant_islands(&bytes),
-            windows_unwind_verdict(&bytes),
         );
     }
 

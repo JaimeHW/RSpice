@@ -27,15 +27,18 @@ const ENTRY_ALIGNMENT: usize = 16;
 // The largest function one Windows ARM64 `.xdata` record can describe: its
 // Function Length field is an 18-bit instruction count.
 //
-// This is the *only* size that still binds an A64 function, and it binds one
-// platform's unwind metadata rather than the code. Nothing in the instruction
-// stream stops earlier: `B`/`BL` carry an imm26 word displacement and reach
-// 128 MiB, `B.cond`/`CBZ`/`CBNZ` are always emitted in the long form (the
-// inverse condition over an unconditional `B`, see `A64Encoder`), and `LDR`
-// (literal) reaches its constants through inline islands. So an entry over
-// this size is *segmented where its form allows it* — a postfix program can be
-// cut, a block program cannot — and is otherwise emitted whole, leaving the
-// refusal to `append_windows_unwind_data`, which is where the limit is real.
+// Nothing in the instruction stream stops here: `B`/`BL` carry an imm26 word
+// displacement and reach 128 MiB, `B.cond`/`CBZ`/`CBNZ` are always emitted in
+// the long form (the inverse condition over an unconditional `B`, see
+// `A64Encoder`), and `LDR` (literal) reaches its constants through inline
+// islands. Nor does the metadata stop here any more: a function past this size
+// is described by several `.pdata`/`.xdata` fragments, which
+// `append_windows_unwind_data` emits.
+//
+// What is left is a preference. An entry over this size is *segmented where
+// its form allows it* — a postfix program can be cut into separately published
+// pieces, a block program cannot — so that the common shape stays one function
+// with one unwind record, and only what cannot be cut is emitted whole.
 pub(crate) const MAX_A64_FUNCTION_BYTES: usize = 0x3ffff * 4;
 const A64_NOP: [u8; 4] = 0xD503_201F_u32.to_le_bytes();
 const A64_BTI_C: [u8; 4] = 0xD503_245F_u32.to_le_bytes();
