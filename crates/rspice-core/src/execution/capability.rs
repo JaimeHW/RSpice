@@ -581,4 +581,57 @@ mod tests {
             assert_eq!(analysis_result_capability(result).result, result);
         }
     }
+
+    /// The registry is the gate the human-readable capability matrix used to
+    /// be: every analysis-result cell of every non-UI surface is mapped. A
+    /// new `Partial` or `Unsupported` declaration here is a product gap and
+    /// must be closed, not recorded.
+    #[test]
+    fn every_analysis_result_cell_is_mapped_on_every_surface() {
+        for row in ANALYSIS_CAPABILITY_MATRIX {
+            for surface in NonUiSurface::ALL {
+                let declaration = row.surface(surface);
+                for (axis, status) in [
+                    ("scalar", declaration.scalar),
+                    ("stepped", declaration.stepped),
+                    ("temperature", declaration.temperature),
+                ] {
+                    assert_eq!(
+                        status,
+                        MappingStatus::Mapped,
+                        "{:?} on {} ({axis}) is not mapped",
+                        row.result,
+                        surface.heading()
+                    );
+                }
+            }
+        }
+    }
+
+    /// The digital signal row is the one declared boundary: the separate
+    /// digital effort owns its surfaces, and each of its cells says so.
+    /// Every analog signal kind is mapped everywhere.
+    #[test]
+    fn the_digital_signal_row_is_the_only_declared_boundary() {
+        for row in SIGNAL_CAPABILITY_MATRIX {
+            for surface in NonUiSurface::ALL {
+                let status = row.surface(surface);
+                if row.signal == SignalKind::Digital {
+                    assert!(
+                        status.note().is_some_and(|note| !note.trim().is_empty()),
+                        "digital signals on {} must state their boundary",
+                        surface.heading()
+                    );
+                } else {
+                    assert_eq!(
+                        status,
+                        MappingStatus::Mapped,
+                        "{:?} on {} is not mapped",
+                        row.signal,
+                        surface.heading()
+                    );
+                }
+            }
+        }
+    }
 }
