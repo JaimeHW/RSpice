@@ -508,7 +508,7 @@ impl TransientChannelDescriptor {
     }
 
     /// Build a descriptor with the unit implied by its role.
-    pub fn for_role(role: TransientChannelRole) -> Result<Self, String> {
+    pub(crate) fn for_role(role: TransientChannelRole) -> Result<Self, String> {
         let unit = role.default_unit();
         Self::new(role, unit)
     }
@@ -631,7 +631,7 @@ impl TransientChannelSample {
     }
 
     /// Classify one raw solver value, never publishing a non-finite number.
-    pub fn from_solver_value(value: Value) -> Self {
+    pub(crate) fn from_solver_value(value: Value) -> Self {
         if value.is_finite() {
             Self::Value(value)
         } else {
