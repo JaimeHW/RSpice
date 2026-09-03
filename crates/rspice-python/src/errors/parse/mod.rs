@@ -171,6 +171,24 @@ impl ParseErrorAttributes {
 pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
     use rspice_core::netlist::{MissingSubcircuitEndsBoundary, ParseError as CoreParseError};
 
+    // A construct the grammar recognized and this build declines to lower is a
+    // capability gap, not a syntax error, and a caller decides differently
+    // about the two. Routing it through the engine's typed refusal keeps the
+    // token, the span, and the exception class identical whether the refusal
+    // came from the parser or from elaboration.
+    if let CoreParseError::UnsupportedCapability {
+        origin,
+        capability,
+        detail,
+    } = err
+    {
+        return super::simulation_error_to_pyerr(
+            rspice_core::UnsupportedCapabilityError::new(capability, detail)
+                .at(origin)
+                .into(),
+        );
+    }
+
     let message = err.to_string();
     let mut attributes = match &err {
         CoreParseError::ResourceLimit(error) => {
@@ -304,6 +322,16 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
             attributes
         }
         CoreParseError::Io(_) => ParseErrorAttributes::new("io"),
+        // The early return above consumes this variant, so this arm does not
+        // run today. It is a real mapping rather than an `unreachable!` so a
+        // future refactor that drops the early return degrades to a coarse
+        // parse error instead of aborting the interpreter.
+        CoreParseError::UnsupportedCapability { capability, .. } => {
+            let mut attributes = ParseErrorAttributes::new("unsupported_capability");
+            attributes.category = Some("capability");
+            attributes.detail = Some((*capability).to_owned());
+            attributes
+        }
     };
     if attributes.primary_line.is_none() {
         attributes.primary_line = attributes.line;

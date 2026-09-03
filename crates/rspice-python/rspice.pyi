@@ -78,6 +78,7 @@ __all__ = [
     "SimulationError",
     "ConvergenceError",
     "CancelledError",
+    "TimeoutError",
     "MeasurementError",
     "RSpiceKeyError",
     "RSpiceIndexError",
@@ -202,20 +203,41 @@ class SimulationError(RSpiceError):
 
     `kind`, `code`, and `category` are stable snake-case tags, deliberately
     typed as `str` because the engine may add values without a breaking
-    change. Current values:
+    change. `category` is the coarse decision a caller branches on; `code`
+    names the specific failure. Current values:
 
     - kind: "configuration", "resource_limit", "circuit", "solver",
-      "netlist", "convergence", "aborted"
+      "netlist", "convergence", "aborted", "unsupported_capability",
+      "materialization_mismatch", "requested_signal_unavailable",
+      "result_schema_mismatch", "persistence_incompatible",
+      "output_commit_failed", "time_limit_exceeded"
     - code: "invalid_configuration", "resource_limit", "circuit_error",
-      "solver_error", "netlist_error", "convergence_error", "aborted"
-    - category: "configuration", "resource_limit", "simulation", "solver",
-      "netlist", "convergence", "cancellation"
+      "behavioral_reference_error", "solver_error", "netlist_error",
+      "unsupported_capability", "materialization_mismatch",
+      "requested_signal_unavailable", "result_schema_mismatch",
+      "persistence_incompatible", "output_commit_failed",
+      "convergence_error", "aborted", "time_limit_exceeded"
+    - category: "configuration", "netlist", "capability", "materialization",
+      "resource_limit", "simulation", "solver", "convergence",
+      "signal_unavailable", "result_schema", "persistence", "output_commit",
+      "cancellation", "timeout"
+
+    `analysis_id` and `coordinate_id` are the stable identities of the
+    failing analysis card (``"ac-002"``) and run coordinate, present when the
+    failure belongs to one. `line` and `path` locate the offending construct
+    in the deck. `capability` is the dotted token of a refused capability
+    boundary, set only when `category` is ``"capability"``.
     """
 
     kind: str
     code: str
     category: str
     retryable: bool
+    analysis_id: str | None
+    coordinate_id: str | None
+    line: int | None
+    path: str | None
+    capability: str | None
     iterations: int | None
     resource: str | None
     requested: int | None
@@ -230,6 +252,14 @@ class ConvergenceError(SimulationError):
 
 class CancelledError(SimulationError):
     """Raised in a simulation's calling thread after Engine.cancel()."""
+
+class TimeoutError(CancelledError):
+    """Raised when a simulation stops because its time budget expired.
+
+    A subclass of ``CancelledError`` so a handler that means "the run did not
+    finish" catches both, while a caller that distinguishes them can retry a
+    cancellation as-is and give a timeout a longer budget.
+    """
 
 class MeasurementError(RSpiceError):
     """Raised when .MEAS verification fails (see RunReport.assert_passed)."""

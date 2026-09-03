@@ -193,6 +193,7 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
         "CancelledError",
         m.py().get_type::<errors::CancelledError>(),
     )?;
+    m.add("TimeoutError", m.py().get_type::<errors::TimeoutError>())?;
     m.add(
         "MeasurementError",
         m.py().get_type::<errors::MeasurementError>(),
@@ -275,6 +276,7 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "SimulationError",
             "ConvergenceError",
             "CancelledError",
+            "TimeoutError",
             "MeasurementError",
             "RSpiceKeyError",
             "RSpiceIndexError",

@@ -598,10 +598,6 @@ fn materialization_failure(error: &MaterializedRunError) -> Execution {
     match error {
         MaterializedRunError::Aborted => failure_execution(&SimulationError::Aborted),
         MaterializedRunError::Simulation(error) => failure_execution(error),
-        MaterializedRunError::AlterUnsupported => Execution::failed(
-            "analysis.axis_unsupported",
-            "Textual .ALTER variants are not representable by this adapter contract.",
-        ),
         other => Execution::failed(
             "analysis.axis_materialization",
             &format!("The canonical deck materializer failed: {other}"),
@@ -2394,6 +2390,12 @@ fn finalize_execution(execution: Execution, abort: &dyn AbortSignal) -> Executio
 fn failure_execution(error: &SimulationError) -> Execution {
     let code = match error.descriptor().code {
         rspice_core::engine::SimulationErrorCode::Aborted => "engine.time_limit".to_owned(),
+        // The engine now says so itself when a budget expired. It keeps the
+        // established wire code rather than adding a second spelling for the
+        // outcome a worker already knows how to handle.
+        rspice_core::engine::SimulationErrorCode::TimeLimitExceeded => {
+            "engine.time_limit".to_owned()
+        }
         stable => format!("engine.{}", stable.as_str()),
     };
     Execution::failed(&code, &error.to_string())

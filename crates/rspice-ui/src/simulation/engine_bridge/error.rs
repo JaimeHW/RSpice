@@ -72,17 +72,18 @@ impl EngineBridge {
             }
             rspice_core::SimulationError::Netlist(msg) => SimulationError::ParseError(msg),
             rspice_core::SimulationError::RequestedSignalUnavailable(error) => {
+                let error = *error;
                 SimulationError::RequestedSignalUnavailable {
                     signal: error.signal,
-                    analysis: error.analysis,
-                    coordinate: error.coordinate,
+                    analysis: error.analysis_label,
+                    coordinate: error.coordinate_label,
                 }
             }
             rspice_core::SimulationError::ResultSchemaMismatch(error) => {
                 let error = *error;
                 SimulationError::ResultSchemaMismatch(Box::new(ResultSchemaMismatch {
-                    analysis: error.analysis,
-                    coordinate: error.coordinate,
+                    analysis: error.analysis_label,
+                    coordinate: error.coordinate_label,
                     signal_family: error.signal_family,
                     expected_names: error.expected_names,
                     actual_names: error.actual_names,
@@ -97,6 +98,19 @@ impl EngineBridge {
                 }
             }
             rspice_core::SimulationError::Aborted => SimulationError::Aborted,
+            // An expired time budget is a stop, not a failed circuit; the UI
+            // treats it exactly as it treats a user cancellation until it
+            // grows a distinct presentation for it.
+            rspice_core::SimulationError::TimeLimitExceeded => SimulationError::Aborted,
+            // Categories this bridge has no dedicated presentation for yet.
+            // They keep their full message, which already names the capability
+            // token, the coordinate, or the artifact that failed.
+            other @ (rspice_core::SimulationError::UnsupportedCapability(_)
+            | rspice_core::SimulationError::MaterializationMismatch(_)
+            | rspice_core::SimulationError::PersistenceIncompatible(_)
+            | rspice_core::SimulationError::OutputCommitFailed(_)) => {
+                SimulationError::CircuitError(other.to_string())
+            }
         }
     }
 }
