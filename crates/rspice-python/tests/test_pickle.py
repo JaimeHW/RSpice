@@ -1003,9 +1003,12 @@ class TestCompressedTransientResult:
         # A sample is a number or a typed absence, never both and never
         # neither: the validity mask cannot be silently dropped or invented.
         assert channels, "compressed pickle channel coverage is non-vacuous"
-        (role, node_index, owner, parameter, unit, availability, values, absence) = channels[0]
-        both = list(channels)
-        both[0] = (
+        retained = next(
+            (index for index, channel in enumerate(channels) if channel[6]),
+            None,
+        )
+        assert retained is not None, "at least one channel must carry samples"
+        (
             role,
             node_index,
             owner,
@@ -1013,13 +1016,40 @@ class TestCompressedTransientResult:
             unit,
             availability,
             values,
-            ["non-finite", *absence[1:]],
+            absence,
+        ) = channels[retained]
+        both = list(channels)
+        both[retained] = (
+            role,
+            node_index,
+            owner,
+            parameter,
+            unit,
+            availability,
+            [1.0] * len(values),
+            ["non-finite"] * len(values),
         )
-        with pytest.raises(ValueError, match="neither a value nor a typed absence"):
+        with pytest.raises(ValueError, match="exactly one of a value and a typed absence"):
             unpickler(*state[:-2], (version, step_sizes, both, *tail[1:]), compression_report)
 
+        neither = list(channels)
+        neither[retained] = (
+            role,
+            node_index,
+            owner,
+            parameter,
+            unit,
+            availability,
+            [None] * len(values),
+            [None] * len(values),
+        )
+        with pytest.raises(ValueError, match="exactly one of a value and a typed absence"):
+            unpickler(
+                *state[:-2], (version, step_sizes, neither, *tail[1:]), compression_report
+            )
+
         short = list(channels)
-        short[0] = (
+        short[retained] = (
             role,
             node_index,
             owner,
@@ -1033,7 +1063,7 @@ class TestCompressedTransientResult:
             unpickler(*state[:-2], (version, step_sizes, short, *tail[1:]), compression_report)
 
         unknown_reason = list(channels)
-        unknown_reason[0] = (
+        unknown_reason[retained] = (
             role,
             node_index,
             owner,
@@ -1051,7 +1081,7 @@ class TestCompressedTransientResult:
             )
 
         unknown_role = list(channels)
-        unknown_role[0] = (
+        unknown_role[retained] = (
             "telepathy",
             node_index,
             owner,

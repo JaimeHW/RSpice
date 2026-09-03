@@ -190,9 +190,14 @@ fn rebuild_channel(
                     ))
                 })?,
             ),
-            _ => {
+            (Some(_), Some(_)) => {
                 return Err(crate::errors::value_error(format!(
-                    "compressed-transient channel pickle sample {index} is neither a value nor a typed absence"
+                    "compressed-transient channel pickle sample {index} must be exactly one of a value and a typed absence, not both"
+                )));
+            }
+            (None, None) => {
+                return Err(crate::errors::value_error(format!(
+                    "compressed-transient channel pickle sample {index} must be exactly one of a value and a typed absence, not neither"
                 )));
             }
         });
