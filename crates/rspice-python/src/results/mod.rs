@@ -89,7 +89,7 @@ pub(crate) use noise::{
 };
 pub(crate) use pac::PyPacResult;
 pub(crate) use pss::{PyFloquetSpectrumCertificate, PyFloquetSpectrumEvidence, PyPssResult};
-pub(crate) use s_parameters::{PySParameterResult, SParameterNoiseData};
+pub(crate) use s_parameters::PySParameterResult;
 pub(crate) use sensitivity::{
     PyAcSensitivity, PyAcSensitivityResult, PyElementSensitivity, PySensitivityResult,
 };

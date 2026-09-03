@@ -23,16 +23,11 @@ pub struct PySParameterResult {
 }
 
 /// Optional `.SP donoise` data attached to an S-parameter sweep.
-#[derive(Debug, Clone)]
-pub(crate) struct SParameterNoiseData {
-    pub temperature: f64,
-    pub current_correlation: Vec<Vec<Vec<rspice_core::Complex64>>>,
-    pub noise_resistance: Option<Vec<f64>>,
-    pub noise_factor: Option<Vec<f64>>,
-    pub minimum_noise_factor: Option<Vec<f64>>,
-    pub optimum_source_reflection: Option<Vec<rspice_core::Complex64>>,
-    pub parameter_validity: Option<Vec<bool>>,
-}
+///
+/// This is the core assembly verbatim. The derived two-port parameters are
+/// therefore either present and physical for every frequency or the sweep
+/// failed: there is no per-point validity mask for a caller to overlook.
+pub(crate) type SParameterNoiseData = rspice_core::analysis::s_param::PortNoiseSweep;
 
 impl PySParameterResult {
     /// Per-frequency stability analysis, for two-port results only.
@@ -147,6 +142,24 @@ impl PySParameterResult {
             .ok_or_else(|| crate::errors::value_error("malformed S-parameter result matrix"))
     }
 
+    /// Project one real scalar out of the derived two-port noise parameters.
+    ///
+    /// `None` means the sweep is not a two-port or carried no `donoise` data;
+    /// it never means "the parameters were undefined here", because core
+    /// refuses to assemble a sweep whose two-port derivation has no physical
+    /// solution.
+    fn two_port_noise_field<'py, F>(
+        &self,
+        py: Python<'py>,
+        select: F,
+    ) -> Option<Bound<'py, PyArray1<f64>>>
+    where
+        F: Fn(&rspice_core::analysis::s_param::TwoPortNoise) -> f64,
+    {
+        let points = self.noise.as_ref()?.two_port_parameters.as_ref()?;
+        Some(points.iter().map(select).collect::<Vec<_>>().to_pyarray(py))
+    }
+
     fn current_noise_correlation(
         &self,
         output_port: usize,
@@ -213,7 +226,9 @@ impl PySParameterResult {
     /// Temperature in kelvin used to evaluate device noise.
     #[getter]
     fn noise_temperature(&self) -> Option<f64> {
-        self.noise.as_ref().map(|noise| noise.temperature)
+        self.noise
+            .as_ref()
+            .map(|noise| noise.reference_temperature_kelvin)
     }
 
     /// Whether two-port `Rn`, `NF`, `NFmin`, and `Sopt` are available.
@@ -221,7 +236,7 @@ impl PySParameterResult {
     fn has_two_port_noise_parameters(&self) -> bool {
         self.noise
             .as_ref()
-            .is_some_and(|noise| noise.noise_resistance.is_some())
+            .is_some_and(|noise| noise.two_port_parameters.is_some())
     }
 
     fn s<'py>(
@@ -290,59 +305,31 @@ impl PySParameterResult {
     /// Two-port equivalent noise resistance `Rn` in ohms.
     #[getter]
     fn noise_resistance<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<f64>>> {
-        self.noise
-            .as_ref()?
-            .noise_resistance
-            .as_ref()
-            .map(|values| values.to_pyarray(py))
+        self.two_port_noise_field(py, |point| point.noise_resistance)
     }
 
     /// Two-port matched-source noise factor (linear power ratio).
     #[getter]
     fn noise_factor<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<f64>>> {
-        self.noise
-            .as_ref()?
-            .noise_factor
-            .as_ref()
-            .map(|values| values.to_pyarray(py))
+        self.two_port_noise_field(py, |point| point.noise_factor)
     }
 
     /// Two-port matched-source noise figure in dB (`NF`).
     #[getter]
     fn noise_figure_db<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<f64>>> {
-        self.noise.as_ref()?.noise_factor.as_ref().map(|values| {
-            values
-                .iter()
-                .map(|value| 10.0 * value.log10())
-                .collect::<Vec<_>>()
-                .to_pyarray(py)
-        })
+        self.two_port_noise_field(py, |point| 10.0 * point.noise_factor.log10())
     }
 
     /// Minimum two-port noise factor (linear power ratio).
     #[getter]
     fn minimum_noise_factor<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<f64>>> {
-        self.noise
-            .as_ref()?
-            .minimum_noise_factor
-            .as_ref()
-            .map(|values| values.to_pyarray(py))
+        self.two_port_noise_field(py, |point| point.minimum_noise_factor)
     }
 
     /// Minimum two-port noise figure in dB (`NFmin`).
     #[getter]
     fn minimum_noise_figure_db<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<f64>>> {
-        self.noise
-            .as_ref()?
-            .minimum_noise_factor
-            .as_ref()
-            .map(|values| {
-                values
-                    .iter()
-                    .map(|value| 10.0 * value.log10())
-                    .collect::<Vec<_>>()
-                    .to_pyarray(py)
-            })
+        self.two_port_noise_field(py, |point| 10.0 * point.minimum_noise_factor.log10())
     }
 
     /// Optimum source reflection coefficient (`Sopt`) for port 1.
@@ -351,21 +338,14 @@ impl PySParameterResult {
         &self,
         py: Python<'py>,
     ) -> Option<Bound<'py, PyArray1<rspice_core::Complex64>>> {
-        self.noise
-            .as_ref()?
-            .optimum_source_reflection
-            .as_ref()
-            .map(|values| values.to_pyarray(py))
-    }
-
-    /// Per-frequency validity of the derived two-port noise parameters.
-    #[getter]
-    fn noise_parameters_valid<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<bool>>> {
-        self.noise
-            .as_ref()?
-            .parameter_validity
-            .as_ref()
-            .map(|values| values.to_pyarray(py))
+        let points = self.noise.as_ref()?.two_port_parameters.as_ref()?;
+        Some(
+            points
+                .iter()
+                .map(|point| point.optimum_source_reflection)
+                .collect::<Vec<_>>()
+                .to_pyarray(py),
+        )
     }
 
     /// ngspice-compatible aliases for common RF notation.
