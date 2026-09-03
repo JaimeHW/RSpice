@@ -20,7 +20,7 @@ use super::{TopologyComponent, TopologyFingerprint};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::engine::{Engine, SimulationError};
 use crate::netlist::{
-    Element, ElementKind, FlattenerConfig, Netlist, XspicePort,
+    Element, ElementKind, FlattenerConfig, Netlist, ParseWithAbortError, XspicePort,
     flatten_netlist_with_models_config_with_abort, reduce_supernode_topology,
 };
 
@@ -69,10 +69,15 @@ pub fn topology_fingerprint_with_abort(
         },
         abort,
     )
-    .map_err(|error| {
-        SimulationError::Circuit(format!(
+    .map_err(|error| match error {
+        // Cancellation is not a property of the deck. Folding it into a
+        // circuit error would publish a cancelled coordinate as an invalid
+        // one, which costs the caller the timeout exit code and the "stop at
+        // the next safe point" contract.
+        ParseWithAbortError::Aborted => SimulationError::Aborted,
+        ParseWithAbortError::Parse(error) => SimulationError::Circuit(format!(
             "topology fingerprint hierarchy flattening failed: {error}"
-        ))
+        )),
     })?;
     if netlist.options.topology_supernode.unwrap_or(false) {
         flattened.elements = reduce_supernode_topology(
@@ -275,6 +280,44 @@ fn append_xspice_port_nodes(port: &XspicePort, terminals: &mut Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::abort_signal::CountingAbort;
+
+    /// A deck whose hierarchy expansion is long enough that cancellation can
+    /// land inside the flattener rather than only at the entry checks.
+    fn hierarchical_deck() -> Netlist {
+        let mut source = String::from("cancellable topology\n.subckt leg a b\nR1 a b 1k\n.ends\n");
+        for index in 0..24 {
+            source.push_str(&format!("X{index} n{index} n{} leg\n", index + 1));
+        }
+        source.push_str("V1 n0 0 1\nRT n24 0 1k\n.end\n");
+        Netlist::parse(&source).expect("hierarchical deck parses")
+    }
+
+    #[test]
+    fn cancelling_the_fingerprint_reports_a_stop_at_every_poll() {
+        let netlist = hierarchical_deck();
+        let engine = Engine::default();
+
+        // How many times a complete fingerprint polls; every one of those is
+        // a point at which a `--timeout` can land.
+        let complete = CountingAbort::new(usize::MAX);
+        topology_fingerprint_with_abort(&engine, &netlist, &complete)
+            .expect("an uncancelled fingerprint succeeds");
+        let polls = complete.count();
+        assert!(polls > 1, "the fingerprint must poll for cancellation");
+
+        for threshold in 0..polls {
+            let abort = CountingAbort::new(threshold);
+            match topology_fingerprint_with_abort(&engine, &netlist, &abort) {
+                Ok(_) => {}
+                Err(error) => assert!(
+                    error.is_stopped(),
+                    "cancelling at poll {} reported a deck failure instead of a stop: {error}",
+                    threshold + 1
+                ),
+            }
+        }
+    }
 
     #[test]
     fn numeric_values_do_not_change_the_assembled_topology_fingerprint() {
