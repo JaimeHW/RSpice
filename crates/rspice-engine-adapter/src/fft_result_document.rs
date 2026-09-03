@@ -8,13 +8,13 @@
 //! complete typed representation of its own.
 
 use std::collections::HashSet;
-use std::io;
 
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::{
     TransientFftBin, TransientFftHarmonic, TransientFftMetrics, TransientFftResult,
     transient_fft_window_coherent_gain,
 };
+use rspice_core::execution::bounded_io::{BoundedAbortWriter, BoundedWriteFailure};
 use rspice_core::netlist::{FftAnalysis, FftFormat, FftOutput, FftWindow, XyceFftMode};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -125,18 +125,20 @@ impl TransientFftResultDocument {
         check_abort(abort)?;
         let mut writer = BoundedAbortWriter::new(abort, byte_limit);
         if let Err(error) = serde_json::to_writer_pretty(&mut writer, self) {
-            if writer.aborted {
-                return Err(FftResultDocumentError::Aborted);
-            }
-            if writer.too_large {
-                return Err(FftResultDocumentError::ArtifactTooLarge {
-                    limit_bytes: byte_limit,
-                });
-            }
-            return Err(FftResultDocumentError::InvalidJson(error));
+            return Err(match writer.failure() {
+                Some(BoundedWriteFailure::Aborted) => FftResultDocumentError::Aborted,
+                Some(BoundedWriteFailure::ByteLimitExceeded { limit_bytes }) => {
+                    FftResultDocumentError::ArtifactTooLarge { limit_bytes }
+                }
+                Some(BoundedWriteFailure::AllocationFailed) => {
+                    invalid(&format!("cannot allocate FFT JSON: {error}"))
+                }
+                None => FftResultDocumentError::InvalidJson(error),
+            });
         }
         check_abort(abort)?;
-        String::from_utf8(writer.bytes)
+        writer
+            .into_string()
             .map_err(|error| invalid(&format!("FFT JSON serialization was not UTF-8: {error}")))
     }
 
@@ -213,53 +215,6 @@ impl TransientFftResultDocument {
             }
             result.validate_with_abort(abort)?;
         }
-        Ok(())
-    }
-}
-
-struct BoundedAbortWriter<'a> {
-    abort: &'a dyn AbortSignal,
-    byte_limit: u64,
-    bytes: Vec<u8>,
-    aborted: bool,
-    too_large: bool,
-}
-
-impl<'a> BoundedAbortWriter<'a> {
-    fn new(abort: &'a dyn AbortSignal, byte_limit: u64) -> Self {
-        Self {
-            abort,
-            byte_limit,
-            bytes: Vec::new(),
-            aborted: false,
-            too_large: false,
-        }
-    }
-}
-
-impl io::Write for BoundedAbortWriter<'_> {
-    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-        if self.abort.is_aborted() {
-            self.aborted = true;
-            return Err(io::Error::other("FFT serialization cancelled"));
-        }
-        let new_len = self
-            .bytes
-            .len()
-            .checked_add(buffer.len())
-            .ok_or_else(|| io::Error::other("FFT serialization length overflow"))?;
-        if new_len as u128 > self.byte_limit as u128 {
-            self.too_large = true;
-            return Err(io::Error::other("FFT artifact byte limit exceeded"));
-        }
-        self.bytes
-            .try_reserve(buffer.len())
-            .map_err(|error| io::Error::other(format!("cannot allocate FFT JSON: {error}")))?;
-        self.bytes.extend_from_slice(buffer);
-        Ok(buffer.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
 }

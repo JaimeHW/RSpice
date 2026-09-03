@@ -4,12 +4,14 @@
 //! analysis identity, Cartesian coordinate order, topology identity, or how a
 //! signal that is absent at one coordinate is represented.
 
+pub mod bounded_io;
 mod capability;
 mod materialized;
 mod plan;
 mod schema;
 mod topology;
 
+pub use bounded_io::{BoundedAbortWriter, BoundedWriteFailure};
 pub use capability::{
     ANALYSIS_CAPABILITY_MATRIX, AnalysisResultCapability, AnalysisResultKind, MappingStatus,
     NonUiSurface, SIGNAL_CAPABILITY_MATRIX, SignalCapability, SurfaceCapability,

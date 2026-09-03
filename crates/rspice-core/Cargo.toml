@@ -23,8 +23,6 @@ faer-parallel = [
 ]
 veriloga = [
     "dep:rspice-veriloga",
-    "dep:serde",
-    "dep:serde_json",
     "dep:dirs",
 ]
 # Native JIT for Verilog-A devices (native targets only). Native mode is full JIT or error.
@@ -283,8 +281,10 @@ rspice-matrix.workspace = true
 rspice-output.workspace = true
 rspice-veriloga-runtime.workspace = true
 rspice-veriloga-models = { workspace = true, optional = true }
-serde = { workspace = true, optional = true }
-serde_json = { workspace = true, optional = true }
+# The shared typed result document in `execution::result_document` is a
+# non-optional part of the core contract, so its encoder is too.
+serde.workspace = true
+serde_json.workspace = true
 blake3 = { version = "1.5", features = ["pure"] }
 flate2.workspace = true
 miniz_oxide.workspace = true
