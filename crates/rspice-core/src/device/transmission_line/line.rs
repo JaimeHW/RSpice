@@ -49,7 +49,7 @@ pub(crate) struct LtraRgTwoPort {
 
 /// The per-unit-length parameters of a distributed RLGC line plus its length.
 #[derive(Clone, Copy)]
-pub struct DistributedRlgc {
+pub(crate) struct DistributedRlgc {
     pub r: Value,
     pub l: Value,
     pub g: Value,
@@ -824,7 +824,7 @@ impl TransmissionLine {
     }
 
     /// Configure the ngspice-style TXL runtime for a non-lossless scalar line.
-    pub fn enable_txl_runtime(&mut self, rlgc: DistributedRlgc) -> bool {
+    pub(crate) fn enable_txl_runtime(&mut self, rlgc: DistributedRlgc) -> bool {
         let DistributedRlgc { r, l, g, c, len } = rlgc;
         if let Some(runtime) = txl::TxlRuntime::setup(r, l, g, c, len) {
             self.txl = Some(runtime);
@@ -1113,7 +1113,7 @@ impl TransmissionLine {
 
     /// Configure a distributed-RLC kernel with ngspice-style straight-line
     /// compaction tolerances for its safe-step estimate.
-    pub fn set_distributed_rlgc_with_compaction(
+    pub(crate) fn set_distributed_rlgc_with_compaction(
         &mut self,
         rlgc: DistributedRlgc,
         compact_reltol: Value,

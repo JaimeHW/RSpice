@@ -290,7 +290,7 @@ impl CompanionCoefficients {
 /// The table lives beside the enum rather than in a parser or in the engine
 /// facade: a spelling-to-variant map is data about this enum, so every layer
 /// that reads a method name reads down into it instead of sideways.
-pub fn parse_integration_method(spelling: &str) -> Option<IntegrationMethod> {
+pub(crate) fn parse_integration_method(spelling: &str) -> Option<IntegrationMethod> {
     if spelling.eq_ignore_ascii_case("TRAP")
         || spelling.eq_ignore_ascii_case("TRAPEZOIDAL")
         || spelling.eq_ignore_ascii_case("TRAPEZOID")

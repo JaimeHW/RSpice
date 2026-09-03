@@ -41,7 +41,7 @@ pub fn ac_sweep_frequencies(
 
 /// Generate AC sweep frequencies while preserving validation, capacity, and
 /// allocation failures.
-pub fn try_ac_sweep_frequencies(
+pub(crate) fn try_ac_sweep_frequencies(
     variation: FreqVariation,
     points: usize,
     fstart: Value,

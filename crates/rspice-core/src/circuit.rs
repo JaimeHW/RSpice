@@ -19,11 +19,12 @@ use std::sync::Arc;
 use thiserror::Error;
 
 mod storage;
-pub use magnetic::XyceCoreCompanionMode;
+pub(crate) use magnetic::XyceCoreCompanionMode;
 pub use storage::{
-    Capacitors, CurrentSources, Diodes, Inductors, ResistorBranches, ResistorValues, Resistors,
-    SolutionDependentCompanionStep, SourceExcitation, ThermalResistorState, VoltageSources,
+    Capacitors, CurrentSources, Diodes, Inductors, ResistorBranches, Resistors,
+    ThermalResistorState, VoltageSources,
 };
+pub(crate) use storage::{ResistorValues, SolutionDependentCompanionStep, SourceExcitation};
 // The nonlinear device arrays are stamping machinery that no frontend names,
 // so they stay reachable inside the crate only. `Diodes` is re-exported above
 // because the public `CircuitData::diode_storage` returns one.

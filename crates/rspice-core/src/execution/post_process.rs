@@ -38,7 +38,7 @@ pub struct PlannedFourierResult {
 /// The resolver classifies every column as a voltage, a current, or a braced
 /// parameter expression. A parameter expression has no unit the simulator
 /// knows, which is [`SignalUnit::Unspecified`] and not dimensionless.
-pub fn transient_output_unit(physical_type: &str) -> Result<SignalUnit, SimulationError> {
+pub(crate) fn transient_output_unit(physical_type: &str) -> Result<SignalUnit, SimulationError> {
     match physical_type {
         "voltage" => Ok(SignalUnit::Volt),
         "current" => Ok(SignalUnit::Ampere),

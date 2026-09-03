@@ -50,7 +50,7 @@ pub use params::B3SoiPdModel;
 /// terminals are positional in the netlist and easy to transpose; naming them
 /// makes a swapped pair a compile error rather than a wrong answer.
 #[derive(Clone, Copy)]
-pub struct B3SoiPdNodes {
+pub(crate) struct B3SoiPdNodes {
     pub node_drain: NodeId,
     pub node_gate: NodeId,
     pub node_source: NodeId,
@@ -191,7 +191,7 @@ pub struct B3SoiPd {
 
 impl B3SoiPd {
     /// Build an instance from a model card and instance geometry.
-    pub fn new(
+    pub(crate) fn new(
         name: String,
         nodes: B3SoiPdNodes,
         body_mode: BodyMode,
@@ -738,7 +738,7 @@ impl B3SoiPd {
     /// device by builder-owned prime-node resistors. The gate-overlap and
     /// extrinsic-substrate derivatives are already folded into `charge`'s
     /// `gc**` matrix.
-    pub fn stamp_charge_companion(
+    pub(crate) fn stamp_charge_companion(
         &self,
         charge: &eval::B3SoiPdCharge,
         ag0: Value,

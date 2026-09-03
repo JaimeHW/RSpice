@@ -113,7 +113,7 @@ impl PnoiseConfig {
     }
 
     /// Generate offset frequencies with cooperative cancellation.
-    pub fn try_offset_frequencies_with_abort(
+    pub(crate) fn try_offset_frequencies_with_abort(
         &self,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, FrequencyGridError> {
@@ -265,7 +265,7 @@ impl PnoiseSweep {
     }
 
     /// Generate frequency points with cooperative cancellation.
-    pub fn generate_points_with_abort(
+    pub(crate) fn generate_points_with_abort(
         &self,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, FrequencyGridError> {

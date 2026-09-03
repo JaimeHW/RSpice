@@ -513,7 +513,7 @@ impl AnalysisRequest {
 
     /// Bind the periodic large-signal analysis this request linearizes
     /// around. Only `.PAC`, `.PNOISE` and `.ENVELOPE` carry one.
-    pub fn with_upstream(mut self, upstream: AnalysisInstanceId) -> Self {
+    pub(crate) fn with_upstream(mut self, upstream: AnalysisInstanceId) -> Self {
         self.upstream = Some(upstream);
         self
     }

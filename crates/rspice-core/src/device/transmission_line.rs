@@ -44,7 +44,6 @@ pub(crate) const DISTRIBUTED_RLC_COMPACT_ABSTOL_DEFAULT: Value = 1e-12;
 mod delay;
 mod distributed;
 mod line;
-mod lossy;
 mod response;
 mod txl;
 
@@ -53,9 +52,8 @@ use distributed::{
     DistributedRcKernel, DistributedRlcKernel, distributed_rc_coefficients,
     distributed_rlc_coefficients, distributed_rlc_max_safe_step,
 };
-pub use line::{DistributedRlgc, TransmissionLine};
-pub(crate) use line::{LtraRgTwoPort, TransmissionLineCheckpoint};
-pub use lossy::LossyTransmissionLine;
+pub use line::TransmissionLine;
+pub(crate) use line::{DistributedRlgc, LtraRgTwoPort, TransmissionLineCheckpoint};
 pub(crate) use response::TlineTransientResponse;
 pub(crate) use txl::TxlTransientStamp;
 

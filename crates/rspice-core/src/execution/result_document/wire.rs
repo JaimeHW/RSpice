@@ -43,11 +43,11 @@ macro_rules! tagged_enum_adapter {
                 }
             }
 
-            pub fn serialize<S: Serializer>(value: &$ty, serializer: S) -> Result<S::Ok, S::Error> {
+            pub(in crate::execution::result_document) fn serialize<S: Serializer>(value: &$ty, serializer: S) -> Result<S::Ok, S::Error> {
                 serializer.serialize_str(tag(*value))
             }
 
-            pub fn deserialize<'de, D: Deserializer<'de>>(
+            pub(in crate::execution::result_document) fn deserialize<'de, D: Deserializer<'de>>(
                 deserializer: D,
             ) -> Result<$ty, D::Error> {
                 let tag = String::deserialize(deserializer)?;
@@ -210,11 +210,16 @@ impl From<SignalUnitWire> for SignalUnit {
 pub(super) mod signal_unit {
     use super::*;
 
-    pub fn serialize<S: Serializer>(value: &SignalUnit, serializer: S) -> Result<S::Ok, S::Error> {
+    pub(in crate::execution::result_document) fn serialize<S: Serializer>(
+        value: &SignalUnit,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
         SignalUnitWire::from(value).serialize(serializer)
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<SignalUnit, D::Error> {
+    pub(in crate::execution::result_document) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<SignalUnit, D::Error> {
         Ok(SignalUnitWire::deserialize(deserializer)?.into())
     }
 }
@@ -222,7 +227,7 @@ pub(super) mod signal_unit {
 pub(super) mod optional_signal_unit {
     use super::*;
 
-    pub fn serialize<S: Serializer>(
+    pub(in crate::execution::result_document) fn serialize<S: Serializer>(
         value: &Option<SignalUnit>,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
@@ -232,7 +237,7 @@ pub(super) mod optional_signal_unit {
         }
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(
+    pub(in crate::execution::result_document) fn deserialize<'de, D: Deserializer<'de>>(
         deserializer: D,
     ) -> Result<Option<SignalUnit>, D::Error> {
         Ok(Option::<SignalUnitWire>::deserialize(deserializer)?.map(SignalUnit::from))
@@ -306,14 +311,14 @@ impl From<&SignalDescriptor> for SignalDescriptorWire {
 pub(super) mod signal_descriptor {
     use super::*;
 
-    pub fn serialize<S: Serializer>(
+    pub(in crate::execution::result_document) fn serialize<S: Serializer>(
         value: &SignalDescriptor,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
         SignalDescriptorWire::from(value).serialize(serializer)
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(
+    pub(in crate::execution::result_document) fn deserialize<'de, D: Deserializer<'de>>(
         deserializer: D,
     ) -> Result<SignalDescriptor, D::Error> {
         let wire = SignalDescriptorWire::deserialize(deserializer)?;
@@ -371,14 +376,14 @@ fn analysis_instance_id_from_wire<E: serde::de::Error>(
 pub(super) mod analysis_instance_id {
     use super::*;
 
-    pub fn serialize<S: Serializer>(
+    pub(in crate::execution::result_document) fn serialize<S: Serializer>(
         value: &AnalysisInstanceId,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
         AnalysisInstanceIdWire::from(*value).serialize(serializer)
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(
+    pub(in crate::execution::result_document) fn deserialize<'de, D: Deserializer<'de>>(
         deserializer: D,
     ) -> Result<AnalysisInstanceId, D::Error> {
         analysis_instance_id_from_wire(AnalysisInstanceIdWire::deserialize(deserializer)?)
@@ -388,7 +393,7 @@ pub(super) mod analysis_instance_id {
 pub(super) mod optional_analysis_instance_id {
     use super::*;
 
-    pub fn serialize<S: Serializer>(
+    pub(in crate::execution::result_document) fn serialize<S: Serializer>(
         value: &Option<AnalysisInstanceId>,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
@@ -398,7 +403,7 @@ pub(super) mod optional_analysis_instance_id {
         }
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(
+    pub(in crate::execution::result_document) fn deserialize<'de, D: Deserializer<'de>>(
         deserializer: D,
     ) -> Result<Option<AnalysisInstanceId>, D::Error> {
         match Option::<AnalysisInstanceIdWire>::deserialize(deserializer)? {
@@ -418,7 +423,7 @@ struct RunCoordinateIdWire {
 pub(super) mod run_coordinate_id {
     use super::*;
 
-    pub fn serialize<S: Serializer>(
+    pub(in crate::execution::result_document) fn serialize<S: Serializer>(
         value: &RunCoordinateId,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
@@ -429,7 +434,7 @@ pub(super) mod run_coordinate_id {
         .serialize(serializer)
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(
+    pub(in crate::execution::result_document) fn deserialize<'de, D: Deserializer<'de>>(
         deserializer: D,
     ) -> Result<RunCoordinateId, D::Error> {
         let wire = RunCoordinateIdWire::deserialize(deserializer)?;
@@ -442,7 +447,7 @@ pub(super) mod run_coordinate_id {
 pub(super) mod optional_run_coordinate_id {
     use super::*;
 
-    pub fn serialize<S: Serializer>(
+    pub(in crate::execution::result_document) fn serialize<S: Serializer>(
         value: &Option<RunCoordinateId>,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
@@ -455,7 +460,7 @@ pub(super) mod optional_run_coordinate_id {
         }
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(
+    pub(in crate::execution::result_document) fn deserialize<'de, D: Deserializer<'de>>(
         deserializer: D,
     ) -> Result<Option<RunCoordinateId>, D::Error> {
         let Some(wire) = Option::<RunCoordinateIdWire>::deserialize(deserializer)? else {
@@ -470,7 +475,7 @@ pub(super) mod optional_run_coordinate_id {
 pub(super) mod optional_topology_fingerprint {
     use super::*;
 
-    pub fn serialize<S: Serializer>(
+    pub(in crate::execution::result_document) fn serialize<S: Serializer>(
         value: &Option<TopologyFingerprint>,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
@@ -480,7 +485,7 @@ pub(super) mod optional_topology_fingerprint {
         }
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(
+    pub(in crate::execution::result_document) fn deserialize<'de, D: Deserializer<'de>>(
         deserializer: D,
     ) -> Result<Option<TopologyFingerprint>, D::Error> {
         let Some(text) = Option::<String>::deserialize(deserializer)? else {
@@ -579,14 +584,14 @@ fn run_axis_value_from_wire<E: serde::de::Error>(
 pub(super) mod run_axis_value {
     use super::*;
 
-    pub fn serialize<S: Serializer>(
+    pub(in crate::execution::result_document) fn serialize<S: Serializer>(
         value: &RunAxisValue,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
         RunAxisValueWire::from(value).serialize(serializer)
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(
+    pub(in crate::execution::result_document) fn deserialize<'de, D: Deserializer<'de>>(
         deserializer: D,
     ) -> Result<RunAxisValue, D::Error> {
         run_axis_value_from_wire(RunAxisValueWire::deserialize(deserializer)?)
@@ -641,7 +646,7 @@ impl From<StepAxisTargetWire> for StepAxisTarget {
 pub(super) mod optional_step_axis_target {
     use super::*;
 
-    pub fn serialize<S: Serializer>(
+    pub(in crate::execution::result_document) fn serialize<S: Serializer>(
         value: &Option<StepAxisTarget>,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
@@ -651,7 +656,7 @@ pub(super) mod optional_step_axis_target {
         }
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(
+    pub(in crate::execution::result_document) fn deserialize<'de, D: Deserializer<'de>>(
         deserializer: D,
     ) -> Result<Option<StepAxisTarget>, D::Error> {
         Ok(Option::<StepAxisTargetWire>::deserialize(deserializer)?.map(StepAxisTarget::from))

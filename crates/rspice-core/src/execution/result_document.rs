@@ -757,7 +757,7 @@ impl AnalysisResultDocumentBuilder {
     }
 
     /// Borrow the payload staged so far.
-    pub const fn payload_ref(&self) -> &ResultPayload {
+    pub(crate) const fn payload_ref(&self) -> &ResultPayload {
         &self.payload
     }
 
@@ -767,7 +767,7 @@ impl AnalysisResultDocumentBuilder {
     /// transient projection for its continued waveforms and then declares the
     /// envelope family that owns it.
     #[must_use]
-    pub fn replace_payload(mut self, payload: ResultPayload) -> Self {
+    pub(crate) fn replace_payload(mut self, payload: ResultPayload) -> Self {
         self.payload = payload;
         self
     }
@@ -1211,7 +1211,7 @@ impl SeriesValues {
     }
 
     /// Numeric columns one point of this series occupies.
-    pub const fn numeric_columns(&self) -> usize {
+    pub(crate) const fn numeric_columns(&self) -> usize {
         match self {
             Self::Real { .. } | Self::Logic { .. } => 1,
             Self::Complex { .. } => 2,
@@ -1475,7 +1475,7 @@ impl ScalarUnavailability {
     /// `NaN` is deliberately not classified: it is a defect in the producing
     /// computation, not a determination about the circuit, and the projection
     /// must keep rejecting it.
-    pub const fn classify(value: f64) -> Option<Self> {
+    pub(crate) const fn classify(value: f64) -> Option<Self> {
         if value == f64::INFINITY {
             Some(Self::PositiveInfinity)
         } else if value == f64::NEG_INFINITY {

@@ -269,7 +269,7 @@ impl PnoiseSolver {
 
     /// Compute phase noise with cancellation through grid construction and
     /// each retained offset/contributor scan.
-    pub fn compute_with_abort(
+    pub(crate) fn compute_with_abort(
         &mut self,
         abort: &dyn AbortSignal,
     ) -> Result<PnoiseResult, PnoiseError> {

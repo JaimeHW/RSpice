@@ -99,7 +99,7 @@ pub(crate) struct AcceptedBoundaryLteEstimatorCheckpoint {
 /// leading unknowns to score, the step size they were solved at, and the
 /// indices excluded from the norm because their rows are not integrated.
 #[derive(Clone, Copy)]
-pub struct LtePrefixWindow<'a> {
+pub(crate) struct LtePrefixWindow<'a> {
     pub prefix_len: usize,
     pub dt: Value,
     pub excluded_indices: &'a [usize],
@@ -1084,7 +1084,7 @@ impl LteEstimator {
 
     /// Estimate LTE for the first `prefix_len` solution entries, skipping
     /// sorted zero-based indices owned by model-specific timestep semantics.
-    pub fn estimate_prefix_excluding(
+    pub(crate) fn estimate_prefix_excluding(
         &self,
         current: &[Value],
         window: LtePrefixWindow<'_>,

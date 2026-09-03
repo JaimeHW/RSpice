@@ -202,7 +202,7 @@ impl PacConfig {
     }
 
     /// Generate frequency points with cooperative cancellation.
-    pub fn try_frequency_points_with_abort(
+    pub(crate) fn try_frequency_points_with_abort(
         &self,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, FrequencyGridError> {

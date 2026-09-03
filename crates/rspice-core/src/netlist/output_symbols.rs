@@ -3215,7 +3215,7 @@ fn collect_measure_sources<'a>(
 /// `execution` check a spelling before they try to resolve it, so the contract
 /// lives below both of them; `execution::projection` re-exports it under the
 /// path callers already use.
-pub fn probe_specification_error(spec: &str) -> Option<String> {
+pub(crate) fn probe_specification_error(spec: &str) -> Option<String> {
     let trimmed = spec.trim();
     if trimmed.is_empty() {
         return Some("output specification must not be empty".to_string());

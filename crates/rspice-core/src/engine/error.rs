@@ -888,7 +888,7 @@ impl SimulationError {
     /// Both a caller cancellation and an expired time budget answer true: they
     /// share the "the run did not finish, and nothing is wrong with the deck"
     /// contract that every propagation site cares about.
-    pub const fn is_stopped(&self) -> bool {
+    pub(crate) const fn is_stopped(&self) -> bool {
         matches!(self, Self::Aborted | Self::TimeLimitExceeded)
     }
 
@@ -897,7 +897,7 @@ impl SimulationError {
     /// Core's inner loops raise the reason-free [`Self::Aborted`] because they
     /// cannot know why the flag is set. The surface that owns the signal can,
     /// so it re-labels once at its boundary rather than every check guessing.
-    pub fn from_abort(abort: &dyn AbortSignal) -> Self {
+    pub(crate) fn from_abort(abort: &dyn AbortSignal) -> Self {
         match abort.abort_reason() {
             AbortReason::Cancelled => Self::Aborted,
             AbortReason::TimeLimit => Self::TimeLimitExceeded,

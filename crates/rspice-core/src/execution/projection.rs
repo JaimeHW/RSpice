@@ -1015,13 +1015,6 @@ pub fn probe_registry_name(display_name: &str) -> &str {
     registry_name(display_name)
 }
 
-/// Why an authored probe spelling is not well formed, if it is not.
-///
-/// Re-exported from `netlist`, where the probe grammar itself is parsed: the
-/// arity contract belongs beside the grammar rather than beside the projection
-/// that consumes it, and `analysis` needs it too without reaching up here.
-pub use crate::netlist::probe_specification_error;
-
 /// Whether a probe spelling names no circuit symbol at all.
 ///
 /// A result whose metadata carries `V( )` or a blank name has lost the

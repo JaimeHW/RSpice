@@ -1613,7 +1613,7 @@ fn evaluate_tran_output_columns_with_abort(
 /// One evaluated output column as a frontend receives it: the request's
 /// authored name, its physical type (`voltage`, `current` or `parameter`), and
 /// the value at each point of the analysis axis.
-pub type FrontendOutputColumn = (String, &'static str, Vec<Value>);
+pub(crate) type FrontendOutputColumn = (String, &'static str, Vec<Value>);
 
 /// Evaluate ordered real `.PRINT TRAN` columns for frontend export.
 ///

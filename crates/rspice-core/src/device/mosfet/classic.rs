@@ -35,7 +35,7 @@ pub enum MosType {
 
 /// MOSFET operating region
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MosRegion {
+pub(crate) enum MosRegion {
     Cutoff,
     Linear,
     Saturation,
@@ -43,7 +43,7 @@ pub enum MosRegion {
 
 /// Bulk-junction current law used by native classic MOSFET devices.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MosBodyJunctionModel {
+pub(crate) enum MosBodyJunctionModel {
     /// ngspice MOS1/2/3/6 reverse-bias clamp: deep reverse bias stamps only
     /// GMIN plus the saturation-current offset.
     NgspiceReverseClamp,
@@ -55,7 +55,7 @@ pub enum MosBodyJunctionModel {
 /// Pre-computed stamp indices for O(1) matrix access (4-terminal device, but only D and S rows)
 /// Note: Gate draws no DC current so has no G row stamps
 #[derive(Debug, Clone, Default)]
-pub struct MosfetIndices {
+pub(crate) struct MosfetIndices {
     // Drain row (4 columns)
     pub dd: Option<CscIndex>,
     pub dg: Option<CscIndex>,
@@ -304,7 +304,7 @@ pub struct Mosfet {
     /// SPICE MOS model level.
     pub level: i32,
     /// Compatibility policy for the native bulk-junction current law.
-    pub body_junction_model: MosBodyJunctionModel,
+    pub(crate) body_junction_model: MosBodyJunctionModel,
     /// Legacy BSIM1/BSIM2 model card for SPICE levels 4 and 5.
     legacy_bsim_model: Option<Box<LegacyBsimModel>>,
     /// Geometry-sized legacy BSIM instance data derived from W/L.
@@ -492,7 +492,7 @@ pub struct Mosfet {
     initial_off_seed_evaluations: u8,
 
     /// Pre-computed matrix indices for O(1) stamping
-    pub indices: MosfetIndices,
+    pub(crate) indices: MosfetIndices,
 }
 
 /// Mutable Newton/limiting state for a classic MOS instance.
@@ -624,12 +624,16 @@ impl Mosfet {
 
     /// The deck marked this instance `OFF`, so its first Newton evaluation
     /// starts from the zero-junction state of mos1load.c's MODEINITJCT arm.
-    pub fn set_initially_off(&mut self, off: bool) {
+    pub(crate) fn set_initially_off(&mut self, off: bool) {
         self.initial_off = off;
     }
 
     /// True when the deck marked this instance `OFF`.
-    pub fn is_initially_off(&self) -> bool {
+    ///
+    /// The seeding itself reads `initial_off` directly; this accessor is how
+    /// the construction tests assert that the deck's `OFF` keyword landed.
+    #[cfg(test)]
+    pub(crate) fn is_initially_off(&self) -> bool {
         self.initial_off
     }
 
@@ -666,7 +670,11 @@ impl Mosfet {
 
     /// True when this instance runs the legacy BSIM1/BSIM2 equations rather
     /// than the classic level 1/2/3/6 models.
-    pub fn uses_legacy_bsim(&self) -> bool {
+    ///
+    /// Stamping matches on `legacy_bsim_model` itself; this predicate is how
+    /// the builder tests assert a level routed to the legacy equation set.
+    #[cfg(test)]
+    pub(crate) fn uses_legacy_bsim(&self) -> bool {
         self.legacy_bsim_model.is_some()
     }
 }

@@ -17,9 +17,11 @@
 
 use thiserror::Error;
 
+#[cfg(test)]
+use crate::NoAbort;
 use crate::abort_signal::AbortSignal;
 use crate::analysis::noise::PortNoiseCorrelationResult;
-use crate::{Complex64, NoAbort, Value};
+use crate::{Complex64, Value};
 
 use super::matrix::SParameterResult;
 use super::network::y_from_s;
@@ -35,7 +37,7 @@ const TWO_PORT: usize = 2;
 /// a frontend can translate it into its native diagnostic without parsing a
 /// message.
 #[derive(Debug, Clone, PartialEq, Error)]
-pub enum PortNoiseAssemblyError {
+pub(crate) enum PortNoiseAssemblyError {
     /// The assembly was cancelled by its abort source.
     #[error("port-noise assembly was cancelled")]
     Aborted,
@@ -103,10 +105,13 @@ pub struct PortNoiseAssembly {
     pub two_port: Option<Vec<TwoPortNoise>>,
 }
 
-/// Validate one port-noise sweep against its scattering sweep and derive the
-/// two-port noise parameters when the network has exactly two ports, without
-/// cancellation.
-pub fn assemble_port_noise(
+/// Uncancellable form of [`assemble_port_noise_with_abort`].
+///
+/// Only the tests below use it: production assembly always runs under the
+/// caller's abort source, so the crate has no place for a form that cannot be
+/// cancelled.
+#[cfg(test)]
+pub(crate) fn assemble_port_noise(
     ports: &[SParameterPort],
     scattering: &SParameterResult,
     points: Vec<PortNoiseCorrelationResult>,
@@ -122,7 +127,7 @@ pub fn assemble_port_noise(
 /// port-noise solver returns them in. The abort source is polled per frequency
 /// so a cancelled run stops inside the derivation rather than only between
 /// solver calls.
-pub fn assemble_port_noise_with_abort(
+pub(crate) fn assemble_port_noise_with_abort(
     ports: &[SParameterPort],
     scattering: &SParameterResult,
     points: Vec<PortNoiseCorrelationResult>,

@@ -14,7 +14,7 @@ use crate::circuit::{CircuitError, projection_changed};
 /// authored waveform specification the transient engine plays. A source built
 /// from a subset of these is a source whose DC point and AC excitation
 /// disagree about which card they came from.
-pub struct SourceExcitation {
+pub(crate) struct SourceExcitation {
     pub dc_value: Value,
     pub ac_magnitude: Value,
     pub ac_phase: Value,
@@ -203,8 +203,12 @@ impl VoltageSources {
         self.invalidate_constraint_projection();
     }
 
-    /// Add voltage source with full AC and transient specification
-    pub fn add_with_ac_and_spec(
+    /// Add voltage source with full AC and transient specification.
+    ///
+    /// Only the storage tests drive a source through one authored excitation
+    /// spec at a time; the builder assembles a source from its parts.
+    #[cfg(test)]
+    pub(crate) fn add_with_ac_and_spec(
         &mut self,
         name: String,
         node_pos: NodeId,
@@ -2099,7 +2103,11 @@ impl CurrentSources {
     }
 
     /// Add current source with AC and transient specification.
-    pub fn add_with_ac_and_spec(
+    ///
+    /// Only the storage tests drive a source through one authored excitation
+    /// spec at a time; the builder assembles a source from its parts.
+    #[cfg(test)]
+    pub(crate) fn add_with_ac_and_spec(
         &mut self,
         name: String,
         node_pos: NodeId,

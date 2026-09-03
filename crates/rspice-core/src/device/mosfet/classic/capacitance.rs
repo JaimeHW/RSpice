@@ -373,7 +373,7 @@ impl Mosfet {
 
     /// Calculate overlap capacitances for AC analysis
     /// Returns (Cgs_overlap, Cgd_overlap, Cgb_overlap)
-    pub fn overlap_capacitances(&self) -> (Value, Value, Value) {
+    pub(crate) fn overlap_capacitances(&self) -> (Value, Value, Value) {
         let width = self.classic_meyer_effective_width();
         // Cgs_overlap = CGSO * W
         let cgs = self.cgso * width;
@@ -394,7 +394,7 @@ impl Mosfet {
     /// - Cutoff: Cgb dominates, Cgs = Cgd = overlap only
     /// - Linear: Cgs = Cgd = Cox*W*L/2 + overlap
     /// - Saturation: Cgs = 2/3*Cox*W*L + overlap, Cgd = overlap only
-    pub fn ac_capacitances(&self) -> (Value, Value, Value) {
+    pub(crate) fn ac_capacitances(&self) -> (Value, Value, Value) {
         let (cgs_ov, cgd_ov, cgb_ov) = self.overlap_capacitances();
 
         if self.uses_mos3_core() {
@@ -433,7 +433,7 @@ impl Mosfet {
     }
 
     /// Return the cached drain current at the converged operating point.
-    pub fn drain_current(&self) -> Value {
+    pub(crate) fn drain_current(&self) -> Value {
         self.id
     }
 

@@ -69,11 +69,12 @@ pub(crate) use output_symbols::{
     collect_output_node_namespace_with_limits_and_abort,
     collect_requested_interface_node_aliases_with_abort, is_current_output_accessor,
     is_current_projection_accessor, is_device_lead_current_accessor, measure_output_dependencies,
+    probe_specification_error,
 };
 pub use output_symbols::{
     OutputAnalysisKind, OutputDirectiveKind, OutputExpressionIssue,
     OutputExpressionValidationError, OutputRequest, OutputSymbolDependency, OutputSymbolKind,
-    OutputSymbolValidationError, PrintDelimiter, UnresolvedOutputSymbol, probe_specification_error,
+    OutputSymbolValidationError, PrintDelimiter, UnresolvedOutputSymbol,
     validate_output_expressions, validate_output_expressions_with_abort, validate_output_requests,
     validate_output_requests_with_abort, validate_output_symbols,
     validate_output_symbols_with_abort,

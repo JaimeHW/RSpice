@@ -105,23 +105,6 @@ impl NodeResolver {
     }
 }
 
-impl Engine {
-    /// Resolve one authored node name against this deck's elaborated circuit.
-    ///
-    /// Convenience for a caller with a single name to resolve. A caller with
-    /// several — every port of a `.PZ` card — should build a [`NodeResolver`]
-    /// once instead, because each call here elaborates the deck again.
-    pub fn resolve_node_with_abort(
-        &self,
-        netlist: &Netlist,
-        node: &str,
-        role: &str,
-        abort: &dyn AbortSignal,
-    ) -> Result<usize, SimulationError> {
-        NodeResolver::build_with_abort(self, netlist, abort)?.resolve(node, role)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

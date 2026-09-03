@@ -211,7 +211,7 @@ struct ResolvedVariation<'a> {
 }
 
 impl SpectreStatisticsPlan {
-    pub fn validate_structure(&self) -> Result<(), SpectreStatisticsError> {
+    pub(crate) fn validate_structure(&self) -> Result<(), SpectreStatisticsError> {
         let mut declarations = BTreeSet::new();
         for variation in &self.variations {
             let parameter = canonical_parameter(&variation.parameter, variation.line)?;
@@ -281,7 +281,7 @@ impl SpectreStatisticsPlan {
         Ok(())
     }
 
-    pub fn references_parameter(&self, expression: &str) -> bool {
+    pub(crate) fn references_parameter(&self, expression: &str) -> bool {
         expression_identifiers(expression).any(|identifier| {
             self.variations
                 .iter()
@@ -289,7 +289,7 @@ impl SpectreStatisticsPlan {
         })
     }
 
-    pub fn sample_process(
+    pub(crate) fn sample_process(
         &self,
         params: &ParamContext,
         coordinate: &SpectreStatisticalCoordinate,
@@ -303,7 +303,7 @@ impl SpectreStatisticsPlan {
         )
     }
 
-    pub fn sample_mismatch(
+    pub(crate) fn sample_mismatch(
         &self,
         params: &ParamContext,
         process: &BTreeMap<String, Value>,

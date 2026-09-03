@@ -27,19 +27,18 @@ mod mos_models;
 mod smooth;
 mod vdmos;
 
-pub use b3soi::{
-    B3SoiDd, B3SoiDdModel, B3SoiDdNodes, B3SoiFd, B3SoiFdModel, B3SoiPd, B3SoiPdModel,
-    B3SoiPdNodes, BodyMode,
-};
+pub use b3soi::{B3SoiDd, B3SoiDdModel, B3SoiFd, B3SoiFdModel, B3SoiPd, B3SoiPdModel, BodyMode};
+pub(crate) use b3soi::{B3SoiDdNodes, B3SoiPdNodes};
 pub use bsim3v3::{Bsim3v3, Bsim3v3Device, Bsim3v3EquationSet, Bsim3v3Model};
 pub use bsim4v8::{Bsim4v8, Bsim4v8Device, Bsim4v8Model};
 #[cfg(feature = "parallel")]
 pub(crate) use classic::ClassicMosResidualRowPlan;
+pub(crate) use classic::MosBodyJunctionModel;
 pub(crate) use classic::{
     ClassicMosCachedStaticTerms, ClassicMosStaticStampPlan, ClassicMosTransientConstants,
     MosfetNonlinearState,
 };
-pub use classic::{MosBodyJunctionModel, MosRegion, MosType, Mosfet, MosfetIndices};
+pub use classic::{MosType, Mosfet};
 pub use ekv::EkvMosfet;
 pub use ekv3::{Ekv3Device, Ekv3Op};
 pub use jfet::{Jfet, JfetChannelModel, JfetParams, JfetType};
