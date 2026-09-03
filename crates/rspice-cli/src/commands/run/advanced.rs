@@ -38,6 +38,11 @@ fn map_advanced_simulation_error(
     }
 }
 
+/// Run one authored `.HB` card and retain the carrier it converged on.
+///
+/// The retained operating point is what an authored `.PAC`, `.PNOISE` or
+/// `.ENVELOPE` bound to this instance linearizes around, so the large-signal
+/// problem is solved once per card rather than once per dependent analysis.
 pub(super) fn run_hb_from_command(
     ctx: &RunContext<'_>,
     frequencies: &[f64],
@@ -50,7 +55,19 @@ pub(super) fn run_hb_from_command(
     )
     .map_err(|error| CliError::simulation_error_in(error.to_string(), "HB"))?;
 
-    run_hb_with_config(ctx, config)
+    let artifact = ctx.resolve_periodic_analysis("hb")?;
+    let hb_result = solve_hb(ctx, config.clone())?;
+    if let Some(path) = &artifact.path {
+        export_hb(
+            ctx,
+            artifact.analysis,
+            path,
+            config.fundamental_freq,
+            &hb_result.result,
+        )?;
+    }
+    ctx.retain_hb(artifact.analysis, hb_result.operating_point, config);
+    Ok(())
 }
 
 /// Write the .STEP sweep table: one row per step value, one column per
@@ -316,11 +333,26 @@ fn export_monte_carlo(
     Ok(())
 }
 
+/// Run one authored Monte Carlo card.
+///
+/// Inside a `.STEP` or `.TEMP` sweep the card runs once per coordinate. Giving
+/// every coordinate the authored seed would repeat one sample across the
+/// sweep, and drawing from a shared stream would make a coordinate's answer
+/// depend on how many coordinates ran before it, so the stream is derived from
+/// the authored seed and the coordinate's own stable identity by the core rule
+/// every surface uses. A deck with no run axis has no coordinate and keeps the
+/// authored seed unchanged.
 pub(super) fn run_monte_carlo_from_command(
     ctx: &RunContext<'_>,
     mc_cmd: &rspice_core::netlist::MonteCarloCommand,
 ) -> Result<(), CliError> {
-    let seed = ctx.args.seed.or(mc_cmd.seed).unwrap_or(1);
+    let authored_seed = ctx.args.seed.or(mc_cmd.seed).unwrap_or(1);
+    let seed = ctx.run_coordinate().map_or(authored_seed, |coordinate| {
+        rspice_core::execution::monte_carlo_seed_at_coordinate(
+            authored_seed,
+            coordinate.stable_id(),
+        )
+    });
     let distribution = match mc_cmd.distribution {
         rspice_core::netlist::MonteCarloDistribution::Gaussian => {
             rspice_core::analysis::Distribution::Gaussian {
@@ -347,67 +379,92 @@ pub(super) fn run_monte_carlo_from_command(
     run_monte_carlo(ctx, mc_cmd.runs, seed, distribution, parameter_filter)
 }
 
+/// The `--pss-freq` route. It supersedes the deck's authored cards outright,
+/// so no authored `.PAC`/`.PNOISE` can consume its carrier and the operating
+/// point is not retained.
 pub(super) fn run_pss(
     ctx: &RunContext<'_>,
     freq: f64,
     harmonics: usize,
     tstab: Option<f64>,
 ) -> Result<(), CliError> {
-    if !ctx.quiet {
-        println!(
-            "Running PSS analysis: fâ‚€ = {:.3e} Hz, {} harmonics",
-            freq, harmonics
-        );
-    }
-
     let mut config = rspice_core::analysis::PssConfig::new(freq);
     config.num_harmonics = harmonics;
     if let Some(t) = tstab {
         config.tstab = t;
     }
 
-    match ctx
+    let artifact = ctx.resolve_periodic_analysis("pss")?;
+    announce_pss(ctx, &config);
+    let pss_result = ctx
         .engine
         .run_pss_with_abort(ctx.netlist, config, &crate::abort::ProcessAbort)
-    {
-        Ok(pss_result) => {
-            ensure_not_cancelled(ctx)?;
-            if !ctx.quiet {
-                println!("âœ“ PSS converged in {} iterations", pss_result.iterations);
-                println!("  Period: {:.6e} s", pss_result.period);
-                println!("  Nodes: {}", pss_result.result.num_nodes());
+        .map_err(|error| map_advanced_simulation_error(ctx, "PSS", error))?;
+    ensure_not_cancelled(ctx)?;
+    report_pss(
+        ctx,
+        pss_result.iterations,
+        pss_result.period,
+        &pss_result.result,
+    );
+    if let Some(path) = &artifact.path {
+        export_pss(ctx, artifact.analysis, path, &pss_result.result)?;
+    }
+    Ok(())
+}
 
-                if ctx.verbose && pss_result.result.num_nodes() > 0 {
-                    println!("\n  Harmonic content (node 1):");
-                    let harm_data = pss_result.result.harmonics(1, 5);
-                    for h in &harm_data {
-                        println!(
-                            "    H{}: mag={:.6e}, phase={:.2}Â° (f={:.3e} Hz)",
-                            h.harmonic_number, h.magnitude, h.phase, h.frequency
-                        );
-                    }
-                }
-            }
+/// Announce one periodic steady state before the shooting solve starts.
+pub(super) fn announce_pss(ctx: &RunContext<'_>, config: &rspice_core::analysis::PssConfig) {
+    if ctx.quiet {
+        return;
+    }
+    if config.is_autonomous() {
+        println!(
+            "Running PSS analysis: autonomous, {} harmonics",
+            config.num_harmonics
+        );
+    } else {
+        println!(
+            "Running PSS analysis: f₀ = {:.3e} Hz, {} harmonics",
+            config.fundamental_freq, config.num_harmonics
+        );
+    }
+}
 
-            export_pss(ctx, &pss_result.result)?;
-            Ok(())
+/// Report one converged periodic steady state on the console.
+pub(super) fn report_pss(
+    ctx: &RunContext<'_>,
+    iterations: usize,
+    period: f64,
+    result: &rspice_core::analysis::PssResult,
+) {
+    if ctx.quiet {
+        return;
+    }
+    println!("✓ PSS converged in {iterations} iterations");
+    println!("  Period: {period:.6e} s");
+    println!("  Nodes: {}", result.num_nodes());
+
+    if ctx.verbose && result.num_nodes() > 0 {
+        println!("\n  Harmonic content (node 1):");
+        for harmonic in &result.harmonics(1, 5) {
+            println!(
+                "    H{}: mag={:.6e}, phase={:.2}° (f={:.3e} Hz)",
+                harmonic.harmonic_number, harmonic.magnitude, harmonic.phase, harmonic.frequency
+            );
         }
-        Err(e) => Err(map_advanced_simulation_error(ctx, "PSS", e)),
     }
 }
 
 /// Write one period of the converged steady-state waveforms (time domain),
 /// the same table shape as a transient export.
-fn export_pss(
+pub(super) fn export_pss(
     ctx: &RunContext<'_>,
+    analysis_id: rspice_core::execution::AnalysisInstanceId,
+    output_path: &std::path::Path,
     result: &rspice_core::analysis::PssResult,
 ) -> Result<(), CliError> {
     ensure_not_cancelled(ctx)?;
-    let Some(resolved) = ctx.resolve_output("pss") else {
-        return Ok(());
-    };
-    let analysis_id = resolved.analysis("pss")?;
-    let output_path = &resolved.path;
 
     let signals: Vec<crate::commands::run_signals::ScalarSignal> = result
         .waveforms
@@ -503,76 +560,76 @@ fn export_pss(
         },
     )?;
 
+    ctx.record_output(output_path.to_path_buf());
     if !ctx.quiet {
         println!("  PSS waveforms exported to: {}", output_path.display());
     }
     Ok(())
 }
 
+/// The `--hb-freq` route. It supersedes the deck's authored cards outright, so
+/// no authored `.PAC`/`.PNOISE`/`.ENVELOPE` can consume its carrier and the
+/// operating point is not retained.
 pub(super) fn run_hb(ctx: &RunContext<'_>, freq: f64, harmonics: usize) -> Result<(), CliError> {
     let config = rspice_core::analysis::HbConfig::new(freq).with_harmonics(harmonics);
-    run_hb_with_config(ctx, config)
+    let fundamental = config.fundamental_freq;
+    let artifact = ctx.resolve_periodic_analysis("hb")?;
+    let hb_result = solve_hb(ctx, config)?;
+    if let Some(path) = &artifact.path {
+        export_hb(ctx, artifact.analysis, path, fundamental, &hb_result.result)?;
+    }
+    Ok(())
 }
 
-fn run_hb_with_config(
+/// Solve one harmonic-balance configuration and report it on the console.
+fn solve_hb(
     ctx: &RunContext<'_>,
     config: rspice_core::analysis::HbConfig,
-) -> Result<(), CliError> {
+) -> Result<rspice_core::engine::HbAnalysisResult, CliError> {
     if !ctx.quiet {
         println!(
-            "Running HB analysis: fâ‚€ = {:.3e} Hz, {} harmonics",
+            "Running HB analysis: f₀ = {:.3e} Hz, {} harmonics",
             config.fundamental_freq, config.num_harmonics
         );
     }
 
-    let fundamental = config.fundamental_freq;
     let harmonics = config.num_harmonics;
-
-    match ctx
+    let hb_result = ctx
         .engine
         .run_hb_with_abort(ctx.netlist, config, &crate::abort::ProcessAbort)
-    {
-        Ok(hb_result) => {
-            ensure_not_cancelled(ctx)?;
-            if !ctx.quiet {
-                println!("âœ“ HB converged");
-                println!("  Nodes: {}", hb_result.result.num_nodes());
-                println!("  Harmonics: {}", hb_result.result.num_harmonics);
+        .map_err(|error| map_advanced_simulation_error(ctx, "HB", error))?;
+    ensure_not_cancelled(ctx)?;
+    if !ctx.quiet {
+        println!("✓ HB converged");
+        println!("  Nodes: {}", hb_result.result.num_nodes());
+        println!("  Harmonics: {}", hb_result.result.num_harmonics);
 
-                if ctx.verbose && !hb_result.result.spectral_voltages.is_empty() {
-                    println!("\n  Spectral content (first node):");
-                    let sv = &hb_result.result.spectral_voltages[0];
-                    for k in 0..=4.min(harmonics) {
-                        println!(
-                            "    H{}: mag={:.6e}, phase={:.2}Â°",
-                            k,
-                            sv.magnitude(k),
-                            sv.phase(k).to_degrees()
-                        );
-                    }
-                }
+        if ctx.verbose && !hb_result.result.spectral_voltages.is_empty() {
+            println!("\n  Spectral content (first node):");
+            let sv = &hb_result.result.spectral_voltages[0];
+            for k in 0..=4.min(harmonics) {
+                println!(
+                    "    H{}: mag={:.6e}, phase={:.2}°",
+                    k,
+                    sv.magnitude(k),
+                    sv.phase(k).to_degrees()
+                );
             }
-
-            export_hb(ctx, fundamental, &hb_result.result)?;
-            Ok(())
         }
-        Err(e) => Err(map_advanced_simulation_error(ctx, "HB", e)),
     }
+    Ok(hb_result)
 }
 
 /// Write the harmonic-balance spectrum: harmonic frequencies as the scale,
 /// one complex column per retained node voltage or MNA branch current.
 fn export_hb(
     ctx: &RunContext<'_>,
+    analysis_id: rspice_core::execution::AnalysisInstanceId,
+    output_path: &std::path::Path,
     fundamental: f64,
     result: &rspice_core::analysis::HbResult,
 ) -> Result<(), CliError> {
     ensure_not_cancelled(ctx)?;
-    let Some(resolved) = ctx.resolve_output("hb") else {
-        return Ok(());
-    };
-    let analysis_id = resolved.analysis("hb")?;
-    let output_path = &resolved.path;
 
     let num_coeffs = result
         .spectral_voltages
@@ -696,6 +753,7 @@ fn export_hb(
         },
     )?;
 
+    ctx.record_output(output_path.to_path_buf());
     if !ctx.quiet {
         println!("  HB spectrum exported to: {}", output_path.display());
     }

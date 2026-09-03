@@ -208,7 +208,6 @@ impl AnalysisResultCapability {
     }
 }
 
-const CLI_AXIS_UNAVAILABLE: &str = "CLI has no authored deck-axis route for this analysis family";
 const PY_PNOISE_DRIVEN_AXIS_ONLY: &str = "deck-axis .PNOISE executes around a driven carrier only; an autonomous PSS carrier's      oscillator phase noise has no run-report field";
 
 /// The CLI publishes the shared typed result document for this family, under
@@ -219,16 +218,6 @@ const fn cli_mapped_axes() -> SurfaceCapability {
         MappingStatus::Mapped,
         MappingStatus::Mapped,
         MappingStatus::Mapped,
-    )
-}
-
-/// The shared document is published, but the deck has no authored axis route
-/// for this family.
-const fn cli_mapped_scalar_only() -> SurfaceCapability {
-    SurfaceCapability::new(
-        MappingStatus::Mapped,
-        MappingStatus::Unsupported(CLI_AXIS_UNAVAILABLE),
-        MappingStatus::Unsupported(CLI_AXIS_UNAVAILABLE),
     )
 }
 
@@ -376,7 +365,7 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::MonteCarlo,
-        cli: cli_mapped_scalar_only(),
+        cli: cli_mapped_axes(),
         python: SurfaceCapability::new(
             MappingStatus::Mapped,
             MappingStatus::Partial(
@@ -391,21 +380,21 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Pss,
-        cli: cli_mapped_scalar_only(),
+        cli: cli_mapped_axes(),
         python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Pac,
-        cli: SurfaceCapability::unsupported("CLI has no PAC execution or result adapter"),
+        cli: cli_mapped_axes(),
         python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::PNoise,
-        cli: SurfaceCapability::unsupported("CLI has no PNoise execution or result adapter"),
+        cli: cli_mapped_axes(),
         python: SurfaceCapability::new(
             MappingStatus::Mapped,
             MappingStatus::Partial(PY_PNOISE_DRIVEN_AXIS_ONLY),
@@ -423,7 +412,7 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Envelope,
-        cli: SurfaceCapability::unsupported("CLI has no envelope result adapter"),
+        cli: cli_mapped_axes(),
         python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),

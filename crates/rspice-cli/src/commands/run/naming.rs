@@ -26,18 +26,16 @@ pub(super) fn analysis_output_tag(analysis: &AnalysisCommand) -> Option<&'static
         AnalysisCommand::Tf { .. } => Some("tf"),
         AnalysisCommand::Hb { .. } => Some("hb"),
         AnalysisCommand::MonteCarlo(_) => Some("mc"),
+        AnalysisCommand::Pss(_) => Some("pss"),
+        AnalysisCommand::Pac(_) => Some("pac"),
+        AnalysisCommand::Pnoise(_) => Some("pnoise"),
+        AnalysisCommand::Envelope(_) => Some("env"),
         // `.STEP` and `.TEMP` are run axes whose coordinates own the artifact
-        // namespace; `.FOUR` publishes under its own post-process instance
-        // identity. The CLI publishes no artifact for the periodic
-        // large-signal family and refuses those cards before execution, so
-        // none of these own a physical output namespace.
-        AnalysisCommand::Step(_)
-        | AnalysisCommand::Temp { .. }
-        | AnalysisCommand::Four { .. }
-        | AnalysisCommand::Pss(_)
-        | AnalysisCommand::Pac(_)
-        | AnalysisCommand::Pnoise(_)
-        | AnalysisCommand::Envelope(_) => None,
+        // namespace, and `.FOUR` publishes under its own post-process instance
+        // identity, so neither owns a physical output namespace.
+        AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. } | AnalysisCommand::Four { .. } => {
+            None
+        }
     }
 }
 
@@ -75,6 +73,9 @@ pub(super) fn output_tag_analysis_kind(tag: &str) -> Option<rspice_core::executi
         "hb" => Some(AnalysisKind::HarmonicBalance),
         "mc" => Some(AnalysisKind::MonteCarlo),
         "pss" => Some(AnalysisKind::Pss),
+        "pac" => Some(AnalysisKind::Pac),
+        "pnoise" => Some(AnalysisKind::PNoise),
+        "env" => Some(AnalysisKind::Envelope),
         // The aggregated axis sweep table spans coordinates, so it is not one
         // analysis instance and publishes no typed document of its own.
         _ => None,
