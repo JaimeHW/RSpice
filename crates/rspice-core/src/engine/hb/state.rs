@@ -7,6 +7,7 @@ use crate::analysis::harmonic_balance::HbContinuationLimitation;
 use crate::analysis::harmonic_balance::{HbReactiveKind, HbReactiveSpectrum};
 use crate::circuit::CircuitData;
 use crate::engine::hb::EnvelopeResult;
+use crate::engine::transient::CheckpointState;
 use crate::engine::transient::{
     netlist_checkpoint_identity, netlist_fingerprint, simulation_checkpoint_identity,
 };
@@ -426,10 +427,12 @@ impl Engine {
             netlist_fingerprint(netlist),
             Some(authenticated_netlist_identity.to_string()),
             simulation_checkpoint_identity(&self.config),
-            0.0,
-            solutions.last().expect("latest HB solution exists"),
-            &circuit,
-            crate::engine::TransientStartupMode::OperatingPoint,
+            CheckpointState {
+                time: 0.0,
+                solution: solutions.last().expect("latest HB solution exists"),
+                circuit: &circuit,
+                startup_mode: crate::engine::TransientStartupMode::OperatingPoint,
+            },
             Some(&lte_estimator),
         )
         .map_err(SimulationError::Circuit)?;

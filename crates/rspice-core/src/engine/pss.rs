@@ -27,7 +27,7 @@ use crate::analysis::{
 };
 use crate::circuit::CircuitData;
 use crate::engine::periodic_capability;
-use crate::engine::transient::BreakpointWindow;
+use crate::engine::transient::{BreakpointWindow, CheckpointState};
 use crate::engine::transient::{netlist_checkpoint_identity, simulation_checkpoint_identity};
 use crate::numerics::integration::CompanionCoefficients;
 use crate::numerics::integration::IntegrationMethod;
@@ -1786,10 +1786,12 @@ impl Engine {
             authenticated_fingerprint,
             Some(authenticated_netlist_identity),
             super::transient::simulation_checkpoint_identity(&self.config),
-            0.0,
-            endpoint,
-            &circuit,
-            crate::engine::TransientStartupMode::OperatingPoint,
+            CheckpointState {
+                time: 0.0,
+                solution: endpoint,
+                circuit: &circuit,
+                startup_mode: crate::engine::TransientStartupMode::OperatingPoint,
+            },
             Some(&lte_estimator),
         )
         .map_err(SimulationError::Circuit)?;

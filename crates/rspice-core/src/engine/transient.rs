@@ -365,6 +365,8 @@ fn capture_transient_merit_rollback(
 
 pub(in crate::engine) use breakpoints::BreakpointWindow;
 use breakpoints::{DynamicBreakpointSink, TlineArrivalEvent, TlineWaveChange};
+pub(in crate::engine) use checkpoint::CheckpointState;
+use checkpoint::{AcceptedTransientRuntime, CheckpointIdentity, CheckpointIntegrationState};
 use state_advanced_mos::Bsim4CompanionStep;
 use state_recovery::{ForceAcceptLimits, SourceActivityRecovery};
 use step_control::{SourceActivityDeltas, StepBiasFloors};
@@ -492,6 +494,100 @@ enum DerivedTransientBranchCurrentKind {
 /// an empty inner vector and therefore costs no per-point memory or append
 /// traffic.
 #[derive(Debug)]
+/// The accepted point one transient sample is recorded at.
+#[derive(Clone, Copy)]
+struct TransientSample<'a> {
+    solution: &'a [Value],
+    num_nodes: usize,
+    time: Value,
+    step_size: Value,
+}
+
+/// The extra series that sample is assembled from.
+#[derive(Clone, Copy)]
+struct TransientSampleSources<'a> {
+    derived_branches: &'a [DerivedTransientBranchCurrent],
+    bjt_history: &'a BjtTransientHistory,
+    diode_history: &'a DiodeTransientHistory,
+}
+
+/// How much of it the run asked to keep.
+#[derive(Clone, Copy)]
+struct TransientCaptureRequest<'a> {
+    record_device_op_traces: bool,
+    capture: &'a TransientCapturePlan,
+    trajectory_point_count: usize,
+}
+
+/// Where the scheduled-checkpoint cursor currently stands.
+struct ScheduledCheckpointPoint<'a> {
+    scheduled_times: &'a [Value],
+    cursor: &'a mut usize,
+    checkpoint_netlist: &'a Netlist,
+    accepted_time: Value,
+}
+
+/// The identity a scheduled checkpoint is stamped with.
+#[derive(Clone, Copy)]
+struct ScheduledCheckpointIdentity<'a> {
+    fingerprint: u64,
+    netlist_identity: &'a Option<String>,
+    restart_identity: &'a Option<String>,
+    simulation_identity: &'a str,
+}
+
+/// The accepted point it captures.
+#[derive(Clone, Copy)]
+struct ScheduledCheckpointState<'a> {
+    solution: &'a [Value],
+    circuit: &'a crate::circuit::CircuitData,
+    startup_mode: TransientStartupMode,
+}
+
+/// The integrator state that goes with it.
+#[derive(Clone, Copy)]
+struct ScheduledCheckpointIntegration<'a> {
+    integration_max_step: Value,
+    integration_continuation: Option<ProposedIntegrationContinuation>,
+    integration_stop_time: Value,
+    pending_tline_arrivals: &'a [Value],
+    dynamic_tline_breakpoints_added: usize,
+}
+
+/// The device histories it must carry.
+struct ScheduledCheckpointHistories<'a> {
+    bjt_history: &'a BjtTransientHistory,
+    diode_history: &'a DiodeTransientHistory,
+    vbic_snapshot_cache: &'a [Option<BjtChargeSnapshot>],
+    accepted_integration_runtime_capture: AcceptedIntegrationRuntimeCapture<'a>,
+}
+
+/// Where the captured checkpoints accumulate, with the retention bookkeeping.
+struct ScheduledCheckpointSink<'a> {
+    retained_result_values: usize,
+    retained_scheduled_checkpoint_values: &'a mut usize,
+    captured: &'a mut Vec<ScheduledTransientCheckpoint>,
+}
+
+/// The interval one resolved transient run covers.
+#[derive(Clone, Copy)]
+struct TransientRunWindow {
+    tstop: Value,
+    max_step: Value,
+    startup_mode: TransientStartupMode,
+}
+
+/// How a resumed run picks up: the checkpoint to resume from, how strictly it
+/// is validated, what to do with the final checkpoint, and the times further
+/// checkpoints are scheduled at.
+#[derive(Clone, Copy)]
+struct TransientResumePlan<'a> {
+    resume: Option<&'a TransientCheckpoint>,
+    resume_validation: ResumeValidation,
+    final_checkpoint_retention: FinalCheckpointRetention,
+    scheduled_checkpoint_times: &'a [Value],
+}
+
 struct TransientCapturePlan {
     voltages: Vec<bool>,
     branch_currents: Vec<bool>,
@@ -1421,18 +1517,27 @@ impl Engine {
         &self,
         result: &mut TransientResult,
         circuit: &mut crate::circuit::CircuitData,
-        solution: &[Value],
-        num_nodes: usize,
-        time: Value,
-        step_size: Value,
-        derived_branches: &[DerivedTransientBranchCurrent],
-        bjt_history: &BjtTransientHistory,
-        diode_history: &DiodeTransientHistory,
-        record_device_op_traces: bool,
-        capture: &TransientCapturePlan,
-        trajectory_point_count: usize,
+        sample: TransientSample<'_>,
+        sources: TransientSampleSources<'_>,
+        request: TransientCaptureRequest<'_>,
         abort: &dyn AbortSignal,
     ) -> Result<usize, SimulationError> {
+        let TransientCaptureRequest {
+            record_device_op_traces,
+            capture,
+            trajectory_point_count,
+        } = request;
+        let TransientSampleSources {
+            derived_branches,
+            bjt_history,
+            diode_history,
+        } = sources;
+        let TransientSample {
+            solution,
+            num_nodes,
+            time,
+            step_size,
+        } = sample;
         let next_point_count = result.time.len().saturating_add(1);
         self.ensure_analysis_points(trajectory_point_count)?;
         self.ensure_result_shape(
@@ -2136,28 +2241,36 @@ impl Engine {
                 .run_tran_resolved_with_resume(
                     &expanded,
                     netlist,
-                    tstop,
-                    max_step,
-                    startup_mode,
+                    TransientRunWindow {
+                        tstop,
+                        max_step,
+                        startup_mode,
+                    },
                     abort,
-                    None,
-                    ResumeValidation::ExactNetlist,
-                    FinalCheckpointRetention::Retained,
-                    &[],
+                    TransientResumePlan {
+                        resume: None,
+                        resume_validation: ResumeValidation::ExactNetlist,
+                        final_checkpoint_retention: FinalCheckpointRetention::Retained,
+                        scheduled_checkpoint_times: &[],
+                    },
                 )
                 .and_then(Self::require_retained_final_checkpoint),
             None => engine
                 .run_tran_resolved_with_resume(
                     netlist,
                     netlist,
-                    tstop,
-                    max_step,
-                    startup_mode,
+                    TransientRunWindow {
+                        tstop,
+                        max_step,
+                        startup_mode,
+                    },
                     abort,
-                    None,
-                    ResumeValidation::ExactNetlist,
-                    FinalCheckpointRetention::Retained,
-                    &[],
+                    TransientResumePlan {
+                        resume: None,
+                        resume_validation: ResumeValidation::ExactNetlist,
+                        final_checkpoint_retention: FinalCheckpointRetention::Retained,
+                        scheduled_checkpoint_times: &[],
+                    },
                 )
                 .and_then(Self::require_retained_final_checkpoint),
         }
@@ -2267,26 +2380,34 @@ impl Engine {
             Some(expanded) => engine.run_tran_resolved_with_resume(
                 &expanded,
                 netlist,
-                tstop,
-                max_step,
-                startup_mode,
+                TransientRunWindow {
+                    tstop,
+                    max_step,
+                    startup_mode,
+                },
                 abort,
-                None,
-                ResumeValidation::ExactNetlist,
-                FinalCheckpointRetention::Discarded,
-                checkpoint_times,
+                TransientResumePlan {
+                    resume: None,
+                    resume_validation: ResumeValidation::ExactNetlist,
+                    final_checkpoint_retention: FinalCheckpointRetention::Discarded,
+                    scheduled_checkpoint_times: checkpoint_times,
+                },
             ),
             None => engine.run_tran_resolved_with_resume(
                 netlist,
                 netlist,
-                tstop,
-                max_step,
-                startup_mode,
+                TransientRunWindow {
+                    tstop,
+                    max_step,
+                    startup_mode,
+                },
                 abort,
-                None,
-                ResumeValidation::ExactNetlist,
-                FinalCheckpointRetention::Discarded,
-                checkpoint_times,
+                TransientResumePlan {
+                    resume: None,
+                    resume_validation: ResumeValidation::ExactNetlist,
+                    final_checkpoint_retention: FinalCheckpointRetention::Discarded,
+                    scheduled_checkpoint_times: checkpoint_times,
+                },
             ),
         }
         .map(|(result, _, checkpoints)| (result, checkpoints))
@@ -2406,28 +2527,36 @@ impl Engine {
                 .run_tran_resolved_with_resume(
                     &expanded,
                     netlist,
-                    tstop,
-                    max_step,
-                    startup_mode,
+                    TransientRunWindow {
+                        tstop,
+                        max_step,
+                        startup_mode,
+                    },
                     abort,
-                    Some(checkpoint),
-                    validation,
-                    FinalCheckpointRetention::Retained,
-                    &[],
+                    TransientResumePlan {
+                        resume: Some(checkpoint),
+                        resume_validation: validation,
+                        final_checkpoint_retention: FinalCheckpointRetention::Retained,
+                        scheduled_checkpoint_times: &[],
+                    },
                 )
                 .and_then(Self::require_retained_final_checkpoint),
             None => engine
                 .run_tran_resolved_with_resume(
                     netlist,
                     netlist,
-                    tstop,
-                    max_step,
-                    startup_mode,
+                    TransientRunWindow {
+                        tstop,
+                        max_step,
+                        startup_mode,
+                    },
                     abort,
-                    Some(checkpoint),
-                    validation,
-                    FinalCheckpointRetention::Retained,
-                    &[],
+                    TransientResumePlan {
+                        resume: Some(checkpoint),
+                        resume_validation: validation,
+                        final_checkpoint_retention: FinalCheckpointRetention::Retained,
+                        scheduled_checkpoint_times: &[],
+                    },
                 )
                 .and_then(Self::require_retained_final_checkpoint),
         }
@@ -2561,14 +2690,18 @@ impl Engine {
         self.run_tran_resolved_with_resume(
             netlist,
             netlist,
-            tstop,
-            max_step,
-            startup_mode,
+            TransientRunWindow {
+                tstop,
+                max_step,
+                startup_mode,
+            },
             abort,
-            None,
-            ResumeValidation::ExactNetlist,
-            FinalCheckpointRetention::Discarded,
-            &[],
+            TransientResumePlan {
+                resume: None,
+                resume_validation: ResumeValidation::ExactNetlist,
+                final_checkpoint_retention: FinalCheckpointRetention::Discarded,
+                scheduled_checkpoint_times: &[],
+            },
         )
         .map(|(result, _, _)| result)
     }
@@ -2802,30 +2935,48 @@ impl Engine {
 
     fn capture_scheduled_checkpoint_if_due(
         &self,
-        scheduled_times: &[Value],
-        cursor: &mut usize,
-        checkpoint_netlist: &Netlist,
-        accepted_time: Value,
-        fingerprint: u64,
-        netlist_identity: &Option<String>,
-        restart_identity: &Option<String>,
-        simulation_identity: &str,
-        solution: &[Value],
-        circuit: &crate::circuit::CircuitData,
-        startup_mode: TransientStartupMode,
-        integration_max_step: Value,
-        integration_continuation: Option<ProposedIntegrationContinuation>,
-        integration_stop_time: Value,
-        pending_tline_arrivals: &[Value],
-        dynamic_tline_breakpoints_added: usize,
-        bjt_history: &BjtTransientHistory,
-        diode_history: &DiodeTransientHistory,
-        vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
-        accepted_integration_runtime_capture: AcceptedIntegrationRuntimeCapture<'_>,
-        retained_result_values: usize,
-        retained_scheduled_checkpoint_values: &mut usize,
-        captured: &mut Vec<ScheduledTransientCheckpoint>,
+        point: ScheduledCheckpointPoint<'_>,
+        identity: ScheduledCheckpointIdentity<'_>,
+        state: ScheduledCheckpointState<'_>,
+        integration: ScheduledCheckpointIntegration<'_>,
+        histories: ScheduledCheckpointHistories<'_>,
+        sink: ScheduledCheckpointSink<'_>,
     ) -> Result<(), SimulationError> {
+        let ScheduledCheckpointSink {
+            retained_result_values,
+            retained_scheduled_checkpoint_values,
+            captured,
+        } = sink;
+        let ScheduledCheckpointHistories {
+            bjt_history,
+            diode_history,
+            vbic_snapshot_cache,
+            accepted_integration_runtime_capture,
+        } = histories;
+        let ScheduledCheckpointIntegration {
+            integration_max_step,
+            integration_continuation,
+            integration_stop_time,
+            pending_tline_arrivals,
+            dynamic_tline_breakpoints_added,
+        } = integration;
+        let ScheduledCheckpointState {
+            solution,
+            circuit,
+            startup_mode,
+        } = state;
+        let ScheduledCheckpointIdentity {
+            fingerprint,
+            netlist_identity,
+            restart_identity,
+            simulation_identity,
+        } = identity;
+        let ScheduledCheckpointPoint {
+            scheduled_times,
+            cursor,
+            checkpoint_netlist,
+            accepted_time,
+        } = point;
         self.ensure_result_values(
             retained_result_values.saturating_add(*retained_scheduled_checkpoint_values),
         )?;
@@ -2906,20 +3057,28 @@ impl Engine {
         let checkpoint = TransientCheckpoint::capture_resumable(
             checkpoint_netlist,
             &self.config,
-            fingerprint,
-            netlist_identity.clone(),
-            restart_identity.clone(),
-            simulation_identity.to_owned(),
-            accepted_time,
-            solution,
-            circuit,
-            startup_mode,
-            Some(integration_max_step),
-            integration_continuation,
-            pending_tline_arrivals,
-            dynamic_tline_breakpoints_added,
-            accepted_junction_history,
-            accepted_integration_runtime,
+            CheckpointIdentity {
+                fingerprint,
+                netlist_identity: netlist_identity.clone(),
+                restart_identity: restart_identity.clone(),
+                simulation_identity: simulation_identity.to_owned(),
+            },
+            CheckpointState {
+                time: accepted_time,
+                solution,
+                circuit,
+                startup_mode,
+            },
+            CheckpointIntegrationState {
+                integration_max_step: Some(integration_max_step),
+                integration_continuation,
+                pending_tline_arrivals,
+                dynamic_tline_breakpoints_added,
+            },
+            AcceptedTransientRuntime {
+                accepted_junction_history,
+                accepted_integration_runtime,
+            },
             Some(lte_estimator),
         )
         .map_err(SimulationError::Circuit)?;
@@ -2955,14 +3114,9 @@ impl Engine {
         &self,
         netlist: &Netlist,
         checkpoint_netlist: &Netlist,
-        tstop: Value,
-        max_step: Value,
-        startup_mode: TransientStartupMode,
+        window: TransientRunWindow,
         abort: &dyn AbortSignal,
-        resume: Option<&TransientCheckpoint>,
-        resume_validation: ResumeValidation,
-        final_checkpoint_retention: FinalCheckpointRetention,
-        scheduled_checkpoint_times: &[Value],
+        plan: TransientResumePlan<'_>,
     ) -> Result<
         (
             TransientResult,
@@ -2971,6 +3125,17 @@ impl Engine {
         ),
         SimulationError,
     > {
+        let TransientRunWindow {
+            tstop,
+            max_step,
+            startup_mode,
+        } = window;
+        let TransientResumePlan {
+            resume,
+            resume_validation,
+            final_checkpoint_retention,
+            scheduled_checkpoint_times,
+        } = plan;
         fft::preflight(self, netlist, tstop, abort)?;
         let trapezoidal_xmu = if self.config.spice_dialect == SpiceDialect::Xyce {
             0.5
@@ -3044,41 +3209,49 @@ impl Engine {
                 let checkpoint = TransientCheckpoint::capture_resumable(
                     checkpoint_netlist,
                     &self.config,
-                    fingerprint,
-                    netlist_identity,
-                    restart_identity,
-                    simulation_identity,
-                    0.0,
-                    &[],
-                    &circuit,
-                    startup_mode,
-                    Some(max_step),
-                    None,
-                    &[],
-                    0,
-                    AcceptedJunctionTransientHistoryCheckpoint {
-                        available: true,
-                        ..AcceptedJunctionTransientHistoryCheckpoint::default()
+                    CheckpointIdentity {
+                        fingerprint,
+                        netlist_identity,
+                        restart_identity,
+                        simulation_identity,
                     },
-                    AcceptedIntegrationRuntime::RestartNormalized(
-                        RestartNormalizedIntegrationRuntimeCheckpoint::capture(
-                            0.0,
-                            RestartNormalizedIntegrationRuntimeCapture {
-                                lte_warmup_skips: 0,
-                                force_accept_cooldown: 0,
-                                livelock_streak: 0,
-                                livelock_last_restart_time: None,
-                                accepted_interval_count: 0,
-                                damped_first_solver_call: true,
-                                damped_status: None,
-                                retry_count: 0,
-                                xyce_step_failure_count: 0,
-                                stale_accept_count: 0,
-                                resume_blockers: &[],
-                            },
-                        )
-                        .map_err(SimulationError::Circuit)?,
-                    ),
+                    CheckpointState {
+                        time: 0.0,
+                        solution: &[],
+                        circuit: &circuit,
+                        startup_mode,
+                    },
+                    CheckpointIntegrationState {
+                        integration_max_step: Some(max_step),
+                        integration_continuation: None,
+                        pending_tline_arrivals: &[],
+                        dynamic_tline_breakpoints_added: 0,
+                    },
+                    AcceptedTransientRuntime {
+                        accepted_junction_history: AcceptedJunctionTransientHistoryCheckpoint {
+                            available: true,
+                            ..AcceptedJunctionTransientHistoryCheckpoint::default()
+                        },
+                        accepted_integration_runtime: AcceptedIntegrationRuntime::RestartNormalized(
+                            RestartNormalizedIntegrationRuntimeCheckpoint::capture(
+                                0.0,
+                                RestartNormalizedIntegrationRuntimeCapture {
+                                    lte_warmup_skips: 0,
+                                    force_accept_cooldown: 0,
+                                    livelock_streak: 0,
+                                    livelock_last_restart_time: None,
+                                    accepted_interval_count: 0,
+                                    damped_first_solver_call: true,
+                                    damped_status: None,
+                                    retry_count: 0,
+                                    xyce_step_failure_count: 0,
+                                    stale_accept_count: 0,
+                                    resume_blockers: &[],
+                                },
+                            )
+                            .map_err(SimulationError::Circuit)?,
+                        ),
+                    },
                     None,
                 )
                 .map_err(SimulationError::Circuit)?;
@@ -4605,53 +4778,65 @@ impl Engine {
             .transpose()
             .map_err(SimulationError::Circuit)?;
         self.capture_scheduled_checkpoint_if_due(
-            scheduled_checkpoint_times,
-            &mut scheduled_checkpoint_cursor,
-            checkpoint_netlist,
-            resume_time,
-            fingerprint,
-            &netlist_identity,
-            &restart_identity,
-            &simulation_identity,
-            &solution,
-            &circuit,
-            startup_mode,
-            max_step,
-            Some(ProposedIntegrationContinuation {
-                next_step: timestep.dt(),
-                breakpoint_span_ceiling: xyce_breakpoint_span_ceiling.ceiling(),
-                controller_max_step: timestep.max_dt(),
-                analysis_first_step_pending,
-                xyce_breakpoint_restart_pending: xyce_lte_restart_first_step,
-            }),
-            tstop,
-            &pending_dynamic_tline_breakpoints,
-            dynamic_tline_breakpoints_added,
-            &bjt_history,
-            &diode_history,
-            &vbic_snapshot_cache,
-            AcceptedIntegrationRuntimeCapture {
-                lte_estimator: &lte_estimator,
-                next_trap_order: trap_order,
-                trapgear: fixed_method.is_none().then(|| trapgear.capture_snapshot()),
-                xyce_static_residual: xyce_static_history.as_deref(),
-                direct_dae_accepted_q: xyce_direct_accepted_q.as_deref(),
-                direct_dae_static_residual: xyce_direct_static_history.as_deref(),
-                lte_warmup_skips,
-                force_accept_cooldown,
-                livelock_streak,
-                livelock_last_restart_time: livelock_last_restart_t,
-                accepted_interval_count,
-                damped_first_solver_call: xyce_damped_first_solver_call,
-                damped_status: damped_status_checkpoint,
-                retry_count,
-                xyce_step_failure_count,
-                stale_accept_count,
-                resume_blockers: &runtime_resume_blockers,
+            ScheduledCheckpointPoint {
+                scheduled_times: scheduled_checkpoint_times,
+                cursor: &mut scheduled_checkpoint_cursor,
+                checkpoint_netlist,
+                accepted_time: resume_time,
             },
-            retained_result_values,
-            &mut retained_scheduled_checkpoint_values,
-            &mut scheduled_checkpoints,
+            ScheduledCheckpointIdentity {
+                fingerprint,
+                netlist_identity: &netlist_identity,
+                restart_identity: &restart_identity,
+                simulation_identity: &simulation_identity,
+            },
+            ScheduledCheckpointState {
+                solution: &solution,
+                circuit: &circuit,
+                startup_mode,
+            },
+            ScheduledCheckpointIntegration {
+                integration_max_step: max_step,
+                integration_continuation: Some(ProposedIntegrationContinuation {
+                    next_step: timestep.dt(),
+                    breakpoint_span_ceiling: xyce_breakpoint_span_ceiling.ceiling(),
+                    controller_max_step: timestep.max_dt(),
+                    analysis_first_step_pending,
+                    xyce_breakpoint_restart_pending: xyce_lte_restart_first_step,
+                }),
+                integration_stop_time: tstop,
+                pending_tline_arrivals: &pending_dynamic_tline_breakpoints,
+                dynamic_tline_breakpoints_added,
+            },
+            ScheduledCheckpointHistories {
+                bjt_history: &bjt_history,
+                diode_history: &diode_history,
+                vbic_snapshot_cache: &vbic_snapshot_cache,
+                accepted_integration_runtime_capture: AcceptedIntegrationRuntimeCapture {
+                    lte_estimator: &lte_estimator,
+                    next_trap_order: trap_order,
+                    trapgear: fixed_method.is_none().then(|| trapgear.capture_snapshot()),
+                    xyce_static_residual: xyce_static_history.as_deref(),
+                    direct_dae_accepted_q: xyce_direct_accepted_q.as_deref(),
+                    direct_dae_static_residual: xyce_direct_static_history.as_deref(),
+                    lte_warmup_skips,
+                    force_accept_cooldown,
+                    livelock_streak,
+                    livelock_last_restart_time: livelock_last_restart_t,
+                    accepted_interval_count,
+                    damped_first_solver_call: xyce_damped_first_solver_call,
+                    damped_status: damped_status_checkpoint,
+                    retry_count,
+                    xyce_step_failure_count,
+                    stale_accept_count,
+                    resume_blockers: &runtime_resume_blockers,
+                },
+            },
+            ScheduledCheckpointSink {
+                retained_result_values,
+                retained_scheduled_checkpoint_values: &mut retained_scheduled_checkpoint_values,
+                captured: &mut scheduled_checkpoints,
+            },
         )?;
         let b3soi_first_transient_handoff =
             accepted_interval_count == 0 && circuit.has_b3soi_devices();
@@ -8108,16 +8293,22 @@ impl Engine {
                         self.record_transient_solution_sample(
                             &mut result,
                             &mut circuit,
-                            &solution,
-                            num_nodes,
-                            t,
-                            dt,
-                            &derived_branch_currents,
-                            &bjt_history,
-                            &diode_history,
-                            record_device_op_traces,
-                            &capture_plan,
-                            trajectory_point_count,
+                            TransientSample {
+                                solution: &solution,
+                                num_nodes,
+                                time: t,
+                                step_size: dt,
+                            },
+                            TransientSampleSources {
+                                derived_branches: &derived_branch_currents,
+                                bjt_history: &bjt_history,
+                                diode_history: &diode_history,
+                            },
+                            TransientCaptureRequest {
+                                record_device_op_traces,
+                                capture: &capture_plan,
+                                trajectory_point_count,
+                            },
                             abort,
                         )?,
                     );
@@ -8181,53 +8372,70 @@ impl Engine {
                         .transpose()
                         .map_err(SimulationError::Circuit)?;
                     self.capture_scheduled_checkpoint_if_due(
-                        scheduled_checkpoint_times,
-                        &mut scheduled_checkpoint_cursor,
-                        checkpoint_netlist,
-                        t,
-                        fingerprint,
-                        &netlist_identity,
-                        &restart_identity,
-                        &simulation_identity,
-                        &solution,
-                        &circuit,
-                        startup_mode,
-                        max_step,
-                        Some(ProposedIntegrationContinuation {
-                            next_step: timestep.dt(),
-                            breakpoint_span_ceiling: xyce_breakpoint_span_ceiling.ceiling(),
-                            controller_max_step: timestep.max_dt(),
-                            analysis_first_step_pending,
-                            xyce_breakpoint_restart_pending: xyce_lte_restart_first_step,
-                        }),
-                        tstop,
-                        &pending_dynamic_tline_breakpoints,
-                        dynamic_tline_breakpoints_added,
-                        &bjt_history,
-                        &diode_history,
-                        &vbic_snapshot_cache,
-                        AcceptedIntegrationRuntimeCapture {
-                            lte_estimator: &lte_estimator,
-                            next_trap_order: trap_order,
-                            trapgear: fixed_method.is_none().then(|| trapgear.capture_snapshot()),
-                            xyce_static_residual: xyce_static_history.as_deref(),
-                            direct_dae_accepted_q: xyce_direct_accepted_q.as_deref(),
-                            direct_dae_static_residual: xyce_direct_static_history.as_deref(),
-                            lte_warmup_skips,
-                            force_accept_cooldown,
-                            livelock_streak,
-                            livelock_last_restart_time: livelock_last_restart_t,
-                            accepted_interval_count,
-                            damped_first_solver_call: xyce_damped_first_solver_call,
-                            damped_status: damped_status_checkpoint,
-                            retry_count,
-                            xyce_step_failure_count,
-                            stale_accept_count,
-                            resume_blockers: &runtime_resume_blockers,
+                        ScheduledCheckpointPoint {
+                            scheduled_times: scheduled_checkpoint_times,
+                            cursor: &mut scheduled_checkpoint_cursor,
+                            checkpoint_netlist,
+                            accepted_time: t,
                         },
-                        retained_result_values,
-                        &mut retained_scheduled_checkpoint_values,
-                        &mut scheduled_checkpoints,
+                        ScheduledCheckpointIdentity {
+                            fingerprint,
+                            netlist_identity: &netlist_identity,
+                            restart_identity: &restart_identity,
+                            simulation_identity: &simulation_identity,
+                        },
+                        ScheduledCheckpointState {
+                            solution: &solution,
+                            circuit: &circuit,
+                            startup_mode,
+                        },
+                        ScheduledCheckpointIntegration {
+                            integration_max_step: max_step,
+                            integration_continuation: Some(ProposedIntegrationContinuation {
+                                next_step: timestep.dt(),
+                                breakpoint_span_ceiling: xyce_breakpoint_span_ceiling.ceiling(),
+                                controller_max_step: timestep.max_dt(),
+                                analysis_first_step_pending,
+                                xyce_breakpoint_restart_pending: xyce_lte_restart_first_step,
+                            }),
+                            integration_stop_time: tstop,
+                            pending_tline_arrivals: &pending_dynamic_tline_breakpoints,
+                            dynamic_tline_breakpoints_added,
+                        },
+                        ScheduledCheckpointHistories {
+                            bjt_history: &bjt_history,
+                            diode_history: &diode_history,
+                            vbic_snapshot_cache: &vbic_snapshot_cache,
+                            accepted_integration_runtime_capture:
+                                AcceptedIntegrationRuntimeCapture {
+                                    lte_estimator: &lte_estimator,
+                                    next_trap_order: trap_order,
+                                    trapgear: fixed_method
+                                        .is_none()
+                                        .then(|| trapgear.capture_snapshot()),
+                                    xyce_static_residual: xyce_static_history.as_deref(),
+                                    direct_dae_accepted_q: xyce_direct_accepted_q.as_deref(),
+                                    direct_dae_static_residual: xyce_direct_static_history
+                                        .as_deref(),
+                                    lte_warmup_skips,
+                                    force_accept_cooldown,
+                                    livelock_streak,
+                                    livelock_last_restart_time: livelock_last_restart_t,
+                                    accepted_interval_count,
+                                    damped_first_solver_call: xyce_damped_first_solver_call,
+                                    damped_status: damped_status_checkpoint,
+                                    retry_count,
+                                    xyce_step_failure_count,
+                                    stale_accept_count,
+                                    resume_blockers: &runtime_resume_blockers,
+                                },
+                        },
+                        ScheduledCheckpointSink {
+                            retained_result_values,
+                            retained_scheduled_checkpoint_values:
+                                &mut retained_scheduled_checkpoint_values,
+                            captured: &mut scheduled_checkpoints,
+                        },
                     )?;
                     reinitialize_xyce_breakpoint_histories!(hit_breakpoint, analysis_final_step);
                 }
@@ -8604,16 +8812,22 @@ impl Engine {
                 retained_result_values.saturating_add(self.record_transient_solution_sample(
                     &mut result,
                     &mut circuit,
-                    &solution,
-                    num_nodes,
-                    t,
-                    dt,
-                    &derived_branch_currents,
-                    &bjt_history,
-                    &diode_history,
-                    record_device_op_traces,
-                    &capture_plan,
-                    trajectory_point_count,
+                    TransientSample {
+                        solution: &solution,
+                        num_nodes,
+                        time: t,
+                        step_size: dt,
+                    },
+                    TransientSampleSources {
+                        derived_branches: &derived_branch_currents,
+                        bjt_history: &bjt_history,
+                        diode_history: &diode_history,
+                    },
+                    TransientCaptureRequest {
+                        record_device_op_traces,
+                        capture: &capture_plan,
+                        trajectory_point_count,
+                    },
                     abort,
                 )?);
             if record_xspice_event_traces {
@@ -8800,53 +9014,65 @@ impl Engine {
                 .transpose()
                 .map_err(SimulationError::Circuit)?;
             self.capture_scheduled_checkpoint_if_due(
-                scheduled_checkpoint_times,
-                &mut scheduled_checkpoint_cursor,
-                checkpoint_netlist,
-                t,
-                fingerprint,
-                &netlist_identity,
-                &restart_identity,
-                &simulation_identity,
-                &solution,
-                &circuit,
-                startup_mode,
-                max_step,
-                Some(ProposedIntegrationContinuation {
-                    next_step: timestep.dt(),
-                    breakpoint_span_ceiling: xyce_breakpoint_span_ceiling.ceiling(),
-                    controller_max_step: timestep.max_dt(),
-                    analysis_first_step_pending,
-                    xyce_breakpoint_restart_pending: xyce_lte_restart_first_step,
-                }),
-                tstop,
-                &pending_dynamic_tline_breakpoints,
-                dynamic_tline_breakpoints_added,
-                &bjt_history,
-                &diode_history,
-                &vbic_snapshot_cache,
-                AcceptedIntegrationRuntimeCapture {
-                    lte_estimator: &lte_estimator,
-                    next_trap_order: trap_order,
-                    trapgear: fixed_method.is_none().then(|| trapgear.capture_snapshot()),
-                    xyce_static_residual: xyce_static_history.as_deref(),
-                    direct_dae_accepted_q: xyce_direct_accepted_q.as_deref(),
-                    direct_dae_static_residual: xyce_direct_static_history.as_deref(),
-                    lte_warmup_skips,
-                    force_accept_cooldown,
-                    livelock_streak,
-                    livelock_last_restart_time: livelock_last_restart_t,
-                    accepted_interval_count,
-                    damped_first_solver_call: xyce_damped_first_solver_call,
-                    damped_status: damped_status_checkpoint,
-                    retry_count,
-                    xyce_step_failure_count,
-                    stale_accept_count,
-                    resume_blockers: &runtime_resume_blockers,
+                ScheduledCheckpointPoint {
+                    scheduled_times: scheduled_checkpoint_times,
+                    cursor: &mut scheduled_checkpoint_cursor,
+                    checkpoint_netlist,
+                    accepted_time: t,
                 },
-                retained_result_values,
-                &mut retained_scheduled_checkpoint_values,
-                &mut scheduled_checkpoints,
+                ScheduledCheckpointIdentity {
+                    fingerprint,
+                    netlist_identity: &netlist_identity,
+                    restart_identity: &restart_identity,
+                    simulation_identity: &simulation_identity,
+                },
+                ScheduledCheckpointState {
+                    solution: &solution,
+                    circuit: &circuit,
+                    startup_mode,
+                },
+                ScheduledCheckpointIntegration {
+                    integration_max_step: max_step,
+                    integration_continuation: Some(ProposedIntegrationContinuation {
+                        next_step: timestep.dt(),
+                        breakpoint_span_ceiling: xyce_breakpoint_span_ceiling.ceiling(),
+                        controller_max_step: timestep.max_dt(),
+                        analysis_first_step_pending,
+                        xyce_breakpoint_restart_pending: xyce_lte_restart_first_step,
+                    }),
+                    integration_stop_time: tstop,
+                    pending_tline_arrivals: &pending_dynamic_tline_breakpoints,
+                    dynamic_tline_breakpoints_added,
+                },
+                ScheduledCheckpointHistories {
+                    bjt_history: &bjt_history,
+                    diode_history: &diode_history,
+                    vbic_snapshot_cache: &vbic_snapshot_cache,
+                    accepted_integration_runtime_capture: AcceptedIntegrationRuntimeCapture {
+                        lte_estimator: &lte_estimator,
+                        next_trap_order: trap_order,
+                        trapgear: fixed_method.is_none().then(|| trapgear.capture_snapshot()),
+                        xyce_static_residual: xyce_static_history.as_deref(),
+                        direct_dae_accepted_q: xyce_direct_accepted_q.as_deref(),
+                        direct_dae_static_residual: xyce_direct_static_history.as_deref(),
+                        lte_warmup_skips,
+                        force_accept_cooldown,
+                        livelock_streak,
+                        livelock_last_restart_time: livelock_last_restart_t,
+                        accepted_interval_count,
+                        damped_first_solver_call: xyce_damped_first_solver_call,
+                        damped_status: damped_status_checkpoint,
+                        retry_count,
+                        xyce_step_failure_count,
+                        stale_accept_count,
+                        resume_blockers: &runtime_resume_blockers,
+                    },
+                },
+                ScheduledCheckpointSink {
+                    retained_result_values,
+                    retained_scheduled_checkpoint_values: &mut retained_scheduled_checkpoint_values,
+                    captured: &mut scheduled_checkpoints,
+                },
             )?;
             reinitialize_xyce_breakpoint_histories!(hit_breakpoint, analysis_final_step);
             rejected_attempt_nonlinear_state_scratch = rejected_attempt_nonlinear_state.take();
@@ -8998,20 +9224,28 @@ impl Engine {
                 TransientCheckpoint::capture_resumable(
                     checkpoint_netlist,
                     &self.config,
-                    fingerprint,
-                    netlist_identity,
-                    restart_identity,
-                    simulation_identity,
-                    t,
-                    &solution,
-                    &circuit,
-                    startup_mode,
-                    Some(max_step),
-                    None,
-                    &pending_dynamic_tline_breakpoints,
-                    dynamic_tline_breakpoints_added,
-                    final_accepted_junction_history,
-                    final_accepted_integration_runtime,
+                    CheckpointIdentity {
+                        fingerprint,
+                        netlist_identity,
+                        restart_identity,
+                        simulation_identity,
+                    },
+                    CheckpointState {
+                        time: t,
+                        solution: &solution,
+                        circuit: &circuit,
+                        startup_mode,
+                    },
+                    CheckpointIntegrationState {
+                        integration_max_step: Some(max_step),
+                        integration_continuation: None,
+                        pending_tline_arrivals: &pending_dynamic_tline_breakpoints,
+                        dynamic_tline_breakpoints_added,
+                    },
+                    AcceptedTransientRuntime {
+                        accepted_junction_history: final_accepted_junction_history,
+                        accepted_integration_runtime: final_accepted_integration_runtime,
+                    },
                     Some(&lte_estimator),
                 )
                 .map_err(SimulationError::Circuit)?,
