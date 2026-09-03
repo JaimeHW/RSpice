@@ -1,4 +1,4 @@
-﻿//! Frequency-domain and small-signal analyses: `.AC` (including `DATA=`
+//! Frequency-domain and small-signal analyses: `.AC` (including `DATA=`
 //! table sweeps), `.DISTO`, `.STB`, `.NOISE` (including `DATA=`), `.PZ`,
 //! `.TF`, and `.SENS`.
 //!

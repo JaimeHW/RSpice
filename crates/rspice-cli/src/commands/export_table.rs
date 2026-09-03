@@ -1,4 +1,4 @@
-﻿//! Unified tabular result model shared by `run`, `convert`, and `compare`.
+//! Unified tabular result model shared by `run`, `convert`, and `compare`.
 //!
 //! Every analysis that honors `--output` routes its tabular results through
 //! [`ExportTable`], which renders the same data in any requested
