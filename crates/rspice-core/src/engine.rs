@@ -121,8 +121,9 @@ pub use pss::{
 };
 pub use pss_noise::OscPnoiseResult;
 pub use result::{
-    TransientDeviceOpTrace, TransientFftBin, TransientFftHarmonic, TransientFftMetrics,
-    TransientFftResult, TransientOutputProjection, TransientResult, TransientStoreTrace,
+    DigitalTrace, DigitalTracePoint, RealTrace, RealTracePoint, TransientDeviceOpTrace,
+    TransientFftBin, TransientFftHarmonic, TransientFftMetrics, TransientFftResult,
+    TransientOutputProjection, TransientResult, TransientStoreTrace,
 };
 pub use stb::StbAnalysisResult;
 pub use step::{MaterializedStepRun, StepPlan, StepPlanLimits};
