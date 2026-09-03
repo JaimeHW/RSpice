@@ -21,11 +21,15 @@
 //! between entries beyond what the value-entry cache can prove structurally
 //! identical after the fact. The plan's total size is `Σ (cone of each entry)`.
 //!
-//! So the figure that decides the whole question is the **duplication factor**,
-//! `Σ cone instructions / body instructions`. If it is near one, the entries
-//! are disjoint and the explosion is somewhere else — the encoder, the hoists,
-//! region duplication. If it is near the entry count, every entry is carrying
-//! the same body and the route is O(entries x body) by construction.
+//! So the figure that decides the whole question is the **duplication factor**:
+//! `Σ cone instructions` over the shared work counted once. The body is the
+//! obvious denominator but it overstates that work — it carries scalarized
+//! derivative lanes no shipped entry reads — so the census also prunes the body
+//! to every entry output at once (the `union` below) and reports the factor
+//! against both. If it is near one, the entries are disjoint and the explosion
+//! is somewhere else — the encoder, the hoists, region duplication. If it is
+//! near the entry count, every entry is carrying the same shared work and the
+//! route is O(entries x body) by construction.
 //!
 //! # What each line reports
 //!
@@ -506,9 +510,11 @@ fn census_cfg_plan(module: &str, shipped: &super::census_models::CensusModel, lo
     }
     println!(
         "cfg-size model={module} factor entries={entries} cone_instructions={cone_instructions} \
-         body_instructions={body_instructions} cone_over_body={:.2} union_over_body={:.2} \
+         body_instructions={body_instructions} union_instructions={union_instructions} \
+         cone_over_body={:.2} cone_over_union={:.2} union_over_body={:.2} \
          block_over_cone={:.2} block_instructions={block_instructions}",
         cone_instructions as f64 / body_instructions.max(1) as f64,
+        cone_instructions as f64 / union_instructions.max(1) as f64,
         union_instructions as f64 / body_instructions.max(1) as f64,
         block_instructions as f64 / cone_instructions.max(1) as f64,
     );
