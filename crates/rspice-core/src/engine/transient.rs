@@ -7131,7 +7131,7 @@ impl Engine {
                     TruncationStep {
                         method: current_method,
                         trap_order: step_trap_order,
-                        dt: dt,
+                        dt,
                     },
                     mosfet_history.accepted_dt_prev,
                     mosfet_history.accepted_dt_prev_prev,
