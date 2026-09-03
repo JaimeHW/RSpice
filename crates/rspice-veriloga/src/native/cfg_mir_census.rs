@@ -44,6 +44,25 @@
 //! is the estate's own criterion for two computations being the same
 //! derivative: see [`DERIVATIVE_AGREEMENT`].
 //!
+//! # Where the derivative criterion is asked
+//!
+//! Not in `f64`. Both cones are walked a second time in
+//! [`DoubleDouble`](super::double_double::DoubleDouble) — the CFG one by the
+//! reference interpreter, the shipped one by
+//! [`PostfixWalk`](super::mir_postfix::PostfixWalk) — and the agreement
+//! criterion is asked of *those*, where a condition number of `5e7` still
+//! leaves twenty-four digits and the arithmetic is no longer part of the
+//! answer. Each route's `f64` rounding error is then a *measurement*,
+//! `|value_f64 − value_dd|`, reported per entry and per model. See
+//! [`Comparison`].
+//!
+//! Two verdicts come out of that and they are different findings. The agreement
+//! criterion asks whether the two chain rules compute one real derivative;
+//! [`Comparison::lost_significance`] asks whether either route's `f64`
+//! evaluation of it has a correct digit left. A route can fail the second while
+//! passing the first — the `max` defect this estate actually had did exactly
+//! that — so both are asserted and the message says which.
+//!
 //! Either bound only decides an entry the census holds the two routes to at
 //! all. An entry nine or more orders below the largest magnitude of its own
 //! kind anywhere in the model carries no significant figures, and is measured
@@ -71,13 +90,16 @@
 //! `#[ignore]`d: this is release-qualification work. Run it with
 //! `--release --features native -- --ignored --nocapture`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use super::census_models::{CensusModel, shipped_census_models_matching};
 use super::cfg_census::{OperatingPoint, deviation};
-use super::cfg_error_lane::{ErrorBounded, lift_inputs};
+use super::double_double::{DoubleDouble, lift_inputs};
+use super::mir_postfix::PostfixWalk;
 use crate::canonical_ir::cfg_lower::CfgModel;
-use crate::canonical_ir::{ValueId, differentiate, evaluate_cfg, prune_cfg_to_outputs};
+use crate::canonical_ir::{
+    CfgScalar, ValueId, differentiate, evaluate_cfg, prune_cfg_to_outputs,
+};
 use crate::jit::cfg_lanes::scalarize_lanes;
 use crate::jit::cfg_plan_builder::{
     CfgNoiseScope, CfgPlanEntry, CfgPlanRefusal, ShippedColumnLanes,
@@ -155,62 +177,66 @@ const REASSOCIATION_BUDGET: f64 = 1.0;
 /// the two chain rules rather than a number to raise.
 const DERIVATIVE_AGREEMENT: f64 = 1.0e-9;
 
-/// How many times the cone's own rounding bound two chain rules may differ by.
+/// The unit round-off, `u = f64::EPSILON / 2`.
 ///
-/// # Why nine figures is not always askable
+/// Used only as the denominator's floor in the noise ratio the census reports,
+/// so an entry both routes evaluate exactly does not divide by zero.
+const UNIT_ROUNDOFF: f64 = f64::EPSILON / 2.0;
+
+/// Where the criterion is asked, and why `f64` is the wrong place to ask it.
 ///
 /// [`DERIVATIVE_AGREEMENT`] is a figure about *significance*, and it says
-/// nothing about whether the arithmetic can reach it. A cone that forms a
-/// factor at `3e7` and lands it at `5e-9` has a condition number near `5e7`;
-/// one unit round-off amplified by that is `5.5e-9`, so no `f64` evaluation of
-/// that cone — neither route's, nor a third one — carries nine figures, and two
-/// correct evaluations of it differ in the eighth. `l_utsoi_102`'s
-/// `jacobians[36][6]` is exactly that entry, and W-F10c established that
-/// neither route is wrong there: the complex-step oracle sits *outside* both,
-/// collinear with them, `7.4e-9` from one and `1.3e-8` from the other.
+/// nothing about whether `f64` can reach it. A cone that forms a factor at
+/// `3e7` and lands it at `5e-9` has a condition number near `5e7`; one unit
+/// round-off amplified by that is `5.5e-9`, so no `f64` evaluation of that cone
+/// — neither route's, nor a third one — carries nine figures, and two correct
+/// evaluations of it differ in the eighth. `l_utsoi_102`'s `jacobians[36][6]`
+/// is exactly that entry, and W-F10c established that neither route is wrong
+/// there: the complex-step oracle sits *outside* both, collinear with them.
 ///
-/// Holding such an entry to `1e-9` fails a correct computation for being
-/// evaluated in floating point. Widening the constant to admit it would be a
-/// tolerance fitted to that run — the thing this census forbids. What is
-/// derived instead is the entry's *own* floor, measured from its own
-/// arithmetic: see [`super::cfg_error_lane`], which walks the CFG cone once per
-/// operating point carrying a first-order forward rounding bound `E` alongside
-/// each value.
+/// Holding such an entry to `1e-9` in `f64` fails a correct computation for
+/// being evaluated in floating point, and widening the constant to admit it
+/// would be a tolerance fitted to that run. W-F10c-2 tried a third way — a
+/// first-order forward rounding *bound*, used as a floor under the criterion —
+/// and it failed for a reason worth keeping written down: a scalar bound adds
+/// the magnitudes of two operands' errors, while the subtraction that follows
+/// *cancels* them, so on the one cone that needed it the bound came out at
+/// four times the entry itself and decided nothing.
 ///
-/// # The constant, and where it comes from
+/// # What is asked instead
 ///
-/// The criterion becomes
+/// Both cones are evaluated a second time in [`DoubleDouble`], and the
+/// criterion is asked there:
 ///
-/// > `|mir − cfg| ≤ max(DERIVATIVE_AGREEMENT · |entry|, K · E)`
+/// > `|mir_dd − cfg_dd| ≤ DERIVATIVE_AGREEMENT · |entry|`
 ///
-/// and `K` is four, as two factors of two:
+/// which is [`DERIVATIVE_AGREEMENT`] with nothing added to it. That is not a
+/// weaker question than the `f64` one but a *different* one, and the right one:
+/// two implementations of the chain rule either compute the same real quantity
+/// or they do not, and at `u_dd ≈ 6e-33` a condition number of `5e7` still
+/// leaves twenty-four digits, so the arithmetic is no longer part of the
+/// answer. A mis-differentiated entry is orders outside this criterion exactly
+/// as it was outside the `f64` one — see
+/// [`the_criterion_rejects_a_mis_differentiated_max`].
 ///
-/// 1. **The difference of two evaluations is at most the sum of their errors.**
-///    `|mir − cfg| ≤ |mir − exact| + |cfg − exact| = E_mir + E_cfg ≤ 2 ·
-///    max(E_mir, E_cfg)`. `E_cfg` is what the lane measures, and it is the CFG
-///    route's own bound exactly: [`super::cfg_census`] pins the block program
-///    bit-identical to the interpreter on all forty-three shipped modules with
-///    an empty allowlist, so the interpreted cone *is* the compiled one.
-///    `E_mir` is not measured — there is no error lane over a postfix stream —
-///    but it is not free either: both routes evaluate the same real quantity,
-///    so they share its condition number, and the condition number is what
-///    dominates a bound whenever this floor binds at all. Where it does not
-///    dominate, both bounds are a few ulp and the floor is far under
-///    [`DERIVATIVE_AGREEMENT`], which decides instead.
-/// 2. **The per-operation charge is one unit round-off.** That is exact for the
-///    correctly-rounded operations, and it is the nominal charge for the
-///    library transcendentals, whose worst-case error is about one unit in the
-///    last place — twice `u`. Charging the difference here rather than inside
-///    every operation keeps the lane's rule per op the textbook one.
+/// The `f64` figures do not disappear; they stop being the criterion and become
+/// the *measurement*. Each entry reports `E_mir = |mir_f64 − mir_dd|` and
+/// `E_cfg = |cfg_f64 − cfg_dd|`, each route's actual rounding error at that
+/// entry, and their ratio. Those are reported per entry and per model and
+/// asserted nowhere: a CFG route noisier than the shipped route at some entry
+/// is a finding for the lane that flips the switch, not a failure of this
+/// census.
 ///
-/// Neither factor is read off a measurement, and the floor is not a constant:
-/// it is `K` times a number the entry's own cone produces at the bias it is
-/// evaluated at. A well-conditioned entry gets a floor of tens of ulp — orders
-/// under `DERIVATIVE_AGREEMENT`, so nothing changes for it — and a wrong
-/// derivative is orders *over* any rounding bound, so it still fails.
-const AGREEMENT_ERROR_FACTOR: f64 = 4.0;
-
-/// One entry's comparison.
+/// # Where the reference is unavailable
+///
+/// A `DoubleDouble` reference needs *both* walks. The CFG side needs a cone the
+/// reference interpreter can walk (see [`entry_reference`]) and the shipped
+/// side needs a postfix stream [`PostfixWalk`] implements every operation of.
+/// Where either is missing the entry falls back to the `f64` deviation against
+/// [`DERIVATIVE_AGREEMENT`] — the criterion this census carried before any of
+/// this — and is counted as [`Tally::reference_missing`] so the class cannot
+/// grow unseen.
+#[derive(Clone, Copy)]
 struct Comparison {
     entry: CfgPlanEntry,
     point: usize,
@@ -218,15 +244,10 @@ struct Comparison {
     cfg: f64,
     operations: usize,
     deviation: f64,
-    /// The CFG cone's own first-order rounding bound at this point, and the
-    /// value the interpreter reached carrying it.
-    ///
-    /// `None` where no bound could be taken: an entry the CFG route found
-    /// structurally absent, a model whose CFG this census could not rebuild, or
-    /// a point the interpreter refused. Absent means the floor does not apply,
-    /// which leaves the entry held to the stricter criterion rather than the
-    /// looser one.
-    conditioning: Option<ErrorBounded>,
+    /// The shipped route's cone re-walked in double-double.
+    mir_dd: Option<DoubleDouble>,
+    /// The CFG route's cone re-walked in double-double.
+    cfg_dd: Option<DoubleDouble>,
 }
 
 impl Comparison {
@@ -239,99 +260,142 @@ impl Comparison {
         )
     }
 
-    /// The scale a relative deviation is taken against — the same one
-    /// [`deviation`] uses, so a bound expressed here is comparable with it.
-    fn magnitude(&self) -> f64 {
-        self.mir.abs().max(self.cfg.abs())
+    /// Both routes' cones re-walked in double-double, where both walks exist.
+    fn references(&self) -> Option<(DoubleDouble, DoubleDouble)> {
+        Some((self.mir_dd?, self.cfg_dd?))
     }
 
-    /// `K · E`, as a share of the entry — the floor the arithmetic itself puts
-    /// under the agreement criterion. See [`AGREEMENT_ERROR_FACTOR`].
+    /// `|mir_dd − cfg_dd|` as a share of the entry, taken *in* double-double so
+    /// a difference below the `f64` resolution is still a number.
     ///
-    /// Zero — meaning no floor, and [`DERIVATIVE_AGREEMENT`] standing
-    /// unweakened — in three cases, each of which is the analysis declining to
-    /// say anything rather than the entry being fine:
-    ///
-    /// * no bound was taken, because the interpreter could not walk the cone;
-    /// * the bound is not finite, because the cone left the reals;
-    /// * the bound is at or above the entry's own magnitude.
-    ///
-    /// The third is a *ceiling on the floor*, and it is where the criterion
-    /// stops being one. A floor of `1` admits every reading of the entry:
-    /// zero, the opposite sign, a derivative wrong by a factor of two. The
-    /// point of a floor is to hold an entry to what its arithmetic can deliver,
-    /// and an arithmetic that by its own analysis delivers no significant
-    /// figure licenses nothing to compare against. So the census refuses the
-    /// floor there and says so, rather than passing an entry on a bound that
-    /// could not have failed it.
-    fn conditioning_floor(&self) -> f64 {
-        let Some(bound) = self.conditioning else {
-            return 0.0;
-        };
-        let magnitude = self.magnitude();
-        if !bound.error.is_finite() || magnitude == 0.0 {
-            return 0.0;
+    /// This is what the criterion is asked of for a derivative entry. It is not
+    /// an estimate of the `f64` deviation and is usually orders below it: the
+    /// `f64` deviation is dominated by the two routes' rounding, and this one
+    /// has none of it left.
+    fn reference_deviation(&self) -> Option<f64> {
+        let (mir, cfg) = self.references()?;
+        let scale = mir.to_f64().abs().max(cfg.to_f64().abs());
+        let difference = mir.absolute_distance_to(cfg.to_f64());
+        if difference == 0.0 {
+            return Some(0.0);
         }
-        let floor = AGREEMENT_ERROR_FACTOR * bound.error / magnitude;
-        if floor >= 1.0 { 0.0 } else { floor }
+        if scale == 0.0 {
+            return Some(f64::INFINITY);
+        }
+        Some(difference / scale)
     }
 
-    /// Whether the bound came back saying the entry has no significant figure,
-    /// so no floor is applied. Counted and named: a class that grew would
-    /// otherwise show up only as entries quietly held to the stricter
-    /// criterion.
-    fn conditioning_abstains(&self) -> bool {
-        let Some(bound) = self.conditioning else {
-            return false;
-        };
-        let magnitude = self.magnitude();
-        magnitude > 0.0
-            && (!bound.error.is_finite() || AGREEMENT_ERROR_FACTOR * bound.error / magnitude >= 1.0)
+    /// `E_mir = |mir_f64 − mir_dd|`, relative: the shipped route's own rounding
+    /// error at this entry, measured rather than bounded.
+    fn mir_error(&self) -> Option<f64> {
+        Some(self.mir_dd?.relative_distance_to(self.mir))
+    }
+
+    /// `E_cfg`, the same for the CFG route.
+    fn cfg_error(&self) -> Option<f64> {
+        Some(self.cfg_dd?.relative_distance_to(self.cfg))
+    }
+
+    /// `E_cfg / (E_mir + u)`: how much noisier the CFG route's arithmetic is
+    /// than the shipped route's at this entry.
+    ///
+    /// The `u` in the denominator is not slack. Two routes that both evaluate
+    /// an entry exactly give `0/0`, and an entry where only the shipped route
+    /// is exact would otherwise report an infinite ratio for a difference of
+    /// one unit in the last place. Charging the denominator one unit round-off
+    /// makes the ratio read "in units of the smallest error there is".
+    fn noise_ratio(&self) -> Option<f64> {
+        let mir = self.mir_error()?;
+        let cfg = self.cfg_error()?;
+        Some(cfg / (mir + UNIT_ROUNDOFF))
+    }
+
+    /// Whether either route's `f64` evaluation of this entry has no correct
+    /// digit left in it.
+    ///
+    /// # Why this is a separate verdict from the agreement one
+    ///
+    /// Asking the agreement question in double-double answers whether the two
+    /// chain rules compute the same *real* derivative, and that is the question
+    /// worth asking — but it is not the only way a route can be wrong, and the
+    /// defect this estate actually had is the other way. The pre-`31be31f82`
+    /// `max` rule `db + (da − db)·c` is algebraically `da`, and it is `da` in
+    /// double-double too, because `da − db` is exact there. What it is not is
+    /// `da` in `f64`: at `da = 1e-9` and `db = 1e9` the subtraction returns
+    /// `−db` and the addition returns zero. The algebra agrees; the arithmetic
+    /// lost everything.
+    ///
+    /// A measurement sees that where a bound could not and where the agreement
+    /// criterion does not look: `E = |value_f64 − value_dd| / |value_dd|` comes
+    /// out at exactly one, which is the statement "this evaluation differs from
+    /// the quantity it computes by the whole of that quantity". A value with no
+    /// significant figure is not a reading of the entry, whichever route
+    /// produced it, and no comparison against it means anything.
+    ///
+    /// One is the threshold and it is a definition rather than a fit: below it
+    /// a value carries some fraction of a digit, at it the value carries none.
+    /// Every entry is reported with its `E` either way, so an entry drifting
+    /// toward it is visible long before it arrives.
+    fn lost_significance(&self) -> bool {
+        [self.mir_error(), self.cfg_error()]
+            .into_iter()
+            .flatten()
+            .any(|error| !(error < 1.0))
+    }
+
+    /// The deviation the criterion is applied to: the double-double one for a
+    /// derivative entry that has both references, and the `f64` one otherwise.
+    fn judged_deviation(&self) -> f64 {
+        if self.is_derivative() {
+            if let Some(deviation) = self.reference_deviation() {
+                return deviation;
+            }
+        }
+        self.deviation
     }
 
     fn bound(&self) -> f64 {
         let reassociation = REASSOCIATION_BUDGET * self.operations as f64 * f64::EPSILON;
         if self.is_derivative() {
-            reassociation
-                .max(DERIVATIVE_AGREEMENT)
-                .max(self.conditioning_floor())
+            reassociation.max(DERIVATIVE_AGREEMENT)
         } else {
             reassociation
         }
     }
 
-    /// Which of the three the bound came out of, which is the reading a per-
-    /// module line has to carry: an entry decided by the floor is one whose own
-    /// arithmetic cannot reach nine figures.
+    /// Which question was asked, which is the reading a per-module line has to
+    /// carry: an entry judged in `f64` is one whose reference is missing.
     fn criterion(&self) -> &'static str {
         if !self.is_derivative() {
             return "reassociation";
         }
-        let reassociation = REASSOCIATION_BUDGET * self.operations as f64 * f64::EPSILON;
-        if self.conditioning_floor() > reassociation.max(DERIVATIVE_AGREEMENT) {
-            "conditioning-floor"
+        if self.references().is_some() {
+            "double-double"
         } else {
             "derivative-agreement"
         }
     }
 
     fn describe(&self) -> String {
-        let (error, relative) = match self.conditioning {
-            Some(bound) => (bound.error, bound.relative()),
-            None => (f64::NAN, f64::NAN),
-        };
+        let optional = |value: Option<f64>| value.unwrap_or(f64::NAN);
         format!(
-            "{} point={} mir={:.17e} cfg={:.17e} operations={} deviation={:.3e} bound={:.3e} \
-             criterion={} error={error:.3e} error_relative={relative:.3e} floor={:.3e}",
+            "{} point={} mir={:.17e} cfg={:.17e} operations={} deviation={:.3e} \
+             reference_deviation={:.3e} bound={:.3e} criterion={} mir_dd={:.17e} \
+             cfg_dd={:.17e} e_mir={:.3e} e_cfg={:.3e} noise_ratio={:.3e}",
             self.entry,
             self.point,
             self.mir,
             self.cfg,
             self.operations,
             self.deviation,
+            optional(self.reference_deviation()),
             self.bound(),
             self.criterion(),
-            self.conditioning_floor(),
+            optional(self.mir_dd.map(DoubleDouble::to_f64)),
+            optional(self.cfg_dd.map(DoubleDouble::to_f64)),
+            optional(self.mir_error()),
+            optional(self.cfg_error()),
+            optional(self.noise_ratio()),
         )
     }
 }
@@ -376,21 +440,24 @@ struct Tally {
     /// kind anywhere in the model at that operating point: measured and
     /// printed, not asserted. See [`MATRIX_SIGNIFICANCE`].
     insignificant: usize,
-    /// Derivative comparisons whose bound came from the cone's own rounding
-    /// floor rather than from [`DERIVATIVE_AGREEMENT`]. See
-    /// [`AGREEMENT_ERROR_FACTOR`].
-    floor_decided: usize,
-    /// Derivative comparisons that carry a finite rounding bound at all.
-    conditioned: usize,
-    /// Derivative comparisons whose cone's bound left the reals, so no floor
-    /// applies and the stricter criterion stands.
-    conditioning_not_finite: usize,
-    /// Derivative comparisons whose bound came back at or above the entry itself,
-    /// so no floor was applied. See `Comparison::conditioning_floor`.
-    conditioning_abstained: usize,
-    /// Models whose CFG this census could not rebuild for the error lane, so
-    /// every derivative comparison in them is held to the stricter criterion.
-    models_without_error_lane: usize,
+    /// Derivative comparisons judged in double-double, which is every one that
+    /// has both routes' references.
+    referenced: usize,
+    /// Derivative comparisons with no double-double reference on one side or
+    /// the other, held to the `f64` criterion instead.
+    reference_missing: usize,
+    /// Models whose CFG this census could not rebuild for the reference walk,
+    /// so every derivative comparison in them is judged in `f64`.
+    models_without_reference: usize,
+    /// Entries whose shipped postfix stream this census's walker could not
+    /// evaluate, by operation name.
+    walker_refusals: BTreeSet<&'static str>,
+    /// Entries where the walker's own `f64` walk disagreed with the machine
+    /// code it is modelling. Any is a finding about the walker.
+    walker_disagreements: usize,
+    /// Significant entries one route evaluated with no correct digit in it.
+    /// See `Comparison::lost_significance`.
+    lost_entries: usize,
 }
 
 /// What a noise magnitude the CFG route took at the *exit block*, under a
@@ -693,8 +760,8 @@ impl Storage {
     }
 }
 
-/// Every derivative entry's rounding bound, one map per operating point.
-type ConditioningBounds = Vec<HashMap<CfgPlanEntry, ErrorBounded>>;
+/// Every derivative entry's double-double value, one map per operating point.
+type ReferenceValues = Vec<HashMap<CfgPlanEntry, DoubleDouble>>;
 
 /// Fill `bounds` for the named equations off one lowering, and say which of
 /// them the interpreter refused.
@@ -708,11 +775,11 @@ type ConditioningBounds = Vec<HashMap<CfgPlanEntry, ErrorBounded>>;
 /// module to a single unevaluable value. The row is where the plan builder cuts
 /// for the same reason, and it is the granularity at which a refusal is worth
 /// reporting.
-fn row_conditioning(
+fn row_reference(
     shipped: &CensusModel,
     mut cfg: CfgModel,
     wanted: &[usize],
-    bounds: &mut ConditioningBounds,
+    bounds: &mut ReferenceValues,
 ) -> Vec<usize> {
     let model = &shipped.model;
     let artifact = &shipped.canonical_ir;
@@ -828,7 +895,7 @@ fn row_conditioning(
                 Ok(snapshot) => walked.push(snapshot),
                 Err(error) => {
                     println!(
-                        "cfg-mir model={} error_lane=refused stamp={stamp_index} detail={error}",
+                        "cfg-mir model={} reference=refused stamp={stamp_index} detail={error}",
                         shipped.name
                     );
                     break;
@@ -883,25 +950,25 @@ fn row_conditioning(
 /// another lane's file. So the steps are repeated here — lower, store charges,
 /// differentiate, scalarize — from the same artifact by the same deterministic
 /// passes, which is what makes the entry-to-value map the same one.
-fn entry_conditioning(shipped: &CensusModel) -> Option<ConditioningBounds> {
+fn entry_reference(shipped: &CensusModel) -> Option<ReferenceValues> {
     let artifact = &shipped.canonical_ir;
-    let mut bounds: ConditioningBounds = vec![HashMap::new(); CENSUS_POINTS.len()];
+    let mut bounds: ReferenceValues = vec![HashMap::new(); CENSUS_POINTS.len()];
     let wanted: Vec<usize> = (0..shipped.model.stamp_programs.len()).collect();
 
     let executable =
         CfgModel::from_hir_for_executable_backend(&artifact.hir, &artifact.mir).ok()?;
-    let refused = row_conditioning(shipped, executable, &wanted, &mut bounds);
+    let refused = row_reference(shipped, executable, &wanted, &mut bounds);
     if !refused.is_empty() {
         println!(
-            "cfg-mir model={} error_lane=interpretable equations={}",
+            "cfg-mir model={} reference=interpretable equations={}",
             shipped.name,
             refused.len()
         );
         if let Ok(interpretable) = CfgModel::from_hir(&artifact.hir, &artifact.mir) {
-            let still = row_conditioning(shipped, interpretable, &refused, &mut bounds);
+            let still = row_reference(shipped, interpretable, &refused, &mut bounds);
             if !still.is_empty() {
                 println!(
-                    "cfg-mir model={} error_lane=unbounded equations={}",
+                    "cfg-mir model={} reference=unavailable equations={}",
                     shipped.name,
                     still.len()
                 );
@@ -911,40 +978,140 @@ fn entry_conditioning(shipped: &CensusModel) -> Option<ConditioningBounds> {
     Some(bounds)
 }
 
-/// The distribution of `E / |value|` over one model's derivative cones.
+/// Re-walk the shipped plan's postfix streams in double-double at one point.
 ///
-/// The tightness reading, and the one that decides whether the floor is a
-/// derived bound or slack in disguise: a well-conditioned entry has to come out
-/// at tens of units in the last place, not orders above.
+/// # Why the walker's own `f64` walk runs alongside
+///
+/// The reference is only a reference if the thing it is a reference *for* is
+/// the same computation. [`PostfixWalk`] reads the operation semantics off
+/// [`x64::codegen`](crate::native::x64), but reading them off and reproducing
+/// them are different claims, so the same streams are walked twice: once in
+/// `f64`, where the answer has to be the machine code's own, and once in
+/// double-double, which is the value that is kept. An entry whose `f64` walk
+/// disagrees with the compiled reading gets *no* reference — a walker that does
+/// not model an entry cannot be its reference — and the disagreement is
+/// counted.
+///
+/// # Only the first assignment pass
+///
+/// The census fills its `f64` variable array with `run_assignments` alone, so
+/// that is what this mirrors. Adding `post_assignments` here would give the
+/// double-double walk variables the `f64` walk it is measuring never had, and
+/// `E_mir` would then be the distance between two different computations rather
+/// than one computation's rounding.
+fn mir_reference(
+    plan: &crate::jit::model_plan::NativeModelPlan,
+    point: &super::mir_postfix::MirPoint<'_>,
+    variables: usize,
+    prelude_slots: usize,
+    wanted: &[(CfgPlanEntry, f64)],
+    tally: &mut Tally,
+) -> HashMap<CfgPlanEntry, DoubleDouble> {
+    let mut narrow: PostfixWalk<'_, f64> = PostfixWalk::new(point, variables, prelude_slots);
+    let mut wide: PostfixWalk<'_, DoubleDouble> = PostfixWalk::new(point, variables, prelude_slots);
+    narrow.fill_variables(&plan.assignments);
+    wide.fill_variables(&plan.assignments);
+
+    let mut values = HashMap::new();
+    for (entry, compiled) in wanted {
+        let Some(PlanProgram::Postfix(program)) = entry_program(plan, *entry) else {
+            continue;
+        };
+        let (Ok(walked), Ok(reference)) = (narrow.run(program), wide.run(program)) else {
+            continue;
+        };
+        // Bit-identical, or the walker is not modelling this entry. `total_cmp`
+        // rather than `==` so two NaNs count as the agreement they are.
+        if walked.total_cmp(compiled) != std::cmp::Ordering::Equal {
+            tally.walker_disagreements += 1;
+            println!(
+                "cfg-mir walker_disagreement entry={entry} walked={walked:.17e} \
+                 compiled={compiled:.17e}"
+            );
+            continue;
+        }
+        values.insert(*entry, reference);
+    }
+    tally.walker_refusals.extend(narrow.refusals());
+    tally.walker_refusals.extend(wide.refusals());
+    values
+}
+
+/// One plan entry's program, whichever form its route produced.
+fn entry_program(
+    plan: &crate::jit::model_plan::NativeModelPlan,
+    entry: CfgPlanEntry,
+) -> Option<&PlanProgram> {
+    match entry {
+        CfgPlanEntry::StampValue(stamp) => plan.stamp_values.get(stamp),
+        CfgPlanEntry::Jacobian(stamp, index) => {
+            plan.jacobians.get(stamp).and_then(|row| row.get(index))
+        }
+        CfgPlanEntry::ReactiveJacobian(stamp, index) => plan
+            .reactive_jacobians
+            .get(stamp)
+            .and_then(|row| row.get(index)),
+        CfgPlanEntry::NoisePsd(source) => plan.noise_psd.get(source),
+        CfgPlanEntry::NoiseExponent(source) => {
+            plan.noise_exponents.get(source).and_then(Option::as_ref)
+        }
+    }
+}
+
+/// The distribution of one route's measured rounding error over a model's
+/// derivative entries, and of the two routes' ratio.
+///
+/// The reading the flip's pre-flight wants: a CFG route whose arithmetic is
+/// systematically noisier than the shipped route's is a finding even where both
+/// are far inside the criterion.
 #[derive(Default)]
-struct ConditioningSpread {
+struct ReferenceSpread {
+    mir: Vec<f64>,
+    cfg: Vec<f64>,
     ratios: Vec<f64>,
 }
 
-impl ConditioningSpread {
-    fn push(&mut self, bound: ErrorBounded) {
-        let relative = bound.relative();
-        if relative.is_finite() {
-            self.ratios.push(relative);
+impl ReferenceSpread {
+    fn push(&mut self, comparison: &Comparison) {
+        for (values, reading) in [
+            (&mut self.mir, comparison.mir_error()),
+            (&mut self.cfg, comparison.cfg_error()),
+            (&mut self.ratios, comparison.noise_ratio()),
+        ] {
+            if let Some(reading) = reading
+                && reading.is_finite()
+            {
+                values.push(reading);
+            }
         }
     }
 
-    fn describe(&mut self) -> String {
-        if self.ratios.is_empty() {
-            return "conditioning[none]".to_string();
+    fn quantiles(values: &mut Vec<f64>) -> (f64, f64, f64) {
+        if values.is_empty() {
+            return (f64::NAN, f64::NAN, f64::NAN);
         }
-        self.ratios.sort_unstable_by(f64::total_cmp);
-        let ulp = |ratio: f64| ratio / f64::EPSILON;
+        values.sort_unstable_by(f64::total_cmp);
+        (
+            values[0],
+            values[values.len() / 2],
+            values[values.len() - 1],
+        )
+    }
+
+    fn describe(&mut self) -> String {
+        if self.mir.is_empty() && self.cfg.is_empty() {
+            return "reference[none]".to_string();
+        }
+        let count = self.mir.len().max(self.cfg.len());
+        let (_, mir_median, mir_max) = Self::quantiles(&mut self.mir);
+        let (_, cfg_median, cfg_max) = Self::quantiles(&mut self.cfg);
+        let (_, ratio_median, ratio_max) = Self::quantiles(&mut self.ratios);
         format!(
-            "conditioning[n={} min={:.3e} median={:.3e} max={:.3e} min_ulp={:.1} \
-             median_ulp={:.1} max_ulp={:.1}]",
-            self.ratios.len(),
-            self.ratios[0],
-            self.ratios[self.ratios.len() / 2],
-            self.ratios[self.ratios.len() - 1],
-            ulp(self.ratios[0]),
-            ulp(self.ratios[self.ratios.len() / 2]),
-            ulp(self.ratios[self.ratios.len() - 1]),
+            "reference[n={count} e_mir_median={mir_median:.3e} e_mir_max={mir_max:.3e} \
+             e_mir_max_ulp={:.1} e_cfg_median={cfg_median:.3e} e_cfg_max={cfg_max:.3e} \
+             e_cfg_max_ulp={:.1} ratio_median={ratio_median:.3e} ratio_max={ratio_max:.3e}]",
+            mir_max / f64::EPSILON,
+            cfg_max / f64::EPSILON,
         )
     }
 }
@@ -956,18 +1123,18 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
     let model = &shipped.model;
     let artifact = &shipped.canonical_ir;
 
-    // The error lane first, and released before either plan is compiled: both
-    // passes build the same differentiated body, and holding two of them is
-    // what puts this census into paging on the largest modules.
-    let conditioning = entry_conditioning(shipped);
-    if conditioning.is_none() {
-        tally.models_without_error_lane += 1;
+    // The CFG reference walk first, and released before either plan is
+    // compiled: both passes build the same differentiated body, and holding two
+    // of them is what puts this census into paging on the largest modules.
+    let cfg_reference = entry_reference(shipped);
+    if cfg_reference.is_none() {
+        tally.models_without_reference += 1;
         println!(
-            "cfg-mir model={module} error_lane=unavailable; every derivative entry is held to \
-             the unconditioned criterion"
+            "cfg-mir model={module} reference=unavailable; every derivative entry is judged in \
+             f64"
         );
     }
-    let conditioning = conditioning.unwrap_or_else(|| vec![HashMap::new(); CENSUS_POINTS.len()]);
+    let cfg_reference = cfg_reference.unwrap_or_else(|| vec![HashMap::new(); CENSUS_POINTS.len()]);
 
     // `Cfg`, not the `Postfix` scope production takes: the whole point of this
     // census is to measure the noise slice the default plan declines to use, so
@@ -1070,11 +1237,18 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
     // several entries and at several points, and reporting one made the totals
     // and the message disagree: `over_bound=4` under a single named entry.
     let mut over: Vec<String> = Vec::new();
-    let mut floor_decided_here = 0_usize;
-    let mut floor_worst: Option<Comparison> = None;
-    let mut floor_worst_deviation = 0.0_f64;
-    let mut abstained_here = 0_usize;
-    let mut spread = ConditioningSpread::default();
+    // Entries a route evaluated with no significant figure left. A second
+    // failure class rather than a second reason for the first one: they are
+    // different findings and the message has to say which.
+    let mut lost: Vec<String> = Vec::new();
+    let mut referenced_here = 0_usize;
+    let mut missing_here = 0_usize;
+    // The three entries where the CFG route's measured rounding is furthest
+    // above the shipped route's. Named rather than counted, because the reading
+    // the flip's pre-flight wants is *which* entry, not how many.
+    let mut noisiest: Vec<Comparison> = Vec::new();
+    let mut noisiest_floor = 0.0_f64;
+    let mut spread = ReferenceSpread::default();
     let mut nonzero_structural: Option<Comparison> = None;
     let mut guarded_noise_worst = 0.0_f64;
     let mut guarded_noise_case: Option<Comparison> = None;
@@ -1119,6 +1293,30 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
         }
         let scales = MatrixScales::of(&readings);
 
+        // The shipped route's reference, taken once for this point: the
+        // assignment pass is most of the work and every entry shares it. Only
+        // the entries the CFG side has a reference for are asked, because a
+        // reference on one side alone answers nothing.
+        let cfg_here = cfg_reference.get(index);
+        let wanted: Vec<(CfgPlanEntry, f64)> = readings
+            .iter()
+            .filter(|(entry, ..)| cfg_here.is_some_and(|values| values.contains_key(entry)))
+            .map(|(entry, mir, _)| (*entry, *mir))
+            .collect();
+        let mir_here = if wanted.is_empty() {
+            HashMap::new()
+        } else {
+            let walked = point.mir_point(&storage.currents, &storage.branch_currents);
+            mir_reference(
+                &mir_plan,
+                &walked,
+                variables.len(),
+                mir_storage.prelude_slots,
+                &wanted,
+                tally,
+            )
+        };
+
         for (entry, mir, cfg) in readings {
             compared += 1;
             let operations = entry_operations(&mir_plan, &cfg_plan.plan, entry);
@@ -1129,26 +1327,20 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
                 cfg,
                 operations,
                 deviation: deviation(mir, cfg).unwrap_or(0.0),
-                conditioning: conditioning
-                    .get(index)
-                    .and_then(|point| point.get(&entry))
-                    .copied(),
+                mir_dd: mir_here.get(&entry).copied(),
+                cfg_dd: cfg_here.and_then(|values| values.get(&entry)).copied(),
             };
             if comparison.deviation == 0.0 {
                 exact += 1;
             }
             if comparison.is_derivative() {
-                if comparison.conditioning_abstains() {
-                    tally.conditioning_abstained += 1;
-                    abstained_here += 1;
-                }
-                match comparison.conditioning {
-                    Some(bound) if bound.error.is_finite() => {
-                        tally.conditioned += 1;
-                        spread.push(bound);
-                    }
-                    Some(_) => tally.conditioning_not_finite += 1,
-                    None => {}
+                if comparison.references().is_some() {
+                    tally.referenced += 1;
+                    referenced_here += 1;
+                    spread.push(&comparison);
+                } else {
+                    tally.reference_missing += 1;
+                    missing_here += 1;
                 }
             }
             if guarded_noise.contains(&entry) {
@@ -1194,31 +1386,45 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
                 continue;
             }
             let bound = comparison.bound();
-            if comparison.deviation > bound {
+            let judged = comparison.judged_deviation();
+            if judged > bound {
                 tally.over_bound += 1;
                 over.push(comparison.describe());
                 continue;
             }
-            let ratio = if bound > 0.0 {
-                comparison.deviation / bound
-            } else {
-                0.0
-            };
-            // The entries the floor decided are the census's own finding, so
-            // they are counted and the furthest-apart of them is named: by
-            // deviation rather than by share of the bound, because the reading
-            // that matters is how far two chain rules actually got, not which
-            // entry happened to have the narrowest floor.
-            if comparison.criterion() == "conditioning-floor" {
-                tally.floor_decided += 1;
-                floor_decided_here += 1;
-                if comparison.deviation >= floor_worst_deviation {
-                    floor_worst_deviation = comparison.deviation;
-                    floor_worst = Some(comparison);
-                }
-            } else if ratio >= worst_ratio {
+            // A separate verdict, and a separate failure: see
+            // `Comparison::lost_significance`.
+            if comparison.lost_significance() {
+                tally.lost_entries += 1;
+                lost.push(comparison.describe());
+                continue;
+            }
+            let ratio = if bound > 0.0 { judged / bound } else { 0.0 };
+            if ratio >= worst_ratio {
                 worst_ratio = ratio;
                 worst = Some(comparison);
+            }
+            // The entries where the CFG route's measured rounding is furthest
+            // above the shipped route's are the census's own finding, and they
+            // are kept by name rather than only counted: three of them, because
+            // one is a coincidence and the distribution says the rest.
+            if let Some(noise) = comparison.noise_ratio()
+                && noise.is_finite()
+                && noise > 1.0
+                && (noisiest.len() < 3 || noise > noisiest_floor)
+            {
+                noisiest.push(comparison);
+                noisiest.sort_by(|left, right| {
+                    right
+                        .noise_ratio()
+                        .unwrap_or(0.0)
+                        .total_cmp(&left.noise_ratio().unwrap_or(0.0))
+                });
+                noisiest.truncate(3);
+                noisiest_floor = noisiest
+                    .last()
+                    .and_then(Comparison::noise_ratio)
+                    .unwrap_or(0.0);
             }
         }
     }
@@ -1259,16 +1465,18 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
         },
     );
     println!(
-        "cfg-mir model={module} floor_decided={floor_decided_here} \
-         conditioning_abstained={abstained_here} {}{}",
+        "cfg-mir model={module} referenced={referenced_here} \
+         reference_missing={missing_here} {}",
         spread.describe(),
-        floor_worst
-            .as_ref()
-            .map(|case| format!(" floor_worst[{}]", case.describe()))
-            .unwrap_or_default(),
     );
+    for case in &noisiest {
+        println!("cfg-mir model={module} noisiest[{}]", case.describe());
+    }
     for case in &over {
         println!("cfg-mir model={module} OVER_BOUND[{case}]");
+    }
+    for case in &lost {
+        println!("cfg-mir model={module} LOST_SIGNIFICANCE[{case}]");
     }
     if let Some(case) = insignificant_case.as_ref() {
         println!(
@@ -1311,6 +1519,13 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
             "{module}: {} comparison(s) outside the bound:\n  {}",
             over.len(),
             over.join("\n  ")
+        ));
+    }
+    if !lost.is_empty() {
+        return Some(format!(
+            "{module}: {} significant entr(ies) a route evaluated with no correct digit:\n  {}",
+            lost.len(),
+            lost.join("\n  ")
         ));
     }
     None
@@ -1371,8 +1586,9 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
          runtime_errors={} structural_zeros={} over_bound={} nonzero_structural_zeros={} \
          structural_zeros_not_evaluable={} \
          guarded_noise_entries={} guarded_noise_agreed={} guarded_noise_third_value={} \
-         below_significance={} conditioned={} floor_decided={} conditioning_not_finite={} \
-         conditioning_abstained={} models_without_error_lane={}",
+         below_significance={} referenced={} reference_missing={} \
+         models_without_reference={} walker_disagreements={} lost_entries={} \
+         walker_refusals={:?}",
         tally.models,
         tally.built,
         tally.refused,
@@ -1389,15 +1605,25 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
         tally.guarded_noise_agreed,
         tally.guarded_noise_third_value,
         tally.insignificant,
-        tally.conditioned,
-        tally.floor_decided,
-        tally.conditioning_not_finite,
-        tally.conditioning_abstained,
-        tally.models_without_error_lane,
+        tally.referenced,
+        tally.reference_missing,
+        tally.models_without_reference,
+        tally.walker_disagreements,
+        tally.lost_entries,
+        tally.walker_refusals,
     );
     if filter.is_none() {
         assert_eq!(tally.models, 43, "the shipped census is 43 modules");
     }
+    // The walker is the reference's other half, and a reference that does not
+    // reproduce the machine code is not one. This is asserted rather than
+    // reported: an entry whose `f64` walk disagrees is already excluded from
+    // the measurement above, so a nonzero count means the walker has stopped
+    // modelling the backend and every figure it produced is suspect.
+    assert_eq!(
+        tally.walker_disagreements, 0,
+        "the postfix walker must reproduce the machine code it is the reference for"
+    );
     assert!(
         tally.comparisons > 0,
         "the census must actually execute both plans"
@@ -1557,7 +1783,8 @@ fn the_reassociation_bound_is_a_rounding_budget() {
         cfg: 1.0,
         operations,
         deviation: 0.0,
-        conditioning: None,
+        mir_dd: None,
+        cfg_dd: None,
     };
     let small = sized(10);
     let large = sized(20_000);
@@ -1609,22 +1836,35 @@ fn blended_max_derivative(da: f64, db: f64, takes_left: f64) -> f64 {
     db + (da - db) * takes_left
 }
 
-/// The conditioning floor must not admit a wrong derivative.
+/// The double-double criterion must still reject a wrong derivative.
 ///
-/// # Why this is the test that keeps the floor honest
+/// # Why this is the test that keeps the criterion honest
 ///
-/// [`AGREEMENT_ERROR_FACTOR`] widens the agreement criterion for an entry whose
-/// own arithmetic cannot deliver nine figures. A floor that widened everywhere
-/// would be a fitted tolerance wearing a derivation, so the thing to
-/// demonstrate is that it stays narrow exactly where it must: at a *selection*.
+/// Asking the question in a wider precision is only the right move if it is the
+/// *same* question. A criterion that admitted more would be a fitted tolerance
+/// wearing a derivation, so the thing to demonstrate is that the one defect
+/// this estate actually had is still orders outside it.
 ///
-/// A mask is `0.0` or `1.0` and carries no error, and `x * 1`, `x * 0` and
-/// `x + 0` commit none, so the lane's bound on `da*c + db*(1-c)` is *exactly
-/// zero* — it does not see `db` at all, whatever `db` is. The pre-`31be31f82`
-/// blend `db + (da - db)*c` returns exactly zero here, which is not a rounding
-/// distance from `da` under any bound: the floor contributes nothing and the
-/// criterion rejects the reading by nine orders on
-/// [`DERIVATIVE_AGREEMENT`] alone.
+/// The defect is the pre-`31be31f82` `max` rule, `db + (da − db)·c`, which is
+/// algebraically `da` when the mask is one and *exactly zero* in `f64` whenever
+/// `|db|` is large enough that `fl(da − db) == −db`.
+///
+/// # What the wider precision changes about this fixture, and why
+///
+/// It changes which of the two criteria catches it, and that is worth stating
+/// rather than hiding, because it says what each criterion is for. The blend is
+/// `da` in double-double — `da − db` is exact there, so the addition returns
+/// what the subtraction took away — so the *agreement* criterion passes it, and
+/// passes it correctly: the two chain rules do compute the same real
+/// derivative. What the blend does not do is evaluate that derivative in `f64`,
+/// and the measurement says so exactly: `E_mir = |0 − da| / |da| = 1`, an
+/// evaluation that differs from the quantity it computes by the whole of it.
+///
+/// That is [`Comparison::lost_significance`], and it is the sharper statement
+/// of the two. The old `f64` criterion failed this fixture for "the two chain
+/// rules disagree", which was not true; this one fails it for "the shipped
+/// route's evaluation of this entry has no correct digit", which is what
+/// happened.
 #[test]
 fn the_criterion_rejects_a_mis_differentiated_max() {
     use crate::canonical_ir::{AdSeed, CfgEvalInputs};
@@ -1675,23 +1915,24 @@ fn the_criterion_rejects_a_mis_differentiated_max() {
         ..Default::default()
     };
 
-    let snapshot =
-        evaluate_cfg(&pruned, &lift_inputs(&inputs)).expect("the error lane evaluates the cone");
-    let bound = snapshot.value(mapped[0]).expect("the entry has a value");
+    let snapshot = evaluate_cfg(&pruned, &lift_inputs(&inputs))
+        .expect("the reference walks the cone in double-double");
+    let reference = snapshot.value(mapped[0]).expect("the entry has a value");
 
     // The interpreter takes the winning arm, so the derivative is `ga`.
     assert!(
-        (bound.value / GA - 1.0).abs() < 1.0e-12,
+        (reference.to_f64() / GA - 1.0).abs() < 1.0e-12,
         "the fixture has to select the shallow arm: {:e}",
-        bound.value
+        reference.to_f64()
     );
-    // And the bound on it is zero: every step of a masked selection is exact,
-    // so the losing arm's eighteen-orders-larger derivative contributes
-    // nothing to the floor however large it is.
+    // And the reference is `ga` *exactly*: every step of a masked selection is
+    // exact, so the double-double walk and the `f64` walk agree to the last
+    // bit however large the losing arm's derivative is.
     assert_eq!(
-        bound.error, 0.0,
-        "a masked selection commits no rounding: {:e}",
-        bound.error
+        reference.relative_distance_to(GA),
+        0.0,
+        "a masked selection commits no rounding: {:.17e}",
+        reference.to_f64()
     );
 
     // The defect, in the arithmetic it was written in.
@@ -1701,49 +1942,64 @@ fn the_criterion_rejects_a_mis_differentiated_max() {
         "the blend has to actually lose the winner's derivative, or this proves nothing"
     );
 
+    // The blend's own reference, in the arithmetic the blend is written in.
+    // It is `da`, not zero: the subtraction that loses everything in `f64` is
+    // exact in double-double, so the addition gives back what it took.
+    let defect_reference = DoubleDouble::from_f64(GB)
+        .add(DoubleDouble::from_f64(GA).sub(DoubleDouble::from_f64(GB)));
+    assert_eq!(
+        defect_reference.relative_distance_to(GA),
+        0.0,
+        "the blend is algebraically right, which is what makes this the sharper test"
+    );
+
     let comparison = Comparison {
         entry: CfgPlanEntry::Jacobian(0, 0),
         point: 0,
         mir: defect,
-        cfg: bound.value,
+        cfg: reference.to_f64(),
         operations: pruned.values.len(),
-        deviation: deviation(defect, bound.value).unwrap_or(0.0),
-        conditioning: Some(bound),
+        deviation: deviation(defect, reference.to_f64()).unwrap_or(0.0),
+        mir_dd: Some(defect_reference),
+        cfg_dd: Some(reference),
     };
     println!("cfg-mir masked-max fixture: {}", comparison.describe());
+    assert_eq!(
+        comparison.criterion(),
+        "double-double",
+        "the fixture has to be judged in the wider precision: {}",
+        comparison.describe()
+    );
+    // The agreement criterion passes, and correctly: the two rules compute one
+    // derivative.
+    assert_eq!(comparison.reference_deviation(), Some(0.0));
+    assert!(comparison.judged_deviation() <= comparison.bound());
+    // The measurement is what rejects it, and it rejects it at the definition
+    // of "no significant figure" rather than at a number.
+    assert_eq!(comparison.mir_error(), Some(1.0));
+    assert_eq!(comparison.cfg_error(), Some(0.0));
     assert!(
-        comparison.deviation > comparison.bound(),
+        comparison.lost_significance(),
         "the criterion has to reject a zeroed derivative: {}",
         comparison.describe()
     );
-    assert_eq!(
-        comparison.criterion(),
-        "derivative-agreement",
-        "the floor must not be what decides this entry: {}",
-        comparison.describe()
-    );
-    assert!(
-        comparison.conditioning_floor() < 1.0e-12,
-        "the floor here is rounding, not slack: {:e}",
-        comparison.conditioning_floor()
-    );
-    // Fifteen orders outside the floor, nine outside the borrowed criterion.
-    assert!(
-        comparison.deviation / comparison.conditioning_floor() > 1.0e12,
-        "{:e}",
-        comparison.deviation / comparison.conditioning_floor()
-    );
+    // And the `f64` deviation the census used to judge on is the same one:
+    // nine orders, entirely explained by the shipped route's own rounding.
+    assert_eq!(comparison.deviation, 1.0);
 
-    // The same fixture with the correct rule agrees with itself, so what the
-    // assertions above reject is the defect and not the fixture.
-    let correct = bound.value;
+    // The same fixture with the correct rule agrees with itself and loses
+    // nothing, so what the assertions above reject is the defect and not the
+    // fixture.
     let agreeing = Comparison {
-        mir: correct,
-        cfg: correct,
-        deviation: deviation(correct, correct).unwrap_or(0.0),
+        mir: reference.to_f64(),
+        mir_dd: Some(reference),
+        deviation: 0.0,
         ..comparison
     };
-    assert!(agreeing.deviation <= agreeing.bound());
+    assert_eq!(agreeing.judged_deviation(), 0.0);
+    assert!(agreeing.judged_deviation() <= agreeing.bound());
+    assert!(!agreeing.lost_significance());
+    assert_eq!(agreeing.mir_error(), Some(0.0));
 }
 
 /// The significance scale is the whole matrix, and `bjt505_va` is why.
@@ -1771,7 +2027,8 @@ fn an_entry_far_below_its_matrix_is_measured_rather_than_asserted() {
         cfg,
         operations: 1202,
         deviation,
-        conditioning: None,
+        mir_dd: None,
+        cfg_dd: None,
     };
 
     let tiny = sized(CfgPlanEntry::Jacobian(21, 2), TINY_MIR, TINY_CFG, 3.234e-5);

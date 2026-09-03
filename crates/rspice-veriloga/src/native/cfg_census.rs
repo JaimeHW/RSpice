@@ -24,6 +24,7 @@
 use std::collections::HashSet;
 
 use super::census_models::shipped_census_models_matching;
+use super::mir_postfix::MirPoint;
 use crate::canonical_ir::cfg_lower::{CfgModel, CfgNoiseProcess};
 use crate::canonical_ir::{
     AdFunction, AdSeed, CanonicalNoiseSourceKind, CanonicalStateFamily, CanonicalStateLayout,
@@ -318,6 +319,39 @@ impl OperatingPoint {
             idt_scale: ComplexStep::from_f64(0.0),
             event_controls: std::collections::HashMap::new(),
             staged: Vec::new(),
+        }
+    }
+
+    /// The same operating point as the storage a postfix walk reads.
+    ///
+    /// The arrays are the ones [`Self::context`] hands the compiled plans, so a
+    /// walk seeded from here reads the identical doubles the machine code does
+    /// rather than a re-derivation of them. The contribution-current arrays are
+    /// borrowed from the caller because they are the census's own scratch and
+    /// not the point's.
+    pub(super) fn mir_point<'a>(
+        &'a self,
+        currents: &'a [f64],
+        branch_currents: &'a [f64],
+    ) -> MirPoint<'a> {
+        MirPoint {
+            parameters: &self.parameters,
+            parameter_given: &self.parameter_given,
+            port_connected: &self.port_connected,
+            terminal_voltages: &self.terminal_voltages,
+            internal_voltages: &self.internal_voltages,
+            branch_unknowns: &self.runtime_branch_unknowns,
+            currents,
+            branch_currents,
+            temperature: self.temperature,
+            time: self.time,
+            multiplicity: self.multiplicity,
+            analysis: self.analysis,
+            initial_step: self.initial_step,
+            // `EvalContext::analysis_final_step` is never set by `context`, so
+            // a walk that read it as anything else would stand at a different
+            // point from the compiled plans.
+            final_step: false,
         }
     }
 
