@@ -782,31 +782,14 @@ fn execute(
             ));
         }
         AnalysisCommand::Hb { frequencies } => {
-            let requested_orders = if net.options.hb_num_frequencies.is_empty() {
-                None
-            } else {
-                Some(net.options.hb_num_frequencies.as_slice())
-            };
-            let orders = resolve_hb_harmonic_orders(
-                frequencies.len(),
-                requested_orders,
-                ".OPTIONS HBINT NUMFREQ",
-            )?;
-            let mut config = hb_config_from_tones(frequencies, &orders, None)?;
-            // Xyce's explicit single-tone NUMFREQ contract uses the
-            // minimal bilateral 2*N+1 collocation grid.
-            if frequencies.len() == 1 && requested_orders.is_some() {
-                config.collocation_points = Some(
-                    orders[0]
-                        .checked_mul(2)
-                        .and_then(|count| count.checked_add(1))
-                        .ok_or_else(|| {
-                            crate::errors::value_error(
-                                ".OPTIONS HBINT NUMFREQ exceeds the addressable collocation grid",
-                            )
-                        })?,
-                );
-            }
+            // The default harmonic order, the multi-tone common basis, and
+            // Xyce's explicit single-tone NUMFREQ collocation contract all
+            // belong to `rspice-core`.
+            let config = rspice_core::analysis::HbConfig::from_hb_card(
+                frequencies,
+                &net.options.hb_num_frequencies,
+            )
+            .map_err(|error| crate::errors::value_error(error.to_string()))?;
             let engine = py_engine.engine_for_netlist(net);
             let result = run_interruptible(py, &py_engine.active_runs, |abort| {
                 engine.run_hb_with_abort(net, config, abort)

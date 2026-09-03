@@ -194,6 +194,38 @@ mod tests {
         );
     }
 
+    /// Which spellings mean node zero is the deck's own ground policy, not a
+    /// fixed list. `.OPTIONS REPLACEGROUND` is how a Xyce deck asks for the
+    /// `GND`/`GROUND` aliases; without it a Xyce-dialect deck has only `0`.
+    #[test]
+    fn the_decks_own_ground_policy_decides_which_names_are_node_zero() {
+        let engine = Engine::new(SimulationConfig::default());
+        let aliased = Netlist::parse(
+            "Replaced ground\n\
+             .options replaceground=1\n\
+             V1 in gnd DC 1\n\
+             R1 in out 1k\n\
+             R2 out gnd 1k\n\
+             .op\n\
+             .end\n",
+        )
+        .expect("deck parses");
+        let resolver = NodeResolver::build(&engine, &aliased).expect("resolver builds");
+        for name in ["GND", "gnd!", "GROUND"] {
+            assert_eq!(
+                resolver
+                    .resolve(name, ".PZ reference")
+                    .expect("ground alias"),
+                0,
+                "{name} is ground under REPLACEGROUND"
+            );
+        }
+
+        let plain = deck();
+        let resolver = NodeResolver::build(&engine, &plain).expect("resolver builds");
+        assert_eq!(resolver.resolve("0", ".PZ reference").expect("zero"), 0);
+    }
+
     #[test]
     fn building_the_resolver_honours_its_abort_source() {
         let engine = Engine::new(SimulationConfig::default());

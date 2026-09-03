@@ -380,9 +380,9 @@ fn family_expectation(kind: AnalysisResultKind) -> FamilyExpectation {
             request_kind: "stability",
             analysis_tag: "stb-001",
             // A three-pole loop crosses -180 degrees, so both margins are
-            // finite. The registry records why an unconditionally stable loop
-            // cannot be published.
-            declared: DeclaredStatus::Partial,
+            // ordinary numbers here. A loop with no crossover publishes the
+            // typed absence rather than failing.
+            declared: DeclaredStatus::Mapped,
             deck: "three-pole loop\nE1 eo 0 ctrl 0 -1000\nVPROBE eo x 0\n\
                    R1 x n1 1k\nC1 n1 0 159.154943091895n\n\
                    R2 n1 n2 1k\nC2 n2 0 159.154943091895n\n\
@@ -438,14 +438,22 @@ fn family_expectation(kind: AnalysisResultKind) -> FamilyExpectation {
             deck: "rf envelope\nV1 in 0 SIN(0 1 1G)\nR1 in out 1k\nC1 out 0 1p\n\
                    .hb 1g\n.envelope tstop=1n\n.end\n",
         },
-        AnalysisResultKind::SParameters => FamilyExpectation::Refused {
+        AnalysisResultKind::SParameters => FamilyExpectation::Runs {
             request_kind: "s_parameters",
+            analysis_tag: "sp-001",
+            declared: DeclaredStatus::Mapped,
+            deck: "two-port pad\nV1 p1 0 AC 1 portnum=1 z0=50\nV2 p2 0 AC 0 portnum=2 z0=50\n\
+                   RA p1 mid 25\nRB mid 0 50\nRC mid p2 25\n.sp lin 2 1meg 2meg\n.end\n",
+        },
+        AnalysisResultKind::PNoise => FamilyExpectation::Runs {
+            request_kind: "pnoise",
+            analysis_tag: "pnoise-001",
+            declared: DeclaredStatus::Mapped,
+            deck: "rf periodic noise\nV1 in 0 SIN(0 1 1G)\nR1 in out 1k\nC1 out 0 1p\n\
+                   .pss fund=1g\n.pnoise dec 2 1k 10k out=v(out)\n.end\n",
         },
         AnalysisResultKind::PortNoise => FamilyExpectation::Refused {
             request_kind: "port_noise",
-        },
-        AnalysisResultKind::PNoise => FamilyExpectation::Refused {
-            request_kind: "pnoise",
         },
         AnalysisResultKind::Fourier => FamilyExpectation::Refused {
             request_kind: "fourier",
@@ -638,28 +646,41 @@ fn every_runnable_family_executes_at_every_step_and_temperature_coordinate() {
     }
 }
 
-/// An unconditionally stable loop has no phase crossover, and the shared
-/// stability payload has no representation for the infinite margin that
-/// produces. The run fails closed with the reason rather than publishing a
-/// fabricated finite margin, and the registry records the gap.
+/// A single-pole loop never reaches -180 degrees, so its gain margin is
+/// unbounded. The shared document records that determination instead of
+/// failing the run closed or naming a fabricated finite margin, and the
+/// scalar's numeric measurement is omitted rather than invented.
 #[test]
-fn an_unconditionally_stable_loop_is_refused_rather_than_given_a_margin() {
+fn an_unconditionally_stable_loop_records_its_unbounded_margin() {
     let job = Job::new("stb-infinite-margin");
     let response = job.execute(
         "single-pole loop\nE1 eo 0 ctrl 0 -1000\nVPROBE eo x 0\nR1 x ctrl 1k\n\
          C1 ctrl 0 159.154943091895n\n.stb dec 2 10 10meg probe=vprobe\n.end\n",
         "stability",
     );
-    assert_eq!(response["status"], "failed", "{response}");
-    assert_eq!(response["failure_code"], "results.schema_mismatch");
+    assert_eq!(response["status"], "succeeded", "{response}");
+    let document = typed_result(&job, &response, "stb-001.result.json");
+    let margin = document
+        .scalars()
+        .iter()
+        .find(|scalar| scalar.name() == "gain_margin_db")
+        .expect("the document reports a gain margin");
     assert!(
-        response["failure_detail"]
-            .as_str()
-            .expect("a refusal explains itself")
-            .contains("margin"),
-        "the refusal must name the margin it cannot represent: {response}"
+        matches!(
+            margin.value(),
+            rspice_core::execution::result_document::ScalarValue::Unavailable { .. }
+        ),
+        "a loop with no phase crossover has no finite gain margin: {:?}",
+        margin.value()
     );
-    assert!(job.results_are_empty());
+    assert!(
+        response["result_manifest"]["measurements"]
+            .as_array()
+            .expect("declared measurements")
+            .iter()
+            .all(|entry| entry["name"] != "scalar:gain_margin_db"),
+        "an unbounded margin must not appear as a number: {response}"
+    );
 }
 
 //=============================================================================
@@ -867,7 +888,14 @@ fn dc_result_preserves_axis_voltage_current_and_device_observables() {
     let rspice_core::execution::ResultPayload::Dc(payload) = document.payload() else {
         panic!("a DC document carries a DC payload")
     };
-    assert_eq!(payload.sweep_variable, "v1");
+    assert_eq!(
+        payload
+            .sweep_variables
+            .iter()
+            .map(|axis| axis.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["v1"]
+    );
     assert!(
         payload
             .observables
@@ -1019,17 +1047,28 @@ fn an_envelope_result_names_the_harmonic_balance_carrier() {
     );
 }
 
+/// A `.SENS ... AC` card is a frequency-domain study with complex
+/// derivatives. It publishes the sensitivity family with a frequency axis and
+/// the AC traces in its payload, rather than being refused for want of a
+/// document shape.
 #[test]
-fn an_ac_sensitivity_sweep_is_refused_with_its_typed_reason() {
+fn an_ac_sensitivity_sweep_publishes_the_shared_sensitivity_document() {
     let job = Job::new("sens-ac");
     let response = job.execute(
         "divider AC sensitivity\nV1 in 0 DC 10 AC 1\nR1 in out 1k\nR2 out 0 1k\n\
          .sens V(out) AC DEC 2 1k 10k\n.end\n",
         "sensitivity",
     );
-    assert_eq!(response["status"], "failed", "response: {response}");
-    assert_eq!(response["failure_code"], "analysis.unsupported_form");
-    assert!(job.results_are_empty());
+    assert_eq!(response["status"], "succeeded", "response: {response}");
+    let document = typed_result(&job, &response, "sens-001.result.json");
+    assert_eq!(document.result_kind(), AnalysisResultKind::Sensitivity);
+    let rspice_core::execution::ResultPayload::Sensitivity(payload) = document.payload() else {
+        panic!("a .SENS card carries a sensitivity payload");
+    };
+    assert!(
+        payload.entries.is_empty() && !payload.ac_entries.is_empty(),
+        "an AC study fills the AC traces and nothing else"
+    );
 }
 
 //=============================================================================
@@ -1453,13 +1492,8 @@ fn an_unmapped_authored_card_fails_the_whole_request_without_writing_results() {
     // Leaving a card this build cannot publish unexecuted would drop authored
     // intent from the response, so the request is refused instead.
     for (cards, card, analysis_id) in [
-        (".sp dec 2 1k 10k\n", ".SP", "sp-001"),
-        (
-            ".hb 1g\n.pnoise dec 2 1 1k out=v(out)\n",
-            ".PNOISE",
-            "pnoise-001",
-        ),
-        (".four 1g v(out)\n", ".FOUR", ""),
+        (".sp dec 2 1k 10k 1\n", ".SP", "sp-001"),
+        (".four 1g v(out)\n", ".FOUR", "four-001"),
     ] {
         let job = Job::new("unmapped-card");
         let deck = format!("{RF}.tran 10p 1n\n{cards}.end\n");
@@ -1567,27 +1601,30 @@ fn a_deck_authoring_several_families_runs_only_the_requested_one() {
     assert_eq!(document.result_kind(), AnalysisResultKind::Ac);
 }
 
-/// `.PAC` may attach to a `.HB` carrier, but the shared result document
-/// accepts only a `.PSS` parent for the pac family. Publishing without the
-/// link would drop the provenance that says which large-signal solution the
-/// small-signal response was taken around.
+/// `.PAC` may attach to a `.HB` carrier as readily as to a `.PSS` one, and the
+/// shared result document now records either as the parent. The provenance
+/// that says which large-signal solution the small-signal response was taken
+/// around is exactly what the link carries.
 #[test]
-fn a_pac_card_attached_to_a_harmonic_balance_carrier_is_refused() {
+fn a_pac_card_attached_to_a_harmonic_balance_carrier_names_that_carrier() {
     let job = Job::new("pac-hb-upstream");
+    // The card's sideband span needs more harmonics than the default carrier
+    // retains, and `.OPTIONS HBINT NUMFREQ` is how a deck asks for them.
     let response = job.execute(
-        &format!("{RF}.hb 1g\n.pac dec 2 1k 10k input=v1 out=v(out)\n.end\n"),
+        &format!(
+            "{RF}.options hbint numfreq=12\n.hb 1g\n\
+             .pac dec 2 1k 10k input=v1 out=v(out)\n.end\n"
+        ),
         "pac",
     );
-    assert_eq!(response["status"], "failed", "{response}");
-    assert_eq!(response["failure_code"], "analysis.unsupported_form");
-    let detail = response["failure_detail"]
-        .as_str()
-        .expect("a refusal explains itself");
-    assert!(
-        detail.contains("pac-001") && detail.contains("hb-001"),
-        "{detail}"
+    assert_eq!(response["status"], "succeeded", "{response}");
+    let document = typed_result(&job, &response, "pac-001.result.json");
+    assert_eq!(document.result_kind(), AnalysisResultKind::Pac);
+    assert_eq!(
+        document.parent_analysis().map(|parent| parent.tag()),
+        Some("hb-001".to_owned()),
+        "a PAC result must name the carrier it linearized around"
     );
-    assert!(job.results_are_empty());
 }
 
 //=============================================================================

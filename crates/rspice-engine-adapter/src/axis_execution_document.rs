@@ -381,6 +381,8 @@ pub enum AxisAnalysisKind {
     HarmonicBalance,
     Pss,
     Pac,
+    PNoise,
+    SParameters,
     Envelope,
 }
 
@@ -403,6 +405,8 @@ impl AxisAnalysisKind {
             Self::HarmonicBalance => "hb",
             Self::Pss => "pss",
             Self::Pac => "pac",
+            Self::PNoise => "pnoise",
+            Self::SParameters => "sp",
             Self::Envelope => "env",
         }
     }

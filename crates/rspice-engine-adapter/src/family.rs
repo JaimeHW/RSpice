@@ -13,26 +13,22 @@
 
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::analysis::{
-    AcSensitivityOutput, Distribution, HbConfig, HbTone, PacConfig, PssConfig, StbConfig,
-    StbSweepType,
+    Distribution, HbConfig, PacConfig, PssConfig, StbConfig, StbSweepType,
 };
-use rspice_core::execution::result_document::AxisValues;
+use rspice_core::engine::SensitivityCardResult;
+use rspice_core::execution::result_document::{AxisValues, DcSweepAxisDocument};
 use rspice_core::execution::{
     AnalysisInstanceId, AnalysisKind as PlannedAnalysisKind, AnalysisResultDocument,
-    AnalysisResultDocumentBuilder, MaterializedAnalysis, ResultAxis, ResultAxisKind, SignalUnit,
+    AnalysisResultDocumentBuilder, MaterializedAnalysis, ResultAxis, ResultAxisKind,
+    RunCoordinateId, SignalUnit,
 };
 use rspice_core::netlist::{
     AnalysisCommand, DcSweepSpec, ElementKind, FftFormat, FreqVariation, MonteCarloDistribution,
-    PoleZeroAnalysisType, PoleZeroTransferType,
 };
 use rspice_core::{Engine, Netlist, SimulationError};
 
 use crate::failure::{DirectiveFailure, check_abort, map_result_document_error};
 use crate::fft_result_document::{FftResultDocumentError, TransientFftResultDocument};
-
-/// Harmonics per tone when neither the `.HB` card nor `.OPTIONS HBINT NUMFREQ`
-/// says. This mirrors the shared default the other frontends resolve to.
-const DEFAULT_HB_HARMONICS: usize = 9;
 
 /// Accepted samples one analysis may retain before the bounded resource
 /// outcome replaces an unbounded waveform.
@@ -61,6 +57,8 @@ pub const REQUEST_KINDS: &[(&str, PlannedAnalysisKind)] = &[
     ("harmonic_balance", PlannedAnalysisKind::HarmonicBalance),
     ("pss", PlannedAnalysisKind::Pss),
     ("pac", PlannedAnalysisKind::Pac),
+    ("pnoise", PlannedAnalysisKind::PNoise),
+    ("s_parameters", PlannedAnalysisKind::Sp),
     ("envelope", PlannedAnalysisKind::Envelope),
 ];
 
@@ -68,33 +66,31 @@ pub const REQUEST_KINDS: &[(&str, PlannedAnalysisKind)] = &[
 /// with the reason an operator needs to act on it.
 pub const REFUSED_REQUEST_KINDS: &[(&str, &str)] = &[
     ("mixed_signal", MIXED_SIGNAL_IS_TRANSIENT),
-    ("s_parameters", S_PARAMETER_GAP),
-    ("port_noise", S_PARAMETER_GAP),
-    ("pnoise", PNOISE_GAP),
-    ("fourier", POST_PROCESS_IDENTITY_GAP),
-    ("fft", POST_PROCESS_IDENTITY_GAP),
+    ("port_noise", SECOND_DOCUMENT_GAP),
+    ("fourier", SECOND_DOCUMENT_GAP),
+    ("fft", SECOND_DOCUMENT_GAP),
 ];
 
 const MIXED_SIGNAL_IS_TRANSIENT: &str = "A mixed-signal deck is a transient: request the transient kind. This engine build has no \
      separate mixed-signal analysis, and running one under its own name would report an \
      analysis the deck never authored.";
 
-const S_PARAMETER_GAP: &str = "S-parameter and port-noise results have no shared engine entry point: rspice-core exposes \
-     no Engine::run_* method that produces an SParameterResult, so the adapter cannot publish \
-     the shared sp/port-noise result document without deciding the .SP projection itself.";
+/// Families whose result is a *second* document produced by another card.
+///
+/// The executor stages exactly one shared result document per materialized
+/// card. Port noise is the `.SP` card's optional second result, and `.FOUR`
+/// and `.FFT` are the transient's post-processing products; `rspice-core` now
+/// names and projects all three, but this executor has no slot to publish them
+/// in beside their parent, so a deck that authors one is refused rather than
+/// executed with the second result silently dropped.
+const SECOND_DOCUMENT_GAP: &str = "This executor publishes one shared result document per authored card, and this family is a \
+     second result produced beside another card's: port noise beside .SP, and .FOUR and .FFT \
+     beside their parent transient. rspice-core names and projects all three; the adapter has no \
+     slot to publish them in, and dropping them silently is not an option.";
 
-const PNOISE_GAP: &str = "Periodic-noise results have no shared projection: the driven .PNOISE runners return \
-     PnoiseAnalysisResult and the autonomous one returns OscPnoiseResult, while \
-     AnalysisResultDocument::from_pnoise accepts only analysis::pnoise::PnoiseResult, which no \
-     Engine::run_* method produces.";
-
-const POST_PROCESS_IDENTITY_GAP: &str = "Fourier and FFT results have no canonical analysis identity: DeckPlan mints no \
-     AnalysisInstanceId for .FOUR or .FFT and AnalysisInstanceId has no public constructor, so \
-     the shared fourier/fft result document cannot be named.";
-
-const PAC_HB_UPSTREAM_GAP: &str = "A .PAC or .PNOISE card that linearizes around a .HB carrier cannot record that provenance: \
-     the shared result document accepts only a .PSS parent for the pac and pnoise families. \
-     Author the periodic operating point as .PSS.";
+const SP_DONOISE_GAP: &str = "The .SP card requests DONOISE. Port noise is that card's second result document and this \
+     executor publishes one document per card, so the noise evidence would be dropped. Author \
+     the .SP card without its noise flag.";
 
 /// Resolve one wire analysis kind.
 pub fn planned_kind_for_request(kind: &str) -> Option<PlannedAnalysisKind> {
@@ -138,9 +134,8 @@ pub fn matches_request(requested: PlannedAnalysisKind, planned: PlannedAnalysisK
 /// no lossless result mapping for.
 pub fn unmapped_deck_card(command: &AnalysisCommand) -> Option<(&'static str, &'static str)> {
     match command {
-        AnalysisCommand::Sp { .. } => Some((".SP", S_PARAMETER_GAP)),
-        AnalysisCommand::Pnoise(_) => Some((".PNOISE", PNOISE_GAP)),
-        AnalysisCommand::Four { .. } => Some((".FOUR", POST_PROCESS_IDENTITY_GAP)),
+        AnalysisCommand::Sp { do_noise: true, .. } => Some((".SP", SP_DONOISE_GAP)),
+        AnalysisCommand::Four { .. } => Some((".FOUR", SECOND_DOCUMENT_GAP)),
         _ => None,
     }
 }
@@ -174,6 +169,7 @@ pub(crate) fn run_directive(
     netlist: &Netlist,
     analysis: &MaterializedAnalysis,
     peers: &[MaterializedAnalysis],
+    coordinate: RunCoordinateId,
     abort: &dyn AbortSignal,
 ) -> Result<DirectiveProjection, DirectiveFailure> {
     check_abort(abort)?;
@@ -217,13 +213,24 @@ pub(crate) fn run_directive(
             if points.len() > MAX_SERIES_SAMPLES {
                 return Err(DirectiveFailure::SeriesBudget);
             }
-            let mut builder = AnalysisResultDocument::from_dc_sweep(
-                id,
-                source,
-                sweep_axis_unit(netlist, source),
-                &points,
-            )
-            .map_err(map_result_document_error)?;
+            // Both authored sweep variables are declared, so the shared
+            // document keeps the outer source instead of losing it, and the
+            // core constructor checks the flattened grid against the card.
+            let mut axes = Vec::new();
+            if let Some(outer) = sweep2 {
+                axes.push(DcSweepAxisDocument {
+                    name: outer.source.trim().to_ascii_lowercase(),
+                    unit: sweep_axis_unit(netlist, &outer.source),
+                    value_count: outer.spec().points().len(),
+                });
+            }
+            axes.push(DcSweepAxisDocument {
+                name: source.trim().to_ascii_lowercase(),
+                unit: sweep_axis_unit(netlist, source),
+                value_count: primary.points().len(),
+            });
+            let mut builder = AnalysisResultDocument::from_nested_dc_sweep(id, &axes, &points)
+                .map_err(map_result_document_error)?;
             if let Some(outer) = sweep2 {
                 let inner_count = primary.points().len();
                 let values: Vec<f64> = outer
@@ -232,11 +239,6 @@ pub(crate) fn run_directive(
                     .into_iter()
                     .flat_map(|value| std::iter::repeat_n(value, inner_count))
                     .collect();
-                if values.len() != points.len() {
-                    return Err(DirectiveFailure::ResultDocument(
-                        "nested DC result shape does not match its declared sweep grid".to_owned(),
-                    ));
-                }
                 let axis = ResultAxis::new(
                     format!("sweep:{}", outer.source.trim().to_ascii_lowercase()),
                     outer.source.trim(),
@@ -406,64 +408,28 @@ pub(crate) fn run_directive(
             AnalysisResultDocument::from_stability(id, &result.result)
                 .map_err(map_result_document_error)
         }
-        AnalysisCommand::Sensitivity {
-            output_node,
-            reference_node,
-            output_is_current,
-            filters,
-            ac_sweep,
-        } => {
-            if ac_sweep.is_some() {
-                return Err(DirectiveFailure::UnsupportedForm(format!(
-                    "The .SENS card ({id}) requests an AC sweep. The engine returns an \
-                     AcSensitivityResult for that form, and the shared sensitivity result \
-                     document accepts only the DC SensitivityResult."
-                )));
+        AnalysisCommand::Sensitivity { .. } => {
+            // The card names its own output probe; resolving it against the
+            // elaborated circuit and choosing the DC or AC driver are core's
+            // decisions, taken once in the card runner.
+            match engine.run_sensitivity_from_card_with_abort(netlist, command, abort)? {
+                SensitivityCardResult::Dc(result) => {
+                    AnalysisResultDocument::from_sensitivity(id, &result)
+                }
+                SensitivityCardResult::Ac(result) => {
+                    AnalysisResultDocument::from_ac_sensitivity(id, &result)
+                }
             }
-            let output = if *output_is_current {
-                AcSensitivityOutput::BranchCurrent(output_node.clone())
-            } else {
-                let resolver = NodeResolver::build(engine, netlist, abort)?;
-                let positive = resolver.resolve(output_node, ".SENS output")?;
-                let negative = match reference_node {
-                    Some(node) => {
-                        let index = resolver.resolve(node, ".SENS reference")?;
-                        (index != 0).then_some(index)
-                    }
-                    None => None,
-                };
-                AcSensitivityOutput::Voltage { positive, negative }
-            };
-            let result =
-                engine.run_sensitivity_dc_complete_with_abort(netlist, output, filters, abort)?;
-            AnalysisResultDocument::from_sensitivity(id, &result).map_err(map_result_document_error)
+            .map_err(map_result_document_error)
         }
-        AnalysisCommand::PoleZero {
-            input_pos,
-            input_neg,
-            output_pos,
-            output_neg,
-            transfer_type,
-            analysis_type,
-        } => {
-            let resolver = NodeResolver::build(engine, netlist, abort)?;
-            let (compute_poles, compute_zeros) = match analysis_type {
-                PoleZeroAnalysisType::PoleZero => (true, true),
-                PoleZeroAnalysisType::PolesOnly => (true, false),
-                PoleZeroAnalysisType::ZerosOnly => (false, true),
-            };
-            let result = engine.run_pz_ports_with_abort(
-                netlist,
-                resolver.resolve(input_pos, ".PZ input")?,
-                Some(resolver.resolve(input_neg, ".PZ input reference")?),
-                resolver.resolve(output_pos, ".PZ output")?,
-                Some(resolver.resolve(output_neg, ".PZ output reference")?),
-                matches!(transfer_type, PoleZeroTransferType::Current),
-                compute_poles,
-                compute_zeros,
-                abort,
-            )?;
+        AnalysisCommand::PoleZero { .. } => {
+            let result = engine.run_pz_from_card_with_abort(netlist, command, abort)?;
             AnalysisResultDocument::from_pole_zero(id, &result).map_err(map_result_document_error)
+        }
+        AnalysisCommand::Sp { .. } => {
+            let run = engine.run_sp_with_abort(netlist, command, abort)?;
+            AnalysisResultDocument::from_s_parameters(id, &run.scattering)
+                .map_err(map_result_document_error)
         }
         AnalysisCommand::MonteCarlo(card) => {
             let distribution = match card.distribution {
@@ -482,8 +448,14 @@ pub(crate) fn run_directive(
                 card.runs,
                 // A deck that does not seed its own Monte Carlo is still
                 // required to reproduce byte for byte, so the seed is the
-                // documented constant rather than an entropy source.
-                card.seed.unwrap_or(1),
+                // documented constant rather than an entropy source. Inside a
+                // `.STEP` or `.TEMP` sweep the card runs once per coordinate,
+                // and the core derivation gives each coordinate its own
+                // reproducible stream instead of repeating one sample.
+                rspice_core::execution::monte_carlo_seed_at_coordinate(
+                    card.seed.unwrap_or(1),
+                    coordinate,
+                ),
                 distribution,
                 (!card.params.is_empty()).then_some(card.params.as_slice()),
                 abort,
@@ -504,19 +476,77 @@ pub(crate) fn run_directive(
         AnalysisCommand::Pac(card) => {
             let (upstream_id, upstream) = upstream_card(analysis, peers)?;
             let config = PacConfig::from(card.as_ref());
-            let AnalysisCommand::Pss(pss) = upstream else {
-                return Err(DirectiveFailure::UnsupportedForm(format!(
-                    "The .PAC card ({id}) linearizes around {upstream_id}. {PAC_HB_UPSTREAM_GAP}"
-                )));
+            // Shooting `.PSS` and harmonic balance both produce the periodic
+            // operating point a `.PAC` card linearizes around, and the shared
+            // document records either as the parent.
+            let result = match upstream {
+                AnalysisCommand::Pss(pss) => {
+                    let operating_point = engine.run_pss_operating_point_with_abort(
+                        netlist,
+                        PssConfig::from(pss.as_ref()),
+                        abort,
+                    )?;
+                    engine.run_pac_from_pss_with_abort(netlist, config, &operating_point, abort)?
+                }
+                AnalysisCommand::Hb { frequencies } => {
+                    let carrier = engine.run_hb_with_abort(
+                        netlist,
+                        hb_config(netlist, frequencies)?,
+                        abort,
+                    )?;
+                    engine.run_pac_from_hb_with_abort(
+                        netlist,
+                        config,
+                        &carrier.operating_point,
+                        abort,
+                    )?
+                }
+                _ => {
+                    return Err(DirectiveFailure::ResultDocument(format!(
+                        "the canonical plan bound {id} to {upstream_id}, which is not a periodic carrier"
+                    )));
+                }
             };
-            let operating_point = engine.run_pss_operating_point_with_abort(
-                netlist,
-                PssConfig::from(pss.as_ref()),
-                abort,
-            )?;
-            let result =
-                engine.run_pac_from_pss_with_abort(netlist, config, &operating_point, abort)?;
             AnalysisResultDocument::from_pac(id, &result.result)
+                .map(|builder| builder.parent_analysis(upstream_id))
+                .map_err(map_result_document_error)
+        }
+        AnalysisCommand::Pnoise(card) => {
+            let (upstream_id, upstream) = upstream_card(analysis, peers)?;
+            let result = match upstream {
+                AnalysisCommand::Pss(pss) => {
+                    let operating_point = engine.run_pss_operating_point_with_abort(
+                        netlist,
+                        PssConfig::from(pss.as_ref()),
+                        abort,
+                    )?;
+                    engine.run_pnoise_card_from_pss_with_abort(
+                        netlist,
+                        card,
+                        &operating_point,
+                        abort,
+                    )?
+                }
+                AnalysisCommand::Hb { frequencies } => {
+                    let carrier = engine.run_hb_with_abort(
+                        netlist,
+                        hb_config(netlist, frequencies)?,
+                        abort,
+                    )?;
+                    engine.run_pnoise_card_from_hb_with_abort(
+                        netlist,
+                        card,
+                        &carrier.operating_point,
+                        abort,
+                    )?
+                }
+                _ => {
+                    return Err(DirectiveFailure::ResultDocument(format!(
+                        "the canonical plan bound {id} to {upstream_id}, which is not a periodic carrier"
+                    )));
+                }
+            };
+            AnalysisResultDocument::from_pnoise(id, &result)
                 .map(|builder| builder.parent_analysis(upstream_id))
                 .map_err(map_result_document_error)
         }
@@ -599,78 +629,20 @@ fn sweep_frequencies(
 
 /// Harmonic-balance configuration for one authored `.HB` card.
 ///
-/// `.OPTIONS HBINT NUMFREQ` supplies the harmonic order per tone, broadcasting
-/// a single order across every tone. An explicit single-tone order also pins
-/// the minimal bilateral `2N+1` collocation grid, which is the Xyce contract
-/// the parser records the option for.
+/// The default harmonic order, the multi-tone common basis and the
+/// `.OPTIONS HBINT NUMFREQ` collocation rule all belong to `rspice-core`; this
+/// only hands it the card's tones and the deck's authored order list.
 fn hb_config(netlist: &Netlist, frequencies: &[f64]) -> Result<HbConfig, DirectiveFailure> {
-    if frequencies.is_empty() {
-        return Err(DirectiveFailure::InvalidAnalysis(
-            ".HB requires at least one positive tone frequency".to_owned(),
-        ));
-    }
-    let requested = &netlist.options.hb_num_frequencies;
-    let orders: Vec<usize> = if requested.is_empty() {
-        vec![DEFAULT_HB_HARMONICS; frequencies.len()]
-    } else if requested.contains(&0) {
-        return Err(DirectiveFailure::InvalidAnalysis(
-            ".OPTIONS HBINT NUMFREQ harmonic orders must all be at least 1".to_owned(),
-        ));
-    } else if requested.len() == 1 {
-        vec![requested[0]; frequencies.len()]
-    } else if requested.len() == frequencies.len() {
-        requested.clone()
-    } else {
-        return Err(DirectiveFailure::InvalidAnalysis(format!(
-            ".HB has {} tones but .OPTIONS HBINT NUMFREQ lists {} harmonic orders; provide one \
-             order to broadcast or one per tone",
-            frequencies.len(),
-            requested.len()
-        )));
-    };
-
-    let mut seen = std::collections::BTreeSet::new();
-    let mut tones = Vec::with_capacity(frequencies.len());
-    for (index, (frequency, order)) in frequencies.iter().zip(&orders).enumerate() {
-        if !frequency.is_finite() || *frequency <= 0.0 {
-            return Err(DirectiveFailure::InvalidAnalysis(format!(
-                ".HB tone {} must be a positive finite frequency, not {frequency}",
-                index + 1
-            )));
-        }
-        if !seen.insert(frequency.to_bits()) {
-            return Err(DirectiveFailure::InvalidAnalysis(format!(
-                ".HB lists the tone frequency {frequency} more than once"
-            )));
-        }
-        tones.push(HbTone::new(*frequency, *order).with_name(format!("tone{}", index + 1)));
-    }
-
-    // A single tone whose order the deck stated explicitly also pins the
-    // minimal bilateral `2N+1` collocation grid; every other shape uses the
-    // configuration's own default grid.
-    let [tone] = tones.as_slice() else {
-        return Ok(HbConfig::multi_tone(tones));
-    };
-    let config = HbConfig::new(tone.frequency).with_harmonics(tone.num_harmonics);
-    if requested.is_empty() {
-        return Ok(config);
-    }
-    let points = config.minimum_collocation_points().ok_or_else(|| {
-        DirectiveFailure::InvalidAnalysis(format!(
-            ".OPTIONS HBINT NUMFREQ harmonic count {} exceeds the addressable collocation grid",
-            tone.num_harmonics
-        ))
-    })?;
-    Ok(config.with_collocation_points(points))
+    HbConfig::from_hb_card(frequencies, &netlist.options.hb_num_frequencies)
+        .map_err(|error| DirectiveFailure::InvalidAnalysis(format!("invalid .HB card: {error}")))
 }
 
 /// Declared unit of one `.DC` sweep axis.
 ///
 /// A source has the unit its excitation is measured in and temperature is
 /// degrees Celsius. A swept parameter or device parameter has no unit the
-/// simulator knows, so it is declared as the explicit custom symbol
-/// `unspecified` rather than being claimed dimensionless.
+/// simulator knows, which is the shared document's `Unspecified` rather than
+/// the pure ratio `Dimensionless` would claim.
 fn sweep_axis_unit(netlist: &Netlist, source: &str) -> SignalUnit {
     if source.eq_ignore_ascii_case("temp") || source.eq_ignore_ascii_case("temper") {
         return SignalUnit::Custom("degC".to_owned());
@@ -688,50 +660,7 @@ fn sweep_axis_unit(netlist: &Netlist, source: &str) -> SignalUnit {
             }
             _ => None,
         })
-        .unwrap_or(SignalUnit::Custom("unspecified".to_owned()))
-}
-
-/// Netlist node name to public SPICE node index.
-struct NodeResolver {
-    indices: std::collections::HashMap<String, usize>,
-    ground: rspice_core::netlist::GroundPolicy,
-}
-
-impl NodeResolver {
-    fn build(
-        engine: &Engine,
-        netlist: &Netlist,
-        abort: &dyn AbortSignal,
-    ) -> Result<Self, DirectiveFailure> {
-        let circuit = engine.build_circuit_with_abort(netlist, abort)?;
-        Ok(Self {
-            indices: circuit
-                .node_names_sorted()
-                .iter()
-                .enumerate()
-                .map(|(index, name)| (name.to_ascii_uppercase(), index + 1))
-                .collect(),
-            ground: netlist.ground_policy(),
-        })
-    }
-
-    fn resolve(&self, node: &str, role: &str) -> Result<usize, DirectiveFailure> {
-        let node = node.trim();
-        if self.ground.is_ground(node) {
-            return Ok(0);
-        }
-        if let Ok(index) = node.parse::<usize>() {
-            return Ok(index);
-        }
-        self.indices
-            .get(&node.to_ascii_uppercase())
-            .copied()
-            .ok_or_else(|| {
-                DirectiveFailure::InvalidAnalysis(format!(
-                    "{role} names node {node:?}, which the elaborated circuit does not contain"
-                ))
-            })
-    }
+        .unwrap_or(SignalUnit::Unspecified)
 }
 
 /// Prove every engine FFT result answers exactly the `.FFT` card that asked
