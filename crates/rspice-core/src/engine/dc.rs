@@ -326,6 +326,16 @@ impl DcSweepSource {
     }
 }
 
+/// One linear `.dc` sweep axis: where it starts, where it stops, and the
+/// increment between points. Three bare `Value`s in that order are trivially
+/// transposed at a call site.
+#[derive(Clone, Copy)]
+pub struct DcSweepRange {
+    pub start: Value,
+    pub stop: Value,
+    pub step: Value,
+}
+
 impl Engine {
     /// Resolve a Xyce device-parameter `.DC` source to the canonical AST
     /// override spelling used by the engine and regression wrapper.
@@ -876,27 +886,17 @@ impl Engine {
         &self,
         netlist: &Netlist,
         source_name: &str,
-        start: Value,
-        stop: Value,
-        step: Value,
+        range: DcSweepRange,
         sweep2: Option<&crate::netlist::DcSecondSweep>,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<(Value, SimulationResult)>, SimulationError> {
-        self.run_dc_sweep2_with_report_and_abort(
-            netlist,
-            source_name,
-            start,
-            stop,
-            step,
-            sweep2,
-            abort,
-        )
-        .map(|points| {
-            points
-                .into_iter()
-                .map(|point| (point.sweep_value, point.result))
-                .collect()
-        })
+        self.run_dc_sweep2_with_report_and_abort(netlist, source_name, range, sweep2, abort)
+            .map(|points| {
+                points
+                    .into_iter()
+                    .map(|point| (point.sweep_value, point.result))
+                    .collect()
+            })
     }
 
     /// Two-source DC sweep that preserves per-point device operating reports.
@@ -904,12 +904,11 @@ impl Engine {
         &self,
         netlist: &Netlist,
         source_name: &str,
-        start: Value,
-        stop: Value,
-        step: Value,
+        range: DcSweepRange,
         sweep2: Option<&crate::netlist::DcSecondSweep>,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<DcSweepPointResult>, SimulationError> {
+        let DcSweepRange { start, stop, step } = range;
         let primary = crate::netlist::DcSweepSpec::linear(start, stop, step);
         self.run_dc_sweep2_spec_with_report_and_abort(netlist, source_name, &primary, sweep2, abort)
     }

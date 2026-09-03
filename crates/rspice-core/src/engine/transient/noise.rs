@@ -129,13 +129,17 @@ fn replace_transient_random(
             rts_emit,
         } => {
             let points = generate_noise_points(
-                *na,
-                *nt,
-                *nalpha,
-                *namp,
-                *rts_amplitude,
-                *rts_capture,
-                *rts_emit,
+                TrNoiseSpectrum {
+                    na: *na,
+                    nt: *nt,
+                    nalpha: *nalpha,
+                    namp: *namp,
+                },
+                TrNoiseRts {
+                    rts_amplitude: *rts_amplitude,
+                    rts_capture: *rts_capture,
+                    rts_emit: *rts_emit,
+                },
                 tstop,
                 seed,
                 name,
@@ -155,11 +159,13 @@ fn replace_transient_random(
             parameter2,
         } => {
             let points = generate_trrandom_points(
-                *distribution,
-                *sample_interval,
-                *delay,
-                *parameter1,
-                *parameter2,
+                TrRandomSpec {
+                    distribution: *distribution,
+                    sample_interval: *sample_interval,
+                    delay: *delay,
+                    parameter1: *parameter1,
+                    parameter2: *parameter2,
+                },
                 tstop,
                 seed,
                 name,
@@ -180,17 +186,23 @@ fn replace_transient_random(
 
 /// Generate the noise sample train as PWL points on the `k*NT` grid.
 fn generate_noise_points(
-    na: Value,
-    nt: Value,
-    nalpha: Value,
-    namp: Value,
-    rts_amplitude: Value,
-    rts_capture: Value,
-    rts_emit: Value,
+    spectrum: TrNoiseSpectrum,
+    rts: TrNoiseRts,
     tstop: Value,
     seed: u64,
     name: &str,
 ) -> Result<Vec<(Value, Value)>, String> {
+    let TrNoiseSpectrum {
+        na,
+        nt,
+        nalpha,
+        namp,
+    } = spectrum;
+    let TrNoiseRts {
+        rts_amplitude,
+        rts_capture,
+        rts_emit,
+    } = rts;
     if na == 0.0 && namp == 0.0 && rts_amplitude == 0.0 {
         return Ok(vec![(0.0, 0.0), (tstop.max(1e-12), 0.0)]);
     }
@@ -314,15 +326,18 @@ fn add_rts_points(
 }
 
 fn generate_trrandom_points(
-    distribution: u8,
-    sample_interval: Value,
-    delay: Value,
-    parameter1: Value,
-    parameter2: Value,
+    spec: TrRandomSpec,
     tstop: Value,
     seed: u64,
     name: &str,
 ) -> Result<Vec<(Value, Value)>, String> {
+    let TrRandomSpec {
+        distribution,
+        sample_interval,
+        delay,
+        parameter1,
+        parameter2,
+    } = spec;
     if !(sample_interval.is_finite() && sample_interval > 0.0) {
         return Err(format!(
             "TRRANDOM source '{}' requires a positive sample interval TS",
@@ -401,6 +416,36 @@ fn kasdin_one_over_f(n: usize, alpha: Value, amplitude: Value, rng: &mut SplitMi
 }
 
 /// SplitMix64 — tiny, fast, platform-stable generator for the noise stream.
+/// The flicker-noise terms of a `TRNOISE` source: the white amplitude, the
+/// sample interval, the 1/f exponent and the 1/f amplitude.
+#[derive(Clone, Copy)]
+struct TrNoiseSpectrum {
+    na: Value,
+    nt: Value,
+    nalpha: Value,
+    namp: Value,
+}
+
+/// The random-telegraph terms of the same source: amplitude, mean capture
+/// time and mean emission time.
+#[derive(Clone, Copy)]
+struct TrNoiseRts {
+    rts_amplitude: Value,
+    rts_capture: Value,
+    rts_emit: Value,
+}
+
+/// A `TRRANDOM` source's shape: which distribution, how often it is resampled,
+/// when it starts, and the two distribution parameters.
+#[derive(Clone, Copy)]
+struct TrRandomSpec {
+    distribution: u8,
+    sample_interval: Value,
+    delay: Value,
+    parameter1: Value,
+    parameter2: Value,
+}
+
 struct SplitMix64 {
     state: u64,
     spare: Option<f64>,
@@ -523,10 +568,57 @@ mod tests {
 
     #[test]
     fn expansion_is_deterministic_and_seed_sensitive() {
-        let a = generate_noise_points(1e-3, 1e-9, 0.0, 0.0, 0.0, 0.0, 0.0, 1e-6, 99, "v1").unwrap();
-        let b = generate_noise_points(1e-3, 1e-9, 0.0, 0.0, 0.0, 0.0, 0.0, 1e-6, 99, "v1").unwrap();
-        let c =
-            generate_noise_points(1e-3, 1e-9, 0.0, 0.0, 0.0, 0.0, 0.0, 1e-6, 100, "v1").unwrap();
+        let a = generate_noise_points(
+            TrNoiseSpectrum {
+                na: 1e-3,
+                nt: 1e-9,
+                nalpha: 0.0,
+                namp: 0.0,
+            },
+            TrNoiseRts {
+                rts_amplitude: 0.0,
+                rts_capture: 0.0,
+                rts_emit: 0.0,
+            },
+            1e-6,
+            99,
+            "v1",
+        )
+        .unwrap();
+        let b = generate_noise_points(
+            TrNoiseSpectrum {
+                na: 1e-3,
+                nt: 1e-9,
+                nalpha: 0.0,
+                namp: 0.0,
+            },
+            TrNoiseRts {
+                rts_amplitude: 0.0,
+                rts_capture: 0.0,
+                rts_emit: 0.0,
+            },
+            1e-6,
+            99,
+            "v1",
+        )
+        .unwrap();
+        let c = generate_noise_points(
+            TrNoiseSpectrum {
+                na: 1e-3,
+                nt: 1e-9,
+                nalpha: 0.0,
+                namp: 0.0,
+            },
+            TrNoiseRts {
+                rts_amplitude: 0.0,
+                rts_capture: 0.0,
+                rts_emit: 0.0,
+            },
+            1e-6,
+            100,
+            "v1",
+        )
+        .unwrap();
         assert_eq!(a.len(), b.len());
         assert!(
             a.iter().zip(&b).all(|(x, y)| x == y),
@@ -540,8 +632,23 @@ mod tests {
 
     #[test]
     fn sample_cap_is_enforced_with_a_clear_error() {
-        let err = generate_noise_points(1e-3, 1e-12, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1, "vbig")
-            .unwrap_err();
+        let err = generate_noise_points(
+            TrNoiseSpectrum {
+                na: 1e-3,
+                nt: 1e-12,
+                nalpha: 0.0,
+                namp: 0.0,
+            },
+            TrNoiseRts {
+                rts_amplitude: 0.0,
+                rts_capture: 0.0,
+                rts_emit: 0.0,
+            },
+            1.0,
+            1,
+            "vbig",
+        )
+        .unwrap_err();
         assert!(
             err.contains("Raise NT"),
             "diagnostic explains the fix: {err}"
@@ -601,13 +708,17 @@ mod tests {
     #[test]
     fn trnoise_extreme_ratio_is_rejected_before_integer_conversion() {
         let error = generate_noise_points(
-            1.0,
-            f64::MIN_POSITIVE,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
+            TrNoiseSpectrum {
+                na: 1.0,
+                nt: f64::MIN_POSITIVE,
+                nalpha: 0.0,
+                namp: 0.0,
+            },
+            TrNoiseRts {
+                rts_amplitude: 0.0,
+                rts_capture: 0.0,
+                rts_emit: 0.0,
+            },
             f64::MAX,
             1,
             "vextreme",
@@ -620,11 +731,13 @@ mod tests {
     #[test]
     fn trrandom_extreme_ratio_is_rejected_before_integer_conversion() {
         let error = generate_trrandom_points(
-            1,
-            f64::MIN_POSITIVE,
-            -f64::MAX,
-            1.0,
-            0.0,
+            TrRandomSpec {
+                distribution: 1,
+                sample_interval: f64::MIN_POSITIVE,
+                delay: -f64::MAX,
+                parameter1: 1.0,
+                parameter2: 0.0,
+            },
             f64::MAX,
             1,
             "vrextreme",
@@ -636,8 +749,19 @@ mod tests {
 
     #[test]
     fn trrandom_gaussian_is_piecewise_constant_and_seeded() {
-        let points = generate_trrandom_points(2, 1e-3, 0.0, 1.0, 0.0, 3e-3, 42, "vr")
-            .expect("TRRANDOM train");
+        let points = generate_trrandom_points(
+            TrRandomSpec {
+                distribution: 2,
+                sample_interval: 1e-3,
+                delay: 0.0,
+                parameter1: 1.0,
+                parameter2: 0.0,
+            },
+            3e-3,
+            42,
+            "vr",
+        )
+        .expect("TRRANDOM train");
         assert_eq!(points[0], (0.0, 0.0));
         assert_eq!(points[1].0, points[2].0);
         assert_ne!(points[1].1, points[2].1);
@@ -646,8 +770,23 @@ mod tests {
 
     #[test]
     fn rts_noise_adds_duplicate_time_step_edges() {
-        let points = generate_noise_points(0.0, 0.0, 0.0, 0.0, 1.0, 1e-6, 1e-6, 20e-6, 9, "vrts")
-            .expect("RTS train");
+        let points = generate_noise_points(
+            TrNoiseSpectrum {
+                na: 0.0,
+                nt: 0.0,
+                nalpha: 0.0,
+                namp: 0.0,
+            },
+            TrNoiseRts {
+                rts_amplitude: 1.0,
+                rts_capture: 1e-6,
+                rts_emit: 1e-6,
+            },
+            20e-6,
+            9,
+            "vrts",
+        )
+        .expect("RTS train");
         assert!(
             points
                 .windows(2)
@@ -657,9 +796,23 @@ mod tests {
 
     #[test]
     fn incomplete_rts_group_is_ignored_like_ngspice() {
-        let points =
-            generate_noise_points(0.05, 8e-12, 0.0, 1.0, 0.001, 0.0, 0.0, 1e-9, 9, "vnoise")
-                .expect("incomplete RTS group is disabled");
+        let points = generate_noise_points(
+            TrNoiseSpectrum {
+                na: 0.05,
+                nt: 8e-12,
+                nalpha: 0.0,
+                namp: 1.0,
+            },
+            TrNoiseRts {
+                rts_amplitude: 0.001,
+                rts_capture: 0.0,
+                rts_emit: 0.0,
+            },
+            1e-9,
+            9,
+            "vnoise",
+        )
+        .expect("incomplete RTS group is disabled");
 
         assert!(!points.is_empty());
         assert!(

@@ -7,7 +7,7 @@
 #![allow(clippy::excessive_precision)]
 
 use rspice_core::device::Jfet;
-use rspice_core::engine::{Engine, JfetLevel2Model, SimulationConfig, SpiceDialect};
+use rspice_core::engine::{DcSweepRange, Engine, JfetLevel2Model, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::{AnalysisCommand, Netlist};
 
 fn jfet2_op_deck() -> &'static str {
@@ -549,9 +549,11 @@ fn jfet2_xyce_variant_matches_full_xyce_njfet_2109_dc_sweep() {
         .run_dc_sweep2_with_abort(
             &netlist,
             "vds",
-            0.0,
-            15.0,
-            1.0,
+            DcSweepRange {
+                start: 0.0,
+                stop: 15.0,
+                step: 1.0,
+            },
             Some(&sweep2),
             &rspice_core::abort_signal::NoAbort,
         )
@@ -664,9 +666,11 @@ fn jfet2_xyce_variant_matches_full_xyce_pjfet_2108_dc_sweep() {
         .run_dc_sweep2_with_abort(
             &netlist,
             "vds",
-            -15.0,
-            0.0,
-            1.0,
+            DcSweepRange {
+                start: -15.0,
+                stop: 0.0,
+                step: 1.0,
+            },
             Some(&sweep2),
             &rspice_core::abort_signal::NoAbort,
         )

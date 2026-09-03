@@ -81,7 +81,9 @@ mod model_policy;
 use model_policy::*;
 mod advanced_mos;
 mod version_metadata;
-use advanced_mos::{Bsim3v3SharedModel, Bsim3v3SharedModelKey, Bsim4v8SharedModel};
+use advanced_mos::{
+    Bsim3v3SharedModel, Bsim3v3SharedModelKey, Bsim4v8SharedModel, DeviceModelContext,
+};
 #[cfg(feature = "veriloga-builtins-base")]
 mod generated_model_routing;
 #[cfg(feature = "veriloga-builtins-base")]
@@ -3397,10 +3399,12 @@ fn add_generated_xspice_auto_bridge_resistor(
         &element.name,
         *value,
         value_expr.as_deref(),
-        model.as_deref(),
-        instance_params,
-        temperature,
-        spice_dialect,
+        ResistorResolutionContext {
+            model_name: model.as_deref(),
+            instance_params,
+            temperature_kelvin: temperature,
+            spice_dialect,
+        },
     )?;
     let resistance = resolved.resistance;
     let small_signal_resistance =
@@ -4332,10 +4336,12 @@ impl Engine {
             &element.name,
             *value,
             value_expr.as_deref(),
-            model.as_deref(),
-            instance_params,
-            engine.config.temperature,
-            engine.config.spice_dialect,
+            ResistorResolutionContext {
+                model_name: model.as_deref(),
+                instance_params,
+                temperature_kelvin: engine.config.temperature,
+                spice_dialect: engine.config.spice_dialect,
+            },
         )
         .map(Some)
     }
@@ -4949,10 +4955,12 @@ impl Engine {
                         &element.name,
                         *value,
                         value_expr,
-                        model.as_deref(),
-                        instance_params,
-                        self.config.temperature,
-                        self.config.spice_dialect,
+                        ResistorResolutionContext {
+                            model_name: model.as_deref(),
+                            instance_params,
+                            temperature_kelvin: self.config.temperature,
+                            spice_dialect: self.config.spice_dialect,
+                        },
                     )?;
                     let resistance = resolved.resistance;
                     let thermal_state = resolve_resistor_thermal_state(
@@ -6137,11 +6145,13 @@ impl Engine {
                                     &mut circuit,
                                     element,
                                     resolved_mos_type,
-                                    model,
-                                    &bsimsoi_params,
-                                    instance_params,
-                                    deferred_params,
-                                    self.config.temperature,
+                                    DeviceModelContext {
+                                        model_key: model,
+                                        params_map: &bsimsoi_params,
+                                        instance_params,
+                                        deferred_params,
+                                        temperature_kelvin: self.config.temperature,
+                                    },
                                 )?;
                                 continue;
                             }
@@ -6150,11 +6160,13 @@ impl Engine {
                                     &mut circuit,
                                     element,
                                     resolved_mos_type,
-                                    model,
-                                    &bsimsoi_params,
-                                    instance_params,
-                                    deferred_params,
-                                    self.config.temperature,
+                                    DeviceModelContext {
+                                        model_key: model,
+                                        params_map: &bsimsoi_params,
+                                        instance_params,
+                                        deferred_params,
+                                        temperature_kelvin: self.config.temperature,
+                                    },
                                 )?;
                                 continue;
                             }
@@ -6163,11 +6175,13 @@ impl Engine {
                                     &mut circuit,
                                     element,
                                     resolved_mos_type,
-                                    model,
-                                    &bsimsoi_params,
-                                    instance_params,
-                                    deferred_params,
-                                    self.config.temperature,
+                                    DeviceModelContext {
+                                        model_key: model,
+                                        params_map: &bsimsoi_params,
+                                        instance_params,
+                                        deferred_params,
+                                        temperature_kelvin: self.config.temperature,
+                                    },
                                 )?;
                                 continue;
                             }
@@ -6260,11 +6274,13 @@ impl Engine {
                             &mut circuit,
                             element,
                             resolved_mos_type,
-                            &model_key,
-                            &bsim3_params,
-                            instance_params,
-                            deferred_params,
-                            self.config.temperature,
+                            DeviceModelContext {
+                                model_key: &model_key,
+                                params_map: &bsim3_params,
+                                instance_params,
+                                deferred_params,
+                                temperature_kelvin: self.config.temperature,
+                            },
                             tnom_default_k,
                             bsim3_equation_set,
                             &mut bsim3v3_models,

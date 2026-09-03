@@ -45,6 +45,18 @@ pub(in crate::engine::transient) struct VbicCompanionSystem<'a> {
     pub z_e: &'a mut [Value; BJT_EXTERNAL_STATE_DIM],
 }
 
+/// The four external terminal voltages of a BJT: collector, base, emitter and
+/// substrate. They were threaded as four bare `Value`s through every VBIC
+/// dynamic entry point, where transposing base and emitter typechecks and
+/// silently reverses the junction.
+#[derive(Clone, Copy)]
+pub(in crate::engine::transient) struct BjtExternalBias {
+    pub vc: Value,
+    pub vb: Value,
+    pub ve: Value,
+    pub vs: Value,
+}
+
 mod continuation;
 mod convergence;
 mod linearization;

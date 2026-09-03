@@ -190,13 +190,11 @@ impl Engine {
     #[inline]
     pub(in crate::engine::transient) fn evaluate_vbic_dynamic_internal_state(
         bjt: &crate::device::Bjt,
-        vc: Value,
-        vb: Value,
-        ve: Value,
-        vs: Value,
+        bias: BjtExternalBias,
         step: VbicChargeStep<'_>,
         internal: [Value; BJT_INTERNAL_STATE_DIM],
     ) -> Option<VbicDynamicStateEvaluation> {
+        let BjtExternalBias { vc, vb, ve, vs } = bias;
         let VbicChargeStep {
             coeff,
             dt,
@@ -207,10 +205,7 @@ impl Engine {
         let mut snapshot = bjt.charge_snapshot_for_dynamic_state(vc, vb, ve, vs, internal);
         Self::rebalance_vbic_dynamic_thermal_state(
             bjt,
-            vc,
-            vb,
-            ve,
-            vs,
+            BjtExternalBias { vc, vb, ve, vs },
             VbicChargeStep {
                 coeff,
                 dt,
@@ -251,10 +246,7 @@ impl Engine {
 
     pub(in crate::engine::transient) fn improve_vbic_dynamic_internal_state_toward_target(
         bjt: &crate::device::Bjt,
-        vc: Value,
-        vb: Value,
-        ve: Value,
-        vs: Value,
+        bias: BjtExternalBias,
         step: VbicChargeStep<'_>,
         current_internal: [Value; BJT_INTERNAL_STATE_DIM],
         _current_residual_norm: Value,
@@ -263,6 +255,7 @@ impl Engine {
         envelope_reference: [Value; BJT_INTERNAL_STATE_DIM],
         max_backtracks: usize,
     ) -> Option<VbicDynamicStateEvaluation> {
+        let BjtExternalBias { vc, vb, ve, vs } = bias;
         let VbicChargeStep {
             coeff,
             dt,
@@ -297,10 +290,7 @@ impl Engine {
 
             let Some(candidate_state) = Self::evaluate_vbic_dynamic_internal_state(
                 bjt,
-                vc,
-                vb,
-                ve,
-                vs,
+                BjtExternalBias { vc, vb, ve, vs },
                 VbicChargeStep {
                     coeff,
                     dt,

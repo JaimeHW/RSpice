@@ -72,10 +72,7 @@ impl Engine {
     #[inline]
     pub(in crate::engine::transient) fn solve_vbic_dynamic_snapshot(
         bjt: &crate::device::Bjt,
-        vc: Value,
-        vb: Value,
-        ve: Value,
-        vs: Value,
+        bias: BjtExternalBias,
         step: VbicChargeStep<'_>,
         seed_internal: Option<&[Value; BJT_INTERNAL_STATE_DIM]>,
     ) -> Option<(
@@ -83,6 +80,7 @@ impl Engine {
         VbicTransientLinearization,
         [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
     )> {
+        let BjtExternalBias { vc, vb, ve, vs } = bias;
         let VbicChargeStep {
             coeff,
             dt,
@@ -92,10 +90,7 @@ impl Engine {
         } = step;
         Self::solve_vbic_dynamic_snapshot_primary(
             bjt,
-            vc,
-            vb,
-            ve,
-            vs,
+            BjtExternalBias { vc, vb, ve, vs },
             VbicChargeStep {
                 coeff,
                 dt,
@@ -108,10 +103,7 @@ impl Engine {
         .or_else(|| {
             Self::solve_vbic_dynamic_snapshot_with_collector_substrate_charge_homotopy(
                 bjt,
-                vc,
-                vb,
-                ve,
-                vs,
+                BjtExternalBias { vc, vb, ve, vs },
                 VbicChargeStep {
                     coeff,
                     dt,
@@ -127,10 +119,7 @@ impl Engine {
     #[inline]
     pub(in crate::engine::transient) fn solve_vbic_dynamic_snapshot_primary(
         bjt: &crate::device::Bjt,
-        vc: Value,
-        vb: Value,
-        ve: Value,
-        vs: Value,
+        bias: BjtExternalBias,
         step: VbicChargeStep<'_>,
         seed_internal: Option<&[Value; BJT_INTERNAL_STATE_DIM]>,
     ) -> Option<(
@@ -138,6 +127,7 @@ impl Engine {
         VbicTransientLinearization,
         [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
     )> {
+        let BjtExternalBias { vc, vb, ve, vs } = bias;
         let VbicChargeStep {
             coeff,
             dt,
@@ -147,10 +137,7 @@ impl Engine {
         } = step;
         Self::solve_vbic_dynamic_snapshot_direct(
             bjt,
-            vc,
-            vb,
-            ve,
-            vs,
+            BjtExternalBias { vc, vb, ve, vs },
             VbicChargeStep {
                 coeff,
                 dt,
@@ -163,10 +150,7 @@ impl Engine {
         .or_else(|| {
             Self::solve_vbic_dynamic_snapshot_with_excess_phase_homotopy(
                 bjt,
-                vc,
-                vb,
-                ve,
-                vs,
+                BjtExternalBias { vc, vb, ve, vs },
                 VbicChargeStep {
                     coeff,
                     dt,
@@ -181,10 +165,7 @@ impl Engine {
 
     pub(in crate::engine::transient) fn solve_vbic_dynamic_snapshot_with_collector_substrate_charge_homotopy(
         bjt: &crate::device::Bjt,
-        vc: Value,
-        vb: Value,
-        ve: Value,
-        vs: Value,
+        bias: BjtExternalBias,
         step: VbicChargeStep<'_>,
         seed_internal: Option<&[Value; BJT_INTERNAL_STATE_DIM]>,
     ) -> Option<(
@@ -192,6 +173,7 @@ impl Engine {
         VbicTransientLinearization,
         [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
     )> {
+        let BjtExternalBias { vc, vb, ve, vs } = bias;
         let VbicChargeStep {
             coeff,
             dt,
@@ -240,10 +222,7 @@ impl Engine {
                 scale_collector_substrate_history(0.0, q_prev, q_prev_prev, cq_prev);
             Self::solve_vbic_dynamic_snapshot_primary(
                 &scaled_bjt,
-                vc,
-                vb,
-                ve,
-                vs,
+                BjtExternalBias { vc, vb, ve, vs },
                 VbicChargeStep {
                     coeff,
                     dt,
@@ -263,10 +242,7 @@ impl Engine {
                 scale_collector_substrate_history(candidate_lambda, q_prev, q_prev_prev, cq_prev);
             let Some(candidate_state) = Self::solve_vbic_dynamic_snapshot_primary(
                 &scaled_bjt,
-                vc,
-                vb,
-                ve,
-                vs,
+                BjtExternalBias { vc, vb, ve, vs },
                 VbicChargeStep {
                     coeff,
                     dt,
@@ -292,10 +268,7 @@ impl Engine {
 
     pub(in crate::engine::transient) fn solve_vbic_dynamic_snapshot_with_excess_phase_homotopy(
         bjt: &crate::device::Bjt,
-        vc: Value,
-        vb: Value,
-        ve: Value,
-        vs: Value,
+        bias: BjtExternalBias,
         step: VbicChargeStep<'_>,
         seed_internal: Option<&[Value; BJT_INTERNAL_STATE_DIM]>,
     ) -> Option<(
@@ -303,6 +276,7 @@ impl Engine {
         VbicTransientLinearization,
         [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
     )> {
+        let BjtExternalBias { vc, vb, ve, vs } = bias;
         let VbicChargeStep {
             coeff,
             dt,
@@ -350,10 +324,7 @@ impl Engine {
         let live_base_seed = base_bjt.dynamic_internal_state_seed(vc, vb, ve, vs);
         let mut current_result = Self::solve_vbic_dynamic_snapshot_best_effort(
             &base_bjt,
-            vc,
-            vb,
-            ve,
-            vs,
+            BjtExternalBias { vc, vb, ve, vs },
             VbicChargeStep {
                 coeff,
                 dt,
@@ -365,10 +336,7 @@ impl Engine {
         );
         let live_base_result = Self::solve_vbic_dynamic_snapshot_best_effort(
             &base_bjt,
-            vc,
-            vb,
-            ve,
-            vs,
+            BjtExternalBias { vc, vb, ve, vs },
             VbicChargeStep {
                 coeff,
                 dt,
@@ -405,10 +373,7 @@ impl Engine {
             );
             let mut candidate_result = Self::solve_vbic_dynamic_snapshot_best_effort(
                 &stepped_bjt,
-                vc,
-                vb,
-                ve,
-                vs,
+                BjtExternalBias { vc, vb, ve, vs },
                 VbicChargeStep {
                     coeff,
                     dt,
@@ -420,10 +385,7 @@ impl Engine {
             );
             let live_candidate_result = Self::solve_vbic_dynamic_snapshot_best_effort(
                 &stepped_bjt,
-                vc,
-                vb,
-                ve,
-                vs,
+                BjtExternalBias { vc, vb, ve, vs },
                 VbicChargeStep {
                     coeff,
                     dt,
@@ -477,10 +439,7 @@ impl Engine {
                 let target_result = Self::choose_preferred_vbic_best_effort_result(
                     Self::solve_vbic_dynamic_snapshot_best_effort(
                         bjt,
-                        vc,
-                        vb,
-                        ve,
-                        vs,
+                        BjtExternalBias { vc, vb, ve, vs },
                         VbicChargeStep {
                             coeff,
                             dt,
@@ -492,10 +451,7 @@ impl Engine {
                     ),
                     Self::solve_vbic_dynamic_snapshot_best_effort(
                         bjt,
-                        vc,
-                        vb,
-                        ve,
-                        vs,
+                        BjtExternalBias { vc, vb, ve, vs },
                         VbicChargeStep {
                             coeff,
                             dt,
@@ -537,10 +493,7 @@ impl Engine {
     #[inline]
     pub(in crate::engine::transient) fn solve_vbic_dynamic_snapshot_direct(
         bjt: &crate::device::Bjt,
-        vc: Value,
-        vb: Value,
-        ve: Value,
-        vs: Value,
+        bias: BjtExternalBias,
         step: VbicChargeStep<'_>,
         seed_internal: Option<&[Value; BJT_INTERNAL_STATE_DIM]>,
     ) -> Option<(
@@ -548,6 +501,7 @@ impl Engine {
         VbicTransientLinearization,
         [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
     )> {
+        let BjtExternalBias { vc, vb, ve, vs } = bias;
         let VbicChargeStep {
             coeff,
             dt,
@@ -558,10 +512,7 @@ impl Engine {
         let (snapshot, linearization, base_static_g, _residual_norm) =
             Self::solve_vbic_dynamic_snapshot_best_effort(
                 bjt,
-                vc,
-                vb,
-                ve,
-                vs,
+                BjtExternalBias { vc, vb, ve, vs },
                 VbicChargeStep {
                     coeff,
                     dt,
@@ -582,13 +533,11 @@ impl Engine {
     #[inline]
     pub(in crate::engine::transient) fn solve_vbic_dynamic_snapshot_best_effort(
         bjt: &crate::device::Bjt,
-        vc: Value,
-        vb: Value,
-        ve: Value,
-        vs: Value,
+        bias: BjtExternalBias,
         step: VbicChargeStep<'_>,
         seed_internal: Option<&[Value; BJT_INTERNAL_STATE_DIM]>,
     ) -> Option<VbicBestEffortSolve> {
+        let BjtExternalBias { vc, vb, ve, vs } = bias;
         let VbicChargeStep {
             coeff,
             dt,
@@ -603,10 +552,7 @@ impl Engine {
         };
         Self::rebalance_vbic_dynamic_thermal_state(
             bjt,
-            vc,
-            vb,
-            ve,
-            vs,
+            BjtExternalBias { vc, vb, ve, vs },
             VbicChargeStep {
                 coeff,
                 dt,
@@ -635,10 +581,7 @@ impl Engine {
         );
         let polished_initial_state = Self::refine_vbic_dynamic_static_core_with_fixed_delay(
             bjt,
-            vc,
-            vb,
-            ve,
-            vs,
+            BjtExternalBias { vc, vb, ve, vs },
             VbicChargeStep {
                 coeff,
                 dt,
@@ -733,10 +676,7 @@ impl Engine {
                 solved_residual_norm,
             )) = Self::improve_vbic_dynamic_internal_state_toward_target(
                 bjt,
-                vc,
-                vb,
-                ve,
-                vs,
+                BjtExternalBias { vc, vb, ve, vs },
                 VbicChargeStep {
                     coeff,
                     dt,
@@ -757,10 +697,7 @@ impl Engine {
 
             let polished_state = Self::refine_vbic_dynamic_static_core_with_fixed_delay(
                 bjt,
-                vc,
-                vb,
-                ve,
-                vs,
+                BjtExternalBias { vc, vb, ve, vs },
                 VbicChargeStep {
                     coeff,
                     dt,
@@ -788,10 +725,7 @@ impl Engine {
         if current_residual_norm > 1e-8 {
             let mut current_state = Self::evaluate_vbic_dynamic_internal_state(
                 bjt,
-                vc,
-                vb,
-                ve,
-                vs,
+                BjtExternalBias { vc, vb, ve, vs },
                 VbicChargeStep {
                     coeff,
                     dt,
@@ -837,10 +771,7 @@ impl Engine {
                     );
                     Self::improve_vbic_dynamic_internal_state_toward_target(
                         bjt,
-                        vc,
-                        vb,
-                        ve,
-                        vs,
+                        BjtExternalBias { vc, vb, ve, vs },
                         VbicChargeStep {
                             coeff,
                             dt,
@@ -858,10 +789,7 @@ impl Engine {
                     .map(|candidate_state| {
                         Self::refine_vbic_dynamic_static_core_with_fixed_delay(
                             bjt,
-                            vc,
-                            vb,
-                            ve,
-                            vs,
+                            BjtExternalBias { vc, vb, ve, vs },
                             VbicChargeStep {
                                 coeff,
                                 dt,
@@ -893,10 +821,7 @@ impl Engine {
                     }
                     let Some(plus_state) = Self::evaluate_vbic_dynamic_internal_state(
                         bjt,
-                        vc,
-                        vb,
-                        ve,
-                        vs,
+                        BjtExternalBias { vc, vb, ve, vs },
                         VbicChargeStep {
                             coeff,
                             dt,
@@ -920,10 +845,7 @@ impl Engine {
                         }
                         let Some(minus_state) = Self::evaluate_vbic_dynamic_internal_state(
                             bjt,
-                            vc,
-                            vb,
-                            ve,
-                            vs,
+                            BjtExternalBias { vc, vb, ve, vs },
                             VbicChargeStep {
                                 coeff,
                                 dt,
@@ -996,10 +918,7 @@ impl Engine {
                 if let Some(candidate_state) =
                     Self::improve_vbic_dynamic_internal_state_toward_target(
                         bjt,
-                        vc,
-                        vb,
-                        ve,
-                        vs,
+                        BjtExternalBias { vc, vb, ve, vs },
                         VbicChargeStep {
                             coeff,
                             dt,
@@ -1017,10 +936,7 @@ impl Engine {
                     .map(|candidate_state| {
                         Self::refine_vbic_dynamic_static_core_with_fixed_delay(
                             bjt,
-                            vc,
-                            vb,
-                            ve,
-                            vs,
+                            BjtExternalBias { vc, vb, ve, vs },
                             VbicChargeStep {
                                 coeff,
                                 dt,
@@ -1103,10 +1019,7 @@ impl Engine {
                     if let Some(candidate_state) =
                         Self::improve_vbic_dynamic_internal_state_toward_target(
                             bjt,
-                            vc,
-                            vb,
-                            ve,
-                            vs,
+                            BjtExternalBias { vc, vb, ve, vs },
                             VbicChargeStep {
                                 coeff,
                                 dt,
@@ -1124,10 +1037,7 @@ impl Engine {
                         .map(|candidate_state| {
                             Self::refine_vbic_dynamic_static_core_with_fixed_delay(
                                 bjt,
-                                vc,
-                                vb,
-                                ve,
-                                vs,
+                                BjtExternalBias { vc, vb, ve, vs },
                                 VbicChargeStep {
                                     coeff,
                                     dt,

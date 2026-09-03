@@ -7,7 +7,7 @@
 #![allow(clippy::excessive_precision)]
 
 use rspice_core::circuit::DeviceOpEntry;
-use rspice_core::engine::{Engine, SimulationConfig};
+use rspice_core::engine::{DcSweepRange, Engine, SimulationConfig};
 use rspice_core::netlist::{AnalysisCommand, Netlist};
 
 #[derive(Clone, Copy, Debug)]
@@ -731,9 +731,11 @@ fn mos3_matches_xyce_710_nmos3_dc_subset() {
         .run_dc_sweep2_with_abort(
             &netlist,
             "vds",
-            0.0,
-            6.0,
-            0.01,
+            DcSweepRange {
+                start: 0.0,
+                stop: 6.0,
+                step: 0.01,
+            },
             Some(&sweep2),
             &rspice_core::abort_signal::NoAbort,
         )

@@ -3,6 +3,18 @@
 use super::*;
 use crate::device::mosfet::b3soi::common::SoiCompanionCurrents;
 
+/// The six BSIM4 terminal charges one companion step differences: gate, the
+/// mid-gate node, bulk, drain and the two junction charges.
+#[derive(Clone, Copy)]
+pub(super) struct Bsim4TerminalCharges {
+    pub qg: Value,
+    pub qgmid: Value,
+    pub qb: Value,
+    pub qd: Value,
+    pub qbs: Value,
+    pub qbd: Value,
+}
+
 impl Engine {
     #[inline]
     pub(super) fn initialize_b3soi_history(
@@ -905,13 +917,16 @@ impl Engine {
         dt: Value,
         history: &Bsim4TransientHistory,
         idx: usize,
-        qg: Value,
-        qgmid: Value,
-        qb: Value,
-        qd: Value,
-        qbs: Value,
-        qbd: Value,
+        charges: Bsim4TerminalCharges,
     ) -> (Value, Value, Value, Value, Value, Value) {
+        let Bsim4TerminalCharges {
+            qg,
+            qgmid,
+            qb,
+            qd,
+            qbs,
+            qbd,
+        } = charges;
         let cq = |q: Value, q_prev: Value, q_prev_prev: Value, cq_prev: Value| {
             Self::jfet_companion_ccap(
                 coeff,
@@ -1041,7 +1056,18 @@ impl Engine {
                 )
             };
             let (cqg, cqgmid, cqb, cqd, cqbs, cqbd) = Self::bsim4_companion_currents(
-                coeff, dt, history, idx, qg, qgmid, qb, qd, qbs, qbd,
+                coeff,
+                dt,
+                history,
+                idx,
+                Bsim4TerminalCharges {
+                    qg,
+                    qgmid,
+                    qb,
+                    qd,
+                    qbs,
+                    qbd,
+                },
             );
             // The history carries per-device charges; the device stamp
             // applies the parallel multiplier itself (b4ld.c: mult_q * ceqq*).
@@ -1117,7 +1143,18 @@ impl Engine {
                 )
             };
             let (cqg, cqgmid, cqb, cqd, cqbs, cqbd) = Self::bsim4_companion_currents(
-                coeff, dt, history, idx, qg, qgmid, qb, qd, qbs, qbd,
+                coeff,
+                dt,
+                history,
+                idx,
+                Bsim4TerminalCharges {
+                    qg,
+                    qgmid,
+                    qb,
+                    qd,
+                    qbs,
+                    qbd,
+                },
             );
             history.qg_prev_prev_prev[idx] = history.qg_prev_prev[idx];
             history.qg_prev_prev[idx] = history.qg_prev[idx];

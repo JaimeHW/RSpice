@@ -83,10 +83,12 @@ pub(in crate::engine::builder) fn add_behavioral_resistor(
     let policy = resolve_behavioral_resistor_policy(
         netlist,
         &element.name,
-        model_name,
-        instance_params,
-        temperature_kelvin,
-        spice_dialect,
+        ResistorResolutionContext {
+            model_name,
+            instance_params,
+            temperature_kelvin,
+            spice_dialect,
+        },
     )?;
     if !policy.scale.is_finite() || policy.scale == 0.0 {
         return Err(SimulationError::Circuit(format!(

@@ -599,6 +599,17 @@ fn resolve_level1_model_geometry_resistance(
     Ok(Some(rsh * squares))
 }
 
+/// How one resistor's value is resolved: the model card it may name, the
+/// instance overrides, the temperature the card is evaluated at, and the
+/// dialect whose parameter semantics apply.
+#[derive(Clone, Copy)]
+pub(in crate::engine::builder) struct ResistorResolutionContext<'a> {
+    pub model_name: Option<&'a str>,
+    pub instance_params: &'a [(String, f64)],
+    pub temperature_kelvin: f64,
+    pub spice_dialect: SpiceDialect,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 /// Resistor parameters after `.PARAM`, model-card, and `.STEP` resolution.
 pub struct ResolvedResistorParameters {
@@ -630,11 +641,14 @@ pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
     element_name: &str,
     value: f64,
     value_expr: Option<&str>,
-    model_name: Option<&str>,
-    instance_params: &[(String, f64)],
-    temperature_kelvin: f64,
-    spice_dialect: SpiceDialect,
+    context: ResistorResolutionContext<'_>,
 ) -> Result<ResolvedResistorParameters, SimulationError> {
+    let ResistorResolutionContext {
+        model_name,
+        instance_params,
+        temperature_kelvin,
+        spice_dialect,
+    } = context;
     let model_def = if let Some(model_name) = model_name {
         let model_def = find_model_def(netlist, model_name).ok_or_else(|| {
             SimulationError::Circuit(format!(
@@ -877,20 +891,25 @@ pub(in crate::engine::builder) fn resolve_resistor_instance_value(
     element_name: &str,
     value: f64,
     value_expr: Option<&str>,
-    model_name: Option<&str>,
-    instance_params: &[(String, f64)],
-    temperature_kelvin: f64,
-    spice_dialect: SpiceDialect,
+    context: ResistorResolutionContext<'_>,
 ) -> Result<f64, SimulationError> {
+    let ResistorResolutionContext {
+        model_name,
+        instance_params,
+        temperature_kelvin,
+        spice_dialect,
+    } = context;
     resolve_resistor_effective_parameters(
         netlist,
         element_name,
         value,
         value_expr,
-        model_name,
-        instance_params,
-        temperature_kelvin,
-        spice_dialect,
+        ResistorResolutionContext {
+            model_name,
+            instance_params,
+            temperature_kelvin,
+            spice_dialect,
+        },
     )
     .map(|parameters| parameters.resistance)
 }
@@ -909,11 +928,14 @@ pub(in crate::engine::builder) struct ResolvedBehavioralResistorPolicy {
 pub(in crate::engine::builder) fn resolve_behavioral_resistor_policy(
     netlist: &Netlist,
     element_name: &str,
-    model_name: Option<&str>,
-    instance_params: &[(String, f64)],
-    temperature_kelvin: f64,
-    spice_dialect: SpiceDialect,
+    context: ResistorResolutionContext<'_>,
 ) -> Result<ResolvedBehavioralResistorPolicy, SimulationError> {
+    let ResistorResolutionContext {
+        model_name,
+        instance_params,
+        temperature_kelvin,
+        spice_dialect,
+    } = context;
     let model_def = if let Some(model_name) = model_name {
         Some(find_model_def(netlist, model_name).ok_or_else(|| {
             SimulationError::Circuit(format!(
@@ -931,10 +953,12 @@ pub(in crate::engine::builder) fn resolve_behavioral_resistor_policy(
         element_name,
         1.0,
         None,
-        model_name,
-        instance_params,
-        temperature_kelvin,
-        spice_dialect,
+        ResistorResolutionContext {
+            model_name,
+            instance_params,
+            temperature_kelvin,
+            spice_dialect,
+        },
     )?;
     Ok(ResolvedBehavioralResistorPolicy {
         scale,
@@ -1048,10 +1072,12 @@ mod tests {
             &element.name,
             *value,
             value_expr.as_deref(),
-            model.as_deref(),
-            instance_params,
-            temperature_kelvin,
-            spice_dialect,
+            ResistorResolutionContext {
+                model_name: model.as_deref(),
+                instance_params,
+                temperature_kelvin,
+                spice_dialect,
+            },
         )
         .expect("resistor resolves");
         let ac = instance_param(instance_params, &["AC"])
@@ -1094,10 +1120,14 @@ mod tests {
             &element.name,
             *value,
             value_expr.as_deref(),
-            model.as_deref(),
-            instance_params,
-            crate::constants::celsius_to_kelvin(netlist.options.temp.unwrap_or(27.0)),
-            SpiceDialect::Xyce,
+            ResistorResolutionContext {
+                model_name: model.as_deref(),
+                instance_params,
+                temperature_kelvin: crate::constants::celsius_to_kelvin(
+                    netlist.options.temp.unwrap_or(27.0),
+                ),
+                spice_dialect: SpiceDialect::Xyce,
+            },
         )
         .expect("effective resistor parameters resolve")
     }
@@ -1239,10 +1269,12 @@ R1 in 0 RMOD L=2 A=1 M=2
             &element.name,
             *value,
             value_expr.as_deref(),
-            model.as_deref(),
-            instance_params,
-            crate::constants::TEMP_REFERENCE,
-            SpiceDialect::Xyce,
+            ResistorResolutionContext {
+                model_name: model.as_deref(),
+                instance_params,
+                temperature_kelvin: crate::constants::TEMP_REFERENCE,
+                spice_dialect: SpiceDialect::Xyce,
+            },
         )
         .expect("transient thermal material resolves");
         assert_eq!(resolved_transient.resistance, 1.0e-8);
@@ -1400,10 +1432,12 @@ R1 a 0 0
             &element.name,
             *value,
             value_expr.as_deref(),
-            model.as_deref(),
-            instance_params,
-            crate::constants::TEMP_REFERENCE,
-            SpiceDialect::BestAvailable,
+            ResistorResolutionContext {
+                model_name: model.as_deref(),
+                instance_params,
+                temperature_kelvin: crate::constants::TEMP_REFERENCE,
+                spice_dialect: SpiceDialect::BestAvailable,
+            },
         )
         .expect("zero-ohm resistor resolves before branch-form stamping");
 

@@ -6,13 +6,11 @@ impl Engine {
     #[inline]
     pub(in crate::engine::transient) fn rebalance_vbic_dynamic_thermal_state(
         bjt: &crate::device::Bjt,
-        vc: Value,
-        vb: Value,
-        ve: Value,
-        vs: Value,
+        bias: BjtExternalBias,
         step: VbicChargeStep<'_>,
         snapshot: &mut crate::device::semiconductor::BjtChargeSnapshot,
     ) {
+        let BjtExternalBias { vc, vb, ve, vs } = bias;
         let VbicChargeStep {
             coeff,
             dt,
@@ -29,10 +27,7 @@ impl Engine {
         for _ in 0..8 {
             let (residual, derivative) = Self::vbic_transient_thermal_residual_and_derivative(
                 bjt,
-                vc,
-                vb,
-                ve,
-                vs,
+                BjtExternalBias { vc, vb, ve, vs },
                 internal,
                 VbicChargeStep {
                     coeff,
@@ -75,10 +70,7 @@ impl Engine {
                 candidate[BJT_THERMAL_STATE_INDEX] = candidate_vrth;
                 let (candidate_residual, _) = Self::vbic_transient_thermal_residual_and_derivative(
                     bjt,
-                    vc,
-                    vb,
-                    ve,
-                    vs,
+                    BjtExternalBias { vc, vb, ve, vs },
                     candidate,
                     VbicChargeStep {
                         coeff,
@@ -122,13 +114,11 @@ impl Engine {
     #[inline]
     pub(in crate::engine::transient) fn vbic_transient_thermal_residual_and_derivative(
         bjt: &crate::device::Bjt,
-        vc: Value,
-        vb: Value,
-        ve: Value,
-        vs: Value,
+        bias: BjtExternalBias,
         internal: [Value; BJT_INTERNAL_STATE_DIM],
         step: VbicChargeStep<'_>,
     ) -> (Value, Value) {
+        let BjtExternalBias { vc, vb, ve, vs } = bias;
         let VbicChargeStep {
             coeff,
             dt,
@@ -1066,14 +1056,12 @@ impl Engine {
     #[inline]
     pub(in crate::engine::transient) fn refine_vbic_dynamic_static_core_with_fixed_delay(
         bjt: &crate::device::Bjt,
-        vc: Value,
-        vb: Value,
-        ve: Value,
-        vs: Value,
+        bias: BjtExternalBias,
         step: VbicChargeStep<'_>,
         mut current_state: VbicDynamicStateEvaluation,
         max_iterations: usize,
     ) -> VbicDynamicStateEvaluation {
+        let BjtExternalBias { vc, vb, ve, vs } = bias;
         let VbicChargeStep {
             coeff,
             dt,
@@ -1116,10 +1104,7 @@ impl Engine {
             );
             let Some(next_state) = Self::improve_vbic_dynamic_internal_state_toward_target(
                 bjt,
-                vc,
-                vb,
-                ve,
-                vs,
+                BjtExternalBias { vc, vb, ve, vs },
                 VbicChargeStep {
                     coeff,
                     dt,

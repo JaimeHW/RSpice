@@ -1,6 +1,6 @@
 //! Native VDMOS / Xyce MOS LEVEL=18 integration tests.
 
-use rspice_core::engine::{Engine, SimulationConfig};
+use rspice_core::engine::{DcSweepRange, Engine, SimulationConfig};
 use rspice_core::netlist::{AnalysisCommand, Netlist};
 
 fn run_report(deck: &str) -> rspice_core::circuit::DeviceOpReport {
@@ -1026,9 +1026,11 @@ fn xyce_level18_irf130_dc_matches_xyce_gold_current() {
         .run_dc_sweep2_with_abort(
             &netlist,
             "vd",
-            0.0,
-            50.0,
-            5.0,
+            DcSweepRange {
+                start: 0.0,
+                stop: 50.0,
+                step: 5.0,
+            },
             Some(&sweep2),
             &rspice_core::abort_signal::NoAbort,
         )
@@ -1108,9 +1110,11 @@ fn xyce_level18_irhc110_dc_matches_xyce_gold_current() {
         .run_dc_sweep2_with_abort(
             &netlist,
             "vd",
-            0.0,
-            10.0,
-            1.0,
+            DcSweepRange {
+                start: 0.0,
+                stop: 10.0,
+                step: 1.0,
+            },
             Some(&sweep2),
             &rspice_core::abort_signal::NoAbort,
         )
@@ -1764,9 +1768,11 @@ fn xyce_level18_vdmos_rd_plus_drift_matches_xyce_gold_current() {
         .run_dc_sweep2_with_abort(
             &netlist,
             "vd",
-            10.0,
-            10.0,
-            1.0,
+            DcSweepRange {
+                start: 10.0,
+                stop: 10.0,
+                step: 1.0,
+            },
             Some(&sweep2),
             &rspice_core::abort_signal::NoAbort,
         )
@@ -1801,9 +1807,11 @@ fn xyce_level18_mtb60p06v_pmos_dc_matches_xyce_gold_current() {
         .run_dc_sweep2_with_abort(
             &netlist,
             "vd",
-            0.0,
-            -5.0,
-            -0.5,
+            DcSweepRange {
+                start: 0.0,
+                stop: -5.0,
+                step: -0.5,
+            },
             Some(&sweep2),
             &rspice_core::abort_signal::NoAbort,
         )

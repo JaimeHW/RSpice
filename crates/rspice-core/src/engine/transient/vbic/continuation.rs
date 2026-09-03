@@ -8,10 +8,7 @@ impl Engine {
         bjt: &crate::device::Bjt,
         previous_external: [Value; BJT_EXTERNAL_STATE_DIM],
         previous_snapshot: &BjtChargeSnapshot,
-        vc: Value,
-        vb: Value,
-        ve: Value,
-        vs: Value,
+        bias: BjtExternalBias,
         step: VbicChargeStep<'_>,
         seed_internal: Option<&[Value; BJT_INTERNAL_STATE_DIM]>,
     ) -> Option<(
@@ -19,6 +16,7 @@ impl Engine {
         VbicTransientLinearization,
         [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
     )> {
+        let BjtExternalBias { vc, vb, ve, vs } = bias;
         let VbicChargeStep {
             coeff,
             dt,
@@ -33,10 +31,7 @@ impl Engine {
         );
         let seeded_result = Self::solve_vbic_dynamic_snapshot_best_effort(
             bjt,
-            vc,
-            vb,
-            ve,
-            vs,
+            BjtExternalBias { vc, vb, ve, vs },
             VbicChargeStep {
                 coeff,
                 dt,
@@ -55,10 +50,7 @@ impl Engine {
             .map(|_| {
                 Self::solve_vbic_dynamic_snapshot_best_effort(
                     bjt,
-                    vc,
-                    vb,
-                    ve,
-                    vs,
+                    BjtExternalBias { vc, vb, ve, vs },
                     VbicChargeStep {
                         coeff,
                         dt,
@@ -79,10 +71,7 @@ impl Engine {
             .map(|_| {
                 Self::solve_vbic_dynamic_snapshot_best_effort(
                     bjt,
-                    vc,
-                    vb,
-                    ve,
-                    vs,
+                    BjtExternalBias { vc, vb, ve, vs },
                     VbicChargeStep {
                         coeff,
                         dt,
@@ -134,10 +123,7 @@ impl Engine {
 
         Self::solve_vbic_dynamic_snapshot_with_excess_phase_homotopy(
             bjt,
-            vc,
-            vb,
-            ve,
-            vs,
+            BjtExternalBias { vc, vb, ve, vs },
             VbicChargeStep {
                 coeff,
                 dt,
@@ -150,10 +136,7 @@ impl Engine {
         .or_else(|| {
             Self::solve_vbic_dynamic_snapshot_with_collector_substrate_charge_homotopy(
                 bjt,
-                vc,
-                vb,
-                ve,
-                vs,
+                BjtExternalBias { vc, vb, ve, vs },
                 VbicChargeStep {
                     coeff,
                     dt,
@@ -201,10 +184,12 @@ impl Engine {
         } = step;
         let current_snapshot = Self::solve_vbic_dynamic_snapshot(
             bjt,
-            previous_external[0],
-            previous_external[1],
-            previous_external[2],
-            previous_external[3],
+            BjtExternalBias {
+                vc: previous_external[0],
+                vb: previous_external[1],
+                ve: previous_external[2],
+                vs: previous_external[3],
+            },
             VbicChargeStep {
                 coeff,
                 dt,
@@ -347,10 +332,12 @@ impl Engine {
                 bjt,
                 current_external,
                 &current_snapshot,
-                next_external[0],
-                next_external[1],
-                next_external[2],
-                next_external[3],
+                BjtExternalBias {
+                    vc: next_external[0],
+                    vb: next_external[1],
+                    ve: next_external[2],
+                    vs: next_external[3],
+                },
                 VbicChargeStep {
                     coeff,
                     dt,
@@ -620,10 +607,12 @@ impl Engine {
         // proceed with the accepted local update.
         Self::solve_vbic_dynamic_snapshot(
             bjt,
-            external[BJT_EXT_C_INDEX],
-            external[BJT_EXT_B_INDEX],
-            external[BJT_EXT_E_INDEX],
-            external[BJT_EXT_S_INDEX],
+            BjtExternalBias {
+                vc: external[BJT_EXT_C_INDEX],
+                vb: external[BJT_EXT_B_INDEX],
+                ve: external[BJT_EXT_E_INDEX],
+                vs: external[BJT_EXT_S_INDEX],
+            },
             VbicChargeStep {
                 coeff,
                 dt,
@@ -636,10 +625,12 @@ impl Engine {
         .or_else(|| {
             Self::solve_vbic_dynamic_snapshot(
                 bjt,
-                external[BJT_EXT_C_INDEX],
-                external[BJT_EXT_B_INDEX],
-                external[BJT_EXT_E_INDEX],
-                external[BJT_EXT_S_INDEX],
+                BjtExternalBias {
+                    vc: external[BJT_EXT_C_INDEX],
+                    vb: external[BJT_EXT_B_INDEX],
+                    ve: external[BJT_EXT_E_INDEX],
+                    vs: external[BJT_EXT_S_INDEX],
+                },
                 VbicChargeStep {
                     coeff,
                     dt,
@@ -803,10 +794,7 @@ impl Engine {
         let cached_seed = cached_snapshot.map(|snapshot| snapshot.reduction.internal_voltages);
         let predicted_seed = Self::vbic_dynamic_internal_seed_from_history_with_linear_history(
             bjt,
-            vc,
-            vb,
-            ve,
-            vs,
+            BjtExternalBias { vc, vb, ve, vs },
             history_internal_prev,
             history_internal_prev_prev,
             history_linear_prev,
@@ -1100,10 +1088,12 @@ impl Engine {
 
         let seed_internal = Self::vbic_dynamic_internal_seed_from_history_with_linear_history(
             bjt,
-            external[0],
-            external[1],
-            external[2],
-            external[3],
+            BjtExternalBias {
+                vc: external[0],
+                vb: external[1],
+                ve: external[2],
+                vs: external[3],
+            },
             history_internal_prev,
             history_internal_prev_prev,
             history_linear_prev,
@@ -1164,10 +1154,12 @@ impl Engine {
         // continuation when that direct solve cannot produce a usable snapshot.
         if let Some((snapshot, _, _)) = Self::solve_vbic_dynamic_snapshot(
             bjt,
-            external[0],
-            external[1],
-            external[2],
-            external[3],
+            BjtExternalBias {
+                vc: external[0],
+                vb: external[1],
+                ve: external[2],
+                vs: external[3],
+            },
             VbicChargeStep {
                 coeff,
                 dt,
@@ -1182,10 +1174,12 @@ impl Engine {
         let mut bounded_best_effort = Self::choose_preferred_vbic_best_effort_result(
             Self::solve_vbic_dynamic_snapshot_best_effort(
                 bjt,
-                external[0],
-                external[1],
-                external[2],
-                external[3],
+                BjtExternalBias {
+                    vc: external[0],
+                    vb: external[1],
+                    ve: external[2],
+                    vs: external[3],
+                },
                 VbicChargeStep {
                     coeff,
                     dt,
@@ -1204,10 +1198,12 @@ impl Engine {
                 .and_then(|seed| {
                     Self::solve_vbic_dynamic_snapshot_best_effort(
                         bjt,
-                        external[0],
-                        external[1],
-                        external[2],
-                        external[3],
+                        BjtExternalBias {
+                            vc: external[0],
+                            vb: external[1],
+                            ve: external[2],
+                            vs: external[3],
+                        },
                         VbicChargeStep {
                             coeff,
                             dt,
@@ -1229,10 +1225,12 @@ impl Engine {
                 .any(|(cached, seeded)| (*cached - *seeded).abs() > 1e-15)
                 && let Some((snapshot, _, _)) = Self::solve_vbic_dynamic_snapshot(
                     bjt,
-                    external[0],
-                    external[1],
-                    external[2],
-                    external[3],
+                    BjtExternalBias {
+                        vc: external[0],
+                        vb: external[1],
+                        ve: external[2],
+                        vs: external[3],
+                    },
                     VbicChargeStep {
                         coeff,
                         dt,
@@ -1256,10 +1254,12 @@ impl Engine {
                     .and_then(|seed| {
                         Self::solve_vbic_dynamic_snapshot_best_effort(
                             bjt,
-                            external[0],
-                            external[1],
-                            external[2],
-                            external[3],
+                            BjtExternalBias {
+                                vc: external[0],
+                                vb: external[1],
+                                ve: external[2],
+                                vs: external[3],
+                            },
                             VbicChargeStep {
                                 coeff,
                                 dt,
@@ -1459,10 +1459,7 @@ impl Engine {
     #[inline]
     pub(in crate::engine::transient) fn vbic_dynamic_internal_seed_from_history_with_linear_history(
         bjt: &crate::device::Bjt,
-        vc: Value,
-        vb: Value,
-        ve: Value,
-        vs: Value,
+        bias: BjtExternalBias,
         history_internal_prev: Option<&[Value; BJT_INTERNAL_STATE_DIM]>,
         history_internal_prev_prev: Option<&[Value; BJT_INTERNAL_STATE_DIM]>,
         history_linear_prev: Option<&VbicPredictorLinearBranchState>,
@@ -1470,6 +1467,7 @@ impl Engine {
         dt: Value,
         previous_dt: Value,
     ) -> [Value; BJT_INTERNAL_STATE_DIM] {
+        let BjtExternalBias { vc, vb, ve, vs } = bias;
         let live_seed = bjt.dynamic_internal_state_seed(vc, vb, ve, vs);
         let Some(history_internal_prev) = history_internal_prev else {
             return live_seed;

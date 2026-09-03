@@ -3,6 +3,19 @@
 use super::*;
 use crate::device::MosTerminals;
 
+/// Everything a device builder needs about the model card behind an element:
+/// which model to look up, its resolved numeric parameters, the instance
+/// overrides, the parameters whose expressions are still deferred, and the
+/// temperature the card is evaluated at.
+#[derive(Clone, Copy)]
+pub(super) struct DeviceModelContext<'a> {
+    pub model_key: &'a str,
+    pub params_map: &'a HashMap<String, f64>,
+    pub instance_params: &'a [(String, f64)],
+    pub deferred_params: &'a [(String, String)],
+    pub temperature_kelvin: f64,
+}
+
 impl Engine {
     /// Build and register a BSIMSOI dynamic-depletion (level 56) instance.
     ///
@@ -20,12 +33,15 @@ impl Engine {
         circuit: &mut CircuitData,
         element: &crate::netlist::Element,
         mos_type: crate::netlist::MosType,
-        model_key: &str,
-        params_map: &HashMap<String, f64>,
-        instance_params: &[(String, f64)],
-        deferred_params: &[(String, String)],
-        temperature_kelvin: f64,
+        model: DeviceModelContext<'_>,
     ) -> Result<(), SimulationError> {
+        let DeviceModelContext {
+            model_key,
+            params_map,
+            instance_params,
+            deferred_params,
+            temperature_kelvin,
+        } = model;
         use crate::device::mosfet::b3soi::dd::temp::{B3SoiDdGeometry, B3SoiDdSized};
         use crate::device::{B3SoiDd, B3SoiDdModel, B3SoiDdNodes, BodyMode};
 
@@ -204,12 +220,15 @@ impl Engine {
         circuit: &mut CircuitData,
         element: &crate::netlist::Element,
         mos_type: crate::netlist::MosType,
-        model_key: &str,
-        params_map: &HashMap<String, f64>,
-        instance_params: &[(String, f64)],
-        deferred_params: &[(String, String)],
-        temperature_kelvin: f64,
+        model: DeviceModelContext<'_>,
     ) -> Result<(), SimulationError> {
+        let DeviceModelContext {
+            model_key,
+            params_map,
+            instance_params,
+            deferred_params,
+            temperature_kelvin,
+        } = model;
         use crate::device::B3SoiFd;
         use crate::device::B3SoiFdModel;
         use crate::device::mosfet::b3soi::fd::BodyMode;
@@ -352,12 +371,15 @@ impl Engine {
         circuit: &mut CircuitData,
         element: &crate::netlist::Element,
         mos_type: crate::netlist::MosType,
-        model_key: &str,
-        params_map: &HashMap<String, f64>,
-        instance_params: &[(String, f64)],
-        deferred_params: &[(String, String)],
-        temperature_kelvin: f64,
+        model: DeviceModelContext<'_>,
     ) -> Result<(), SimulationError> {
+        let DeviceModelContext {
+            model_key,
+            params_map,
+            instance_params,
+            deferred_params,
+            temperature_kelvin,
+        } = model;
         use crate::device::B3SoiPdModel;
         use crate::device::mosfet::b3soi::pd::BodyMode;
         use crate::device::mosfet::b3soi::pd::temp::B3SoiPdGeometry;
@@ -623,15 +645,18 @@ impl Engine {
         circuit: &mut CircuitData,
         element: &crate::netlist::Element,
         mos_type: crate::netlist::MosType,
-        model_key: &str,
-        params_map: &HashMap<String, f64>,
-        instance_params: &[(String, f64)],
-        deferred_params: &[(String, String)],
-        temperature_kelvin: f64,
+        model: DeviceModelContext<'_>,
         tnom_default_k: f64,
         equation_set: crate::device::Bsim3v3EquationSet,
         shared: &mut HashMap<Bsim3v3SharedModelKey, Bsim3v3SharedModel>,
     ) -> Result<(), SimulationError> {
+        let DeviceModelContext {
+            model_key,
+            params_map,
+            instance_params,
+            deferred_params,
+            temperature_kelvin,
+        } = model;
         use crate::device::Bsim3v3Device;
         use crate::device::mosfet::bsim3v3::{
             Bsim3v3, Bsim3v3Geometry, Bsim3v3Model, Bsim3v3ModelTemp, SizeDepCache,
