@@ -97,9 +97,7 @@ use super::cfg_census::{OperatingPoint, deviation};
 use super::double_double::{DoubleDouble, lift_inputs};
 use super::mir_postfix::PostfixWalk;
 use crate::canonical_ir::cfg_lower::CfgModel;
-use crate::canonical_ir::{
-    CfgScalar, ValueId, differentiate, evaluate_cfg, prune_cfg_to_outputs,
-};
+use crate::canonical_ir::{CfgScalar, ValueId, differentiate, evaluate_cfg, prune_cfg_to_outputs};
 use crate::jit::cfg_lanes::scalarize_lanes;
 use crate::jit::cfg_plan_builder::{
     CfgNoiseScope, CfgPlanEntry, CfgPlanRefusal, ShippedColumnLanes,
@@ -364,7 +362,11 @@ impl Comparison {
         [self.mir_error(), self.cfg_error()]
             .into_iter()
             .flatten()
-            .any(|error| !(error < 1.0))
+            // `>=` rather than `< 1.0` negated, so a NaN — which is what a
+            // reference that left the reals produces — is *not* read as a loss
+            // here. That case is `Self::reference_left_the_reals`, and the two
+            // are different findings.
+            .any(|error| error >= 1.0)
     }
 
     /// The deviation the criterion is applied to: the double-double one for a
@@ -2026,8 +2028,8 @@ fn the_criterion_rejects_a_mis_differentiated_max() {
     // The blend's own reference, in the arithmetic the blend is written in.
     // It is `da`, not zero: the subtraction that loses everything in `f64` is
     // exact in double-double, so the addition gives back what it took.
-    let defect_reference = DoubleDouble::from_f64(GB)
-        .add(DoubleDouble::from_f64(GA).sub(DoubleDouble::from_f64(GB)));
+    let defect_reference =
+        DoubleDouble::from_f64(GB).add(DoubleDouble::from_f64(GA).sub(DoubleDouble::from_f64(GB)));
     assert_eq!(
         defect_reference.relative_distance_to(GA),
         0.0,

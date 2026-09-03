@@ -82,33 +82,30 @@ const SPLIT: f64 = 134_217_729.0;
 /// fused multiply-add instead. `2^996`.
 const SPLIT_CEILING: f64 = 6.696_928_794_914_171e299;
 
+/// One of the four named constants, as its `f64` value and the correction that
+/// makes it a double-double.
+///
+/// The high word is the standard library's own constant rather than a literal
+/// of the same digits: the two are the same double, and taking it from `std`
+/// says so and keeps the low word — which is the *residual*, `constant − hi`,
+/// and cannot come from anywhere but a table — as the only transcribed figure.
+/// [`the_named_constants_are_accurate`] checks each pair against this module's
+/// own functions.
+const fn constant(hi: f64, lo: f64) -> DoubleDouble {
+    DoubleDouble { hi, lo, real: hi }
+}
+
 /// `ln 2`, to double-double precision.
-const LN2: DoubleDouble = DoubleDouble {
-    hi: 6.931_471_805_599_452_9e-1,
-    lo: 2.319_046_813_846_299_6e-17,
-    real: 6.931_471_805_599_452_9e-1,
-};
+const LN2: DoubleDouble = constant(std::f64::consts::LN_2, 2.319_046_813_846_299_6e-17);
 
 /// `ln 10`, to double-double precision.
-const LN10: DoubleDouble = DoubleDouble {
-    hi: 2.302_585_092_994_046e0,
-    lo: -2.170_756_223_382_249_4e-16,
-    real: 2.302_585_092_994_046e0,
-};
+const LN10: DoubleDouble = constant(std::f64::consts::LN_10, -2.170_756_223_382_249_4e-16);
 
 /// `π/2`, to double-double precision.
-const PI_OVER_2: DoubleDouble = DoubleDouble {
-    hi: 1.570_796_326_794_896_6e0,
-    lo: 6.123_233_995_736_766e-17,
-    real: 1.570_796_326_794_896_6e0,
-};
+const PI_OVER_2: DoubleDouble = constant(std::f64::consts::FRAC_PI_2, 6.123_233_995_736_766e-17);
 
 /// `π`, to double-double precision.
-const PI: DoubleDouble = DoubleDouble {
-    hi: 3.141_592_653_589_793e0,
-    lo: 1.224_646_799_147_353_2e-16,
-    real: 3.141_592_653_589_793e0,
-};
+const PI: DoubleDouble = constant(std::f64::consts::PI, 1.224_646_799_147_353_2e-16);
 
 /// Past this argument magnitude the double-double `π/2` has no digits left to
 /// reduce against. See the module documentation.
@@ -206,7 +203,11 @@ impl DoubleDouble {
         if hi.is_finite() && lo.is_finite() {
             Self { hi, lo, real: hi }
         } else {
-            Self { hi, lo: 0.0, real: hi }
+            Self {
+                hi,
+                lo: 0.0,
+                real: hi,
+            }
         }
     }
 
@@ -384,7 +385,11 @@ impl DoubleDouble {
         }
         if y.is_zero() {
             return if x.is_negative() {
-                if self.hi.is_sign_negative() { PI.negated() } else { PI }
+                if self.hi.is_sign_negative() {
+                    PI.negated()
+                } else {
+                    PI
+                }
             } else {
                 Self::from_f64(0.0)
             };
@@ -578,7 +583,9 @@ impl DoubleDouble {
         }
         let mut estimate = Self::from_f64(reduced.hi.ln());
         for _ in 0..2 {
-            let correction = reduced.mul(estimate.negated().exp()).sub(Self::from_f64(1.0));
+            let correction = reduced
+                .mul(estimate.negated().exp())
+                .sub(Self::from_f64(1.0));
             estimate = estimate.add(correction);
         }
         estimate.add(LN2.scale(doublings))
@@ -716,7 +723,11 @@ impl DoubleDouble {
         let value = magnitude
             .add(magnitude.square().add(Self::from_f64(1.0)).sqrt())
             .ln();
-        if self.is_negative() { value.negated() } else { value }
+        if self.is_negative() {
+            value.negated()
+        } else {
+            value
+        }
     }
 
     fn acosh(self) -> Self {
@@ -945,11 +956,7 @@ impl DoubleDouble {
 /// identical doubles.
 pub(super) fn lift_inputs(real: &CfgEvalInputs<f64>) -> CfgEvalInputs<DoubleDouble> {
     let lift = |values: &[f64]| -> Vec<DoubleDouble> {
-        values
-            .iter()
-            .copied()
-            .map(DoubleDouble::from_f64)
-            .collect()
+        values.iter().copied().map(DoubleDouble::from_f64).collect()
     };
     CfgEvalInputs {
         parameters: lift(&real.parameters),
@@ -980,7 +987,7 @@ pub(super) fn lift_inputs(real: &CfgEvalInputs<f64>) -> CfgEvalInputs<DoubleDoub
 
 #[cfg(test)]
 mod tests {
-    use super::{DoubleDouble, LN10, LN2, PI, PI_OVER_2, two_prod, two_sum};
+    use super::{DoubleDouble, LN2, LN10, PI, PI_OVER_2, two_prod, two_sum};
     use crate::canonical_ir::CfgScalar;
 
     fn dd(value: f64) -> DoubleDouble {
@@ -1132,11 +1139,7 @@ mod tests {
                 (x.cosh().hi, value.cosh(), "cosh"),
                 (x.tanh().hi, value.tanh(), "tanh"),
                 (x.asinh().hi, value.asinh(), "asinh"),
-                (
-                    x.atan2(dd(1.5)).hi,
-                    f64::atan2(value, 1.5),
-                    "atan2",
-                ),
+                (x.atan2(dd(1.5)).hi, f64::atan2(value, 1.5), "atan2"),
                 (x.abs().hi, value.abs(), "abs"),
             ];
             for (ours, theirs, name) in pairs {
@@ -1197,11 +1200,7 @@ mod tests {
         let in_f64 = (1.0 + delta) * (1.0 + delta) - 1.0 - 2.0 * delta;
         let one = dd(1.0);
         let d = dd(delta);
-        let in_dd = one
-            .add(d)
-            .mul(one.add(d))
-            .sub(one)
-            .sub(d.scale(2.0));
+        let in_dd = one.add(d).mul(one.add(d)).sub(one).sub(d.scale(2.0));
         let exact = delta * delta;
         let dd_error = (in_dd.hi - exact).abs() / exact;
         let f64_error = (in_f64 - exact).abs() / exact;

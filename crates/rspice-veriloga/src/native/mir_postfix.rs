@@ -253,7 +253,11 @@ impl<'a, S: CfgScalar> PostfixWalk<'a, S> {
         match op {
             NativeOp::Const(value) => stack.push(S::from_f64(value)),
             NativeOp::LoadParam(index) => {
-                stack.push(S::from_f64(self.read(self.point.parameters, index, name)?));
+                stack.push(S::from_f64(self.read(
+                    self.point.parameters,
+                    index,
+                    name,
+                )?));
             }
             NativeOp::LoadParamGiven(index) => {
                 let flag = self.read_flag(self.point.parameter_given, index, name)?;
@@ -304,9 +308,8 @@ impl<'a, S: CfgScalar> PostfixWalk<'a, S> {
                 stack.push(S::from_f64(value));
             }
             NativeOp::LoadTemperature => stack.push(S::from_f64(self.point.temperature)),
-            NativeOp::LoadThermalVoltage => stack.push(
-                S::from_f64(self.point.temperature).mul(S::from_f64(THERMAL_VOLTAGE_PER_K)),
-            ),
+            NativeOp::LoadThermalVoltage => stack
+                .push(S::from_f64(self.point.temperature).mul(S::from_f64(THERMAL_VOLTAGE_PER_K))),
             NativeOp::LoadTime => stack.push(S::from_f64(self.point.time)),
             NativeOp::Analysis(id) => stack.push(S::from_f64(self.point.analysis_value(id))),
             NativeOp::LoadMfactor => stack.push(S::from_f64(self.point.multiplicity)),
@@ -361,7 +364,9 @@ impl<'a, S: CfgScalar> PostfixWalk<'a, S> {
                 })?;
             }
             NativeOp::Logical(LogicalOp::Not) => {
-                Self::unary(stack, name, |x| S::from_f64(f64::from(u8::from(!truthy(x)))))?;
+                Self::unary(stack, name, |x| {
+                    S::from_f64(f64::from(u8::from(!truthy(x))))
+                })?;
             }
             NativeOp::Logical(op) => {
                 Self::binary(stack, name, |left, right| {
@@ -406,15 +411,16 @@ impl<'a, S: CfgScalar> PostfixWalk<'a, S> {
             }
             NativeOp::IntegerCast => {
                 let value = Self::top(stack, name)?;
-                let integer =
-                    real_to_integer(value.real()).map_err(|_| PostfixRefusal::RuntimeError(name))?;
+                let integer = real_to_integer(value.real())
+                    .map_err(|_| PostfixRefusal::RuntimeError(name))?;
                 *stack.last_mut().ok_or(PostfixRefusal::Malformed(name))? =
                     S::from_f64(f64::from(integer));
             }
             NativeOp::IntegerBinary(op) => {
                 let (left, right) = Self::two(stack, name)?;
-                let value = integer_binary(runtime_integer_operation(op), left.real(), right.real())
-                    .map_err(|_| PostfixRefusal::RuntimeError(name))?;
+                let value =
+                    integer_binary(runtime_integer_operation(op), left.real(), right.real())
+                        .map_err(|_| PostfixRefusal::RuntimeError(name))?;
                 stack.push(S::from_f64(value));
             }
             NativeOp::IntegerShiftConst(op, count) => {
@@ -429,8 +435,8 @@ impl<'a, S: CfgScalar> PostfixWalk<'a, S> {
             }
             NativeOp::IntegerBinaryConst(op, literal) => {
                 let value = Self::top(stack, name)?;
-                let literal = i32::try_from(literal)
-                    .map_err(|_| PostfixRefusal::RuntimeError(name))?;
+                let literal =
+                    i32::try_from(literal).map_err(|_| PostfixRefusal::RuntimeError(name))?;
                 let combined = integer_binary(
                     runtime_integer_operation(op),
                     value.real(),
@@ -459,7 +465,12 @@ impl<'a, S: CfgScalar> PostfixWalk<'a, S> {
         Ok(())
     }
 
-    fn read(&self, values: &[f64], index: usize, name: &'static str) -> Result<f64, PostfixRefusal> {
+    fn read(
+        &self,
+        values: &[f64],
+        index: usize,
+        name: &'static str,
+    ) -> Result<f64, PostfixRefusal> {
         values
             .get(index)
             .copied()
@@ -479,10 +490,7 @@ impl<'a, S: CfgScalar> PostfixWalk<'a, S> {
     }
 
     fn top(stack: &[S], name: &'static str) -> Result<S, PostfixRefusal> {
-        stack
-            .last()
-            .copied()
-            .ok_or(PostfixRefusal::Malformed(name))
+        stack.last().copied().ok_or(PostfixRefusal::Malformed(name))
     }
 
     fn two(stack: &mut Vec<S>, name: &'static str) -> Result<(S, S), PostfixRefusal> {
@@ -708,10 +716,7 @@ mod tests {
 
         assert_eq!(
             run_f64(
-                vec![
-                    NativeOp::Const(f64::NAN),
-                    NativeOp::Logical(LogicalOp::Not)
-                ],
+                vec![NativeOp::Const(f64::NAN), NativeOp::Logical(LogicalOp::Not)],
                 1
             ),
             Ok(0.0)
@@ -897,7 +902,10 @@ mod tests {
             1,
         ));
         assert_eq!(stored, Ok(6.25), "the store is an identity on its operand");
-        assert_eq!(walk.run(&program(vec![NativeOp::LoadPreludeSlot(1)], 1)), Ok(6.25));
+        assert_eq!(
+            walk.run(&program(vec![NativeOp::LoadPreludeSlot(1)], 1)),
+            Ok(6.25)
+        );
     }
 
     /// The assignment pass fills the variable array the entries then read,
@@ -924,9 +932,18 @@ mod tests {
                 value: program(vec![NativeOp::Const(-8.0)], 1),
             },
         ]);
-        assert_eq!(walk.run(&program(vec![NativeOp::LoadVariable(0)], 1)), Ok(10.0));
-        assert_eq!(walk.run(&program(vec![NativeOp::LoadVariable(1)], 1)), Ok(11.0));
-        assert_eq!(walk.run(&program(vec![NativeOp::LoadVariable(3)], 1)), Ok(-8.0));
+        assert_eq!(
+            walk.run(&program(vec![NativeOp::LoadVariable(0)], 1)),
+            Ok(10.0)
+        );
+        assert_eq!(
+            walk.run(&program(vec![NativeOp::LoadVariable(1)], 1)),
+            Ok(11.0)
+        );
+        assert_eq!(
+            walk.run(&program(vec![NativeOp::LoadVariable(3)], 1)),
+            Ok(-8.0)
+        );
         assert_eq!(
             walk.run(&program(
                 vec![
