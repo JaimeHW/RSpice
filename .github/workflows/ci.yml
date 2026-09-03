@@ -81,11 +81,21 @@ jobs:
           RUSTFLAGS: -D warnings
         run: cargo check --locked --workspace --exclude rspice-python --exclude rspice-wasm
       - name: Check granular generated Verilog-A features
+        # The model-less base shard is checked with `--all-targets`
+        # because the defect it guards lives in `#[cfg(test)]` code.
+        # With no `veriloga-model-*` feature the generated
+        # `GeneratedBuiltinKind` has no variants, so every type holding
+        # one is uninhabited and a test helper that builds one becomes
+        # unreachable code. A bare `cargo check` never compiles that
+        # target, and no other lint lane reaches this shard: the
+        # workspace Clippy below runs default features, which exclude
+        # the catalog outright, and `python.yml` lints `--all-features`,
+        # which selects every model and leaves the enum inhabited.
         env:
           RUSTFLAGS: -D warnings
         run: |
           cargo check --locked -p rspice-core --no-default-features --features veriloga-model-diode-cmc,veriloga-builtins-noise
-          cargo check --locked -p rspice-core --features veriloga-builtins-base
+          cargo check --locked -p rspice-core --features veriloga-builtins-base --all-targets
           cargo test --locked -p rspice-core --features veriloga-model-diode-cmc --test generated_veriloga_feature_shards
           cargo test --locked -p rspice-core --features veriloga-model-diode-cmc,veriloga-builtins-noise --test generated_veriloga_feature_shards
           cargo check --locked -p rspice-core --features veriloga-model-hisimhv-va,veriloga-builtins-noise
