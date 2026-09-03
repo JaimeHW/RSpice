@@ -77,7 +77,9 @@ def _assert_series_resistor_noise(result, resistance):
     assert np.allclose(result.noise_figure_db, 10.0 * np.log10(2.0), atol=1e-11)
     assert np.allclose(result.minimum_noise_figure_db, 0.0, atol=1e-11)
     assert np.allclose(result.optimum_source_reflection, 1.0 + 0.0j, atol=1e-11)
-    assert np.all(result.noise_parameters_valid)
+    # There is no per-point validity mask: an undefined two-port derivation
+    # fails the analysis, so published parameters are physical by construction.
+    assert not hasattr(result, "noise_parameters_valid")
     assert np.array_equal(result.rn, result.noise_resistance)
     assert np.array_equal(result.nf, result.noise_figure_db)
     assert np.array_equal(result.nfmin, result.minimum_noise_figure_db)

@@ -181,8 +181,9 @@ def test_transient_pickle_rejects_legacy_and_future_fft_state(
         original = engine.run_tran(fft_netlist, stop_time=1e-3, max_step=1e-6)
     unpickler, state = original.__reduce__()
     # Compressed state appends the FFT contract before the analog-inventory
-    # and compression-certificate contracts. Full transient state ends with it.
-    fft_index = -3 if compressed else -1
+    # and compression-certificate contracts. Full transient state appends the
+    # event-history contract after it.
+    fft_index = -3 if compressed else -2
 
     legacy_state = list(state)
     legacy_state[fft_index] = None

@@ -212,8 +212,8 @@ const CLI_ARTIFACT: &str = "CSV/text artifact exists, but no shared typed result
 const CLI_AXIS: &str =
     "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document";
 const CLI_AXIS_UNAVAILABLE: &str = "CLI has no authored deck-axis route for this analysis family";
-const PY_AXIS_UNAVAILABLE: &str =
-    "typed direct API exists, but Engine.run has no authored axis route";
+const PY_PNOISE_DRIVEN_AXIS_ONLY: &str = "deck-axis .PNOISE executes around a driven carrier only; an autonomous PSS carrier's \
+     oscillator phase noise has no run-report field";
 const ADAPTER_SP_UNAVAILABLE: &str = "no Engine::run_* entry point produces an SParameterResult, so the protocol-4 adapter cannot \
      publish the shared sp/port-noise document without deciding the .SP projection itself";
 const ADAPTER_PNOISE_UNAVAILABLE: &str = "the driven .PNOISE runners return PnoiseAnalysisResult and the autonomous one returns \
@@ -250,14 +250,6 @@ const fn python_mapped_axes() -> SurfaceCapability {
         MappingStatus::Mapped,
         MappingStatus::Mapped,
         MappingStatus::Mapped,
-    )
-}
-
-const fn python_direct_only() -> SurfaceCapability {
-    SurfaceCapability::new(
-        MappingStatus::Mapped,
-        MappingStatus::Unsupported(PY_AXIS_UNAVAILABLE),
-        MappingStatus::Unsupported(PY_AXIS_UNAVAILABLE),
     )
 }
 
@@ -444,21 +436,25 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
     AnalysisResultCapability {
         result: AnalysisResultKind::Pss,
         cli: cli_artifact_scalar_only(),
-        python: python_direct_only(),
+        python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Pac,
         cli: SurfaceCapability::unsupported("CLI has no PAC execution or result adapter"),
-        python: python_direct_only(),
+        python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::PNoise,
         cli: SurfaceCapability::unsupported("CLI has no PNoise execution or result adapter"),
-        python: python_direct_only(),
+        python: SurfaceCapability::new(
+            MappingStatus::Mapped,
+            MappingStatus::Partial(PY_PNOISE_DRIVEN_AXIS_ONLY),
+            MappingStatus::Partial(PY_PNOISE_DRIVEN_AXIS_ONLY),
+        ),
         wasm: SurfaceCapability::unsupported(WASM_PNOISE_RUNNER),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_PNOISE_UNAVAILABLE),
     },
@@ -472,13 +468,7 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
     AnalysisResultCapability {
         result: AnalysisResultKind::Envelope,
         cli: SurfaceCapability::unsupported("CLI has no envelope result adapter"),
-        python: SurfaceCapability::new(
-            MappingStatus::Partial(
-                "HB continuation state and continued transient are exposed, but no envelope result document exists",
-            ),
-            MappingStatus::Unsupported(PY_AXIS_UNAVAILABLE),
-            MappingStatus::Unsupported(PY_AXIS_UNAVAILABLE),
-        ),
+        python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
@@ -535,6 +525,19 @@ impl SignalCapability {
 
 const SIGNAL_ARTIFACT: &str = "export exists, but it is not a shared SignalDescriptor document";
 const ADVANCED_SIGNAL_SUBSET: &str = "mapped for a subset of result families only";
+/// The Python device-observable and analysis-scalar gaps, stated by family.
+///
+/// These are deliberately specific rather than "a subset of result families":
+/// the missing cells are missing because the engine computes no such signal
+/// for those families, not because the binding declined to expose one, and a
+/// reader deciding whether to wait for the adapter needs to know which it is.
+const PY_DEVICE_OBSERVABLE_SUBSET: &str = "mapped for operating-point, DC-sweep and transient results, which are the families whose \
+     solvers capture per-device observables; the frequency-domain and periodic families compute \
+     none to expose";
+const PY_SCALAR_SUBSET: &str = "mapped as named accessors on the noise, transfer-function, stability, pole-zero, \
+     distortion, S-parameter, harmonic-balance, PSS, Monte Carlo and envelope results, not as a \
+     shared SignalDescriptor lookup; AC and operating-point results publish no analysis-owned \
+     scalar";
 const DIGITAL_OUT_OF_SCOPE: &str =
     "digital/AMS surface work is owned by the separate digital effort";
 const WASM_LOGIC_SAMPLES: &str = "descriptors, state/strength samples and validity masks cross the browser boundary with the shared document, but no digital-specific browser surface exists; that work is owned by the separate digital effort";
@@ -559,14 +562,14 @@ pub const SIGNAL_CAPABILITY_MATRIX: &[SignalCapability] = &[
     SignalCapability {
         signal: SignalKind::DeviceObservable,
         cli: MappingStatus::Partial(ADVANCED_SIGNAL_SUBSET),
-        python: MappingStatus::Partial(ADVANCED_SIGNAL_SUBSET),
+        python: MappingStatus::Partial(PY_DEVICE_OBSERVABLE_SUBSET),
         wasm: MappingStatus::Mapped,
         engine_adapter: MappingStatus::Mapped,
     },
     SignalCapability {
         signal: SignalKind::Scalar,
         cli: MappingStatus::Partial(SIGNAL_ARTIFACT),
-        python: MappingStatus::Partial(ADVANCED_SIGNAL_SUBSET),
+        python: MappingStatus::Partial(PY_SCALAR_SUBSET),
         wasm: MappingStatus::Mapped,
         engine_adapter: MappingStatus::Mapped,
     },

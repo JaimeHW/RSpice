@@ -6,6 +6,11 @@
 
 use super::*;
 
+/// Structural proof that a transient result is a complete, aligned waveform set.
+mod structure;
+
+pub(crate) use structure::validate_transient_state;
+
 /// Transient simulation result with time-domain waveforms
 ///
 /// Contains time points, node voltage waveforms, and branch current
@@ -735,12 +740,15 @@ impl PyTransientResult {
 
     /// Rebuild from pickled state. Not part of the public API.
     ///
-    /// XSPICE digital and real event traces are not part of this type's
-    /// Python surface and are therefore not carried; every quantity a caller
-    /// can read back is.
+    /// `event_state` carries the pickle's version tag and the XSPICE digital
+    /// and real event histories. It is the last parameter and defaults to
+    /// `None` so a state written before it existed still reaches this method
+    /// and is refused with a message that says what to do, instead of failing
+    /// as an arity mismatch. Nothing this method builds is zero-filled: a
+    /// state that does not describe a complete, aligned result is rejected.
     #[staticmethod]
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (time, step_sizes, voltages, branch_currents, num_nodes, names, device_op_traces, store_traces, fft_state=None))]
+    #[pyo3(signature = (time, step_sizes, voltages, branch_currents, num_nodes, names, device_op_traces, store_traces, fft_state=None, event_state=None))]
     fn _unpickle(
         time: Vec<f64>,
         step_sizes: Vec<f64>,
@@ -751,9 +759,12 @@ impl PyTransientResult {
         device_op_traces: Vec<(String, String, Vec<f64>)>,
         store_traces: Vec<(String, Vec<f64>)>,
         fft_state: Option<TransientFftPersistenceState>,
+        event_state: Option<TransientEventPersistenceState>,
     ) -> PyResult<Self> {
+        let (digital_traces, real_traces) =
+            rebuild_transient_event_traces(event_state).map_err(crate::errors::value_error)?;
         let (node_names, branch_names) = names;
-        Ok(Self::new(TransientResult {
+        let restored = TransientResult {
             time,
             step_sizes,
             voltages,
@@ -761,8 +772,8 @@ impl PyTransientResult {
             num_nodes,
             node_names,
             branch_names,
-            digital_traces: Vec::new(),
-            real_traces: Vec::new(),
+            digital_traces,
+            real_traces,
             device_op_traces: device_op_traces
                 .into_iter()
                 .map(|(device_name, parameter, values)| {
@@ -778,7 +789,9 @@ impl PyTransientResult {
                 .map(|(name, values)| rspice_core::engine::TransientStoreTrace { name, values })
                 .collect(),
             fft_results: rebuild_transient_fft_results(fft_state)?,
-        }))
+        };
+        validate_transient_state(&restored).map_err(crate::errors::value_error)?;
+        Ok(Self::new(restored))
     }
 
     #[allow(clippy::type_complexity)]
@@ -797,8 +810,13 @@ impl PyTransientResult {
             Vec<(String, String, Vec<f64>)>,
             Vec<(String, Vec<f64>)>,
             TransientFftPersistenceState,
+            TransientEventPersistenceState,
         ),
     )> {
+        // Refuse to publish a state the unpickler would refuse to read: a
+        // pickle is evidence, and a file that cannot be loaded back is worse
+        // than a failed call.
+        validate_transient_state(&self.inner).map_err(crate::errors::value_error)?;
         Ok((
             unpickler::<Self>(py)?,
             (
@@ -828,6 +846,10 @@ impl PyTransientResult {
                     .map(|trace| (trace.name.clone(), trace.values.clone()))
                     .collect(),
                 transient_fft_persistence_state(&self.inner.fft_results)?,
+                transient_event_persistence_state(
+                    &self.inner.digital_traces,
+                    &self.inner.real_traces,
+                ),
             ),
         ))
     }

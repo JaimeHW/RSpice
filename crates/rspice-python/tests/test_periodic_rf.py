@@ -332,10 +332,18 @@ def test_periodic_result_types_have_public_module_identity():
 
 
 PERIODIC_CARD_DECKS = [
-    (".PSS FUND=1G", ".PSS", "pss-001"),
-    (".HB 1G\n.PAC DEC 5 1k 1meg INPUT=V1 OUT=V(out)", ".PAC", "pac-001"),
-    (".HB 1G\n.PNOISE DEC 5 1 1k OUT=V(out)", ".PNOISE", "pnoise-001"),
-    (".HB 1G\n.ENVELOPE TSTOP=1u", ".ENVELOPE", "env-001"),
+    (f".PSS FUND={F0}", "pss", "pss-001"),
+    (
+        f".HB {F0}\n.PAC DEC 3 1k 10k INPUT=V1 OUT=V(out) MAXSIDEBAND=2",
+        "pac",
+        "pac-001",
+    ),
+    (
+        f".HB {F0}\n.PNOISE DEC 3 1 1k OUT=V(out) MAXSIDEBAND=2",
+        "pnoise",
+        "pnoise-001",
+    ),
+    (f".HB {F0}\n.ENVELOPE TSTOP=1u", "envelope", "env-001"),
 ]
 
 
@@ -351,22 +359,59 @@ C1 out 0 1p
     )
 
 
-@pytest.mark.parametrize(("cards", "card", "analysis_id"), PERIODIC_CARD_DECKS)
-def test_authored_periodic_cards_are_refused_by_engine_run(cards, card, analysis_id):
-    """Engine.run has no authored route for the periodic family yet."""
+@pytest.mark.parametrize(("cards", "kind", "analysis_id"), PERIODIC_CARD_DECKS)
+def test_authored_periodic_cards_execute_and_are_recorded(cards, kind, analysis_id):
+    """Every authored periodic card runs and names its canonical identity."""
     netlist = periodic_card_deck(cards)
-    with pytest.raises(NotImplementedError) as excinfo:
-        rspice.Engine().run(netlist)
-    assert isinstance(excinfo.value, rspice.RSpiceError)
-    assert card in str(excinfo.value)
-    assert analysis_id in str(excinfo.value)
+    report = rspice.Engine().run(netlist, continue_on_error=False)
+
+    executed = [r for r in report.records if r.kind == kind and not r.skipped]
+    assert executed, f".{kind} produced no executed record: {report.records}"
+    assert executed[-1].analysis_id == analysis_id
+    assert getattr(report, kind) is not None
+    assert len(getattr(report, f"all_{kind}")) == 1
 
 
-def test_a_refused_periodic_deck_publishes_no_result():
-    """The refusal precedes every directive, continue_on_error included."""
-    netlist = periodic_card_deck(".OP\n.PSS FUND=1G")
-    with pytest.raises(rspice.RSpiceNotImplementedError):
-        rspice.Engine().run(netlist, continue_on_error=True)
+def test_a_deck_pac_linearizes_around_the_instance_the_plan_bound_it_to():
+    """The plan's binding, not "the last periodic analysis", selects the carrier."""
+    netlist = periodic_card_deck(
+        f".PSS FUND={F0}\n.PAC DEC 3 1k 10k INPUT=V1 OUT=V(out) FROM=PSS MAXSIDEBAND=2"
+    )
+    report = rspice.Engine().run(netlist, continue_on_error=False)
+
+    assert report.pss is not None
+    assert report.pac is not None
+    assert report.pac.fundamental_frequency == pytest.approx(
+        report.pss.frequency, rel=1e-9
+    )
+    assert report.all_pss == [report.pss] or len(report.all_pss) == 1
+    assert len(report.all_pac) == 1
+
+
+def test_a_deck_envelope_publishes_its_carrier_and_continued_transient():
+    netlist = periodic_card_deck(f".HB {F0}\n.ENVELOPE TSTOP=2u MAXSTEP=100n")
+    report = rspice.Engine().run(netlist, continue_on_error=False)
+
+    envelope = report.envelope
+    assert isinstance(envelope, rspice.EnvelopeResult)
+    assert envelope.fundamental_frequency == pytest.approx(F0, rel=1e-9)
+    assert envelope.duration == pytest.approx(2e-6, rel=1e-12)
+    assert envelope.max_step == pytest.approx(100e-9, rel=1e-12)
+    assert envelope.guarantee
+    assert envelope.continued_transient.num_points > 1
+    assert envelope.final_checkpoint.time >= envelope.time_origin
+    assert envelope.carrier.fundamental_frequency == pytest.approx(F0, rel=1e-9)
+    assert report.all_envelope == [envelope] or len(report.all_envelope) == 1
+
+
+def test_a_deck_pnoise_around_an_autonomous_carrier_is_refused_by_family():
+    """Phase noise is a different result family, not a relabelled sideband noise."""
+    netlist = periodic_card_deck(
+        ".PSS AUTONOMOUS=TRUE PERIODGUESS=1u\n.PNOISE DEC 3 1 1k OUT=V(out)"
+    )
+    with pytest.raises(rspice.RSpiceNotImplementedError) as excinfo:
+        rspice.Engine().run(netlist, continue_on_error=False)
+    assert "run_oscillator_noise" in str(excinfo.value)
 
 
 def test_a_malformed_periodic_card_is_a_typed_parse_error():

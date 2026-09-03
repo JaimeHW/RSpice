@@ -97,23 +97,124 @@ pub(super) fn hb_config_from_tones(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(super) fn configure_hb_numerics(
-    config: &mut HbConfig,
-    tolerance: f64,
-    abstol: f64,
-    max_iterations: usize,
-    damping: f64,
-    min_damping: f64,
-    oversample: usize,
-    collocation_points: Option<usize>,
-    max_mixing_order: usize,
-    use_krylov: bool,
-    gmres_restart: usize,
-    source_stepping: bool,
-    use_exact_jacobian: bool,
-    verbose: bool,
-) -> PyResult<()> {
+/// Everything a direct `.PAC` request states, before validation.
+pub(super) struct PacRequest<'a> {
+    pub fundamental_frequency: f64,
+    pub start_frequency: f64,
+    pub stop_frequency: f64,
+    pub points: usize,
+    pub input_source: &'a str,
+    pub output_node: &'a str,
+    pub variation: &'a str,
+    pub sideband_min: Option<i32>,
+    pub sideband_max: i32,
+    pub reference_node: Option<&'a str>,
+    pub reltol: f64,
+    pub abstol: f64,
+}
+
+/// Build and validate the periodic-AC configuration a direct request states.
+pub(super) fn pac_config(request: PacRequest<'_>) -> PyResult<PacConfig> {
+    if !request.fundamental_frequency.is_finite() || request.fundamental_frequency <= 0.0 {
+        return Err(crate::errors::value_error(format!(
+            "fundamental_frequency must be positive and finite, got {}",
+            request.fundamental_frequency
+        )));
+    }
+    if request.input_source.trim().is_empty() {
+        return Err(crate::errors::value_error("input_source must not be empty"));
+    }
+    if request.output_node.trim().is_empty() {
+        return Err(crate::errors::value_error("output_node must not be empty"));
+    }
+    let sweep_type = match request.variation.to_ascii_lowercase().as_str() {
+        "dec" | "decade" => PacSweepType::Decade,
+        "oct" | "octave" => PacSweepType::Octave,
+        "lin" | "linear" => PacSweepType::Linear,
+        other => {
+            return Err(crate::errors::value_error(format!(
+                "variation must be 'dec', 'oct', or 'lin', got '{other}'"
+            )));
+        }
+    };
+    let sideband_min = request
+        .sideband_min
+        .unwrap_or(rspice_core::netlist::PacCard::DEFAULT_SIDEBAND_MIN);
+    let mut config = PacConfig::new()
+        .with_fundamental(request.fundamental_frequency)
+        .with_sweep(
+            request.start_frequency,
+            request.stop_frequency,
+            request.points,
+        )
+        .with_sweep_type(sweep_type)
+        .with_sidebands(sideband_min, request.sideband_max)
+        .with_tolerances(request.reltol, request.abstol)
+        .with_input_source(request.input_source)
+        .with_output_node(request.output_node);
+    if let Some(reference) = request.reference_node {
+        if reference.trim().is_empty() {
+            return Err(crate::errors::value_error(
+                "reference_node must not be empty",
+            ));
+        }
+        config = config.with_output_ref(reference);
+    }
+    config.validate().map_err(|message| {
+        crate::errors::value_error(format!("invalid PAC configuration: {message}"))
+    })?;
+    Ok(config)
+}
+
+/// The numerical knobs every harmonic-balance entry point exposes.
+///
+/// The three HB methods take the same thirteen values and hand them to the
+/// same validator. Naming that set once keeps the entry points from drifting
+/// into thirteen-argument calls that differ by one forgotten field.
+pub(super) struct HbNumerics {
+    pub tolerance: f64,
+    pub abstol: f64,
+    pub max_iterations: usize,
+    pub damping: f64,
+    pub min_damping: f64,
+    pub oversample: usize,
+    pub collocation_points: Option<usize>,
+    pub max_mixing_order: usize,
+    pub use_krylov: bool,
+    pub gmres_restart: usize,
+    pub source_stepping: bool,
+    pub use_exact_jacobian: bool,
+    pub verbose: bool,
+}
+
+/// Build the validated HB configuration a set of tones and knobs describes.
+pub(super) fn hb_config(
+    frequencies: &[f64],
+    harmonic_orders: &[usize],
+    source_names: Option<&[String]>,
+    numerics: HbNumerics,
+) -> PyResult<HbConfig> {
+    let mut config = hb_config_from_tones(frequencies, harmonic_orders, source_names)?;
+    configure_hb_numerics(&mut config, numerics)?;
+    Ok(config)
+}
+
+pub(super) fn configure_hb_numerics(config: &mut HbConfig, numerics: HbNumerics) -> PyResult<()> {
+    let HbNumerics {
+        tolerance,
+        abstol,
+        max_iterations,
+        damping,
+        min_damping,
+        oversample,
+        collocation_points,
+        max_mixing_order,
+        use_krylov,
+        gmres_restart,
+        source_stepping,
+        use_exact_jacobian,
+        verbose,
+    } = numerics;
     if !tolerance.is_finite() || tolerance <= 0.0 {
         return Err(crate::errors::value_error(format!(
             "tolerance must be positive and finite, got {tolerance}"
@@ -179,12 +280,13 @@ pub(super) fn configure_hb_numerics(
     Ok(())
 }
 
-/// Build and validate a shooting PSS configuration.
+/// Build and validate the authored `.PSS` card a direct call describes.
 ///
-/// Shared by every PSS entry point so the driven/autonomous rules and the
-/// numerical bounds are stated once; a second copy would drift.
+/// Every PSS entry point goes through this, and the shooting configuration is
+/// then core's own `PssConfig::from(&PssCard)` conversion, so a `.PSS` card in
+/// a deck and a `run_pss` call cannot resolve to different configurations.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn pss_config(
+pub(super) fn pss_card(
     fundamental_frequency: Option<f64>,
     harmonics: usize,
     tstab: f64,
@@ -199,7 +301,7 @@ pub(super) fn pss_config(
     autonomous: bool,
     period_guess: Option<f64>,
     verbose: bool,
-) -> PyResult<PssConfig> {
+) -> PyResult<rspice_core::netlist::PssCard> {
     if harmonics == 0 {
         return Err(crate::errors::value_error("harmonics must be at least 1"));
     }
@@ -223,40 +325,40 @@ pub(super) fn pss_config(
         )));
     }
 
-    let mut config = if autonomous {
-        PssConfig::autonomous()
+    let mut card = if autonomous {
+        rspice_core::netlist::PssCard::autonomous()
     } else {
         let frequency = fundamental_frequency.ok_or_else(|| {
             crate::errors::value_error("fundamental_frequency is required for driven PSS")
         })?;
-        PssConfig::new(frequency)
+        rspice_core::netlist::PssCard::driven(frequency)
     };
     if autonomous {
         if let Some(period) = period_guess {
-            config.period_guess = period;
-            config.fundamental_freq = 1.0 / period;
+            card.period_guess = period;
+            card.fundamental_freq = 1.0 / period;
         } else if let Some(frequency) = fundamental_frequency {
-            config.period_guess = 1.0 / frequency;
-            config.fundamental_freq = frequency;
+            card.period_guess = 1.0 / frequency;
+            card.fundamental_freq = frequency;
         }
     }
-    config.num_harmonics = harmonics;
-    config.tstab = tstab;
+    card.num_harmonics = harmonics;
+    card.tstab = tstab;
     if let Some(periods) = tstab_periods {
-        config.tstab_periods = periods;
+        card.tstab_periods = periods;
     }
-    config.max_iterations = max_iterations;
-    config.tolerance = tolerance;
-    config.abstol = abstol;
-    config.damping_factor = damping;
-    config.max_period_change = max_period_change;
-    config.points_per_period = points_per_period;
-    config.integration_method = integration_method.map(Into::into);
-    config.verbose = verbose;
-    config.validate().map_err(|message| {
+    card.max_iterations = max_iterations;
+    card.tolerance = tolerance;
+    card.abstol = abstol;
+    card.damping_factor = damping;
+    card.max_period_change = max_period_change;
+    card.points_per_period = points_per_period;
+    card.integration_method = integration_method.map(Into::into);
+    card.verbose = verbose;
+    PssConfig::from(&card).validate().map_err(|message| {
         crate::errors::value_error(format!("invalid PSS configuration: {message}"))
     })?;
-    Ok(config)
+    Ok(card)
 }
 
 /// Validate a continuation window shared by the PSS and HB envelope runners.

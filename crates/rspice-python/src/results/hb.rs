@@ -16,8 +16,14 @@ pub struct PyHbResult {
 
 impl PyHbResult {
     pub fn from_core(result: &rspice_core::engine::HbAnalysisResult) -> Self {
+        Self::from_spectra(&result.result)
+    }
+
+    /// Wrap spectra that reached this surface without their analysis envelope,
+    /// as an envelope-following result's retained carrier does.
+    pub(crate) fn from_spectra(result: &rspice_core::analysis::HbResult) -> Self {
         Self {
-            inner: result.result.clone(),
+            inner: result.clone(),
         }
     }
 

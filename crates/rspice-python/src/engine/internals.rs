@@ -8,6 +8,7 @@
 //! implementation.
 
 use super::*;
+use rspice_core::analysis::Distribution;
 
 impl PyEngine {
     pub(super) fn engine_for_netlist(&self, netlist: &rspice_core::Netlist) -> Engine {
@@ -59,6 +60,63 @@ impl PyEngine {
         }
     }
 
+    /// Core operating-point runner shared by the `.op` card and implicit OP.
+    pub(super) fn dc_op_impl(
+        &self,
+        py: Python<'_>,
+        netlist: &PyNetlist,
+    ) -> PyResult<PySimulationResult> {
+        let engine = self.engine_for_netlist(&netlist.inner);
+        let (result, device_op_report) = run_interruptible(py, &self.active_runs, |abort| {
+            engine.run_dc_op_with_report_and_abort(&netlist.inner, abort)
+        })?;
+        Ok(PySimulationResult::new_with_report(
+            result,
+            device_op_report,
+        ))
+    }
+
+    /// Core Monte Carlo runner shared by `run_monte_carlo` and the `.mc` card.
+    ///
+    /// An unseeded request draws one seed here, so both surfaces are
+    /// reproducible in exactly the same way: a `.MC` card without `SEED=` and
+    /// a `run_monte_carlo(seed=None)` call are the same request.
+    pub(super) fn monte_carlo_impl(
+        &self,
+        py: Python<'_>,
+        netlist: &PyNetlist,
+        command: &rspice_core::netlist::MonteCarloCommand,
+    ) -> PyResult<PyMonteCarloResult> {
+        let spread = command.relative_spread;
+        let distribution = match command.distribution {
+            rspice_core::netlist::MonteCarloDistribution::Gaussian => {
+                Distribution::Gaussian { sigma: spread }
+            }
+            rspice_core::netlist::MonteCarloDistribution::Uniform => {
+                Distribution::Uniform { tolerance: spread }
+            }
+            rspice_core::netlist::MonteCarloDistribution::WorstCase => {
+                Distribution::WorstCase { tolerance: spread }
+            }
+        };
+        let seed = command
+            .seed
+            .unwrap_or_else(|| RandomState::new().build_hasher().finish());
+        let params = (!command.params.is_empty()).then(|| command.params.clone());
+        let engine = self.engine_for_netlist(&netlist.inner);
+        let result = run_interruptible(py, &self.active_runs, |abort| {
+            engine.run_monte_carlo_with_options_and_abort(
+                &netlist.inner,
+                command.runs,
+                seed,
+                distribution,
+                params.as_deref(),
+                abort,
+            )
+        })?;
+        Ok(PyMonteCarloResult::from_core(&result))
+    }
+
     /// Core transient runner shared by `run_tran` and `run()`.
     pub(super) fn tran_impl(
         &self,
@@ -97,10 +155,15 @@ impl PyEngine {
         let results = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_ac_with_abort(&netlist.inner, &frequencies, abort)
         })?;
-        Ok(PyAcResult::new(frequencies, results))
+        PyAcResult::new(frequencies, results)
     }
 
     /// Core distortion runner shared by the direct and deck APIs.
+    ///
+    /// The F1 grid and the fixed-F2 ratio are validated by core's `.DISTO`
+    /// rules inside the runner, not again here: what a `.DISTO` argument means
+    /// is decided in exactly one place, so the direct API and a deck's own
+    /// card cannot accept different inputs.
     pub(super) fn distortion_impl(
         &self,
         py: Python<'_>,
@@ -108,7 +171,6 @@ impl PyEngine {
         frequencies: Vec<f64>,
         f2_over_f1: Option<f64>,
     ) -> PyResult<PyDistortionResult> {
-        validate_distortion_arguments(&frequencies, f2_over_f1)?;
         let engine = self.engine_for_netlist(&netlist.inner);
         let result = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_distortion_with_abort(&netlist.inner, &frequencies, f2_over_f1, abort)
@@ -401,7 +463,6 @@ impl PyEngine {
         Ok(PyAcSensitivityResult::from_core(&result))
     }
 
-    #[allow(clippy::needless_range_loop)]
     pub(super) fn sparameter_impl(
         &self,
         py: Python<'_>,
@@ -425,7 +486,6 @@ impl PyEngine {
         let engine = self.engine_for_netlist(&netlist.inner);
         let temperature = engine.config().temperature;
         let (parameters, noise) = run_interruptible(py, &self.active_runs, |abort| {
-            let num_points = frequencies.len();
             let scattering = s_param::extract_s_matrix_with_abort(
                 &netlist.inner,
                 &ports,
@@ -458,110 +518,21 @@ impl PyEngine {
                     temperature,
                     abort,
                 )?;
-                if points.len() != num_points {
-                    return Err(rspice_core::engine::SimulationError::Circuit(format!(
-                        "SP noise solve returned {} points for {num_points} requested frequencies",
-                        points.len()
-                    )));
-                }
-                let num_ports = ports.len();
-                let zero = rspice_core::Complex64::new(0.0, 0.0);
-                let mut current_correlation =
-                    vec![vec![vec![zero; num_points]; num_ports]; num_ports];
-                let mut two_port_points = Vec::with_capacity(num_points);
-                for (frequency_index, point) in points.iter().enumerate() {
-                    if point.frequency.to_bits() != frequencies[frequency_index].to_bits() {
-                        return Err(rspice_core::engine::SimulationError::Circuit(format!(
-                            "SP noise frequency mismatch at point {frequency_index}: expected {}, got {}",
-                            frequencies[frequency_index], point.frequency
-                        )));
-                    }
-                    if point.current_correlation.len() != num_ports
-                        || point
-                            .current_correlation
-                            .iter()
-                            .any(|row| row.len() != num_ports)
-                    {
-                        return Err(rspice_core::engine::SimulationError::Circuit(format!(
-                            "SP noise returned a malformed Cy matrix at frequency point {frequency_index}"
-                        )));
-                    }
-                    for row in 0..num_ports {
-                        for column in 0..num_ports {
-                            current_correlation[row][column][frequency_index] =
-                                point.current_correlation[row][column];
-                        }
-                    }
-                    if num_ports == 2 {
-                        // Derived from the S-matrix just measured rather than
-                        // read off the port branch currents: behind a Thevenin
-                        // port that current flows through the reference
-                        // resistor and is not the admittance term at all.
-                        let s = (0..num_ports)
-                            .map(|row| {
-                                (0..num_ports)
-                                    .map(|column| scattering[row][column][frequency_index])
-                                    .collect::<Vec<_>>()
-                            })
-                            .collect::<Vec<_>>();
-                        let y = s_param::y_from_s(&s, &impedances).map_err(|error| {
-                            rspice_core::engine::SimulationError::Circuit(error.to_string())
-                        })?;
-                        two_port_points.push(s_param::derive_two_port_noise(
-                            &y,
-                            &point.current_correlation,
-                            impedances[0],
-                            temperature,
-                        ));
-                    }
-                }
-
-                let (
-                    noise_resistance,
-                    noise_factor,
-                    minimum_noise_factor,
-                    optimum_source_reflection,
-                    parameter_validity,
-                ) = if num_ports == 2 {
-                    (
-                        Some(
-                            two_port_points
-                                .iter()
-                                .map(|point| point.noise_resistance)
-                                .collect(),
-                        ),
-                        Some(
-                            two_port_points
-                                .iter()
-                                .map(|point| point.noise_factor)
-                                .collect(),
-                        ),
-                        Some(
-                            two_port_points
-                                .iter()
-                                .map(|point| point.minimum_noise_factor)
-                                .collect(),
-                        ),
-                        Some(
-                            two_port_points
-                                .iter()
-                                .map(|point| point.optimum_source_reflection)
-                                .collect(),
-                        ),
-                        Some(two_port_points.iter().map(|point| point.valid).collect()),
+                // Folding the sweep, checking its alignment, and deriving the
+                // two-port parameters is one core operation with one validity
+                // policy: an undefined parameter set fails the analysis rather
+                // than being published behind a mask.
+                Some(
+                    s_param::assemble_port_noise_with_abort(
+                        &points,
+                        &frequencies,
+                        &scattering,
+                        &impedances,
+                        temperature,
+                        abort,
                     )
-                } else {
-                    (None, None, None, None, None)
-                };
-                Some(SParameterNoiseData {
-                    temperature,
-                    current_correlation,
-                    noise_resistance,
-                    noise_factor,
-                    minimum_noise_factor,
-                    optimum_source_reflection,
-                    parameter_validity,
-                })
+                    .map_err(port_noise_simulation_error)?,
+                )
             } else {
                 None
             };
@@ -574,5 +545,21 @@ impl PyEngine {
             parameters,
             noise,
         ))
+    }
+}
+
+/// Map a core port-noise assembly failure onto the engine's error type.
+///
+/// Cancellation stays cancellation: a `KeyboardInterrupt` that lands inside
+/// the assembly must not reach the caller dressed up as a defect in their
+/// circuit.
+fn port_noise_simulation_error(
+    error: rspice_core::analysis::s_param::PortNoiseAssemblyError,
+) -> rspice_core::engine::SimulationError {
+    match error {
+        rspice_core::analysis::s_param::PortNoiseAssemblyError::Aborted => {
+            rspice_core::engine::SimulationError::Aborted
+        }
+        other => rspice_core::engine::SimulationError::Circuit(other.to_string()),
     }
 }

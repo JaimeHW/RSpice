@@ -91,6 +91,36 @@ impl PyPacResult {
         }
     }
 
+    /// The solved record for one `(frequency, sideband)` coordinate.
+    ///
+    /// A coordinate inside the declared sideband span that carries no record
+    /// is a malformed result. Substituting an empty spectrum would publish
+    /// "the circuit responded with nothing here", which is a different claim
+    /// from "this analysis produced nothing here".
+    fn sideband_data(
+        &self,
+        frequency_index: usize,
+        sideband: i32,
+    ) -> PyResult<&rspice_core::analysis::pac::PacSidebandData> {
+        self.inner
+            .get_sideband_data(frequency_index, sideband)
+            .ok_or_else(|| {
+                let frequency = self
+                    .inner
+                    .frequencies
+                    .get(frequency_index)
+                    .copied()
+                    .unwrap_or(f64::NAN);
+                crate::errors::SimulationError::new_err(format!(
+                    "malformed PAC result: no sideband {sideband} record at frequency point {} ({frequency:.16e} Hz), \
+                     although the result declares sidebands [{}, {}]",
+                    frequency_index + 1,
+                    self.inner.sideband_min,
+                    self.inner.sideband_max
+                ))
+            })
+    }
+
     fn validate_sideband(&self, sideband: i32) -> PyResult<()> {
         if sideband < self.inner.sideband_min || sideband > self.inner.sideband_max {
             return Err(crate::errors::index_error(format!(
@@ -418,19 +448,20 @@ impl PyPacResult {
         ),
     )> {
         let sidebands: Vec<i32> = (self.inner.sideband_min..=self.inner.sideband_max).collect();
+        // A sideband the solve never produced is a hole in the result, not an
+        // empty spectrum: persisting it as an empty vector would restore a
+        // result claiming the circuit had no response there.
         let node_voltages = (0..self.inner.frequencies.len())
             .map(|freq_idx| {
                 sidebands
                     .iter()
                     .map(|&sideband| {
-                        self.inner
-                            .get_sideband_data(freq_idx, sideband)
+                        self.sideband_data(freq_idx, sideband)
                             .map(|data| complex_state(&data.node_voltages))
-                            .unwrap_or_default()
                     })
-                    .collect()
+                    .collect::<PyResult<Vec<_>>>()
             })
-            .collect();
+            .collect::<PyResult<Vec<_>>>()?;
         let conversion_matrix = (0..self.inner.frequencies.len())
             .map(|freq_idx| {
                 sidebands
@@ -456,14 +487,12 @@ impl PyPacResult {
                     sidebands
                         .iter()
                         .map(|&sideband| {
-                            self.inner
-                                .get_sideband_data(freq_idx, sideband)
+                            self.sideband_data(freq_idx, sideband)
                                 .map(|data| complex_state(&data.branch_currents))
-                                .unwrap_or_default()
                         })
-                        .collect()
+                        .collect::<PyResult<Vec<_>>>()
                 })
-                .collect(),
+                .collect::<PyResult<Vec<_>>>()?,
         );
         Ok((
             unpickler::<Self>(py)?,

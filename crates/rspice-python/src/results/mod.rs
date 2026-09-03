@@ -12,6 +12,7 @@
 //! | [`fourier`]              | `FourierResult`, `Harmonic`                                     |
 //! | [`ac`]                   | `AcResult`, `ComplexValue`                                      |
 //! | [`distortion`]           | `DistortionResult`                                              |
+//! | [`envelope`]             | `EnvelopeResult`                                                |
 //! | [`s_parameters`]         | `SParameterResult`                                              |
 //! | [`stability`]            | `StbResult`, `PoleZeroResult`, `TransferFunctionResult`         |
 //! | [`noise`]                | `NoiseResult`, `NoiseContribution`, `PeriodicNoiseResult`, `PeriodicNoiseContribution`, `OscillatorNoiseResult` |
@@ -50,6 +51,8 @@ mod ac;
 mod access;
 mod dc;
 mod distortion;
+mod envelope;
+mod event_state;
 mod export_bridge;
 mod fft;
 mod fourier;
@@ -70,13 +73,15 @@ mod verification;
 // Cross-cutting helpers, re-imported here so each family module reaches
 // them through its own `use super::*`.
 use access::*;
+use event_state::*;
 use export_bridge::*;
 use state::*;
 
-pub(crate) use ac::{PyAcResult, PyComplexValue};
+pub(crate) use ac::{PyAcResult, PyComplexValue, validated_ac_schema};
 pub(crate) use access::{NodeIdentifier, is_ground_name};
 pub(crate) use dc::{PyDcSweepResult, PyDeviceOperatingPoint, PySimulationResult};
 pub(crate) use distortion::PyDistortionResult;
+pub(crate) use envelope::PyEnvelopeResult;
 pub(crate) use fft::{
     PyTransientFftBin, PyTransientFftHarmonic, PyTransientFftMetrics, PyTransientFftResult,
 };
@@ -90,7 +95,7 @@ pub(crate) use noise::{
 pub(crate) use pac::PyPacResult;
 pub(crate) use projection::PyProjectedSignal;
 pub(crate) use pss::{PyFloquetSpectrumCertificate, PyFloquetSpectrumEvidence, PyPssResult};
-pub(crate) use s_parameters::{PySParameterResult, SParameterNoiseData};
+pub(crate) use s_parameters::PySParameterResult;
 pub(crate) use sensitivity::{
     PyAcSensitivity, PyAcSensitivityResult, PyElementSensitivity, PySensitivityResult,
 };

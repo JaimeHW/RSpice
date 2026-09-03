@@ -25,25 +25,37 @@ pub struct PyAcResult {
     branch_names: Vec<String>,
 }
 
+/// Proof that every frequency point publishes the schema the first one did.
+mod schema;
+
+pub(crate) use schema::validated_ac_schema;
+
 impl PyAcResult {
-    pub fn new(frequencies: Vec<f64>, results: Vec<AcResult>) -> Self {
-        let node_names = results
-            .first()
-            .map(|r| r.node_names.clone())
-            .unwrap_or_default();
-        let branch_names = results
-            .first()
-            .map(|r| r.branch_names.clone())
-            .unwrap_or_default();
-        Self {
+    pub fn new(frequencies: Vec<f64>, results: Vec<AcResult>) -> PyResult<Self> {
+        Self::checked(frequencies, results).map_err(crate::errors::SimulationError::new_err)
+    }
+
+    fn checked(frequencies: Vec<f64>, results: Vec<AcResult>) -> Result<Self, String> {
+        if frequencies.len() != results.len() {
+            return Err(format!(
+                "malformed AC result: {} solved points for {} requested frequencies",
+                results.len(),
+                frequencies.len()
+            ));
+        }
+        let (node_names, branch_names) = validated_ac_schema("AC", &results)?;
+        Ok(Self {
             frequencies,
             results,
             node_names,
             branch_names,
-        }
+        })
     }
 
     /// Number of non-ground nodes with phasor data.
+    ///
+    /// Every point carries the same schema (proved on construction), so the
+    /// first row's width is the sweep's width.
     fn node_count(&self) -> usize {
         self.results
             .first()
@@ -94,12 +106,11 @@ impl PyAcResult {
 
     /// Column layout shared by the CSV and raw exporters.
     ///
-    /// A row that is short relative to the first row yields NaN rather than
-    /// dropping a column, so a malformed core result stays diagnosable in the
-    /// exported artifact instead of silently changing the table's shape.
+    /// Every point carries the schema the first point published — proved when
+    /// the result was constructed — so each column is exactly as long as the
+    /// frequency axis and no cell has to be invented.
     fn raw_plot(&self, title: &str) -> crate::export::RawPlot {
         use crate::export::{RawVariable, RawVariableKind};
-        let missing = rspice_core::Complex64::new(f64::NAN, f64::NAN);
 
         let mut variables = vec![RawVariable {
             name: "frequency".to_string(),
@@ -119,7 +130,7 @@ impl PyAcResult {
             series.push(
                 self.results
                     .iter()
-                    .map(|row| row.voltages.get(index).copied().unwrap_or(missing))
+                    .filter_map(|row| row.voltages.get(index).copied())
                     .collect(),
             );
         }
@@ -131,7 +142,7 @@ impl PyAcResult {
             series.push(
                 self.results
                     .iter()
-                    .map(|row| row.currents.get(index).copied().unwrap_or(missing))
+                    .filter_map(|row| row.currents.get(index).copied())
                     .collect(),
             );
         }
@@ -548,7 +559,7 @@ impl PyAcResult {
 
     /// Rebuild from pickled state. Not part of the public API.
     #[staticmethod]
-    fn _unpickle(frequencies: Vec<f64>, rows: Vec<AcRowState>) -> Self {
+    fn _unpickle(frequencies: Vec<f64>, rows: Vec<AcRowState>) -> PyResult<Self> {
         Self::new(frequencies, rows.into_iter().map(rebuild_ac_row).collect())
     }
 
@@ -672,59 +683,5 @@ impl PyComplexValue {
     #[allow(clippy::type_complexity)]
     fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (f64, f64))> {
         Ok((unpickler::<Self>(py)?, (self.real, self.imag)))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use rspice_core::Complex64;
-
-    fn ac_row(frequency: f64, voltages: Vec<Complex64>, currents: Vec<Complex64>) -> AcResult {
-        AcResult {
-            frequency,
-            node_names: vec!["out".to_string()],
-            branch_names: vec!["V1".to_string()],
-            voltages,
-            currents,
-        }
-    }
-
-    #[test]
-    fn ac_voltage_access_rejects_short_later_rows() {
-        let ac = PyAcResult::new(
-            vec![1.0, 2.0],
-            vec![
-                ac_row(1.0, vec![Complex64::new(1.0, 0.0)], Vec::new()),
-                ac_row(2.0, Vec::new(), Vec::new()),
-            ],
-        );
-
-        let message = ac
-            .voltage_phasor_from_row(1, &ac.results[1], 1)
-            .unwrap_err();
-        assert!(message.contains("malformed AC result row 1"), "{message}");
-        assert!(message.contains("missing voltage"), "{message}");
-    }
-
-    #[test]
-    fn ac_branch_access_rejects_short_later_rows() {
-        let ac = PyAcResult::new(
-            vec![1.0, 2.0],
-            vec![
-                ac_row(
-                    1.0,
-                    vec![Complex64::new(1.0, 0.0)],
-                    vec![Complex64::new(0.0, 1.0)],
-                ),
-                ac_row(2.0, vec![Complex64::new(1.0, 0.0)], Vec::new()),
-            ],
-        );
-
-        let message = ac
-            .branch_current_from_row(1, &ac.results[1], 0)
-            .unwrap_err();
-        assert!(message.contains("malformed AC result row 1"), "{message}");
-        assert!(message.contains("missing current"), "{message}");
     }
 }

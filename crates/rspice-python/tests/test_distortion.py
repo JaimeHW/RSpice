@@ -159,8 +159,13 @@ def test_sweep_api_and_result_error_discipline(engine) -> None:
     ("frequencies", "ratio"),
     [([], None), ([0.0], None), ([float("nan")], None), ([1e3], 0.0), ([1e3], 1.0)],
 )
-def test_invalid_arguments_raise_value_error(engine, frequencies, ratio) -> None:
-    with pytest.raises(ValueError):
+def test_invalid_arguments_are_refused_by_the_core_disto_rules(
+    engine, frequencies, ratio
+) -> None:
+    # The direct API no longer carries its own copy of the `.DISTO` argument
+    # rules: the engine's own validation decides, so a deck's card and this
+    # call cannot accept different inputs.
+    with pytest.raises(rspice.SimulationError):
         engine.run_distortion(
             rspice.Netlist.parse(HARMONIC_DIODE), frequencies, f2_over_f1=ratio
         )
@@ -171,7 +176,7 @@ def test_two_tone_requires_distof2_and_positive_difference_frequencies(engine) -
         engine.run_distortion(
             rspice.Netlist.parse(HARMONIC_DIODE), [1e3], f2_over_f1=0.9
         )
-    with pytest.raises(ValueError, match="greater than the fixed F2"):
+    with pytest.raises(rspice.SimulationError, match="greater than the fixed F2"):
         engine.run_distortion(
             rspice.Netlist.parse(TWO_TONE_DIODE),
             [1e3, 500.0],
