@@ -992,7 +992,7 @@ pub(super) fn run_transient(
                         // as children of it, so a reader of the typed document
                         // can find the sibling artifact that carries them.
                         let children = ctx
-                            .fft_analysis_instances()?
+                            .fft_analysis_instances()
                             .into_iter()
                             .zip(&result.fft_results)
                             .map(|(analysis, spectrum)| {
@@ -1140,7 +1140,7 @@ fn write_transient_fft_output_pair(
     timeout_seconds: Option<f64>,
     byte_limit: u64,
 ) -> Result<(), CliError> {
-    validate_fft_publication(results, netlist)?;
+    validate_fft_publication(results, analysis_ids, netlist)?;
     let requests = &netlist.fft_analyses;
     // A transient result and the FFT derived from it are one logical result:
     // publishing the transient alone would advertise a run whose declared
@@ -1571,14 +1571,14 @@ fn validate_fft_result_count(
     Ok(())
 }
 
-fn fft_validation_error(ordinal: usize, message: impl std::fmt::Display) -> CliError {
+fn fft_validation_error(analysis: &str, message: impl std::fmt::Display) -> CliError {
     CliError::InternalError {
-        message: format!("cannot publish fft-{ordinal:03}: {message}"),
+        message: format!("cannot publish {analysis}: {message}"),
     }
 }
 
 fn fft_expected_frequency_bin(
-    ordinal: usize,
+    analysis: &str,
     name: &str,
     requested: Option<f64>,
     default: usize,
@@ -1591,14 +1591,14 @@ fn fft_expected_frequency_bin(
     let rounded = (requested / frequency_resolution).round();
     if !rounded.is_finite() || rounded < 0.0 || rounded > usize::MAX as f64 {
         return Err(fft_validation_error(
-            ordinal,
+            analysis,
             format!("authored {name} cannot be represented as a transform bin"),
         ));
     }
     let bin = rounded as usize;
     if (name == "FREQ" && bin == 0) || bin > nyquist_bin {
         return Err(fft_validation_error(
-            ordinal,
+            analysis,
             format!("authored {name} is outside the retained one-sided spectrum"),
         ));
     }
@@ -1651,29 +1651,38 @@ fn fft_validation_window_coefficient(
     }
 }
 
+/// Check every spectrum the transient produced against the `.FFT` card that
+/// asked for it, naming each by the canonical identity the plan assigned.
 fn validate_fft_publication(
     results: &[rspice_core::engine::TransientFftResult],
+    analysis_ids: &[String],
     netlist: &rspice_core::Netlist,
 ) -> Result<(), CliError> {
     let requests = &netlist.fft_analyses;
     validate_fft_result_count(results, requests)?;
+    if analysis_ids.len() != requests.len() {
+        return Err(missing_fft_identity(analysis_ids.len()));
+    }
     let expected_mode = netlist.options.fft_mode.unwrap_or_default();
     let expected_accurate_sampling = netlist.options.fft_accurate.unwrap_or(true)
         && netlist.options.output_interval_schedule.is_none();
     let expected_metrics = netlist.options.fft_output_metrics.unwrap_or(false);
     for (index, (result, request)) in results.iter().zip(requests).enumerate() {
-        let ordinal = index + 1;
+        let analysis = analysis_ids
+            .get(index)
+            .ok_or_else(|| missing_fft_identity(index))?
+            .as_str();
         if result.output != request.output {
             return Err(fft_validation_error(
-                ordinal,
+                analysis,
                 "result source does not match the authored request at this ordinal",
             ));
         }
         fft_value_unit(result.physical_type, result.format)
-            .map_err(|message| fft_validation_error(ordinal, message))?;
+            .map_err(|message| fft_validation_error(analysis, message))?;
         if result.output_name.is_empty() {
             return Err(fft_validation_error(
-                ordinal,
+                analysis,
                 "resolved signal name is empty",
             ));
         }
@@ -1682,7 +1691,7 @@ fn validate_fft_publication(
             || result.metrics.is_some() != expected_metrics
         {
             return Err(fft_validation_error(
-                ordinal,
+                analysis,
                 "FFT mode, sampling policy, or FFTOUT presence does not match the deck options",
             ));
         }
@@ -1691,7 +1700,7 @@ fn validate_fft_publication(
             || !result.point_count.is_power_of_two()
         {
             return Err(fft_validation_error(
-                ordinal,
+                analysis,
                 "result point count does not match the authored request",
             ));
         }
@@ -1704,7 +1713,7 @@ fn validate_fft_publication(
                 && (!value.is_finite() || value < 0.0 || (!allow_zero && value == 0.0))
             {
                 return Err(fft_validation_error(
-                    ordinal,
+                    analysis,
                     format!("authored {name} is not a valid frequency"),
                 ));
             }
@@ -1714,7 +1723,7 @@ fn validate_fft_publication(
             .zip(request.maximum_frequency)
             .is_some_and(|(minimum, maximum)| minimum > maximum)
         {
-            return Err(fft_validation_error(ordinal, "authored FMIN exceeds FMAX"));
+            return Err(fft_validation_error(analysis, "authored FMIN exceeds FMAX"));
         }
         let expected_start = request.start.unwrap_or(0.0);
         if !fft_values_close(result.start_time, expected_start)
@@ -1726,7 +1735,7 @@ fn validate_fft_publication(
             || result.stop_time <= result.start_time
         {
             return Err(fft_validation_error(
-                ordinal,
+                analysis,
                 "sampling interval does not match the authored START/STOP request",
             ));
         }
@@ -1741,7 +1750,7 @@ fn validate_fft_publication(
             || !fft_values_close(result.frequency_resolution, expected_frequency_resolution)
         {
             return Err(fft_validation_error(
-                ordinal,
+                analysis,
                 "sampling calibration is inconsistent with START, STOP, or NP",
             ));
         }
@@ -1759,7 +1768,7 @@ fn validate_fft_publication(
             || !fft_values_close(result.alpha, request.alpha)
         {
             return Err(fft_validation_error(
-                ordinal,
+                analysis,
                 "effective format or window metadata does not match the authored request",
             ));
         }
@@ -1787,7 +1796,7 @@ fn validate_fft_publication(
             || !fft_values_close(result.coherent_gain, expected_coherent_gain)
         {
             return Err(fft_validation_error(
-                ordinal,
+                analysis,
                 "coherent-gain calibration does not match the effective window",
             ));
         }
@@ -1795,13 +1804,13 @@ fn validate_fft_publication(
         let bin_count = result.point_count / 2 + 1;
         if result.bins.len() != bin_count {
             return Err(fft_validation_error(
-                ordinal,
+                analysis,
                 "one-sided bin count does not match NP",
             ));
         }
         let nyquist_bin = result.point_count / 2;
         let expected_fundamental = fft_expected_frequency_bin(
-            ordinal,
+            analysis,
             "FREQ",
             request.fundamental_frequency,
             1,
@@ -1809,7 +1818,7 @@ fn validate_fft_publication(
             nyquist_bin,
         )?;
         let expected_minimum = fft_expected_frequency_bin(
-            ordinal,
+            analysis,
             "FMIN",
             request.minimum_frequency,
             1,
@@ -1817,7 +1826,7 @@ fn validate_fft_publication(
             nyquist_bin,
         )?;
         let expected_maximum = fft_expected_frequency_bin(
-            ordinal,
+            analysis,
             "FMAX",
             request.maximum_frequency,
             nyquist_bin,
@@ -1832,7 +1841,7 @@ fn validate_fft_publication(
             || (expected_fundamental > 1 && expected_maximum < 1)
         {
             return Err(fft_validation_error(
-                ordinal,
+                analysis,
                 "metric-bin bounds do not match authored FREQ/FMIN/FMAX",
             ));
         }
@@ -1856,7 +1865,7 @@ fn validate_fft_publication(
                 || fft_phase_distance_degrees(bin.phase_degrees, expected_phase) > 1.0e-9
             {
                 return Err(fft_validation_error(
-                    ordinal,
+                    analysis,
                     format!("bin {bin_index} is inconsistent with the transform schema"),
                 ));
             }
@@ -1869,7 +1878,7 @@ fn validate_fft_publication(
                 .fold(0.0, f64::max);
             if maximum_magnitude != 0.0 && !fft_values_close(maximum_magnitude, 1.0) {
                 return Err(fft_validation_error(
-                    ordinal,
+                    analysis,
                     "normalized spectrum does not peak at one",
                 ));
             }
@@ -1883,7 +1892,7 @@ fn validate_fft_publication(
             .try_reserve_exact(result.bins.len())
             .map_err(|error| {
                 fft_validation_error(
-                    ordinal,
+                    analysis,
                     format!("cannot allocate metric validation workspace: {error}"),
                 )
             })?;
@@ -1895,7 +1904,7 @@ fn validate_fft_publication(
             result.maximum_metric_bin,
             sfdr_search_minimum,
         )
-        .ok_or_else(|| fft_validation_error(ordinal, "metrics cannot be derived from spectrum"))?;
+        .ok_or_else(|| fft_validation_error(analysis, "metrics cannot be derived from spectrum"))?;
         let spur_frequency_matches = match (
             metrics.sfdr_spur_frequency,
             expected_metrics
@@ -1920,7 +1929,7 @@ fn validate_fft_publication(
             || metrics.largest_harmonics.len() != expected_metrics.ranked_bins.len()
         {
             return Err(fft_validation_error(
-                ordinal,
+                analysis,
                 "FFTOUT metrics do not match the spectrum",
             ));
         }
@@ -1942,7 +1951,7 @@ fn validate_fft_publication(
                 || fft_phase_distance_degrees(harmonic.phase_degrees, bin.phase_degrees) > 1.0e-9
             {
                 return Err(fft_validation_error(
-                    ordinal,
+                    analysis,
                     format!(
                         "ranked harmonic {} does not match the spectrum",
                         harmonic_index + 1
@@ -2558,16 +2567,20 @@ fn validate_fft_raw_metadata(metadata: &FftRawMetadata) -> Result<(), String> {
     // The canonical identity of each authored `.FFT` request comes from the
     // planner, so a decoded document is checked against the same minting the
     // writer used rather than a second spelling of it.
-    let canonical_ids = crate::analysis_identity::post_process_ids(
+    let canonical_ids = crate::commands::run::canonical_analysis_identities(
         rspice_core::execution::AnalysisKind::Fft,
         metadata.results.len(),
     )
     .map_err(|error| format!("cannot mint canonical FFT identities: {error}"))?;
     for (index, result) in metadata.results.iter().enumerate() {
         let ordinal = index + 1;
-        if canonical_ids
+        let analysis = canonical_ids
             .get(index)
-            .is_none_or(|id| result.analysis_id != id.tag())
+            .ok_or_else(|| {
+                format!("FFT RAW document has no canonical identity for result {ordinal}")
+            })?
+            .tag();
+        if result.analysis_id != analysis
             || result.parent_analysis_id != metadata.parent_analysis_id
             || result.ordinal != ordinal
             || !crate::hdf5::fft_source_identity_is_valid(
@@ -2618,7 +2631,7 @@ fn validate_fft_raw_metadata(metadata: &FftRawMetadata) -> Result<(), String> {
             )
             || result.transform.window_name.is_empty()
         {
-            return Err(format!("invalid FFT RAW metadata for fft-{ordinal:03}"));
+            return Err(format!("invalid FFT RAW metadata for {analysis}"));
         }
         let bin_count = result.sampling.point_count / 2 + 1;
         if result.transform.fundamental_bin >= bin_count
@@ -2636,15 +2649,13 @@ fn validate_fft_raw_metadata(metadata: &FftRawMetadata) -> Result<(), String> {
             || (result.transform.fundamental_bin == 1 && result.transform.maximum_metric_bin < 2)
             || (result.transform.fundamental_bin > 1 && result.transform.maximum_metric_bin < 1)
         {
-            return Err(format!(
-                "invalid FFT RAW metric-bin bounds for fft-{ordinal:03}"
-            ));
+            return Err(format!("invalid FFT RAW metric-bin bounds for {analysis}"));
         }
         let physical_unit = match result.signal.physical_type.as_str() {
             "voltage" => Some("V"),
             "current" => Some("A"),
             "parameter" => None,
-            _ => return Err(format!("invalid FFT RAW signal type for fft-{ordinal:03}")),
+            _ => return Err(format!("invalid FFT RAW signal type for {analysis}")),
         };
         let expected_unit = if result.transform.format == "normalized" {
             Some("1")
@@ -2652,7 +2663,7 @@ fn validate_fft_raw_metadata(metadata: &FftRawMetadata) -> Result<(), String> {
             physical_unit
         };
         if result.signal.unit.as_deref() != expected_unit {
-            return Err(format!("invalid FFT RAW signal unit for fft-{ordinal:03}"));
+            return Err(format!("invalid FFT RAW signal unit for {analysis}"));
         }
         if let Some(metrics) = &result.metrics {
             if ![
@@ -2690,7 +2701,7 @@ fn validate_fft_raw_metadata(metadata: &FftRawMetadata) -> Result<(), String> {
                 || metrics.units.sfdr_db != "dB"
                 || metrics.units.sfdr_spur_frequency != "Hz"
             {
-                return Err(format!("invalid FFT RAW metrics for fft-{ordinal:03}"));
+                return Err(format!("invalid FFT RAW metrics for {analysis}"));
             }
             for (harmonic_index, harmonic) in metrics.largest_harmonics.iter().enumerate() {
                 if harmonic.rank != harmonic_index + 1
@@ -2713,7 +2724,7 @@ fn validate_fft_raw_metadata(metadata: &FftRawMetadata) -> Result<(), String> {
                     )
                 {
                     return Err(format!(
-                        "invalid FFT RAW ranked harmonic {} for fft-{ordinal:03}",
+                        "invalid FFT RAW ranked harmonic {} for {analysis}",
                         harmonic_index + 1
                     ));
                 }
@@ -3223,7 +3234,7 @@ fn write_fft_output(
     if crate::abort::reason().is_some() {
         return Err(super::cancellation_cli_error(timeout_seconds));
     }
-    validate_fft_publication(results, netlist)?;
+    validate_fft_publication(results, analysis_ids, netlist)?;
     let requests = &netlist.fft_analyses;
     publish::artifact(path, |writer| {
         write_fft_to_writer(
@@ -3647,16 +3658,11 @@ pub(super) fn run_fourier(
         );
     }
 
-    let retained = ctx.last_transient.borrow();
-    let retained = retained.as_ref().ok_or_else(|| {
-        CliError::simulation_error_in(
-            format!(
-                ".FOUR request {} requires a completed authored .TRAN analysis; it will not invent an independent transient schedule",
-                four_index + 1
-            ),
-            "Fourier",
-        )
-    })?;
+    // The plan names this card's operands and the transient it post-processes;
+    // `.FOUR` never invents an independent transient schedule of its own.
+    let (parent, planned_operands) = ctx.planned_fourier_operands(four_index)?;
+    let retained = ctx.retained_transient(parent)?;
+    let retained = &*retained;
     // A compressed parent transient publishes a decimated waveform, so a DFT
     // over it would report different harmonics than the same deck without
     // `--compress`. The core already evaluated this card against the exact
@@ -3776,10 +3782,31 @@ pub(super) fn run_fourier(
 
     // The core evaluates one spectrum per resolved operand and the shared
     // result document names one spectrum, so each operand is its own analysis
-    // instance and publishes its own artifact.
-    for (output, physical_type, result) in &analyzed {
-        let ordinal = ctx.take_fourier_operand_ordinal()?;
-        let analysis_id = ctx.fourier_operand_analysis_id(ordinal)?;
+    // instance and publishes its own artifact. The plan already named those
+    // instances and bound each to this transient, so the identities are read
+    // off it and checked against the operands the resolver produced: a
+    // mismatch would publish one operand's spectrum under another's name.
+    if planned_operands.len() != analyzed.len() {
+        return Err(CliError::InternalError {
+            message: format!(
+                "the canonical plan names {} operand(s) for .FOUR card {} of {}, but the resolver produced {}",
+                planned_operands.len(),
+                four_index + 1,
+                retained.analysis_id,
+                analyzed.len()
+            ),
+        });
+    }
+    for ((analysis_id, planned_output), (output, physical_type, result)) in
+        planned_operands.into_iter().zip(&analyzed)
+    {
+        if planned_output != output {
+            return Err(CliError::InternalError {
+                message: format!(
+                    "planned .FOUR operand {analysis_id} names '{planned_output}' but the resolver produced '{output}'"
+                ),
+            });
+        }
         let Some(output_path) = ctx.output_path_for(&analysis_id.tag()) else {
             continue;
         };
@@ -3944,11 +3971,14 @@ mod restart_tests {
     /// The canonical `fft-NNN` identities a deck with `count` authored `.FFT`
     /// requests publishes under, minted the same way the executor mints them.
     fn fft_test_identities(count: usize) -> Vec<String> {
-        crate::analysis_identity::post_process_ids(rspice_core::execution::AnalysisKind::Fft, count)
-            .expect("canonical FFT identities")
-            .iter()
-            .map(|id| id.tag())
-            .collect()
+        crate::commands::run::canonical_analysis_identities(
+            rspice_core::execution::AnalysisKind::Fft,
+            count,
+        )
+        .expect("canonical FFT identities")
+        .iter()
+        .map(|id| id.tag())
+        .collect()
     }
 
     struct FftTestDirectory(PathBuf);

@@ -188,3 +188,53 @@ fn fourier_without_an_authored_transient_fails_without_an_artifact() {
         "failed Fourier request published an artifact"
     );
 }
+
+/// A deck with two transients gets its `.FOUR` identities and its parent
+/// bindings from the canonical plan, not from the order the CLI happened to
+/// publish spectra in: the second card post-processes the second transient.
+#[test]
+fn each_fourier_card_is_named_and_parented_by_the_canonical_plan() {
+    let directory = test_dir("two_parents");
+    let deck = directory.join("two_parents.cir");
+    let requested = directory.join("results.json");
+    std::fs::write(
+        &deck,
+        "* one .FOUR card per authored transient\n\
+         V1 in 0 SIN(0 1 1k)\n\
+         R1 in mid 1k\n\
+         R2 mid 0 1k\n\
+         .TRAN 2u 4m\n\
+         .FOUR 1k V(in,mid)\n\
+         .TRAN 2u 4m\n\
+         .FOUR 1k I(V1)\n\
+         .END\n",
+    )
+    .expect("write two-transient deck");
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "--quiet",
+            "run",
+            deck.to_str().expect("UTF-8 deck path"),
+            "--output",
+            requested.to_str().expect("UTF-8 output path"),
+            "--format",
+            "json",
+        ])
+        .output()
+        .expect("run two-transient Fourier deck");
+    assert!(
+        output.status.success(),
+        "two-transient Fourier run failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let first = read_json(&directory.join("results.four-001.json"));
+    let second = read_json(&directory.join("results.four-002.json"));
+    assert_eq!(first["payload"]["output"], "V(IN,MID)");
+    assert_eq!(first["parentAnalysis"]["tag"], "tran-001");
+    assert_eq!(second["payload"]["output"], "I(V1)");
+    assert_eq!(
+        second["parentAnalysis"]["tag"], "tran-002",
+        "the second .FOUR card post-processes the second authored transient"
+    );
+}

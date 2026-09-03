@@ -29,8 +29,9 @@ use crate::cli::{
 };
 use crate::commands::publish;
 use rspice_core::execution::{
-    AxisAssignment, AxisKind, DeckPlan, DeckPlanError, DeckPlanMaterializer, MaterializedAnalysis,
-    MaterializedRunError, RunAxisValue, RunCoordinate, StepAxisTarget,
+    AnalysisInstanceId, AxisAssignment, AxisKind, DeckPlan, DeckPlanError, DeckPlanMaterializer,
+    MaterializedAnalysis, MaterializedRunError, PlannedPostProcess, PostProcessSource,
+    RunAxisValue, RunCoordinate, StepAxisTarget,
 };
 use rspice_core::netlist::AnalysisCommand;
 use rspice_core::{
@@ -98,9 +99,11 @@ struct RunContext<'a> {
     /// Canonical transient identities used by checkpoint and post-processing
     /// namespaces, indexed by zero-based authored transient ordinal.
     planned_transient_ids: Vec<rspice_core::execution::AnalysisInstanceId>,
-    /// Next deck-wide ordinal for a resolved `.FOUR` operand.
-    next_fourier_operand: std::cell::Cell<usize>,
-    /// Canonical `.FFT` identities, one per authored transient FFT request.
+    /// Every planned `.FOUR` operand and `.FFT` card, named by the canonical
+    /// plan and bound to the transient it post-processes.
+    planned_post_processes: Vec<PlannedPostProcess>,
+    /// Canonical `.FFT` identities in authored order, one per authored
+    /// transient FFT request, projected from `planned_post_processes`.
     planned_fft_ids: Vec<String>,
     planned_namespace_error: std::cell::RefCell<Option<String>>,
     /// The canonical coordinate this concrete deck run belongs to, retained so
@@ -124,15 +127,23 @@ struct RunContext<'a> {
     /// Result files this run resolved for export, for the `--summary`
     /// manifest.
     outputs: std::cell::RefCell<Vec<std::path::PathBuf>>,
-    /// Most recently completed authored transient. Transient post-processors
-    /// consume this exact result instead of launching an independent run.
-    last_transient: std::cell::RefCell<Option<RetainedTransient>>,
+    /// Completed authored transients a planned `.FOUR` card post-processes,
+    /// in authored order. `.FOUR` cards run after every physical analysis —
+    /// ngspice accepts a `.FOUR` card above the `.TRAN` it belongs to — so a
+    /// deck with several transients must still be able to reach the one the
+    /// plan bound each card to, not merely the one that ran last. A transient
+    /// no planned card names is not retained at all.
+    retained_transients: std::cell::RefCell<Vec<RetainedTransient>>,
     /// Zero-based ordinal assigned to authored transient cards as they enter
     /// the physical-analysis dispatcher.
     next_transient_ordinal: std::cell::Cell<u32>,
     /// Zero-based ordinal assigned to source-authored Fourier cards.
     next_fourier_ordinal: std::cell::Cell<u32>,
 }
+
+/// The canonical identity of one planned `.FOUR` operand and the authored
+/// output spelling that operand names.
+type PlannedFourierOperand<'plan> = (AnalysisInstanceId, &'plan str);
 
 struct RetainedTransient {
     analysis_id: String,
@@ -226,11 +237,8 @@ impl<'a> RunContext<'a> {
             output_tag_multiplicities: analysis_output_tag_multiplicities(netlist),
             planned_output_ids: std::cell::RefCell::new(planned.output_ids),
             planned_transient_ids: planned.transient_ids,
-            next_fourier_operand: std::cell::Cell::new(0),
-            planned_fft_ids: post_process_tags(
-                rspice_core::execution::AnalysisKind::Fft,
-                netlist.fft_analyses.len(),
-            )?,
+            planned_fft_ids: planned_fft_ids(&planned.post_processes, netlist)?,
+            planned_post_processes: planned.post_processes,
             planned_namespace_error: std::cell::RefCell::new(None),
             run_coordinate: coordinate.cloned(),
             topology: std::cell::RefCell::new(topology),
@@ -240,7 +248,7 @@ impl<'a> RunContext<'a> {
             measurements: std::cell::RefCell::new(Vec::new()),
             evaluated_meas: std::cell::RefCell::new(std::collections::HashSet::new()),
             outputs: std::cell::RefCell::new(Vec::new()),
-            last_transient: std::cell::RefCell::new(None),
+            retained_transients: std::cell::RefCell::new(Vec::new()),
             next_transient_ordinal: std::cell::Cell::new(0),
             next_fourier_ordinal: std::cell::Cell::new(0),
         })
@@ -287,11 +295,8 @@ impl<'a> RunContext<'a> {
             output_tag_multiplicities: analysis_output_tag_multiplicities(netlist),
             planned_output_ids: std::cell::RefCell::new(planned.output_ids),
             planned_transient_ids: planned.transient_ids,
-            next_fourier_operand: std::cell::Cell::new(0),
-            planned_fft_ids: post_process_tags(
-                rspice_core::execution::AnalysisKind::Fft,
-                netlist.fft_analyses.len(),
-            )?,
+            planned_fft_ids: planned_fft_ids(&planned.post_processes, netlist)?,
+            planned_post_processes: planned.post_processes,
             planned_namespace_error: std::cell::RefCell::new(None),
             // A corner is a re-elaborated deck: it owns no plan coordinate,
             // and its topology is its own, computed on demand.
@@ -303,7 +308,7 @@ impl<'a> RunContext<'a> {
             measurements: std::cell::RefCell::new(Vec::new()),
             evaluated_meas: std::cell::RefCell::new(std::collections::HashSet::new()),
             outputs: std::cell::RefCell::new(Vec::new()),
-            last_transient: std::cell::RefCell::new(None),
+            retained_transients: std::cell::RefCell::new(Vec::new()),
             next_transient_ordinal: std::cell::Cell::new(0),
             next_fourier_ordinal: std::cell::Cell::new(0),
         })
@@ -436,15 +441,14 @@ impl<'a> RunContext<'a> {
                     return None;
                 }
                 let minted = output_tag_analysis_kind(tag)
-                    .map(|kind| crate::analysis_identity::post_process_ids(kind, 1))
+                    .map(command_line_analysis_identity)
                     .transpose()
                     .unwrap_or_else(|error| {
                         self.planned_namespace_error.replace(Some(format!(
                             "cannot mint a canonical '{tag}' identity: {error}"
                         )));
                         None
-                    })
-                    .and_then(|ids| ids.first().copied());
+                    });
                 (tag.to_string(), minted)
             }
         };
@@ -605,41 +609,79 @@ impl<'a> RunContext<'a> {
         self.output_path_for(&tag)
     }
 
-    /// Canonical identity of one resolved `.FOUR` operand.
-    ///
-    /// The core evaluates one Fourier spectrum per resolved operand, and the
-    /// shared result document names one spectrum, so an operand — not a card —
-    /// is the analysis instance. `index` is its zero-based deck-wide ordinal.
-    fn fourier_operand_analysis_id(
-        &self,
-        index: usize,
-    ) -> Result<rspice_core::execution::AnalysisInstanceId, CliError> {
-        crate::analysis_identity::post_process_ids(
-            rspice_core::execution::AnalysisKind::Fourier,
-            index.saturating_add(1),
-        )
-        .map_err(|error| CliError::InternalError {
-            message: format!("cannot mint canonical Fourier identities: {error}"),
-        })?
-        .last()
-        .copied()
-        .ok_or_else(|| CliError::InternalError {
-            message: format!("planned Fourier namespace has no identity for operand {index}"),
+    /// Every planned `.FOUR` operand of one authored card.
+    fn planned_fourier_card(&self, card_index: usize) -> impl Iterator<Item = &PlannedPostProcess> {
+        self.planned_post_processes.iter().filter(move |post| {
+            matches!(
+                post.source(),
+                PostProcessSource::FourierOperand { card_index: card, .. } if *card == card_index
+            )
         })
     }
 
-    /// Take the next deck-wide `.FOUR` operand ordinal.
-    fn take_fourier_operand_ordinal(&self) -> Result<usize, CliError> {
-        let ordinal = self.next_fourier_operand.get();
-        self.next_fourier_operand
-            .set(
-                ordinal
-                    .checked_add(1)
-                    .ok_or_else(|| CliError::InternalError {
-                        message: "resolved Fourier operand ordinal overflowed".to_string(),
-                    })?,
-            );
-        Ok(ordinal)
+    /// Whether any planned `.FOUR` operand post-processes this transient.
+    fn plans_fourier_for(&self, transient: AnalysisInstanceId) -> bool {
+        self.planned_post_processes.iter().any(|post| {
+            matches!(post.source(), PostProcessSource::FourierOperand { .. })
+                && post.parent() == transient
+        })
+    }
+
+    /// The transient one authored `.FOUR` card post-processes, and the planned
+    /// identity and authored spelling of each of its operands.
+    ///
+    /// The core evaluates one Fourier spectrum per resolved operand and the
+    /// shared result document names one spectrum, so an operand — not a card —
+    /// is the analysis instance. The plan already assigned those identities
+    /// and already bound the card to its transient, so the CLI reads both off
+    /// it instead of counting operands and assuming the transient that ran
+    /// last is the one the card meant.
+    fn planned_fourier_operands(
+        &self,
+        card_index: usize,
+    ) -> Result<(AnalysisInstanceId, Vec<PlannedFourierOperand<'_>>), CliError> {
+        let parent = self
+            .planned_fourier_card(card_index)
+            .next()
+            .map(PlannedPostProcess::parent)
+            .ok_or_else(|| CliError::InternalError {
+                message: format!(
+                    "the canonical plan names no operand for .FOUR card {}",
+                    card_index.saturating_add(1)
+                ),
+            })?;
+        let operands = self
+            .planned_fourier_card(card_index)
+            .map(|post| match post.source() {
+                PostProcessSource::FourierOperand { output, .. } => {
+                    Ok((post.id(), output.as_str()))
+                }
+                _ => Err(CliError::InternalError {
+                    message: format!("{} is not a planned .FOUR operand", post.id()),
+                }),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((parent, operands))
+    }
+
+    /// The completed transient result one `.FOUR` card post-processes.
+    fn retained_transient(
+        &self,
+        parent: AnalysisInstanceId,
+    ) -> Result<std::cell::Ref<'_, RetainedTransient>, CliError> {
+        std::cell::Ref::filter_map(self.retained_transients.borrow(), |retained| {
+            retained
+                .iter()
+                .find(|candidate| candidate.analysis == parent)
+        })
+        .map_err(|_| {
+            CliError::simulation_error_in(
+                format!(
+                    ".FOUR requires a completed authored .TRAN to post-process; the plan binds this card to {parent}, which this run did not complete"
+                ),
+                "Fourier",
+            )
+        })
     }
 
     /// Canonical identities of the deck's authored `.FFT` requests, in source
@@ -650,16 +692,8 @@ impl<'a> RunContext<'a> {
 
     /// The same identities as typed instances, for a document that names its
     /// attached spectra as children.
-    fn fft_analysis_instances(
-        &self,
-    ) -> Result<Vec<rspice_core::execution::AnalysisInstanceId>, CliError> {
-        crate::analysis_identity::post_process_ids(
-            rspice_core::execution::AnalysisKind::Fft,
-            self.planned_fft_ids.len(),
-        )
-        .map_err(|error| CliError::InternalError {
-            message: format!("cannot mint canonical FFT identities: {error}"),
-        })
+    fn fft_analysis_instances(&self) -> Vec<AnalysisInstanceId> {
+        planned_fft_instances(&self.planned_post_processes).collect()
     }
 
     fn run_analysis(&self, analysis: &AnalysisCommand) -> Result<(), CliError> {
@@ -696,12 +730,20 @@ impl<'a> RunContext<'a> {
                     *uic,
                 )?;
                 let analysis = self.current_transient_instance()?;
-                self.last_transient.replace(Some(RetainedTransient {
-                    analysis_id: analysis.tag(),
-                    analysis,
-                    result: outcome.result,
-                    post_results: outcome.post_results,
-                }));
+                // Only a transient a planned `.FOUR` card names is kept:
+                // holding every transient's waveform for a deck that
+                // post-processes none of them would be an unbounded cost for
+                // nothing.
+                if self.plans_fourier_for(analysis) {
+                    self.retained_transients
+                        .borrow_mut()
+                        .push(RetainedTransient {
+                            analysis_id: analysis.tag(),
+                            analysis,
+                            result: outcome.result,
+                            post_results: outcome.post_results,
+                        });
+                }
             }
             AnalysisCommand::Ac {
                 variation,
@@ -1015,6 +1057,14 @@ struct PlannedAnalysisIdentities {
     /// Transient identities in authored order, indexed by zero-based
     /// transient ordinal for checkpoint and post-processing namespaces.
     transient_ids: Vec<rspice_core::execution::AnalysisInstanceId>,
+    /// Every planned `.FOUR` operand and `.FFT` card, each already named and
+    /// bound to the transient it post-processes.
+    ///
+    /// These are not analyses the CLI dispatches; they are the identities the
+    /// transient's post-processing artifacts publish under. Taking them from
+    /// the plan is what keeps `four-002` meaning the same operand here, in the
+    /// browser runner, and in the engine adapter.
+    post_processes: Vec<PlannedPostProcess>,
 }
 
 impl PlannedAnalysisIdentities {
@@ -1025,8 +1075,12 @@ impl PlannedAnalysisIdentities {
                 rspice_core::execution::AnalysisInstanceId,
             ),
         >,
+        post_processes: &[PlannedPostProcess],
     ) -> Self {
-        let mut identities = Self::default();
+        let mut identities = Self {
+            post_processes: post_processes.to_vec(),
+            ..Self::default()
+        };
         for (analysis, id) in pairs {
             let Some(tag) = analysis_output_tag(analysis) else {
                 continue;
@@ -1048,6 +1102,7 @@ impl PlannedAnalysisIdentities {
         Self::from_pairs(
             plan.authored_analyses(netlist)
                 .filter_map(|(analysis, id)| id.map(|id| (analysis, id))),
+            plan.post_process_analyses(),
         )
     }
 
@@ -1057,6 +1112,7 @@ impl PlannedAnalysisIdentities {
     /// or checkpoint namespace that disagrees with the coordinate it claims to
     /// belong to would let one coordinate overwrite another's artifact.
     fn from_materialized(
+        plan: &DeckPlan,
         coordinate: &RunCoordinate,
         analyses: &[MaterializedAnalysis],
     ) -> Result<Self, CliError> {
@@ -1077,9 +1133,15 @@ impl PlannedAnalysisIdentities {
                 });
             }
         }
-        Ok(Self::from_pairs(analyses.iter().filter_map(|analysis| {
-            analysis.command().map(|command| (command, analysis.id()))
-        })))
+        // Post-processes are planned per deck, not per coordinate: a `.FOUR`
+        // operand keeps one identity across the whole sweep, and the
+        // coordinate that separates two artifacts is already in their paths.
+        Ok(Self::from_pairs(
+            analyses
+                .iter()
+                .filter_map(|analysis| analysis.command().map(|command| (command, analysis.id()))),
+            plan.post_process_analyses(),
+        ))
     }
 }
 
@@ -1150,16 +1212,87 @@ pub(crate) struct RunContextSettings {
     pub(crate) quiet: bool,
 }
 
-/// Canonical artifact tags of one post-process family, in authored order.
-fn post_process_tags(
+/// The first `count` canonical identities of one analysis family, minted by
+/// the planner exactly as it would mint them for `count` authored cards.
+///
+/// Every artifact this process publishes for a card the deck authored takes
+/// its identity from that deck's own `DeckPlan`. Two callers have no such plan
+/// to read and must still name a family instance canonically, and both go
+/// through here rather than formatting `sp-001` or `fft-002` by hand:
+///
+/// - a command-line analysis mode (`--sparam`, `--monte-carlo`) publishes an
+///   analysis the deck never authored, so there is no planned card for it. It
+///   is single by construction and is therefore planned on its own.
+/// - the FFT RAW artifact decoder validates a file this process did not
+///   necessarily write, so it has only the artifact's own declared result
+///   count to mint the identities it checks against.
+///
+/// `AnalysisInstanceId` is deliberately not constructible outside
+/// `rspice-core`; going through the planner is what keeps the tag spelling,
+/// the ordinal base, and the family name decided in exactly one place.
+pub(crate) fn canonical_analysis_identities(
     kind: rspice_core::execution::AnalysisKind,
     count: usize,
-) -> Result<Vec<String>, CliError> {
-    crate::analysis_identity::post_process_ids(kind, count)
-        .map(|ids| ids.iter().map(|id| id.tag()).collect())
-        .map_err(|error| CliError::InternalError {
-            message: format!("cannot mint {count} canonical {kind:?} identities: {error}"),
+) -> Result<Vec<AnalysisInstanceId>, DeckPlanError> {
+    if count == 0 {
+        return Ok(Vec::new());
+    }
+    let requests = std::iter::repeat_with(|| rspice_core::execution::AnalysisRequest::new(kind))
+        .take(count)
+        .collect::<Vec<_>>();
+    Ok(DeckPlan::new(Vec::new(), requests)?
+        .analyses()
+        .iter()
+        .map(rspice_core::execution::PlannedAnalysis::id)
+        .collect())
+}
+
+/// Canonical identity of an analysis the command line requested and the deck
+/// never authored, such as `--sparam` or `--monte-carlo`.
+fn command_line_analysis_identity(
+    kind: rspice_core::execution::AnalysisKind,
+) -> Result<AnalysisInstanceId, DeckPlanError> {
+    canonical_analysis_identities(kind, 1)?
+        .first()
+        .copied()
+        .ok_or(DeckPlanError::MissingUpstreamAnalysis {
+            card: "command-line analysis mode",
+            required: "one planned analysis instance",
         })
+}
+
+/// The planned `.FFT` identities of one deck, in authored card order.
+fn planned_fft_instances(
+    post_processes: &[PlannedPostProcess],
+) -> impl Iterator<Item = AnalysisInstanceId> + '_ {
+    post_processes
+        .iter()
+        .filter(|post| matches!(post.source(), PostProcessSource::Fft { .. }))
+        .map(PlannedPostProcess::id)
+}
+
+/// Canonical artifact tags of the deck's authored `.FFT` cards.
+///
+/// The plan is the only source: an authored `.FFT` card the plan did not name
+/// would otherwise publish under a tag this process invented, and the same
+/// spectrum would carry two identities across surfaces.
+fn planned_fft_ids(
+    post_processes: &[PlannedPostProcess],
+    netlist: &Netlist,
+) -> Result<Vec<String>, CliError> {
+    let ids = planned_fft_instances(post_processes)
+        .map(|id| id.tag())
+        .collect::<Vec<_>>();
+    if ids.len() != netlist.fft_analyses.len() {
+        return Err(CliError::InternalError {
+            message: format!(
+                "the deck authors {} .FFT card(s) but the canonical plan named {}",
+                netlist.fft_analyses.len(),
+                ids.len()
+            ),
+        });
+    }
+    Ok(ids)
 }
 
 /// What one concrete deck run publishes under: its canonical analysis
@@ -3036,6 +3169,7 @@ fn run_deck(
                 coordinate: Some(canonical_coordinate),
                 topology: Some(topology),
                 analyses: PlannedAnalysisIdentities::from_materialized(
+                    &canonical_plan,
                     canonical_coordinate,
                     materialized.analyses(),
                 )?,
