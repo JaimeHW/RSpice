@@ -8,8 +8,8 @@
 
 use super::plan::analysis_kind;
 use super::{
-    AnalysisInstanceId, AnalysisKind, DeckPlan, DeckPlanError, PlannedAnalysis, RunCoordinate,
-    RunCoordinateId,
+    AnalysisInstanceId, AnalysisKind, DeckPlan, DeckPlanError, PlannedAnalysis, RunAxisValue,
+    RunCoordinate, RunCoordinateId,
 };
 use crate::Netlist;
 use crate::abort_signal::{AbortSignal, NoAbort};
@@ -229,6 +229,18 @@ impl DeckPlanMaterializer<'_> {
             return Err(MaterializedRunError::Aborted);
         }
 
+        // A Spectre `statistics` block draws from a coordinate. Monte Carlo
+        // stamps its own per trial; every other coordinate — plain, `.STEP`,
+        // `.TEMP`, or DATA — gets the one this plan defines. Without it the
+        // builder finds no coordinate, skips process and mismatch sampling
+        // entirely, and a swept statistical deck runs nominal at every point.
+        if !netlist.spectre_statistics.variations.is_empty()
+            && netlist.spectre_statistical_coordinate.is_none()
+        {
+            netlist.spectre_statistical_coordinate =
+                Some(self.spectre_statistical_coordinate(&coordinate, &netlist)?);
+        }
+
         // A concrete run must never feed its meta-analysis cards back into an
         // executor. Post-processing cards such as FOUR remain on the netlist.
         netlist.analyses.retain(|analysis| {
@@ -299,6 +311,47 @@ impl DeckPlanMaterializer<'_> {
             netlist,
             topology,
             analyses,
+        })
+    }
+
+    /// Statistical coordinate for one planned run coordinate.
+    ///
+    /// The axes are the coordinate's own assignments: a numeric `.STEP` or
+    /// `.TEMP` value directly, and a DATA row as one axis per bound parameter
+    /// so two rows that bind identical values are one statistical point.
+    /// `spectre_statistics` canonicalizes and sorts these names before
+    /// hashing, so the order they are collected in is immaterial. The
+    /// temperature is the one the coordinate materialized, or the engine's
+    /// configured temperature when no axis moved it.
+    fn spectre_statistical_coordinate(
+        &self,
+        coordinate: &RunCoordinate,
+        netlist: &Netlist,
+    ) -> Result<crate::netlist::SpectreStatisticalCoordinate, MaterializedRunError> {
+        let mut axes = Vec::new();
+        for assignment in coordinate.assignments() {
+            match assignment.value() {
+                RunAxisValue::Numeric(value) => axes.push((assignment.name().to_owned(), *value)),
+                RunAxisValue::DataRow(bindings) => axes.extend(
+                    bindings
+                        .iter()
+                        .map(|binding| (binding.name().to_owned(), binding.value())),
+                ),
+                // Preparation already refuses textual ALTER; a variant axis
+                // has no numeric coordinate to seed a draw from.
+                RunAxisValue::AlterVariant { .. } => {
+                    return Err(MaterializedRunError::AlterUnsupported);
+                }
+            }
+        }
+        let temperature_celsius = netlist.options.temp.unwrap_or_else(|| {
+            crate::constants::kelvin_to_celsius(self.engine.config().temperature)
+        });
+        Ok(crate::netlist::SpectreStatisticalCoordinate {
+            seed: 0,
+            monte_carlo_run: 0,
+            temperature_celsius,
+            axes,
         })
     }
 }
