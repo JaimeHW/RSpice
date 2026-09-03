@@ -328,6 +328,17 @@ pub struct VmContext {
     /// that value translated onto the wrapped candidate's common branch.
     /// Runtime-only; accepted history lanes are serialized by checkpoints.
     pub(crate) state_older_candidate: Vec<f64>,
+    /// Per-evaluation slots the CFG route's prelude publishes into.
+    ///
+    /// One `f64` per distinct value entry output of a plan built through
+    /// `CfgPrelude`, live for exactly one evaluation: the prelude writes every
+    /// one of them and each value entry then returns the one it was assigned.
+    /// Empty for every postfix plan, which is what production compiles, and
+    /// sized by the device from the compiled model's
+    /// `NativeRequiredStorage::prelude_slots` rather than from anything the
+    /// interpreter knows. Runtime-only, and never serialized: a slot has no
+    /// meaning outside the evaluation that wrote it.
+    pub(crate) prelude_slots: Vec<f64>,
     /// Current timestep (delta t) for transient analysis
     timestep: f64,
     /// Companion coefficients selected by the transient solver.
@@ -408,6 +419,7 @@ impl Default for VmContext {
             state_initialized: Vec::new(),
             state_candidate_valid: Vec::new(),
             state_older_candidate: Vec::new(),
+            prelude_slots: Vec::new(),
             timestep: 0.0,
             integration: IntegrationCoefficients::inactive(),
             lookup_tables: Vec::new(),
@@ -460,6 +472,7 @@ impl VmContext {
             state_initialized: Vec::new(),
             state_candidate_valid: Vec::new(),
             state_older_candidate: Vec::new(),
+            prelude_slots: Vec::new(),
             timestep: 0.0,
             integration: IntegrationCoefficients::inactive(),
             lookup_tables: Vec::new(),
@@ -506,6 +519,7 @@ impl VmContext {
             state_initialized: Vec::new(),
             state_candidate_valid: Vec::new(),
             state_older_candidate: Vec::new(),
+            prelude_slots: Vec::new(),
             timestep: 0.0,
             integration: IntegrationCoefficients::inactive(),
             lookup_tables: Vec::new(),
@@ -552,6 +566,7 @@ impl VmContext {
             state_initialized: vec![false; num_states],
             state_candidate_valid: vec![0; num_states],
             state_older_candidate: vec![0.0; num_states],
+            prelude_slots: Vec::new(),
             timestep: 0.0,
             integration: IntegrationCoefficients::inactive(),
             lookup_tables: Vec::new(),

@@ -397,6 +397,7 @@ impl A64ImageBuilder {
     pub(super) fn append_fused_evaluation_kernel(
         &mut self,
         assignment: CodeOffset,
+        prelude: Option<CodeOffset>,
         stamp_values: &[PlanProgram],
         stamp_value_entries: &[CodeOffset],
         published_current_pairs: &[Option<(usize, usize)>],
@@ -405,6 +406,7 @@ impl A64ImageBuilder {
         let inline = compile_fused_evaluation_kernel(
             offset.as_usize(),
             assignment,
+            prelude,
             stamp_values,
             published_current_pairs,
         )?;
@@ -414,6 +416,7 @@ impl A64ImageBuilder {
             compile_fused_evaluation_driver(
                 offset.as_usize(),
                 assignment,
+                prelude,
                 stamp_value_entries,
                 published_current_pairs,
             )?
@@ -425,6 +428,7 @@ impl A64ImageBuilder {
     pub(super) fn append_fused_stamp_kernel(
         &mut self,
         assignment: CodeOffset,
+        prelude: Option<CodeOffset>,
         stamp_values: &[PlanProgram],
         jacobians: &[Vec<PlanProgram>],
         stamp_value_entries: &[CodeOffset],
@@ -435,6 +439,7 @@ impl A64ImageBuilder {
         let inline = compile_fused_stamp_kernel(
             offset.as_usize(),
             assignment,
+            prelude,
             stamp_values,
             jacobians,
             published_current_pairs,
@@ -445,6 +450,7 @@ impl A64ImageBuilder {
             compile_fused_stamp_driver(
                 offset.as_usize(),
                 assignment,
+                prelude,
                 stamp_value_entries,
                 jacobian_entries,
                 published_current_pairs,

@@ -2,6 +2,15 @@
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct JitCurrentDependencies {
+    /// Branch unknowns the CFG route's prelude reads.
+    ///
+    /// The prelude computes what the value entries used to compute for
+    /// themselves, so their read-sets moved here with them and the runtime must
+    /// validate this one before the prelude runs rather than before each entry.
+    /// It has no current-pair or prior-current counterpart on purpose: a
+    /// prelude runs ahead of every publication, so `CfgPrelude::build` refuses
+    /// one that reads either.
+    pub prelude_branch_unknowns: Vec<usize>,
     pub assignment_current_pairs: Vec<usize>,
     pub assignment_prior_currents: Vec<usize>,
     pub assignment_branch_unknowns: Vec<usize>,

@@ -237,6 +237,7 @@ fn compile_assignment_function_artifact(
 pub(super) fn compile_fused_stamp_kernel_artifact(
     kernel_image_offset: usize,
     assignment: crate::native::model::CodeOffset,
+    prelude: Option<crate::native::model::CodeOffset>,
     stamp_values: &[PlanProgram],
     jacobians: &[Vec<PlanProgram>],
     published_current_pairs: &[Option<(usize, usize)>],
@@ -244,6 +245,7 @@ pub(super) fn compile_fused_stamp_kernel_artifact(
     compile_fused_kernel_artifact(
         kernel_image_offset,
         assignment,
+        prelude,
         stamp_values,
         Some(jacobians),
         published_current_pairs,
@@ -254,6 +256,7 @@ pub(super) fn compile_fused_stamp_kernel_artifact(
 fn compile_fused_kernel_artifact(
     kernel_image_offset: usize,
     assignment: crate::native::model::CodeOffset,
+    prelude: Option<crate::native::model::CodeOffset>,
     stamp_values: &[PlanProgram],
     jacobians: Option<&[Vec<PlanProgram>]>,
     published_current_pairs: &[Option<(usize, usize)>],
@@ -361,6 +364,17 @@ fn compile_fused_kernel_artifact(
 
     compiler.emit_image_entry_call(kernel_image_offset, assignment)?;
     compiler.emit_kernel_abort_if_failed()?;
+
+    // The prelude, once, before any entry reads a slot it publishes. It is
+    // *called* rather than inlined for the same reason the assignment pass is:
+    // one copy in the image serves the kernel and the per-entry path both, and
+    // inlining a program the entries no longer carry would put the code size
+    // this whole route exists to remove straight back into the kernel. A plan
+    // without one emits nothing here, so a postfix kernel is unchanged.
+    if let Some(prelude) = prelude {
+        compiler.emit_image_entry_call(kernel_image_offset, prelude)?;
+        compiler.emit_kernel_abort_if_failed()?;
+    }
 
     let mut jacobian_index = 0_usize;
     for (stamp_index, ((program, allocation), current_pair)) in value_ssa
@@ -5043,6 +5057,7 @@ mod tests {
         let artifact = super::compile_fused_stamp_kernel_artifact(
             1024,
             CodeOffset::new(0),
+            None,
             std::slice::from_ref(&value),
             &[vec![value.clone(), value.clone()]],
             &[None],

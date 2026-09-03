@@ -41,6 +41,14 @@ pub(super) fn compile_model_plan(
     } else {
         Some(image.append_assignment_pass(&plan.post_assignments, "post-assignment")?)
     };
+    // The CFG route's assignment pass, emitted before every entry that reads a
+    // slot it publishes. It is a value function of `(ctx, vars)` like any other,
+    // so it goes through the same appender; both fused kernels call this copy.
+    let prelude = plan
+        .prelude
+        .as_ref()
+        .map(|prelude| image.append_value(prelude.program.borrow(), "prelude"))
+        .transpose()?;
 
     let parameter_defaults = plan
         .parameter_defaults
@@ -128,12 +136,14 @@ pub(super) fn compile_model_plan(
         .collect::<JitResult<Vec<_>>>()?;
     let evaluation_kernel = image.append_fused_evaluation_kernel(
         assignment,
+        prelude,
         &plan.stamp_values,
         &stamp_values,
         &plan.published_current_pairs,
     )?;
     let stamp_kernel = image.append_fused_stamp_kernel(
         assignment,
+        prelude,
         &plan.stamp_values,
         &plan.jacobians,
         &stamp_values,
@@ -142,6 +152,7 @@ pub(super) fn compile_model_plan(
     )?;
     let entries = NativeEntryOffsets {
         assignment,
+        prelude,
         post_assignment,
         evaluation_kernel: Some(evaluation_kernel),
         stamp_kernel: Some(stamp_kernel),
@@ -174,7 +185,7 @@ pub(super) fn compile_model_plan(
         entries,
         entry_starts,
         plan.current_dependencies.clone(),
-        NativeRequiredStorage::for_model(model),
+        NativeRequiredStorage::for_model(model).with_prelude_slots(plan.prelude_slot_count()),
     )
 }
 

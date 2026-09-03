@@ -56,6 +56,7 @@ pub(crate) fn compile_evaluation_kernel(
     Ok(compile_evaluation_kernel_artifact(
         driver_image_offset,
         assignment,
+        None,
         stamp_values,
         published_current_pairs,
     )?
@@ -65,12 +66,14 @@ pub(crate) fn compile_evaluation_kernel(
 pub(super) fn compile_evaluation_kernel_artifact(
     driver_image_offset: usize,
     assignment: CodeOffset,
+    prelude: Option<CodeOffset>,
     stamp_values: &[CodeOffset],
     published_current_pairs: &[Option<(usize, usize)>],
 ) -> JitResult<CompiledX64Function> {
     compile_kernel_artifact(
         driver_image_offset,
         assignment,
+        prelude,
         stamp_values,
         None,
         published_current_pairs,
@@ -91,6 +94,7 @@ pub(super) fn compile_stamp_kernel_artifact(
     compile_kernel_artifact(
         driver_image_offset,
         assignment,
+        None,
         stamp_values,
         Some(jacobians),
         published_current_pairs,
@@ -101,6 +105,7 @@ pub(super) fn compile_stamp_kernel_artifact(
 fn compile_kernel_artifact(
     driver_image_offset: usize,
     assignment: CodeOffset,
+    prelude: Option<CodeOffset>,
     stamp_values: &[CodeOffset],
     jacobians: Option<&[Vec<CodeOffset>]>,
     published_current_pairs: &[Option<(usize, usize)>],
@@ -152,6 +157,15 @@ fn compile_kernel_artifact(
     emit_entry_call(&mut encoder, driver_image_offset, assignment)?;
     restore_internal_args(&mut encoder);
     abort_branches.push(emit_abort_if_failed(&mut encoder, runtime_failed_offset));
+
+    // The CFG route's assignment pass, once, before the first value entry —
+    // every one of which is a read of a slot it publishes. A plan without one
+    // emits nothing here, which is why a postfix driver is unchanged.
+    if let Some(prelude) = prelude {
+        emit_entry_call(&mut encoder, driver_image_offset, prelude)?;
+        restore_internal_args(&mut encoder);
+        abort_branches.push(emit_abort_if_failed(&mut encoder, runtime_failed_offset));
+    }
 
     let mut jacobian_index = 0usize;
     for (stamp_index, (value_entry, current_pair)) in

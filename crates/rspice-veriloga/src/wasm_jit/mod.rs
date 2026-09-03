@@ -117,6 +117,11 @@ pub enum WasmJitAssignmentExpression {
 /// Stable semantic role of one exported scalar entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WasmJitValueRole {
+    /// The CFG route's assignment pass: one entry that publishes every value
+    /// entry's output into a prelude slot, run once between the assignment
+    /// kernel and the first stamp. At most one per module, and none at all for
+    /// the postfix plans production compiles.
+    Prelude,
     Assignment {
         phase: WasmJitAssignmentPhase,
         /// Recursive source-order assignment indexes from the phase root.
@@ -173,6 +178,10 @@ pub struct WasmJitModelArtifact {
     cache_key: String,
     entries: Vec<WasmJitValueEntry>,
     assignment_export: String,
+    /// The CFG route's assignment pass, when the plan carried one.
+    prelude_export: Option<String>,
+    /// How many prelude slots one evaluation of that pass publishes.
+    prelude_slots: usize,
     post_assignment_export: Option<String>,
     /// Whole-model drivers, present when the shared contribution-ordering rule
     /// allows fusing. Absent means the worker must use the per-entry exports.
@@ -191,6 +200,16 @@ impl WasmJitModelArtifact {
 
     pub fn entries(&self) -> &[WasmJitValueEntry] {
         &self.entries
+    }
+
+    /// The CFG route's assignment pass, when this artifact carries one.
+    pub fn prelude_export(&self) -> Option<&str> {
+        self.prelude_export.as_deref()
+    }
+
+    /// How many prelude slots one evaluation publishes.
+    pub fn prelude_slots(&self) -> usize {
+        self.prelude_slots
     }
 
     pub fn assignment_export(&self) -> &str {
@@ -420,6 +439,21 @@ fn emit_model_value_module(
         &mut planned,
         &mut post_assignment_kernel,
     )?;
+    // The CFG route's assignment pass, planned right after the assignment
+    // kernels it reads the variables of and before every entry that reads one
+    // of its slots. `None` for a postfix plan, and then nothing below changes.
+    let prelude_entry = plan
+        .prelude
+        .as_ref()
+        .map(|prelude| {
+            let index = u32_index(planned.len(), "scalar entry")?;
+            planned.push(PlannedValue {
+                program: prelude.program.borrow(),
+                role: WasmJitValueRole::Prelude,
+            });
+            Ok::<_, WasmJitError>(index)
+        })
+        .transpose()?;
     for (parameter_index, program) in plan.parameter_defaults.iter().enumerate() {
         if let Some(program) = program {
             planned.push(PlannedValue {
@@ -554,6 +588,7 @@ fn emit_model_value_module(
         fused.push(codegen::WasmFusedKernel {
             export_name: codegen::WASM_JIT_EVALUATION_KERNEL_EXPORT,
             assignment_kernel: 0,
+            prelude_entry,
             stamps: stamps.clone(),
             with_jacobians: false,
         });
@@ -562,6 +597,7 @@ fn emit_model_value_module(
             fused.push(codegen::WasmFusedKernel {
                 export_name: codegen::WASM_JIT_STAMP_KERNEL_EXPORT,
                 assignment_kernel: 0,
+                prelude_entry,
                 stamps,
                 with_jacobians: true,
             });
@@ -569,7 +605,7 @@ fn emit_model_value_module(
     }
 
     let bytes = codegen::emit_verified_model_module(&programs, &kernels, &fused)?;
-    let entries = planned
+    let entries: Vec<WasmJitValueEntry> = planned
         .into_iter()
         .enumerate()
         .map(|(index, entry)| WasmJitValueEntry {
@@ -577,6 +613,17 @@ fn emit_model_value_module(
             role: entry.role,
         })
         .collect();
+    let prelude_export_name = prelude_entry
+        .map(|entry| {
+            usize::try_from(entry)
+                .ok()
+                .and_then(|entry| entries.get(entry))
+                .map(|entry: &WasmJitValueEntry| entry.export_name().to_owned())
+                .ok_or_else(|| {
+                    WasmJitError::Encoding("prelude entry has no published export".into())
+                })
+        })
+        .transpose()?;
     let cache_key = model_cache_key(canonical_ir);
     Ok(WasmJitModelArtifact {
         module: WasmJitArtifact {
@@ -588,6 +635,8 @@ fn emit_model_value_module(
         cache_key,
         entries,
         assignment_export: codegen::WASM_JIT_ASSIGNMENT_EXPORT.to_owned(),
+        prelude_export: prelude_export_name,
+        prelude_slots: plan.prelude_slot_count(),
         post_assignment_export: (kernels.len() == 2)
             .then(|| codegen::WASM_JIT_POST_ASSIGNMENT_EXPORT.to_owned()),
         evaluation_kernel_export,
@@ -2000,7 +2049,7 @@ endmodule
         let mut compared_noise_exponent = false;
         for entry in artifact.entries() {
             let expected = match entry.role() {
-                WasmJitValueRole::Assignment { .. } => continue,
+                WasmJitValueRole::Assignment { .. } | WasmJitValueRole::Prelude => continue,
                 WasmJitValueRole::ParameterDefault { parameter_index } => native
                     .run_parameter_default(
                         *parameter_index as usize,

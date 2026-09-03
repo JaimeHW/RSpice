@@ -122,13 +122,14 @@
 use std::collections::{HashMap, HashSet};
 
 use super::cfg_lanes::scalarize_lanes;
+use super::cfg_prelude::{CfgPrelude, LiveCurrentTaint};
 use super::cfg_program::{CfgRuntimeBindings, lower_cfg_function};
 use super::expr::NativeOp;
-use super::model_plan::NativeModelPlan;
+use super::model_plan::{NativeModelPlan, NativePrelude};
 use super::plan_builder::{
     build_model_plan_with_canonical_ir, canonical_branch_unknown_runtime_map,
 };
-use super::plan_program::{BlockProgram, PlanProgram};
+use super::plan_program::{BlockProgram, PlanProgram, PlanProgramRef};
 use super::ssa::{BlockId, BuilderTerminator, Program, ProgramBuilder, ValueType};
 use super::{JitError, JitResult};
 use crate::canonical_ir::cfg_lower::CfgModel;
@@ -278,8 +279,26 @@ pub(crate) struct CfgPlanReport {
     /// Noise magnitudes that only lowered after the derivative pass resolved a
     /// `ddx` inside them — the shipped emitter's own two-pass rule, kept.
     pub(crate) noise_from_differentiated: usize,
-    /// Instructions in the largest block entry, with its identity.
+    /// Instructions in the largest block entry the plan *lowered as a cone*,
+    /// with its identity.
+    ///
+    /// Since the prelude, that is a small population: every entry the prelude
+    /// publishes is one instruction, so what this measures is the noise
+    /// magnitudes and the entries [`Self::live_current_entries`] counts. `None`
+    /// on a module where the prelude covers everything and noise stays postfix.
     pub(crate) largest_entry: Option<(CfgPlanEntry, usize)>,
+    /// `f64` slots the plan's prelude publishes, one per distinct entry output.
+    pub(crate) prelude_slots: usize,
+    /// Instructions in the prelude, which is the numerator the size census
+    /// used to spend once per entry.
+    pub(crate) prelude_instructions: usize,
+    /// Entries kept out of the prelude because their value reads a contribution
+    /// current the evaluation publishes after the prelude runs. Each keeps its
+    /// own cone; see [`LiveCurrentTaint`].
+    pub(crate) live_current_entries: usize,
+    /// Whether a branch condition reads one, which taints every cone at once
+    /// and leaves the module with no prelude at all.
+    pub(crate) live_current_control_flow: bool,
 }
 
 /// One value entry's position in the plan, for a message that names it.
@@ -874,59 +893,116 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     // undifferentiated `ddx` has no value until the pass that resolves one has
     // run, and ten shipped modules are in that position. Running the pass first
     // is what makes their residuals lowerable at all.
-    let mut stamp_values = Vec::with_capacity(model.stamp_programs.len());
-    let mut jacobians = Vec::with_capacity(model.stamp_programs.len());
-    let mut reactive_jacobians = Vec::with_capacity(model.stamp_programs.len());
+    //
+    // Every entry of every stamp is gathered first and lowered *once*, through
+    // one [`CfgPrelude`]. Slicing a cone per entry is what made the CFG route's
+    // image explode — Σ cone / union ran from 24 on asmesd to 383 on asmhemt,
+    // and the fused stamp kernel inlined every one of them a second time — and
+    // the cones overlapped because they are all values of one function. The
+    // prelude computes each of them once into a slot and each entry becomes the
+    // single instruction that reads it.
+    let mut entries: Vec<(CfgPlanEntry, ValueId)> = Vec::new();
     for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
-        // Slice the whole equation out of the body once, then each of its
-        // entries out of that slice. Pruning is linear in the function it is
-        // given, so slicing per entry from the *model* would cost the entry
-        // count times a compact model's whole body — quadratic, and measured:
-        // it took asmhemt past twenty gigabytes of working set and into paging
-        // before this loop was written this way. Slicing the equation first
-        // makes every inner pass linear in the equation instead. The result is
-        // the same function either way: pruning is idempotent, and composing
-        // two slices keeps exactly what the inner one asked for.
-        let residual = cfg.residuals[stamp_index];
         let stamp_entry = CfgPlanEntry::StampValue(stamp_index);
-        let mut row_entries: Vec<(CfgPlanEntry, ValueId)> =
-            vec![(stamp_entry, scalar(residual, stamp_entry)?)];
+        entries.push((
+            stamp_entry,
+            scalar(cfg.residuals[stamp_index], stamp_entry)?,
+        ));
         for (entry_index, jacobian) in stamp.jacobian_programs.iter().enumerate() {
             let entry = CfgPlanEntry::Jacobian(stamp_index, entry_index);
             let lane = require_lane(&jacobian.col_axis, entry)?;
             if let Some(value) = jacobian_rows[stamp_index].get(lane).copied().flatten() {
-                row_entries.push((entry, scalar(value, entry)?));
+                entries.push((entry, scalar(value, entry)?));
             }
         }
         for (entry_index, reactive) in stamp.reactive_jacobians.iter().enumerate() {
             let entry = CfgPlanEntry::ReactiveJacobian(stamp_index, entry_index);
             let lane = require_lane(&reactive.col_axis, entry)?;
             if let Some(value) = reactive_rows[stamp_index].get(lane).copied().flatten() {
-                row_entries.push((entry, scalar(value, entry)?));
+                entries.push((entry, scalar(value, entry)?));
             }
         }
-        let row_outputs: Vec<ValueId> = row_entries.iter().map(|(_, value)| *value).collect();
-        let (row_function, row_mapped) = prune_cfg_to_outputs(&scalarized.function, &row_outputs);
-        let row_values: HashMap<CfgPlanEntry, ValueId> = row_entries
-            .iter()
-            .map(|(entry, _)| *entry)
-            .zip(row_mapped)
-            .collect();
+    }
+    let entry_values: HashMap<CfgPlanEntry, ValueId> = entries.iter().copied().collect();
 
-        stamp_values.push(lower(
-            &row_function,
-            row_values[&stamp_entry],
-            stamp_entry,
-            &mut report,
-        )?);
+    // A value that reads a contribution current is ordered against the
+    // residuals before it, and the prelude runs before all of them. Those
+    // entries keep the cone they have always had; see [`LiveCurrentTaint`].
+    let taint = LiveCurrentTaint::build(&scalarized.function);
+    let (published, deferred): (Vec<_>, Vec<_>) = entries
+        .iter()
+        .copied()
+        .partition(|(_, value)| taint.publishable(*value));
+    report.live_current_entries = deferred.len();
+    report.live_current_control_flow = taint.taints_control_flow();
+
+    let prelude = if published.is_empty() {
+        None
+    } else {
+        Some(CfgPrelude::build(
+            module.as_str(),
+            &scalarized.function,
+            &published,
+            &state,
+            &bindings,
+            &slots,
+        )?)
+    };
+    report.prelude_slots = prelude.as_ref().map_or(0, CfgPrelude::slot_count);
+    report.prelude_instructions = prelude
+        .as_ref()
+        .map_or(0, |prelude| prelude.program().ssa().instructions().len());
+
+    // The cones the prelude does not cover, sliced once as a group and then per
+    // entry inside that slice — the same two-level prune the whole loop used
+    // before, kept because it is what bounds the cost of a module that does
+    // have probes.
+    let deferred_outputs: Vec<ValueId> = deferred.iter().map(|(_, value)| *value).collect();
+    let (deferred_function, deferred_mapped) =
+        prune_cfg_to_outputs(&scalarized.function, &deferred_outputs);
+    let deferred_values: HashMap<CfgPlanEntry, ValueId> = deferred
+        .iter()
+        .map(|(entry, _)| *entry)
+        .zip(deferred_mapped)
+        .collect();
+
+    // One entry's program: a slot read where the prelude publishes it, its own
+    // cone where it does not.
+    let entry_program = |entry: CfgPlanEntry,
+                         report: &mut CfgPlanReport|
+     -> Result<PlanProgram, CfgPlanRefused> {
+        if let Some(program) = prelude.as_ref().and_then(|p| p.entry_program(entry)) {
+            let program = program
+                .map_err(|error| refuse(CfgPlanRefusal::Lowering, format!("{entry}: {error}")))?;
+            let adopted =
+                BlockProgram::adopt(module.as_str(), program, &slots).map_err(|error| {
+                    refuse(CfgPlanRefusal::SlotUnclaimed, format!("{entry}: {error}"))
+                })?;
+            return Ok(PlanProgram::Blocks(adopted));
+        }
+        let output = deferred_values.get(&entry).copied().ok_or_else(|| {
+            refuse(
+                CfgPlanRefusal::Lowering,
+                format!("{entry} has neither a prelude slot nor a cone"),
+            )
+        })?;
+        lower(&deferred_function, output, entry, report)
+    };
+
+    let mut stamp_values = Vec::with_capacity(model.stamp_programs.len());
+    let mut jacobians = Vec::with_capacity(model.stamp_programs.len());
+    let mut reactive_jacobians = Vec::with_capacity(model.stamp_programs.len());
+    for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
+        let stamp_entry = CfgPlanEntry::StampValue(stamp_index);
+        stamp_values.push(entry_program(stamp_entry, &mut report)?);
         report.stamp_values += 1;
 
         let mut row = Vec::with_capacity(stamp.jacobian_programs.len());
         for entry_index in 0..stamp.jacobian_programs.len() {
             let entry = CfgPlanEntry::Jacobian(stamp_index, entry_index);
-            match row_values.get(&entry).copied() {
-                Some(output) => {
-                    row.push(lower(&row_function, output, entry, &mut report)?);
+            match entry_values.get(&entry).copied() {
+                Some(_) => {
+                    row.push(entry_program(entry, &mut report)?);
                     report.jacobians += 1;
                 }
                 None => {
@@ -960,9 +1036,9 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
         }
         for entry_index in 0..stamp.reactive_jacobians.len() {
             let entry = CfgPlanEntry::ReactiveJacobian(stamp_index, entry_index);
-            match row_values.get(&entry).copied() {
-                Some(output) => {
-                    reactive_row.push(lower(&row_function, output, entry, &mut report)?);
+            match entry_values.get(&entry).copied() {
+                Some(_) => {
+                    reactive_row.push(entry_program(entry, &mut report)?);
                     report.reactive_jacobians += 1;
                 }
                 None => {
@@ -1155,6 +1231,17 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     // routes do not reach the same unknowns, and a borrowed set would describe
     // a program that was never compiled.
     let dependencies = &mut plan.current_dependencies;
+    // The prelude's, first: a slot-read entry has no read-set of its own any
+    // more, so the reads it used to declare are the prelude's now and the
+    // runtime has to be told where they went.
+    dependencies.prelude_branch_unknowns = prelude
+        .as_ref()
+        .map(|prelude| {
+            PlanProgramRef::Blocks(prelude.program())
+                .branch_unknown_dependencies()
+                .to_vec()
+        })
+        .unwrap_or_default();
     dependencies.stamp_values = read_set(&stamp_values, PlanProgram::current_pair_dependencies);
     dependencies.stamp_value_prior_currents =
         read_set(&stamp_values, PlanProgram::prior_current_dependencies);
@@ -1190,6 +1277,10 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
             read_set_optional(noise_exponents, PlanProgram::branch_unknown_dependencies);
     }
 
+    plan.prelude = prelude.map(|prelude| NativePrelude {
+        slot_count: prelude.slot_count(),
+        program: PlanProgram::Blocks(prelude.into_program()),
+    });
     plan.stamp_values = stamp_values;
     plan.jacobians = jacobians;
     plan.reactive_jacobians = reactive_jacobians;

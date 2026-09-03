@@ -190,6 +190,10 @@ pub(crate) struct WasmFusedKernel {
     pub(crate) export_name: &'static str,
     /// Index of the assignment kernel this driver runs first.
     pub(crate) assignment_kernel: u32,
+    /// Scalar entry of the CFG route's assignment pass, run once after the
+    /// assignment kernel and before the first stamp. `None` for a postfix plan,
+    /// which is why a shipped driver's body is unchanged.
+    pub(crate) prelude_entry: Option<u32>,
     pub(crate) stamps: Vec<WasmKernelStamp>,
     /// Whether the driver also evaluates and publishes Jacobian entries.
     pub(crate) with_jacobians: bool,
@@ -805,6 +809,12 @@ fn encode_fused_kernel(
     body.instruction(&WasmInstruction::LocalGet(KERNEL_STATUS_LOCAL));
     body.instruction(&WasmInstruction::Return);
     body.instruction(&WasmInstruction::End);
+
+    // The CFG route's assignment pass, once, before the first stamp: every
+    // value entry below is a read of a slot it publishes.
+    if let Some(prelude) = kernel.prelude_entry {
+        emit_value_entry_call(&mut body, prelude, scalar_count)?;
+    }
 
     for (stamp_index, stamp) in kernel.stamps.iter().enumerate() {
         let stamp_index = u32::try_from(stamp_index)

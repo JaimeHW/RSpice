@@ -24,6 +24,12 @@ pub(crate) enum WasmJitExecutableEntry {
 pub(crate) struct WasmJitExecutable {
     cache_key: String,
     assignment_export: String,
+    /// The CFG route's assignment pass, run once between the assignment pass
+    /// and the first value entry that reads one of its slots.
+    prelude_export: Option<String>,
+    /// How many slots that pass publishes, which is what the context array has
+    /// to hold before any of it runs.
+    prelude_slots: usize,
     post_assignment_export: Option<String>,
     /// Whole-model drivers, absent when the shared contribution-ordering rule
     /// forbids fusing this model.
@@ -46,6 +52,8 @@ impl WasmJitExecutable {
         let mut executable = Self {
             cache_key: artifact.cache_key().to_owned(),
             assignment_export: artifact.assignment_export().to_owned(),
+            prelude_export: artifact.prelude_export().map(str::to_owned),
+            prelude_slots: artifact.prelude_slots(),
             post_assignment_export: artifact.post_assignment_export().map(str::to_owned),
             evaluation_kernel_export: artifact.evaluation_kernel_export().map(str::to_owned),
             stamp_kernel_export: artifact.stamp_kernel_export().map(str::to_owned),
@@ -69,7 +77,7 @@ impl WasmJitExecutable {
         for entry in artifact.entries() {
             let name = entry.export_name();
             match entry.role() {
-                WasmJitValueRole::Assignment { .. } => {}
+                WasmJitValueRole::Assignment { .. } | WasmJitValueRole::Prelude => {}
                 WasmJitValueRole::ParameterDefault { parameter_index } => set_optional(
                     &mut executable.parameter_defaults,
                     *parameter_index,
@@ -295,6 +303,15 @@ impl WasmJitExecutable {
         self.dispatch(&self.assignment_export, context).map(|_| ())
     }
 
+    /// Run the CFG route's assignment pass, which publishes every value entry's
+    /// output into a prelude slot. A postfix plan has none and this is a no-op.
+    pub(crate) fn run_prelude(&self, context: &mut crate::vm::VmContext) -> Result<(), String> {
+        let Some(export) = self.prelude_export.as_deref() else {
+            return Ok(());
+        };
+        self.dispatch(export, context).map(|_| ())
+    }
+
     /// Run the assignment pass and every stamp value in one dispatch, plus
     /// every Jacobian entry when the caller supplies somewhere to put them.
     ///
@@ -349,6 +366,7 @@ impl WasmJitExecutable {
         program_active: &[u8],
         jacobians: Option<&mut [f64]>,
     ) -> Result<(), String> {
+        self.ensure_prelude_slots(context);
         let mut frame = evaluation_frame(context)?;
         (frame.program_active_ptr, frame.program_active_len) = slice_capability(program_active)?;
         if let Some(jacobians) = jacobians {
@@ -357,11 +375,24 @@ impl WasmJitExecutable {
         self.dispatch_frame(export, context, frame).map(|_| ())
     }
 
+    /// Give the context room for every slot this module's prelude publishes.
+    ///
+    /// The wasm frame carries the array as a capability, so it has to be the
+    /// right length before the frame is built rather than before the call.
+    /// Zero-length for every postfix plan, which leaves the frame's slot
+    /// capability null exactly as it was.
+    fn ensure_prelude_slots(&self, context: &mut crate::vm::VmContext) {
+        if context.prelude_slots.len() < self.prelude_slots {
+            context.prelude_slots.resize(self.prelude_slots, 0.0);
+        }
+    }
+
     fn dispatch(
         &self,
         export: &str,
         context: &mut crate::vm::VmContext,
     ) -> Result<super::WasmJitEvalFrame, String> {
+        self.ensure_prelude_slots(context);
         let frame = evaluation_frame(context)?;
         self.dispatch_frame(export, context, frame)
     }
@@ -420,6 +451,7 @@ fn evaluation_frame(context: &crate::vm::VmContext) -> Result<super::WasmJitEval
     let (branch_unknowns_ptr, branch_unknowns_len) =
         slice_capability(&context.branch_current_values)?;
     let (variables_ptr, variables_len) = slice_capability(&context.variables)?;
+    let (prelude_slots_ptr, prelude_slots_len) = slice_capability(&context.prelude_slots)?;
 
     Ok(super::WasmJitEvalFrame {
         parameters_ptr,
@@ -440,6 +472,8 @@ fn evaluation_frame(context: &crate::vm::VmContext) -> Result<super::WasmJitEval
         branch_unknowns_len,
         variables_ptr,
         variables_len,
+        prelude_slots_ptr,
+        prelude_slots_len,
         analysis_mask: analysis_mask(context),
         temperature: context.temperature,
         thermal_voltage: context.vt(),

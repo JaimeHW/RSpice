@@ -384,6 +384,8 @@ fn build_model_plan_inner(
         })
         .collect::<JitResult<Vec<_>>>()?;
     let current_dependencies = NativeCurrentDependencies {
+        // The postfix route has no prelude, so there is nothing here to read.
+        prelude_branch_unknowns: Vec::new(),
         assignment_current_pairs: assignment_dependencies.current_pairs,
         assignment_prior_currents: assignment_dependencies.prior_currents,
         assignment_branch_unknowns: assignment_dependencies.branch_unknowns,
@@ -408,6 +410,9 @@ fn build_model_plan_inner(
         noise_exponent_branch_unknowns: noise_exponent_branch_unknown_dependencies,
     };
     let plan = NativeModelPlan {
+        // The postfix route has always had an assignment pass of its own; this
+        // field is the CFG route's, and this route never builds one.
+        prelude: None,
         assignments,
         post_assignments,
         parameter_defaults,

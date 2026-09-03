@@ -208,6 +208,25 @@ pub(crate) fn compile_model_plan(
     };
     let post_assignment_image_end = image.len();
 
+    // The CFG route's assignment pass, emitted before every entry that reads
+    // one of its slots. It goes through the value-entry path because that is
+    // exactly what it is — a function of `(ctx, vars)` returning an `f64`
+    // nothing reads — and both fused kernels call this one copy.
+    let prelude = plan
+        .prelude
+        .as_ref()
+        .map(|prelude| {
+            append_value_entry(
+                &mut image,
+                &mut entry_starts,
+                &mut windows_unwind_functions,
+                &mut value_entries,
+                prelude.program.borrow(),
+            )
+        })
+        .transpose()?;
+    let prelude_image_end = image.len();
+
     let mut parameter_defaults = Vec::with_capacity(plan.parameter_defaults.len());
     for program in &plan.parameter_defaults {
         parameter_defaults.push(
@@ -319,6 +338,7 @@ pub(crate) fn compile_model_plan(
     let evaluation_kernel_artifact = driver::compile_evaluation_kernel_artifact(
         evaluation_kernel.as_usize(),
         assignment,
+        prelude,
         &stamp_values,
         &plan.published_current_pairs,
     )?;
@@ -334,6 +354,7 @@ pub(crate) fn compile_model_plan(
     let stamp_kernel_artifact = codegen::compile_fused_stamp_kernel_artifact(
         stamp_kernel.as_usize(),
         assignment,
+        prelude,
         &plan.stamp_values,
         &plan.jacobians,
         &plan.published_current_pairs,
@@ -347,10 +368,11 @@ pub(crate) fn compile_model_plan(
 
     if std::env::var_os("RSPICE_NATIVE_X64_IMAGE_TRACE").is_some() {
         eprintln!(
-            "native-x64-image assignment={} post_assignment={} value_entries={} evaluation_kernel={} stamp_kernel={} total={}",
+            "native-x64-image assignment={} post_assignment={} prelude={} value_entries={} evaluation_kernel={} stamp_kernel={} total={}",
             assignment_image_end,
             post_assignment_image_end - assignment_image_end,
-            value_entries_image_end - post_assignment_image_end,
+            prelude_image_end - post_assignment_image_end,
+            value_entries_image_end - prelude_image_end,
             evaluation_kernel_image_end - value_entries_image_end,
             image.len() - evaluation_kernel_image_end,
             image.len(),
@@ -359,6 +381,7 @@ pub(crate) fn compile_model_plan(
 
     let entries = NativeEntryOffsets {
         assignment,
+        prelude,
         post_assignment,
         evaluation_kernel: Some(evaluation_kernel),
         stamp_kernel: Some(stamp_kernel),
@@ -392,7 +415,7 @@ pub(crate) fn compile_model_plan(
         entries,
         NativeEntryStarts::new(entry_starts),
         plan.current_dependencies.clone(),
-        NativeRequiredStorage::for_model(model),
+        NativeRequiredStorage::for_model(model).with_prelude_slots(plan.prelude_slot_count()),
     )
 }
 
@@ -4112,6 +4135,7 @@ endmodule
         let offset = CodeOffset::new(0);
         let entries = NativeEntryOffsets {
             assignment: offset,
+            prelude: None,
             post_assignment: None,
             evaluation_kernel: None,
             stamp_kernel: None,
@@ -4144,6 +4168,7 @@ endmodule
                 .collect(),
         };
         let dependencies = NativeCurrentDependencies {
+            prelude_branch_unknowns: Vec::new(),
             assignment_current_pairs: Vec::new(),
             assignment_prior_currents: Vec::new(),
             assignment_branch_unknowns: Vec::new(),

@@ -28,6 +28,15 @@ use crate::codegen::CompiledModel;
 /// what keeps both routes filling `variables` by the same code.
 #[derive(Debug)]
 pub(crate) struct NativeModelPlan {
+    /// The CFG route's assignment pass, when this plan has one.
+    ///
+    /// `None` for every postfix plan, which is what production compiles, so
+    /// nothing about the shipped image changes by this field existing. A plan
+    /// that has one runs it once per evaluation, after the assignment pass and
+    /// before the first value entry: every value entry it publishes for is a
+    /// single `LoadPreludeSlot`, and reading a slot the prelude did not write
+    /// is the one thing the backends must not let happen.
+    pub(crate) prelude: Option<NativePrelude>,
     pub(crate) assignments: Vec<NativeAssignment>,
     pub(crate) post_assignments: Vec<NativeAssignment>,
     pub(crate) parameter_defaults: Vec<Option<PlanProgram>>,
@@ -41,7 +50,26 @@ pub(crate) struct NativeModelPlan {
     pub(crate) current_dependencies: JitCurrentDependencies,
 }
 
+/// One plan's assignment pass for the CFG route, and how much storage it needs.
+///
+/// The program and the slot count travel together because a backend that had
+/// one without the other could size an array for a program it is not going to
+/// run, and the failure mode of that is a value entry reading an uninitialized
+/// slot rather than a compile error.
+#[derive(Debug)]
+pub(crate) struct NativePrelude {
+    pub(crate) program: PlanProgram,
+    pub(crate) slot_count: usize,
+}
+
 impl NativeModelPlan {
+    /// How many `f64` prelude slots an evaluation of this plan writes.
+    pub(crate) fn prelude_slot_count(&self) -> usize {
+        self.prelude
+            .as_ref()
+            .map_or(0, |prelude| prelude.slot_count)
+    }
+
     pub(crate) fn validate_shape(&self, model: &CompiledModel) -> JitResult<()> {
         let stamp_count = model.stamp_programs.len();
         let noise_count = model.noise_sources.len();

@@ -4999,6 +4999,7 @@ impl VerilogADevice {
             if context.variables.len() < model.num_variables {
                 context.variables.resize(model.num_variables, 0.0);
             }
+            Self::ensure_native_prelude_slots(context, native)?;
             Self::validate_native_storage(context, native)?;
             Self::validate_native_terminal_pair_table(context, native.num_terminals)?;
             Self::validate_native_branch_unknowns(
@@ -5177,9 +5178,37 @@ impl VerilogADevice {
                 context.state_older_candidate.as_mut_ptr()
             },
             state_older_candidate_len: context.state_older_candidate.len(),
-            prelude_slots: std::ptr::null_mut(),
-            prelude_slots_len: 0,
+            prelude_slots: if context.prelude_slots.is_empty() {
+                std::ptr::null_mut()
+            } else {
+                context.prelude_slots.as_mut_ptr()
+            },
+            prelude_slots_len: context.prelude_slots.len(),
         }
+    }
+
+    /// Give the context room for every slot this model's prelude publishes,
+    /// then refuse the dispatch if it still does not have it.
+    ///
+    /// Sizing here rather than beside `variables`: the requirement is a
+    /// property of the *plan* the model was compiled through, and the
+    /// interpreter that owns the context has never had to know one. The
+    /// validation is not redundant with the resize — a caller that reached a
+    /// native entry by another road would otherwise have generated code
+    /// addressing the array by a compile-time index it cannot check.
+    #[cfg(feature = "native")]
+    fn ensure_native_prelude_slots(
+        context: &mut VmContext,
+        native: &NativeModel,
+    ) -> Result<(), VmError> {
+        let required = native.required_storage().prelude_slots;
+        if context.prelude_slots.len() < required {
+            context.prelude_slots.resize(required, 0.0);
+        }
+        native
+            .required_storage()
+            .validate_prelude_slot_storage(context.prelude_slots.len())
+            .map_err(|error| VmError::NativeJit(error.to_string()))
     }
 
     #[cfg(feature = "native")]
@@ -5266,6 +5295,7 @@ impl VerilogADevice {
         native: &NativeModel,
         entry: NativeValueEntry,
     ) -> Result<f64, VmError> {
+        Self::ensure_native_prelude_slots(vm.context, native)?;
         Self::validate_native_storage(vm.context, native)?;
         let dependencies = Self::native_entry_dependencies(native, entry)?;
         Self::validate_native_current_pairs(
@@ -5485,6 +5515,14 @@ impl VerilogADevice {
         context: &VmContext,
         required: NativeRequiredStorage,
     ) -> Result<(), VmError> {
+        // The prelude slot array, first: generated code addresses it by a
+        // compile-time index, so a short array is an out-of-bounds write rather
+        // than a wrong answer.
+        Self::validate_native_runtime_storage_len(
+            "prelude slot storage",
+            required.prelude_slots,
+            context.prelude_slots.len(),
+        )?;
         Self::validate_native_runtime_storage_len(
             "state-value storage",
             required.state_values,
@@ -5644,6 +5682,7 @@ impl VerilogADevice {
         if vm.context.variables.len() < model.num_variables {
             vm.context.variables.resize(model.num_variables, 0.0);
         }
+        Self::ensure_native_prelude_slots(vm.context, native)?;
         Self::validate_native_storage(vm.context, native)?;
         // Assignment loads can be guarded by runtime control flow. Validate
         // their memory contract here without rejecting a currently-unpublished
@@ -5655,10 +5694,22 @@ impl VerilogADevice {
         )?;
         Self::validate_native_prior_currents(vm.context, native.assignment_prior_currents())?;
         Self::validate_native_branch_unknowns(vm.context, native.assignment_branch_unknowns())?;
+        // The prelude reads the branch unknowns its entries used to read for
+        // themselves, so its read-set is validated here — before it runs — and
+        // not before each of the entries it publishes for.
+        Self::validate_native_branch_unknowns(vm.context, native.prelude_branch_unknowns())?;
         let ctx = Self::eval_context_from(vm.context);
         let vars_ptr = vm.context.variables.as_mut_ptr();
         ctx.clear_runtime_error();
         native.run_assignments(&ctx, vars_ptr);
+        if let Some(error) = ctx.take_native_runtime_error() {
+            return Err(Self::native_runtime_error_to_vm(error));
+        }
+        // The CFG route's assignment pass, once per evaluation, between the
+        // assignment pass it reads the variables of and the first value entry
+        // that reads one of its slots. A postfix plan has none and this is a
+        // predicate test that returns `false`.
+        native.run_prelude(&ctx, vars_ptr);
         if let Some(error) = ctx.take_native_runtime_error() {
             return Err(Self::native_runtime_error_to_vm(error));
         }
@@ -5680,6 +5731,7 @@ impl VerilogADevice {
         if vm.context.variables.len() < model.num_variables {
             vm.context.variables.resize(model.num_variables, 0.0);
         }
+        Self::ensure_native_prelude_slots(vm.context, native)?;
         Self::validate_native_storage(vm.context, native)?;
         Self::validate_native_current_pairs(
             vm.context,
@@ -5715,7 +5767,11 @@ impl VerilogADevice {
         if vm.context.variables.len() < model.num_variables {
             vm.context.variables.resize(model.num_variables, 0.0);
         }
-        wasm.run_assignments(vm.context).map_err(VmError::WasmJit)
+        wasm.run_assignments(vm.context).map_err(VmError::WasmJit)?;
+        // The CFG route's assignment pass, between the assignment pass whose
+        // variables it reads and the first value entry that reads one of its
+        // slots. A postfix plan has no prelude export and this returns `Ok`.
+        wasm.run_prelude(vm.context).map_err(VmError::WasmJit)
     }
 
     #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
@@ -6218,6 +6274,7 @@ impl VerilogADevice {
             if context.variables.len() < model.num_variables {
                 context.variables.resize(model.num_variables, 0.0);
             }
+            Self::ensure_native_prelude_slots(context, native)?;
             Self::validate_native_storage(context, native)?;
             Self::validate_native_terminal_pair_table(context, native.num_terminals)?;
             Self::validate_native_prior_currents(context, native.assignment_prior_currents())?;

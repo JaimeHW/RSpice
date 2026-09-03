@@ -35,29 +35,161 @@
 //! written by different passes is exactly the kind of coupling that turns a
 //! sizing mistake into a silently wrong read.
 //!
-//! # Where this is not yet used
+//! # What a prelude may not publish
 //!
-//! Nothing in production builds a prelude: the CFG plan still inlines each
-//! entry's cone, and `DEFAULT_PLAN_ROUTE` still selects the postfix route
-//! anyway. This module is reached by its own fixture and by the frame census
-//! beside it, which is what qualifies the design before the plan is rewired.
-
-// Reached only by those two tests until W-F10b-2 builds a prelude inside
-// `build_model_plan_from_canonical_cfg`, turns each entry into
-// `CfgPrelude::entry_program`, and sizes `NativeRequiredStorage::prelude_slots`
-// from `CfgPrelude::slot_count`. This attribute comes off with that lane.
-#![cfg_attr(not(test), allow(dead_code))]
+//! A value that reads a *contribution current*. The runtime publishes those
+//! during the evaluation — `VmContext::currents` grows one slot as each
+//! residual is evaluated, and the fused kernels store each one as they go — so
+//! a value computed ahead of the first publication would read a slot nothing
+//! has written. [`LiveCurrentTaint`] is what keeps them out, and the entries it
+//! names keep the per-entry cone they have always had.
+//!
+//! # Where this is used
+//!
+//! [`build_model_plan_from_canonical_cfg`](crate::jit::cfg_plan_builder::build_model_plan_from_canonical_cfg)
+//! builds one per module and turns every publishable entry into
+//! [`CfgPrelude::entry_program`]. `DEFAULT_PLAN_ROUTE` still selects the
+//! postfix route, so nothing production compiles carries one yet; the fixture
+//! and the frame census beside this module are what qualified the design.
 
 use std::collections::HashMap;
 
-use crate::canonical_ir::{CfgFunction, CfgStateAllocation, ValueId, prune_cfg_to_outputs};
+use crate::canonical_ir::{
+    CfgFunction, CfgStateAllocation, CfgTerminator, CfgValueKind, ValueId, prune_cfg_to_outputs,
+};
 use crate::codegen::state_renumbering::StateSlotMapping;
 use crate::jit::JitResult;
 use crate::jit::cfg_plan_builder::{CfgPlanEntry, CfgPlanRefusal, CfgPlanRefused};
 use crate::jit::cfg_program::{CfgRuntimeBindings, lower_cfg_function_to_prelude_slots};
 use crate::jit::expr::NativeOp;
-use crate::jit::plan_program::BlockProgram;
+use crate::jit::plan_program::{BlockProgram, PlanProgramRef};
 use crate::jit::ssa::{BlockId, BuilderTerminator, Program, ProgramBuilder, ValueType};
+
+/// Which of a function's values a prelude must not publish, because computing
+/// them early would read a current the evaluation has not published yet.
+///
+/// # Why this is a taint and not a refusal
+///
+/// [`CfgValueKind::ContributedCurrent`] is the CFG's name for "the running sum
+/// the runtime already holds for this branch". The executable lowering reads it
+/// out of the runtime's own storage — `NativeOp::LoadCurrent` for a terminal
+/// pair, `NativeOp::LoadPriorCurrent` for a contribution slot — and that
+/// storage is filled *as the evaluation proceeds*. An entry that reads one is
+/// therefore ordered against the residuals before it, which is the whole point
+/// of `JitCurrentDependencies::evaluation_kernel_order_safe`; a prelude runs
+/// before residual zero, so it cannot compute such a value at all.
+///
+/// Refusing the module over one probe would be the wrong trade: the probe class
+/// is closed and pinned (`a_contribution_current_probe_reads_the_shipped_routes_storage`),
+/// and every other entry of the same module still wants a slot. So the entries
+/// that read one keep the cone they have always had and the rest take slots.
+///
+/// # Control dependence
+///
+/// A cone contains every surviving block's branch condition — `prune_to_outputs`
+/// marks them live whether or not anything downstream reads them — so a
+/// condition derived from a contributed current is in *every* entry's cone.
+/// [`Self::control`] records that, and taints the whole function rather than
+/// pretending the data-flow answer covers it.
+#[derive(Debug, Clone)]
+pub(crate) struct LiveCurrentTaint {
+    tainted: Vec<bool>,
+    control: bool,
+}
+
+impl LiveCurrentTaint {
+    /// Every value that transitively reads a contribution current.
+    ///
+    /// One forward walk over the use graph, paid only by a module that has a
+    /// probe at all: the root scan returns immediately on the rest, which is
+    /// every compact model the size census measured.
+    pub(crate) fn build(function: &CfgFunction) -> Self {
+        let mut tainted = vec![false; function.values.len()];
+        let mut worklist: Vec<usize> = Vec::new();
+        for (index, value) in function.values.iter().enumerate() {
+            if matches!(value.kind, CfgValueKind::ContributedCurrent { .. }) {
+                tainted[index] = true;
+                worklist.push(index);
+            }
+        }
+        if worklist.is_empty() {
+            return Self {
+                tainted,
+                control: false,
+            };
+        }
+
+        // Uses, both kinds: an operand of an instruction's value, and an
+        // argument on an edge into a block parameter. The second is what makes
+        // a merge of a probed current tainted, and leaving it out would publish
+        // a slot whose value depends on one.
+        let mut users: Vec<Vec<u32>> = vec![Vec::new(); function.values.len()];
+        for (index, value) in function.values.iter().enumerate() {
+            let user = u32::try_from(index).expect("CFG value index fits u32");
+            for operand in value.kind.operands() {
+                users[usize::from(operand)].push(user);
+            }
+        }
+        fn edge(args: &[ValueId], params: &[ValueId], users: &mut [Vec<u32>]) {
+            for (argument, param) in args.iter().zip(params) {
+                let param = u32::try_from(usize::from(*param)).expect("CFG value index fits u32");
+                users[usize::from(*argument)].push(param);
+            }
+        }
+        for block in &function.blocks {
+            match &block.terminator {
+                CfgTerminator::Jump { target, args } => {
+                    edge(args, &function.block(*target).params, &mut users);
+                }
+                CfgTerminator::Branch {
+                    then_target,
+                    then_args,
+                    else_target,
+                    else_args,
+                    ..
+                } => {
+                    edge(then_args, &function.block(*then_target).params, &mut users);
+                    edge(else_args, &function.block(*else_target).params, &mut users);
+                }
+                CfgTerminator::Wait {
+                    resume,
+                    resume_args,
+                    ..
+                } => {
+                    edge(resume_args, &function.block(*resume).params, &mut users);
+                }
+                CfgTerminator::Return | CfgTerminator::Unset => {}
+            }
+        }
+
+        while let Some(value) = worklist.pop() {
+            for user in &users[value] {
+                let user = *user as usize;
+                if !tainted[user] {
+                    tainted[user] = true;
+                    worklist.push(user);
+                }
+            }
+        }
+
+        let control = function.blocks.iter().any(|block| match &block.terminator {
+            CfgTerminator::Branch { condition, .. } => tainted[usize::from(*condition)],
+            _ => false,
+        });
+        Self { tainted, control }
+    }
+
+    /// Whether a prelude may publish `value`.
+    pub(crate) fn publishable(&self, value: ValueId) -> bool {
+        !self.control && !self.tainted[usize::from(value)]
+    }
+
+    /// Whether a branch this function takes depends on a contributed current,
+    /// which taints every cone at once.
+    pub(crate) fn taints_control_flow(&self) -> bool {
+        self.control
+    }
+}
 
 /// One module's prelude: the shared program, and which slot each entry reads.
 #[derive(Debug, Clone)]
@@ -132,6 +264,27 @@ impl CfgPrelude {
         let program = BlockProgram::adopt(module, program, state_slots)
             .map_err(|error| refuse(CfgPlanRefusal::SlotUnclaimed, format!("prelude: {error}")))?;
 
+        // The ordering guard, checked on the emitted operations rather than
+        // trusted from the analysis that was supposed to prevent it. A prelude
+        // runs before the first contribution is published, so a load of one
+        // here would read a slot nothing has written — silently, and only in a
+        // model that has a probe. `LiveCurrentTaint` keeps those entries out;
+        // this refuses the plan if it ever fails to.
+        let reads = PlanProgramRef::Blocks(&program);
+        if !reads.current_pair_dependencies().is_empty()
+            || !reads.prior_current_dependencies().is_empty()
+        {
+            return Err(refuse(
+                CfgPlanRefusal::Lowering,
+                format!(
+                    "the prelude reads contribution currents {:?}/{:?}, which are published after \
+                     it runs",
+                    reads.current_pair_dependencies(),
+                    reads.prior_current_dependencies()
+                ),
+            ));
+        }
+
         Ok(Self {
             program,
             slots,
@@ -142,6 +295,11 @@ impl CfgPrelude {
     /// The shared program, which publishes every slot once per evaluation.
     pub(crate) fn program(&self) -> &BlockProgram {
         &self.program
+    }
+
+    /// The shared program, taken for a plan to carry.
+    pub(crate) fn into_program(self) -> BlockProgram {
+        self.program
     }
 
     /// How many `f64` slots the evaluation must supply.

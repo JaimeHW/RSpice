@@ -62,6 +62,7 @@ impl NativeEntryStarts {
     #[cfg(all(test, target_arch = "x86_64"))]
     pub(crate) fn from_entries(entries: &NativeEntryOffsets) -> Self {
         let mut starts = vec![entries.assignment];
+        starts.extend(entries.prelude);
         starts.extend(entries.post_assignment);
         starts.extend(entries.evaluation_kernel);
         starts.extend(entries.stamp_kernel);
@@ -87,6 +88,13 @@ impl NativeEntryStarts {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NativeEntryOffsets {
     pub assignment: CodeOffset,
+    /// The CFG route's assignment pass, when the plan carried one.
+    ///
+    /// Called once per evaluation, between [`Self::assignment`] and the first
+    /// value entry. `None` for every postfix plan, and the fused kernels emit
+    /// nothing for it then, so a shipped image is byte for byte what it was
+    /// before this field existed.
+    pub prelude: Option<CodeOffset>,
     pub post_assignment: Option<CodeOffset>,
     pub evaluation_kernel: Option<CodeOffset>,
     pub stamp_kernel: Option<CodeOffset>,
@@ -119,8 +127,8 @@ pub(crate) struct NativeRequiredStorage {
     /// here: [`Self::for_model`] reads bytecode, and a prelude exists only in a
     /// plan built through
     /// [`CfgPrelude`](crate::jit::cfg_prelude::CfgPrelude). Zero for every plan
-    /// the shipped route builds. W-F10b-2 sets it from the plan when it wires
-    /// the prelude into compilation.
+    /// the shipped route builds; each backend's `compile_model_plan` sets it
+    /// from `NativeModelPlan::prelude_slot_count`.
     pub prelude_slots: usize,
 }
 
@@ -130,7 +138,6 @@ impl NativeRequiredStorage {
     /// Separate from [`Self::for_model`] because the two are read off different
     /// things: everything else is a property of the compiled module, and this
     /// is a property of the plan that module was compiled through.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn with_prelude_slots(mut self, slots: usize) -> Self {
         self.prelude_slots = slots;
         self
@@ -143,8 +150,7 @@ impl NativeRequiredStorage {
     /// compile-time index and cannot check it, so the one place that can check
     /// it must, before the first store rather than after it. A larger array is
     /// accepted; the requirement is a floor.
-    /// Called by the device once W-F10b-2 gives a plan a prelude to size.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// Called by the device before the first evaluation of a plan that has one.
     pub(crate) fn validate_prelude_slot_storage(&self, provided: usize) -> JitResult<()> {
         if provided < self.prelude_slots {
             return Err(JitError::Verifier {
@@ -390,6 +396,9 @@ impl NativeModel {
             entries.noise_psd.len() + entries.noise_exponents.iter().flatten().count();
         let mut evaluation_kernel_branch_unknowns =
             current_dependencies.assignment_branch_unknowns.clone();
+        // The prelude runs inside both kernels, so its reads are theirs.
+        evaluation_kernel_branch_unknowns
+            .extend(current_dependencies.prelude_branch_unknowns.iter().copied());
         evaluation_kernel_branch_unknowns.extend(
             current_dependencies
                 .stamp_value_branch_unknowns
@@ -485,6 +494,7 @@ impl NativeModel {
         );
         let entries = NativeEntryOffsets {
             assignment: CodeOffset::new(0),
+            prelude: None,
             post_assignment: None,
             evaluation_kernel: None,
             stamp_kernel: None,
@@ -568,6 +578,9 @@ impl NativeModel {
         }
 
         Self::validate_entry_offset(entries.assignment, entry_starts, image_len)?;
+        if let Some(offset) = entries.prelude {
+            Self::validate_entry_offset(offset, entry_starts, image_len)?;
+        }
         if let Some(offset) = entries.post_assignment {
             Self::validate_entry_offset(offset, entry_starts, image_len)?;
         }
@@ -641,6 +654,7 @@ impl NativeModel {
     #[cfg(all(test, target_arch = "x86_64"))]
     fn empty_current_dependencies(entries: &NativeEntryOffsets) -> NativeCurrentDependencies {
         NativeCurrentDependencies {
+            prelude_branch_unknowns: Vec::new(),
             assignment_current_pairs: Vec::new(),
             assignment_prior_currents: Vec::new(),
             assignment_branch_unknowns: Vec::new(),
@@ -1048,6 +1062,28 @@ impl NativeModel {
             unsafe { std::mem::transmute(self.entry_ptr(self.entries.assignment)) };
         // Safety: callers provide pointers matching the native assignment ABI.
         unsafe { entry(ctx as *const EvalContext, vars) };
+    }
+
+    /// Runs the CFG route's assignment pass, which publishes every value entry's
+    /// output into a prelude slot. Returns `false` when the plan had none.
+    ///
+    /// Ordered between [`Self::run_assignments`] and the first value entry, and
+    /// nowhere else: it reads the variables the assignment pass wrote, and its
+    /// slots are what every value entry of a prelude-bearing plan returns.
+    pub(crate) fn run_prelude(&self, ctx: &EvalContext, vars: *const f64) -> bool {
+        let Some(offset) = self.entries.prelude else {
+            return false;
+        };
+        // The value ABI: the prelude publishes through the context's slot array
+        // and returns a constant nothing reads.
+        self.run_value_entry(offset, ctx, vars);
+        true
+    }
+
+    /// Branch unknowns the prelude reads, which the runtime validates before
+    /// running it rather than before each entry it publishes for.
+    pub(crate) fn prelude_branch_unknowns(&self) -> &[usize] {
+        &self.current_dependencies.prelude_branch_unknowns
     }
 
     /// Runs assignments whose values depend on the completed contribution-current
@@ -1474,6 +1510,7 @@ mod tests {
             image,
             NativeEntryOffsets {
                 assignment: CodeOffset::new(0),
+                prelude: None,
                 post_assignment: None,
                 evaluation_kernel: None,
                 stamp_kernel: None,
@@ -1605,6 +1642,7 @@ mod tests {
             image,
             NativeEntryOffsets {
                 assignment: CodeOffset::new(1),
+                prelude: None,
                 post_assignment: None,
                 evaluation_kernel: None,
                 stamp_kernel: None,
@@ -1629,6 +1667,7 @@ mod tests {
             ExecutableMemory::allocate(&[0xC3, 0x90, 0xC3]).expect("allocate native test image");
         let entries = NativeEntryOffsets {
             assignment: CodeOffset::new(0),
+            prelude: None,
             post_assignment: None,
             evaluation_kernel: None,
             stamp_kernel: None,
@@ -1673,6 +1712,7 @@ mod tests {
             image,
             NativeEntryOffsets {
                 assignment: CodeOffset::new(0),
+                prelude: None,
                 post_assignment: None,
                 evaluation_kernel: None,
                 stamp_kernel: None,
@@ -1770,6 +1810,7 @@ mod tests {
     fn one_stamp_entries() -> NativeEntryOffsets {
         NativeEntryOffsets {
             assignment: CodeOffset::new(0),
+            prelude: None,
             post_assignment: None,
             evaluation_kernel: None,
             stamp_kernel: None,
