@@ -1053,15 +1053,10 @@ fn mir_reference(
         let (Ok(walked), Ok(reference)) = (narrow.run(program), wide.run(program)) else {
             continue;
         };
-        // Bit-identical, or the walker is not modelling this entry. `total_cmp`
-        // rather than `==` so two NaNs count as the agreement they are.
-        // Bit-identical on both counts, or the walker is not modelling this
+        // The same reading on both counts, or the walker is not modelling this
         // entry: the `f64` walk against the machine code, and the `f64` walk
         // the double-double scalar carries alongside itself against that.
-        // `total_cmp` rather than `==` so two NaNs count as the agreement they
-        // are.
-        let agrees = walked.total_cmp(compiled) == std::cmp::Ordering::Equal
-            && reference.narrow().total_cmp(compiled) == std::cmp::Ordering::Equal;
+        let agrees = same_reading(walked, *compiled) && same_reading(reference.narrow(), *compiled);
         if !agrees {
             tally.walker_disagreements += 1;
             println!(
@@ -1076,6 +1071,19 @@ fn mir_reference(
     tally.walker_refusals.extend(narrow.refusals());
     tally.walker_refusals.extend(wide.refusals());
     values
+}
+
+/// Whether two evaluations of one entry are the same reading.
+///
+/// Not `total_cmp`, which was the first thing written here and is wrong for
+/// this question twice over: it is a total order over *bit patterns*, so it
+/// separates `+0.0` from `−0.0` and one NaN encoding from another. A route that
+/// stamps a NaN and a walker that reproduces it agree about the entry whatever
+/// payloads the two NaNs carry — `hisimhv_n5_va`'s `reactive_jacobians[30][0]`
+/// is that case, and `total_cmp` reported it as the walker failing to model the
+/// backend. Ordinary equality answers both, with the NaN case named.
+fn same_reading(left: f64, right: f64) -> bool {
+    left == right || (left.is_nan() && right.is_nan())
 }
 
 /// One plan entry's program, whichever form its route produced.
@@ -1374,7 +1382,7 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
             // borrowing the plan builder's — and not about the route.
             let cfg_candidate = cfg_here.and_then(|values| values.get(&entry)).copied();
             let cfg_dd = cfg_candidate
-                .filter(|value| value.narrow().total_cmp(&cfg) == std::cmp::Ordering::Equal);
+                .filter(|value| same_reading(value.narrow(), cfg));
             let diverged = cfg_candidate.is_some() && cfg_dd.is_none();
             let comparison = Comparison {
                 entry,
