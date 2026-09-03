@@ -1436,6 +1436,27 @@ module cfg_closed_assigned_current_probe(p, n);
 endmodule
 "#,
             ),
+            // A probe read *before* the contribution it names. There is no
+            // slot to freeze it against — the shipped route registers a probe
+            // only for a contribution it has already lowered, and answers this
+            // one by splitting the assignment pass in two — so the CFG keeps
+            // the running accumulator, which at that point is the entry block's
+            // zero. That is the language's answer and a constant, so freezing
+            // it would change nothing and refusing it would drop the module.
+            (
+                "current-probe-before-its-contribution",
+                r#"
+module cfg_closed_forward_current_probe(p, n);
+  inout p, n;
+  electrical p, n;
+  real sensed;
+  analog begin
+    sensed = I(p, n);
+    I(p, n) <+ V(p, n);
+  end
+endmodule
+"#,
+            ),
         ];
         for (case, source) in cases {
             let (model, artifact) = compile(source);
