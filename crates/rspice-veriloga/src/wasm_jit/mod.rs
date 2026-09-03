@@ -1293,6 +1293,8 @@ endmodule
         /// Jacobian entry count per stamp, in model order.
         stamp_jacobians: Vec<usize>,
         parameters: usize,
+        /// Compiled variable names, so a test can name the slot it reads back.
+        variable_names: Vec<smol_str::SmolStr>,
     }
 
     impl FusedKernelHarness {
@@ -1341,6 +1343,7 @@ endmodule
             let stamp_count = stamp_jacobians.len();
             let jacobian_count = stamp_jacobians.iter().sum::<usize>();
             let parameters = report.model.parameters.len();
+            let variable_names = report.model.variable_names.clone();
 
             let engine = Engine::default();
             let module = Module::new(&engine, artifact.module().bytes())
@@ -1425,6 +1428,7 @@ endmodule
                 frame,
                 stamp_jacobians,
                 parameters,
+                variable_names,
             }
         }
 
@@ -1545,6 +1549,73 @@ endmodule
                 .expect("Jacobian export")
                 .to_owned()
         }
+    }
+
+    /// The shape `ekv3_302.00` has: a scratch variable a contribution reads
+    /// and a later statement reassigns.
+    const REUSED_AFTER_READ: &str = r#"
+`include "disciplines.vams"
+module wasm_reuse(p, n);
+  inout p, n;
+  electrical p, n;
+  real tmp;
+  real reported;
+  analog begin
+    tmp = 2.5e-3;
+    I(p, n) <+ V(p, n) * tmp;
+    tmp = 1.25;
+    reported = tmp;
+  end
+endmodule
+"#;
+
+    /// The browser route reads the definition reaching the contribution.
+    ///
+    /// `tests/reaching_definitions.rs` holds this on the VM and the machine
+    /// backends; this is the same arithmetic executed as WebAssembly, because
+    /// the module is compiled from the same plan and nothing else pins that the
+    /// spliced copy survives into the emitted module. The expected value is the
+    /// LRM's — `V * 2.5e-3` at the reading contribution's own program point —
+    /// so it cannot agree with a defect two routes share, and the later write is
+    /// read back to prove it happened.
+    #[test]
+    fn a_wasm_contribution_reads_the_definition_reaching_it() {
+        use std::mem::size_of;
+
+        use super::abi::FRAME_RESULT_OFFSET;
+
+        const BIAS: f64 = 4.0;
+        const REACHING: f64 = 2.5e-3;
+        const OVERWRITTEN: f64 = 1.25;
+
+        let mut harness = FusedKernelHarness::for_source(REUSED_AFTER_READ, "wasm_reuse");
+        let reported = harness
+            .variable_names
+            .iter()
+            .position(|name| name == "reported")
+            .expect("the module declares the reporting variable");
+        let assignment_export = harness.artifact.assignment_export().to_owned();
+        let value_export = harness.stamp_value_export(0);
+
+        harness.reset();
+        harness.write_f64(FusedKernelHarness::VOLTAGES as usize, BIAS);
+        harness.write_f64(
+            FusedKernelHarness::VOLTAGES as usize + size_of::<f64>(),
+            0.0,
+        );
+        assert_eq!(harness.call(&assignment_export), 0);
+        assert_eq!(harness.call(&value_export), 0);
+
+        assert_eq!(
+            harness.read_f64(FRAME_RESULT_OFFSET as usize),
+            BIAS * REACHING,
+            "the contribution reads tmp at its reaching definition"
+        );
+        assert_eq!(
+            harness.read_f64(FusedKernelHarness::VARIABLES as usize + reported * size_of::<f64>()),
+            OVERWRITTEN,
+            "the later write has to have happened, or this pin proves nothing"
+        );
     }
 
     /// The fused driver publishes exactly what the per-entry path produces.

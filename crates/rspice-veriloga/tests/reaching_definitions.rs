@@ -28,6 +28,10 @@
 //! snapshot answers. Without that the conductance the first pin measures was
 //! 1.25 where the block says 0.0025, with the snapshot slot holding 0.
 //!
+//! These run on the host, so they reach the WASM route's *plan* but not its
+//! emitted module; `wasm_jit`'s own test module executes the first of them as
+//! WebAssembly, in wasmi, against the same frame the browser backend uses.
+//!
 //! The `cfg_mir` census slice over `ekv3_rf` measures the same property on a
 //! shipped model.
 
