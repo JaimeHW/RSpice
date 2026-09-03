@@ -76,6 +76,7 @@ impl CanonicalNoiseSourcePlan {
         let mut sources = Vec::new();
         let mut diagnostics = Vec::new();
 
+        let span = crate::metrics::FineSpan::new("noise.extract");
         for equation in mir.equations.clone() {
             if let Err(diagnostic) = extract_equation(hir, mir, &equation, &mut sources) {
                 diagnostics.push(diagnostic);
@@ -85,9 +86,16 @@ impl CanonicalNoiseSourcePlan {
         for (index, source) in sources.iter_mut().enumerate() {
             source.id = NoiseSourceId::from(index);
         }
+        span.finish(&format!(
+            "equations={} sources={}",
+            mir.equations.len(),
+            sources.len()
+        ));
 
         if diagnostics.is_empty() {
+            let span = crate::metrics::FineSpan::new("noise.arena_sync");
             mir.expressions.clone_from(&hir.expressions);
+            span.finish(&format!("expressions={}", hir.expressions.len()));
             Ok(Self { sources })
         } else {
             Err(diagnostics)

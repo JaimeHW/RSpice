@@ -4104,9 +4104,36 @@ fn native_device_executes_minmax_assignments() {
 #[test]
 fn native_device_executes_exp_limexp_assignments() {
     let model = exp_limexp_assignment_model();
+    // The model evaluates `limexp(($temperature - 300.0) * 0.1)`, so each
+    // temperature below is chosen for the limexp argument it produces. The
+    // threshold is 80, which puts every boundary at a temperature no device
+    // sees — that is fine and is the point: this is a contract test for the
+    // operator, not a bias point.
     let cases = [
+        // 1.0 — the ordinary exponential branch.
         ("nominal", 0.5, 310.0),
-        ("linear-limited", 0.25, 750.0),
+        // Exactly 80.0. Both branches agree here and must produce the same
+        // bits, which is what makes the threshold continuous rather than a
+        // step the JIT could round either side of.
+        ("at-threshold", 0.5, 1100.0),
+        // 85.0 — the linear arm. This case used to pass 750.0, for an
+        // argument of 45.0 that was linear only under the old threshold of
+        // 40; against the ruling it was an ordinary exponential and the test
+        // stopped covering the arm it is named for.
+        ("linear-limited", 0.25, 1150.0),
+        // -25.0. Unchanged by the ruling — it was inside the old clamp too —
+        // and kept as the ordinary negative argument.
+        //
+        // It is also as negative as this model goes. The ruling's one
+        // behavioural change is that limexp no longer floors below -40 at
+        // `exp(-40) = 4.2e-18`, and reaching that region here would need an
+        // argument under -40, so a temperature under -100 K, which
+        // `set_temperature` rejects: temperature must be finite and above
+        // zero kelvin, which caps the argument at just over -30. The
+        // no-floor behaviour is covered where it is reachable instead, by
+        // `generated_value_leaf_inlines_limexp_clamped_regions` in the x64
+        // backend, whose `underflowed` case passes -800 straight to the
+        // compiled leaf.
         ("negative-argument", 0.125, 50.0),
     ];
 
@@ -5701,39 +5728,23 @@ fn thermal_voltage(temperature: f64) -> f64 {
     K_BOLTZMANN * temperature / Q_ELECTRON
 }
 
+/// The oracle these contract tests hold the JIT to.
+///
+/// This file used to carry its own transcription — the seventh — at a
+/// threshold of 40 with a floor at `exp(-40)`, so it agreed with the backend
+/// it was testing only for as long as that backend was wrong in the same way.
+/// An oracle that is a copy of the thing under test cannot fail for the reason
+/// it exists, so these three now read the workspace's one definition.
 fn limexp(value: f64) -> f64 {
-    const LIMIT: f64 = 40.0;
-    if value > LIMIT {
-        let exp_limit = LIMIT.exp();
-        exp_limit * (1.0 + value - LIMIT)
-    } else if value < -LIMIT {
-        (-LIMIT).exp()
-    } else {
-        value.exp()
-    }
+    rspice_veriloga_runtime::rspice_limexp(value)
 }
 
 fn limited_exp(value: f64) -> f64 {
-    const LIMIT: f64 = 80.0;
-    const LOW_VALUE: f64 = 1.804851387e-35;
-    if value > LIMIT {
-        LIMIT.exp() * (1.0 + value - LIMIT)
-    } else if value < -LIMIT {
-        LOW_VALUE
-    } else {
-        value.exp()
-    }
+    rspice_veriloga_runtime::rspice_limited_exp(value)
 }
 
 fn limited_exp_derivative_scale(value: f64) -> f64 {
-    const LIMIT: f64 = 80.0;
-    if value > LIMIT {
-        LIMIT.exp()
-    } else if value < -LIMIT {
-        0.0
-    } else {
-        value.exp()
-    }
+    rspice_veriloga_runtime::rspice_limited_exp_derivative(value)
 }
 
 fn assert_relative_close(actual: f64, expected: f64, case: &str, value_name: &str) {

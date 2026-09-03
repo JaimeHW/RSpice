@@ -1375,6 +1375,17 @@ fn push_zi_children(kind: &crate::canonical_ir::HirZiKind, children: &mut Vec<Ex
     }
 }
 
+// The two emitters below spell the thresholds as literal text because the
+// generated bundle's digest is a function of those bytes, and formatting them
+// from a constant would make the bundle hostage to how `f64` happens to
+// `Debug`-print. These assertions are what keeps the literals and the
+// workspace's one ruling from drifting apart: change
+// `rspice_veriloga_runtime::LIMEXP_THRESHOLD` and this crate stops compiling
+// until the emitted text follows.
+const _: () = assert!(rspice_veriloga_runtime::LIMEXP_THRESHOLD == 80.0);
+const _: () = assert!(rspice_veriloga_runtime::LIMITED_EXP_THRESHOLD == 80.0);
+const _: () = assert!(rspice_veriloga_runtime::LIMITED_EXP_FLOOR == 1.804851387e-35);
+
 fn limexp_value_expr(arg: &str) -> String {
     format!(
         "{{ let limexp_arg = {arg}; if limexp_arg < 80.0 {{ limexp_arg.exp() }} else {{ LIMEXP_MAX * (1.0 + (limexp_arg - 80.0)) }} }}"

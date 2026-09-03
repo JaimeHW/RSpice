@@ -997,6 +997,7 @@ impl HirModel {
         // lowering below reads that back to pair its own ids with these.
         let mut executed_sites: HashMap<AnalogSiteId, ExecutedSite> = HashMap::new();
 
+        let span = crate::metrics::FineSpan::new("hir.executed_copy");
         let contributions = module
             .contributions
             .iter()
@@ -1028,11 +1029,19 @@ impl HirModel {
             .iter()
             .map(|statement| lower_statement(&mut lowerer, statement, &mut executed_sites))
             .collect();
+        span.finish(&format!(
+            "module={} expressions={} sites={}",
+            module.name,
+            lowerer.expressions.len(),
+            executed_sites.len()
+        ));
 
         // The analyzer records a region and pushes the flat contribution at the
         // same program point, so a pre-order walk of the body meets them in the
         // order they were assigned ids. `validate_body` re-checks that against
         // the flat list rather than trusting it.
+        let span = crate::metrics::FineSpan::new("hir.body_copy");
+        let executed_expression_count = lowerer.expressions.len();
         let mut next_contribution = 0usize;
         let mut correspondence = CorrespondenceBuilder::default();
         let body = module
@@ -1051,6 +1060,11 @@ impl HirModel {
 
         let executed_correspondence = correspondence.finish();
         let expressions = lowerer.expressions;
+        span.finish(&format!(
+            "module={} executed_expressions={executed_expression_count} total_expressions={}",
+            module.name,
+            expressions.len()
+        ));
 
         Self {
             module_id: ModuleId::new(0),

@@ -937,6 +937,7 @@ impl DeviceIR {
 
         // Convert evaluation statements (assignments and runtime loops) to
         // IR, in order
+        let span = crate::metrics::FineSpan::new("ir.statements");
         let mut items = Vec::with_capacity(module.statements.len());
         Self::convert_statements(&module.statements, &converter, &mut items)?;
         let mut zi_site_ordinal = 0_u32;
@@ -953,6 +954,11 @@ impl DeviceIR {
         );
         autodiff::assign_absdelay_site_ordinals_in_items(&mut items, &mut absdelay_site_ordinal);
         ir.assignments = items;
+        span.finish(&format!(
+            "module={} statements={}",
+            module.name,
+            module.statements.len()
+        ));
 
         // Pre-pass over contributions: parse branch refs and register a
         // branch-current unknown per node pair receiving a potential
@@ -1025,6 +1031,7 @@ impl DeviceIR {
         // duplicate stateful-operator identities, this makes the preorder
         // noise process ids assigned below identical for metadata,
         // assignment shadows, and final equation gains.
+        let span = crate::metrics::FineSpan::new("ir.contributions");
         let mut converted_contribs = Vec::with_capacity(module.contributions.len());
         for contrib in &module.contributions {
             let mut expr = converter.convert_contribution(&contrib.expression)?;
@@ -1035,7 +1042,13 @@ impl DeviceIR {
             autodiff::assign_absdelay_site_ordinals(&mut expr, &mut absdelay_site_ordinal);
             converted_contribs.push(autodiff::rewrite_branch_probes(&expr, &branch_table));
         }
+        span.finish(&format!(
+            "module={} contributions={}",
+            module.name,
+            module.contributions.len()
+        ));
 
+        let span = crate::metrics::FineSpan::new("ir.noise_collect");
         Self::collect_noise_processes_in_items(&ir.assignments, &mut ir.noise_sources)?;
         for expr in &converted_contribs {
             Self::collect_noise_processes(expr, &mut ir.noise_sources)?;
@@ -1052,6 +1065,11 @@ impl DeviceIR {
                 .into());
             }
         }
+        span.finish(&format!(
+            "module={} processes={}",
+            module.name,
+            ir.noise_sources.len()
+        ));
 
         // Current probes I(a,b) of a branch that carries a potential
         // contribution read the branch unknown (exact), not the inferred
@@ -1062,7 +1080,13 @@ impl DeviceIR {
 
         // Variables that are fixed per instance (computed purely from
         // parameters) may participate in topology guards
+        let span = crate::metrics::FineSpan::new("ir.static_vars");
         let static_vars = Self::compute_instance_static_vars(&ir.assignments, &ir.variables);
+        span.finish(&format!(
+            "module={} static={}",
+            module.name,
+            static_vars.len()
+        ));
 
         // Shadow liveness roots: only variables that contribution
         // expressions (the equation Jacobians chain through them) or
@@ -1084,6 +1108,7 @@ impl DeviceIR {
         // Jacobians chain through intermediate variables. Shadow updates
         // recurse into loop bodies so loop-carried dependencies
         // differentiate correctly.
+        let span = crate::metrics::FineSpan::new("ir.shadow_assignments");
         let mut shadows = autodiff::build_shadow_assignments(
             &mut ir,
             num_nodes,
@@ -1091,6 +1116,12 @@ impl DeviceIR {
             &shadow_roots,
             &second_shadow_roots,
         );
+        span.finish(&format!(
+            "module={} shadow_variables={}",
+            module.name,
+            ir.variables.len()
+        ));
+        let span = crate::metrics::FineSpan::new("ir.noise_shadow_assignments");
         if !ir.noise_sources.is_empty() {
             let noise_process_count = ir.noise_sources.len();
             let ordinary_assignments = ir.assignments.clone();
@@ -1102,12 +1133,33 @@ impl DeviceIR {
             );
             ir.noise_assignments = std::mem::replace(&mut ir.assignments, ordinary_assignments);
         }
+        span.finish(&format!(
+            "module={} processes={}",
+            module.name,
+            ir.noise_sources.len()
+        ));
 
         // Resolve ddx() operators now that the shadow context exists
+        let span = crate::metrics::FineSpan::new("ir.resolve_ddx");
         autodiff::resolve_ddx_in_items(&mut ir.assignments, &shadows);
+        span.finish(&format!(
+            "module={} assignments={}",
+            module.name,
+            ir.assignments.len()
+        ));
+        let span = crate::metrics::FineSpan::new("ir.resolve_ddx_noise");
         autodiff::resolve_ddx_in_items(&mut ir.noise_assignments, &shadows);
+        span.finish(&format!(
+            "module={} assignments={}",
+            module.name,
+            ir.noise_assignments.len()
+        ));
 
         // Convert contributions to equations
+        let equation_span = crate::metrics::FineSpan::new("ir.equations");
+        let mut derivative_elapsed = std::time::Duration::ZERO;
+        let mut reactive_elapsed = std::time::Duration::ZERO;
+        let mut noise_gain_elapsed = std::time::Duration::ZERO;
         for ((contrib, branch_ref), expr) in module
             .contributions
             .iter()
@@ -1166,21 +1218,26 @@ impl DeviceIR {
 
             // Generate derivatives for Jacobian (over node voltages and
             // branch-current unknowns)
+            let span = crate::metrics::FineSpan::new("ir.equation_derivatives");
             let derivatives = Self::generate_derivatives(&expr, num_nodes, num_branches, &shadows);
+            derivative_elapsed += span.elapsed();
 
             // Reactive (charge/flux) derivatives for AC analysis: extract
             // the ddt() operand and differentiate it
+            let span = crate::metrics::FineSpan::new("ir.equation_reactive");
             let reactive_derivatives = match Self::extract_charge(&expr) {
                 Some(charge) => {
                     Self::generate_derivatives(&charge, num_nodes, num_branches, &shadows)
                 }
                 None => Vec::new(),
             };
+            reactive_elapsed += span.elapsed();
 
             // Extract small-signal noise sources (white_noise /
             // flicker_noise terms) for noise analysis; they evaluate to
             // zero in the large-signal programs
             let equation_index = ir.equations.len();
+            let span = crate::metrics::FineSpan::new("ir.equation_noise_gains");
             for process in &mut ir.noise_sources {
                 let gain = autodiff::simplify(autodiff::differentiate_with_shadows(
                     &expr,
@@ -1205,6 +1262,7 @@ impl DeviceIR {
                 }
                 process.injections.push(injection);
             }
+            noise_gain_elapsed += span.elapsed();
 
             ir.equations.push(BranchEquation {
                 branch: branch_ref,
@@ -1217,6 +1275,15 @@ impl DeviceIR {
                 reactive_derivatives,
             });
         }
+        equation_span.finish(&format!(
+            "module={} equations={}",
+            module.name,
+            ir.equations.len()
+        ));
+        let detail = format!("module={}", module.name);
+        crate::metrics::report_fine_span("ir.equation_derivatives", derivative_elapsed, &detail);
+        crate::metrics::report_fine_span("ir.equation_reactive", reactive_elapsed, &detail);
+        crate::metrics::report_fine_span("ir.equation_noise_gains", noise_gain_elapsed, &detail);
 
         Ok(ir)
     }
@@ -1921,17 +1988,14 @@ pub mod autodiff {
 
     /// Collect every variable (and array) name an expression reads
     pub(crate) fn collect_var_names(expr: &IrExpr, out: &mut HashSet<SmolStr>) {
-        map_expr(expr, &mut |e| {
-            match e {
-                IrExpr::Var(name) => {
-                    out.insert(name.clone());
-                }
-                IrExpr::VarIndexed { array, .. } => {
-                    out.insert(array.clone());
-                }
-                _ => {}
+        visit_expr(expr, &mut |e| match e {
+            IrExpr::Var(name) => {
+                out.insert(name.clone());
             }
-            None
+            IrExpr::VarIndexed { array, .. } => {
+                out.insert(array.clone());
+            }
+            _ => {}
         });
     }
 
@@ -1945,56 +2009,52 @@ pub mod autodiff {
             Option<SmolStr>,
         )>,
     ) {
-        map_expr(expr, &mut |node| {
-            match node {
-                IrExpr::WhiteNoise { site, power, name } => out.push((
-                    *site,
-                    power.as_ref().clone(),
-                    None,
-                    None,
-                    name.as_deref().map(SmolStr::from),
-                )),
-                IrExpr::FlickerNoise {
-                    site,
-                    power,
-                    exponent,
-                    name,
-                } => out.push((
-                    *site,
-                    power.as_ref().clone(),
-                    Some(exponent.as_ref().clone()),
-                    None,
-                    name.as_deref().map(SmolStr::from),
-                )),
-                IrExpr::NoiseTable {
-                    site,
-                    points,
-                    log_interp,
-                    name,
-                } => out.push((
-                    *site,
-                    IrExpr::Const(1.0),
-                    None,
-                    Some(NoiseTableData {
-                        points: points.clone(),
-                        log_interp: *log_interp,
-                    }),
-                    name.as_deref().map(SmolStr::from),
-                )),
-                _ => {}
-            }
-            None
+        visit_expr(expr, &mut |node| match node {
+            IrExpr::WhiteNoise { site, power, name } => out.push((
+                *site,
+                power.as_ref().clone(),
+                None,
+                None,
+                name.as_deref().map(SmolStr::from),
+            )),
+            IrExpr::FlickerNoise {
+                site,
+                power,
+                exponent,
+                name,
+            } => out.push((
+                *site,
+                power.as_ref().clone(),
+                Some(exponent.as_ref().clone()),
+                None,
+                name.as_deref().map(SmolStr::from),
+            )),
+            IrExpr::NoiseTable {
+                site,
+                points,
+                log_interp,
+                name,
+            } => out.push((
+                *site,
+                IrExpr::Const(1.0),
+                None,
+                Some(NoiseTableData {
+                    points: points.clone(),
+                    log_interp: *log_interp,
+                }),
+                name.as_deref().map(SmolStr::from),
+            )),
+            _ => {}
         });
     }
 
     /// Collect variable names appearing inside ddx() operands across an
     /// assignment tree (their derivative resolution reads shadows)
     pub(crate) fn collect_ddx_operand_names_in_expr(expr: &IrExpr, out: &mut HashSet<SmolStr>) {
-        map_expr(expr, &mut |e| {
+        visit_expr(expr, &mut |e| {
             if let IrExpr::Ddx { expr, .. } = e {
                 collect_var_names(expr, out);
             }
-            None
         });
     }
 
@@ -2223,75 +2283,130 @@ pub mod autodiff {
         }
     }
 
-    /// Backward liveness step for shadow pruning: every variable read by
-    /// an assignment to a live variable becomes live (indexed writes use
-    /// the array name; the caller expands families afterwards)
-    fn propagate_liveness(
+    /// The read edges shadow liveness closes over, extracted once.
+    ///
+    /// Liveness here is a reachability question — a variable is live when
+    /// some chain of writes carries it into a contribution — and reachability
+    /// wants a graph, not a rescan. Reading the edges out of the assignment
+    /// trees once and then closing over them keeps the two things that used to
+    /// be entangled apart: the expression walk happens a fixed number of
+    /// times, and the fixpoint iterates over names.
+    ///
+    /// The distinction matters because the walk was the expensive half.
+    /// Liveness flows *backward* through a forward-ordered assignment list, so
+    /// a straight-line chain of `n` writes advanced the answer by exactly one
+    /// write per sweep and re-walked every live expression on each of the `n`
+    /// sweeps — and the walk went through `map_expr`, which rebuilds the tree,
+    /// so each sweep also copied and dropped the live half of the program.
+    /// That is quadratic in the assignment count times the expression size.
+    ///
+    /// What this buys on the shipped corpus is small and should be stated as
+    /// such: the old sweep cost 1.31s across all 43 models against 0.12s here,
+    /// because a shipped model's live set converges in a few sweeps, and the
+    /// second call site — inside `build_noise_shadow_assignments`, where the
+    /// list has already been expanded by shadow interleaving — is never
+    /// reached, since no shipped model has a noise process feeding a variable.
+    /// The bound is the point. A user model that does reach it would sweep a
+    /// million-assignment list once per link of its dependency chain.
+    struct LivenessGraph {
+        /// Names read by the writes to each target, deduplicated. Sorted so
+        /// the structure is a function of the module and not of hash order.
+        reads_by_target: HashMap<SmolStr, Vec<SmolStr>>,
+        /// Array element families: one live member makes the family live.
+        families: Vec<Vec<SmolStr>>,
+        /// Family index of an array name or one of its element names.
+        family_of: HashMap<SmolStr, usize>,
+    }
+
+    impl LivenessGraph {
+        fn build(items: &[IrAssignmentItem], variables: &[VarDef], arrays: &[ArrayDef]) -> Self {
+            let mut reads_by_target: HashMap<SmolStr, Vec<SmolStr>> = HashMap::new();
+            collect_liveness_edges(items, variables, &mut reads_by_target);
+            for reads in reads_by_target.values_mut() {
+                reads.sort_unstable();
+                reads.dedup();
+            }
+
+            let mut families = Vec::with_capacity(arrays.len());
+            let mut family_of = HashMap::new();
+            for array in arrays {
+                let index = families.len();
+                let mut members = Vec::with_capacity(array.len + 1);
+                members.push(array.name.clone());
+                for k in array.lower..array.lower + array.len as i64 {
+                    members.push(format!("{}[{k}]", array.name).into());
+                }
+                for member in &members {
+                    family_of.insert(member.clone(), index);
+                }
+                families.push(members);
+            }
+
+            Self {
+                reads_by_target,
+                families,
+                family_of,
+            }
+        }
+
+        /// Least set containing `roots` and closed under both relations: a
+        /// live target makes everything its writes read live, and a live
+        /// family member makes the whole family live.
+        fn live_from(&self, roots: &HashSet<SmolStr>) -> HashSet<SmolStr> {
+            let mut live = HashSet::with_capacity(roots.len());
+            let mut pending: Vec<SmolStr> = Vec::with_capacity(roots.len());
+            for root in roots {
+                if live.insert(root.clone()) {
+                    pending.push(root.clone());
+                }
+            }
+            while let Some(name) = pending.pop() {
+                if let Some(&family) = self.family_of.get(&name) {
+                    for member in &self.families[family] {
+                        if live.insert(member.clone()) {
+                            pending.push(member.clone());
+                        }
+                    }
+                }
+                if let Some(reads) = self.reads_by_target.get(&name) {
+                    for read in reads {
+                        if live.insert(read.clone()) {
+                            pending.push(read.clone());
+                        }
+                    }
+                }
+            }
+            live
+        }
+    }
+
+    /// Record, per write target, every name the write reads. An indexed write
+    /// is attributed to the array name, since a runtime index may land in any
+    /// element; a loop's condition is not a read here, exactly as before.
+    fn collect_liveness_edges(
         items: &[IrAssignmentItem],
         variables: &[VarDef],
-        live: &mut HashSet<SmolStr>,
-        changed: &mut bool,
+        out: &mut HashMap<SmolStr, Vec<SmolStr>>,
     ) {
         for item in items {
             match item {
                 IrAssignmentItem::Assign(assign) => {
-                    let target_live = match &assign.index {
-                        Some(target) => live.contains(&target.array),
-                        None => live.contains(&variables[assign.var_index].name),
+                    let target = match &assign.index {
+                        Some(target) => target.array.clone(),
+                        None => variables[assign.var_index].name.clone(),
                     };
-                    if !target_live {
-                        continue;
-                    }
                     let mut reads = HashSet::new();
                     collect_var_names(&assign.expr, &mut reads);
                     if let Some(target) = &assign.index {
                         collect_var_names(&target.index, &mut reads);
                     }
-                    for name in reads {
-                        if live.insert(name) {
-                            *changed = true;
-                        }
-                    }
+                    out.entry(target).or_default().extend(reads);
                 }
                 IrAssignmentItem::Loop { body, .. } => {
-                    propagate_liveness(body, variables, live, changed);
+                    collect_liveness_edges(body, variables, out);
                 }
             }
         }
-    }
-
-    fn shadow_liveness(
-        items: &[IrAssignmentItem],
-        variables: &[VarDef],
-        arrays: &[ArrayDef],
-        roots: &HashSet<SmolStr>,
-    ) -> HashSet<SmolStr> {
-        let mut live = roots.clone();
-        loop {
-            let mut changed = false;
-            propagate_liveness(items, variables, &mut live, &mut changed);
-            // Array families share their mask; share liveness the same
-            // way (one live element keeps the whole family).
-            for array in arrays {
-                let family_live = live.contains(&array.name)
-                    || (array.lower..array.lower + array.len as i64)
-                        .any(|k| live.contains(format!("{}[{k}]", array.name).as_str()));
-                if family_live && live.insert(array.name.clone()) {
-                    changed = true;
-                }
-                if family_live {
-                    for k in array.lower..array.lower + array.len as i64 {
-                        if live.insert(format!("{}[{k}]", array.name).into()) {
-                            changed = true;
-                        }
-                    }
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-        live
     }
 
     /// Interleave shadow derivative updates before each original
@@ -2458,9 +2573,12 @@ pub mod autodiff {
     ) -> ShadowContext {
         // Fixpoint: a variable depends on an axis if any assignment to it
         // reads a probe of that axis or another variable depending on it.
+        let span = crate::metrics::FineSpan::new("ir.shadow_axis_fixpoint");
         let mut deps: HashMap<SmolStr, AxisMask> = HashMap::new();
+        let mut axis_passes = 0_usize;
         loop {
             let mut changed = false;
+            axis_passes += 1;
             scan_shadowed(
                 &ir.assignments,
                 &ir.variables,
@@ -2473,19 +2591,22 @@ pub mod autodiff {
                 break;
             }
         }
+        span.finish(&format!("passes={axis_passes} shadowed={}", deps.len()));
 
         // Backward liveness: a shadow matters only when the equation
         // Jacobians can reach it — the variable feeds a contribution (or
         // ddx operand) directly, or feeds an assignment to a live
         // variable. Dead shadows (operating-point reporting chains) are
         // dropped before any slot is allocated.
-        let live = shadow_liveness(&ir.assignments, &ir.variables, &ir.arrays, shadow_roots);
-        let second_live = shadow_liveness(
-            &ir.assignments,
-            &ir.variables,
-            &ir.arrays,
-            second_shadow_roots,
-        );
+        let span = crate::metrics::FineSpan::new("ir.shadow_liveness");
+        let liveness = LivenessGraph::build(&ir.assignments, &ir.variables, &ir.arrays);
+        let live = liveness.live_from(shadow_roots);
+        let second_live = liveness.live_from(second_shadow_roots);
+        span.finish(&format!(
+            "live={} second_live={}",
+            live.len(),
+            second_live.len()
+        ));
         deps.retain(|name, _| live.contains(name) || second_live.contains(name));
         let second_deps: HashMap<SmolStr, AxisMask> = deps
             .iter()
@@ -2496,6 +2617,8 @@ pub mod autodiff {
         if deps.is_empty() {
             return ShadowContext::default();
         }
+
+        let span = crate::metrics::FineSpan::new("ir.shadow_layout");
 
         // Register shadow variables along each variable's live axes only:
         // a value computed from V(g) and V(s) never varies with the drain
@@ -2660,10 +2783,12 @@ pub mod autodiff {
             num_nodes,
             noise_shadowed: HashMap::new(),
         };
+        span.finish(&format!("shadow_slots={}", shadow_index.len()));
 
         // Interleave shadow updates before each original assignment.
         // Both the derivative and the original expression read the
         // pre-assignment values, so the shadows must be written first.
+        let span = crate::metrics::FineSpan::new("ir.shadow_interleave");
         let originals = std::mem::take(&mut ir.assignments);
         ir.assignments = interleave_shadows(
             originals,
@@ -2674,6 +2799,7 @@ pub mod autodiff {
             num_nodes,
             num_branches,
         );
+        span.finish(&format!("assignments={}", ir.assignments.len()));
 
         ctx
     }
@@ -3166,9 +3292,12 @@ pub mod autodiff {
         if num_processes == 0 {
             return;
         }
+        let span = crate::metrics::FineSpan::new("ir.noise_axis_fixpoint");
         let mut deps = HashMap::new();
+        let mut passes = 0_usize;
         loop {
             let mut changed = false;
+            passes += 1;
             scan_noise_shadowed(
                 &ir.assignments,
                 &ir.variables,
@@ -3181,15 +3310,24 @@ pub mod autodiff {
                 break;
             }
         }
+        span.finish(&format!("passes={passes} shadowed={}", deps.len()));
         if deps.is_empty() {
             return;
         }
-        let live = shadow_liveness(&ir.assignments, &ir.variables, &ir.arrays, shadow_roots);
+        let span = crate::metrics::FineSpan::new("ir.noise_liveness");
+        let liveness = LivenessGraph::build(&ir.assignments, &ir.variables, &ir.arrays);
+        let live = liveness.live_from(shadow_roots);
+        span.finish(&format!(
+            "assignments={} live={}",
+            ir.assignments.len(),
+            live.len()
+        ));
         deps.retain(|name, _| live.contains(name));
         if deps.is_empty() {
             return;
         }
 
+        let span = crate::metrics::FineSpan::new("ir.noise_shadow_layout");
         let array_members = ir
             .arrays
             .iter()
@@ -3239,8 +3377,11 @@ pub mod autodiff {
             }
         }
         ctx.noise_shadowed = deps;
+        span.finish(&format!("shadow_slots={}", shadow_index.len()));
+        let span = crate::metrics::FineSpan::new("ir.noise_shadow_interleave");
         let originals = std::mem::take(&mut ir.assignments);
         ir.assignments = interleave_noise_shadows(originals, &ir.variables, &shadow_index, ctx);
+        span.finish(&format!("assignments={}", ir.assignments.len()));
     }
 
     /// Rewrite I(a,b) probes of branches carrying potential contributions
@@ -3364,21 +3505,233 @@ pub mod autodiff {
     }
 
     /// Resolve ddx() operators across an assignment-item tree
+    /// Resolve every `ddx` in an assignment tree.
+    ///
+    /// Each rewrite goes through [`map_expr`], which rebuilds the expression
+    /// whether or not it changed. Almost none of these expressions hold a
+    /// `ddx` — after shadow interleaving the tree is a million derivative
+    /// assignments and the operators are the couple of dozen sites the author
+    /// wrote — so the untouched ones are copied for nothing. Asking
+    /// [`contains_ddx`] first replaces that copy with a read.
     pub fn resolve_ddx_in_items(items: &mut [IrAssignmentItem], shadows: &ShadowContext) {
         for item in items {
             match item {
                 IrAssignmentItem::Assign(assign) => {
-                    assign.expr = resolve_ddx(&assign.expr, shadows);
-                    if let Some(target) = &mut assign.index {
+                    if contains_ddx(&assign.expr) {
+                        assign.expr = resolve_ddx(&assign.expr, shadows);
+                    }
+                    if let Some(target) = &mut assign.index
+                        && contains_ddx(&target.index)
+                    {
                         target.index = resolve_ddx(&target.index, shadows);
                     }
                 }
                 IrAssignmentItem::Loop { condition, body } => {
-                    *condition = resolve_ddx(condition, shadows);
+                    if contains_ddx(condition) {
+                        *condition = resolve_ddx(condition, shadows);
+                    }
                     resolve_ddx_in_items(body, shadows);
                 }
             }
         }
+    }
+
+    /// Read-only sibling of [`map_expr`]: the same nodes, in the same
+    /// pre-order, without rebuilding the tree.
+    ///
+    /// [`map_expr`] reconstructs every node it walks, so a caller that only
+    /// wanted to *look* at an expression paid for a full copy of it and then
+    /// dropped the copy. On a compact model whose analog block has been
+    /// expanded into a million shadow assignments that copy is the whole
+    /// program, and the passes that only inspect — collecting the names a
+    /// write reads, finding noise definitions, asking whether a subtree holds
+    /// a `ddx` at all — were each paying it.
+    ///
+    /// The match below mirrors [`map_expr`]'s child slots exactly, including
+    /// where it does *not* descend: the coefficient vectors of a Laplace or
+    /// Zi filter, and every event, noise, and companion node, are leaves in
+    /// both. `visit_expr_walks_the_same_child_slots_as_map_expr` pins that
+    /// agreement per variant, and the arms are written out rather than left
+    /// to a wildcard so a new [`IrExpr`] variant has to be classified here.
+    pub(crate) fn visit_expr(expr: &IrExpr, f: &mut impl FnMut(&IrExpr)) {
+        f(expr);
+        let mut recurse = |e: &IrExpr| visit_expr(e, f);
+        match expr {
+            IrExpr::Binary(_, left, right) => {
+                recurse(left);
+                recurse(right);
+            }
+            IrExpr::Unary(_, inner) => recurse(inner),
+            IrExpr::Call(_, args) => args.iter().for_each(recurse),
+            IrExpr::Conditional(condition, then_expr, else_expr) => {
+                recurse(condition);
+                recurse(then_expr);
+                recurse(else_expr);
+            }
+            IrExpr::Ddt(inner)
+            | IrExpr::Limexp(inner)
+            | IrExpr::CanonicalLimit(inner)
+            | IrExpr::Ddx { expr: inner, .. }
+            | IrExpr::LaplaceND { expr: inner, .. }
+            | IrExpr::LaplaceNDDerivative { expr: inner, .. }
+            | IrExpr::LaplaceZP { expr: inner, .. }
+            | IrExpr::LaplaceZPDerivative { expr: inner, .. }
+            | IrExpr::TableLookup { input: inner, .. }
+            | IrExpr::VarIndexed { index: inner, .. } => recurse(inner),
+            IrExpr::Idt(inner, second) | IrExpr::Limit(inner, second) => {
+                recurse(inner);
+                second.iter().for_each(|e| recurse(e));
+            }
+            IrExpr::IdtMod {
+                expr,
+                ic,
+                modulus,
+                offset,
+            } => {
+                recurse(expr);
+                ic.iter().for_each(|e| recurse(e));
+                recurse(modulus);
+                offset.iter().for_each(|e| recurse(e));
+            }
+            IrExpr::AbsDelay {
+                expr,
+                delay_time,
+                max_delay,
+                ..
+            } => {
+                recurse(expr);
+                recurse(delay_time);
+                max_delay.iter().for_each(|e| recurse(e));
+            }
+            IrExpr::AbsDelayDerivative {
+                input,
+                input_derivative,
+                delay_time,
+                delay_derivative,
+                max_delay,
+                ..
+            } => {
+                recurse(input);
+                recurse(input_derivative);
+                recurse(delay_time);
+                recurse(delay_derivative);
+                max_delay.iter().for_each(|e| recurse(e));
+            }
+            IrExpr::Transition {
+                expr,
+                delay,
+                rise_time,
+                fall_time,
+                ..
+            } => {
+                recurse(expr);
+                delay.iter().for_each(|e| recurse(e));
+                rise_time.iter().for_each(|e| recurse(e));
+                fall_time.iter().for_each(|e| recurse(e));
+            }
+            IrExpr::TransitionDerivative {
+                input,
+                input_derivative,
+                delay,
+                rise_time,
+                fall_time,
+                ..
+            } => {
+                recurse(input);
+                recurse(input_derivative);
+                delay.iter().for_each(|e| recurse(e));
+                rise_time.iter().for_each(|e| recurse(e));
+                fall_time.iter().for_each(|e| recurse(e));
+            }
+            IrExpr::Slew {
+                expr,
+                max_pos_slew,
+                max_neg_slew,
+                ..
+            } => {
+                recurse(expr);
+                max_pos_slew.iter().for_each(|e| recurse(e));
+                max_neg_slew.iter().for_each(|e| recurse(e));
+            }
+            IrExpr::SlewDerivative {
+                input,
+                input_derivative,
+                max_pos_slew,
+                max_pos_slew_derivative,
+                max_neg_slew,
+                max_neg_slew_derivative,
+                ..
+            } => {
+                recurse(input);
+                recurse(input_derivative);
+                max_pos_slew.iter().for_each(|e| recurse(e));
+                max_pos_slew_derivative.iter().for_each(|e| recurse(e));
+                max_neg_slew.iter().for_each(|e| recurse(e));
+                max_neg_slew_derivative.iter().for_each(|e| recurse(e));
+            }
+            IrExpr::ZiFilter {
+                expr,
+                period,
+                transition,
+                first_transition,
+                ..
+            }
+            | IrExpr::ZiFilterDerivative {
+                expr,
+                period,
+                transition,
+                first_transition,
+                ..
+            } => {
+                recurse(expr);
+                recurse(period);
+                recurse(transition);
+                recurse(first_transition);
+            }
+            // Leaves for `map_expr`, so leaves here. The event, noise and
+            // companion nodes carry operands that it never descends into,
+            // and rewriting that would change what every existing caller
+            // sees, not just what this one costs.
+            IrExpr::Const(_)
+            | IrExpr::Param(_)
+            | IrExpr::ParamGiven(_)
+            | IrExpr::Var(_)
+            | IrExpr::Voltage(..)
+            | IrExpr::Current(..)
+            | IrExpr::BranchCurrent(_)
+            | IrExpr::Time
+            | IrExpr::Temperature
+            | IrExpr::Vt
+            | IrExpr::Mfactor
+            | IrExpr::PortConnected(_)
+            | IrExpr::Analysis(_)
+            | IrExpr::Cross { .. }
+            | IrExpr::LastCrossing { .. }
+            | IrExpr::WhiteNoise { .. }
+            | IrExpr::FlickerNoise { .. }
+            | IrExpr::NoiseTable { .. }
+            | IrExpr::Above { .. }
+            | IrExpr::Timer { .. }
+            | IrExpr::DdtCompanion(_)
+            | IrExpr::IdtCompanion(_)
+            | IrExpr::TableDerivative { .. } => {}
+        }
+    }
+
+    /// Whether a subtree holds a `ddx` operator.
+    ///
+    /// [`resolve_ddx`] rewrites through [`map_expr`], which copies whatever it
+    /// walks whether or not anything changed. A module's `ddx` operators are
+    /// a couple of dozen sites in a program of a million assignments, so
+    /// asking first turns a whole-program copy into a whole-program read.
+    pub(crate) fn contains_ddx(expr: &IrExpr) -> bool {
+        let mut found = false;
+        visit_expr(expr, &mut |node| {
+            if matches!(node, IrExpr::Ddx { .. }) {
+                found = true;
+            }
+        });
+        found
     }
 
     /// Structurally map an IR expression bottom-up. The closure may replace
@@ -4675,6 +5028,323 @@ pub mod autodiff {
                 IrExpr::IdtCompanion(Box::new(inner))
             }
             other => other,
+        }
+    }
+
+    #[cfg(test)]
+    mod visit_expr_parity_tests {
+        use super::*;
+
+        fn marker(index: usize) -> Box<IrExpr> {
+            Box::new(IrExpr::Var(SmolStr::new(format!("m{index}"))))
+        }
+
+        fn opt(index: usize) -> Option<Box<IrExpr>> {
+            Some(marker(index))
+        }
+
+        /// Names reached through [`map_expr`] — the traversal
+        /// [`visit_expr`] has to reproduce.
+        fn names_via_map(expr: &IrExpr) -> Vec<SmolStr> {
+            let mut names = Vec::new();
+            map_expr(expr, &mut |node| {
+                if let IrExpr::Var(name) = node {
+                    names.push(name.clone());
+                }
+                None
+            });
+            names
+        }
+
+        fn names_via_visit(expr: &IrExpr) -> Vec<SmolStr> {
+            let mut names = Vec::new();
+            visit_expr(expr, &mut |node| {
+                if let IrExpr::Var(name) = node {
+                    names.push(name.clone());
+                }
+            });
+            names
+        }
+
+        /// One value per [`IrExpr`] variant, with a distinctly named marker
+        /// in every operand slot the variant has — including the slots
+        /// `map_expr` deliberately does not descend into, so a visitor that
+        /// descended too far would be caught as surely as one that stopped
+        /// short.
+        fn one_of_every_variant() -> Vec<IrExpr> {
+            let site = ZiSiteId {
+                source: 0,
+                start: 0,
+                end: 1,
+                ordinal: 0,
+            };
+            let laplace = LaplaceSiteId {
+                source: 0,
+                start: 0,
+                end: 1,
+                ordinal: 0,
+            };
+            let slew = SlewSiteId {
+                source: 0,
+                start: 0,
+                end: 1,
+                ordinal: 0,
+            };
+            let transition = TransitionSiteId {
+                source: 0,
+                start: 0,
+                end: 1,
+                ordinal: 0,
+            };
+            let absdelay = AbsDelaySiteId {
+                source: 0,
+                start: 0,
+                end: 1,
+                ordinal: 0,
+            };
+            let noise_site = NoiseSiteId {
+                source: 0,
+                start: 0,
+                end: 1,
+                ordinal: 0,
+            };
+            vec![
+                IrExpr::Const(1.0),
+                IrExpr::Param(SmolStr::new("p")),
+                IrExpr::ParamGiven(SmolStr::new("p")),
+                IrExpr::Var(SmolStr::new("m0")),
+                IrExpr::VarIndexed {
+                    array: SmolStr::new("a"),
+                    base: 0,
+                    len: 2,
+                    lower: 0,
+                    index: marker(1),
+                },
+                IrExpr::Voltage(0, 1),
+                IrExpr::Current(0, 1),
+                IrExpr::BranchCurrent(0),
+                IrExpr::Time,
+                IrExpr::Temperature,
+                IrExpr::Vt,
+                IrExpr::Mfactor,
+                IrExpr::PortConnected(0),
+                IrExpr::Binary(BinaryOp::Add, marker(2), marker(3)),
+                IrExpr::Unary(UnaryOp::Neg, marker(4)),
+                IrExpr::Call(IrFunction::Sqrt, vec![*marker(5), *marker(6)]),
+                IrExpr::Ddt(marker(7)),
+                IrExpr::Idt(marker(8), opt(9)),
+                IrExpr::IdtMod {
+                    expr: marker(10),
+                    ic: opt(11),
+                    modulus: marker(12),
+                    offset: opt(13),
+                },
+                IrExpr::Limexp(marker(14)),
+                IrExpr::Limit(marker(15), opt(16)),
+                IrExpr::CanonicalLimit(marker(17)),
+                IrExpr::TableLookup {
+                    input: marker(18),
+                    x_data: vec![0.0],
+                    y_data: vec![0.0],
+                },
+                IrExpr::AbsDelay {
+                    site: absdelay,
+                    expr: marker(19),
+                    delay_time: marker(20),
+                    max_delay: opt(21),
+                },
+                IrExpr::AbsDelayDerivative {
+                    site: absdelay,
+                    input: marker(22),
+                    input_derivative: marker(23),
+                    delay_time: marker(24),
+                    delay_derivative: marker(25),
+                    max_delay: opt(26),
+                    derivative_order: 1,
+                },
+                IrExpr::Transition {
+                    site: transition,
+                    expr: marker(27),
+                    delay: opt(28),
+                    rise_time: opt(29),
+                    fall_time: opt(30),
+                },
+                IrExpr::TransitionDerivative {
+                    site: transition,
+                    input: marker(31),
+                    input_derivative: marker(32),
+                    delay: opt(33),
+                    rise_time: opt(34),
+                    fall_time: opt(35),
+                },
+                IrExpr::Slew {
+                    site: slew,
+                    expr: marker(36),
+                    max_pos_slew: opt(37),
+                    max_neg_slew: opt(38),
+                },
+                IrExpr::SlewDerivative {
+                    site: slew,
+                    input: marker(39),
+                    input_derivative: marker(40),
+                    max_pos_slew: opt(41),
+                    max_pos_slew_derivative: opt(42),
+                    max_neg_slew: opt(43),
+                    max_neg_slew_derivative: opt(44),
+                },
+                IrExpr::Cross {
+                    expr: marker(45),
+                    direction: opt(46),
+                    time_tol: opt(47),
+                    expr_tol: opt(48),
+                    enable: opt(49),
+                },
+                IrExpr::LastCrossing {
+                    expr: marker(50),
+                    direction: Some(1),
+                },
+                IrExpr::WhiteNoise {
+                    site: noise_site,
+                    power: marker(51),
+                    name: None,
+                },
+                IrExpr::FlickerNoise {
+                    site: noise_site,
+                    power: marker(52),
+                    exponent: marker(53),
+                    name: None,
+                },
+                IrExpr::NoiseTable {
+                    site: noise_site,
+                    points: vec![(1.0, 1.0)],
+                    log_interp: false,
+                    name: None,
+                },
+                IrExpr::Analysis("dc".to_string()),
+                IrExpr::Above {
+                    expr: marker(54),
+                    time_tol: opt(55),
+                    expr_tol: opt(56),
+                    enable: opt(57),
+                },
+                IrExpr::Timer {
+                    start_time: marker(58),
+                    period: opt(59),
+                    time_tol: opt(60),
+                    enable: opt(61),
+                },
+                IrExpr::LaplaceZP {
+                    site: laplace,
+                    expr: marker(62),
+                    zeros: Vec::new(),
+                    poles: Vec::new(),
+                    gain: 1.0,
+                },
+                IrExpr::LaplaceND {
+                    site: laplace,
+                    expr: marker(63),
+                    numerator: vec![1.0],
+                    denominator: vec![1.0],
+                },
+                IrExpr::LaplaceNDDerivative {
+                    site: laplace,
+                    expr: marker(64),
+                    numerator: vec![1.0],
+                    denominator: vec![1.0],
+                },
+                IrExpr::LaplaceZPDerivative {
+                    site: laplace,
+                    expr: marker(65),
+                    zeros: Vec::new(),
+                    poles: Vec::new(),
+                    gain: 1.0,
+                },
+                IrExpr::ZiFilter {
+                    site,
+                    expr: marker(66),
+                    numerator: ZiPolynomialDefinition::Coefficients(vec![*marker(67)]),
+                    denominator: ZiPolynomialDefinition::Roots(vec![(*marker(68), *marker(69))]),
+                    period: marker(70),
+                    transition: marker(71),
+                    first_transition: marker(72),
+                    direct_assignment: false,
+                },
+                IrExpr::ZiFilterDerivative {
+                    site,
+                    expr: marker(73),
+                    numerator: ZiPolynomialDefinition::Coefficients(vec![*marker(74)]),
+                    denominator: ZiPolynomialDefinition::Roots(vec![(*marker(75), *marker(76))]),
+                    period: marker(77),
+                    transition: marker(78),
+                    first_transition: marker(79),
+                    direct_assignment: false,
+                },
+                IrExpr::Ddx {
+                    expr: marker(80),
+                    axis: DdxAxis::Potential {
+                        pos: Some(0),
+                        neg: None,
+                    },
+                },
+                IrExpr::DdtCompanion(marker(81)),
+                IrExpr::IdtCompanion(marker(82)),
+                IrExpr::TableDerivative {
+                    input: marker(83),
+                    x_data: vec![0.0],
+                    y_data: vec![0.0],
+                },
+                IrExpr::Conditional(marker(84), marker(85), marker(86)),
+            ]
+        }
+
+        #[test]
+        fn visit_expr_walks_the_same_child_slots_as_map_expr() {
+            for expr in one_of_every_variant() {
+                assert_eq!(
+                    names_via_visit(&expr),
+                    names_via_map(&expr),
+                    "visit_expr and map_expr disagree about {expr:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn contains_ddx_finds_an_operator_under_every_descended_slot() {
+            let ddx = IrExpr::Ddx {
+                expr: Box::new(IrExpr::Var(SmolStr::new("v"))),
+                axis: DdxAxis::BranchCurrent {
+                    ordinal: 0,
+                    reversed: false,
+                },
+            };
+            assert!(contains_ddx(&ddx));
+            assert!(contains_ddx(&IrExpr::Binary(
+                BinaryOp::Mul,
+                Box::new(IrExpr::Const(2.0)),
+                Box::new(IrExpr::Conditional(
+                    Box::new(IrExpr::Const(1.0)),
+                    Box::new(ddx.clone()),
+                    Box::new(IrExpr::Const(0.0)),
+                )),
+            )));
+            assert!(!contains_ddx(&IrExpr::Binary(
+                BinaryOp::Mul,
+                Box::new(IrExpr::Const(2.0)),
+                Box::new(IrExpr::Var(SmolStr::new("v"))),
+            )));
+            // A slot `map_expr` does not descend into is a slot
+            // `resolve_ddx` cannot rewrite, so reporting it would promise a
+            // resolution that never happens.
+            assert!(!contains_ddx(&IrExpr::WhiteNoise {
+                site: NoiseSiteId {
+                    source: 0,
+                    start: 0,
+                    end: 1,
+                    ordinal: 0,
+                },
+                power: Box::new(ddx),
+                name: None,
+            }));
         }
     }
 

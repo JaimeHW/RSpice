@@ -708,17 +708,12 @@ pub extern "C" fn rspice_idtmod_wrap(raw: f64, modulus: f64, offset: f64) -> f64
 }
 
 /// External helper function for limited exponential.
+///
+/// One line, because the threshold is not this backend's to choose: see
+/// [`rspice_veriloga_runtime::rspice_limexp`], which every route shares.
 #[unsafe(export_name = "rspice_limexp")]
 pub extern "C" fn rspice_limexp(x: f64) -> f64 {
-    const LIMIT: f64 = 40.0;
-    if x > LIMIT {
-        let exp_limit = LIMIT.exp();
-        exp_limit * (1.0 + x - LIMIT)
-    } else if x < -LIMIT {
-        (-LIMIT).exp()
-    } else {
-        x.exp()
-    }
+    rspice_veriloga_runtime::rspice_limexp(x)
 }
 
 /// External helper function for CMC-style limited exponential.
