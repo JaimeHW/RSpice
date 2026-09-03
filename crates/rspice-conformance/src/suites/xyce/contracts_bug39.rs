@@ -841,15 +841,20 @@ impl XyceTestRunner {
                 netlist.output_requests.first()
             ));
         }
+        // The generated wrapper authors `R1:R R2:R ...`, and that is the
+        // spelling the retained save operand carries: Xyce names the request
+        // back with the deck's own token (its `.prn` header for `.print DC
+        // ... R1:R` is `R1:R`), so nothing here may assert a case folding.
+        // Every comparison against a circuit symbol folds both sides.
         for (offset, signal) in netlist.saves.signals.iter().enumerate() {
             let index = offset + 1;
             if !matches!(
                 signal,
                 rspice_core::netlist::SaveSignal::Raw(raw)
-                    if raw == &format!("r{index}:r")
+                    if raw == &format!("R{index}:R")
             ) {
                 return Err(format!(
-                    "{LABEL} generated print probe {index} is not ordered R{index}:R"
+                    "{LABEL} generated print probe {index} is not the authored ordered R{index}:R"
                 ));
             }
         }
