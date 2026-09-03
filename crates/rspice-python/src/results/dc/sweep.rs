@@ -192,36 +192,6 @@ impl PyDcSweepResult {
         }
     }
 
-    pub fn new_nested(
-        results: Vec<(f64, SimulationResult)>,
-        primary_source: &str,
-        secondary_source: &str,
-        secondary_sweep_values: Vec<f64>,
-    ) -> PyResult<Self> {
-        if secondary_sweep_values.is_empty()
-            || !results.len().is_multiple_of(secondary_sweep_values.len())
-        {
-            return Err(crate::errors::SimulationError::new_err(format!(
-                "malformed nested DC sweep: {} result points cannot be divided across {} secondary sweep values",
-                results.len(),
-                secondary_sweep_values.len()
-            )));
-        }
-        let inner_points = results.len() / secondary_sweep_values.len();
-        Ok(Self {
-            results,
-            device_operating_points: None,
-            primary_source: Some(primary_source.to_string()),
-            secondary_source: Some(secondary_source.to_string()),
-            secondary_sweep_values: Some(secondary_sweep_values),
-            inner_points,
-            evidence: Some(DocumentEvidence::sole(
-                rspice_core::execution::AnalysisKind::Dc,
-                None,
-            )),
-        })
-    }
-
     pub fn new_nested_with_reports(
         results: Vec<rspice_core::engine::DcSweepPointResult>,
         primary_source: &str,

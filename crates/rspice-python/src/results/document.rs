@@ -537,6 +537,11 @@ pub(crate) fn restored_result_error(family: &str) -> PyErr {
 ///
 /// The projection walks every retained sample, so it is exactly the kind of
 /// call that must not hold the GIL or ignore Ctrl-C.
+///
+/// `project` borrows the calling result across the GIL release. That is sound
+/// because no result class exposes a mutating method: there is no `&mut self`
+/// entry point and no `__setstate__`, so nothing Python can call while the
+/// worker runs can move the values out from under it.
 pub(crate) fn build<F>(
     py: Python<'_>,
     coordinate: Option<ResultCoordinate>,
