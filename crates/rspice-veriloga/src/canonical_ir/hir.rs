@@ -587,11 +587,20 @@ pub struct HirCorrespondenceSpan {
 ///
 /// A `case` arm's structured condition is `selector == match` while its executed
 /// counterpart is `__guardN == match`: two different expressions, not two copies
-/// of one, so no site pairs them. Prologue statements (localparam and variable
-/// initializers, `$bound_step` resets) and a named block's local initializers
-/// exist only in the executed copy and pair with nothing in the body. Neither
-/// gap is silent: [`Self::executed`] returns `None`, and
+/// of one, so no site pairs them. Module prologue statements (localparam and
+/// module-scope variable initializers, `$bound_step` resets) exist only in the
+/// executed copy and pair with nothing in the body — they run before the analog
+/// block rather than inside it, so the region tree has no position to hold them.
+/// Neither gap is silent: [`Self::executed`] returns `None`, and
 /// [`crate::canonical_ir::state::CfgStateAllocation`] refuses the model by name.
+///
+/// A named block's local initializer is *not* in that list. It is a step of the
+/// block, so the analyzer records it in the region tree as well as the flat
+/// sink, under one site, and it pairs here like any other assignment. It did
+/// not always: recording it only into the sink left the CFG with no definition
+/// of the local at all, and the read of it fell through to Verilog-AMS
+/// zero-initialisation — a wrong number rather than a refusal, which is why the
+/// pairing is asserted in `tests/cfg_lowering.rs` rather than assumed.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HirExecutedCorrespondence {
     /// Sorted by `body_start` and pairwise disjoint, so a lookup is a binary

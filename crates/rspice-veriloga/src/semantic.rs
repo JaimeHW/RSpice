@@ -2073,21 +2073,40 @@ impl SemanticAnalyzer {
                         );
 
                         if let Some(init) = &item.init {
-                            let expression =
+                            let written =
                                 self.lower_expression_with_side_effects(init, module, sink)?;
                             let expression_guard = self.active_site_guard();
-                            let expression =
-                                self.apply_guard(expression, Self::number_expr(0.0, item.span));
+                            let expression = self
+                                .apply_guard(written.clone(), Self::number_expr(0.0, item.span));
                             let expr_type = self.infer_type(&expression)?;
                             let var_index = module
                                 .variables
                                 .iter()
                                 .position(|v| v.name == hoisted)
                                 .expect("just registered");
-                            // Recorded but unpaired: a named block's local
-                            // initializer is emitted into the flat sink only,
-                            // never into a region.
+                            // Recorded in both copies under one site: a named
+                            // block's local initializer is a step of the block
+                            // like any other, so the structured body runs it and
+                            // the correspondence pairs it with the flat sink's
+                            // copy rather than leaving the region tree short an
+                            // assignment the executed list has.
                             let site = self.next_analog_site();
+                            // Both copies carry the sink's own post-guard
+                            // `expr_type` because one site is one assignment,
+                            // and a second inference over the pre-guard
+                            // expression would let the two halves of that pair
+                            // disagree about its type.
+                            self.record_region(AnalyzedRegion::Assignment(AnalyzedAssignment {
+                                target: hoisted.clone(),
+                                var_index,
+                                index: None,
+                                expression: written,
+                                site,
+                                expression_guard,
+                                expr_type,
+                                span: item.span,
+                                unfiltered_initial_step_guard: None,
+                            }));
                             sink.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
                                 target: hoisted.clone(),
                                 var_index,
