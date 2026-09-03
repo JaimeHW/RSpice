@@ -327,18 +327,6 @@ impl<'a> ProjectionSource<'a> {
         self
     }
 
-    pub const fn kind(&self) -> AnalysisResultKind {
-        self.kind
-    }
-
-    pub fn instance(&self) -> &str {
-        &self.instance
-    }
-
-    pub fn signals(&self) -> &[ProjectionSourceSignal<'a>] {
-        &self.signals
-    }
-
     fn unavailable(&self, symbol: &str) -> SimulationError {
         SimulationError::requested_signal_unavailable(
             symbol,
@@ -439,14 +427,6 @@ impl ProjectedSignals {
 
     pub fn into_signals(self) -> Vec<ProjectedSignal> {
         self.signals
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.signals.is_empty()
-    }
-
-    pub fn len(&self) -> usize {
-        self.signals.len()
     }
 
     /// The typed schema of this projection, for cross-coordinate unions.
@@ -839,6 +819,133 @@ pub const fn raw_variable_type(kind: SignalKind) -> &'static str {
     }
 }
 
+/// The registry name a result's own metadata gives one column.
+///
+/// Result metadata occasionally arrives already wrapped (`V(out)`); an
+/// ordinal is a last resort so a column is never anonymous.
+fn result_registry_name(name: Option<&String>, fallback_index: usize) -> String {
+    let candidate = name
+        .map(|name| probe_registry_name(name).trim())
+        .unwrap_or("");
+    if candidate.is_empty() {
+        fallback_index.to_string()
+    } else {
+        candidate.to_string()
+    }
+}
+
+/// The signals one transient result materializes, in result order.
+///
+/// This is the inventory every surface projects against: node voltages,
+/// branch currents, and digital traces sampled onto the analysis time grid.
+/// Device observables stay out of it deliberately — they are resolvable
+/// spellings through [`crate::analysis::measure_signals::transient_signal_map`],
+/// not columns an unrestricted export should grow.
+pub fn transient_projection_signals(
+    result: &crate::engine::TransientResult,
+) -> Result<Vec<ProjectionSourceSignal<'_>>, SignalSchemaError> {
+    let mut signals = Vec::new();
+    for (index, waveform) in result.voltages.iter().enumerate() {
+        if !result.time.is_empty() && waveform.is_empty() {
+            continue;
+        }
+        let registry = result_registry_name(result.node_names.get(index), index + 1);
+        signals.push(ProjectionSourceSignal::new(
+            format!("V({registry})"),
+            &registry,
+            SignalKind::Voltage,
+            ProjectionValues::Real(Cow::Borrowed(waveform.as_slice())),
+        )?);
+    }
+    for (index, waveform) in result.branch_currents.iter().enumerate() {
+        if !result.time.is_empty() && waveform.is_empty() {
+            continue;
+        }
+        let registry = result_registry_name(result.branch_names.get(index), index + 1);
+        signals.push(ProjectionSourceSignal::new(
+            format!("I({registry})"),
+            &registry,
+            SignalKind::Current,
+            ProjectionValues::Real(Cow::Borrowed(waveform.as_slice())),
+        )?);
+    }
+    for trace in &result.digital_traces {
+        let sampled = sampled_digital_trace(
+            &result.time,
+            trace.points.iter().map(|point| (point.time, point.value)),
+        );
+        signals.push(ProjectionSourceSignal::new(
+            format!("D({})", trace.node_name),
+            &trace.node_name,
+            SignalKind::Digital,
+            ProjectionValues::Real(Cow::Owned(sampled)),
+        )?);
+    }
+    Ok(signals)
+}
+
+/// Sample one event-driven digital trace onto the analysis time grid.
+///
+/// A state holds until the next recorded event, which is what a digital
+/// waveform means; it is not interpolated and never invented.
+fn sampled_digital_trace(
+    times: &[Value],
+    events: impl IntoIterator<Item = (Value, crate::xspice::DigitalValue)>,
+) -> Vec<Value> {
+    // Event times and grid times are both produced by the same integrator, so
+    // an event that lands exactly on a grid point must not be pushed to the
+    // next sample by a last-bit rounding difference.
+    const TIME_EPSILON: Value = 1.0e-18;
+
+    let mut events = events.into_iter().peekable();
+    let mut values = Vec::with_capacity(times.len());
+    let mut current = crate::xspice::DigitalValue::default();
+    for &time in times {
+        while events
+            .peek()
+            .is_some_and(|(event_time, _)| *event_time <= time + TIME_EPSILON)
+        {
+            if let Some((_, value)) = events.next() {
+                current = value;
+            }
+        }
+        values.push(match current.to_bool() {
+            Some(false) => 0.0,
+            Some(true) => 1.0,
+            None => 0.5,
+        });
+    }
+    values
+}
+
+/// The signals one DC solution materializes, in result order.
+///
+/// Ground is omitted: it is a reference, not a solved column.
+pub fn operating_point_projection_signals(
+    result: &crate::solver::SimulationResult,
+) -> Result<Vec<ProjectionSourceSignal<'_>>, SignalSchemaError> {
+    let mut signals = Vec::new();
+    for (node_id, value) in result.node_voltages.iter().enumerate().skip(1) {
+        let registry = result_registry_name(result.node_names.get(node_id), node_id);
+        signals.push(ProjectionSourceSignal::new(
+            format!("V({registry})"),
+            &registry,
+            SignalKind::Voltage,
+            ProjectionValues::Real(Cow::Owned(vec![*value])),
+        )?);
+    }
+    for (index, current) in result.branch_currents.iter().enumerate() {
+        let registry = result_registry_name(result.branch_names.get(index), index + 1);
+        signals.push(ProjectionSourceSignal::new(
+            format!("I({registry})"),
+            &registry,
+            SignalKind::Current,
+            ProjectionValues::Real(Cow::Owned(vec![*current])),
+        )?);
+    }
+    Ok(signals)
+}
+
 /// Operating-point observables a single DC solution reports, as one-sample
 /// lookup series.
 ///
@@ -898,6 +1005,58 @@ pub fn observable_lookup(series: &[(String, Vec<Value>)]) -> HashMap<String, &[V
 /// no accessor (`@d1[id]`) is already its own registry name.
 pub fn probe_registry_name(display_name: &str) -> &str {
     registry_name(display_name)
+}
+
+/// Why an authored probe spelling is not well formed, if it is not.
+///
+/// This is the arity contract of the probe grammar, kept next to the
+/// projection that owns probe meaning: `V()` takes a node or a node pair,
+/// `I()` takes one element, every other accessor takes one argument, and an
+/// accessor's parentheses must close. A well-formed probe naming something
+/// the result does not have is a different failure — an unavailable signal,
+/// not a malformed request.
+pub fn probe_specification_error(spec: &str) -> Option<String> {
+    let trimmed = spec.trim();
+    if trimmed.is_empty() {
+        return Some("output specification must not be empty".to_string());
+    }
+    let open_count = trimmed.matches('(').count();
+    if open_count != trimmed.matches(')').count() {
+        return Some(format!(
+            "output specification '{spec}' has unbalanced parentheses"
+        ));
+    }
+    let open = trimmed.find('(')?;
+    if !trimmed.ends_with(')') {
+        return Some(format!(
+            "output specification '{spec}' does not end with its accessor's closing parenthesis"
+        ));
+    }
+    let operator = trimmed[..open].trim();
+    if operator.is_empty() {
+        return Some(format!("output specification '{spec}' has no accessor"));
+    }
+    let arguments = trimmed[open + 1..trimmed.len() - 1]
+        .split(',')
+        .map(str::trim)
+        .collect::<Vec<_>>();
+    if arguments.iter().any(|argument| argument.is_empty()) {
+        return Some(format!(
+            "output specification '{spec}' has an empty argument"
+        ));
+    }
+    let permitted = if operator.eq_ignore_ascii_case("V") {
+        2
+    } else {
+        1
+    };
+    if arguments.len() > permitted {
+        return Some(format!(
+            "output specification '{spec}': {operator}() takes at most {permitted} argument(s), got {}",
+            arguments.len()
+        ));
+    }
+    None
 }
 
 /// Whether a probe spelling names no circuit symbol at all.
@@ -1227,6 +1386,32 @@ mod tests {
             .iter()
             .map(|signal| signal.descriptor().display_name().to_string())
             .collect()
+    }
+
+    #[test]
+    fn an_absent_sample_stays_absent_and_the_schema_describes_the_selection() {
+        let netlist =
+            parse("partial retention\nV1 out 0 1\nR1 out 0 1k\n.TRAN 1u 10u\n.SAVE V(out)\n.END\n");
+        let projection = SignalProjection::from_netlist(&netlist).expect("projection builds");
+        let validity = vec![true, false, true];
+        let source = ProjectionSource::new(AnalysisResultKind::Transient, "TRAN")
+            .with_axis(vec![0.0, 1.0, 2.0])
+            .with_signals(vec![
+                real_signal("V(out)", "out", SignalKind::Voltage, vec![1.0, 0.0, 3.0])
+                    .with_validity(validity.clone()),
+            ]);
+        let projected = projection
+            .project(&netlist.params, &source, &crate::abort_signal::NoAbort)
+            .expect("a retained signal projects");
+        assert_eq!(projected.signals()[0].validity(), validity.as_slice());
+
+        let schema = projected.schema().expect("projected schema is well formed");
+        let described = schema
+            .descriptors()
+            .iter()
+            .map(SignalDescriptor::canonical_name)
+            .collect::<Vec<_>>();
+        assert_eq!(described, ["v(out)"]);
     }
 
     #[test]

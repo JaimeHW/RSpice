@@ -135,7 +135,8 @@ pub use {
         evaluate_tran_equation_measurements, evaluate_tran_four_output_requests_with_abort,
         evaluate_tran_measurements, evaluate_tran_measurements_with_abort,
         evaluate_tran_output_requests_with_abort, evaluate_tran_remeasurements,
-        measurements_for_analysis, transient_signal_map, unevaluated_measurements,
+        evaluate_transient_probe_with_abort, measurements_for_analysis, transient_signal_map,
+        unevaluated_measurements,
     },
 };
 

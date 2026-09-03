@@ -15,10 +15,7 @@ use rspice_core::execution::{
     ProjectionSourceSignal, ProjectionValues, SignalProjection, SignalValueType,
     probe_registry_name, signal_descriptor,
 };
-use rspice_core::{
-    Value, analysis::AcResult, engine::TransientResult, solver::SimulationResult,
-    xspice::DigitalValue,
-};
+use rspice_core::{Value, analysis::AcResult, engine::TransientResult, solver::SimulationResult};
 
 pub(crate) use rspice_core::execution::SignalKind;
 
@@ -97,7 +94,9 @@ fn complex_descriptor(
     )
 }
 
-fn canonical_signal_name(name: &str, fallback_index: usize) -> String {
+/// The bare circuit symbol a result's own metadata gives one column, with an
+/// ordinal only as a last resort so no exported column is anonymous.
+fn registry_or_ordinal(name: &str, fallback_index: usize) -> String {
     let candidate = probe_registry_name(name).trim();
     if candidate.is_empty() {
         fallback_index.to_string()
@@ -106,20 +105,8 @@ fn canonical_signal_name(name: &str, fallback_index: usize) -> String {
     }
 }
 
-pub(crate) fn voltage_raw_name(name: &str, fallback_index: usize) -> String {
-    canonical_signal_name(name, fallback_index)
-}
-
 pub(crate) fn voltage_display_name(name: &str, fallback_index: usize) -> String {
-    format!("V({})", voltage_raw_name(name, fallback_index))
-}
-
-pub(crate) fn current_raw_name(name: &str, fallback_index: usize) -> String {
-    canonical_signal_name(name, fallback_index)
-}
-
-pub(crate) fn current_display_name(name: &str, fallback_index: usize) -> String {
-    format!("I({})", current_raw_name(name, fallback_index))
+    format!("V({})", registry_or_ordinal(name, fallback_index))
 }
 
 //=============================================================================
@@ -300,142 +287,54 @@ fn complex_signals(
 // Result inventories
 //=============================================================================
 
-fn voltage_signal(raw_name: String, values: Vec<Value>) -> ScalarSignal {
-    ScalarSignal {
-        display_name: format!("V({raw_name})"),
-        raw_name,
-        kind: SignalKind::Voltage,
-        values,
-    }
+/// Flatten one core inventory entry into the CLI's export row.
+fn inventory_row(
+    signal: &ProjectionSourceSignal<'_>,
+) -> Result<ScalarSignal, rspice_core::SimulationError> {
+    let display_name = signal.descriptor().display_name().to_string();
+    let ProjectionValues::Real(values) = signal.values() else {
+        return Err(rspice_core::SimulationError::Circuit(format!(
+            "result signal '{display_name}' is complex in a real inventory"
+        )));
+    };
+    Ok(ScalarSignal {
+        raw_name: probe_registry_name(&display_name).to_string(),
+        display_name,
+        kind: signal.descriptor().kind(),
+        values: values.as_ref().to_vec(),
+    })
 }
 
-fn current_signal(raw_name: String, values: Vec<Value>) -> ScalarSignal {
-    ScalarSignal {
-        display_name: current_display_name(&raw_name, 1),
-        raw_name,
-        kind: SignalKind::Current,
-        values,
-    }
-}
-
-fn digital_signal(raw_name: String, values: Vec<Value>) -> ScalarSignal {
-    ScalarSignal {
-        display_name: format!("D({raw_name})"),
-        raw_name,
-        kind: SignalKind::Digital,
-        values,
-    }
-}
-
-fn digital_value_numeric(value: DigitalValue) -> Value {
-    match value.to_bool() {
-        Some(false) => 0.0,
-        Some(true) => 1.0,
-        None => 0.5,
-    }
-}
-
-pub(crate) fn transient_voltage_signals(result: &TransientResult) -> Vec<ScalarSignal> {
-    result
-        .voltages
+fn inventory_rows(
+    instance: &str,
+    signals: Vec<ProjectionSourceSignal<'_>>,
+) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
+    signals
         .iter()
-        .enumerate()
-        .filter(|(_, waveform)| result.time.is_empty() || !waveform.is_empty())
-        .map(|(index, waveform)| {
-            let raw_name = result.node_names.get(index).map_or_else(
-                || (index + 1).to_string(),
-                |name| voltage_raw_name(name, index + 1),
-            );
-            voltage_signal(raw_name, waveform.clone())
-        })
-        .collect()
-}
-
-pub(crate) fn transient_current_signals(result: &TransientResult) -> Vec<ScalarSignal> {
-    result
-        .branch_currents
-        .iter()
-        .enumerate()
-        .filter(|(_, waveform)| result.time.is_empty() || !waveform.is_empty())
-        .map(|(index, waveform)| {
-            let raw_name = result.branch_names.get(index).map_or_else(
-                || (index + 1).to_string(),
-                |name| current_raw_name(name, index + 1),
-            );
-            current_signal(raw_name, waveform.clone())
-        })
-        .collect()
-}
-
-pub(crate) fn transient_digital_signals(result: &TransientResult) -> Vec<ScalarSignal> {
-    const TIME_EPSILON: Value = 1.0e-18;
-
-    result
-        .digital_traces
-        .iter()
-        .map(|trace| {
-            let mut values = Vec::with_capacity(result.time.len());
-            let mut point_index = 0;
-            let mut current = DigitalValue::default();
-            for &time in &result.time {
-                while let Some(point) = trace.points.get(point_index) {
-                    if point.time <= time + TIME_EPSILON {
-                        current = point.value;
-                        point_index += 1;
-                    } else {
-                        break;
-                    }
-                }
-                values.push(digital_value_numeric(current));
+        .map(inventory_row)
+        .collect::<Result<_, _>>()
+        .map_err(|error| match error {
+            rspice_core::SimulationError::Circuit(message) => {
+                rspice_core::SimulationError::Circuit(format!("{instance}: {message}"))
             }
-            digital_signal(trace.node_name.clone(), values)
+            other => other,
         })
-        .collect()
 }
 
-pub(crate) fn transient_signals(result: &TransientResult) -> Vec<ScalarSignal> {
-    let mut signals = transient_voltage_signals(result);
-    signals.extend(transient_current_signals(result));
-    signals.extend(transient_digital_signals(result));
-    signals
+pub(crate) fn transient_signals(
+    result: &TransientResult,
+) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
+    let signals = rspice_core::execution::transient_projection_signals(result)
+        .map_err(|error| schema_error("TRAN", error))?;
+    inventory_rows("TRAN", signals)
 }
 
-pub(crate) fn dc_operating_point_voltage_signals(result: &SimulationResult) -> Vec<ScalarSignal> {
-    result
-        .node_voltages
-        .iter()
-        .copied()
-        .enumerate()
-        .skip(1)
-        .map(|(node_id, value)| {
-            let raw_name = result.node_names.get(node_id).map_or_else(
-                || node_id.to_string(),
-                |name| voltage_raw_name(name, node_id),
-            );
-            voltage_signal(raw_name, vec![value])
-        })
-        .collect()
-}
-
-pub(crate) fn dc_operating_point_current_signals(result: &SimulationResult) -> Vec<ScalarSignal> {
-    result
-        .branch_currents
-        .iter()
-        .enumerate()
-        .map(|(index, current)| {
-            let raw_name = result.branch_names.get(index).map_or_else(
-                || (index + 1).to_string(),
-                |name| current_raw_name(name, index + 1),
-            );
-            current_signal(raw_name, vec![*current])
-        })
-        .collect()
-}
-
-pub(crate) fn dc_operating_point_signals(result: &SimulationResult) -> Vec<ScalarSignal> {
-    let mut signals = dc_operating_point_voltage_signals(result);
-    signals.extend(dc_operating_point_current_signals(result));
-    signals
+pub(crate) fn dc_operating_point_signals(
+    result: &SimulationResult,
+) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
+    let signals = rspice_core::execution::operating_point_projection_signals(result)
+        .map_err(|error| schema_error("DC OP", error))?;
+    inventory_rows("DC OP", signals)
 }
 
 //=============================================================================
@@ -508,7 +407,7 @@ fn dc_point_signals(
     point: &str,
 ) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
     validate_dc_point_shape(result, point)?;
-    Ok(dc_operating_point_signals(result))
+    dc_operating_point_signals(result)
 }
 
 fn scalar_point_index(
@@ -659,7 +558,7 @@ fn ac_point_signals(
 
     let mut signals = Vec::with_capacity(result.voltages.len() + result.currents.len());
     for (node_idx, value) in result.voltages.iter().copied().enumerate() {
-        let raw_name = voltage_raw_name(&result.node_names[node_idx], node_idx + 1);
+        let raw_name = registry_or_ordinal(&result.node_names[node_idx], node_idx + 1);
         signals.push(ComplexSignal {
             display_name: format!("V({raw_name})"),
             raw_name,
@@ -669,7 +568,7 @@ fn ac_point_signals(
         });
     }
     for (branch_idx, value) in result.currents.iter().copied().enumerate() {
-        let raw_name = current_raw_name(&result.branch_names[branch_idx], branch_idx + 1);
+        let raw_name = registry_or_ordinal(&result.branch_names[branch_idx], branch_idx + 1);
         signals.push(ComplexSignal {
             display_name: format!("I({raw_name})"),
             raw_name,
@@ -830,7 +729,7 @@ pub(crate) fn transient_export_signals(
 ) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
     let projection = projection(netlist)?;
     let ordered = projection.ordered_transient_columns(netlist, result, limits, abort)?;
-    let signals = transient_signals(result);
+    let signals = transient_signals(result)?;
     let lookup = rspice_core::analysis::measure_signals::transient_signal_map(result);
     project_scalar(
         netlist,
@@ -1015,7 +914,12 @@ mod tests {
 
     #[test]
     fn a_scalar_save_validates_each_request_and_supports_wildcards() {
-        let signals = vec![voltage_signal("out".to_string(), vec![1.0])];
+        let signals = vec![ScalarSignal {
+            display_name: "V(out)".to_string(),
+            raw_name: "out".to_string(),
+            kind: SignalKind::Voltage,
+            values: vec![1.0],
+        }];
         let wildcard = netlist_with_saves(".SAVE V(o*)\n");
         let projected = scalar_export_signals(
             &wildcard,

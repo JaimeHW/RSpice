@@ -12,7 +12,6 @@
 //! - `config` - Simulation and convergence configuration
 //! - `results` - Simulation results with NumPy array support
 //! - `measure` - .MEAS evaluation against simulation results
-//! - `signal` - SPICE output-specification parsing
 //! - `export` - Touchstone, SPICE raw, and CSV serialization
 //! - `abort` - Ctrl-C cancellation plumbing
 //! - `errors` - Python exception types
@@ -40,7 +39,6 @@ mod export;
 mod measure;
 mod netlist;
 mod results;
-mod signal;
 
 use numpy::{PyArray1, ToPyArray};
 use pyo3::prelude::*;
@@ -137,6 +135,7 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<results::PyRunCoordinate>()?;
     m.add_class::<results::PyDeviceOperatingPoint>()?;
     m.add_class::<results::PyTransientResult>()?;
+    m.add_class::<results::PyProjectedSignal>()?;
     m.add_class::<results::PyCompressedTransientResult>()?;
     m.add_class::<results::PyTransientCheckpoint>()?;
     m.add_class::<results::PyTransientFftBin>()?;
@@ -230,6 +229,7 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "SimulationResult",
             "DeviceOperatingPoint",
             "TransientResult",
+            "ProjectedSignal",
             "CompressedTransientResult",
             "TransientCheckpoint",
             "FftBin",

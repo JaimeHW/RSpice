@@ -32,7 +32,6 @@
 //! This file holds only the imports the families share, the module wiring, and
 //! the re-exports the rest of the crate binds against.
 
-use crate::signal::SignalSpec;
 use numpy::{PyArray1, ToPyArray};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -58,6 +57,7 @@ mod hb;
 mod monte_carlo;
 mod noise;
 mod pac;
+mod projection;
 mod pss;
 mod s_parameters;
 mod sensitivity;
@@ -88,6 +88,7 @@ pub(crate) use noise::{
     PyPeriodicNoiseResult,
 };
 pub(crate) use pac::PyPacResult;
+pub(crate) use projection::PyProjectedSignal;
 pub(crate) use pss::{PyFloquetSpectrumCertificate, PyFloquetSpectrumEvidence, PyPssResult};
 pub(crate) use s_parameters::{PySParameterResult, SParameterNoiseData};
 pub(crate) use sensitivity::{
