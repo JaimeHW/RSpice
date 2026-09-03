@@ -52,9 +52,9 @@ pub(super) fn analysis_output_tag_multiplicities(
 
 /// The core analysis family one output tag publishes under.
 ///
-/// Every tag `analysis_output_tag` can return appears here, plus the two the
-/// command line can request without an authored card. A tag with no family
-/// owns no analysis identity and therefore no typed result document.
+/// Every tag `analysis_output_tag` can return appears here, plus `sparam`,
+/// which the command line can request without an authored card. A tag with no
+/// family owns no analysis identity and therefore no typed result document.
 pub(super) fn output_tag_analysis_kind(tag: &str) -> Option<rspice_core::execution::AnalysisKind> {
     use rspice_core::execution::AnalysisKind;
     match tag {

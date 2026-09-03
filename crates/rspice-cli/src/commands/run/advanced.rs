@@ -1,5 +1,9 @@
 //! Sweeps, RF, and statistical analyses: `.STEP`, `.HB`, `.SP`, Monte Carlo,
-//! plus the command-line-only PSS, `--sparam`, and `--corners` modes.
+//! plus the `--pss-freq`, `--sparam`, and `--corners` command-line modes.
+//!
+//! The `.HB` and PSS writers live here because both routes — an authored card
+//! and a command-line mode — publish the same artifact. The authored periodic
+//! family that consumes an `.HB`/`.PSS` carrier is in [`super::periodic`].
 //!
 //! Two S-parameter paths live here and write different tags. The `.SP` card
 //! solves the N ports the deck declares with `PORT` voltage sources (`sp`
