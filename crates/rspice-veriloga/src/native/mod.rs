@@ -13,6 +13,8 @@ mod census_models;
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod cfg_census;
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
+mod cfg_mir_census;
+#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod code_identity;
 mod model;
 mod runtime;
