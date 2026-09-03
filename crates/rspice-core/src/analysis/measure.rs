@@ -21,6 +21,70 @@ use crate::netlist::canonical_symbol;
 use crate::netlist::measure::XYCE_DEFAULT_MEASURE_MINVAL;
 use std::collections::HashMap;
 
+/// The waveform a `.MEASURE` statement is evaluated over: the independent axis
+/// it walks, the dependent signals it can name, and the index at which each
+/// stepped segment begins. Every evaluator needs the axis and the signals
+/// together -- a value without its coordinate is not a measurement -- and the
+/// ones that resolve `AT`/`WHEN` need the segment boundaries with them.
+/// The part of the axis a measurement is allowed to look at: the `FROM`/`TO`
+/// bounds, the `TD` delay before the search may begin, and the `MINVAL`
+/// magnitude below which a crossing is treated as noise rather than an event.
+/// Xyce resolves an event against all four together, so a helper handed three
+/// of them would be searching a window nobody described.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct MeasureWindow {
+    pub(crate) from: Option<Value>,
+    pub(crate) to: Option<Value>,
+    pub(crate) td: Option<Value>,
+    pub(crate) minval: Value,
+}
+
+/// Where a `FIND`/`DERIV` statement is evaluated: an explicit `AT` coordinate,
+/// or the first point at which a `WHEN` condition holds. Exactly one of the
+/// two is authored, and the resolver needs to see which.
+#[derive(Clone, Copy)]
+struct MeasureLocator<'a> {
+    at: Option<Value>,
+    when: Option<&'a WhenCondition>,
+}
+
+/// The reference an `ERROR` measurement compares against: the file to read,
+/// the norm to apply, and which of its columns carry the independent and
+/// dependent values.
+#[derive(Clone, Copy)]
+struct FileErrorReference<'a> {
+    file: &'a str,
+    norm: FileErrorNorm,
+    independent_column: Option<isize>,
+    dependent_column: usize,
+}
+
+/// Which extremum a `MIN`/`MAX` statement reports, over which part of the axis.
+#[derive(Clone, Copy)]
+struct ExtremaRequest {
+    from: Option<Value>,
+    to: Option<Value>,
+    output: ExtremaOutput,
+    is_max: bool,
+}
+
+/// A `RISE_TIME`/`FALL_TIME` request: the two percentage thresholds the edge
+/// is measured between, which occurrence to take, and which direction it runs.
+#[derive(Clone, Copy)]
+struct RiseFallRequest {
+    from_pct: Value,
+    to_pct: Value,
+    number: usize,
+    is_rise: bool,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct MeasureData<'a, 'b> {
+    pub(crate) axis: &'a [Value],
+    pub(crate) signals: &'a HashMap<String, &'b [Value]>,
+    pub(crate) segment_starts: &'a [usize],
+}
+
 // The statement types describe a parsed `.MEAS` card, so they live with the
 // rest of the deck syntax in `netlist::measure`. They are re-exported here
 // because this is where callers expect to find them, and because the engine
@@ -704,10 +768,14 @@ impl MeasureEngine {
     /// Vector of measurement results
     pub fn evaluate(
         &self,
-        time: &[Value],
+        axis: &[Value],
         signals: &HashMap<String, &[Value]>,
     ) -> Vec<MeasureResult> {
-        self.evaluate_with_segment_starts(time, signals, &[])
+        self.evaluate_with_segment_starts(MeasureData {
+            axis,
+            signals,
+            segment_starts: &[],
+        })
     }
 
     /// Evaluate the raw scalar cached by a file-backed ERROR getter.
@@ -718,9 +786,9 @@ impl MeasureEngine {
     /// the same computed numeric payload.
     pub(crate) fn evaluate_file_error_prefix_raw(
         statement: &MeasureStatement,
-        axis: &[Value],
-        signals: &HashMap<String, &[Value]>,
+        data: MeasureData<'_, '_>,
     ) -> Result<Value, String> {
+        let MeasureData { axis, signals, .. } = data;
         let MeasureType::FileError {
             signal,
             file,
@@ -739,12 +807,17 @@ impl MeasureEngine {
         engine.file_error_value(
             &statement.analysis,
             signal,
-            file,
-            *norm,
-            *independent_column,
-            *dependent_column,
-            axis,
-            &signals,
+            FileErrorReference {
+                file,
+                norm: *norm,
+                independent_column: *independent_column,
+                dependent_column: *dependent_column,
+            },
+            MeasureData {
+                axis,
+                signals: &signals,
+                segment_starts: &[],
+            },
         )
     }
 
@@ -754,25 +827,21 @@ impl MeasureEngine {
     /// synthetic jump between cycles is not a physical interpolation interval.
     pub(crate) fn evaluate_with_segment_starts(
         &self,
-        time: &[Value],
-        signals: &HashMap<String, &[Value]>,
-        segment_starts: &[usize],
+        data: MeasureData<'_, '_>,
     ) -> Vec<MeasureResult> {
-        self.evaluate_with_segment_starts_and_context(
-            time,
-            signals,
-            segment_starts,
-            &crate::netlist::ParamContext::new(),
-        )
+        self.evaluate_with_segment_starts_and_context(data, &crate::netlist::ParamContext::new())
     }
 
     pub(crate) fn evaluate_with_segment_starts_and_context(
         &self,
-        time: &[Value],
-        signals: &HashMap<String, &[Value]>,
-        segment_starts: &[usize],
+        data: MeasureData<'_, '_>,
         params: &crate::netlist::ParamContext,
     ) -> Vec<MeasureResult> {
+        let MeasureData {
+            axis: time,
+            signals,
+            segment_starts,
+        } = data;
         self.evaluate_with_signal_maps(time, &[signals], segment_starts, params)
     }
 
@@ -860,7 +929,7 @@ impl MeasureEngine {
                         ),
                     );
                 }
-                self.evaluate_continuous_one(statement, axis, &indexed_signals, segment_starts)
+                self.evaluate_continuous_one(statement, MeasureData { axis, signals: &indexed_signals, segment_starts })
                     .check_contract(statement)
             })
             .collect()
@@ -869,9 +938,7 @@ impl MeasureEngine {
     fn evaluate_continuous_one(
         &self,
         statement: &MeasureStatement,
-        axis: &[Value],
-        signals: &HashMap<String, &[Value]>,
-        segment_starts: &[usize],
+        data: MeasureData<'_, '_>,
     ) -> ContinuousMeasureResult {
         match &statement.measure_type {
             MeasureType::When {
@@ -884,13 +951,13 @@ impl MeasureEngine {
                 &statement.name,
                 &statement.analysis,
                 condition,
-                *from,
-                *to,
-                *td,
-                *minval,
-                axis,
-                signals,
-                segment_starts,
+                MeasureWindow {
+                    from: *from,
+                    to: *to,
+                    td: *td,
+                    minval: *minval,
+                },
+                data,
             ),
             MeasureType::Find {
                 signal,
@@ -904,15 +971,17 @@ impl MeasureEngine {
                 &statement.name,
                 &statement.analysis,
                 signal,
-                *at,
-                when.as_ref(),
-                *from,
-                *to,
-                *td,
-                *minval,
-                axis,
-                signals,
-                segment_starts,
+                MeasureLocator {
+                    at: *at,
+                    when: when.as_ref(),
+                },
+                MeasureWindow {
+                    from: *from,
+                    to: *to,
+                    td: *td,
+                    minval: *minval,
+                },
+                data,
             ),
             MeasureType::Derivative {
                 signal,
@@ -926,15 +995,17 @@ impl MeasureEngine {
                 &statement.name,
                 &statement.analysis,
                 signal,
-                *at,
-                when.as_ref(),
-                *from,
-                *to,
-                *td,
-                *minval,
-                axis,
-                signals,
-                segment_starts,
+                MeasureLocator {
+                    at: *at,
+                    when: when.as_ref(),
+                },
+                MeasureWindow {
+                    from: *from,
+                    to: *to,
+                    td: *td,
+                    minval: *minval,
+                },
+                data,
             ),
             MeasureType::Delay {
                 trig, targ, minval, ..
@@ -945,15 +1016,7 @@ impl MeasureEngine {
                         "FRAC_MAX is supported only by scalar TRAN TRIG/TARG",
                     )
                 } else {
-                    continuous_delay(
-                        &statement.name,
-                        trig,
-                        targ,
-                        *minval,
-                        axis,
-                        signals,
-                        segment_starts,
-                    )
+                    continuous_delay(&statement.name, trig, targ, *minval, data)
                 }
             }
             _ => ContinuousMeasureResult::failed(
@@ -1038,7 +1101,14 @@ impl MeasureEngine {
                     } else {
                         signal_maps[index]
                     };
-                    self.evaluate_one(m, time, signals, segment_starts)
+                    self.evaluate_one(
+                        m,
+                        MeasureData {
+                            axis: time,
+                            signals,
+                            segment_starts,
+                        },
+                    )
                 }
             })
             .collect();
@@ -1062,20 +1132,16 @@ impl MeasureEngine {
     fn evaluate_one(
         &self,
         measurement: &MeasureStatement,
-        time: &[Value],
-        signals: &HashMap<String, &[Value]>,
-        segment_starts: &[usize],
+        data: MeasureData<'_, '_>,
     ) -> MeasureResult {
-        self.evaluate_kind(measurement, time, signals, segment_starts)
+        self.evaluate_kind(measurement, data)
             .check_contract(measurement)
     }
 
     fn evaluate_kind(
         &self,
         measurement: &MeasureStatement,
-        time: &[Value],
-        signals: &HashMap<String, &[Value]>,
-        segment_starts: &[usize],
+        data: MeasureData<'_, '_>,
     ) -> MeasureResult {
         match &measurement.measure_type {
             MeasureType::Delay {
@@ -1089,12 +1155,13 @@ impl MeasureEngine {
                 &measurement.analysis,
                 trig,
                 targ,
-                *from,
-                *to,
-                *minval,
-                time,
-                signals,
-                segment_starts,
+                MeasureWindow {
+                    from: *from,
+                    to: *to,
+                    td: None,
+                    minval: *minval,
+                },
+                data,
             ),
             MeasureType::Derivative {
                 signal,
@@ -1108,15 +1175,17 @@ impl MeasureEngine {
                 &measurement.name,
                 &measurement.analysis,
                 signal,
-                *at,
-                when.as_ref(),
-                *from,
-                *to,
-                *td,
-                *minval,
-                time,
-                signals,
-                segment_starts,
+                MeasureLocator {
+                    at: *at,
+                    when: when.as_ref(),
+                },
+                MeasureWindow {
+                    from: *from,
+                    to: *to,
+                    td: *td,
+                    minval: *minval,
+                },
+                data,
             ),
             MeasureType::Param { .. } => MeasureResult::failed(
                 &measurement.name,
@@ -1142,13 +1211,15 @@ impl MeasureEngine {
                 measured,
                 comparison,
                 *norm,
-                *from,
-                *to,
-                *minval,
+                MeasureWindow {
+                    from: *from,
+                    to: *to,
+                    td: None,
+                    minval: *minval,
+                },
                 *ymin,
                 *ymax,
-                time,
-                signals,
+                data,
             ),
             MeasureType::FileError {
                 signal,
@@ -1160,12 +1231,13 @@ impl MeasureEngine {
                 &measurement.name,
                 &measurement.analysis,
                 signal,
-                file,
-                *norm,
-                *independent_column,
-                *dependent_column,
-                time,
-                signals,
+                FileErrorReference {
+                    file,
+                    norm: *norm,
+                    independent_column: *independent_column,
+                    dependent_column: *dependent_column,
+                },
+                data,
             ),
             MeasureType::Min {
                 signal,
@@ -1175,12 +1247,13 @@ impl MeasureEngine {
             } => self.eval_min_max(
                 &measurement.name,
                 signal,
-                *from,
-                *to,
-                *output,
-                time,
-                signals,
-                false,
+                ExtremaRequest {
+                    from: *from,
+                    to: *to,
+                    output: *output,
+                    is_max: false,
+                },
+                data,
             ),
             MeasureType::Max {
                 signal,
@@ -1190,21 +1263,22 @@ impl MeasureEngine {
             } => self.eval_min_max(
                 &measurement.name,
                 signal,
-                *from,
-                *to,
-                *output,
-                time,
-                signals,
-                true,
+                ExtremaRequest {
+                    from: *from,
+                    to: *to,
+                    output: *output,
+                    is_max: true,
+                },
+                data,
             ),
             MeasureType::PeakToPeak { signal, from, to } => {
-                self.eval_pp(&measurement.name, signal, *from, *to, time, signals)
+                self.eval_pp(&measurement.name, signal, *from, *to, data)
             }
             MeasureType::Avg { signal, from, to } => {
-                self.eval_avg(&measurement.name, signal, *from, *to, time, signals)
+                self.eval_avg(&measurement.name, signal, *from, *to, data)
             }
             MeasureType::Rms { signal, from, to } => {
-                self.eval_rms(&measurement.name, signal, *from, *to, time, signals)
+                self.eval_rms(&measurement.name, signal, *from, *to, data)
             }
             MeasureType::RiseTime {
                 signal,
@@ -1214,12 +1288,13 @@ impl MeasureEngine {
             } => self.eval_rise_fall(
                 &measurement.name,
                 signal,
-                *from_pct,
-                *to_pct,
-                *number,
-                true,
-                time,
-                signals,
+                RiseFallRequest {
+                    from_pct: *from_pct,
+                    to_pct: *to_pct,
+                    number: *number,
+                    is_rise: true,
+                },
+                data,
             ),
             MeasureType::FallTime {
                 signal,
@@ -1229,12 +1304,13 @@ impl MeasureEngine {
             } => self.eval_rise_fall(
                 &measurement.name,
                 signal,
-                *from_pct,
-                *to_pct,
-                *number,
-                false,
-                time,
-                signals,
+                RiseFallRequest {
+                    from_pct: *from_pct,
+                    to_pct: *to_pct,
+                    number: *number,
+                    is_rise: false,
+                },
+                data,
             ),
             MeasureType::Find {
                 signal,
@@ -1248,15 +1324,17 @@ impl MeasureEngine {
                 &measurement.name,
                 &measurement.analysis,
                 signal,
-                *at,
-                when.as_ref(),
-                *from,
-                *to,
-                *td,
-                *minval,
-                time,
-                signals,
-                segment_starts,
+                MeasureLocator {
+                    at: *at,
+                    when: when.as_ref(),
+                },
+                MeasureWindow {
+                    from: *from,
+                    to: *to,
+                    td: *td,
+                    minval: *minval,
+                },
+                data,
             ),
             MeasureType::When {
                 condition,
@@ -1268,13 +1346,13 @@ impl MeasureEngine {
                 &measurement.name,
                 &measurement.analysis,
                 condition,
-                *from,
-                *to,
-                *td,
-                *minval,
-                time,
-                signals,
-                segment_starts,
+                MeasureWindow {
+                    from: *from,
+                    to: *to,
+                    td: *td,
+                    minval: *minval,
+                },
+                data,
             ),
             MeasureType::Integ { signal, from, to } => self.eval_integ(
                 &measurement.name,
@@ -1282,8 +1360,7 @@ impl MeasureEngine {
                 signal,
                 *from,
                 *to,
-                time,
-                signals,
+                data,
             ),
         }
     }
@@ -1293,22 +1370,25 @@ impl MeasureEngine {
         name: &str,
         analysis: &str,
         signal_name: &str,
-        file: &str,
-        norm: FileErrorNorm,
-        independent_column: Option<isize>,
-        dependent_column: usize,
-        axis: &[Value],
-        signals: &HashMap<String, &[Value]>,
+        reference: FileErrorReference<'_>,
+        data: MeasureData<'_, '_>,
     ) -> MeasureResult {
-        match self.file_error_value(
-            analysis,
-            signal_name,
+        let FileErrorReference {
             file,
             norm,
             independent_column,
             dependent_column,
-            axis,
-            signals,
+        } = reference;
+        match self.file_error_value(
+            analysis,
+            signal_name,
+            FileErrorReference {
+                file,
+                norm,
+                independent_column,
+                dependent_column,
+            },
+            data,
         ) {
             Ok(value) => MeasureResult::success(name, value),
             Err(error) => MeasureResult::failed(name, &error),
@@ -1319,13 +1399,16 @@ impl MeasureEngine {
         &self,
         analysis: &str,
         signal_name: &str,
-        file: &str,
-        norm: FileErrorNorm,
-        independent_column: Option<isize>,
-        dependent_column: usize,
-        axis: &[Value],
-        signals: &HashMap<String, &[Value]>,
+        reference: FileErrorReference<'_>,
+        data: MeasureData<'_, '_>,
     ) -> Result<Value, String> {
+        let FileErrorReference {
+            file,
+            norm,
+            independent_column,
+            dependent_column,
+        } = reference;
+        let MeasureData { axis, signals, .. } = data;
         if !matches!(
             analysis.to_ascii_uppercase().as_str(),
             "DC" | "TRAN" | "AC" | "NOISE"
@@ -1435,13 +1518,12 @@ impl MeasureEngine {
         analysis: &str,
         trig: &TrigSpec,
         targ: &TrigSpec,
-        from: Option<Value>,
-        to: Option<Value>,
-        minval: Value,
-        time: &[Value],
-        signals: &HashMap<String, &[Value]>,
-        segment_starts: &[usize],
+        window: MeasureWindow,
+        data: MeasureData<'_, '_>,
     ) -> MeasureResult {
+        let MeasureWindow {
+            from, to, minval, ..
+        } = window;
         let legacy = analysis.eq_ignore_ascii_case("TRAN")
             && (self.use_legacy_tran_trig_targ
                 || trig.frac_max.is_some()
@@ -1468,7 +1550,16 @@ impl MeasureEngine {
         };
         if legacy && (trig.frac_max.is_some() || targ.frac_max.is_some()) {
             return match eval_legacy_frac_delay(
-                trig, targ, legacy_td, from, to, minval, time, signals,
+                trig,
+                targ,
+                legacy_td,
+                MeasureWindow {
+                    from,
+                    to,
+                    td: None,
+                    minval,
+                },
+                data,
             ) {
                 Ok(Some((trigger, target))) => MeasureResult::success(name, target - trigger),
                 Ok(None) => MeasureResult::failed(name, "Trigger or target condition not found"),
@@ -1477,13 +1568,13 @@ impl MeasureEngine {
         }
         let t_trig = match delay_clause_event(
             trig,
-            trigger_td,
-            from,
-            to,
-            minval,
-            time,
-            signals,
-            segment_starts,
+            MeasureWindow {
+                from,
+                to,
+                td: trigger_td,
+                minval,
+            },
+            data,
             legacy,
             None,
         ) {
@@ -1493,13 +1584,13 @@ impl MeasureEngine {
         };
         let t_targ = match delay_clause_event(
             targ,
-            target_td,
-            from,
-            to,
-            minval,
-            time,
-            signals,
-            segment_starts,
+            MeasureWindow {
+                from,
+                to,
+                td: target_td,
+                minval,
+            },
+            data,
             legacy,
             legacy.then_some(t_trig),
         ) {
@@ -1578,13 +1669,20 @@ impl MeasureEngine {
         &self,
         name: &str,
         signal_name: &str,
-        from: Option<Value>,
-        to: Option<Value>,
-        output: ExtremaOutput,
-        time: &[Value],
-        signals: &HashMap<String, &[Value]>,
-        is_max: bool,
+        request: ExtremaRequest,
+        data: MeasureData<'_, '_>,
     ) -> MeasureResult {
+        let ExtremaRequest {
+            from,
+            to,
+            output,
+            is_max,
+        } = request;
+        let MeasureData {
+            axis: time,
+            signals,
+            ..
+        } = data;
         let signal = match lookup_signal(signals, signal_name) {
             Some(s) => s,
             None => {
@@ -1625,9 +1723,13 @@ impl MeasureEngine {
         signal_name: &str,
         from: Option<Value>,
         to: Option<Value>,
-        time: &[Value],
-        signals: &HashMap<String, &[Value]>,
+        data: MeasureData<'_, '_>,
     ) -> MeasureResult {
+        let MeasureData {
+            axis: time,
+            signals,
+            ..
+        } = data;
         let signal = match lookup_signal(signals, signal_name) {
             Some(s) => s,
             None => {
@@ -1667,14 +1769,15 @@ impl MeasureEngine {
         measured_name: &str,
         comparison_name: &str,
         norm: ErrorFunctionNorm,
-        from: Option<Value>,
-        to: Option<Value>,
-        minval: Value,
+        window: MeasureWindow,
         ymin: Value,
         ymax: Value,
-        axis: &[Value],
-        signals: &HashMap<String, &[Value]>,
+        data: MeasureData<'_, '_>,
     ) -> MeasureResult {
+        let MeasureWindow {
+            from, to, minval, ..
+        } = window;
+        let MeasureData { axis, signals, .. } = data;
         if !minval.is_finite() || !ymin.is_finite() || !ymax.is_finite() {
             return MeasureResult::failed(name, "ERR limits must be finite");
         }
@@ -1740,9 +1843,13 @@ impl MeasureEngine {
         signal_name: &str,
         from: Option<Value>,
         to: Option<Value>,
-        time: &[Value],
-        signals: &HashMap<String, &[Value]>,
+        data: MeasureData<'_, '_>,
     ) -> MeasureResult {
+        let MeasureData {
+            axis: time,
+            signals,
+            ..
+        } = data;
         let signal = match lookup_signal(signals, signal_name) {
             Some(s) => s,
             None => {
@@ -1803,9 +1910,13 @@ impl MeasureEngine {
         signal_name: &str,
         from: Option<Value>,
         to: Option<Value>,
-        time: &[Value],
-        signals: &HashMap<String, &[Value]>,
+        data: MeasureData<'_, '_>,
     ) -> MeasureResult {
+        let MeasureData {
+            axis: time,
+            signals,
+            ..
+        } = data;
         let signal = match lookup_signal(signals, signal_name) {
             Some(s) => s,
             None => {
@@ -1864,13 +1975,20 @@ impl MeasureEngine {
         &self,
         name: &str,
         signal_name: &str,
-        from_pct: Value,
-        to_pct: Value,
-        number: usize,
-        is_rise: bool,
-        time: &[Value],
-        signals: &HashMap<String, &[Value]>,
+        request: RiseFallRequest,
+        data: MeasureData<'_, '_>,
     ) -> MeasureResult {
+        let RiseFallRequest {
+            from_pct,
+            to_pct,
+            number,
+            is_rise,
+        } = request;
+        let MeasureData {
+            axis: time,
+            signals,
+            ..
+        } = data;
         let signal = match lookup_signal(signals, signal_name) {
             Some(s) => s,
             None => {
@@ -1892,16 +2010,22 @@ impl MeasureEngine {
         name: &str,
         analysis: &str,
         signal_name: &str,
-        at: Option<Value>,
-        when: Option<&WhenCondition>,
-        from: Option<Value>,
-        to: Option<Value>,
-        td: Option<Value>,
-        minval: Value,
-        time: &[Value],
-        signals: &HashMap<String, &[Value]>,
-        segment_starts: &[usize],
+        locator: MeasureLocator<'_>,
+        window: MeasureWindow,
+        data: MeasureData<'_, '_>,
     ) -> MeasureResult {
+        let MeasureLocator { at, when } = locator;
+        let MeasureWindow {
+            from,
+            to,
+            td,
+            minval,
+        } = window;
+        let MeasureData {
+            axis: time,
+            signals,
+            segment_starts,
+        } = data;
         let signal = match lookup_signal(signals, signal_name) {
             Some(s) => s,
             None => {
@@ -1930,15 +2054,7 @@ impl MeasureEngine {
         let Some(condition) = when else {
             return MeasureResult::failed(name, "DERIV requires AT=time or WHEN signal=value");
         };
-        match first_measure_condition_event(
-            condition,
-            minval,
-            time,
-            signals,
-            lower,
-            upper,
-            segment_starts,
-        ) {
+        match first_measure_condition_event(condition, minval, data, lower, upper, segment_starts) {
             Ok(Some((segment, _, event_axis, _))) => {
                 return measurement_segment_slope(name, time, signal, segment)
                     .with_event_axis(event_axis);
@@ -2017,16 +2133,22 @@ impl MeasureEngine {
         name: &str,
         analysis: &str,
         signal_name: &str,
-        at: Option<Value>,
-        when: Option<&WhenCondition>,
-        from: Option<Value>,
-        to: Option<Value>,
-        td: Option<Value>,
-        minval: Value,
-        time: &[Value],
-        signals: &HashMap<String, &[Value]>,
-        segment_starts: &[usize],
+        locator: MeasureLocator<'_>,
+        window: MeasureWindow,
+        data: MeasureData<'_, '_>,
     ) -> MeasureResult {
+        let MeasureLocator { at, when } = locator;
+        let MeasureWindow {
+            from,
+            to,
+            td,
+            minval,
+        } = window;
+        let MeasureData {
+            axis: time,
+            signals,
+            segment_starts,
+        } = data;
         let signal = match lookup_signal(signals, signal_name) {
             Some(s) => s,
             None => {
@@ -2056,8 +2178,7 @@ impl MeasureEngine {
             match first_measure_condition_event(
                 condition,
                 minval,
-                time,
-                signals,
+                data,
                 lower,
                 upper,
                 segment_starts,
@@ -2090,24 +2211,22 @@ impl MeasureEngine {
         name: &str,
         analysis: &str,
         condition: &WhenCondition,
-        from: Option<Value>,
-        to: Option<Value>,
-        td: Option<Value>,
-        minval: Value,
-        time: &[Value],
-        signals: &HashMap<String, &[Value]>,
-        segment_starts: &[usize],
+        window: MeasureWindow,
+        data: MeasureData<'_, '_>,
     ) -> MeasureResult {
-        let (lower, upper) = Self::point_measurement_window_bounds(time, analysis, from, to, td);
-        match first_measure_condition_event(
-            condition,
+        let MeasureWindow {
+            from,
+            to,
+            td,
             minval,
-            time,
-            signals,
-            lower,
-            upper,
+        } = window;
+        let MeasureData {
+            axis: time,
             segment_starts,
-        ) {
+            ..
+        } = data;
+        let (lower, upper) = Self::point_measurement_window_bounds(time, analysis, from, to, td);
+        match first_measure_condition_event(condition, minval, data, lower, upper, segment_starts) {
             Ok(Some((_, _, axis, _))) => MeasureResult::success(name, axis).with_event_axis(axis),
             Ok(None) => {
                 MeasureResult::failed(name, "WHEN condition not found in the measurement window")
@@ -2123,9 +2242,13 @@ impl MeasureEngine {
         signal_name: &str,
         from: Option<Value>,
         to: Option<Value>,
-        time: &[Value],
-        signals: &HashMap<String, &[Value]>,
+        data: MeasureData<'_, '_>,
     ) -> MeasureResult {
+        let MeasureData {
+            axis: time,
+            signals,
+            ..
+        } = data;
         let signal = match lookup_signal(signals, signal_name) {
             Some(s) => s,
             None => {
@@ -2216,16 +2339,22 @@ fn resolve_measure_operand<'a>(
 
 fn delay_clause_event(
     clause: &TrigSpec,
-    effective_td: Option<Value>,
-    from: Option<Value>,
-    to: Option<Value>,
-    minval: Value,
-    axis: &[Value],
-    signals: &HashMap<String, &[Value]>,
-    segment_starts: &[usize],
+    window: MeasureWindow,
+    data: MeasureData<'_, '_>,
     legacy: bool,
     after: Option<Value>,
 ) -> Result<Option<Value>, String> {
+    let MeasureWindow {
+        from,
+        to,
+        td: effective_td,
+        minval,
+    } = window;
+    let MeasureData {
+        axis,
+        signals,
+        segment_starts,
+    } = data;
     match &clause.event {
         TriggerEvent::At(target) => {
             if !target.is_finite() {
@@ -2233,8 +2362,16 @@ fn delay_clause_event(
             }
             if legacy {
                 Ok(axis.iter().copied().find(|sample| {
-                    legacy_delay_accepts_sample(*sample, effective_td, from, to, minval)
-                        && *sample >= *target
+                    legacy_delay_accepts_sample(
+                        *sample,
+                        effective_td,
+                        MeasureWindow {
+                            from,
+                            to,
+                            td: None,
+                            minval,
+                        },
+                    ) && *sample >= *target
                 }))
             } else {
                 Ok(delay_at_is_reached(axis, *target, segment_starts, minval).then_some(*target))
@@ -2261,7 +2398,17 @@ fn delay_clause_event(
             };
             let mut events = Vec::new();
             for row in 0..axis.len() {
-                if legacy && !legacy_delay_accepts_sample(axis[row], effective_td, from, to, minval)
+                if legacy
+                    && !legacy_delay_accepts_sample(
+                        axis[row],
+                        effective_td,
+                        MeasureWindow {
+                            from,
+                            to,
+                            td: None,
+                            minval,
+                        },
+                    )
                 {
                     continue;
                 }
@@ -2316,12 +2463,13 @@ fn eval_legacy_frac_delay(
     trig: &TrigSpec,
     targ: &TrigSpec,
     td: Option<Value>,
-    from: Option<Value>,
-    to: Option<Value>,
-    minval: Value,
-    axis: &[Value],
-    signals: &HashMap<String, &[Value]>,
+    window: MeasureWindow,
+    data: MeasureData<'_, '_>,
 ) -> Result<Option<(Value, Value)>, String> {
+    let MeasureWindow {
+        from, to, minval, ..
+    } = window;
+    let MeasureData { axis, signals, .. } = data;
     let (trigger_signal, trigger_target) = resolve_legacy_frac_clause(trig, signals)?;
     let (Some(target_signal), target_target) = resolve_legacy_frac_clause(targ, signals)? else {
         return Ok(None);
@@ -2329,7 +2477,16 @@ fn eval_legacy_frac_delay(
     let mut tracker = LegacyFracDelayTracker::new(trig, targ, minval);
     let mut result = None;
     for row in 0..axis.len() {
-        if !legacy_delay_accepts_sample(axis[row], td, from, to, minval) {
+        if !legacy_delay_accepts_sample(
+            axis[row],
+            td,
+            MeasureWindow {
+                from,
+                to,
+                td: None,
+                minval,
+            },
+        ) {
             continue;
         }
         let trigger_value = trigger_signal.map_or(0.0, |signal| signal[row]);
@@ -2940,10 +3097,11 @@ pub(crate) fn delay_td_accepts_sample(axis: Value, td: Option<Value>, minval: Va
 pub(crate) fn legacy_delay_accepts_sample(
     axis: Value,
     td: Option<Value>,
-    from: Option<Value>,
-    to: Option<Value>,
-    minval: Value,
+    window: MeasureWindow,
 ) -> bool {
+    let MeasureWindow {
+        from, to, minval, ..
+    } = window;
     delay_td_accepts_sample(axis, td, minval)
         && from.is_none_or(|from| {
             axis.partial_cmp(&(from * (1.0 - minval))) != Some(std::cmp::Ordering::Less)
@@ -2974,12 +3132,12 @@ fn axis_in_error_window(axis: Value, lower: Value, upper: Value, minval: Value) 
 fn first_measure_condition_event(
     condition: &WhenCondition,
     minval: Value,
-    axis: &[Value],
-    signals: &HashMap<String, &[Value]>,
+    data: MeasureData<'_, '_>,
     lower: Value,
     upper: Value,
     segment_starts: &[usize],
 ) -> Result<Option<MeasureEvent>, String> {
+    let MeasureData { axis, signals, .. } = data;
     let left = lookup_signal(signals, &condition.left)
         .ok_or_else(|| format!("When signal '{}' not found", condition.left))?;
     let right = resolve_measure_operand(&condition.right, signals)?;
@@ -3007,12 +3165,12 @@ type MeasureEvent = (usize, Value, Value, bool);
 fn continuous_condition_events(
     condition: &WhenCondition,
     minval: Value,
-    axis: &[Value],
-    signals: &HashMap<String, &[Value]>,
+    data: MeasureData<'_, '_>,
     lower: Value,
     upper: Value,
     segment_starts: &[usize],
 ) -> Result<Vec<MeasureEvent>, String> {
+    let MeasureData { axis, signals, .. } = data;
     let left = lookup_signal(signals, &condition.left)
         .ok_or_else(|| format!("When signal '{}' not found", condition.left))?;
     let right = resolve_measure_operand(&condition.right, signals)?;
@@ -3061,25 +3219,23 @@ fn continuous_when(
     name: &str,
     analysis: &str,
     condition: &WhenCondition,
-    from: Option<Value>,
-    to: Option<Value>,
-    td: Option<Value>,
-    minval: Value,
-    axis: &[Value],
-    signals: &HashMap<String, &[Value]>,
-    segment_starts: &[usize],
+    window: MeasureWindow,
+    data: MeasureData<'_, '_>,
 ) -> ContinuousMeasureResult {
+    let MeasureWindow {
+        from,
+        to,
+        td,
+        minval,
+    } = window;
+    let MeasureData {
+        axis,
+        segment_starts,
+        ..
+    } = data;
     let (lower, upper) =
         MeasureEngine::point_measurement_window_bounds(axis, analysis, from, to, td);
-    match continuous_condition_events(
-        condition,
-        minval,
-        axis,
-        signals,
-        lower,
-        upper,
-        segment_starts,
-    ) {
+    match continuous_condition_events(condition, minval, data, lower, upper, segment_starts) {
         Ok(events) if !events.is_empty() => ContinuousMeasureResult::success(
             name,
             events
@@ -3099,16 +3255,22 @@ fn continuous_find(
     name: &str,
     analysis: &str,
     signal_name: &str,
-    at: Option<Value>,
-    when: Option<&WhenCondition>,
-    from: Option<Value>,
-    to: Option<Value>,
-    td: Option<Value>,
-    minval: Value,
-    axis: &[Value],
-    signals: &HashMap<String, &[Value]>,
-    segment_starts: &[usize],
+    locator: MeasureLocator<'_>,
+    window: MeasureWindow,
+    data: MeasureData<'_, '_>,
 ) -> ContinuousMeasureResult {
+    let MeasureLocator { at, when } = locator;
+    let MeasureWindow {
+        from,
+        to,
+        td,
+        minval,
+    } = window;
+    let MeasureData {
+        axis,
+        signals,
+        segment_starts,
+    } = data;
     let Some(signal) = lookup_signal(signals, signal_name) else {
         return ContinuousMeasureResult::failed(name, format!("Signal '{signal_name}' not found"));
     };
@@ -3133,15 +3295,7 @@ fn continuous_find(
     let Some(condition) = when else {
         return ContinuousMeasureResult::failed(name, "FIND requires AT= or WHEN condition");
     };
-    match continuous_condition_events(
-        condition,
-        minval,
-        axis,
-        signals,
-        lower,
-        upper,
-        segment_starts,
-    ) {
+    match continuous_condition_events(condition, minval, data, lower, upper, segment_starts) {
         Ok(events) if !events.is_empty() => ContinuousMeasureResult::success(
             name,
             events
@@ -3168,16 +3322,22 @@ fn continuous_derivative(
     name: &str,
     analysis: &str,
     signal_name: &str,
-    at: Option<Value>,
-    when: Option<&WhenCondition>,
-    from: Option<Value>,
-    to: Option<Value>,
-    td: Option<Value>,
-    minval: Value,
-    axis: &[Value],
-    signals: &HashMap<String, &[Value]>,
-    segment_starts: &[usize],
+    locator: MeasureLocator<'_>,
+    window: MeasureWindow,
+    data: MeasureData<'_, '_>,
 ) -> ContinuousMeasureResult {
+    let MeasureLocator { at, when } = locator;
+    let MeasureWindow {
+        from,
+        to,
+        td,
+        minval,
+    } = window;
+    let MeasureData {
+        axis,
+        signals,
+        segment_starts,
+    } = data;
     let Some(signal) = lookup_signal(signals, signal_name) else {
         return ContinuousMeasureResult::failed(name, format!("Signal '{signal_name}' not found"));
     };
@@ -3214,15 +3374,7 @@ fn continuous_derivative(
             "DERIV requires AT=time or WHEN signal=value",
         );
     };
-    match continuous_condition_events(
-        condition,
-        minval,
-        axis,
-        signals,
-        lower,
-        upper,
-        segment_starts,
-    ) {
+    match continuous_condition_events(condition, minval, data, lower, upper, segment_starts) {
         Ok(events) if !events.is_empty() => {
             let records = events
                 .into_iter()
@@ -3242,10 +3394,13 @@ fn continuous_delay_clause_events(
     clause: &TrigSpec,
     effective_td: Option<Value>,
     minval: Value,
-    axis: &[Value],
-    signals: &HashMap<String, &[Value]>,
-    segment_starts: &[usize],
+    data: MeasureData<'_, '_>,
 ) -> Result<Vec<Value>, String> {
+    let MeasureData {
+        axis,
+        signals,
+        segment_starts,
+    } = data;
     match &clause.event {
         // Xyce treats AT as an exact clause result. TD gates conditional
         // events but does not override a valid explicit AT location.
@@ -3294,30 +3449,14 @@ fn continuous_delay(
     trig: &TrigSpec,
     targ: &TrigSpec,
     minval: Value,
-    axis: &[Value],
-    signals: &HashMap<String, &[Value]>,
-    segment_starts: &[usize],
+    data: MeasureData<'_, '_>,
 ) -> ContinuousMeasureResult {
     let target_td = targ.td.or(trig.td);
-    let triggers = match continuous_delay_clause_events(
-        trig,
-        trig.td,
-        minval,
-        axis,
-        signals,
-        segment_starts,
-    ) {
+    let triggers = match continuous_delay_clause_events(trig, trig.td, minval, data) {
         Ok(events) => events,
         Err(error) => return ContinuousMeasureResult::failed(name, error),
     };
-    let targets = match continuous_delay_clause_events(
-        targ,
-        target_td,
-        minval,
-        axis,
-        signals,
-        segment_starts,
-    ) {
+    let targets = match continuous_delay_clause_events(targ, target_td, minval, data) {
         Ok(events) => events,
         Err(error) => return ContinuousMeasureResult::failed(name, error),
     };
@@ -4201,8 +4340,11 @@ mod tests {
             2.0,
             XYCE_DEFAULT_MEASURE_MINVAL,
         ));
-        let nested =
-            nested_engine.evaluate_with_segment_starts(&nested_axis, &nested_signals, &[2]);
+        let nested = nested_engine.evaluate_with_segment_starts(MeasureData {
+            axis: &nested_axis,
+            signals: &nested_signals,
+            segment_starts: &[2],
+        });
         assert!(nested[0].passed, "the rollover self-secant is computed 0/0");
         assert!(nested[0].value.is_some_and(Value::is_nan));
 
@@ -4592,7 +4734,14 @@ mod tests {
 
         let mut params = crate::netlist::ParamContext::new();
         params.set_expression_dialect(crate::config::ExpressionDialect::Xyce);
-        let xyce = engine.evaluate_with_segment_starts_and_context(&time, &signals, &[], &params);
+        let xyce = engine.evaluate_with_segment_starts_and_context(
+            MeasureData {
+                axis: &time,
+                signals: &signals,
+                segment_starts: &[],
+            },
+            &params,
+        );
         assert!(xyce[0].passed, "{:?}", xyce[0]);
         assert_eq!(xyce[0].value, Some(0.0));
         assert_eq!(xyce[0].error, None);
@@ -4632,8 +4781,14 @@ mod tests {
         let mut params = crate::netlist::ParamContext::new();
         params.set_expression_dialect(crate::config::ExpressionDialect::Xyce);
 
-        let results =
-            engine.evaluate_with_segment_starts_and_context(&axis, &signals, &[], &params);
+        let results = engine.evaluate_with_segment_starts_and_context(
+            MeasureData {
+                axis: &axis,
+                signals: &signals,
+                segment_starts: &[],
+            },
+            &params,
+        );
 
         assert_eq!(results[0].value, Some(Value::NEG_INFINITY));
         assert_eq!(results[1].value, Some(-1.0e50));
@@ -4932,7 +5087,11 @@ mod tests {
             tolerance: None,
         });
 
-        let results = engine.evaluate_with_segment_starts(&axis, &signals, &[5]);
+        let results = engine.evaluate_with_segment_starts(MeasureData {
+            axis: &axis,
+            signals: &signals,
+            segment_starts: &[5],
+        });
 
         assert_eq!(results[0].value, Some(3.9));
         assert_eq!(results[1].value, Some(4.1));
@@ -5344,8 +5503,12 @@ mod tests {
         signals.insert("V(out)".to_string(), values.as_slice());
 
         for invalid in [&[0][..], &[3][..], &[2, 1][..], &[1, 1][..]] {
-            let results = engine_with(max_statement("V(out)"))
-                .evaluate_with_segment_starts(&axis, &signals, invalid);
+            let results =
+                engine_with(max_statement("V(out)")).evaluate_with_segment_starts(MeasureData {
+                    axis: &axis,
+                    signals: &signals,
+                    segment_starts: invalid,
+                });
             assert_eq!(results[0].value, None);
             assert!(!results[0].passed);
             assert!(

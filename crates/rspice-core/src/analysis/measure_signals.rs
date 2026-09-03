@@ -15,9 +15,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use super::measure::{
     AcceptedRowAtMatch, ContinuousMeasureResult, DelayConditionTracker, EdgeType,
     ErrorFunctionNorm, ExtremaOutput, LegacyFracDelayTracker, MeasureConditionDirection,
-    MeasureEngine, MeasureOperand, MeasureResult, MeasureStatement, MeasureType, TrigSpec,
-    TriggerEvent, WhenCondition, accepted_row_at_match, accepted_row_secant_slope,
-    canonical_measure_signal_name,
+    MeasureData, MeasureEngine, MeasureOperand, MeasureResult, MeasureStatement, MeasureType,
+    MeasureWindow, TrigSpec, TriggerEvent, WhenCondition, accepted_row_at_match,
+    accepted_row_secant_slope, canonical_measure_signal_name,
 };
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
@@ -3037,8 +3037,11 @@ fn freeze_live_file_error(
     signals.insert(signal_name, samples.as_slice());
     match MeasureEngine::evaluate_file_error_prefix_raw(
         program.statement,
-        &axis[..sample_count],
-        &signals,
+        MeasureData {
+            axis: &axis[..sample_count],
+            signals: &signals,
+            segment_starts: &[],
+        },
     ) {
         Ok(value) => {
             program.current = value;
@@ -3262,9 +3265,12 @@ impl LiveDelayClause {
                     super::measure::legacy_delay_accepts_sample(
                         axis_value,
                         self.td,
-                        self.from,
-                        self.to,
-                        self.minval,
+                        MeasureWindow {
+                            from: self.from,
+                            to: self.to,
+                            td: None,
+                            minval: self.minval,
+                        },
                     ) && axis_value >= target
                 } else {
                     live_delay_at_is_reached(
@@ -3288,9 +3294,12 @@ impl LiveDelayClause {
             && !super::measure::legacy_delay_accepts_sample(
                 axis_value,
                 self.td,
-                self.from,
-                self.to,
-                condition.tracker.minval(),
+                MeasureWindow {
+                    from: self.from,
+                    to: self.to,
+                    td: None,
+                    minval: condition.tracker.minval(),
+                },
             )
         {
             return Ok(());
@@ -3777,9 +3786,12 @@ impl LiveMeasureState {
                     if !super::measure::legacy_delay_accepts_sample(
                         axis_value,
                         trigger.td,
-                        trigger.from,
-                        trigger.to,
-                        trigger.minval,
+                        MeasureWindow {
+                            from: trigger.from,
+                            to: trigger.to,
+                            td: None,
+                            minval: trigger.minval,
+                        },
                     ) {
                         return Ok(None);
                     }
@@ -5278,9 +5290,11 @@ fn evaluate_statements_with_segment_starts(
         engine.add((*statement).clone());
     }
     engine.evaluate_with_segment_starts_and_context(
-        axis,
-        &augmented_signals,
-        segment_starts,
+        MeasureData {
+            axis,
+            signals: &augmented_signals,
+            segment_starts,
+        },
         params,
     )
 }
