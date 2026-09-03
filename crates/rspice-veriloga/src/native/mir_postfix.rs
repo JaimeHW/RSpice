@@ -198,6 +198,16 @@ impl<'a, S: CfgScalar> PlanWalk<'a, S> {
         self.refused.iter().copied()
     }
 
+    /// What this walk published into the prelude slots.
+    ///
+    /// The only intermediate values a block program exposes: a plan entry
+    /// returns one number, but a prelude names hundreds of them by slot, and a
+    /// slot the walk and the machine code disagree about is the disagreement
+    /// localised to one published value.
+    pub(super) fn prelude_slots(&self) -> &[S] {
+        &self.prelude
+    }
+
     /// Run one assignment pass into the variable array.
     ///
     /// A refusal inside an assignment is recorded and the assignment is

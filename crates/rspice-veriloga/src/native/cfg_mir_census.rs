@@ -482,6 +482,14 @@ struct Tally {
     /// Entries where the walker's own `f64` walk disagreed with the machine
     /// code it is modelling. Any is a finding about the walker.
     walker_disagreements: usize,
+    /// Prelude slots where the walk of the prelude program disagreed with the
+    /// machine code compiled from that same program.
+    ///
+    /// The localisation an entry disagreement does not have. An entry that
+    /// reads a slot is one instruction long, so a walker disagreement on one
+    /// says only that something upstream differs; this says *which* published
+    /// value, out of a program that publishes hundreds.
+    prelude_slot_disagreements: usize,
     /// Significant entries one route evaluated with no correct digit in it.
     /// See `Comparison::lost_significance`.
     lost_entries: usize,
@@ -853,6 +861,7 @@ fn plan_reference(
     point: &super::mir_postfix::MirPoint<'_>,
     variables: usize,
     prelude_slots: usize,
+    compiled_prelude: &[f64],
     wanted: &[(CfgPlanEntry, f64)],
     tally: &mut Tally,
 ) -> HashMap<CfgPlanEntry, DoubleDouble> {
@@ -875,6 +884,21 @@ fn plan_reference(
                 "cfg-mir model={module} prelude_refused route={route} detail={}",
                 refusal.name()
             );
+        }
+        // The same fidelity question the entries are asked, at the one place a
+        // block program's *intermediate* values are readable: the walk's slots
+        // against the machine code's, published value by published value.
+        for (slot, walked) in narrow.prelude_slots().iter().enumerate() {
+            let Some(compiled) = compiled_prelude.get(slot) else {
+                break;
+            };
+            if !same_reading(*walked, *compiled) {
+                tally.prelude_slot_disagreements += 1;
+                println!(
+                    "cfg-mir model={module} prelude_slot_disagreement route={route} slot={slot} \
+                     walked={walked:.17e} compiled={compiled:.17e}"
+                );
+            }
         }
     }
 
@@ -1187,6 +1211,7 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
             (HashMap::new(), HashMap::new())
         } else {
             let walked = point.mir_point(&storage.currents, &storage.branch_currents);
+            let compiled_prelude = point.prelude_slot_readings();
             (
                 plan_reference(
                     module,
@@ -1195,6 +1220,7 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
                     &walked,
                     variables.len(),
                     mir_storage.prelude_slots,
+                    compiled_prelude,
                     &wanted_mir,
                     tally,
                 ),
@@ -1205,6 +1231,7 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
                     &walked,
                     variables.len(),
                     cfg_storage.prelude_slots,
+                    compiled_prelude,
                     &wanted_cfg,
                     tally,
                 ),
@@ -1503,8 +1530,8 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
          structural_zeros_not_evaluable={} \
          guarded_noise_entries={} guarded_noise_agreed={} guarded_noise_third_value={} \
          below_significance={} referenced={} reference_missing={} \
-         reference_not_finite={} walker_disagreements={} lost_entries={} \
-         walker_refusals={:?}",
+         reference_not_finite={} walker_disagreements={} prelude_slot_disagreements={} \
+         lost_entries={} walker_refusals={:?}",
         tally.models,
         tally.built,
         tally.refused,
@@ -1525,6 +1552,7 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
         tally.reference_missing,
         tally.reference_not_finite,
         tally.walker_disagreements,
+        tally.prelude_slot_disagreements,
         tally.lost_entries,
         tally.walker_refusals,
     );
