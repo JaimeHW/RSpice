@@ -152,6 +152,11 @@ impl CfgModel {
     /// So the fold is an optimization one consumer has earned and the other has
     /// not, and this is where the two part company rather than a mode the CFG
     /// level is confused about.
+    ///
+    /// Gated with its only caller, [`crate::jit`]: a build with neither JIT
+    /// compiles no executable backend, so this entry point has no consumer to
+    /// be alive for.
+    #[cfg(any(feature = "native", feature = "wasm-jit"))]
     pub(crate) fn from_hir_for_executable_backend(
         hir: &HirModel,
         mir: &MirModel,
@@ -763,6 +768,7 @@ impl CfgLowerMode {
         noise_metadata_only: false,
         per_instance_ports: false,
     };
+    #[cfg(any(feature = "native", feature = "wasm-jit"))]
     const EXECUTABLE: Self = Self {
         noise_metadata_only: false,
         per_instance_ports: true,
