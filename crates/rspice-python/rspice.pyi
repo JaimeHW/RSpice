@@ -83,6 +83,7 @@ __all__ = [
     "RSpiceIndexError",
     "RSpiceValueError",
     "RSpiceTypeError",
+    "RSpiceNotImplementedError",
 ]
 
 class RSpiceError(Exception):
@@ -249,6 +250,12 @@ class RSpiceValueError(RSpiceError, ValueError):
 
 class RSpiceTypeError(RSpiceError, TypeError):
     """Invalid argument type. Both an ``RSpiceError`` and a ``TypeError``."""
+
+class RSpiceNotImplementedError(RSpiceError, NotImplementedError):
+    """An authored analysis this surface cannot execute yet.
+
+    Both an ``RSpiceError`` and a ``NotImplementedError``.
+    """
 
 def ac_frequencies(
     variation: str, points: int, start_freq: float, stop_freq: float

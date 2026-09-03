@@ -255,5 +255,9 @@ pub(super) fn analysis_record_kind(analysis: &AnalysisCommand) -> &'static str {
             }
         }
         AnalysisCommand::Four { .. } => "four",
+        AnalysisCommand::Pss(_) => "pss",
+        AnalysisCommand::Pac(_) => "pac",
+        AnalysisCommand::Pnoise(_) => "pnoise",
+        AnalysisCommand::Envelope(_) => "envelope",
     }
 }

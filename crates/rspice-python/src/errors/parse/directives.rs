@@ -49,6 +49,57 @@ pub(super) fn duplicate_model_parameter_attributes(
     attributes
 }
 
+/// Stable machine token for one analysis-card failure mode.
+fn analysis_card_issue_kind(issue: &rspice_core::netlist::AnalysisCardIssue) -> &'static str {
+    use rspice_core::netlist::AnalysisCardIssue as Issue;
+    match issue {
+        Issue::MissingField { .. } => "missing_field",
+        Issue::UnknownKeyword { .. } => "unknown_keyword",
+        Issue::DuplicateKeyword { .. } => "duplicate_keyword",
+        Issue::MissingKeywordValue { .. } => "missing_keyword_value",
+        Issue::InvalidNumber { .. } => "invalid_number",
+        Issue::InvalidChoice { .. } => "invalid_choice",
+        Issue::ConflictingFields { .. } => "conflicting_fields",
+        Issue::InvalidName { .. } => "invalid_name",
+        Issue::UnhonourableField { .. } => "unhonourable_field",
+        Issue::TrailingToken { .. } => "trailing_token",
+        Issue::Rejected { .. } => "rejected_configuration",
+    }
+}
+
+/// Which card field or keyword the failure is about, when it names one.
+fn analysis_card_field(issue: &rspice_core::netlist::AnalysisCardIssue) -> Option<String> {
+    use rspice_core::netlist::AnalysisCardIssue as Issue;
+    match issue {
+        Issue::MissingField { field }
+        | Issue::InvalidNumber { field, .. }
+        | Issue::InvalidChoice { field, .. }
+        | Issue::InvalidName { field, .. }
+        | Issue::UnhonourableField { field, .. } => Some((*field).to_string()),
+        Issue::DuplicateKeyword { keyword } | Issue::MissingKeywordValue { keyword } => {
+            Some((*keyword).to_string())
+        }
+        Issue::UnknownKeyword { keyword } => Some(keyword.clone()),
+        Issue::ConflictingFields { first, .. } => Some((*first).to_string()),
+        Issue::TrailingToken { .. } | Issue::Rejected { .. } => None,
+    }
+}
+
+/// Project one authored analysis-card failure onto the flat attribute set.
+pub(super) fn analysis_card_attributes(
+    error: &rspice_core::netlist::AnalysisCardError,
+) -> ParseErrorAttributes {
+    let mut attributes = ParseErrorAttributes::new("analysis_card");
+    attributes.category = Some("analysis_card_validation");
+    attributes.line = Some(error.line);
+    attributes.primary_line = Some(error.line);
+    attributes.output_directive = Some(error.card.directive().to_string());
+    attributes.reason = Some(analysis_card_issue_kind(&error.issue).to_string());
+    attributes.parameter_name = analysis_card_field(&error.issue);
+    attributes.detail = Some(error.issue.to_string());
+    attributes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -533,6 +533,10 @@ fn command_name(command: &AnalysisCommand) -> &'static str {
         AnalysisCommand::MonteCarlo(_) => ".mc",
         AnalysisCommand::Step(_) => ".step",
         AnalysisCommand::Temp { .. } => ".temp",
+        AnalysisCommand::Pss(_) => ".pss",
+        AnalysisCommand::Pac(_) => ".pac",
+        AnalysisCommand::Pnoise(_) => ".pnoise",
+        AnalysisCommand::Envelope(_) => ".envelope",
     }
 }
 
@@ -1145,6 +1149,13 @@ fn command_to_queue_item(
         AnalysisCommand::Temp { .. } => Err(
             ".temp directives must be planned as temperature sweeps before queueing".to_string(),
         ),
+        AnalysisCommand::Pss(_)
+        | AnalysisCommand::Pac(_)
+        | AnalysisCommand::Pnoise(_)
+        | AnalysisCommand::Envelope(_) => Err(format!(
+            "{} has no manual-deck queue route in this build",
+            command_name(command)
+        )),
     }
 }
 

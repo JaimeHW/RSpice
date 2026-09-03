@@ -632,10 +632,89 @@ impl<'a> RunContext<'a> {
             AnalysisCommand::MonteCarlo(mc_cmd) => {
                 advanced::run_monte_carlo_from_command(self, mc_cmd)?
             }
+            AnalysisCommand::Pss(_)
+            | AnalysisCommand::Pac(_)
+            | AnalysisCommand::Pnoise(_)
+            | AnalysisCommand::Envelope(_) => {
+                // `refuse_unsupported_deck_analyses` rejects these before any
+                // solver or artifact work; reaching the dispatcher means the
+                // preflight was bypassed.
+                return Err(unsupported_deck_analysis_error(analysis, None));
+            }
         }
 
         Ok(())
     }
+}
+
+/// Dot-command spelling of a card the CLI has no execution route for.
+fn unsupported_deck_analysis_card(analysis: &AnalysisCommand) -> Option<&'static str> {
+    match analysis {
+        AnalysisCommand::Pss(_) => Some(".PSS"),
+        AnalysisCommand::Pac(_) => Some(".PAC"),
+        AnalysisCommand::Pnoise(_) => Some(".PNOISE"),
+        AnalysisCommand::Envelope(_) => Some(".ENVELOPE"),
+        _ => None,
+    }
+}
+
+/// Typed refusal for an authored periodic-family card.
+fn unsupported_deck_analysis_error(
+    analysis: &AnalysisCommand,
+    analysis_id: Option<String>,
+) -> CliError {
+    let card = unsupported_deck_analysis_card(analysis).unwrap_or(".<analysis>");
+    CliError::UnsupportedDeckAnalysis {
+        card,
+        analysis_id,
+        reason: "the CLI has no execution route or result artifact for the periodic \
+                 large-signal analysis family; run it through the Python API",
+    }
+}
+
+/// Refuse authored cards this frontend cannot execute before any solver work
+/// runs or any artifact is written.
+fn refuse_unsupported_deck_analyses(netlist: &Netlist, plan: &DeckPlan) -> Result<(), CliError> {
+    let mut planned = plan
+        .analyses()
+        .iter()
+        .map(|analysis| analysis.id().tag())
+        .collect::<std::collections::VecDeque<_>>();
+    for analysis in &netlist.analyses {
+        if matches!(analysis, AnalysisCommand::Four { .. }) {
+            // `.FOUR` is attached to a transient by the planner and never
+            // occupies its own planned-analysis slot.
+            continue;
+        }
+        let id = planned.pop_front();
+        if unsupported_deck_analysis_card(analysis).is_some() {
+            return Err(unsupported_deck_analysis_error(analysis, id));
+        }
+    }
+    Ok(())
+}
+
+/// `--pss-freq` and an authored `.PSS` both name a periodic steady state.
+/// Executing one and dropping the other would silently discard what the deck
+/// or the command line asked for.
+fn validate_pss_flag_conflict(netlist: &Netlist, args: &RunArgs) -> Result<(), CliError> {
+    if args.pss_freq.is_none() {
+        return Ok(());
+    }
+    if !netlist
+        .analyses
+        .iter()
+        .any(|analysis| matches!(analysis, AnalysisCommand::Pss(_)))
+    {
+        return Ok(());
+    }
+    Err(CliError::InvalidArgument {
+        message: "--pss-freq cannot be combined with an authored .PSS card".to_string(),
+        suggestion: Some(
+            "drop --pss-freq and author the whole periodic steady state on the .PSS card"
+                .to_string(),
+        ),
+    })
 }
 
 fn analysis_output_tag(analysis: &AnalysisCommand) -> Option<&'static str> {
@@ -654,7 +733,14 @@ fn analysis_output_tag(analysis: &AnalysisCommand) -> Option<&'static str> {
         AnalysisCommand::Hb { .. } => Some("hb"),
         AnalysisCommand::MonteCarlo(_) => Some("mc"),
         AnalysisCommand::Temp { .. } => Some("temp"),
-        AnalysisCommand::Step(_) | AnalysisCommand::Four { .. } => None,
+        // The CLI publishes no artifact for the periodic large-signal family
+        // and refuses those cards before execution, so they own no namespace.
+        AnalysisCommand::Step(_)
+        | AnalysisCommand::Four { .. }
+        | AnalysisCommand::Pss(_)
+        | AnalysisCommand::Pac(_)
+        | AnalysisCommand::Pnoise(_)
+        | AnalysisCommand::Envelope(_) => None,
     }
 }
 
@@ -1449,6 +1535,10 @@ fn physical_step_analysis_kind(
         AnalysisCommand::Tf { .. } => Ok(Some("tf")),
         AnalysisCommand::PoleZero { .. } => Ok(Some("pz")),
         AnalysisCommand::Four { .. } => Ok(Some("four")),
+        AnalysisCommand::Pss(_)
+        | AnalysisCommand::Pac(_)
+        | AnalysisCommand::Pnoise(_)
+        | AnalysisCommand::Envelope(_) => Err(unsupported_deck_analysis_error(analysis, None)),
         AnalysisCommand::MonteCarlo(_) => Err(CliError::InvalidArgument {
             message: ".STEP cannot wrap authored Monte Carlo until deterministic nested seed/substream derivation is configured"
                 .to_string(),
@@ -2270,11 +2360,13 @@ fn run_deck(
     run_label: Option<&str>,
 ) -> Result<DeckOutcome, CliError> {
     validate_step_frontend_compatibility(netlist, args)?;
+    validate_pss_flag_conflict(netlist, args)?;
 
     let resource_limits = config.resources.limits();
     let canonical_plan =
         DeckPlan::from_netlist_with_abort(netlist, &resource_limits, &crate::abort::ProcessAbort)
             .map_err(|error| map_deck_plan_error(error, args))?;
+    refuse_unsupported_deck_analyses(netlist, &canonical_plan)?;
     if canonical_plan.axes().is_empty() {
         let (report, outputs) =
             run_concrete_deck(netlist, args, config, verbose, quiet, run_label, None, None)?;

@@ -288,6 +288,7 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
         CoreParseError::DeviceInitialCondition(error) => {
             device::device_initial_condition_attributes(error.as_ref())
         }
+        CoreParseError::AnalysisCard(error) => directives::analysis_card_attributes(error),
         CoreParseError::MissingParameter(value) => {
             let mut attributes = ParseErrorAttributes::new("missing_parameter");
             attributes.detail = Some(value.clone());

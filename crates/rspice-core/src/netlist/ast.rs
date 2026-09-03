@@ -2234,6 +2234,238 @@ pub enum AnalysisCommand {
 
     /// Temperature sweep: .TEMP t1 [t2 t3...]
     Temp { temperatures: Vec<Value> },
+
+    /// Shooting periodic steady state: `.PSS`.
+    Pss(Box<PssAnalysis>),
+
+    /// Periodic small-signal AC around a periodic operating point: `.PAC`.
+    Pac(Box<PacAnalysis>),
+
+    /// Periodic (cyclostationary) noise around a periodic operating
+    /// point: `.PNOISE`.
+    Pnoise(Box<PnoiseAnalysis>),
+
+    /// Harmonic-balance envelope continuation: `.ENVELOPE`.
+    Envelope(Box<EnvelopeAnalysis>),
+}
+
+//=============================================================================
+// Periodic large-signal analysis cards
+//=============================================================================
+
+/// Authored `.PSS` card.
+///
+/// The card carries the same configuration the direct PSS entry points take;
+/// it is fully validated by the parser, so no later stage re-derives what the
+/// deck asked for.
+#[derive(Debug, Clone)]
+pub struct PssAnalysis {
+    /// Validated shooting configuration.
+    pub config: crate::analysis::pss::PssConfig,
+}
+
+/// Authored `.PAC` card.
+#[derive(Debug, Clone)]
+pub struct PacAnalysis {
+    /// Validated periodic-AC configuration.
+    ///
+    /// `fundamental_freq` stays zero here: it is bound from the upstream
+    /// `.PSS`/`.HB` instance when the analysis runs, exactly as the direct
+    /// PAC entry points bind it from their operating point.
+    pub config: crate::analysis::pac::PacConfig,
+    /// Which upstream periodic analysis this card linearizes around.
+    pub source: PeriodicSourceSelector,
+}
+
+/// Authored `.PNOISE` card.
+///
+/// There is no single core configuration struct for periodic noise: the
+/// runners take the offset grid, the output probe, an optional input source
+/// and the folded sideband bound directly, so the card carries exactly those.
+#[derive(Debug, Clone)]
+pub struct PnoiseAnalysis {
+    /// Offset-frequency sweep; generates the offsets the runners consume.
+    pub sweep: PeriodicSweep,
+    /// Output voltage probe node.
+    pub output_node: String,
+    /// Reference node of a differential `V(out,ref)` probe.
+    pub reference_node: Option<String>,
+    /// Independent source used for input-referred noise, when authored.
+    pub input_source: Option<String>,
+    /// Highest folded sideband index; sidebands `-n..=n` participate.
+    pub max_sideband: i32,
+    /// Which upstream periodic analysis this card folds noise around.
+    pub source: PeriodicSourceSelector,
+}
+
+/// Authored `.ENVELOPE` card: harmonic-balance envelope continuation.
+#[derive(Debug, Clone)]
+pub struct EnvelopeAnalysis {
+    /// Slow-time continuation length in seconds.
+    pub duration: Value,
+    /// Maximum continued timestep in seconds.
+    pub max_step: Value,
+    /// Independent sources frozen at their exact time-zero values during the
+    /// carrier solve. Authored spelling is retained; the engine canonicalizes.
+    pub frozen_sources: Vec<String>,
+}
+
+/// `DEC|LIN|OCT np fstart fstop` sweep shared by `.PAC` and `.PNOISE`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PeriodicSweep {
+    pub variation: FreqVariation,
+    pub points: usize,
+    pub start_freq: Value,
+    pub stop_freq: Value,
+}
+
+/// Which upstream periodic large-signal analysis a `.PAC`/`.PNOISE` card
+/// attaches to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PeriodicSourceSelector {
+    /// The nearest preceding `.PSS` or `.HB` card, whichever is closer.
+    #[default]
+    Preceding,
+    /// The nearest preceding `.PSS` card.
+    Pss,
+    /// The nearest preceding `.HB` card.
+    Hb,
+}
+
+impl PeriodicSourceSelector {
+    /// Authored spelling of the `FROM=` selector.
+    pub const fn keyword(self) -> &'static str {
+        match self {
+            Self::Preceding => "PRECEDING",
+            Self::Pss => "PSS",
+            Self::Hb => "HB",
+        }
+    }
+}
+
+/// Which authored analysis card a card-level parse failure came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnalysisCard {
+    Pss,
+    Pac,
+    Pnoise,
+    Envelope,
+}
+
+impl AnalysisCard {
+    /// Dot-command spelling used in diagnostics.
+    pub const fn directive(self) -> &'static str {
+        match self {
+            Self::Pss => ".PSS",
+            Self::Pac => ".PAC",
+            Self::Pnoise => ".PNOISE",
+            Self::Envelope => ".ENVELOPE",
+        }
+    }
+}
+
+impl std::fmt::Display for AnalysisCard {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.directive())
+    }
+}
+
+/// What is wrong with one authored analysis card.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AnalysisCardIssue {
+    /// A field the card cannot default was not authored.
+    MissingField { field: &'static str },
+    /// A keyword this card does not define.
+    UnknownKeyword { keyword: String },
+    /// The same keyword was authored more than once.
+    DuplicateKeyword { keyword: &'static str },
+    /// A keyword appeared without its `=value`.
+    MissingKeywordValue { keyword: &'static str },
+    /// A numeric field is non-finite or outside its admissible range.
+    InvalidNumber {
+        field: &'static str,
+        value: Value,
+        expected: &'static str,
+    },
+    /// A choice-valued field received a spelling the card does not define.
+    InvalidChoice {
+        field: &'static str,
+        value: String,
+        expected: &'static str,
+    },
+    /// Two authored fields describe the same quantity.
+    ConflictingFields {
+        first: &'static str,
+        second: &'static str,
+    },
+    /// A name field was empty or repeated where it must be unique.
+    InvalidName { field: &'static str, value: String },
+    /// A field another simulator accepts here that RSpice cannot honour.
+    ///
+    /// Ignoring it would silently change what the deck asked for, so the
+    /// card is refused instead.
+    UnhonourableField {
+        field: &'static str,
+        detail: &'static str,
+    },
+    /// Tokens remain after the card's grammar is complete.
+    TrailingToken { token: String },
+    /// The assembled configuration failed its core validation.
+    Rejected { reason: String },
+}
+
+impl std::fmt::Display for AnalysisCardIssue {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingField { field } => write!(formatter, "missing required field {field}"),
+            Self::UnknownKeyword { keyword } => write!(formatter, "unknown keyword '{keyword}'"),
+            Self::DuplicateKeyword { keyword } => {
+                write!(formatter, "keyword {keyword} authored more than once")
+            }
+            Self::MissingKeywordValue { keyword } => {
+                write!(formatter, "keyword {keyword} requires {keyword}=<value>")
+            }
+            Self::InvalidNumber {
+                field,
+                value,
+                expected,
+            } => write!(formatter, "{field} must be {expected}, got {value}"),
+            Self::InvalidChoice {
+                field,
+                value,
+                expected,
+            } => write!(formatter, "{field} must be {expected}, got '{value}'"),
+            Self::ConflictingFields { first, second } => write!(
+                formatter,
+                "{first} and {second} set the same quantity; author only one"
+            ),
+            Self::InvalidName { field, value } => {
+                write!(formatter, "invalid {field} name '{value}'")
+            }
+            Self::UnhonourableField { field, detail } => {
+                write!(formatter, "{field} cannot be honoured by RSpice: {detail}")
+            }
+            Self::TrailingToken { token } => {
+                write!(formatter, "unexpected trailing token '{token}'")
+            }
+            Self::Rejected { reason } => write!(formatter, "{reason}"),
+        }
+    }
+}
+
+/// Source-located failure of one authored analysis card.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+#[error("{card} at line {line}: {issue}")]
+pub struct AnalysisCardError {
+    pub card: AnalysisCard,
+    pub line: usize,
+    pub issue: AnalysisCardIssue,
+}
+
+impl AnalysisCardError {
+    pub fn new(card: AnalysisCard, line: usize, issue: AnalysisCardIssue) -> Self {
+        Self { card, line, issue }
+    }
 }
 
 /// Monte Carlo command configuration

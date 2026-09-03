@@ -280,6 +280,7 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "RSpiceIndexError",
             "RSpiceValueError",
             "RSpiceTypeError",
+            "RSpiceNotImplementedError",
         ],
     )?;
 

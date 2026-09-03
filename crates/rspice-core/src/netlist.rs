@@ -554,6 +554,9 @@ pub enum ParseError {
     #[error(transparent)]
     DeviceInitialCondition(Box<DeviceInitialConditionError>),
 
+    #[error(transparent)]
+    AnalysisCard(Box<AnalysisCardError>),
+
     #[error("Missing required parameter: {0}")]
     MissingParameter(String),
 

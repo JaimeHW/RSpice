@@ -168,6 +168,22 @@ pub enum CliError {
         source: serde_json::Error,
     },
 
+    #[error(
+        "The CLI cannot execute the authored {card} card{instance}: {reason}",
+        instance = analysis_id
+            .as_ref()
+            .map(|id| format!(" ({id})"))
+            .unwrap_or_default()
+    )]
+    UnsupportedDeckAnalysis {
+        /// Dot-command spelling of the refused card.
+        card: &'static str,
+        /// Canonical analysis instance identity, when the plan assigned one.
+        analysis_id: Option<String>,
+        /// Why this surface cannot execute the card.
+        reason: &'static str,
+    },
+
     #[error("Invalid argument: {message}")]
     InvalidArgument {
         message: String,
@@ -216,6 +232,7 @@ impl CliError {
             CliError::AddResistorsMaterialization { .. } => ExitCode::InputError,
             CliError::AddResistorsArtifactIo { .. } => ExitCode::IoError,
             CliError::OutputSerializationError { .. } => ExitCode::InternalError,
+            CliError::UnsupportedDeckAnalysis { .. } => ExitCode::InputError,
             CliError::InvalidArgument { .. } => ExitCode::MisuseOfCommand,
             CliError::ConfigError { .. } => ExitCode::ConfigError,
             CliError::CoreConfigError { .. } => ExitCode::ConfigError,
@@ -281,6 +298,18 @@ impl CliError {
             }
             Self::OutputSerializationError { .. } => {
                 ErrorDetails::new("output_serialization", "internal", false)
+            }
+            Self::UnsupportedDeckAnalysis {
+                card, analysis_id, ..
+            } => {
+                let mut details =
+                    ErrorDetails::new("unsupported_deck_analysis", "unsupported_capability", false);
+                details.analysis = Some(
+                    analysis_id
+                        .clone()
+                        .unwrap_or_else(|| (*card).to_ascii_lowercase()),
+                );
+                details
             }
             Self::InvalidArgument { .. } => {
                 ErrorDetails::new("invalid_argument", "input_validation", false)

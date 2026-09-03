@@ -176,6 +176,7 @@ pub(super) fn run(
         )
         .map_err(deck_plan_simulation_error)
     })?;
+    refuse_unsupported_deck_analyses(net, &plan)?;
     let mut measurements = if plan.axes().is_empty() {
         run_directives(
             py_engine,
@@ -199,6 +200,57 @@ pub(super) fn run(
 
     measurements.shrink_to_fit();
     Ok(into_report(out, measurements))
+}
+
+/// Dot-command spelling of a card this surface has no execution route for.
+fn unsupported_deck_analysis_card(analysis: &AnalysisCommand) -> Option<&'static str> {
+    match analysis {
+        AnalysisCommand::Pss(_) => Some(".PSS"),
+        AnalysisCommand::Pac(_) => Some(".PAC"),
+        AnalysisCommand::Pnoise(_) => Some(".PNOISE"),
+        AnalysisCommand::Envelope(_) => Some(".ENVELOPE"),
+        _ => None,
+    }
+}
+
+/// Typed refusal naming the card and its canonical analysis identity.
+fn unsupported_deck_analysis_error(
+    analysis: &AnalysisCommand,
+    analysis_id: Option<String>,
+) -> PyErr {
+    let card = unsupported_deck_analysis_card(analysis).unwrap_or(".<analysis>");
+    let instance = analysis_id.map(|id| format!(" ({id})")).unwrap_or_default();
+    crate::errors::not_implemented_error(format!(
+        "Engine.run has no authored route for the {card} card{instance}; \
+         call the direct periodic analysis methods instead"
+    ))
+}
+
+/// Refuse authored cards this surface cannot execute before any directive
+/// runs, so a refused deck publishes no partial result.
+fn refuse_unsupported_deck_analyses(
+    netlist: &rspice_core::netlist::Netlist,
+    plan: &rspice_core::execution::DeckPlan,
+) -> PyResult<()> {
+    let mut planned = plan
+        .analyses()
+        .iter()
+        .map(|analysis| analysis.id().tag())
+        .collect::<std::collections::VecDeque<_>>();
+    for analysis in &netlist.analyses {
+        if matches!(
+            analysis,
+            AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. } | AnalysisCommand::Four { .. }
+        ) {
+            // Run axes and `.FOUR` never occupy a planned-analysis slot.
+            continue;
+        }
+        let analysis_id = planned.pop_front();
+        if unsupported_deck_analysis_card(analysis).is_some() {
+            return Err(unsupported_deck_analysis_error(analysis, analysis_id));
+        }
+    }
+    Ok(())
 }
 
 fn run_directives(
@@ -1005,6 +1057,17 @@ fn execute(
         AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. } => {
             return Err(crate::errors::SimulationError::new_err(
                 "run-axis directives must be executed through the canonical deck materializer",
+            ));
+        }
+        AnalysisCommand::Pss(_)
+        | AnalysisCommand::Pac(_)
+        | AnalysisCommand::Pnoise(_)
+        | AnalysisCommand::Envelope(_) => {
+            // `refuse_unsupported_deck_analyses` rejects these before any
+            // directive runs; reaching here means the preflight was bypassed.
+            return Err(unsupported_deck_analysis_error(
+                analysis,
+                context.and_then(|context| context.analysis_id.clone()),
             ));
         }
         AnalysisCommand::Sensitivity {

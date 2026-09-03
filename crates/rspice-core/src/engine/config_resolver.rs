@@ -504,7 +504,7 @@ pub fn resolve_simulation_config(
     resolved
 }
 
-fn parse_integration_method_option(method: &str) -> Option<IntegrationMethod> {
+pub(crate) fn parse_integration_method_option(method: &str) -> Option<IntegrationMethod> {
     if method.eq_ignore_ascii_case("TRAP")
         || method.eq_ignore_ascii_case("TRAPEZOIDAL")
         || method.eq_ignore_ascii_case("TRAPEZOID")
