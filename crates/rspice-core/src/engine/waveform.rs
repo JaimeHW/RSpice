@@ -837,6 +837,13 @@ pub struct TransientResultCompressed {
     pub post_results: TransientPostResults,
 
     /// Analysis instance, coordinate, and topology this result came from.
+    ///
+    /// The solver entry points do not receive planning identity, so they
+    /// leave this empty rather than inventing an ordinal. A caller that
+    /// planned the run — the execution layer, or a frontend that owns the
+    /// analysis cardinality — attaches it, and
+    /// `AnalysisResultDocument::from_compressed_transient` then refuses to
+    /// publish the container under a different analysis.
     pub identity: TransientResultIdentity,
 
     /// Compression ratio achieved
@@ -979,7 +986,7 @@ impl TransientResultCompressed {
         }
         self.identity.validate()?;
         self.validate_report_policy(point_count)?;
-        self.validate_grid(point_count)?;
+        self.validate_grid()?;
         self.validate_channels(point_count)?;
         self.validate_event_traces()?;
         self.validate_worst_observation()
@@ -1041,7 +1048,7 @@ impl TransientResultCompressed {
         Ok(())
     }
 
-    fn validate_grid(&self, _point_count: usize) -> Result<(), String> {
+    fn validate_grid(&self) -> Result<(), String> {
         if self
             .time
             .windows(2)
@@ -1780,6 +1787,60 @@ mod tests {
                 .validate()
                 .expect_err("a certificate cannot claim an over-budget result")
                 .contains("utilization")
+        );
+    }
+
+    #[test]
+    fn parent_identity_is_optional_but_never_blank() {
+        let mut identified =
+            malformed_compressed_result(vec![node_channel(0, "out", values(&[0.0, 1.0, 2.0]))]);
+        assert!(identified.identity.is_empty());
+        identified.identity = TransientResultIdentity {
+            analysis: Some(
+                TransientAnalysisIdentity::new(" TRAN ", 2).expect("analysis identity normalizes"),
+            ),
+            coordinate: Some(
+                TransientCoordinateIdentity::new([3u8; 16], 1, 4, " sweep-3 ")
+                    .expect("coordinate identity normalizes"),
+            ),
+            topology_fingerprint: Some([9u8; 32]),
+        };
+        identified
+            .validate()
+            .expect("a populated identity is part of a valid container");
+        assert!(!identified.identity.is_empty());
+        let analysis = identified
+            .identity
+            .analysis
+            .as_ref()
+            .expect("analysis identity");
+        assert_eq!(analysis.kind_tag, "tran");
+        assert_eq!(analysis.tag(), "tran-003");
+        assert_eq!(
+            identified
+                .identity
+                .coordinate
+                .as_ref()
+                .expect("coordinate identity")
+                .label,
+            "sweep-3"
+        );
+
+        assert!(TransientAnalysisIdentity::new("   ", 0).is_err());
+        assert!(TransientCoordinateIdentity::new([0u8; 16], 0, 0, "  ").is_err());
+
+        let mut blanked = identified;
+        blanked
+            .identity
+            .analysis
+            .as_mut()
+            .expect("analysis identity")
+            .kind_tag = String::new();
+        assert!(
+            blanked
+                .validate()
+                .expect_err("a blank analysis kind tag is not an identity")
+                .contains("analysis kind tag")
         );
     }
 
