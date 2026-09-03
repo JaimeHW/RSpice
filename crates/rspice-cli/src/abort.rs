@@ -7,13 +7,19 @@
 //! codes: 130 for an interrupt, 124 for a timeout.
 //!
 //! The same flag is the completion latch. A run that ends under its own power
-//! claims the flag as [`COMPLETE`], which is what stops the detached timeout
-//! thread from announcing a cancellation for a run that had already finished:
-//! the timer only speaks when its own claim wins, and a claim can only win
-//! while a run is still in progress.
+//! claims the flag as [`COMPLETE`], which is what stops the timeout thread
+//! from announcing a cancellation for a run that had already finished: the
+//! timer only speaks when its own claim wins, and a claim can only win while a
+//! run is still in progress.
+//!
+//! The timer is retired as well as latched out. [`TimeoutGuard`] wakes it and
+//! joins it, so the only thread this module starts is bounded by the region it
+//! was armed for and no sleeper is left running through process teardown.
 
 use rspice_core::abort_signal::AbortSignal;
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::Duration;
 
 const NONE: u8 = 0;
 const INTERRUPT: u8 = 1;
@@ -164,37 +170,89 @@ unsafe extern "system" fn windows_console_control_handler(control_type: u32) -> 
     1
 }
 
-/// Closes the completion latch when the cancellable region ends.
+/// Latch a timer thread can wait on and its owner can release early.
+type RetireLatch = (Mutex<bool>, Condvar);
+
+/// Wait out `seconds` unless the latch is released first, then try to claim
+/// `state` for the timeout.
+///
+/// Returns whether this timer is the caller that must announce the timeout:
+/// `true` only when the deadline arrived while a run was still in progress.
+/// A retired timer, a run that finished first, and a run already stopping for
+/// Ctrl-C all return `false`, so exactly one message can ever be printed.
+fn await_deadline(state: &AtomicU8, seconds: f64, latch: &RetireLatch) -> bool {
+    let (retired, wake) = latch;
+    // A poisoned latch means the owner panicked while retiring the timer; the
+    // run is over either way, so the timer stays silent.
+    let Ok(guard) = retired.lock() else {
+        return false;
+    };
+    let Ok((guard, elapsed)) =
+        wake.wait_timeout_while(guard, Duration::from_secs_f64(seconds), |retired| !*retired)
+    else {
+        return false;
+    };
+    // Release the latch before claiming, so retiring the timer never waits on
+    // this thread's diagnostic.
+    drop(guard);
+    elapsed.timed_out() && claim(state, TIMEOUT)
+}
+
+/// The armed timer and the latch that retires it.
+struct Timer {
+    latch: Arc<RetireLatch>,
+    thread: std::thread::JoinHandle<()>,
+}
+
+/// Closes the completion latch and retires the timer when the cancellable
+/// region ends.
 ///
 /// Hold one for exactly as long as `--timeout` is allowed to cancel work.
-/// Dropping it retires the timer: a run that finishes on its own claims the
-/// shared flag, and the detached thread that wakes afterwards finds the claim
-/// refused and stays silent.
+/// Dropping it claims the shared flag, so a run that finished on its own
+/// refuses a later timeout claim, and then wakes and joins the timer thread,
+/// so no thread armed for the region outlives it.
 #[must_use = "the timeout stays armed only while its guard is alive"]
-pub struct TimeoutGuard;
+pub struct TimeoutGuard {
+    timer: Option<Timer>,
+}
 
 impl Drop for TimeoutGuard {
     fn drop(&mut self) {
         claim(&STATE, COMPLETE);
+        let Some(timer) = self.timer.take() else {
+            return;
+        };
+        let (retired, wake) = &*timer.latch;
+        if let Ok(mut retired) = retired.lock() {
+            *retired = true;
+        }
+        wake.notify_all();
+        // The timer either is waiting on the latch it was just released from
+        // or is already returning, so this join does not wait out the
+        // deadline. A panicked timer is joined just the same.
+        let _ = timer.thread.join();
     }
 }
 
 /// Arm the run timeout: after `seconds`, long-running analyses stop at the
 /// next abort check and the process exits 124.
 ///
-/// The timer thread announces the timeout only when its own claim on the
-/// shared flag wins, which can happen only while the returned guard is alive
-/// — that is, only when the deadline genuinely interrupted a run in progress.
-/// A run that finished first, or one already stopping for Ctrl-C, loses the
-/// race deliberately and produces no diagnostic.
+/// The timer announces the timeout only when its own claim on the shared flag
+/// wins, which can happen only while the returned guard is alive — that is,
+/// only when the deadline genuinely interrupted a run in progress. A run that
+/// finished first, or one already stopping for Ctrl-C, loses the race
+/// deliberately and produces no diagnostic.
 pub fn arm_timeout(seconds: f64) -> TimeoutGuard {
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_secs_f64(seconds));
-        if claim(&STATE, TIMEOUT) {
+    let latch: Arc<RetireLatch> = Arc::new((Mutex::new(false), Condvar::new()));
+    let waited = Arc::clone(&latch);
+    let thread = std::thread::spawn(move || {
+        if await_deadline(&STATE, seconds, &waited) {
             eprintln!("Timeout: simulation exceeded {seconds}s — stopping at the next safe point");
         }
     });
-    TimeoutGuard
+    TimeoutGuard {
+        timer: Some(Timer { latch, thread }),
+    }
 }
 
 #[cfg(test)]
@@ -207,8 +265,8 @@ mod tests {
         assert!(claim(&state, COMPLETE));
         assert!(
             !claim(&state, TIMEOUT),
-            "a timeout firing after the run completed must not be recorded, so the \
-             detached timer prints nothing"
+            "a timeout firing after the run completed must not be recorded, so a \
+             timer that reached its deadline first prints nothing"
         );
         assert_eq!(state.load(Ordering::SeqCst), COMPLETE);
     }
@@ -222,6 +280,81 @@ mod tests {
             "a run cancelled by its deadline must not overwrite the recorded reason"
         );
         assert_eq!(state.load(Ordering::SeqCst), TIMEOUT);
+    }
+
+    /// A deadline no test may reach, so only the retire latch can end a wait.
+    const UNREACHABLE_DEADLINE_SECONDS: f64 = 3_600.0;
+
+    fn retire(latch: &RetireLatch) {
+        let (retired, wake) = latch;
+        *retired.lock().expect("retire latch") = true;
+        wake.notify_all();
+    }
+
+    #[test]
+    fn retiring_the_timer_ends_its_wait_without_claiming_the_flag() {
+        let state = AtomicU8::new(NONE);
+        let latch: Arc<RetireLatch> = Arc::new((Mutex::new(false), Condvar::new()));
+        let waited = Arc::clone(&latch);
+        // Retire the timer before it starts waiting, exactly as a run that
+        // finishes before its deadline does.
+        retire(&latch);
+
+        assert!(
+            !await_deadline(&state, UNREACHABLE_DEADLINE_SECONDS, &waited),
+            "a retired timer must not announce a timeout"
+        );
+        assert_eq!(
+            state.load(Ordering::SeqCst),
+            NONE,
+            "a retired timer must leave the shared flag to the run that retired it"
+        );
+    }
+
+    #[test]
+    fn a_retired_timer_returns_instead_of_outliving_its_run() {
+        let state = Arc::new(AtomicU8::new(NONE));
+        let latch: Arc<RetireLatch> = Arc::new((Mutex::new(false), Condvar::new()));
+        let waited = Arc::clone(&latch);
+        let timed = Arc::clone(&state);
+        let thread = std::thread::spawn(move || {
+            await_deadline(&timed, UNREACHABLE_DEADLINE_SECONDS, &waited)
+        });
+
+        retire(&latch);
+
+        // Joining is the assertion: without the latch this thread would still
+        // be sleeping an hour from now, and the process would exit around it.
+        assert!(
+            !thread.join().expect("join the retired timer"),
+            "a retired timer must not announce a timeout"
+        );
+        assert_eq!(state.load(Ordering::SeqCst), NONE);
+    }
+
+    #[test]
+    fn an_expired_deadline_claims_the_flag_for_the_timeout() {
+        let state = AtomicU8::new(NONE);
+        let latch: Arc<RetireLatch> = Arc::new((Mutex::new(false), Condvar::new()));
+
+        assert!(
+            await_deadline(&state, 0.0, &latch),
+            "an expired deadline that wins the claim must announce the timeout"
+        );
+        assert_eq!(state.load(Ordering::SeqCst), TIMEOUT);
+    }
+
+    #[test]
+    fn an_expired_deadline_stays_silent_once_the_run_has_completed() {
+        let state = AtomicU8::new(NONE);
+        let latch: Arc<RetireLatch> = Arc::new((Mutex::new(false), Condvar::new()));
+        assert!(claim(&state, COMPLETE));
+
+        assert!(
+            !await_deadline(&state, 0.0, &latch),
+            "a deadline that expires after the run completed must print nothing"
+        );
+        assert_eq!(state.load(Ordering::SeqCst), COMPLETE);
     }
 
     #[test]
