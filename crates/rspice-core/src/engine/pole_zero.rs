@@ -386,22 +386,24 @@ impl Engine {
     ) -> Result<(), SimulationError> {
         for dev in &circuit.bsim3v3.devices {
             if dev.core.model.acnqs_mod != 0 {
-                return Err(SimulationError::Circuit(format!(
-                    "Pole-zero analysis does not yet support BSIM3 '{}' with ACNQSMOD=1; \
-                     AC-NQS is a rational charge-deficit effect and needs a hidden \
-                     charge-deficit state instead of G+sC descriptor extraction",
-                    dev.name
-                )));
+                return Err(SimulationError::unsupported_capability(
+                    "analysis.pz.device.ac_nqs",
+                    format!(
+                        "Pole-zero analysis does not yet support BSIM3 '{}' with ACNQSMOD=1; \n                         AC-NQS is a rational charge-deficit effect and needs a hidden \n                         charge-deficit state instead of G+sC descriptor extraction",
+                        dev.name
+                    ),
+                ));
             }
         }
         for dev in &circuit.bsim4v8.devices {
             if dev.core.model.acnqs_mod != 0 {
-                return Err(SimulationError::Circuit(format!(
-                    "Pole-zero analysis does not yet support BSIM4 '{}' with ACNQSMOD=1; \
-                     AC-NQS is a rational charge-deficit effect and needs a hidden \
-                     charge-deficit state instead of G+sC descriptor extraction",
-                    dev.name
-                )));
+                return Err(SimulationError::unsupported_capability(
+                    "analysis.pz.device.ac_nqs",
+                    format!(
+                        "Pole-zero analysis does not yet support BSIM4 '{}' with ACNQSMOD=1; \n                         AC-NQS is a rational charge-deficit effect and needs a hidden \n                         charge-deficit state instead of G+sC descriptor extraction",
+                        dev.name
+                    ),
+                ));
             }
         }
         Ok(())
@@ -711,8 +713,9 @@ impl Engine {
         }
 
         if !circuit.tlines.is_empty() {
-            return Err(SimulationError::Circuit(
-                "Pole-zero analysis does not yet support transmission lines".to_string(),
+            return Err(SimulationError::unsupported_capability(
+                "analysis.pz.device.transmission_line",
+                "Pole-zero analysis does not yet support transmission lines",
             ));
         }
 

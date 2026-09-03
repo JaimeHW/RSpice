@@ -494,6 +494,20 @@ pub enum ParseError {
     #[error("Syntax error at line {line}: {message}")]
     Syntax { line: usize, message: String },
 
+    /// A construct the grammar recognizes and this build declines to lower.
+    ///
+    /// Separate from [`Self::Syntax`] because the deck is not wrong: an
+    /// unsupported Xyce Y-device family or Spectre construct is a capability
+    /// boundary, and a frontend reports it as a gap rather than as an
+    /// authoring mistake. `capability` is the same stable dotted token the
+    /// engine's [`crate::UnsupportedCapabilityError`] publishes.
+    #[error("{origin}: unsupported capability [{capability}]: {detail}")]
+    UnsupportedCapability {
+        origin: NetlistSourceLocation,
+        capability: &'static str,
+        detail: String,
+    },
+
     #[error("Unknown device type: {0}")]
     UnknownDevice(String),
 

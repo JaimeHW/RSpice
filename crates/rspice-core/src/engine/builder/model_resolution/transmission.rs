@@ -290,10 +290,13 @@ pub fn validate_native_xyce_ltra_model_contract(
         || !model.real_vector_expr_params.is_empty()
         || !model.integer_vector_params.is_empty()
     {
-        return Err(SimulationError::Circuit(format!(
-            "LTRA model '{}' contains deferred, string, or vector parameters not supported by the native scalar runtime",
-            model.name
-        )));
+        return Err(SimulationError::unsupported_capability(
+            "device.ltra.model_parameter",
+            format!(
+                "LTRA model '{}' contains deferred, string, or vector parameters not supported by the native scalar runtime",
+                model.name
+            ),
+        ));
     }
 
     const SUPPORTED: &[&str] = &[
@@ -318,10 +321,13 @@ pub fn validate_native_xyce_ltra_model_contract(
     for (name, value) in &model.params {
         let authored = name.to_ascii_uppercase();
         if !SUPPORTED.contains(&authored.as_str()) {
-            return Err(SimulationError::Circuit(format!(
-                "LTRA model '{}' uses unsupported parameter '{}'",
-                model.name, name
-            )));
+            return Err(SimulationError::unsupported_capability(
+                "device.ltra.model_parameter",
+                format!(
+                    "LTRA model '{}' uses unsupported parameter '{}'",
+                    model.name, name
+                ),
+            ));
         }
         let canonical = match authored.as_str() {
             "G0" => "G".to_string(),
@@ -349,10 +355,13 @@ pub fn validate_native_xyce_ltra_model_contract(
         Some(LtraModelClass::RlcLc | LtraModelClass::Rc | LtraModelClass::ZeroLengthThrough) => {
             Ok(())
         }
-        Some(LtraModelClass::Rg) => Err(SimulationError::Circuit(format!(
-            "LTRA model '{}' is finite-length RG, whose native execution stamps are not implemented",
-            model.name
-        ))),
+        Some(LtraModelClass::Rg) => Err(SimulationError::unsupported_capability(
+            "device.ltra.rg_finite_length",
+            format!(
+                "LTRA model '{}' is finite-length RG, whose native execution stamps are not implemented",
+                model.name
+            ),
+        )),
         None => Err(SimulationError::Circuit(format!(
             "LTRA model '{}' has no classified native scalar semantics",
             model.name
@@ -446,10 +455,13 @@ fn classify_ltra_model_params(
         return Ok(LtraModelClass::Rc);
     }
 
-    Err(SimulationError::Circuit(format!(
-        "LTRA model '{}' has unsupported or ambiguous RLGC combination R={}, L={}, G={}, C={}, LEN={}; expected finite RLC/LC, RC, RG, or LEN=0 RC/RG semantics",
-        model_name, r, l, g, c, len
-    )))
+    Err(SimulationError::unsupported_capability(
+        "device.ltra.rlgc_class",
+        format!(
+            "LTRA model '{}' has unsupported or ambiguous RLGC combination R={}, L={}, G={}, C={}, LEN={}; expected finite RLC/LC, RC, RG, or LEN=0 RC/RG semantics",
+            model_name, r, l, g, c, len
+        ),
+    ))
 }
 
 fn finalize_ltra_model_params(
@@ -484,10 +496,13 @@ fn finalize_ltra_model_params(
 
     let class = classify_ltra_model_params(model_name, params)?;
     if class == LtraModelClass::Rg {
-        return Err(SimulationError::Circuit(format!(
-            "LTRA model '{}' is a finite-length RG line (R>0, G>0, L=C=0), whose native execution stamps are not implemented; only LEN=0 RG is currently supported",
-            model_name
-        )));
+        return Err(SimulationError::unsupported_capability(
+            "device.ltra.rg_finite_length",
+            format!(
+                "LTRA model '{}' is a finite-length RG line (R>0, G>0, L=C=0), whose native execution stamps are not implemented; only LEN=0 RG is currently supported",
+                model_name
+            ),
+        ));
     }
     params.ltra_class = Some(class);
     Ok(params)

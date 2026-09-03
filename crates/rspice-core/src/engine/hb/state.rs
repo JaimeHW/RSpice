@@ -304,10 +304,13 @@ impl Engine {
         } else {
             blockers.sort_unstable();
             blockers.dedup();
-            Err(SimulationError::Circuit(format!(
-                "HB Envelope continuation is unavailable because the circuit contains {}; the exact initializer currently supports only ordinary R/C elements and independent voltage/current sources",
-                blockers.join(", ")
-            )))
+            Err(SimulationError::unsupported_capability(
+                "analysis.hb.envelope.continuation",
+                format!(
+                    "HB Envelope continuation is unavailable because the circuit contains {}; the exact initializer currently supports only ordinary R/C elements and independent voltage/current sources",
+                    blockers.join(", ")
+                ),
+            ))
         }
     }
 

@@ -1796,34 +1796,45 @@ impl Engine {
                 ..
             } => {
                 if *delay != 0.0 || *damping != 0.0 {
-                    return Err(SimulationError::Circuit(format!(
-                        "periodic source '{name}' uses a delayed or damped SIN waveform"
-                    )));
+                    return Err(SimulationError::unsupported_capability(
+                        "analysis.pss.driven_source_waveform",
+                        format!("periodic source '{name}' uses a delayed or damped SIN waveform"),
+                    ));
                 }
                 *frequency
             }
             SourceSpec::Pulse { period, delay, .. } => {
                 if *delay != 0.0 || !period.is_finite() || *period <= 0.0 {
-                    return Err(SimulationError::Circuit(format!(
-                        "periodic source '{name}' requires an undelayed PULSE with a positive period"
-                    )));
+                    return Err(SimulationError::unsupported_capability(
+                        "analysis.pss.driven_source_waveform",
+                        format!(
+                            "periodic source '{name}' requires an undelayed PULSE with a positive period"
+                        ),
+                    ));
                 }
                 1.0 / *period
             }
             SourceSpec::Pwl { .. } | SourceSpec::PwlFile { .. } => {
-                return Err(SimulationError::Circuit(format!(
-                    "periodic source '{name}' uses PWL; exact PWL period authentication is unavailable"
-                )));
+                return Err(SimulationError::unsupported_capability(
+                    "analysis.pss.driven_source_waveform",
+                    format!(
+                        "periodic source '{name}' uses PWL; exact PWL period authentication is unavailable"
+                    ),
+                ));
             }
             SourceSpec::Exp { .. } => {
-                return Err(SimulationError::Circuit(format!(
-                    "periodic source '{name}' uses the non-periodic EXP waveform"
-                )));
+                return Err(SimulationError::unsupported_capability(
+                    "analysis.pss.driven_source_waveform",
+                    format!("periodic source '{name}' uses the non-periodic EXP waveform"),
+                ));
             }
             other => {
-                return Err(SimulationError::Circuit(format!(
-                    "periodic source '{name}' uses unsupported waveform {other:?}; driven PSS accepts undelayed SIN and PULSE sources"
-                )));
+                return Err(SimulationError::unsupported_capability(
+                    "analysis.pss.driven_source_waveform",
+                    format!(
+                        "periodic source '{name}' uses unsupported waveform {other:?}; driven PSS accepts undelayed SIN and PULSE sources"
+                    ),
+                ));
             }
         };
         if !source_frequency.is_finite() || source_frequency <= 0.0 {

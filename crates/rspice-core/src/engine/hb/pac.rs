@@ -270,9 +270,12 @@ impl Engine {
             return Err(HbError::UnsupportedNonlinearDevices(summary).into());
         }
         if let Some(summary) = Self::hb_periodic_mna_unsupported_summary(&circuit) {
-            return Err(SimulationError::Circuit(format!(
-                "PAC exact periodic MNA is unavailable because the circuit contains {summary}"
-            )));
+            return Err(SimulationError::unsupported_capability(
+                "analysis.pac.periodic_mna",
+                format!(
+                    "PAC exact periodic MNA is unavailable because the circuit contains {summary}"
+                ),
+            ));
         }
 
         let drive_tones = Self::hb_collect_drive_tones(&hb_config)?;

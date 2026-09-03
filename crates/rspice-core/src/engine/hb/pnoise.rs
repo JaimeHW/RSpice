@@ -628,16 +628,22 @@ impl Engine {
             return Err(HbError::UnsupportedNonlinearDevices(summary).into());
         }
         if let Some(summary) = Self::hb_periodic_mna_unsupported_summary(&circuit) {
-            return Err(SimulationError::Circuit(format!(
-                "pnoise exact periodic MNA is unavailable because the circuit contains {summary}"
-            )));
+            return Err(SimulationError::unsupported_capability(
+                "analysis.pnoise.periodic_mna",
+                format!(
+                    "pnoise exact periodic MNA is unavailable because the circuit contains {summary}"
+                ),
+            ));
         }
         let unsupported_colored = unsupported_device_colored_noise(&circuit);
         if !unsupported_colored.is_empty() {
-            return Err(SimulationError::Circuit(format!(
-                "driven pnoise requires exact cyclostationary colored-noise folding, which is not implemented for {}; set the listed noise coefficient exactly to zero to disable that mechanism",
-                unsupported_colored.join(", ")
-            )));
+            return Err(SimulationError::unsupported_capability(
+                "analysis.pnoise.colored_noise",
+                format!(
+                    "driven pnoise requires exact cyclostationary colored-noise folding, which is not implemented for {}; set the listed noise coefficient exactly to zero to disable that mechanism",
+                    unsupported_colored.join(", ")
+                ),
+            ));
         }
         let temperature = self.config.temperature;
         let physical_constants = pnoise_physical_constants(self.config.spice_dialect);

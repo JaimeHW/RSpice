@@ -3365,9 +3365,9 @@ impl Engine {
         Self::ensure_no_mixed_signal_analysis(&circuit, "SP noise analysis")?;
         Self::ensure_supported_dynamic_charges(&circuit, "SP noise")?;
         if !circuit.ekv3s.is_empty() {
-            return Err(SimulationError::Circuit(
-                "SP noise does not support the restricted EKV3 LEVEL=301 VANOISE oracle slice"
-                    .to_string(),
+            return Err(SimulationError::unsupported_capability(
+                "analysis.noise.device.ekv3_vanoise",
+                "SP noise does not support the restricted EKV3 LEVEL=301 VANOISE oracle slice",
             ));
         }
 
@@ -3697,9 +3697,12 @@ impl Engine {
         }
 
         fn reject(detail: impl std::fmt::Display) -> SimulationError {
-            SimulationError::Circuit(format!(
-                "unsupported EKV3 LEVEL=301 NOISE contract: the native VANOISE slice is validated only for the Xyce NMOS150 VANOISE fixture; {detail}"
-            ))
+            SimulationError::unsupported_capability(
+                "analysis.noise.device.ekv3_vanoise",
+                format!(
+                    "unsupported EKV3 LEVEL=301 NOISE contract: the native VANOISE slice is validated only for the Xyce NMOS150 VANOISE fixture; {detail}"
+                ),
+            )
         }
 
         fn close(actual: Value, expected: Value) -> bool {
