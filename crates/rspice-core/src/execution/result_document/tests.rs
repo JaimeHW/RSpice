@@ -2,7 +2,6 @@
 
 use num_complex::Complex64;
 
-use super::payload::*;
 use super::*;
 use crate::abort_signal::{CountingAbort, ImmediateAbort, NoAbort};
 use crate::analysis::ac::AcResult;
