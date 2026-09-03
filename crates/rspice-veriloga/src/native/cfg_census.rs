@@ -110,6 +110,9 @@ pub(super) struct OperatingPoint {
     /// interpreter refuses a slot it was not given, and every value is zero
     /// because a static evaluation has no accepted history.
     event_state_slots: usize,
+    /// Whether `@(initial_step)` is active here. See
+    /// [`OperatingPoint::with_initial_step`].
+    initial_step: bool,
 }
 
 const BOLTZMANN_OVER_ELECTRON: f64 = 1.380_649e-23 / 1.602_176_634e-19;
@@ -167,7 +170,34 @@ impl OperatingPoint {
             state: vec![0.0; state_len],
             state_flags: vec![0; state_len],
             event_state_slots,
+            initial_step: false,
         }
+    }
+
+    /// Evaluate here with `@(initial_step)` active.
+    ///
+    /// # Why a point without it is not a point at all for some models
+    ///
+    /// A compact model that maps its parameters to temperature does that work
+    /// once, in an initial block, and the body then divides by what the block
+    /// wrote. VBIC writes `tiniK = TABS + tnom` under `@(initial_step)` and the
+    /// body computes `rT = tdevK / tiniK`; with the block skipped `tiniK` is the
+    /// zero its slot was allocated with, `rT` is infinite, and
+    /// `exp(-dear * (1 - rT) / …)` with VBIC's default `dear = 0` is `exp(0 *
+    /// -inf)` — a NaN that reaches 347 of the module's 1052 variables.
+    ///
+    /// Nothing about that measures a route. Both plans read the one variable
+    /// array the shipped assignment pass fills, so a poisoned array is poisoned
+    /// for both, and every entry that loads one of those variables compares two
+    /// readings of the same NaN. It also hides the entries that *would* differ:
+    /// `deviation` cannot separate two NaNs, so they are counted as agreeing.
+    ///
+    /// Production never evaluates in this state — the first load of a device
+    /// runs its initial step — so this is not a wider operating envelope than
+    /// the model was written for. It is the one the model was written for.
+    pub(super) fn with_initial_step(mut self) -> Self {
+        self.initial_step = true;
+        self
     }
 
     fn interpreter_inputs(&self, node_count: usize, branch_count: usize) -> CfgEvalInputs<f64> {
@@ -272,6 +302,7 @@ impl OperatingPoint {
         context.multiplicity = self.multiplicity;
         context.time = self.time;
         context.analysis_type = self.analysis;
+        context.analysis_initial_step = u8::from(self.initial_step);
         context.integration_active = 0;
         let values = self.state.as_mut_ptr();
         let flags = self.state_flags.as_mut_ptr();

@@ -551,6 +551,7 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
                     state_len,
                     0,
                 )
+                .with_initial_step()
             })
             .collect();
 
@@ -854,6 +855,108 @@ fn every_refusal_class_has_a_name() {
         assert!(!class.name().is_empty());
         assert!(!class.name().contains(' '), "{:?}", class);
     }
+}
+
+/// VBIC's temperature mapping, reduced to the two statements that make an
+/// operating point without `@(initial_step)` meaningless.
+///
+/// `tiniK` is written by the initial block and divided by in the body, and the
+/// exponential's coefficient is the zero VBIC's `dear` defaults to. Skip the
+/// block and `tiniK` is its slot's zero, `rT` is infinite, and `-0.0 * -inf` is
+/// a NaN that everything downstream inherits.
+const TEMPERATURE_MAPPED_BY_AN_INITIAL_STEP: &str = r#"
+module cfg_initial_step_temperature(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real tnom = 27.0;
+  parameter real dear = 0.0;
+  parameter real g0 = 1.0e-3;
+  real tiniK;
+  real rT;
+  real g;
+  analog begin
+    @(initial_step) begin
+      tiniK = 273.15 + tnom;
+    end
+    rT = $temperature / tiniK;
+    g = g0 * exp(-dear * (1.0 - rT));
+    I(p, n) <+ V(p, n) * g;
+  end
+endmodule
+"#;
+
+/// The census's operating point has to run the model's initial step.
+///
+/// Without it a third of VBIC's variables are NaN before either plan is asked
+/// for anything — measured at 347 of 1052 — so every entry that loads one
+/// compares two readings of the same NaN, and the structural-zero check reads
+/// the shipped route's NaN as a nonzero it was supposed to evaluate to zero.
+/// This pins the reason rather than the count: the same module, at the same
+/// point, with and without the initial block.
+#[test]
+fn an_operating_point_without_the_initial_step_poisons_the_variable_array() {
+    let compiler = crate::VerilogACompiler::new(crate::CompilerOptions::default());
+    let model = compiler
+        .compile(TEMPERATURE_MAPPED_BY_AN_INITIAL_STEP)
+        .expect("compile bytecode model");
+    let artifact = compiler
+        .compile_canonical_ir(TEMPERATURE_MAPPED_BY_AN_INITIAL_STEP)
+        .expect("compile canonical IR");
+    let plan = build_model_plan_with_canonical_ir(&model, &artifact).expect("shipped plan");
+    let native = crate::native::x64::compile_model_plan(&model, &plan).expect("shipped codegen");
+
+    let parameter_defaults: Vec<Option<f64>> = artifact
+        .mir
+        .parameters
+        .iter()
+        .map(|parameter| parameter.default)
+        .collect();
+    let branch_unknowns =
+        crate::jit::plan_builder::canonical_branch_unknown_runtime_map(&model, &artifact.mir)
+            .expect("branch unknown map");
+    let storage = native.required_storage();
+    let state_len = storage
+        .state_values
+        .max(storage.state_initialized)
+        .max(storage.state_candidate_valid)
+        + 8;
+
+    let nan_count = |initial_step: bool| {
+        let mut point = OperatingPoint::new(
+            0x0005_EED1,
+            0,
+            &parameter_defaults,
+            model.num_terminals,
+            model.internal_nodes,
+            &branch_unknowns,
+            state_len,
+            0,
+        );
+        if initial_step {
+            point = point.with_initial_step();
+        }
+        let context = point.context();
+        let mut variables = vec![0.0_f64; model.num_variables + 64];
+        context.clear_runtime_error();
+        native.run_assignments(&context, variables.as_mut_ptr());
+        let _ = context.take_runtime_error();
+        variables
+            .iter()
+            .take(model.num_variables)
+            .filter(|value| value.is_nan())
+            .count()
+    };
+
+    assert!(
+        nan_count(false) > 0,
+        "without the initial step the body divides by an unwritten slot, so this module is not \
+         evaluable and the census would be comparing NaNs"
+    );
+    assert_eq!(
+        nan_count(true),
+        0,
+        "with the initial step every variable is a number"
+    );
 }
 
 /// The bound is derived from the entry's size, so it has to grow with it and
