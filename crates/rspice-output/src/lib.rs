@@ -33,7 +33,16 @@
 //! Predecessor snapshots taken by an interrupted [`AtomicArtifactSet`] commit
 //! carry [`PREDECESSOR_MARKER`] instead and are never removed automatically,
 //! because such a snapshot can be the last copy of a published result.
+//!
+//! # Qualifying the transaction
+//!
+//! "Old bytes or no bytes" is a claim about failure, so [`fault`] lets a
+//! qualification test arm one deterministic I/O or allocation failure at a
+//! named publication phase on its own thread. Nothing is armed unless a caller
+//! constructs a guard, and the seam is a thread-local read on the path that
+//! already calls `fsync`.
 
+pub mod fault;
 mod recovery;
 mod set;
 
@@ -172,7 +181,7 @@ pub struct PreparedAtomicArtifact {
 impl AtomicArtifactFile {
     /// Prepare a seekable staging file beside `destination`.
     pub fn prepare(destination: &Path) -> Result<Self, AtomicArtifactError<io::Error>> {
-        Self::prepare_impl::<io::Error, _>(destination, &mut NoFaults)
+        Self::prepare_impl::<io::Error, _>(destination, &mut AmbientFaults)
     }
 
     /// Publish the completed staging file atomically.
@@ -182,7 +191,7 @@ impl AtomicArtifactFile {
     /// [`DestinationState::PublishedDurabilityUncertain`] because replacement
     /// has already occurred at that point.
     pub fn commit(self) -> Result<(), AtomicArtifactError<io::Error>> {
-        self.commit_impl::<io::Error, _>(&mut NoFaults)
+        self.commit_impl::<io::Error, _>(&mut AmbientFaults)
     }
 
     /// Finish all fallible data flushing and synchronization without
@@ -194,7 +203,7 @@ impl AtomicArtifactFile {
     pub fn prepare_for_commit(
         self,
     ) -> Result<PreparedAtomicArtifact, AtomicArtifactError<io::Error>> {
-        self.prepare_for_commit_impl::<io::Error, _>(&mut NoFaults)
+        self.prepare_for_commit_impl::<io::Error, _>(&mut AmbientFaults)
     }
 
     pub(crate) fn prepare_for_commit_impl<E, H>(
@@ -310,7 +319,7 @@ impl AtomicArtifactFile {
 impl PreparedAtomicArtifact {
     /// Atomically replace the destination with this fully prepared artifact.
     pub fn commit(self) -> Result<(), AtomicArtifactError<io::Error>> {
-        self.commit_impl::<io::Error, _>(&mut NoFaults)
+        self.commit_impl::<io::Error, _>(&mut AmbientFaults)
     }
 
     pub(crate) fn commit_impl<E, H>(mut self, hooks: &mut H) -> Result<(), AtomicArtifactError<E>>
@@ -385,7 +394,7 @@ where
     E: std::error::Error + 'static,
     F: FnOnce(&mut dyn Write) -> Result<(), E>,
 {
-    write_atomic_impl(destination, write, &mut NoFaults)
+    write_atomic_impl(destination, write, &mut AmbientFaults)
 }
 
 /// List crash-left staging files associated with `destination`.
@@ -654,8 +663,12 @@ impl Drop for StagingCleanup {
     }
 }
 
-/// Injection points used by the crate's transactional tests. Production code
-/// always runs with [`NoFaults`], so the seam costs one inlined `Ok(())`.
+/// Injection points consulted during publication.
+///
+/// Production code runs with [`AmbientFaults`], which forwards to whatever the
+/// publishing thread armed through [`fault::ArmedFaults`] — nothing, unless a
+/// qualification test asked for a failure. The crate's own transactional tests
+/// substitute their own [`FaultHooks`] instead, so they need no ambient state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FaultPoint {
     AfterPrepare,
@@ -680,11 +693,20 @@ pub(crate) trait FaultHooks {
     fn enter_member(&mut self, _index: usize) {}
 }
 
-pub(crate) struct NoFaults;
+/// The hooks every production publication uses.
+///
+/// It reads the publishing thread's armed fault, if any. With nothing armed —
+/// the only state a shipped process is ever in — each check is one
+/// thread-local read that returns `Ok(())`.
+pub(crate) struct AmbientFaults;
 
-impl FaultHooks for NoFaults {
-    fn check(&mut self, _point: FaultPoint) -> io::Result<()> {
-        Ok(())
+impl FaultHooks for AmbientFaults {
+    fn check(&mut self, point: FaultPoint) -> io::Result<()> {
+        fault::check_armed(point)
+    }
+
+    fn enter_member(&mut self, index: usize) {
+        fault::enter_armed_member(index);
     }
 }
 

@@ -41,6 +41,17 @@ jobs:
           --exclude rspice-conformance --release
       - name: Core library unit tests (release)
         run: cargo test --locked -p rspice-core --lib --release
+      - name: Qualification baseline (release)
+        # The workspace run above already executes these targets. Naming them
+        # again buys two things a nightly needs: the counts are printed into
+        # the log rather than captured, and a drift that only appears under
+        # optimization is attributed to this step instead of to a workspace
+        # run with several hundred other tests in it. The baseline gates
+        # counts, never wall-clock, so a release profile must produce the same
+        # numbers the debug CI run does.
+        run: >-
+          cargo test --locked -p rspice-core --release
+          --test qualification_baseline --test no_panic_corpus -- --nocapture
       - name: Xyce conformance suite (release)
         # The workspace run above excludes rspice-conformance wholesale, so
         # the Xyce corpus needs its own step or it would silently vanish from
@@ -119,6 +130,23 @@ jobs:
         run: >-
           cargo test --locked -p rspice-conformance --release
           --test execution_corpora -- --nocapture --test-threads 1
+      - name: Corpus panic gate (release, full depth)
+        # Rule 2 of the engineering contract — authored input never panics —
+        # over every vendored deck rather than only the ones a reference suite
+        # has data for. Ingestion, planning, coordinate materialization and
+        # authored-output resolution run in process under `catch_unwind`; the
+        # solve stays with the subprocess-isolated regression runners, which is
+        # where a solver crash is already attributable.
+        #
+        # It is a nightly step for the same reason the corpora above are: the
+        # sweep is thousands of decks and elaborates most of them, which is
+        # minutes rather than seconds. The per-push tier gets the same claim
+        # over a deterministic slice, through `rspice-core`'s `no_panic_corpus`
+        # target. `--nocapture` so the deck and per-corpus counts reach the
+        # log; a gate that silently swept nothing must not look like a pass.
+        run: >-
+          cargo test --locked -p rspice-conformance --release
+          --test panic_gate -- --nocapture
       - name: ngspice conformance report
         # Serial test threads: each deck spawns a case-runner subprocess with
         # a hard per-case timeout; parallel threads oversubscribe the runner

@@ -153,6 +153,22 @@ jobs:
         run: cargo test --locked -p rspice-core --tests
       - name: Core library unit tests
         run: cargo test --locked -p rspice-core --lib
+      - name: Gate the qualification baseline
+        # The checked-in qualification baseline is a product artifact: what
+        # this build supports, and what it costs *in counts*. Wall-clock and
+        # resident set size are deliberately not gated — a shared hosted
+        # runner measures neither reproducibly, so a time budget here would be
+        # either noise or so loose it catches nothing. Every claim it makes is
+        # an abort-poll count, a retained-point count, a result-value count or
+        # an artifact byte count, each judged against the tolerance the
+        # baseline itself declares.
+        #
+        # The targets also run in the fast tier above; naming them here makes
+        # the gate greppable in a red build and prints the counts, which the
+        # aggregate step captures.
+        run: >-
+          cargo test --locked -p rspice-core
+          --test qualification_baseline --test no_panic_corpus -- --nocapture
       - name: Conformance suite unit tests
         # The ngspice runner's own unit tests — tolerance model, directive
         # classification, reference-table decoding — used to run as part of

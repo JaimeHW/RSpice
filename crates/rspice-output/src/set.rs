@@ -21,8 +21,8 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 use crate::{
-    AtomicArtifactError, AtomicArtifactFile, CommitOperation, DestinationState, FaultHooks,
-    FaultPoint, NoFaults, PREDECESSOR_MARKER, PreparedAtomicArtifact, create_sibling_file,
+    AmbientFaults, AtomicArtifactError, AtomicArtifactFile, CommitOperation, DestinationState,
+    FaultHooks, FaultPoint, PREDECESSOR_MARKER, PreparedAtomicArtifact, create_sibling_file,
     remove_artifact_durably, restore_artifact_durably, sync_parent_directory,
 };
 
@@ -148,7 +148,7 @@ impl StagedArtifact {
         E: std::error::Error + 'static,
         F: FnOnce(&mut dyn Write) -> Result<(), E>,
     {
-        Self::stage_impl(destination, write, &mut NoFaults)
+        Self::stage_impl(destination, write, &mut AmbientFaults)
     }
 
     /// Destination this member will replace when its set commits.
@@ -283,7 +283,7 @@ impl AtomicArtifactSet {
     /// staging file or predecessor snapshot remains. On a commit failure the
     /// error reports the failing destination and what the rollback restored.
     pub fn commit(self) -> Result<(), AtomicArtifactSetError<io::Error>> {
-        self.commit_impl(&mut NoFaults)
+        self.commit_impl(&mut AmbientFaults)
     }
 
     fn reject_duplicate(&self, destination: &Path) -> Result<(), SetMembershipError> {
@@ -699,7 +699,7 @@ mod tests {
             seed_set(&paths, preexisting);
             let manifest_path = directory.path().join("set.json");
             let mut set = AtomicArtifactSet::new();
-            stage_all(&mut set, &paths, &mut NoFaults).expect("stage members");
+            stage_all(&mut set, &paths, &mut AmbientFaults).expect("stage members");
             stage_manifest(&mut set, &manifest_path).expect("stage manifest");
             assert_eq!(set.destinations().count(), 4);
             assert_eq!(
@@ -733,7 +733,7 @@ mod tests {
 
             // Cancellation between members: the second coordinate is staged
             // and the third never runs.
-            stage_all(&mut set, &paths[..2], &mut NoFaults).expect("stage members");
+            stage_all(&mut set, &paths[..2], &mut AmbientFaults).expect("stage members");
             assert_eq!(set.destinations().count(), 2);
             drop(set);
 
@@ -779,7 +779,7 @@ mod tests {
             let paths = member_paths(&directory, 3);
             seed_set(&paths, preexisting);
             let mut set = AtomicArtifactSet::new();
-            stage_all(&mut set, &paths, &mut NoFaults).expect("stage members");
+            stage_all(&mut set, &paths, &mut AmbientFaults).expect("stage members");
 
             let error = set
                 .commit_impl(&mut InjectSetFault::new(
@@ -806,7 +806,7 @@ mod tests {
                 let paths = member_paths(&directory, 3);
                 seed_set(&paths, preexisting);
                 let mut set = AtomicArtifactSet::new();
-                stage_all(&mut set, &paths, &mut NoFaults).expect("stage members");
+                stage_all(&mut set, &paths, &mut AmbientFaults).expect("stage members");
 
                 let error = set
                     .commit_impl(&mut InjectSetFault::new(FaultPoint::Replace, Some(failing)))
@@ -831,7 +831,7 @@ mod tests {
             let paths = member_paths(&directory, 3);
             seed_set(&paths, preexisting);
             let mut set = AtomicArtifactSet::new();
-            stage_all(&mut set, &paths, &mut NoFaults).expect("stage members");
+            stage_all(&mut set, &paths, &mut AmbientFaults).expect("stage members");
 
             let error = set
                 .commit_impl(&mut InjectSetFault::new(FaultPoint::SyncParent, Some(1)))
@@ -856,7 +856,7 @@ mod tests {
             seed_set(&paths, preexisting);
             let manifest_path = directory.path().join("set.json");
             let mut set = AtomicArtifactSet::new();
-            stage_all(&mut set, &paths, &mut NoFaults).expect("stage members");
+            stage_all(&mut set, &paths, &mut AmbientFaults).expect("stage members");
             stage_manifest(&mut set, &manifest_path).expect("stage manifest");
 
             let error = set
@@ -885,7 +885,7 @@ mod tests {
         seed_set(&paths[..1], true);
         std::fs::create_dir(&paths[1]).expect("create conflicting directory destination");
         let mut set = AtomicArtifactSet::new();
-        stage_all(&mut set, &paths, &mut NoFaults).expect("stage members");
+        stage_all(&mut set, &paths, &mut AmbientFaults).expect("stage members");
 
         let error = set.commit().expect_err("directory member must fail commit");
         assert!(

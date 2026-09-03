@@ -60,6 +60,11 @@ mod hb;
 mod monte_carlo;
 mod noise;
 mod pac;
+/// Chaos coverage for the pickle-state decoders in [`state`]. The pickled
+/// state of a result is untrusted machine-written input, so the decoders that
+/// read it back get the same treatment the netlist parser gets.
+#[cfg(test)]
+mod pickle_state_chaos;
 mod projection;
 mod pss;
 mod s_parameters;
