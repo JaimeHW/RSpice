@@ -16,6 +16,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use rspice_core::abort_signal::NoAbort;
 use rspice_core::engine::{Engine, SimulationConfig, TransientCheckpointEncoding};
 use rspice_core::execution::{ANALYSIS_RESULT_DOCUMENT_SCHEMA, ANALYSIS_RESULT_DOCUMENT_VERSION};
 use rspice_core::netlist::Netlist;
@@ -163,10 +164,16 @@ fn a_saved_checkpoint_carries_the_header_its_documentation_names() {
          .END\n",
     )
     .expect("the checkpoint fixture parses");
+    // The `_with_abort` forms with `NoAbort`, because this crate is a
+    // first-party surface: rule 6 says a frontend never calls a non-abort
+    // wrapper, and "this call cannot be cancelled" is written at the call site
+    // rather than assumed.
     let (_, checkpoint) = Engine::new(SimulationConfig::default())
-        .run_tran_checkpointed(&netlist, 1.0e-6, 50.0e-9)
+        .run_tran_checkpointed_with_abort(&netlist, 1.0e-6, 50.0e-9, &NoAbort)
         .expect("the checkpoint fixture solves its first segment");
-    let text = checkpoint.to_text();
+    let text = checkpoint
+        .to_text_with_abort(&NoAbort)
+        .expect("an uncancelled checkpoint serializes");
     let header = text
         .lines()
         .next()
@@ -182,7 +189,7 @@ fn a_saved_checkpoint_carries_the_header_its_documentation_names() {
     // checkpoint and carries its own magic; both are part of the contract a
     // reader matches on.
     let packed = checkpoint
-        .to_bytes(TransientCheckpointEncoding::Packed)
+        .to_bytes_with_abort(TransientCheckpointEncoding::Packed, &NoAbort)
         .expect("the fixture packs");
     assert!(packed.starts_with(b"RSPICE-CPACK"));
 
