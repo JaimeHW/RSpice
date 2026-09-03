@@ -44,6 +44,12 @@
 //! is the estate's own criterion for two computations being the same
 //! derivative: see [`DERIVATIVE_AGREEMENT`].
 //!
+//! Either bound only decides an entry the census holds the two routes to at
+//! all. An entry nine or more orders below the largest magnitude of its own
+//! kind anywhere in the model carries no significant figures, and is measured
+//! and printed rather than asserted: see [`MATRIX_SIGNIFICANCE`]. Every
+//! per-module line says how many entries that was.
+//!
 //! `#[ignore]`d: this is release-qualification work. Run it with
 //! `--release --features native -- --ignored --nocapture`.
 
@@ -184,8 +190,9 @@ struct Tally {
     /// asserted. See [`is_grouped_noise_entry`].
     grouped_noise_entries: usize,
     grouped_noise_exact: usize,
-    /// Matrix entries nine or more orders below the largest entry of their own
-    /// row: measured and printed, not asserted. See [`ROW_SIGNIFICANCE`].
+    /// Entries nine or more orders below the largest magnitude of their own
+    /// kind anywhere in the model at that operating point: measured and
+    /// printed, not asserted. See [`MATRIX_SIGNIFICANCE`].
     insignificant: usize,
 }
 
@@ -299,8 +306,8 @@ fn run_entry(
     value
 }
 
-/// Below this share of its own matrix row, a Jacobian entry carries no
-/// significant figures.
+/// Below this share of the largest entry of its own matrix, a reading carries
+/// no significant figures.
 ///
 /// The estate's existing figure, under the estate's existing name:
 /// `tests/cfg_derivatives.rs` and [`super::cfg_census`] both call it
@@ -310,60 +317,78 @@ fn run_entry(
 /// and demanding that two independent chain rules agree about it manufactures
 /// failures rather than finding them.
 ///
-/// What is new here is only the scale it is taken against. The oracle censuses
-/// scale an entry against the residual it differentiates; this one scales it
-/// against the largest entry of its own row, which is the same judgement stated
-/// where it is dimensionally exact — a conductance nine orders below the
-/// largest conductance in its row is invisible to the solve that consumes the
-/// row, whatever the residual happens to be. The reactive matrix has no
-/// residual to scale against at all, so the row is the only scale that serves
-/// both.
-const ROW_SIGNIFICANCE: f64 = 1.0e-9;
+/// # The scale is the matrix, not the row
+///
+/// The oracle censuses scale an entry against the residual it differentiates.
+/// This one scales it against the largest magnitude of its own kind anywhere in
+/// the model at that operating point — the whole Jacobian, not one of its rows.
+///
+/// A row was the first thing tried and it is the wrong unit, for a reason the
+/// corpus produced rather than one argued in advance: `bjt505_va`'s
+/// `jacobians[21][2]` reads about `4.5e-31` on both routes, and *every* entry
+/// of row 21 is that small, so row-relative significance called it significant
+/// and the two chain rules' disagreement in its sixth figure became a failure.
+/// It is not one. A row whose largest conductance is thirty-one orders below
+/// the rest of the matrix contributes nothing to the solve that consumes it,
+/// and no linear solver can see the difference between the two readings. What
+/// makes an entry matter is its size against the matrix that is factorized,
+/// which is what this scale states.
+const MATRIX_SIGNIFICANCE: f64 = 1.0e-9;
 
-/// The largest magnitude in each matrix row at one operating point.
+/// The largest magnitude of each entry kind across the whole model at one
+/// operating point.
 #[derive(Default)]
-struct RowScales {
-    jacobians: Vec<f64>,
-    reactive_jacobians: Vec<f64>,
+struct MatrixScales {
+    stamp_values: f64,
+    jacobians: f64,
+    reactive_jacobians: f64,
+    noise_psd: f64,
+    noise_exponents: f64,
 }
 
-impl RowScales {
+impl MatrixScales {
     fn of(readings: &[(CfgPlanEntry, f64, f64)]) -> Self {
         let mut scales = Self::default();
         // Both routes' readings, because an entry one route calls large and the
         // other calls zero must not be gated away by the route that dropped it.
         for (entry, mir, cfg) in readings {
             let magnitude = mir.abs().max(cfg.abs());
-            let (row, stamp) = match entry {
-                CfgPlanEntry::Jacobian(stamp, _) => (&mut scales.jacobians, *stamp),
-                CfgPlanEntry::ReactiveJacobian(stamp, _) => {
-                    (&mut scales.reactive_jacobians, *stamp)
-                }
-                _ => continue,
-            };
-            if row.len() <= stamp {
-                row.resize(stamp + 1, 0.0);
-            }
-            row[stamp] = row[stamp].max(magnitude);
+            let slot = scales.slot(*entry);
+            *slot = f64::max(*slot, magnitude);
         }
         scales
     }
 
-    /// Whether this reading is large enough, within its own row, for the two
+    /// Each entry kind is its own matrix or vector, and each is scaled against
+    /// itself: a reactive Jacobian entry against the reactive matrix, a
+    /// residual against the residual vector. Scaling one kind against another
+    /// would compare quantities that are not even in the same units.
+    fn slot(&mut self, entry: CfgPlanEntry) -> &mut f64 {
+        match entry {
+            CfgPlanEntry::StampValue(_) => &mut self.stamp_values,
+            CfgPlanEntry::Jacobian(..) => &mut self.jacobians,
+            CfgPlanEntry::ReactiveJacobian(..) => &mut self.reactive_jacobians,
+            CfgPlanEntry::NoisePsd(_) => &mut self.noise_psd,
+            CfgPlanEntry::NoiseExponent(_) => &mut self.noise_exponents,
+        }
+    }
+
+    fn scale(&self, entry: CfgPlanEntry) -> f64 {
+        match entry {
+            CfgPlanEntry::StampValue(_) => self.stamp_values,
+            CfgPlanEntry::Jacobian(..) => self.jacobians,
+            CfgPlanEntry::ReactiveJacobian(..) => self.reactive_jacobians,
+            CfgPlanEntry::NoisePsd(_) => self.noise_psd,
+            CfgPlanEntry::NoiseExponent(_) => self.noise_exponents,
+        }
+    }
+
+    /// Whether this reading is large enough, within its own matrix, for the two
     /// routes to be held to agreeing about it.
-    ///
-    /// Always true for anything that is not a matrix entry: a residual and a
-    /// noise magnitude are the quantity itself rather than one term of a row,
-    /// so there is nothing to be insignificant against.
     fn is_significant(&self, comparison: &Comparison) -> bool {
-        let (row, stamp) = match comparison.entry {
-            CfgPlanEntry::Jacobian(stamp, _) => (&self.jacobians, stamp),
-            CfgPlanEntry::ReactiveJacobian(stamp, _) => (&self.reactive_jacobians, stamp),
-            _ => return true,
-        };
-        let scale = row.get(stamp).copied().unwrap_or(0.0);
+        let scale = self.scale(comparison.entry);
         let magnitude = comparison.mir.abs().max(comparison.cfg.abs());
-        magnitude > scale * ROW_SIGNIFICANCE
+        magnitude > scale * MATRIX_SIGNIFICANCE
     }
 }
 
@@ -520,7 +545,7 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
             };
             readings.push((entry, mir, cfg));
         }
-        let rows = RowScales::of(&readings);
+        let scales = MatrixScales::of(&readings);
 
         for (entry, mir, cfg) in readings {
             compared += 1;
@@ -555,7 +580,7 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
                 }
                 continue;
             }
-            if !rows.is_significant(&comparison) {
+            if !scales.is_significant(&comparison) {
                 tally.insignificant += 1;
                 insignificant_here += 1;
                 if comparison.deviation > insignificant_worst {
@@ -597,7 +622,8 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
 
     println!(
         "cfg-mir model={module} entries={} compared={compared} exact={exact} \
-         structural_zeros={} noise_from_differentiated={} max_deviation_over_bound={worst_ratio:.3e}{}{}{}",
+         below_significance={insignificant_here} structural_zeros={} \
+         noise_from_differentiated={} max_deviation_over_bound={worst_ratio:.3e}{}{}{}",
         positions.len(),
         cfg_plan.report.structural_zeros.len(),
         cfg_plan.report.noise_from_differentiated,
@@ -617,7 +643,7 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
     );
     if let Some(case) = insignificant_case.as_ref() {
         println!(
-            "cfg-mir model={module} insignificant_row_entries={insignificant_here} \
+            "cfg-mir model={module} below_significance={insignificant_here} \
              max_deviation={insignificant_worst:.3e} case[{}]",
             case.describe()
         );
@@ -704,7 +730,7 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
     println!(
         "cfg-mir models={} built={} refused={} entries={} comparisons={} exact={} \
          runtime_errors={} structural_zeros={} over_bound={} nonzero_structural_zeros={} \
-         grouped_noise_entries={} grouped_noise_exact={} insignificant_row_entries={}",
+         grouped_noise_entries={} grouped_noise_exact={} below_significance={}",
         tally.models,
         tally.built,
         tally.refused,
@@ -787,4 +813,48 @@ fn the_reassociation_bound_is_a_rounding_budget() {
     assert!(derivative.is_derivative());
     assert_eq!(derivative.bound(), DERIVATIVE_AGREEMENT);
     assert!(!large.is_derivative());
+}
+
+/// The significance scale is the whole matrix, and `bjt505_va` is why.
+///
+/// The figures are that module's, measured: `jacobians[21][2]` reads about
+/// `-4.5e-31` on both routes and the two chain rules disagree in its sixth
+/// figure, while the Jacobian it belongs to carries entries of order one. Every
+/// entry of row 21 is that small, so a row-relative scale called it significant
+/// and failed the module on a number no linear solver can see. A matrix-relative
+/// scale classifies it as measured, which is what it is.
+#[test]
+fn an_entry_far_below_its_matrix_is_measured_rather_than_asserted() {
+    const TINY_MIR: f64 = -4.545_131_238_293_389_5e-31;
+    const TINY_CFG: f64 = -4.545_278_222_975_802e-31;
+    let readings = [
+        (CfgPlanEntry::Jacobian(0, 0), 1.0, 1.0),
+        (CfgPlanEntry::Jacobian(21, 2), TINY_MIR, TINY_CFG),
+        (CfgPlanEntry::StampValue(0), 2.0e-30, 2.0e-30),
+    ];
+    let scales = MatrixScales::of(&readings);
+    let sized = |entry, mir: f64, cfg: f64, deviation| Comparison {
+        entry,
+        point: 0,
+        mir,
+        cfg,
+        operations: 1202,
+        deviation,
+    };
+
+    let tiny = sized(CfgPlanEntry::Jacobian(21, 2), TINY_MIR, TINY_CFG, 3.234e-5);
+    assert!(
+        tiny.deviation > tiny.bound(),
+        "the fixture has to be one the bound rejects, or it proves nothing"
+    );
+    assert!(
+        !scales.is_significant(&tiny),
+        "an entry thirty-one orders below its own Jacobian is invisible to the solve"
+    );
+    assert!(scales.is_significant(&sized(CfgPlanEntry::Jacobian(0, 0), 1.0, 1.0, 0.0)));
+
+    // Each kind is scaled against itself. This residual is as small as the
+    // Jacobian entry that was gated away, and it is still significant, because
+    // it is the largest residual there is.
+    assert!(scales.is_significant(&sized(CfgPlanEntry::StampValue(0), 2.0e-30, 2.0e-30, 0.0)));
 }

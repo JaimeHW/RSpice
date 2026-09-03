@@ -39,6 +39,19 @@
 //! refusing it would refuse thirty-four of the forty-three shipped modules and
 //! take every entry they *do* agree on down with them.
 //!
+//! # Why this module is `allow(dead_code)` outside `cfg(test)`
+//!
+//! Because it is: production compiles the postfix plan, and the only caller of
+//! this one is the CFG-versus-MIR census. That is the whole point of a
+//! non-default constructor, and the attribute is the honest statement of it
+//! rather than a silenced warning — W-F3c is what gives it a production caller,
+//! and this attribute comes off with the same commit that flips the default.
+//! Its reach is deliberately this module and the three items in
+//! [`crate::jit::plan_program`] that nothing *else* constructs; anything with a
+//! shipped caller is warned about normally.
+
+#![cfg_attr(not(test), allow(dead_code))]
+//!
 //! # The one place a program is built rather than lowered
 //!
 //! The shipped planner decides Jacobian sparsity with a conservative structural
