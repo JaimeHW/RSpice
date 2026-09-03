@@ -113,6 +113,14 @@ pub(super) struct OperatingPoint {
     /// Whether `@(initial_step)` is active here. See
     /// [`OperatingPoint::with_initial_step`].
     initial_step: bool,
+    /// Per-evaluation slots a CFG plan's prelude publishes into.
+    ///
+    /// Empty unless a census asks for them: only a plan built through
+    /// `CfgPrelude` writes any, and generated code addresses them by a
+    /// compile-time index, so a census that runs such a plan against a
+    /// zero-length array would write through a null pointer rather than get a
+    /// wrong number. See [`OperatingPoint::with_prelude_slots`].
+    prelude_slots: Vec<f64>,
 }
 
 const BOLTZMANN_OVER_ELECTRON: f64 = 1.380_649e-23 / 1.602_176_634e-19;
@@ -171,6 +179,7 @@ impl OperatingPoint {
             state_flags: vec![0; state_len],
             event_state_slots,
             initial_step: false,
+            prelude_slots: Vec::new(),
         }
     }
 
@@ -208,6 +217,17 @@ impl OperatingPoint {
     /// one has to say how many there are.
     pub(super) fn set_event_state_slots(&mut self, slots: usize) {
         self.event_state_slots = slots;
+    }
+
+    /// Give this point room for a CFG plan's prelude slots.
+    ///
+    /// Sized from the compiled model's `NativeRequiredStorage::prelude_slots`,
+    /// the same figure the device sizes `VmContext::prelude_slots` from. The
+    /// slack is the same reason every other array here has some: an unchecked
+    /// index must land inside the allocation.
+    pub(super) fn with_prelude_slots(mut self, slots: usize) -> Self {
+        self.prelude_slots = vec![f64::NAN; slots + 8];
+        self
     }
 
     pub(super) fn interpreter_inputs(
@@ -337,6 +357,10 @@ impl OperatingPoint {
         context.state_initialized_len = len;
         context.state_candidate_valid = flags;
         context.state_candidate_valid_len = len;
+        if !self.prelude_slots.is_empty() {
+            context.prelude_slots = self.prelude_slots.as_mut_ptr();
+            context.prelude_slots_len = self.prelude_slots.len();
+        }
         context
     }
 }

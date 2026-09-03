@@ -340,7 +340,14 @@ impl Comparison {
 struct Tally {
     models: usize,
     built: usize,
+    /// Modules the plan builder would not build a CFG plan for. Production
+    /// falls those back whole to the postfix plan, so a refusal costs coverage
+    /// and nothing else.
     refused: usize,
+    /// Modules whose CFG plan *built* and then would not compile. Production
+    /// raises that error after the fallback point, so the model cannot be
+    /// constructed at all: any is a failure of this census.
+    codegen_failed: usize,
     entries: usize,
     comparisons: usize,
     exact: usize,
@@ -981,14 +988,21 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
         .unwrap_or_else(|error| panic!("{module}: shipped plan: {error}"));
     let mir_native = crate::native::x64::compile_model_plan(model, &mir_plan)
         .unwrap_or_else(|error| panic!("{module}: shipped plan codegen: {error}"));
-    // A backend that will not emit the CFG plan is a finding about that plan,
-    // counted like a refusal rather than raised as a panic: aborting here would
-    // take the other forty-two modules' measurements with it.
+    // A backend that will not emit a plan the builder *built* is a different
+    // finding from a builder that refused to build one, and counting it as a
+    // refusal hid the difference: `build_model_plan_from_canonical_cfg` failing
+    // is a module production falls back whole through the `[JIT]` seam, which
+    // costs coverage and nothing else, while `compile_model_plan` failing on a
+    // built plan is a module production cannot construct at all. bsimcmg_va's
+    // 417 MB image was the second and this census read it as the first.
+    //
+    // Still not a panic — aborting here would take the other forty-two modules'
+    // measurements with it — but the run fails at the end.
     let cfg_native = match crate::native::x64::compile_model_plan(model, &cfg_plan.plan) {
         Ok(native) => native,
         Err(error) => {
-            tally.refused += 1;
-            println!("cfg-mir model={module} refused=x64-codegen detail={error}");
+            tally.codegen_failed += 1;
+            println!("cfg-mir model={module} codegen_failed=x64 detail={error}");
             return None;
         }
     };
@@ -1039,6 +1053,10 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
                 0,
             )
             .with_initial_step()
+            // The CFG plan's prelude publishes into these, and every value
+            // entry it covers returns one of them. A census that ran that
+            // plan without them would write through a null pointer.
+            .with_prelude_slots(cfg_storage.prelude_slots)
         })
         .collect();
 
@@ -1078,6 +1096,10 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
         let mut variables = vec![0.0_f64; model.num_variables + 64];
         context.clear_runtime_error();
         mir_native.run_assignments(&context, variables.as_mut_ptr());
+        // The CFG plan's own assignment pass, in the position the device runs
+        // it: after the variables are filled and before any entry is read. The
+        // shipped plan has none, and its entries do not read a slot.
+        cfg_native.run_prelude(&context, variables.as_ptr());
         let _ = context.take_runtime_error();
 
         // Read every entry on both plans first, then compare. Two passes
@@ -1345,7 +1367,7 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
         "cfg-mir total_compile_seconds={total_compile_seconds:.1} total_census_seconds={total_census_seconds:.1}"
     );
     println!(
-        "cfg-mir models={} built={} refused={} entries={} comparisons={} exact={} \
+        "cfg-mir models={} built={} refused={} codegen_failed={} entries={} comparisons={} exact={} \
          runtime_errors={} structural_zeros={} over_bound={} nonzero_structural_zeros={} \
          structural_zeros_not_evaluable={} \
          guarded_noise_entries={} guarded_noise_agreed={} guarded_noise_third_value={} \
@@ -1354,6 +1376,7 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
         tally.models,
         tally.built,
         tally.refused,
+        tally.codegen_failed,
         tally.entries,
         tally.comparisons,
         tally.exact,
@@ -1378,6 +1401,15 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
     assert!(
         tally.comparisons > 0,
         "the census must actually execute both plans"
+    );
+    // A plan the builder built and the backend would not emit is a module
+    // production would fail to construct: `compile_model_plan` raises its error
+    // after `build_default_model_plan` has already decided not to fall back.
+    // Naming it separately from a refusal is the whole point of the counter.
+    assert_eq!(
+        tally.codegen_failed, 0,
+        "a CFG plan this census built would not compile; production has no fallback left at that \
+         point"
     );
     assert!(
         failures.is_empty(),
@@ -1405,6 +1437,7 @@ fn every_refusal_class_has_a_name() {
         CfgPlanRefusal::ChargeMissing,
         CfgPlanRefusal::NoiseUnpaired,
         CfgPlanRefusal::SlotUnclaimed,
+        CfgPlanRefusal::PreludeLiveCurrent,
     ] {
         assert!(!class.name().is_empty());
         assert!(!class.name().contains(' '), "{:?}", class);

@@ -134,7 +134,8 @@ fn readings(source: &str) -> Vec<Reading> {
         &branch_unknowns,
         state_len,
         0,
-    );
+    )
+    .with_prelude_slots(cfg_storage.prelude_slots);
     let mut currents = vec![0.0_f64; model.stamp_programs.len() + 64];
     let terminals = model.num_terminals + 64;
     let mut branch_currents = vec![0.0_f64; terminals * terminals];
@@ -146,6 +147,8 @@ fn readings(source: &str) -> Vec<Reading> {
     let mut variables = vec![0.0_f64; model.num_variables + 64];
     context.clear_runtime_error();
     mir_native.run_assignments(&context, variables.as_mut_ptr());
+    // The CFG plan's own assignment pass, in the position the device runs it.
+    cfg_native.run_prelude(&context, variables.as_ptr());
     let _ = context.take_runtime_error();
 
     let mut out = Vec::new();
