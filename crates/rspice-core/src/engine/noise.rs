@@ -4562,6 +4562,7 @@ mod tests {
     use crate::Netlist;
     #[cfg(feature = "veriloga-builtins-base")]
     use crate::analysis::NoiseSourceType;
+    use crate::circuit::ResistorValues;
 
     #[cfg(feature = "veriloga-builtins-base")]
     fn generated_process(gains: &[crate::Complex64]) -> EvaluatedGeneratedNoiseProcess {
@@ -4651,9 +4652,11 @@ mod tests {
             out,
             0,
             branch,
-            0.6,
-            1.2,
-            0.6,
+            ResistorValues {
+                resistance: 0.6,
+                small_signal_resistance: 1.2,
+                reported_resistance: 0.6,
+            },
         );
         for label in [
             "noise-temperature offsets",

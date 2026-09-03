@@ -374,17 +374,19 @@ impl Bjt {
         self.impose_vbic_collapse_manifold(&mut state, vc, vb, ve, vs);
 
         let eval = self.evaluate_state(
-            vc,
-            vb,
-            ve,
-            vs,
-            state[IDX_VCX],
-            state[IDX_VCI],
-            state[IDX_VBX],
-            state[IDX_VBI],
-            state[IDX_VEI],
-            state[IDX_VBP],
-            state[IDX_VSI],
+            BjtNodeVoltages {
+                vc,
+                vb,
+                ve,
+                vs,
+                vcx: state[IDX_VCX],
+                vci: state[IDX_VCI],
+                vbx: state[IDX_VBX],
+                vbi: state[IDX_VBI],
+                vei: state[IDX_VEI],
+                vbp: state[IDX_VBP],
+                vsi: state[IDX_VSI],
+            },
             state[IDX_VRTH],
         );
         let terminal_currents = self.external_terminal_branches(eval);

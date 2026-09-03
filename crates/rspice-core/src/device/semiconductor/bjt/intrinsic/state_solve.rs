@@ -2,6 +2,25 @@
 
 use super::*;
 
+/// The node voltages one BJT evaluation is taken at: the four external
+/// terminals followed by the seven internal nodes the parasitic network adds.
+/// Eleven positional `Value`s were indistinguishable to the compiler; a
+/// transposed pair changed the answer without changing the types.
+#[derive(Clone, Copy)]
+pub(in crate::device::semiconductor::bjt) struct BjtNodeVoltages {
+    pub vc: Value,
+    pub vb: Value,
+    pub ve: Value,
+    pub vs: Value,
+    pub vcx: Value,
+    pub vci: Value,
+    pub vbx: Value,
+    pub vbi: Value,
+    pub vei: Value,
+    pub vbp: Value,
+    pub vsi: Value,
+}
+
 impl Bjt {
     pub(in crate::device::semiconductor::bjt) fn solve_intrinsic_state_with_external_continuation(
         &self,
@@ -241,18 +260,21 @@ impl Bjt {
 
     pub(in crate::device::semiconductor::bjt) fn evaluate_state_fixed_temperature(
         &self,
-        vc: Value,
-        vb: Value,
-        ve: Value,
-        vs: Value,
-        vcx: Value,
-        vci: Value,
-        vbx: Value,
-        vbi: Value,
-        vei: Value,
-        vbp: Value,
-        vsi: Value,
+        voltages: BjtNodeVoltages,
     ) -> EvaluatedBjtState {
+        let BjtNodeVoltages {
+            vc,
+            vb,
+            ve,
+            vs,
+            vcx,
+            vci,
+            vbx,
+            vbi,
+            vei,
+            vbp,
+            vsi,
+        } = voltages;
         let (linearized, intrinsic) =
             self.linearize_currents_with_branches(vbi - vei, vbx - vei, vbi - vci);
         EvaluatedBjtState {
@@ -285,22 +307,36 @@ impl Bjt {
 
     pub(in crate::device::semiconductor::bjt) fn evaluate_state(
         &self,
-        vc: Value,
-        vb: Value,
-        ve: Value,
-        vs: Value,
-        vcx: Value,
-        vci: Value,
-        vbx: Value,
-        vbi: Value,
-        vei: Value,
-        vbp: Value,
-        vsi: Value,
+        voltages: BjtNodeVoltages,
         vrth: Value,
     ) -> EvaluatedBjtState {
+        let BjtNodeVoltages {
+            vc,
+            vb,
+            ve,
+            vs,
+            vcx,
+            vci,
+            vbx,
+            vbi,
+            vei,
+            vbp,
+            vsi,
+        } = voltages;
         let mut evaluated = self.with_temperature_variant(vrth, |model| {
-            model
-                .evaluate_state_fixed_temperature(vc, vb, ve, vs, vcx, vci, vbx, vbi, vei, vbp, vsi)
+            model.evaluate_state_fixed_temperature(BjtNodeVoltages {
+                vc,
+                vb,
+                ve,
+                vs,
+                vcx,
+                vci,
+                vbx,
+                vbi,
+                vei,
+                vbp,
+                vsi,
+            })
         });
 
         if !self.self_heating_enabled() {
@@ -309,12 +345,34 @@ impl Bjt {
 
         let h = self.thermal_derivative_step(vrth);
         let plus = self.with_temperature_variant(vrth + h, |model| {
-            model
-                .evaluate_state_fixed_temperature(vc, vb, ve, vs, vcx, vci, vbx, vbi, vei, vbp, vsi)
+            model.evaluate_state_fixed_temperature(BjtNodeVoltages {
+                vc,
+                vb,
+                ve,
+                vs,
+                vcx,
+                vci,
+                vbx,
+                vbi,
+                vei,
+                vbp,
+                vsi,
+            })
         });
         let minus = self.with_temperature_variant(vrth - h, |model| {
-            model
-                .evaluate_state_fixed_temperature(vc, vb, ve, vs, vcx, vci, vbx, vbi, vei, vbp, vsi)
+            model.evaluate_state_fixed_temperature(BjtNodeVoltages {
+                vc,
+                vb,
+                ve,
+                vs,
+                vcx,
+                vci,
+                vbx,
+                vbi,
+                vei,
+                vbp,
+                vsi,
+            })
         });
         let denom = 2.0 * h;
 
@@ -688,7 +746,22 @@ impl Bjt {
             vrth = 0.0;
         }
 
-        let eval = self.evaluate_state(vc, vb, ve, vs, vcx, vci, vbx, vbi, vei, vbp, vsi, vrth);
+        let eval = self.evaluate_state(
+            BjtNodeVoltages {
+                vc,
+                vb,
+                ve,
+                vs,
+                vcx,
+                vci,
+                vbx,
+                vbi,
+                vei,
+                vbp,
+                vsi,
+            },
+            vrth,
+        );
         let (collector_d, base_d, emitter_d) = self.intrinsic_terminal_derivatives(eval.linearized);
         let collector_internal = Self::branch_from_internal(eval.linearized.ic, collector_d);
         let base_internal = Self::branch_from_internal(eval.linearized.ib, base_d);
@@ -1104,8 +1177,20 @@ impl Bjt {
     ) -> BjtReducedLinearization {
         let state = self.intrinsic_state_for_biases(vc, vb, ve, vs);
         let eval = self.evaluate_state(
-            vc, vb, ve, vs, state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp,
-            state.vsi, state.vrth,
+            BjtNodeVoltages {
+                vc,
+                vb,
+                ve,
+                vs,
+                vcx: state.vcx,
+                vci: state.vci,
+                vbx: state.vbx,
+                vbi: state.vbi,
+                vei: state.vei,
+                vbp: state.vbp,
+                vsi: state.vsi,
+            },
+            state.vrth,
         );
         self.reduced_linearization_from_state_and_eval(state, eval, vc, vb, ve, vs)
     }

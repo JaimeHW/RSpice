@@ -57,7 +57,7 @@ struct Jfet2RawTerms {
 /// self-heating term differences. They come from one accepted step and are
 /// only consistent together.
 #[derive(Clone, Copy)]
-struct Jfet2TrapState {
+pub(in crate::device::mosfet::jfet) struct Jfet2TrapState {
     vgstrap: Value,
     vgdtrap: Value,
     trap_h: Value,
@@ -457,9 +457,9 @@ impl Jfet {
                 Jfet2TrapState {
                     vgstrap: vgdtrap_int,
                     vgdtrap: vgstrap_int,
-                    trap_h: trap_h,
-                    prev_power: prev_power,
-                    power_h: power_h,
+                    trap_h,
+                    prev_power,
+                    power_h,
                 },
             );
             (
@@ -480,9 +480,9 @@ impl Jfet {
                 Jfet2TrapState {
                     vgstrap: vgstrap_int,
                     vgdtrap: vgdtrap_int,
-                    trap_h: trap_h,
-                    prev_power: prev_power,
-                    power_h: power_h,
+                    trap_h,
+                    prev_power,
+                    power_h,
                 },
             );
             (
@@ -526,11 +526,11 @@ impl Jfet {
             vgd,
             self.analysis_temperature(),
             Jfet2TrapState {
-                vgstrap: vgstrap,
-                vgdtrap: vgdtrap,
-                trap_h: trap_h,
-                prev_power: prev_power,
-                power_h: power_h,
+                vgstrap,
+                vgdtrap,
+                trap_h,
+                prev_power,
+                power_h,
             },
         );
         (vgstrap, vgdtrap, terms.power)
@@ -559,11 +559,11 @@ impl Jfet {
             vgd,
             self.analysis_temperature(),
             Jfet2TrapState {
-                vgstrap: vgstrap,
-                vgdtrap: vgdtrap,
-                trap_h: trap_h,
-                prev_power: prev_power,
-                power_h: power_h,
+                vgstrap,
+                vgdtrap,
+                trap_h,
+                prev_power,
+                power_h,
             },
         );
 

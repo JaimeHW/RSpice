@@ -10,6 +10,11 @@ mod fft;
 mod post_results;
 use super::{Engine, SimulationError, SpiceDialect, TransientPostResults, TransientResult};
 use crate::abort_signal::{AbortSignal, NoAbort};
+// Only the unit tests below construct these records directly; the
+// production paths in this module receive them already built.
+use crate::circuit::SolutionDependentCompanionStep;
+#[cfg(test)]
+use crate::device::DistributedRlgc;
 use crate::device::semiconductor::{
     BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM, BJT_INTERNAL_STATE_DIM, BjtChargeBranch,
     BjtChargeSnapshot,
@@ -13128,7 +13133,13 @@ D1 D 0 DMOD
 
         let mut txl_circuit = crate::circuit::CircuitData::new();
         let mut txl_line = scalar_line("TTXL");
-        assert!(txl_line.enable_txl_runtime(12.45, 8.972e-9, 0.0, 0.468e-12, 16.0));
+        assert!(txl_line.enable_txl_runtime(DistributedRlgc {
+            r: 12.45,
+            l: 8.972e-9,
+            g: 0.0,
+            c: 0.468e-12,
+            len: 16.0
+        }));
         txl_circuit.tlines.push(txl_line);
         assert!(!Engine::should_enable_nonlinear_source_ramp_cap(
             &txl_circuit,
@@ -14016,10 +14027,12 @@ D1 D 0 DMOD
                 &mut matrix,
                 &mut rhs,
                 &rejected,
-                1.0e-9,
-                1.0e-9,
-                &CompanionCoefficients::backward_euler(),
-                num_nodes,
+                SolutionDependentCompanionStep {
+                    time: 1.0e-9,
+                    dt: 1.0e-9,
+                    coeff: &CompanionCoefficients::backward_euler(),
+                    num_nodes,
+                },
             )
             .expect("rejected trial stamps");
         assert_ne!(

@@ -6,6 +6,10 @@
 use super::{Engine, JfetLevel2Model, SimulationError, SpiceDialect, extract_dc_value_with_limits};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::circuit::SourceExcitation;
+use crate::circuit::{ResistorValues, SolutionDependentCapacitorSpec};
+use crate::device::DistributedRlgc;
+use crate::device::controlled::VoltageControlledNodes;
+use crate::device::passive::CoupledWinding;
 
 /// A model parameter the deck left as text: its name and the unresolved
 /// expression or string literal that follows it.
@@ -3421,9 +3425,11 @@ fn add_generated_xspice_auto_bridge_resistor(
             np,
             nn,
             branch,
-            resistance,
-            small_signal_resistance,
-            resolved.reported_resistance,
+            ResistorValues {
+                resistance,
+                small_signal_resistance,
+                reported_resistance: resolved.reported_resistance,
+            },
         );
         if let Some(temp) = instance_param(instance_params, &["TEMP"]) {
             let temp_k = crate::constants::celsius_to_kelvin(temp);
@@ -3455,9 +3461,11 @@ fn add_generated_xspice_auto_bridge_resistor(
             element.name.clone(),
             np,
             nn,
-            resistance,
-            small_signal_resistance,
-            resolved.reported_resistance,
+            ResistorValues {
+                resistance,
+                small_signal_resistance,
+                reported_resistance: resolved.reported_resistance,
+            },
         );
         if let Some(temp) = instance_param(instance_params, &["TEMP"]) {
             let temp_k = crate::constants::celsius_to_kelvin(temp);
@@ -4982,9 +4990,11 @@ impl Engine {
                             np,
                             nn,
                             branch,
-                            resistance,
-                            small_signal_resistance,
-                            resolved.reported_resistance,
+                            ResistorValues {
+                                resistance,
+                                small_signal_resistance,
+                                reported_resistance: resolved.reported_resistance,
+                            },
                         );
                         if let Some(temp) = instance_param(instance_params, &["TEMP"]) {
                             let temp_k = crate::constants::celsius_to_kelvin(temp);
@@ -5020,9 +5030,11 @@ impl Engine {
                         element.name.clone(),
                         np,
                         nn,
-                        resistance,
-                        small_signal_resistance,
-                        resolved.reported_resistance,
+                        ResistorValues {
+                            resistance,
+                            small_signal_resistance,
+                            reported_resistance: resolved.reported_resistance,
+                        },
                     );
                     if self.config.spice_dialect == SpiceDialect::Xyce {
                         circuit.record_xyce_topology_device(
@@ -5120,9 +5132,11 @@ impl Engine {
                                 element.name.clone(),
                                 np,
                                 nn,
-                                scale,
-                                evaluator,
-                                ic,
+                                SolutionDependentCapacitorSpec {
+                                    capacitance: scale,
+                                    value_expression: evaluator,
+                                    ic,
+                                },
                                 branch_ordinal,
                             );
                         } else {
@@ -7028,9 +7042,17 @@ impl Engine {
                     let cp = circuit.get_or_create_node(&control_nodes.0);
                     let cn = circuit.get_or_create_node(&control_nodes.1);
                     let branch = circuit.allocate_branch_named(&element.name);
-                    circuit
-                        .vcvs
-                        .add(element.name.clone(), np, nn, cp, cn, branch, *gain);
+                    circuit.vcvs.add(
+                        element.name.clone(),
+                        VoltageControlledNodes {
+                            node_pos: np,
+                            node_neg: nn,
+                            ctrl_pos: cp,
+                            ctrl_neg: cn,
+                        },
+                        branch,
+                        *gain,
+                    );
                 }
                 ElementKind::Vccs {
                     transconductance,
@@ -7052,10 +7074,12 @@ impl Engine {
                     )?;
                     circuit.vccs.add(
                         element.name.clone(),
-                        np,
-                        nn,
-                        cp,
-                        cn,
+                        VoltageControlledNodes {
+                            node_pos: np,
+                            node_neg: nn,
+                            ctrl_pos: cp,
+                            ctrl_neg: cn,
+                        },
                         *transconductance * multiplicity,
                     );
                 }
@@ -7915,7 +7939,7 @@ impl Engine {
                             && let (Some(r), Some(l), Some(g), Some(c), Some(len)) =
                                 (params.r, params.l, params.g, params.c, params.len)
                         {
-                            tline.enable_txl_runtime(r, l, g, c, len)
+                            tline.enable_txl_runtime(DistributedRlgc { r, l, g, c, len })
                         } else {
                             false
                         };
@@ -7944,11 +7968,7 @@ impl Engine {
                             let r = params.r.unwrap_or(0.0);
                             let g = params.g.unwrap_or(0.0);
                             tline.set_distributed_rlgc_with_compaction(
-                                r,
-                                l,
-                                g,
-                                c,
-                                len,
+                                DistributedRlgc { r, l, g, c, len },
                                 compact_reltol,
                                 compact_abstol,
                             );
@@ -8563,12 +8583,16 @@ impl Engine {
                     let (i, j) = (indices[a], indices[b]);
                     let mut device = crate::device::CoupledInductorPair::new(
                         coupling.name.clone(),
-                        circuit.inductors.node_pos[i],
-                        circuit.inductors.node_neg[i],
-                        circuit.inductors.inductances[i],
-                        circuit.inductors.node_pos[j],
-                        circuit.inductors.node_neg[j],
-                        circuit.inductors.inductances[j],
+                        CoupledWinding {
+                            node_pos: circuit.inductors.node_pos[i],
+                            node_neg: circuit.inductors.node_neg[i],
+                            inductance: circuit.inductors.inductances[i],
+                        },
+                        CoupledWinding {
+                            node_pos: circuit.inductors.node_pos[j],
+                            node_neg: circuit.inductors.node_neg[j],
+                            inductance: circuit.inductors.inductances[j],
+                        },
                         coupling.coefficient,
                     );
                     device.set_initial_currents(

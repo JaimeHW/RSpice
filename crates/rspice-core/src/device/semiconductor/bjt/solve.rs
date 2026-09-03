@@ -321,8 +321,20 @@ impl Bjt {
         let solve_vbp = self.vbic_solves_vbp();
 
         let eval = self.evaluate_state(
-            vc, vb, ve, vs, state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp,
-            state.vsi, state.vrth,
+            BjtNodeVoltages {
+                vc,
+                vb,
+                ve,
+                vs,
+                vcx: state.vcx,
+                vci: state.vci,
+                vbx: state.vbx,
+                vbi: state.vbi,
+                vei: state.vei,
+                vbp: state.vbp,
+                vsi: state.vsi,
+            },
+            state.vrth,
         );
         let (collector_d, base_d, emitter_d) = self.intrinsic_terminal_derivatives(eval.linearized);
         let collector_internal = Self::branch_from_internal(eval.linearized.ic, collector_d);
@@ -651,8 +663,20 @@ impl Bjt {
 
         let state = self.intrinsic_state_from_internal_vector(internal);
         let eval = self.evaluate_state(
-            vc, vb, ve, vs, state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp,
-            state.vsi, state.vrth,
+            BjtNodeVoltages {
+                vc,
+                vb,
+                ve,
+                vs,
+                vcx: state.vcx,
+                vci: state.vci,
+                vbx: state.vbx,
+                vbi: state.vbi,
+                vei: state.vei,
+                vbp: state.vbp,
+                vsi: state.vsi,
+            },
+            state.vrth,
         );
         self.thermal_power_branch(eval, [vc, vb, ve, vs], internal)
             .current
@@ -684,8 +708,20 @@ impl Bjt {
         ];
         let state = self.intrinsic_state_from_internal_vector(static_internal);
         let eval = self.evaluate_state(
-            vc, vb, ve, vs, state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp,
-            state.vsi, state.vrth,
+            BjtNodeVoltages {
+                vc,
+                vb,
+                ve,
+                vs,
+                vcx: state.vcx,
+                vci: state.vci,
+                vbx: state.vbx,
+                vbi: state.vbi,
+                vei: state.vei,
+                vbp: state.vbp,
+                vsi: state.vsi,
+            },
+            state.vrth,
         );
         let static_row = Self::sub_branches(
             self.thermal_sink_branch(state.vrth),
@@ -750,7 +786,22 @@ impl Bjt {
         internal: [Value; INTERNAL_DIM],
     ) -> [BranchLinearization; Self::VBIC_CONVERGENCE_BRANCH_COUNT] {
         let [vcx, vci, vbx, vbi, vei, vbp, vsi, vrth] = internal;
-        let eval = self.evaluate_state(0.0, 0.0, 0.0, 0.0, vcx, vci, vbx, vbi, vei, vbp, vsi, vrth);
+        let eval = self.evaluate_state(
+            BjtNodeVoltages {
+                vc: 0.0,
+                vb: 0.0,
+                ve: 0.0,
+                vs: 0.0,
+                vcx,
+                vci,
+                vbx,
+                vbi,
+                vei,
+                vbp,
+                vsi,
+            },
+            vrth,
+        );
         [
             eval.ibe, eval.ibep, eval.iciei, eval.ibc, eval.irci, eval.irbi, eval.irbp, eval.ibcp,
             eval.iccp, eval.ibex,
@@ -767,7 +818,22 @@ impl Bjt {
     ) -> VbicTransientConvergenceState {
         let [vcx, vci, vbx, vbi, vei, vbp, vsi, vrth, _vxf1, _vxf2] =
             snapshot.reduction.internal_voltages;
-        let eval = self.evaluate_state(vc, vb, ve, vs, vcx, vci, vbx, vbi, vei, vbp, vsi, vrth);
+        let eval = self.evaluate_state(
+            BjtNodeVoltages {
+                vc,
+                vb,
+                ve,
+                vs,
+                vcx,
+                vci,
+                vbx,
+                vbi,
+                vei,
+                vbp,
+                vsi,
+            },
+            vrth,
+        );
         let delay_branches = self.vbic_delay_static_branches(&snapshot.reduction);
 
         let mut currents = [0.0; VBIC_TRANSIENT_CONVERGENCE_BRANCH_COUNT];

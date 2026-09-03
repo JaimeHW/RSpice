@@ -233,6 +233,17 @@ pub struct Resistors {
     pub thermal: Vec<Option<ThermalResistorState>>,
 }
 
+/// The three resistances a resistor carries: the value the DC/transient stamp
+/// uses, the value small-signal analyses linearize around, and the value
+/// `.op`/`.print` reports. They diverge for thermal and behavioural resistors,
+/// so passing them as three bare `Value`s invites a silent transposition.
+#[derive(Clone, Copy)]
+pub struct ResistorValues {
+    pub resistance: Value,
+    pub small_signal_resistance: Value,
+    pub reported_resistance: Value,
+}
+
 impl Resistors {
     pub fn new() -> Self {
         Self::default()
@@ -254,9 +265,11 @@ impl Resistors {
             name,
             node_pos,
             node_neg,
-            resistance,
-            small_signal_resistance,
-            resistance,
+            ResistorValues {
+                resistance,
+                small_signal_resistance,
+                reported_resistance: resistance,
+            },
         );
     }
 
@@ -268,10 +281,13 @@ impl Resistors {
         name: String,
         node_pos: NodeId,
         node_neg: NodeId,
-        resistance: Value,
-        small_signal_resistance: Value,
-        reported_resistance: Value,
+        values: ResistorValues,
     ) {
+        let ResistorValues {
+            resistance,
+            small_signal_resistance,
+            reported_resistance,
+        } = values;
         self.names.push(name);
         self.stamps.push(TwoTerminalStamp::new(node_pos, node_neg));
         self.conductances.push(1.0 / resistance);
@@ -463,9 +479,11 @@ impl ResistorBranches {
             node_pos,
             node_neg,
             branch_idx,
-            resistance,
-            small_signal_resistance,
-            resistance,
+            ResistorValues {
+                resistance,
+                small_signal_resistance,
+                reported_resistance: resistance,
+            },
         );
     }
 
@@ -475,10 +493,13 @@ impl ResistorBranches {
         node_pos: NodeId,
         node_neg: NodeId,
         branch_idx: NodeId,
-        resistance: Value,
-        small_signal_resistance: Value,
-        reported_resistance: Value,
+        values: ResistorValues,
     ) {
+        let ResistorValues {
+            resistance,
+            small_signal_resistance,
+            reported_resistance,
+        } = values;
         self.names.push(name);
         self.node_pos.push(node_pos);
         self.node_neg.push(node_neg);
@@ -727,6 +748,23 @@ pub struct Capacitors {
     ic_branch_csc_indices: Vec<[Option<CscIndex>; 5]>,
 }
 
+/// A solution-dependent capacitor as the netlist declares it: the constant
+/// term, the expression evaluated against the solution each iteration, and the
+/// initial condition.
+pub(crate) struct SolutionDependentCapacitorSpec {
+    pub capacitance: Value,
+    pub value_expression: SolutionDependentCapacitor,
+    pub ic: Value,
+}
+
+/// The step a solution-dependent companion stamp is written for.
+pub struct SolutionDependentCompanionStep<'a> {
+    pub time: Value,
+    pub dt: Value,
+    pub coeff: &'a CompanionCoefficients,
+    pub num_nodes: usize,
+}
+
 impl Capacitors {
     pub fn new() -> Self {
         Self::default()
@@ -812,11 +850,14 @@ impl Capacitors {
         name: String,
         node_pos: NodeId,
         node_neg: NodeId,
-        capacitance: Value,
-        value_expression: SolutionDependentCapacitor,
-        ic: Value,
+        spec: SolutionDependentCapacitorSpec,
         branch_ordinal: Option<NodeId>,
     ) {
+        let SolutionDependentCapacitorSpec {
+            capacitance,
+            value_expression,
+            ic,
+        } = spec;
         match branch_ordinal {
             Some(branch_ordinal) => {
                 self.add_with_ic_branch(name, node_pos, node_neg, capacitance, ic, branch_ordinal)
@@ -1052,11 +1093,14 @@ impl Capacitors {
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
         solution: &[Value],
-        time: Value,
-        dt: Value,
-        coeff: &CompanionCoefficients,
-        num_nodes: usize,
+        step: SolutionDependentCompanionStep<'_>,
     ) -> Result<(), String> {
+        let SolutionDependentCompanionStep {
+            time,
+            dt,
+            coeff,
+            num_nodes,
+        } = step;
         if !dt.is_finite() || dt <= 0.0 {
             return Err(format!(
                 "solution-dependent capacitor companion requires a finite positive dt, got {dt}"

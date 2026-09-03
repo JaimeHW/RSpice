@@ -251,7 +251,7 @@ fn charge_companion_folds_body_charge_linearization_into_source_rhs() {
             ag0,
             SoiCompanionCurrents {
                 cqg: 0.0,
-                cqb: cqb,
+                cqb,
                 cqd: 0.0,
                 cqe: 0.0,
                 cqth: 0.0,

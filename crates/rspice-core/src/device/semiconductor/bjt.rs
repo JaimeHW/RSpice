@@ -8,6 +8,8 @@ use crate::solver::{CscIndex, StaticMatrix};
 use crate::{NodeId, Value};
 use std::cell::{Cell, RefCell};
 
+use intrinsic::BjtNodeVoltages;
+
 mod dynamic;
 mod intrinsic;
 mod mna;
@@ -2395,8 +2397,20 @@ impl NonlinearDevice for Bjt {
         }
         self.eval_anchor = anchor;
         let eval = self.evaluate_state(
-            vc, vb, ve, vs, state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp,
-            state.vsi, state.vrth,
+            BjtNodeVoltages {
+                vc,
+                vb,
+                ve,
+                vs,
+                vcx: state.vcx,
+                vci: state.vci,
+                vbx: state.vbx,
+                vbi: state.vbi,
+                vei: state.vei,
+                vbp: state.vbp,
+                vsi: state.vsi,
+            },
+            state.vrth,
         );
         let reduced = self.reduced_linearization_from_state_and_eval(state, eval, vc, vb, ve, vs);
         let terminal_currents = self.external_terminal_branches(eval);

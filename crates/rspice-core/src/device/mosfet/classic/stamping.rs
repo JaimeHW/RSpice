@@ -441,12 +441,12 @@ impl Mosfet {
             matrix,
             rhs,
             ClassicMosDirectOperatingPoint {
-                eval_vds: eval_vds,
-                eval_vbs: eval_vbs,
-                gm: gm,
-                gds: gds,
-                gmb: gmb,
-                id_eq: id_eq,
+                eval_vds,
+                eval_vbs,
+                gm,
+                gds,
+                gmb,
+                id_eq,
             },
             cache_matches,
         );
@@ -878,10 +878,10 @@ impl Mosfet {
             ClassicMosDirectOperatingPoint {
                 eval_vds: vds,
                 eval_vbs: vbs,
-                gm: gm,
-                gds: gds,
-                gmb: gmb,
-                id_eq: id_eq,
+                gm,
+                gds,
+                gmb,
+                id_eq,
             },
             cache_matches,
         );

@@ -428,8 +428,8 @@ impl Jfet {
                 v_int,
                 rg.max(0.0),
                 HfetGateDiodePair {
-                    is1: is1,
-                    is2: is2,
+                    is1,
+                    is2,
                     m1: m1.max(1e-12),
                     m2: m2.max(1e-12),
                 },

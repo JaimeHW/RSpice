@@ -1149,10 +1149,10 @@ impl EkvMosfet {
             name,
             MosType::Nmos,
             MosTerminals {
-                drain: drain,
-                gate: gate,
-                source: source,
-                bulk: bulk,
+                drain,
+                gate,
+                source,
+                bulk,
             },
         )
     }
@@ -1168,10 +1168,10 @@ impl EkvMosfet {
             name,
             MosType::Pmos,
             MosTerminals {
-                drain: drain,
-                gate: gate,
-                source: source,
-                bulk: bulk,
+                drain,
+                gate,
+                source,
+                bulk,
             },
         )
     }
@@ -1193,10 +1193,10 @@ impl EkvMosfet {
         Self::with_setup(
             name,
             MosTerminals {
-                drain: drain,
-                gate: gate,
-                source: source,
-                bulk: bulk,
+                drain,
+                gate,
+                source,
+                bulk,
             },
             setup,
             300.15,
@@ -1221,10 +1221,10 @@ impl EkvMosfet {
         Ok(Self::with_setup(
             name,
             MosTerminals {
-                drain: drain,
-                gate: gate,
-                source: source,
-                bulk: bulk,
+                drain,
+                gate,
+                source,
+                bulk,
             },
             setup,
             circuit_temp_k,

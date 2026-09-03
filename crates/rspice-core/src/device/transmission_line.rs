@@ -53,7 +53,7 @@ use distributed::{
     DistributedRcKernel, DistributedRlcKernel, distributed_rc_coefficients,
     distributed_rlc_coefficients, distributed_rlc_max_safe_step,
 };
-pub use line::TransmissionLine;
+pub use line::{DistributedRlgc, TransmissionLine};
 pub(crate) use line::{LtraRgTwoPort, TransmissionLineCheckpoint};
 pub use lossy::LossyTransmissionLine;
 pub(crate) use response::TlineTransientResponse;

@@ -7,6 +7,7 @@
 
 use super::state::MosfetCompanionBiasSource;
 use super::*;
+use crate::circuit::XyceCoreCompanionMode;
 
 #[cfg(feature = "parallel")]
 const PARALLEL_CLASSIC_MOS_THRESHOLD: usize = 2_048;
@@ -1487,10 +1488,12 @@ impl Engine {
                 matrix,
                 rhs,
                 solution,
-                time,
-                dt,
-                &companion_coeff,
-                num_nodes,
+                SolutionDependentCompanionStep {
+                    time,
+                    dt,
+                    coeff: &companion_coeff,
+                    num_nodes,
+                },
             )
             .map_err(SimulationError::Circuit)?;
         circuit.stamp_transient_inductor_companions(matrix, rhs, dt, &companion_coeff, num_nodes);
@@ -1505,18 +1508,20 @@ impl Engine {
             solution,
             dt,
             &companion_coeff,
-            ctx.xyce_one_step,
-            ctx.xyce_one_step_order2,
-            // Keep the Core carry advancement coupled to a refreshed
-            // candidate. Static/cached probes must remain pure.  The transient
-            // Newton loop stamps the corrected candidate once as its RHS and
-            // then stamps that same point again to build the next Jacobian;
-            // reusing the cached endpoint for the latter is the equivalent of
-            // Xyce's loadDAEMatrices call, which does not run
-            // MutIndNonLin2::updatePrimaryState a second time.
-            evaluation_mode
-                == crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited
-                && refresh_nonlinear,
+            XyceCoreCompanionMode {
+                one_step: ctx.xyce_one_step,
+                one_step_order2: ctx.xyce_one_step_order2,
+                // Keep the Core carry advancement coupled to a refreshed
+                // candidate. Static/cached probes must remain pure.  The
+                // transient Newton loop stamps the corrected candidate once as
+                // its RHS and then stamps that same point again to build the
+                // next Jacobian; reusing the cached endpoint for the latter is
+                // the equivalent of Xyce's loadDAEMatrices call, which does not
+                // run MutIndNonLin2::updatePrimaryState a second time.
+                advance_magvar_update: evaluation_mode
+                    == crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited
+                    && refresh_nonlinear,
+            },
         );
         circuit.stamp_coupled_inductor_pairs_transient(matrix, rhs, dt, &companion_coeff);
         circuit.stamp_multi_winding_transformers_transient(matrix, rhs, dt, &companion_coeff);

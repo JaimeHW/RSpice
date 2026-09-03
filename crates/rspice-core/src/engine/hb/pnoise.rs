@@ -13,7 +13,11 @@
 use super::*;
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::HbSolverState;
+// Only the unit tests below construct these records directly; the
+// production paths in this module receive them already built.
 use crate::analysis::harmonic_balance::{HbConfig, PeriodicAcExcitation, PeriodicNoiseSource};
+#[cfg(test)]
+use crate::circuit::ResistorValues;
 
 /// Result of periodic noise analysis.
 #[derive(Debug, Clone)]
@@ -1034,9 +1038,11 @@ mod publication_tests {
             out,
             0,
             branch,
-            0.6,
-            1.2,
-            0.6,
+            ResistorValues {
+                resistance: 0.6,
+                small_signal_resistance: 1.2,
+                reported_resistance: 0.6,
+            },
         );
         for label in [
             "noise-temperature offsets",

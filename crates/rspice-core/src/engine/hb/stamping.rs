@@ -1,4 +1,8 @@
 use super::*;
+// Only the unit tests below construct these records directly; the
+// production paths in this module receive them already built.
+#[cfg(test)]
+use crate::device::passive::CoupledWinding;
 
 #[derive(Debug, Clone, Copy)]
 enum PeriodicMnaRegistration {
@@ -1818,12 +1822,16 @@ mod tests {
             branch2 + 1,
             CoupledInductorPair::new(
                 "Kbad".to_string(),
-                primary,
-                0,
-                100.0e-6,
-                secondary,
-                0,
-                25.0e-6,
+                CoupledWinding {
+                    node_pos: primary,
+                    node_neg: 0,
+                    inductance: 100.0e-6,
+                },
+                CoupledWinding {
+                    node_pos: secondary,
+                    node_neg: 0,
+                    inductance: 25.0e-6,
+                },
                 0.8,
             ),
         );

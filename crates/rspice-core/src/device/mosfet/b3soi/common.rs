@@ -12,7 +12,7 @@ use std::collections::HashMap;
 /// if all five come from the same step, so they travel as one record rather
 /// than five interchangeable `Value`s.
 #[derive(Clone, Copy)]
-pub(crate) struct SoiCompanionCurrents {
+pub struct SoiCompanionCurrents {
     pub cqg: Value,
     pub cqb: Value,
     pub cqd: Value,

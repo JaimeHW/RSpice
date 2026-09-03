@@ -1198,9 +1198,9 @@ fn ekv3_intrinsic_currents(
 
     let nq = nq(
         Ekv3ChargeState {
-            psi_p: psi_p,
-            sqrt_psi_p: sqrt_psi_p,
-            qs: qs,
+            psi_p,
+            sqrt_psi_p,
+            qs,
             qd: qdp,
         },
         dpd,
@@ -1236,8 +1236,8 @@ fn ekv3_intrinsic_currents(
     let qd_charge = qx(psi_p, nq, qdp, qs, powqs_qdp2, powqsqdpp1_2, inv_dqmip1);
     let qg_charge = qg(
         Ekv3GateChargeTerms {
-            psi_p: psi_p,
-            qs: qs,
+            psi_p,
+            qs,
             qd: qdp,
             powqs_qd2: powqs_qdp2,
             powqsqd1_2: powqsqdpp1_2,

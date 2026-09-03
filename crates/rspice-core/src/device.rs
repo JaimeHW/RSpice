@@ -80,7 +80,7 @@ pub(crate) use transmission_line::{
     DISTRIBUTED_RLC_COMPACT_ABSTOL_DEFAULT, DISTRIBUTED_RLC_COMPACT_RELTOL_DEFAULT, LtraRgTwoPort,
     TransmissionLineCheckpoint,
 };
-pub use transmission_line::{LossyTransmissionLine, TransmissionLine};
+pub use transmission_line::{DistributedRlgc, LossyTransmissionLine, TransmissionLine};
 pub(crate) use transmission_line::{TlineTransientResponse, TxlTransientStamp};
 
 use crate::Value;

@@ -6,7 +6,7 @@
 //! stamping so hysteresis state reaches the MNA coefficients.
 
 use super::*;
-use crate::device::passive::XyceCoreTrial;
+use crate::device::passive::{XyceCoreStep, XyceCoreTrial};
 
 #[inline]
 fn node_voltage(solution: &[Value], node_pos: NodeId, node_neg: NodeId) -> Value {
@@ -21,6 +21,17 @@ fn node_voltage(solution: &[Value], node_pos: NodeId, node_neg: NodeId) -> Value
         solution.get(node_neg - 1).copied().unwrap_or(0.0)
     };
     pos - neg
+}
+
+/// How the Xyce core companion stamp treats the step it is writing: whether
+/// the integrator is in its one-step mode, whether that step is second order,
+/// and whether the magnetization variable may advance. The three booleans are
+/// read together and are easy to transpose as bare arguments.
+#[derive(Clone, Copy)]
+pub struct XyceCoreCompanionMode {
+    pub one_step: bool,
+    pub one_step_order2: bool,
+    pub advance_magvar_update: bool,
 }
 
 impl CircuitData {
@@ -247,10 +258,13 @@ impl CircuitData {
         solution: &[Value],
         dt: Value,
         coeff: &CompanionCoefficients,
-        one_step: bool,
-        one_step_order2: bool,
-        advance_magvar_update: bool,
+        mode: XyceCoreCompanionMode,
     ) {
+        let XyceCoreCompanionMode {
+            one_step,
+            one_step_order2,
+            advance_magvar_update,
+        } = mode;
         // This status belongs to the current Newton assembly only.  Any
         // constitutive failure below must make the candidate non-converged;
         // do not leave the generic inductor companion as an accidental
@@ -368,11 +382,13 @@ impl CircuitData {
                     binding
                         .device
                         .xyce_core_level1_trial_at_magnetization_and_rate(
-                            trial_happ,
-                            trial_happ - old_happ,
-                            trial_voltage,
-                            dt,
-                            one_step_order2,
+                            XyceCoreStep {
+                                happ: trial_happ,
+                                delta_happ: trial_happ - old_happ,
+                                voltage: trial_voltage,
+                                dt,
+                                one_step_order2,
+                            },
                             hidden_m,
                             hidden_rate,
                         )?
@@ -791,11 +807,13 @@ impl CircuitData {
                 group
                     .device
                     .xyce_core_level1_trial_at_magnetization_and_rate(
-                        happ,
-                        delta_happ,
-                        first_voltage,
-                        dt,
-                        one_step_order2,
+                        XyceCoreStep {
+                            happ,
+                            delta_happ,
+                            voltage: first_voltage,
+                            dt,
+                            one_step_order2,
+                        },
                         hidden_m,
                         hidden_rate,
                     )
@@ -1575,12 +1593,14 @@ impl CircuitData {
                 None
             };
             group.device.commit_xyce_core_group_solution(
-                happ,
-                happ - previous_happ,
-                first_voltage,
+                XyceCoreStep {
+                    happ,
+                    delta_happ: happ - previous_happ,
+                    voltage: first_voltage,
+                    dt,
+                    one_step_order2,
+                },
                 hidden_state,
-                dt,
-                one_step_order2,
                 raw_ampere_turns,
             );
         }

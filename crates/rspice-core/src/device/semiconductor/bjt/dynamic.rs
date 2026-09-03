@@ -771,8 +771,20 @@ impl Bjt {
         ];
         let state = self.intrinsic_state_from_internal_vector(static_internal);
         let eval = self.evaluate_state(
-            vc, vb, ve, vs, state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp,
-            state.vsi, state.vrth,
+            BjtNodeVoltages {
+                vc,
+                vb,
+                ve,
+                vs,
+                vcx: state.vcx,
+                vci: state.vci,
+                vbx: state.vbx,
+                vbi: state.vbi,
+                vei: state.vei,
+                vbp: state.vbp,
+                vsi: state.vsi,
+            },
+            state.vrth,
         );
         let base = self.reduced_linearization_from_state_and_eval(state, eval, vc, vb, ve, vs);
         let mut reduction = self.dynamic_reduction_template(base);
@@ -959,8 +971,20 @@ impl Bjt {
 
         let state = self.intrinsic_state_for_biases(vc, vb, ve, vs);
         let eval = self.evaluate_state(
-            vc, vb, ve, vs, state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp,
-            state.vsi, state.vrth,
+            BjtNodeVoltages {
+                vc,
+                vb,
+                ve,
+                vs,
+                vcx: state.vcx,
+                vci: state.vci,
+                vbx: state.vbx,
+                vbi: state.vbi,
+                vei: state.vei,
+                vbp: state.vbp,
+                vsi: state.vsi,
+            },
+            state.vrth,
         );
         let terminal = self.external_terminal_branches(eval);
         [

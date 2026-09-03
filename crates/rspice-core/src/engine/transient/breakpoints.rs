@@ -1,6 +1,10 @@
 //! Source and transmission-line breakpoint scheduling helpers.
 
 use super::*;
+// Only the unit tests below construct these records directly; the
+// production paths in this module receive them already built.
+#[cfg(test)]
+use crate::device::DistributedRlgc;
 
 impl Engine {
     #[inline]
@@ -1513,7 +1517,13 @@ mod tests {
 
         let mut txl_line =
             crate::device::TransmissionLine::new("TTXL".to_string(), 3, 0, 4, 0, 50.0, 4.0e-9);
-        assert!(txl_line.enable_txl_runtime(12.45, 8.972e-9, 0.0, 0.468e-12, 16.0));
+        assert!(txl_line.enable_txl_runtime(DistributedRlgc {
+            r: 12.45,
+            l: 8.972e-9,
+            g: 0.0,
+            c: 0.468e-12,
+            len: 16.0
+        }));
         circuit.tlines.push(txl_line);
 
         let mut ltra_line =
