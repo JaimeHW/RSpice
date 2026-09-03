@@ -7,6 +7,20 @@
 //! those dependencies against the flattened circuit namespace before any
 //! topology reduction or device stamping occurs.
 
+// Plan rule 2: no authored-input panic. Every index, name and shape this layer
+// reads comes from a deck, so an unchecked access here is a crash a user can
+// author. A proven invariant keeps its `expect` under a function-scope allow
+// that names the test constructing the boundary case; everything else returns
+// a typed error. Clippy's in-test allowances (crates/rspice-core/clippy.toml)
+// keep the denial off the tests' own preconditions.
+#![deny(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unreachable,
+    clippy::unwrap_used
+)]
+
 use super::{
     AnalysisCommand, Element, ElementKind, FftAnalysis, FftOutput, Flattener, FlattenerConfig,
     MeasureStatement, Netlist, NetlistSourceLocation, ParseError, ParseWithAbortError,
@@ -592,7 +606,9 @@ fn retain_authored_dependency_spelling(
     semantic
         .into_iter()
         .map(|dependency| {
-            let matched = authored[authored_index..]
+            let matched = authored
+                .get(authored_index..)
+                .unwrap_or_default()
                 .iter()
                 .position(|candidate| {
                     candidate.kind == dependency.kind
@@ -607,7 +623,9 @@ fn retain_authored_dependency_spelling(
                 return dependency;
             };
             authored_index = index + 1;
-            let authored = &authored[index];
+            let Some(authored) = authored.get(index) else {
+                return dependency;
+            };
             OutputSymbolDependency {
                 operator: authored.operator.clone(),
                 symbol: authored.symbol.clone(),
@@ -984,11 +1002,10 @@ fn first_xyce_ddx_issue_in_source(
     let mut index = 0usize;
     while index < bytes.len() {
         poll_parse_abort(abort, index)?;
-        if bytes[index] == b'"' {
-            let delimiter = bytes[index];
+        if let Some(delimiter @ b'"') = byte(bytes, index) {
             index += 1;
             while index < bytes.len()
-                && (bytes[index] != delimiter || is_backslash_escaped(bytes, index))
+                && (byte(bytes, index) != Some(delimiter) || is_backslash_escaped(bytes, index))
             {
                 poll_parse_abort(abort, index)?;
                 index += 1;
@@ -996,14 +1013,15 @@ fn first_xyce_ddx_issue_in_source(
             index = index.saturating_add(1);
             continue;
         }
-        if !(bytes[index] as char).is_ascii_alphabetic() {
+        if !byte(bytes, index).is_some_and(|value| (value as char).is_ascii_alphabetic()) {
             index += 1;
             continue;
         }
         let start = index;
         index += 1;
         while index < bytes.len()
-            && ((bytes[index] as char).is_ascii_alphanumeric() || bytes[index] == b'_')
+            && (byte(bytes, index).is_some_and(|value| (value as char).is_ascii_alphanumeric())
+                || byte(bytes, index) == Some(b'_'))
         {
             poll_parse_abort(abort, index)?;
             index += 1;
@@ -1012,11 +1030,13 @@ fn first_xyce_ddx_issue_in_source(
             continue;
         }
         let mut open = index;
-        while open < bytes.len() && (bytes[open] as char).is_ascii_whitespace() {
+        while open < bytes.len()
+            && byte(bytes, open).is_some_and(|value| (value as char).is_ascii_whitespace())
+        {
             poll_parse_abort(abort, open)?;
             open += 1;
         }
-        if open == bytes.len() || bytes[open] != b'(' {
+        if open == bytes.len() || byte(bytes, open) != Some(b'(') {
             continue;
         }
         let Some(close) = matching_output_parenthesis_with_abort(bytes, open, abort)? else {
@@ -1977,17 +1997,23 @@ fn collect_interface_node_aliases_impl_with_limits(
                 depth: 0,
             }];
             while !frames.is_empty() {
-                let frame_index = frames.len() - 1;
-                if frames[frame_index].next_index >= frames[frame_index].elements.len() {
+                let Some(top) = frames.last_mut() else {
+                    break;
+                };
+                if top.next_index >= top.elements.len() {
                     frames.pop();
                     continue;
                 }
-                let element_index = frames[frame_index].next_index;
-                frames[frame_index].next_index += 1;
+                let element_index = top.next_index;
+                top.next_index += 1;
                 poll_parse_abort(abort, self.traversal_steps)?;
                 self.traversal_steps = self.traversal_steps.saturating_add(1);
-                let frame = &frames[frame_index];
-                let element = &frame.elements[element_index];
+                let Some(frame) = frames.last() else {
+                    break;
+                };
+                let Some(element) = frame.elements.get(element_index) else {
+                    continue;
+                };
                 crate::resource::ResourceLimitError::ensure(
                     crate::resource::ResourceKind::HierarchyDepth,
                     frame.depth,
@@ -2050,7 +2076,11 @@ fn collect_interface_node_aliases_impl_with_limits(
                     .iter()
                     .position(|name| name == &canonical_subcircuit)
                 {
-                    let mut chain = frame.active_definitions[start..].to_vec();
+                    let mut chain = frame
+                        .active_definitions
+                        .get(start..)
+                        .unwrap_or_default()
+                        .to_vec();
                     chain.push(canonical_subcircuit);
                     return Err(ParseError::Syntax {
                         line: 0,
@@ -2181,28 +2211,36 @@ fn resolved_alias_exists(
 }
 
 fn hierarchy_pattern_matches(pattern: &str, candidate: &str) -> bool {
-    let pattern = pattern.chars().collect::<Vec<_>>();
     let candidate = candidate.chars().collect::<Vec<_>>();
+    // `reachable[i]` is true when the pattern consumed so far can end just
+    // before `candidate[i]`; the trailing slot is the full-match position.
     let mut reachable = vec![false; candidate.len() + 1];
-    reachable[0] = true;
-    for token in pattern {
+    let Some(first) = reachable.first_mut() else {
+        return false;
+    };
+    *first = true;
+    for token in pattern.chars() {
         let mut next = vec![false; candidate.len() + 1];
         if token == '*' {
             let mut active = false;
-            for index in 0..=candidate.len() {
-                active |= reachable[index];
-                next[index] = active;
+            for (slot, reached) in next.iter_mut().zip(&reachable) {
+                active |= *reached;
+                *slot = active;
             }
         } else {
-            for index in 0..candidate.len() {
-                if reachable[index] && (token == '?' || token == candidate[index]) {
-                    next[index + 1] = true;
+            for ((reached, expected), slot) in reachable
+                .iter()
+                .zip(&candidate)
+                .zip(next.iter_mut().skip(1))
+            {
+                if *reached && (token == '?' || token == *expected) {
+                    *slot = true;
                 }
             }
         }
         reachable = next;
     }
-    reachable[candidate.len()]
+    reachable.last().copied().unwrap_or(false)
 }
 
 /// Extract recognized circuit accessors without interpreting arithmetic.
@@ -2219,15 +2257,13 @@ fn extract_output_expressions(source: &str) -> Vec<String> {
     let bytes = source.as_bytes();
     let mut expressions = Vec::new();
     let mut index = 0usize;
-    while index < bytes.len() {
-        let delimiter = bytes[index];
+    while let Some(delimiter) = byte(bytes, index) {
         if delimiter == b'{' {
             let start = index + 1;
             let mut depth = 1usize;
             let mut quote = None;
             index += 1;
-            while index < bytes.len() {
-                let byte = bytes[index];
+            while let Some(byte) = byte(bytes, index) {
                 if let Some(active) = quote {
                     if byte == active && !is_backslash_escaped(bytes, index) {
                         quote = None;
@@ -2258,7 +2294,7 @@ fn extract_output_expressions(source: &str) -> Vec<String> {
             let start = index + 1;
             index += 1;
             while index < bytes.len()
-                && (bytes[index] != delimiter || is_backslash_escaped(bytes, index))
+                && (byte(bytes, index) != Some(delimiter) || is_backslash_escaped(bytes, index))
             {
                 index += 1;
             }
@@ -2305,11 +2341,10 @@ fn protect_xyce_output_operands(
         if index.is_multiple_of(64) && abort.is_aborted() {
             return Err(OutputOperandProtectionError::Aborted);
         }
-        if matches!(bytes[index], b'\'' | b'"') {
-            let delimiter = bytes[index];
+        if let Some(delimiter @ (b'\'' | b'"')) = byte(bytes, index) {
             index += 1;
             while index < bytes.len()
-                && (bytes[index] != delimiter || is_backslash_escaped(bytes, index))
+                && (byte(bytes, index) != Some(delimiter) || is_backslash_escaped(bytes, index))
             {
                 if index.is_multiple_of(64) && abort.is_aborted() {
                     return Err(OutputOperandProtectionError::Aborted);
@@ -2319,23 +2354,29 @@ fn protect_xyce_output_operands(
             index = index.saturating_add(1);
             continue;
         }
-        if !(bytes[index] as char).is_ascii_alphabetic() {
+        if !byte(bytes, index).is_some_and(|value| (value as char).is_ascii_alphabetic()) {
             index += 1;
             continue;
         }
         let start = index;
         index += 1;
         while index < bytes.len()
-            && ((bytes[index] as char).is_ascii_alphanumeric() || bytes[index] == b'_')
+            && (byte(bytes, index).is_some_and(|value| (value as char).is_ascii_alphanumeric())
+                || byte(bytes, index) == Some(b'_'))
         {
             index += 1;
         }
         let operator = source[start..index].to_ascii_uppercase();
         let mut open = index;
-        while open < bytes.len() && (bytes[open] as char).is_ascii_whitespace() {
+        while open < bytes.len()
+            && byte(bytes, open).is_some_and(|value| (value as char).is_ascii_whitespace())
+        {
             open += 1;
         }
-        if open < bytes.len() && bytes[open] == b'(' && xyce_output_operand_operator(&operator) {
+        if open < bytes.len()
+            && byte(bytes, open) == Some(b'(')
+            && xyce_output_operand_operator(&operator)
+        {
             let close = match matching_output_parenthesis_with_abort(bytes, open, abort) {
                 Ok(Some(close)) => close,
                 Ok(None) => {
@@ -2348,7 +2389,16 @@ fn protect_xyce_output_operands(
                 Err(ParseWithAbortError::Aborted) => {
                     return Err(OutputOperandProtectionError::Aborted);
                 }
-                Err(ParseWithAbortError::Parse(_)) => unreachable!("parenthesis scan cannot parse"),
+                // `matching_output_parenthesis_with_abort` only scans for a
+                // balanced ')' and reports a resource limit; report whatever it
+                // says rather than asserting it cannot speak.
+                Err(ParseWithAbortError::Parse(error)) => {
+                    return Err(OutputOperandProtectionError::Invalid(
+                        OutputExpressionIssue::Syntax {
+                            detail: error.to_string(),
+                        },
+                    ));
+                }
             };
             validate_xyce_output_accessor(&operator, &source[open + 1..close], analysis)?;
             protected.push_str(&source[copied_through..start]);
@@ -2365,9 +2415,11 @@ fn protect_xyce_output_operands(
             copied_through = index;
             continue;
         }
-        if index < bytes.len() && bytes[index] == b':' {
+        if index < bytes.len() && byte(bytes, index) == Some(b':') {
             let mut end = index + 1;
-            while end < bytes.len() && is_output_parameter_char(bytes[end] as char) {
+            while end < bytes.len()
+                && byte(bytes, end).is_some_and(|value| is_output_parameter_char(value as char))
+            {
                 end += 1;
             }
             let token = &source[start..end];
@@ -2708,8 +2760,8 @@ fn strict_output_validation_expression(
                     continue;
                 }
                 tasks.push(Task::Static(")"));
-                for index in (0..args.len()).rev() {
-                    tasks.push(Task::Expression(&args[index]));
+                for (index, argument) in args.iter().enumerate().rev() {
+                    tasks.push(Task::Expression(argument));
                     if index != 0 {
                         tasks.push(Task::Static(","));
                     }
@@ -2820,10 +2872,21 @@ fn is_output_parameter_char(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || matches!(ch, '_' | '$' | '.' | ':' | '!' | '#' | '[' | ']')
 }
 
+/// The byte at `index`, or `None` past the end.
+///
+/// The scanners in this module advance an explicit cursor and read it a line
+/// after testing it against the length. Reading through `get` keeps that bound
+/// the compiler's business rather than the reader's, which is what plan rule 2
+/// asks of a layer that parses authored output expressions.
+#[inline]
+fn byte(bytes: &[u8], index: usize) -> Option<u8> {
+    bytes.get(index).copied()
+}
+
 fn is_backslash_escaped(bytes: &[u8], index: usize) -> bool {
     let mut preceding = 0usize;
     let mut cursor = index;
-    while cursor != 0 && bytes[cursor - 1] == b'\\' {
+    while cursor != 0 && byte(bytes, cursor - 1) == Some(b'\\') {
         preceding += 1;
         cursor -= 1;
     }
@@ -2844,10 +2907,12 @@ fn extract_output_dependencies_with_context(
     let mut dependencies = Vec::new();
     let mut index = 0usize;
     while index < bytes.len() {
-        if bytes[index] == b'@' {
+        if byte(bytes, index) == Some(b'@') {
             let start = index + 1;
             let mut end = start;
-            while end < bytes.len() && is_symbol_char(bytes[end] as char) {
+            while end < bytes.len()
+                && byte(bytes, end).is_some_and(|value| is_symbol_char(value as char))
+            {
                 end += 1;
             }
             // Device-parameter probes belong to parameter metadata
@@ -2855,23 +2920,26 @@ fn extract_output_dependencies_with_context(
             index = end.max(index + 1);
             continue;
         }
-        if !(bytes[index] as char).is_ascii_alphabetic() {
+        if !byte(bytes, index).is_some_and(|value| (value as char).is_ascii_alphabetic()) {
             index += 1;
             continue;
         }
         let operator_start = index;
         index += 1;
         while index < bytes.len()
-            && ((bytes[index] as char).is_ascii_alphanumeric() || bytes[index] == b'_')
+            && (byte(bytes, index).is_some_and(|value| (value as char).is_ascii_alphanumeric())
+                || byte(bytes, index) == Some(b'_'))
         {
             index += 1;
         }
         let operator = source[operator_start..index].to_ascii_uppercase();
         let mut open = index;
-        while open < bytes.len() && (bytes[open] as char).is_ascii_whitespace() {
+        while open < bytes.len()
+            && byte(bytes, open).is_some_and(|value| (value as char).is_ascii_whitespace())
+        {
             open += 1;
         }
-        if open >= bytes.len() || bytes[open] != b'(' {
+        if open >= bytes.len() || byte(bytes, open) != Some(b'(') {
             continue;
         }
         let Some(close) = matching_parenthesis(bytes, open) else {
@@ -2879,7 +2947,11 @@ fn extract_output_dependencies_with_context(
         };
         let args = split_top_level_args(&source[open + 1..close]);
         let first_new_dependency = dependencies.len();
-        let expression = inherited_expression_context || expression_context[operator_start];
+        let expression = inherited_expression_context
+            || expression_context
+                .get(operator_start)
+                .copied()
+                .unwrap_or(false);
         // `IF(device)` is a valid direct Xyce lead-current request, while
         // `IF(condition, then, else)` inside an authored expression is the
         // expression builtin and must be traversed recursively.
@@ -2908,7 +2980,7 @@ fn extract_output_dependencies_with_context(
             }
             _ => {}
         }
-        for dependency in &mut dependencies[first_new_dependency..] {
+        for dependency in dependencies.iter_mut().skip(first_new_dependency) {
             dependency.expression = expression;
         }
         // Continue inside the argument list as well, so expressions nested in
@@ -2943,16 +3015,18 @@ fn push_dependency(
     let mut parts = authored.split_whitespace();
     let first = parts.next();
     let second = parts.next();
-    let preserve_legacy_branch = operator == "I"
-        && first.is_some()
-        && second.is_some_and(|part| part.eq_ignore_ascii_case("BRANCH"))
-        && parts.next().is_none();
-    let symbol = if preserve_legacy_branch {
-        format!(
-            "{} {}",
-            first.expect("checked above"),
-            second.expect("checked above")
-        )
+    let legacy_branch = match (first, second) {
+        (Some(device), Some(branch))
+            if operator == "I"
+                && branch.eq_ignore_ascii_case("BRANCH")
+                && parts.next().is_none() =>
+        {
+            Some((device, branch))
+        }
+        _ => None,
+    };
+    let symbol = if let Some((device, branch)) = legacy_branch {
+        format!("{device} {branch}")
     } else {
         authored.split_whitespace().collect::<String>()
     };
@@ -2971,8 +3045,8 @@ fn output_expression_context_by_byte(source: &str) -> Vec<bool> {
     let mut braces = 0usize;
     let mut single_quote = false;
     let mut double_quote = false;
-    for (index, byte) in source.bytes().enumerate() {
-        context[index] = braces != 0 || single_quote || double_quote;
+    for (slot, byte) in context.iter_mut().zip(source.bytes()) {
+        *slot = braces != 0 || single_quote || double_quote;
         match byte {
             b'{' if !single_quote && !double_quote => braces += 1,
             b'}' if !single_quote && !double_quote => braces = braces.saturating_sub(1),
@@ -2981,7 +3055,9 @@ fn output_expression_context_by_byte(source: &str) -> Vec<bool> {
             _ => {}
         }
     }
-    context[source.len()] = braces != 0 || single_quote || double_quote;
+    if let Some(last) = context.last_mut() {
+        *last = braces != 0 || single_quote || double_quote;
+    }
     context
 }
 

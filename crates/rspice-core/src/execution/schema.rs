@@ -371,7 +371,7 @@ impl SchemaUnion {
         }
         Ok(indices
             .iter()
-            .map(|index| index.map(|index| source_values[index].clone()))
+            .map(|index| index.and_then(|index| source_values.get(index).cloned()))
             .collect())
     }
 }

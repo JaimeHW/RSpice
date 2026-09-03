@@ -290,7 +290,7 @@ const fn adapter_attached_fft() -> SurfaceCapability {
 ///
 /// Every constructor is deliberately visible in source: unsupported cells are
 /// declarations, never a wildcard/default inferred by the renderer.
-pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
+pub const ANALYSIS_CAPABILITY_MATRIX: [AnalysisResultCapability; 20] = [
     AnalysisResultCapability {
         result: AnalysisResultKind::OperatingPoint,
         cli: cli_mapped_axes(),
@@ -518,7 +518,7 @@ const WASM_LOGIC_SAMPLES: &str = "descriptors, state/strength samples and validi
 
 /// Signal-descriptor adapter coverage, kept beside result coverage so adding a
 /// `SignalKind` cannot silently inherit a frontend default.
-pub const SIGNAL_CAPABILITY_MATRIX: &[SignalCapability] = &[
+pub const SIGNAL_CAPABILITY_MATRIX: [SignalCapability; 5] = [
     SignalCapability {
         signal: SignalKind::Voltage,
         cli: MappingStatus::Mapped,

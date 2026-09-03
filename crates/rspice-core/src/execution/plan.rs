@@ -330,7 +330,10 @@ impl RunAxis {
             }
         }
         if kind == AxisKind::Data {
-            let expected = values[0].data_binding_names().unwrap_or_default();
+            let expected = values
+                .first()
+                .and_then(RunAxisValue::data_binding_names)
+                .unwrap_or_default();
             if values
                 .iter()
                 .skip(1)
@@ -412,7 +415,11 @@ impl RunAxis {
         }
         match self.kind {
             AxisKind::Alter => BTreeSet::new(),
-            AxisKind::Data => self.values[0].data_binding_names().unwrap_or_default(),
+            AxisKind::Data => self
+                .values
+                .first()
+                .and_then(RunAxisValue::data_binding_names)
+                .unwrap_or_default(),
             AxisKind::Step => [self.name.to_ascii_lowercase()].into_iter().collect(),
             AxisKind::Temperature => ["temperature".to_string()].into_iter().collect(),
         }
@@ -590,10 +597,12 @@ impl PlannedPostProcess {
     ///
     /// Planning refuses a post-process with no parent, so this is always
     /// present.
+    // Proven invariant: `plan_post_processes` is the only constructor of a
+    // `PostProcessAnalysis` and binds the upstream transient before building
+    // one, and the field is private. `every_four_operand_gets_a_stable_identity_bound_to_its_transient`
+    // constructs the boundary case and reads this parent back.
+    #[allow(clippy::expect_used)]
     pub fn parent(&self) -> AnalysisInstanceId {
-        // `plan_post_processes` binds every post-process to a transient before
-        // it is constructed, and the field is private, so the parent cannot be
-        // absent here.
         self.analysis
             .request
             .upstream
