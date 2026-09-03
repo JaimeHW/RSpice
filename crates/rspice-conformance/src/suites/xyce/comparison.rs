@@ -1032,26 +1032,31 @@ impl XyceTestRunner {
         locked_time_grid: bool,
     ) -> Result<Vec<XyceValueMismatch>, String> {
         self.compare_step_tran_runs_with_print(
-            plan,
+            &XyceStepTranComparison {
+                plan: plan,
+                step_runs: step_runs,
+                abort: abort,
+                locked_time_grid: locked_time_grid,
+            },
             plan.require_print("stepped transient comparison")?,
-            step_runs,
             step_references,
-            abort,
-            locked_time_grid,
             true,
         )
     }
 
     pub(super) fn compare_step_tran_runs_with_print(
         &self,
-        plan: &XyceStaticTranPlan,
+        comparison: &XyceStepTranComparison<'_>,
         print: &XycePrintRequest,
-        step_runs: &[XyceStepRun],
         step_references: &[XycePrnTable],
-        abort: &dyn AbortSignal,
-        locked_time_grid: bool,
         use_plan_comparison_mode: bool,
     ) -> Result<Vec<XyceValueMismatch>, String> {
+        let XyceStepTranComparison {
+            plan,
+            step_runs,
+            abort,
+            locked_time_grid,
+        } = *comparison;
         let uses_integrated_rms =
             use_plan_comparison_mode && plan.comparison_mode.uses_integrated_rms_verifier();
         if uses_integrated_rms && locked_time_grid {
@@ -1190,11 +1195,14 @@ impl XyceTestRunner {
 
     pub(super) fn compare_step_tran_side_outputs(
         &self,
-        plan: &XyceStaticTranPlan,
-        step_runs: &[XyceStepRun],
-        abort: &dyn AbortSignal,
-        locked_time_grid: bool,
+        comparison: &XyceStepTranComparison<'_>,
     ) -> Result<Vec<XyceValueMismatch>, String> {
+        let XyceStepTranComparison {
+            plan,
+            step_runs,
+            abort,
+            locked_time_grid,
+        } = *comparison;
         if plan.output_override {
             return Ok(Vec::new());
         }
@@ -1221,12 +1229,14 @@ impl XyceTestRunner {
                 probes: request.probes,
             };
             let mut mismatches = self.compare_step_tran_runs_with_print(
-                plan,
+                &XyceStepTranComparison {
+                    plan: plan,
+                    step_runs: step_runs,
+                    abort: abort,
+                    locked_time_grid: locked_time_grid,
+                },
                 &print,
-                step_runs,
                 &step_references,
-                abort,
-                locked_time_grid,
                 false,
             )?;
             for mismatch in &mut mismatches {
@@ -3712,22 +3722,26 @@ impl XyceTestRunner {
         let evaluations = self.evaluate_dc_sensitivity_batches(plan, batches, start)?;
         let mut mismatches = self.compare_dc_sensitivity_table(
             plan,
-            &plan.reference_path,
-            plan.reference_format,
+            &XyceSensitivityReference {
+                path: &plan.reference_path,
+                format: plan.reference_format,
+                side_file: None,
+            },
             &plan.print,
             plan.no_index,
             &evaluations,
-            None,
         )?;
         for side in &plan.side_outputs {
             let mut side_mismatches = self.compare_dc_sensitivity_table(
                 plan,
-                &side.reference_path,
-                side.reference_format,
+                &XyceSensitivityReference {
+                    path: &side.reference_path,
+                    format: side.reference_format,
+                    side_file: Some(&side.file),
+                },
                 &side.print,
                 side.no_index,
                 &evaluations,
-                Some(&side.file),
             )?;
             mismatches.append(&mut side_mismatches);
             if mismatches.len() >= self.config.max_mismatches {
@@ -3741,13 +3755,16 @@ impl XyceTestRunner {
     pub(super) fn compare_dc_sensitivity_table(
         &self,
         plan: &XyceStaticDcSensitivityPlan,
-        reference_path: &Path,
-        reference_format: XyceDcSensitivityReferenceFormat,
+        artifact: &XyceSensitivityReference<'_>,
         print: &XycePrintRequest,
         no_index: bool,
         evaluations: &[XyceDcSensitivityEvaluation],
-        side_file: Option<&str>,
     ) -> Result<Vec<XyceValueMismatch>, String> {
+        let XyceSensitivityReference {
+            path: reference_path,
+            format: reference_format,
+            side_file,
+        } = *artifact;
         let reference = match reference_format {
             XyceDcSensitivityReferenceFormat::Prn => Self::parse_prn_file(reference_path)?,
             XyceDcSensitivityReferenceFormat::Csv => Self::parse_csv_file(reference_path)?,
@@ -4540,7 +4557,15 @@ impl XyceTestRunner {
         results: &[rspice_core::analysis::NoiseResult],
     ) -> Result<Vec<XyceValueMismatch>, String> {
         self.compare_noise_prn_reference_with_contexts(
-            reference, print, netlist, source, results, None, None,
+            reference,
+            print,
+            netlist,
+            source,
+            results,
+            XyceStepContext {
+                row_netlists: None,
+                expected_step_index: None,
+            },
         )
     }
 
@@ -4559,8 +4584,10 @@ impl XyceTestRunner {
             netlist,
             source,
             results,
-            None,
-            expected_step_index,
+            XyceStepContext {
+                row_netlists: None,
+                expected_step_index: expected_step_index,
+            },
         )
     }
 
@@ -4586,8 +4613,10 @@ impl XyceTestRunner {
             netlist,
             source,
             results,
-            Some(row_netlists),
-            None,
+            XyceStepContext {
+                row_netlists: Some(row_netlists),
+                expected_step_index: None,
+            },
         )
     }
 
@@ -4598,9 +4627,12 @@ impl XyceTestRunner {
         netlist: &Netlist,
         source: &str,
         results: &[rspice_core::analysis::NoiseResult],
-        row_netlists: Option<&[Netlist]>,
-        expected_step_index: Option<usize>,
+        step: XyceStepContext<'_>,
     ) -> Result<Vec<XyceValueMismatch>, String> {
+        let XyceStepContext {
+            row_netlists,
+            expected_step_index,
+        } = step;
         if reference.columns.is_empty() {
             return Err("reference table has no columns".to_string());
         }
@@ -5467,9 +5499,11 @@ impl XyceTestRunner {
                             probe,
                             netlist,
                             result,
-                            time,
-                            expected,
-                            actual,
+                            XyceProbeSample {
+                                time,
+                                expected,
+                                actual,
+                            },
                             tolerance,
                             time_tolerance,
                         )?
@@ -5478,14 +5512,18 @@ impl XyceTestRunner {
                     }
                     if stateful_waveforms[column_index].is_none()
                         && self.transient_probe_matches_reference_time_neighborhood(
-                            reference,
-                            layout.time_column,
-                            row_index,
+                            &XyceReferenceRow {
+                                table: reference,
+                                time_column: layout.time_column,
+                                row_index: row_index,
+                            },
                             column_index + layout.data_column_offset,
                             actual,
-                            tolerance,
-                            time_tolerance,
-                            tran_time_scale_factor,
+                            XyceNeighborhoodTolerance {
+                                value: tolerance,
+                                time_tolerance: time_tolerance,
+                                time_scale_factor: tran_time_scale_factor,
+                            },
                         )
                     {
                         continue;
@@ -5496,13 +5534,17 @@ impl XyceTestRunner {
                             probe,
                             netlist,
                             result,
-                            reference,
-                            layout.time_column,
-                            row_index,
+                            &XyceReferenceRow {
+                                table: reference,
+                                time_column: layout.time_column,
+                                row_index: row_index,
+                            },
                             expected,
-                            tolerance,
-                            output_interval,
-                            tran_time_scale_factor,
+                            XyceCorridorTolerance {
+                                value: tolerance,
+                                output_interval: output_interval,
+                                time_scale_factor: tran_time_scale_factor,
+                            },
                         )?
                     {
                         continue;
@@ -6043,14 +6085,20 @@ impl XyceTestRunner {
 
     pub(super) fn compare_measurement_references(
         &self,
-        paths: &[PathBuf],
+        artifacts: &XyceMeasureArtifacts<'_>,
         actual: &[rspice_core::analysis::MeasureResult],
-        tolerance: XyceFileCompareTolerance,
-        measure_fail_output: Option<bool>,
-        measure_default_value: Option<Value>,
+        policy: XyceMeasurePolicy,
         analysis: &str,
-        declarations: &[rspice_core::analysis::MeasureStatement],
     ) -> Result<Vec<XyceValueMismatch>, String> {
+        let XyceMeasureArtifacts {
+            paths,
+            tolerance,
+            declarations,
+        } = *artifacts;
+        let XyceMeasurePolicy {
+            fail_output: measure_fail_output,
+            default_value: measure_default_value,
+        } = policy;
         if paths.len() != 1 {
             return Err(format!(
                 "unstepped measurement comparison requires exactly one artifact, found {}",
@@ -6259,22 +6307,28 @@ impl XyceTestRunner {
             // mixed-row model. The scalar comparator owns MEASFAIL and
             // DEFAULT_VAL projection for failed ordinary measurements.
             return self.compare_measurement_references(
-                scalar_paths,
+                &XyceMeasureArtifacts {
+                    paths: scalar_paths,
+                    tolerance: tolerance,
+                    declarations: declarations,
+                },
                 scalar,
-                tolerance,
-                measure_fail_output,
-                measure_default_value,
+                XyceMeasurePolicy {
+                    fail_output: measure_fail_output,
+                    default_value: measure_default_value,
+                },
                 base_analysis,
-                declarations,
             );
         }
         if !use_continuous_files {
             return self.compare_mixed_measurement_references(
-                scalar_paths,
+                &XyceMeasureArtifacts {
+                    paths: scalar_paths,
+                    tolerance: tolerance,
+                    declarations: declarations,
+                },
                 scalar,
                 continuous,
-                tolerance,
-                declarations,
                 base_analysis,
                 continuous_analysis,
             );
@@ -6284,13 +6338,17 @@ impl XyceTestRunner {
             Vec::new()
         } else {
             self.compare_measurement_references(
-                scalar_paths,
+                &XyceMeasureArtifacts {
+                    paths: scalar_paths,
+                    tolerance: tolerance,
+                    declarations: declarations,
+                },
                 scalar,
-                tolerance,
-                measure_fail_output,
-                measure_default_value,
+                XyceMeasurePolicy {
+                    fail_output: measure_fail_output,
+                    default_value: measure_default_value,
+                },
                 base_analysis,
-                declarations,
             )?
         };
         let continuous_declarations = declarations
@@ -6330,14 +6388,17 @@ impl XyceTestRunner {
 
     pub(super) fn compare_mixed_measurement_references(
         &self,
-        paths: &[PathBuf],
+        artifacts: &XyceMeasureArtifacts<'_>,
         scalar: &[rspice_core::analysis::MeasureResult],
         continuous: &[rspice_core::analysis::ContinuousMeasureResult],
-        tolerance: XyceFileCompareTolerance,
-        declarations: &[rspice_core::analysis::MeasureStatement],
         base_analysis: &str,
         continuous_analysis: &str,
     ) -> Result<Vec<XyceValueMismatch>, String> {
+        let XyceMeasureArtifacts {
+            paths,
+            tolerance,
+            declarations,
+        } = *artifacts;
         for result in continuous {
             result.validate_invariants().map_err(|error| {
                 format!(

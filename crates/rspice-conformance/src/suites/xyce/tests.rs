@@ -2853,11 +2853,13 @@ fn mixed_measurement_comparison_preserves_duplicate_names_and_omits_non_file_pol
 
     let mismatches = runner
         .compare_mixed_measurement_references(
-            std::slice::from_ref(&path),
+            &XyceMeasureArtifacts {
+                paths: std::slice::from_ref(&path),
+                tolerance: XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+                declarations: &netlist.measurements,
+            },
             &scalar,
             &continuous,
-            XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
-            &netlist.measurements,
             "NOISE",
             "NOISE_CONT",
         )
@@ -2930,11 +2932,13 @@ fn mixed_measurement_reference_accepts_failed_trig_targ_diagnostics() {
     let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
     let mismatches = runner
         .compare_mixed_measurement_references(
-            std::slice::from_ref(&path),
+            &XyceMeasureArtifacts {
+                paths: std::slice::from_ref(&path),
+                tolerance: XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+                declarations: &netlist.measurements,
+            },
             &[],
             &actual,
-            XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
-            &netlist.measurements,
             "TRAN",
             "TRAN_CONT",
         )
@@ -3199,13 +3203,17 @@ fn failed_measurement_projection_honors_local_and_global_defaults() {
     std::fs::write(&path, "LOCAL = -9.000000e+00\n").expect("write local-default artifact");
     let local = runner
         .compare_measurement_references(
-            std::slice::from_ref(&path),
+            &XyceMeasureArtifacts {
+                paths: std::slice::from_ref(&path),
+                tolerance: XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+                declarations: &netlist.measurements,
+            },
             &actual,
-            XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
-            Some(false),
-            None,
+            XyceMeasurePolicy {
+                fail_output: Some(false),
+                default_value: None,
+            },
             "DC",
-            &netlist.measurements,
         )
         .expect("local default projects failed measurement");
     assert!(local.is_empty());
@@ -3213,13 +3221,17 @@ fn failed_measurement_projection_honors_local_and_global_defaults() {
     std::fs::write(&path, "LOCAL = -1.000000e+01\n").expect("write global-default artifact");
     let global = runner
         .compare_measurement_references(
-            std::slice::from_ref(&path),
+            &XyceMeasureArtifacts {
+                paths: std::slice::from_ref(&path),
+                tolerance: XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+                declarations: &netlist.measurements,
+            },
             &actual,
-            XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
-            Some(false),
-            Some(-10.0),
+            XyceMeasurePolicy {
+                fail_output: Some(false),
+                default_value: Some(-10.0),
+            },
             "DC",
-            &netlist.measurements,
         )
         .expect("global default overrides local default");
     assert!(global.is_empty());
@@ -4925,11 +4937,13 @@ fn transient_comparison_accounts_for_printed_time_quantization() {
                 "V(1)",
                 &Netlist::default(),
                 &result,
-                2.99999996,
-                1.52218075e-3,
-                1.7336955179822779e-3,
+                XyceProbeSample {
+                    time: 2.99999996,
+                    expected: 1.52218075e-3,
+                    actual: 1.7336955179822779e-3
+                },
                 tolerance,
-                time_tolerance,
+                time_tolerance
             )
             .expect("time-window comparison should evaluate"),
         "expected value falls inside the waveform interval induced by printed PRN time precision"
@@ -4966,11 +4980,13 @@ fn transient_comparison_uses_local_samples_inside_prn_time_neighborhood() {
                 "V(3)",
                 &Netlist::default(),
                 &result,
-                time,
-                2.38339292e-4,
-                3.984804681e-4,
+                XyceProbeSample {
+                    time: time,
+                    expected: 2.38339292e-4,
+                    actual: 3.984804681e-4
+                },
                 tolerance,
-                time_tolerance,
+                time_tolerance
             )
             .expect("time-neighborhood comparison should evaluate"),
         "expected value falls inside adjacent PRN-rounded transition samples"
@@ -4991,7 +5007,18 @@ fn transient_comparison_accepts_duplicate_reference_time_envelope() {
 
     assert!(
         runner.transient_probe_matches_reference_time_neighborhood(
-            &reference, 1, 0, 2, 2.0, tolerance, 0.0, 1.0,
+            &XyceReferenceRow {
+                table: &reference,
+                time_column: 1,
+                row_index: 0
+            },
+            2,
+            2.0,
+            XyceNeighborhoodTolerance {
+                value: tolerance,
+                time_tolerance: 0.0,
+                time_scale_factor: 1.0
+            }
         ),
         "actual value inside duplicate printed-time oracle envelope should be accepted"
     );
@@ -5011,7 +5038,18 @@ fn transient_comparison_rejects_outside_duplicate_reference_time_envelope() {
 
     assert!(
         !runner.transient_probe_matches_reference_time_neighborhood(
-            &reference, 1, 0, 2, 4.0, tolerance, 0.0, 1.0,
+            &XyceReferenceRow {
+                table: &reference,
+                time_column: 1,
+                row_index: 0
+            },
+            2,
+            4.0,
+            XyceNeighborhoodTolerance {
+                value: tolerance,
+                time_tolerance: 0.0,
+                time_scale_factor: 1.0
+            }
         ),
         "actual value outside duplicate printed-time oracle envelope should be rejected"
     );
@@ -5031,7 +5069,18 @@ fn transient_comparison_rejects_single_reference_time_row_neighborhood() {
 
     assert!(
         !runner.transient_probe_matches_reference_time_neighborhood(
-            &reference, 1, 0, 2, 2.0, tolerance, 0.0, 1.0,
+            &XyceReferenceRow {
+                table: &reference,
+                time_column: 1,
+                row_index: 0
+            },
+            2,
+            2.0,
+            XyceNeighborhoodTolerance {
+                value: tolerance,
+                time_tolerance: 0.0,
+                time_scale_factor: 1.0
+            }
         ),
         "a single oracle row must still fail normal comparison"
     );
@@ -5057,14 +5106,18 @@ fn transient_comparison_accepts_rounded_reference_time_neighborhood() {
 
     assert!(
         runner.transient_probe_matches_reference_time_neighborhood(
-            &reference,
-            1,
-            1,
+            &XyceReferenceRow {
+                table: &reference,
+                time_column: 1,
+                row_index: 1
+            },
             2,
             0.020293594015632306,
-            tolerance,
-            time_tolerance,
-            1.0,
+            XyceNeighborhoodTolerance {
+                value: tolerance,
+                time_tolerance: time_tolerance,
+                time_scale_factor: 1.0
+            }
         ),
         "actual value inside rounded printed-time oracle envelope should be accepted"
     );
@@ -5090,14 +5143,18 @@ fn transient_comparison_accepts_decimal_boundary_reference_time_neighborhood() {
 
     assert!(
         runner.transient_probe_matches_reference_time_neighborhood(
-            &reference,
-            1,
-            0,
+            &XyceReferenceRow {
+                table: &reference,
+                time_column: 1,
+                row_index: 0
+            },
             2,
             8.189634498984992e-3,
-            tolerance,
-            time_tolerance,
-            1.0,
+            XyceNeighborhoodTolerance {
+                value: tolerance,
+                time_tolerance: time_tolerance,
+                time_scale_factor: 1.0
+            }
         ),
         "decimal timestamps at the PRN-neighborhood boundary should not fail due to binary roundoff"
     );
@@ -5250,13 +5307,17 @@ fn transient_output_interval_corridor_uses_adjacent_reference_rows() {
                 "V(1)",
                 &Netlist::default(),
                 &result,
-                &reference,
-                1,
-                1,
+                &XyceReferenceRow {
+                    table: &reference,
+                    time_column: 1,
+                    row_index: 1
+                },
                 0.75,
-                tolerance,
-                0.5,
-                1.0,
+                XyceCorridorTolerance {
+                    value: tolerance,
+                    output_interval: 0.5,
+                    time_scale_factor: 1.0
+                }
             )
             .expect("corridor comparison evaluates"),
         "expected interval-interpolated value should be accepted inside adjacent output rows"
@@ -5267,13 +5328,17 @@ fn transient_output_interval_corridor_uses_adjacent_reference_rows() {
                 "V(1)",
                 &Netlist::default(),
                 &result,
-                &reference,
-                1,
-                1,
+                &XyceReferenceRow {
+                    table: &reference,
+                    time_column: 1,
+                    row_index: 1
+                },
                 1.5,
-                tolerance,
-                0.5,
-                1.0,
+                XyceCorridorTolerance {
+                    value: tolerance,
+                    output_interval: 0.5,
+                    time_scale_factor: 1.0
+                }
             )
             .expect("corridor comparison evaluates"),
         "value outside the adjacent output-row envelope must not be accepted"

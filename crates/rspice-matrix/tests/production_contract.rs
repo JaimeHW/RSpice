@@ -69,6 +69,9 @@ fn real_backends_agree_on_random_scaled_sparse_systems() {
         for (row, values) in base.iter_mut().enumerate() {
             values[row] = 4.0 + rng.unit();
         }
+        // The coupled row is drawn at random per column, so there is no row
+        // to iterate over here.
+        #[allow(clippy::needless_range_loop)]
         for col in 0..n {
             for _ in 0..3 {
                 let row = rng.next() as usize % n;
@@ -157,13 +160,17 @@ fn dense_complex_solve(
         rhs.swap(col, pivot);
         let pivot_value = matrix[col][col];
         let pivot_rhs = rhs[col];
-        for row in col + 1..n {
-            let factor = matrix[row][col] / pivot_value;
-            for index in col..n {
-                let pivot_entry = matrix[col][index];
-                matrix[row][index] -= factor * pivot_entry;
+        for (row, rhs_entry) in rhs.iter_mut().enumerate().take(n).skip(col + 1) {
+            // `row > col`, so the pivot row stays in `above` and the row being
+            // eliminated is the head of `below`.
+            let (above, below) = matrix.split_at_mut(row);
+            let pivot_row = &above[col];
+            let target_row = &mut below[0];
+            let factor = target_row[col] / pivot_value;
+            for (target, &pivot_entry) in target_row[col..n].iter_mut().zip(&pivot_row[col..n]) {
+                *target -= factor * pivot_entry;
             }
-            rhs[row] -= factor * pivot_rhs;
+            *rhs_entry -= factor * pivot_rhs;
         }
     }
     for col in (0..n).rev() {
@@ -182,9 +189,12 @@ fn complex_sparse_solve_matches_an_independent_dense_reference() {
     for trial in 0..80 {
         let n = 2 + rng.next() as usize % 10;
         let mut dense = vec![vec![Complex64::new(0.0, 0.0); n]; n];
-        for row in 0..n {
-            dense[row][row] = Complex64::new(5.0 + rng.unit(), 0.25 * rng.signed());
+        for (row, entries) in dense.iter_mut().enumerate() {
+            entries[row] = Complex64::new(5.0 + rng.unit(), 0.25 * rng.signed());
         }
+        // The coupled row is drawn at random per column, so there is no row
+        // to iterate over here.
+        #[allow(clippy::needless_range_loop)]
         for col in 0..n {
             for _ in 0..2 {
                 let row = rng.next() as usize % n;
@@ -205,8 +215,8 @@ fn complex_sparse_solve_matches_an_independent_dense_reference() {
         let real = StaticMatrix::from_triplets(n, n, &structure).unwrap();
         let mut sparse = ComplexMatrix::from_real_structure(&real);
         for col in 0..n {
-            for row in 0..n {
-                let value = dense[row][col];
+            for (row, entries) in dense.iter().enumerate() {
+                let value = entries[col];
                 if value != Complex64::new(0.0, 0.0) {
                     let index = real.get_index(row, col).unwrap();
                     sparse.stamp_direct_real(index, value.re);

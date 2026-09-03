@@ -3997,13 +3997,17 @@ impl XyceTestRunner {
                     rspice_core::analysis::evaluate_noise_measurements(&run.netlist, &results);
                 let comparison = if run.netlist.options.measure_use_cont_files() {
                     self.compare_measurement_references(
-                        std::slice::from_ref(reference_path),
+                        &XyceMeasureArtifacts {
+                            paths: std::slice::from_ref(reference_path),
+                            tolerance: plan.measurement_tolerance,
+                            declarations: &run.netlist.measurements,
+                        },
                         &measurements,
-                        plan.measurement_tolerance,
-                        run.netlist.options.measure_fail_output,
-                        run.netlist.options.measure_default_value,
+                        XyceMeasurePolicy {
+                            fail_output: run.netlist.options.measure_fail_output,
+                            default_value: run.netlist.options.measure_default_value,
+                        },
                         "NOISE",
-                        &run.netlist.measurements,
                     )
                 } else {
                     let continuous = rspice_core::analysis::evaluate_noise_continuous_measurements(
@@ -4011,11 +4015,13 @@ impl XyceTestRunner {
                         &results,
                     );
                     let comparison = self.compare_mixed_measurement_references(
-                        std::slice::from_ref(reference_path),
+                        &XyceMeasureArtifacts {
+                            paths: std::slice::from_ref(reference_path),
+                            tolerance: plan.measurement_tolerance,
+                            declarations: &run.netlist.measurements,
+                        },
                         &measurements,
                         &continuous,
-                        plan.measurement_tolerance,
-                        &run.netlist.measurements,
                         "NOISE",
                         "NOISE_CONT",
                     );
@@ -5189,13 +5195,17 @@ impl XyceTestRunner {
                         &point_params,
                     );
                 match self.compare_measurement_references(
-                    &plan.measurement_reference_paths,
+                    &XyceMeasureArtifacts {
+                        paths: &plan.measurement_reference_paths,
+                        tolerance: plan.measurement_tolerance,
+                        declarations: &netlist.measurements,
+                    },
                     &measurements,
-                    plan.measurement_tolerance,
-                    netlist.options.measure_fail_output,
-                    netlist.options.measure_default_value,
+                    XyceMeasurePolicy {
+                        fail_output: netlist.options.measure_fail_output,
+                        default_value: netlist.options.measure_default_value,
+                    },
                     "DC",
-                    &netlist.measurements,
                 ) {
                     Ok(measurement_mismatches) => mismatches.extend(measurement_mismatches),
                     Err(err) => {
@@ -6316,7 +6326,15 @@ impl XyceTestRunner {
                 Ok(mismatches) => {
                     if mismatches.is_empty() {
                         return self.passed_or_step_tran_side_output_failure(
-                            deck, start, contract, &plan, &step_runs, &abort, false,
+                            deck,
+                            start,
+                            contract,
+                            &XyceStepTranComparison {
+                                plan: &plan,
+                                step_runs: &step_runs,
+                                abort: &abort,
+                                locked_time_grid: false,
+                            },
                         );
                     }
                     if uses_integrated_rms {
@@ -6363,7 +6381,15 @@ impl XyceTestRunner {
                     return match locked_result {
                         Ok(locked_mismatches) if locked_mismatches.is_empty() => self
                             .passed_or_step_tran_side_output_failure(
-                                deck, start, contract, &plan, &step_runs, &abort, true,
+                                deck,
+                                start,
+                                contract,
+                                &XyceStepTranComparison {
+                                    plan: &plan,
+                                    step_runs: &step_runs,
+                                    abort: &abort,
+                                    locked_time_grid: true,
+                                },
                             ),
                         Ok(locked_mismatches) => self.failure_result(
                             deck,
@@ -6393,7 +6419,15 @@ impl XyceTestRunner {
         {
             if locked_mismatches.is_empty() {
                 return self.passed_or_step_tran_side_output_failure(
-                    deck, start, contract, &plan, &step_runs, &abort, true,
+                    deck,
+                    start,
+                    contract,
+                    &XyceStepTranComparison {
+                        plan: &plan,
+                        step_runs: &step_runs,
+                        abort: &abort,
+                        locked_time_grid: true,
+                    },
                 );
             }
             if Self::candidate_mismatches_are_better(Some(&mismatches), &locked_mismatches) {

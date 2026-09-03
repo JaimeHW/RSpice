@@ -3,14 +3,18 @@ use super::*;
 impl TestRunner {
     pub(in crate::suites::ngspice) fn run_sensitivity_test(
         &self,
-        name: &str,
-        source_path: &Path,
-        source: &str,
+        case: &RegressionCase<'_>,
         output_pos: &str,
         output_neg: Option<&str>,
         sweep: Option<(AcSweepType, usize, Value, Value)>,
-        start: std::time::Instant,
     ) -> TestResult {
+        let RegressionCase {
+            name,
+            source_path,
+            source,
+            start,
+            ..
+        } = *case;
         let netlist = match Self::parse_regression_source(source, source_path) {
             Ok(n) => n,
             Err(e) => {

@@ -163,14 +163,17 @@ impl TestRunner {
 
     pub(in crate::suites::ngspice) fn run_transfer_function_test(
         &self,
-        name: &str,
-        cir_path: &Path,
-        source_path: &Path,
-        source: &str,
+        case: &RegressionCase<'_>,
         output: &str,
         input_source: &str,
-        start: std::time::Instant,
     ) -> TestResult {
+        let RegressionCase {
+            name,
+            cir_path,
+            source_path,
+            source,
+            start,
+        } = *case;
         let base_netlist = match Self::parse_regression_source(source, source_path) {
             Ok(n) => n,
             Err(e) => {

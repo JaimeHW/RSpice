@@ -741,12 +741,9 @@ impl XyceTestRunner {
         deck: &XyceDeck,
         start: Instant,
         contract: &str,
-        plan: &XyceStaticTranPlan,
-        step_runs: &[XyceStepRun],
-        abort: &dyn AbortSignal,
-        locked_time_grid: bool,
+        comparison: &XyceStepTranComparison<'_>,
     ) -> XyceTestResult {
-        match self.compare_step_tran_side_outputs(plan, step_runs, abort, locked_time_grid) {
+        match self.compare_step_tran_side_outputs(comparison) {
             Ok(mismatches) if mismatches.is_empty() => self.passed_result(deck, start, contract),
             Ok(mismatches) => self.failure_result(
                 deck,
@@ -1460,14 +1457,20 @@ impl XyceTestRunner {
         probe: &str,
         netlist: &Netlist,
         result: &TransientResult,
-        reference: &XycePrnTable,
-        time_column: usize,
-        row_index: usize,
+        row: &XyceReferenceRow<'_>,
         expected: Value,
-        tolerance: XyceComparisonTolerance,
-        output_interval: Value,
-        time_scale_factor: Value,
+        tolerance: XyceCorridorTolerance,
     ) -> Result<bool, String> {
+        let XyceReferenceRow {
+            table: reference,
+            time_column,
+            row_index,
+        } = *row;
+        let XyceCorridorTolerance {
+            value: tolerance,
+            output_interval,
+            time_scale_factor,
+        } = tolerance;
         if !expected.is_finite()
             || !output_interval.is_finite()
             || output_interval <= 0.0

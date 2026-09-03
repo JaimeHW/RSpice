@@ -388,8 +388,12 @@ impl KluSolver {
         for j in 0..self.n {
             let original_col = self.col_perm[j] as usize;
             let mut input_max: Value = 0.0;
-            for index in self.a_col_ptr[original_col]..self.a_col_ptr[original_col + 1] {
-                let scaled = values[index] * self.a_entry_scale[index];
+            let span = self.a_col_ptr[original_col]..self.a_col_ptr[original_col + 1];
+            for (&value, &entry_scale) in values[span.clone()]
+                .iter()
+                .zip(&self.a_entry_scale[span])
+            {
+                let scaled = value * entry_scale;
                 if !scaled.is_finite() {
                     return Err(SolverError::Overflow);
                 }
@@ -537,12 +541,12 @@ impl KluSolver {
         self.row_scale.resize(self.n, 0.0);
         self.row_scale.fill(0.0);
         for col in 0..self.n {
-            for idx in self.a_col_ptr[col]..self.a_col_ptr[col + 1] {
-                let value = values[idx];
+            let span = self.a_col_ptr[col]..self.a_col_ptr[col + 1];
+            for (&value, &row) in values[span.clone()].iter().zip(&self.a_rows[span]) {
                 if !value.is_finite() {
                     return Err(SolverError::Overflow);
                 }
-                let slot = &mut self.row_scale[self.a_rows[idx] as usize];
+                let slot = &mut self.row_scale[row as usize];
                 *slot = slot.max(value.abs());
             }
         }
@@ -1827,10 +1831,17 @@ mod tests {
             m.swap(col, piv);
             x.swap(col, piv);
             for row in col + 1..n {
-                let f = m[row][col] / m[col][col];
+                // `row > col`, so the split keeps the pivot row in `above` and
+                // puts the row being eliminated at the head of `below`.
+                let (above, below) = m.split_at_mut(row);
+                let pivot_row = &above[col];
+                let target_row = &mut below[0];
+                let f = target_row[col] / pivot_row[col];
                 if f != 0.0 {
-                    for k in col..n {
-                        m[row][k] -= f * m[col][k];
+                    for (target, &pivot) in
+                        target_row[col..n].iter_mut().zip(&pivot_row[col..n])
+                    {
+                        *target -= f * pivot;
                     }
                     x[row] -= f * x[col];
                 }
@@ -1869,6 +1880,9 @@ mod tests {
         n: usize,
     ) -> (Vec<usize>, Vec<usize>, Vec<Value>, Vec<Vec<Value>>) {
         let mut dense = vec![vec![0.0; n]; n];
+        // Each column touches `dense[j][j]`, `dense[i][j]` and `dense[j][i]`
+        // for a random `i`, so there is no single row to iterate over.
+        #[allow(clippy::needless_range_loop)]
         for j in 0..n {
             dense[j][j] = 1.0 + 4.0 * rng.unit();
             let couplings = 1 + (rng.next() as usize % 3);
@@ -1886,10 +1900,10 @@ mod tests {
         let mut rows = Vec::new();
         let mut vals = Vec::new();
         for j in 0..n {
-            for i in 0..n {
-                if dense[i][j] != 0.0 {
+            for (i, row) in dense.iter().enumerate() {
+                if row[j] != 0.0 {
                     rows.push(i);
-                    vals.push(dense[i][j]);
+                    vals.push(row[j]);
                 }
             }
             col_ptr.push(rows.len());
