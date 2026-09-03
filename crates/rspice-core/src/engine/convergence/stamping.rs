@@ -46,10 +46,10 @@ impl Engine {
             matrix,
             rhs,
             OperatingPointProbe {
-                solution: solution,
+                solution,
                 time: 0.0,
                 analysis: crate::xspice::AnalysisType::DcOp,
-                junction_gmin: junction_gmin,
+                junction_gmin,
             },
         )
     }
@@ -112,10 +112,10 @@ impl Engine {
             matrix,
             rhs,
             OperatingPointProbe {
-                solution: solution,
+                solution,
                 time: 0.0,
                 analysis: crate::xspice::AnalysisType::DcOp,
-                junction_gmin: junction_gmin,
+                junction_gmin,
             },
         )
     }
@@ -223,10 +223,10 @@ impl Engine {
         self.update_device_states_for_operating_point(
             circuit,
             OperatingPointProbe {
-                solution: solution,
+                solution,
                 time: 0.0,
                 analysis: crate::xspice::AnalysisType::DcOp,
-                junction_gmin: junction_gmin,
+                junction_gmin,
             },
         );
     }

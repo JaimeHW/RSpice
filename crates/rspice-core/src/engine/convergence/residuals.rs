@@ -101,10 +101,10 @@ impl Engine {
                     probe,
                     rhs,
                     OperatingPointProbe {
-                        solution: solution,
-                        time: time,
+                        solution,
+                        time,
                         analysis: crate::xspice::AnalysisType::Transient,
-                        junction_gmin: junction_gmin,
+                        junction_gmin,
                     },
                 )?;
             } else {
@@ -491,10 +491,10 @@ impl Engine {
                     probe,
                     rhs,
                     OperatingPointProbe {
-                        solution: solution,
-                        time: time,
-                        analysis: analysis,
-                        junction_gmin: junction_gmin,
+                        solution,
+                        time,
+                        analysis,
+                        junction_gmin,
                     },
                 )
                 .is_err()
@@ -669,10 +669,10 @@ impl Engine {
             circuit,
             matrix,
             OperatingPointProbe {
-                solution: solution,
+                solution,
                 time: 0.0,
                 analysis: crate::xspice::AnalysisType::DcOp,
-                junction_gmin: junction_gmin,
+                junction_gmin,
             },
             linear_stamp,
         )
@@ -708,10 +708,10 @@ impl Engine {
                     probe,
                     rhs,
                     OperatingPointProbe {
-                        solution: solution,
-                        time: time,
-                        analysis: analysis,
-                        junction_gmin: junction_gmin,
+                        solution,
+                        time,
+                        analysis,
+                        junction_gmin,
                     },
                 )
                 .is_err()

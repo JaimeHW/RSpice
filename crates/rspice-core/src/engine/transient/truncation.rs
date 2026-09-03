@@ -949,9 +949,9 @@ impl Engine {
                     dt,
                     q_curr,
                     BranchChargeHistory {
-                        q_prev: q_prev,
-                        q_prev_prev: q_prev_prev,
-                        cq_prev: cq_prev,
+                        q_prev,
+                        q_prev_prev,
+                        cq_prev,
                     },
                 );
 
@@ -1099,9 +1099,9 @@ impl Engine {
                     dt,
                     q_curr,
                     BranchChargeHistory {
-                        q_prev: q_prev,
-                        q_prev_prev: q_prev_prev,
-                        cq_prev: cq_prev,
+                        q_prev,
+                        q_prev_prev,
+                        cq_prev,
                     },
                 );
 
@@ -1342,9 +1342,9 @@ impl Engine {
                         voltage,
                         q_exact,
                         BranchChargeHistory {
-                            q_prev: q_prev,
-                            q_prev_prev: q_prev_prev,
-                            cq_prev: cq_prev,
+                            q_prev,
+                            q_prev_prev,
+                            cq_prev,
                         },
                     )
                 } else {
@@ -1355,9 +1355,9 @@ impl Engine {
                         voltage,
                         voltage_prev,
                         BranchChargeHistory {
-                            q_prev: q_prev,
-                            q_prev_prev: q_prev_prev,
-                            cq_prev: cq_prev,
+                            q_prev,
+                            q_prev_prev,
+                            cq_prev,
                         },
                     )
                 };
@@ -1610,9 +1610,9 @@ impl Engine {
                     voltage,
                     voltage_prev,
                     BranchChargeHistory {
-                        q_prev: q_prev,
-                        q_prev_prev: q_prev_prev,
-                        cq_prev: cq_prev,
+                        q_prev,
+                        q_prev_prev,
+                        cq_prev,
                     },
                 );
                 let Some(branch_limit) = truncation.limit(ChargeSamples {
@@ -1760,9 +1760,9 @@ impl Engine {
                     voltage,
                     voltage_prev,
                     BranchChargeHistory {
-                        q_prev: q_prev,
-                        q_prev_prev: q_prev_prev,
-                        cq_prev: cq_prev,
+                        q_prev,
+                        q_prev_prev,
+                        cq_prev,
                     },
                 );
                 let Some(branch_limit) = truncation.limit(ChargeSamples {
@@ -1830,9 +1830,9 @@ impl Engine {
                     voltage,
                     q_curr_exact,
                     BranchChargeHistory {
-                        q_prev: q_prev,
-                        q_prev_prev: q_prev_prev,
-                        cq_prev: cq_prev,
+                        q_prev,
+                        q_prev_prev,
+                        cq_prev,
                     },
                 );
                 let Some(branch_limit) = truncation.limit(ChargeSamples {
@@ -1969,9 +1969,9 @@ impl Engine {
                     dt,
                     q_curr,
                     BranchChargeHistory {
-                        q_prev: q_prev,
-                        q_prev_prev: q_prev_prev,
-                        cq_prev: cq_prev,
+                        q_prev,
+                        q_prev_prev,
+                        cq_prev,
                     },
                 );
                 let Some(branch_limit) = truncation.limit(ChargeSamples {
@@ -2074,9 +2074,9 @@ impl Engine {
                     dt,
                     q_curr,
                     BranchChargeHistory {
-                        q_prev: q_prev,
-                        q_prev_prev: q_prev_prev,
-                        cq_prev: cq_prev,
+                        q_prev,
+                        q_prev_prev,
+                        cq_prev,
                     },
                 );
                 let Some(branch_limit) = truncation.limit(ChargeSamples {
@@ -2174,9 +2174,9 @@ impl Engine {
                     dt,
                     q_curr,
                     BranchChargeHistory {
-                        q_prev: q_prev,
-                        q_prev_prev: q_prev_prev,
-                        cq_prev: cq_prev,
+                        q_prev,
+                        q_prev_prev,
+                        cq_prev,
                     },
                 );
                 let Some(branch_limit) = truncation.limit(ChargeSamples {
@@ -2321,9 +2321,9 @@ impl Engine {
                     dt,
                     charge,
                     BranchChargeHistory {
-                        q_prev: q_prev,
-                        q_prev_prev: q_prev_prev,
-                        cq_prev: cq_prev,
+                        q_prev,
+                        q_prev_prev,
+                        cq_prev,
                     },
                 );
                 let Some(branch_limit) = truncation.limit(ChargeSamples {

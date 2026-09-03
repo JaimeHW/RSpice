@@ -194,9 +194,9 @@ impl Engine {
                 dt,
                 q,
                 BranchChargeHistory {
-                    q_prev: q_prev,
-                    q_prev_prev: q_prev_prev,
-                    cq_prev: cq_prev,
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
                 },
             )
         };
@@ -547,9 +547,9 @@ impl Engine {
                 dt,
                 q,
                 BranchChargeHistory {
-                    q_prev: q_prev,
-                    q_prev_prev: q_prev_prev,
-                    cq_prev: cq_prev,
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
                 },
             )
         };
@@ -590,9 +590,9 @@ impl Engine {
                 dt,
                 q,
                 BranchChargeHistory {
-                    q_prev: q_prev,
-                    q_prev_prev: q_prev_prev,
-                    cq_prev: cq_prev,
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
                 },
             )
         };
@@ -911,9 +911,9 @@ impl Engine {
                 dt,
                 q,
                 BranchChargeHistory {
-                    q_prev: q_prev,
-                    q_prev_prev: q_prev_prev,
-                    cq_prev: cq_prev,
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
                 },
             )
         };
@@ -972,9 +972,9 @@ impl Engine {
                 dt,
                 q,
                 BranchChargeHistory {
-                    q_prev: q_prev,
-                    q_prev_prev: q_prev_prev,
-                    cq_prev: cq_prev,
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
                 },
             )
         };

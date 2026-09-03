@@ -337,9 +337,9 @@ impl Engine {
                         dt,
                         branch.charge,
                         BranchChargeHistory {
-                            q_prev: q_prev,
-                            q_prev_prev: q_prev_prev,
-                            cq_prev: cq_prev,
+                            q_prev,
+                            q_prev_prev,
+                            cq_prev,
                         },
                     );
                     bjt_history.charge_q_prev_prev_prev[idx][branch_idx] = q_prev_prev;
@@ -429,9 +429,9 @@ impl Engine {
                     dt,
                     charge,
                     BranchChargeHistory {
-                        q_prev: q_prev,
-                        q_prev_prev: q_prev_prev,
-                        cq_prev: cq_prev,
+                        q_prev,
+                        q_prev_prev,
+                        cq_prev,
                     },
                 );
                 bjt_history.charge_q_prev_prev_prev[idx][branch_idx] = q_prev_prev;

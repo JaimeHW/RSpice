@@ -802,9 +802,9 @@ impl Engine {
             dt,
             q_curr,
             BranchChargeHistory {
-                q_prev: q_prev,
-                q_prev_prev: q_prev_prev,
-                cq_prev: cq_prev,
+                q_prev,
+                q_prev_prev,
+                cq_prev,
             },
         );
         // Match ngspice load linearization contract for capacitive branches:
@@ -871,9 +871,9 @@ impl Engine {
             dt,
             q_curr,
             BranchChargeHistory {
-                q_prev: q_prev,
-                q_prev_prev: q_prev_prev,
-                cq_prev: cq_prev,
+                q_prev,
+                q_prev_prev,
+                cq_prev,
             },
         );
         let ieq = geq * v_curr - cq_curr;

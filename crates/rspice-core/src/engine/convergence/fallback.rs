@@ -159,9 +159,9 @@ impl Engine {
             matrix,
             source_scale,
             CorrectorRun {
-                initial_solution: initial_solution,
-                damping_state: damping_state,
-                max_iterations: max_iterations,
+                initial_solution,
+                damping_state,
+                max_iterations,
             },
             abort,
             CorrectorSeedMode::Limited,
@@ -242,7 +242,7 @@ impl Engine {
                 DampingStep {
                     old: &solution,
                     proposal: &raw_solution,
-                    damping_state: damping_state,
+                    damping_state,
                 },
                 junction_owns_steps,
                 |trial| self.nonlinear_merit_scaled(circuit, matrix, trial, source_scale),

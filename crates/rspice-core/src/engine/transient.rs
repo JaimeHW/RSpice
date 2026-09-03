@@ -12875,9 +12875,9 @@ D1 D 0 DMOD
             dt,
             q_curr,
             BranchChargeHistory {
-                q_prev: q_prev,
-                q_prev_prev: q_prev_prev,
-                cq_prev: cq_prev,
+                q_prev,
+                q_prev_prev,
+                cq_prev,
             },
         );
         let gear_order_one_ccap = Engine::jfet_companion_ccap(
@@ -12885,9 +12885,9 @@ D1 D 0 DMOD
             dt,
             q_curr,
             BranchChargeHistory {
-                q_prev: q_prev,
-                q_prev_prev: q_prev_prev,
-                cq_prev: cq_prev,
+                q_prev,
+                q_prev_prev,
+                cq_prev,
             },
         );
         let gear_order_two_ccap = Engine::jfet_companion_ccap(
@@ -12895,9 +12895,9 @@ D1 D 0 DMOD
             dt,
             q_curr,
             BranchChargeHistory {
-                q_prev: q_prev,
-                q_prev_prev: q_prev_prev,
-                cq_prev: cq_prev,
+                q_prev,
+                q_prev_prev,
+                cq_prev,
             },
         );
         assert_eq!(gear_order_one_ccap, backward_euler_ccap);
@@ -12907,27 +12907,27 @@ D1 D 0 DMOD
             &backward_euler,
             dt,
             BranchChargeHistory {
-                q_prev: q_prev,
-                q_prev_prev: q_prev_prev,
-                cq_prev: cq_prev,
+                q_prev,
+                q_prev_prev,
+                cq_prev,
             },
         );
         let gear_order_one_ieq = Engine::linear_charge_history_ieq(
             &gear_order_one,
             dt,
             BranchChargeHistory {
-                q_prev: q_prev,
-                q_prev_prev: q_prev_prev,
-                cq_prev: cq_prev,
+                q_prev,
+                q_prev_prev,
+                cq_prev,
             },
         );
         let gear_order_two_ieq = Engine::linear_charge_history_ieq(
             &gear_order_two,
             dt,
             BranchChargeHistory {
-                q_prev: q_prev,
-                q_prev_prev: q_prev_prev,
-                cq_prev: cq_prev,
+                q_prev,
+                q_prev_prev,
+                cq_prev,
             },
         );
         assert_eq!(gear_order_one_ieq, backward_euler_ieq);
@@ -12952,8 +12952,8 @@ D1 D 0 DMOD
             v_curr,
             q_curr,
             BranchChargeHistory {
-                q_prev: q_prev,
-                q_prev_prev: q_prev_prev,
+                q_prev,
+                q_prev_prev,
                 cq_prev: 0.0,
             },
         );

@@ -541,10 +541,10 @@ impl Engine {
                 probe,
                 rhs,
                 OperatingPointProbe {
-                    solution: solution,
-                    time: time,
+                    solution,
+                    time,
                     analysis: crate::xspice::AnalysisType::Transient,
-                    junction_gmin: junction_gmin,
+                    junction_gmin,
                 },
             )?;
             Self::apply_node_voltage_constraints(circuit, probe, rhs, node_hints, solution)?;
@@ -1507,9 +1507,9 @@ impl Engine {
                 &mut rhs,
                 OperatingPointProbe {
                     solution: &solution,
-                    time: time,
+                    time,
                     analysis: crate::xspice::AnalysisType::Transient,
-                    junction_gmin: junction_gmin,
+                    junction_gmin,
                 },
             )?;
             Self::apply_node_voltage_constraints(circuit, matrix, &mut rhs, node_hints, &solution)?;
@@ -1526,9 +1526,9 @@ impl Engine {
                 circuit,
                 OperatingPointProbe {
                     solution: &new_solution,
-                    time: time,
+                    time,
                     analysis: crate::xspice::AnalysisType::Transient,
-                    junction_gmin: junction_gmin,
+                    junction_gmin,
                 },
             );
             let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
@@ -1929,9 +1929,9 @@ impl Engine {
                 &mut rhs,
                 OperatingPointProbe {
                     solution: &solution,
-                    time: time,
+                    time,
                     analysis: crate::xspice::AnalysisType::Transient,
-                    junction_gmin: junction_gmin,
+                    junction_gmin,
                 },
             )?;
             Self::apply_node_voltage_constraints(
@@ -2028,9 +2028,9 @@ impl Engine {
                 circuit,
                 OperatingPointProbe {
                     solution: new_solution,
-                    time: time,
+                    time,
                     analysis: crate::xspice::AnalysisType::Transient,
-                    junction_gmin: junction_gmin,
+                    junction_gmin,
                 },
             );
             let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
@@ -2042,9 +2042,9 @@ impl Engine {
                     matrix,
                     OperatingPointProbe {
                         solution: new_solution,
-                        time: time,
+                        time,
                         analysis: crate::xspice::AnalysisType::Transient,
-                        junction_gmin: junction_gmin,
+                        junction_gmin,
                     },
                     |circuit, matrix, rhs| {
                         circuit.refresh_jiles_atherton_inductances(new_solution);

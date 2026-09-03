@@ -1006,7 +1006,7 @@ impl Engine {
                 DampingStep {
                     old: &solution,
                     proposal: &raw_solution,
-                    damping_state: damping_state,
+                    damping_state,
                 },
                 Self::junction_limiting_owns_newton_steps(circuit)
                     || self.b3soi_limiter_owns_global_damping(circuit),
