@@ -1,4 +1,4 @@
-//! Unified tabular result model shared by `run`, `convert`, and `compare`.
+﻿//! Unified tabular result model shared by `run`, `convert`, and `compare`.
 //!
 //! Every analysis that honors `--output` routes its tabular results through
 //! [`ExportTable`], which renders the same data in any requested
@@ -68,7 +68,7 @@ pub(crate) fn scalar_table(
             .iter()
             .map(|signal| ExportColumn {
                 name: signal.display_name.clone(),
-                var_type: signal.kind.raw_variable_type().to_string(),
+                var_type: signal.raw_variable_type().to_string(),
                 data: ColumnData::Real(signal.values.clone()),
             })
             .collect(),
@@ -92,7 +92,7 @@ pub(crate) fn complex_table(
             .iter()
             .map(|signal| ExportColumn {
                 name: signal.display_name.clone(),
-                var_type: signal.kind.raw_variable_type().to_string(),
+                var_type: signal.raw_variable_type().to_string(),
                 data: ColumnData::Complex {
                     real: signal.real.clone(),
                     imag: signal.imag.clone(),

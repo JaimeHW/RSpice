@@ -102,7 +102,7 @@ pub(super) fn run_hb_from_command(
 }
 
 /// Write the .STEP sweep table: one row per step value, one column per
-/// node voltage — the same shape as a DC sweep with the stepped quantity
+/// node voltage â€” the same shape as a DC sweep with the stepped quantity
 /// as the abscissa.
 pub(super) fn export_step_sweep(
     ctx: &RunContext<'_>,
@@ -115,15 +115,21 @@ pub(super) fn export_step_sweep(
     };
 
     let sweep_vals: Vec<f64> = sweep_results.iter().map(|(v, _)| *v).collect();
-    let signals = crate::commands::run_signals::apply_save_set(
-        crate::commands::run_signals::dc_sweep_voltage_signals(sweep_results).map_err(
-            |source| CliError::CoreSimulationError {
-                source,
-                analysis: Some("Step output projection".to_string()),
-            },
-        )?,
-        &ctx.netlist.saves,
-    );
+    let step_error = |source| CliError::CoreSimulationError {
+        source,
+        analysis: Some("Step output projection".to_string()),
+    };
+    let inventory = crate::commands::run_signals::dc_sweep_voltage_signals(sweep_results)
+        .map_err(step_error)?;
+    let signals = crate::commands::run_signals::scalar_export_signals(
+        ctx.netlist,
+        rspice_core::execution::AnalysisResultKind::DcSweep,
+        "Step",
+        &sweep_vals,
+        &inventory,
+        &crate::abort::ProcessAbort,
+    )
+    .map_err(step_error)?;
 
     match ctx.format {
         crate::cli::OutputFormat::Hdf5 => {
@@ -134,7 +140,7 @@ pub(super) fn export_step_sweep(
             for signal in &signals {
                 sweep.add_typed_signal(
                     signal.display_name.clone(),
-                    signal.kind.raw_variable_type(),
+                    signal.raw_variable_type(),
                     signal.values.clone(),
                 );
             }
@@ -251,7 +257,7 @@ pub(super) fn run_monte_carlo(
 
             if !ctx.quiet {
                 println!(
-                    "✓ Monte Carlo complete: {} runs (seed={})",
+                    "âœ“ Monte Carlo complete: {} runs (seed={})",
                     result.num_runs, seed
                 );
                 if !variables.is_empty() {
@@ -342,7 +348,7 @@ fn export_monte_carlo(
                 for signal in &signals {
                     sweep.add_typed_signal(
                         signal.display_name.clone(),
-                        signal.kind.raw_variable_type(),
+                        signal.raw_variable_type(),
                         signal.values.clone(),
                     );
                 }
@@ -412,7 +418,7 @@ pub(super) fn run_pss(
 ) -> Result<(), CliError> {
     if !ctx.quiet {
         println!(
-            "Running PSS analysis: f₀ = {:.3e} Hz, {} harmonics",
+            "Running PSS analysis: fâ‚€ = {:.3e} Hz, {} harmonics",
             freq, harmonics
         );
     }
@@ -430,7 +436,7 @@ pub(super) fn run_pss(
         Ok(pss_result) => {
             ensure_not_cancelled(ctx)?;
             if !ctx.quiet {
-                println!("✓ PSS converged in {} iterations", pss_result.iterations);
+                println!("âœ“ PSS converged in {} iterations", pss_result.iterations);
                 println!("  Period: {:.6e} s", pss_result.period);
                 println!("  Nodes: {}", pss_result.result.num_nodes());
 
@@ -439,7 +445,7 @@ pub(super) fn run_pss(
                     let harm_data = pss_result.result.harmonics(1, 5);
                     for h in &harm_data {
                         println!(
-                            "    H{}: mag={:.6e}, phase={:.2}° (f={:.3e} Hz)",
+                            "    H{}: mag={:.6e}, phase={:.2}Â° (f={:.3e} Hz)",
                             h.harmonic_number, h.magnitude, h.phase, h.frequency
                         );
                     }
@@ -482,7 +488,18 @@ fn export_pss(
             }
         })
         .collect();
-    let signals = crate::commands::run_signals::apply_save_set(signals, &ctx.netlist.saves);
+    let signals = crate::commands::run_signals::scalar_export_signals(
+        ctx.netlist,
+        rspice_core::execution::AnalysisResultKind::Pss,
+        "PSS",
+        &result.time,
+        &signals,
+        &crate::abort::ProcessAbort,
+    )
+    .map_err(|source| CliError::CoreSimulationError {
+        source,
+        analysis: Some("PSS output projection".to_string()),
+    })?;
 
     match ctx.format {
         crate::cli::OutputFormat::Hdf5 => {
@@ -492,7 +509,7 @@ fn export_pss(
             for signal in &signals {
                 section.add_typed_signal(
                     signal.display_name.clone(),
-                    signal.kind.raw_variable_type(),
+                    signal.raw_variable_type(),
                     signal.values.clone(),
                 );
             }
@@ -552,7 +569,7 @@ fn run_hb_with_config(
 ) -> Result<(), CliError> {
     if !ctx.quiet {
         println!(
-            "Running HB analysis: f₀ = {:.3e} Hz, {} harmonics",
+            "Running HB analysis: fâ‚€ = {:.3e} Hz, {} harmonics",
             config.fundamental_freq, config.num_harmonics
         );
     }
@@ -567,7 +584,7 @@ fn run_hb_with_config(
         Ok(hb_result) => {
             ensure_not_cancelled(ctx)?;
             if !ctx.quiet {
-                println!("✓ HB converged");
+                println!("âœ“ HB converged");
                 println!("  Nodes: {}", hb_result.result.num_nodes());
                 println!("  Harmonics: {}", hb_result.result.num_harmonics);
 
@@ -576,7 +593,7 @@ fn run_hb_with_config(
                     let sv = &hb_result.result.spectral_voltages[0];
                     for k in 0..=4.min(harmonics) {
                         println!(
-                            "    H{}: mag={:.6e}, phase={:.2}°",
+                            "    H{}: mag={:.6e}, phase={:.2}Â°",
                             k,
                             sv.magnitude(k),
                             sv.phase(k).to_degrees()
@@ -674,7 +691,18 @@ fn export_hb(
             imag,
         }
     }));
-    let signals = crate::commands::run_signals::apply_save_set_complex(signals, &ctx.netlist.saves);
+    let signals = crate::commands::run_signals::complex_export_signals(
+        ctx.netlist,
+        rspice_core::execution::AnalysisResultKind::HarmonicBalance,
+        "HB",
+        &frequencies,
+        &signals,
+        &crate::abort::ProcessAbort,
+    )
+    .map_err(|source| CliError::CoreSimulationError {
+        source,
+        analysis: Some("HB output projection".to_string()),
+    })?;
 
     if matches!(ctx.format, crate::cli::OutputFormat::Hdf5) {
         let mut data = crate::hdf5::Hdf5SimulationData::new();
@@ -791,15 +819,25 @@ pub(super) fn run_corner_sweep(ctx: &RunContext<'_>, corners_str: &str) -> Resul
     ensure_not_cancelled(ctx)?;
 
     if !ctx.quiet {
-        println!("\n┌─────────────────────────────────────┐");
-        println!("│        Corner Sweep Summary         │");
-        println!("├─────────────────────────────────────┤");
+        println!(
+            "\nâ”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”"
+        );
+        println!("â”‚        Corner Sweep Summary         â”‚");
+        println!(
+            "â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤"
+        );
         for (name, simulation_passed, measurements_passed) in &results {
             let passed = *simulation_passed && *measurements_passed;
-            let status = if passed { "✓ PASS" } else { "✗ FAIL" };
-            println!("│  {:6}  {:>24}  │", name, status);
+            let status = if passed {
+                "âœ“ PASS"
+            } else {
+                "âœ— FAIL"
+            };
+            println!("â”‚  {:6}  {:>24}  â”‚", name, status);
         }
-        println!("└─────────────────────────────────────┘");
+        println!(
+            "â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜"
+        );
 
         let passed_count = results
             .iter()
@@ -808,7 +846,7 @@ pub(super) fn run_corner_sweep(ctx: &RunContext<'_>, corners_str: &str) -> Resul
             })
             .count();
         println!(
-            "\n✓ Corner sweep complete: {}/{} corners passed",
+            "\nâœ“ Corner sweep complete: {}/{} corners passed",
             passed_count,
             corners.len()
         );
@@ -877,8 +915,8 @@ fn corner_setup<'a>(ctx: &RunContext<'a>) -> Result<CornerSetup<'a>, CliError> {
 }
 
 /// Run one corner in isolation: re-elaborate, simulate every analysis,
-/// evaluate measurements. Quiet by construction — workers must not
-/// interleave solver chatter — and self-contained so it can run on any
+/// evaluate measurements. Quiet by construction â€” workers must not
+/// interleave solver chatter â€” and self-contained so it can run on any
 /// thread.
 fn run_corner_job(
     setup: &CornerSetup<'_>,
@@ -1667,7 +1705,7 @@ fn write_touchstone_nport(
 /// Standard matched-termination wave method: for each drive port, a source
 /// of 2 V AC behind Z0 excites the port (incident wave of 1 V) while the
 /// other port is terminated in Z0. The port voltages then read off the
-/// S-parameters directly — `Sjj = Vj − 1`, `Sij = Vi` — with no matrix
+/// S-parameters directly â€” `Sjj = Vj âˆ’ 1`, `Sij = Vi` â€” with no matrix
 /// inversion and no floating-port hazard. The deck supplies the bias
 /// network and sweep; its own sources must not carry AC specifications.
 pub(super) fn run_sparam(ctx: &RunContext<'_>, ports_spec: &str, z0: f64) -> Result<(), CliError> {
@@ -1729,7 +1767,7 @@ pub(super) fn run_sparam(ctx: &RunContext<'_>, ports_spec: &str, z0: f64) -> Res
 
     if !ctx.quiet {
         println!(
-            "Running 2-port S-parameter extraction: Z0={}Ω, {} frequency points",
+            "Running 2-port S-parameter extraction: Z0={}Î©, {} frequency points",
             z0,
             frequencies.len()
         );

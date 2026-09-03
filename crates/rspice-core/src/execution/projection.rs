@@ -217,6 +217,14 @@ pub fn signal_descriptor(
         ),
         SignalKind::Scalar => (SignalUnit::Dimensionless, SignalOwner::Analysis),
     };
+    // A digital trace is carried as numeric samples so it can share one table
+    // with analog columns, but its declared value type stays logic: the
+    // samples are states, not volts.
+    let value_type = if kind == SignalKind::Digital {
+        SignalValueType::Logic
+    } else {
+        value_type
+    };
     SignalDescriptor::new(
         display_name,
         display_name,
@@ -818,7 +826,97 @@ fn projected_signal_kind(kind: OutputColumnKind, name: &str) -> SignalKind {
     }
 }
 
+/// The rawfile variable type one signal kind serializes as.
+///
+/// Frontends format results; they do not decide what physical type a signal
+/// has, so this mapping lives with the projection that produced the signal.
+pub const fn raw_variable_type(kind: SignalKind) -> &'static str {
+    match kind {
+        SignalKind::Voltage => "voltage",
+        SignalKind::Current => "current",
+        SignalKind::Digital => "digital",
+        SignalKind::DeviceObservable | SignalKind::Scalar => "parameter",
+    }
+}
+
+/// Operating-point observables a single DC solution reports, as one-sample
+/// lookup series.
+///
+/// These are resolvable spellings, not export columns: an unrestricted export
+/// must not suddenly grow a column per internal observable, but an authored
+/// `.SAVE @D1[Id]` must still find one.
+pub fn operating_point_observable_series(
+    result: &crate::solver::SimulationResult,
+) -> Vec<(String, Vec<Value>)> {
+    result
+        .dc_observables
+        .iter()
+        .map(|(name, value)| (name.clone(), vec![*value]))
+        .collect()
+}
+
+/// Operating-point observables reported at every point of a DC sweep.
+///
+/// A name that is absent from any point is omitted entirely rather than being
+/// padded: a partially present observable is not a signal the sweep supplies,
+/// and projecting it would have to invent values.
+pub fn dc_sweep_observable_series(
+    sweep: &[(Value, crate::solver::SimulationResult)],
+) -> Vec<(String, Vec<Value>)> {
+    let mut order = Vec::<String>::new();
+    let mut values = HashMap::<String, Vec<Option<Value>>>::new();
+    for (row, (_, result)) in sweep.iter().enumerate() {
+        for (name, value) in &result.dc_observables {
+            let slot = values.entry(name.clone()).or_insert_with(|| {
+                order.push(name.clone());
+                vec![None; sweep.len()]
+            });
+            slot[row] = Some(*value);
+        }
+    }
+    order
+        .into_iter()
+        .filter_map(|name| {
+            let samples = values.remove(&name)?;
+            let complete = samples.iter().copied().collect::<Option<Vec<_>>>()?;
+            Some((name, complete))
+        })
+        .collect()
+}
+
+/// Borrow an observable series as a resolver lookup table.
+pub fn observable_lookup(series: &[(String, Vec<Value>)]) -> HashMap<String, &[Value]> {
+    series
+        .iter()
+        .map(|(name, values)| (name.clone(), values.as_slice()))
+        .collect()
+}
+
 /// The bare circuit symbol inside an authored probe spelling.
+///
+/// `V(out)` names node `out`, `I(V1)` names branch `v1`, and a spelling with
+/// no accessor (`@d1[id]`) is already its own registry name.
+pub fn probe_registry_name(display_name: &str) -> &str {
+    registry_name(display_name)
+}
+
+/// Whether a probe spelling names no circuit symbol at all.
+///
+/// A result whose metadata carries `V( )` or a blank name has lost the
+/// identity of that column; projecting it would have to invent an ordinal.
+pub fn probe_names_nothing(display_name: &str) -> bool {
+    let trimmed = display_name.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    match trimmed.find('(') {
+        Some(open) if trimmed.ends_with(')') => {
+            trimmed[open + 1..trimmed.len() - 1].trim().is_empty()
+        }
+        _ => false,
+    }
+}
+
 fn registry_name(display_name: &str) -> &str {
     let trimmed = display_name.trim();
     let Some(open) = trimmed.find('(') else {
@@ -968,6 +1066,13 @@ fn resolve_complex_operand(
     authored: &str,
     kind: &OutputOperandKind,
 ) -> Result<ProjectedSignal, SimulationError> {
+    // Magnitude, phase, real, imaginary and decibel accessors are renderings
+    // of one complex column, so they select it rather than naming a different
+    // signal. The exporter decides how to render; the projection decides only
+    // which column the deck asked for.
+    if let Some(column) = complex_accessor_column(source, authored) {
+        return Ok(column);
+    }
     let OutputOperandKind::Probe(signal) = kind else {
         return Err(SimulationError::Netlist(format!(
             "output expression '{authored}' is not evaluable over a complex {} result",
@@ -1024,6 +1129,30 @@ fn resolve_complex_operand(
         });
     }
     Err(source.unavailable(authored))
+}
+
+/// The materialized complex column one authored accessor addresses.
+fn complex_accessor_column(
+    source: &ProjectionSource<'_>,
+    authored: &str,
+) -> Option<ProjectedSignal> {
+    let (operator, argument) = split_accessor(authored)?;
+    let expected = match operator.as_str() {
+        "V" | "VR" | "VI" | "VM" | "VP" | "VDB" => SignalKind::Voltage,
+        "I" | "IR" | "II" | "IM" | "IP" | "IDB" => SignalKind::Current,
+        _ => return None,
+    };
+    source
+        .signals
+        .iter()
+        .find(|candidate| {
+            candidate.descriptor.kind() == expected
+                && candidate.values.value_type() == SignalValueType::Complex
+                && registry_name(candidate.descriptor.display_name())
+                    .eq_ignore_ascii_case(&argument)
+        })
+        .cloned()
+        .map(ProjectionSourceSignal::into_projected)
 }
 
 fn complex_node(source: &ProjectionSource<'_>, node: &str) -> Option<(Vec<Value>, Vec<Value>)> {

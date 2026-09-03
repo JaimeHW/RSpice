@@ -1,4 +1,4 @@
-//! Frequency-domain and small-signal analyses: `.AC` (including `DATA=`
+﻿//! Frequency-domain and small-signal analyses: `.AC` (including `DATA=`
 //! table sweeps), `.DISTO`, `.STB`, `.NOISE` (including `DATA=`), `.PZ`,
 //! `.TF`, and `.SENS`.
 //!
@@ -11,9 +11,7 @@
 use super::RunContext;
 use super::shared::{generate_frequency_sweep, map_hdf5_output_error};
 use crate::cli::{CliError, OutputFormat};
-use crate::commands::run_signals::{
-    ComplexSignal, ac_signals, apply_save_set_complex_checked, voltage_display_name,
-};
+use crate::commands::run_signals::{ComplexSignal, ac_signals, voltage_display_name};
 use crate::hdf5::{
     Hdf5AcSection, Hdf5DistortionSection, Hdf5DistortionSeries, Hdf5DistortionSignal,
     Hdf5SimulationData, Hdf5WaveformSection, write_hdf5,
@@ -352,18 +350,23 @@ fn distortion_series(
     is_product: bool,
     rows: Vec<rspice_core::analysis::AcResult>,
 ) -> Result<DistortionSeries, CliError> {
-    let physical_frequencies = rows.iter().map(|row| row.frequency).collect();
+    let physical_frequencies: Vec<f64> = rows.iter().map(|row| row.frequency).collect();
     let signals = ac_signals(&rows).map_err(|source| CliError::CoreSimulationError {
         source,
         analysis: Some(format!("DISTO {label} output projection")),
     })?;
-    let signals =
-        apply_save_set_complex_checked(signals, &ctx.netlist.saves, "DISTO").map_err(|source| {
-            CliError::CoreSimulationError {
-                source,
-                analysis: Some(format!("DISTO {label} output projection")),
-            }
-        })?;
+    let signals = crate::commands::run_signals::complex_export_signals(
+        ctx.netlist,
+        rspice_core::execution::AnalysisResultKind::Distortion,
+        "DISTO",
+        &physical_frequencies,
+        &signals,
+        &crate::abort::ProcessAbort,
+    )
+    .map_err(|source| CliError::CoreSimulationError {
+        source,
+        analysis: Some(format!("DISTO {label} output projection")),
+    })?;
 
     if !ctx.args.allow_nonfinite {
         for signal in &signals {
@@ -450,9 +453,10 @@ fn distortion_export_table(
                     &magnitudes,
                 )?)
             };
+            let var_type = signal.raw_variable_type().to_string();
             columns.push(ExportColumn {
                 name: phasor_name,
-                var_type: signal.kind.raw_variable_type().to_string(),
+                var_type: var_type.clone(),
                 data: ColumnData::Complex {
                     real: signal.real,
                     imag: signal.imag,
@@ -460,7 +464,7 @@ fn distortion_export_table(
             });
             columns.push(ExportColumn {
                 name: format!("magnitude({}:{})", series.label, signal.display_name),
-                var_type: signal.kind.raw_variable_type().to_string(),
+                var_type,
                 data: ColumnData::Real(magnitudes.clone()),
             });
             columns.push(ExportColumn {
@@ -529,7 +533,7 @@ fn distortion_hdf5_section(
             };
             signals.push(Hdf5DistortionSignal {
                 name: signal.display_name.clone(),
-                var_type: signal.kind.raw_variable_type().to_string(),
+                var_type: signal.raw_variable_type().to_string(),
                 real: signal.real.clone(),
                 imag: signal.imag.clone(),
                 magnitude,
@@ -725,21 +729,23 @@ fn finish_ac_results(
     // Projection is part of executing an authored output contract, not merely
     // serialization. Validate it even when the caller did not request a file
     // so `.SAVE`/`.PRINT` can never be reported as successful while skipped.
-    let signals = crate::commands::run_signals::apply_save_set_complex_checked(
-        ac_signals(&results).map_err(|source| CliError::CoreSimulationError {
-            source,
-            analysis: Some("AC output projection".to_string()),
-        })?,
-        &ctx.netlist.saves,
-        "AC",
-    )
-    .map_err(|source| CliError::CoreSimulationError {
+    let frequencies: Vec<f64> = results.iter().map(|result| result.frequency).collect();
+    let ac_projection_error = |source| CliError::CoreSimulationError {
         source,
         analysis: Some("AC output projection".to_string()),
-    })?;
+    };
+    let inventory = ac_signals(&results).map_err(ac_projection_error)?;
+    let signals = crate::commands::run_signals::complex_export_signals(
+        ctx.netlist,
+        rspice_core::execution::AnalysisResultKind::Ac,
+        "AC",
+        &frequencies,
+        &inventory,
+        &crate::abort::ProcessAbort,
+    )
+    .map_err(ac_projection_error)?;
 
     if let Some(ref output_path) = ctx.output_path_for("ac") {
-        let frequencies: Vec<f64> = results.iter().map(|result| result.frequency).collect();
         if matches!(ctx.format, OutputFormat::Hdf5) {
             let mut data = Hdf5SimulationData::new();
             data.title = "AC Analysis".to_string();
@@ -1235,7 +1241,7 @@ fn report_pz(
     zeros: &[rspice_core::Complex64],
 ) -> Result<(), CliError> {
     if !ctx.quiet {
-        println!("✓ Pole-Zero analysis complete");
+        println!("âœ“ Pole-Zero analysis complete");
         println!("  Poles: {}", poles.len());
         println!("  Zeros: {}", zeros.len());
 
@@ -1376,7 +1382,7 @@ pub(super) fn run_sensitivity(
 ) -> Result<(), CliError> {
     if !ctx.quiet {
         println!(
-            "Running Sensitivity analysis: ∂V({})/∂{} at {}={:.6e}",
+            "Running Sensitivity analysis: âˆ‚V({})/âˆ‚{} at {}={:.6e}",
             output_node, param_name, param_name, param_value
         );
     }
@@ -1391,9 +1397,9 @@ pub(super) fn run_sensitivity(
     ) {
         Ok(sensitivity) => {
             if !ctx.quiet {
-                println!("✓ Sensitivity analysis complete");
+                println!("âœ“ Sensitivity analysis complete");
                 println!(
-                    "  ∂V({})/∂{} = {:.6e} V/unit",
+                    "  âˆ‚V({})/âˆ‚{} = {:.6e} V/unit",
                     output_node, param_name, sensitivity
                 );
 
@@ -1571,10 +1577,10 @@ pub(super) fn run_sensitivity_from_command(
     });
 
     if !ctx.quiet {
-        println!("✓ Sensitivity analysis complete");
+        println!("âœ“ Sensitivity analysis complete");
         for sensitivity in &sensitivities {
             println!(
-                "  ∂{}/∂{} = {:.6e} {} per native parameter unit (normalized: {:.6e})",
+                "  âˆ‚{}/âˆ‚{} = {:.6e} {} per native parameter unit (normalized: {:.6e})",
                 output_label,
                 sensitivity.vector_name,
                 sensitivity.absolute,

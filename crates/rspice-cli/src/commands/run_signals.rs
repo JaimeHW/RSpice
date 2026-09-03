@@ -1,34 +1,30 @@
 //! Turn engine results into named export signals.
 //!
-//! One place decides how a node or branch becomes a column: the rawfile name
-//! (`v(out)`, `i(v1)`) and the display name, the differential `V(a,b)` series
-//! a `.SAVE`/`--save` request synthesizes, digital XSPICE states as numeric
-//! values, and the `SaveSet` filter that drops everything not requested.
-//! Every analysis exporter goes through here so a signal is named identically
-//! whichever analysis produced it.
+//! This module builds the inventory one analysis result materialized — the
+//! rawfile name (`v(out)`, `i(v1)`), the display name, digital XSPICE states
+//! as numeric values — validates that the inventory keeps a stable schema
+//! across sweep coordinates, and then hands it to the one core
+//! [`SignalProjection`] that decides what the deck's
+//! `.SAVE`/`.PROBE`/`.PRINT`/`.PLOT` cards select. The CLI never decides that
+//! itself: it only flattens the projected columns into each output format.
 
+use std::collections::{BTreeMap, HashMap};
+
+use rspice_core::execution::{
+    AnalysisResultKind, ProjectedSignal, ProjectedSignals, ProjectionSource,
+    ProjectionSourceSignal, ProjectionValues, SignalProjection, SignalValueType,
+    probe_registry_name, signal_descriptor,
+};
 use rspice_core::{
-    Value, analysis::AcResult, engine::TransientResult, netlist::SaveSet, netlist::SaveSignal,
-    solver::SimulationResult, xspice::DigitalValue,
+    Value, analysis::AcResult, engine::TransientResult, solver::SimulationResult,
+    xspice::DigitalValue,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) enum SignalKind {
-    Voltage,
-    Current,
-    Digital,
-    Scalar,
-}
+pub(crate) use rspice_core::execution::SignalKind;
 
-impl SignalKind {
-    pub(crate) fn raw_variable_type(self) -> &'static str {
-        match self {
-            Self::Voltage => "voltage",
-            Self::Current => "current",
-            Self::Digital => "digital",
-            Self::Scalar => "parameter",
-        }
-    }
+/// The rawfile variable type a projected column serializes as.
+pub(crate) fn raw_variable_type(kind: SignalKind) -> &'static str {
+    rspice_core::execution::raw_variable_type(kind)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -37,6 +33,12 @@ pub(crate) struct ScalarSignal {
     pub(crate) raw_name: String,
     pub(crate) kind: SignalKind,
     pub(crate) values: Vec<Value>,
+}
+
+impl ScalarSignal {
+    pub(crate) fn raw_variable_type(&self) -> &'static str {
+        raw_variable_type(self.kind)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -48,6 +50,12 @@ pub(crate) struct ComplexSignal {
     pub(crate) imag: Vec<Value>,
 }
 
+impl ComplexSignal {
+    pub(crate) fn raw_variable_type(&self) -> &'static str {
+        raw_variable_type(self.kind)
+    }
+}
+
 /// Describe one already-projected scalar result without inspecting its
 /// numeric values.  STEP preflight unions these descriptors across every
 /// coordinate before any artifact is committed, so absent signals become
@@ -55,137 +63,42 @@ pub(crate) struct ComplexSignal {
 pub(crate) fn scalar_signal_schema(
     signals: &[ScalarSignal],
 ) -> Result<rspice_core::execution::SignalSchema, rspice_core::execution::SignalSchemaError> {
-    use rspice_core::execution::{
-        SignalDescriptor, SignalKind as ExecutionSignalKind, SignalOwner, SignalShape, SignalUnit,
-        SignalValueType,
-    };
-
     let descriptors = signals
         .iter()
-        .map(|signal| {
-            let (kind, unit, owner) = match signal.kind {
-                SignalKind::Voltage => (
-                    ExecutionSignalKind::Voltage,
-                    SignalUnit::Volt,
-                    SignalOwner::Node(signal.raw_name.clone()),
-                ),
-                SignalKind::Current => (
-                    ExecutionSignalKind::Current,
-                    SignalUnit::Ampere,
-                    SignalOwner::Branch(signal.raw_name.clone()),
-                ),
-                SignalKind::Digital => (
-                    ExecutionSignalKind::Digital,
-                    SignalUnit::Logic,
-                    SignalOwner::Node(signal.raw_name.clone()),
-                ),
-                SignalKind::Scalar => scalar_signal_identity(signal),
-            };
-            let value_type = if kind == ExecutionSignalKind::Digital {
-                SignalValueType::Logic
-            } else {
-                SignalValueType::Real
-            };
-            SignalDescriptor::new(
-                signal.display_name.clone(),
-                signal.display_name.clone(),
-                kind,
-                unit,
-                value_type,
-                SignalShape::Scalar,
-                owner,
-            )
-        })
+        .map(scalar_descriptor)
         .collect::<Result<Vec<_>, _>>()?;
     rspice_core::execution::SignalSchema::new(descriptors)
 }
 
-fn scalar_signal_identity(
+fn scalar_descriptor(
     signal: &ScalarSignal,
-) -> (
-    rspice_core::execution::SignalKind,
-    rspice_core::execution::SignalUnit,
-    rspice_core::execution::SignalOwner,
-) {
-    use rspice_core::execution::{SignalKind, SignalOwner, SignalUnit};
-
-    let device = signal
-        .raw_name
-        .strip_prefix('@')
-        .and_then(|name| name.split_once('['))
-        .map(|(device, _)| device.trim())
-        .filter(|device| !device.is_empty());
-    match device {
-        Some(device) => (
-            SignalKind::DeviceObservable,
-            SignalUnit::Dimensionless,
-            SignalOwner::Device(device.to_string()),
-        ),
-        None => (
-            SignalKind::Scalar,
-            SignalUnit::Dimensionless,
-            SignalOwner::Analysis,
-        ),
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct DeviceParamRequest {
-    device: String,
-    param: String,
-    authored_symbol: String,
-}
-
-fn requested_device_params(saves: &SaveSet) -> Vec<DeviceParamRequest> {
-    let mut seen = std::collections::BTreeSet::new();
-    let mut requests = Vec::new();
-    for signal in &saves.signals {
-        let SaveSignal::DeviceParam { device, param } = signal else {
-            continue;
-        };
-        let identity = (device.to_ascii_lowercase(), param.to_ascii_lowercase());
-        if seen.insert(identity) {
-            requests.push(DeviceParamRequest {
-                device: device.clone(),
-                param: param.clone(),
-                authored_symbol: format!("@{device}[{param}]"),
-            });
-        }
-    }
-    requests
-}
-
-fn requested_signal_unavailable(
-    request: &DeviceParamRequest,
-    analysis: &str,
-    coordinate: Option<String>,
-) -> rspice_core::SimulationError {
-    rspice_core::SimulationError::requested_signal_unavailable(
-        request.authored_symbol.clone(),
-        analysis,
-        coordinate,
+) -> Result<rspice_core::execution::SignalDescriptor, rspice_core::execution::SignalSchemaError> {
+    let value_type = if signal.kind == SignalKind::Digital {
+        SignalValueType::Logic
+    } else {
+        SignalValueType::Real
+    };
+    signal_descriptor(
+        &signal.display_name,
+        &signal.raw_name,
+        signal.kind,
+        value_type,
     )
 }
 
-fn unwrap_signal_name(name: &str, prefix: char) -> Option<&str> {
-    let trimmed = name.trim();
-    let mut chars = trimmed.chars();
-    let first = chars.next()?;
-    if !first.eq_ignore_ascii_case(&prefix) || chars.next()? != '(' || !trimmed.ends_with(')') {
-        return None;
-    }
-    Some(&trimmed[2..trimmed.len() - 1])
+fn complex_descriptor(
+    signal: &ComplexSignal,
+) -> Result<rspice_core::execution::SignalDescriptor, rspice_core::execution::SignalSchemaError> {
+    signal_descriptor(
+        &signal.display_name,
+        &signal.raw_name,
+        signal.kind,
+        SignalValueType::Complex,
+    )
 }
 
-fn canonical_signal_name(name: &str, fallback_index: usize, prefix: char) -> String {
-    let trimmed = name.trim();
-    if trimmed.is_empty() {
-        return fallback_index.to_string();
-    }
-
-    let candidate = unwrap_signal_name(trimmed, prefix)
-        .unwrap_or(trimmed)
-        .trim();
+fn canonical_signal_name(name: &str, fallback_index: usize) -> String {
+    let candidate = probe_registry_name(name).trim();
     if candidate.is_empty() {
         fallback_index.to_string()
     } else {
@@ -194,7 +107,7 @@ fn canonical_signal_name(name: &str, fallback_index: usize, prefix: char) -> Str
 }
 
 pub(crate) fn voltage_raw_name(name: &str, fallback_index: usize) -> String {
-    canonical_signal_name(name, fallback_index, 'V')
+    canonical_signal_name(name, fallback_index)
 }
 
 pub(crate) fn voltage_display_name(name: &str, fallback_index: usize) -> String {
@@ -202,178 +115,190 @@ pub(crate) fn voltage_display_name(name: &str, fallback_index: usize) -> String 
 }
 
 pub(crate) fn current_raw_name(name: &str, fallback_index: usize) -> String {
-    canonical_signal_name(name, fallback_index, 'I')
+    canonical_signal_name(name, fallback_index)
 }
 
 pub(crate) fn current_display_name(name: &str, fallback_index: usize) -> String {
     format!("I({})", current_raw_name(name, fallback_index))
 }
 
-/// Restrict scalar signals to a netlist's `.save`/`.probe`/`.print` selection.
+//=============================================================================
+// Projection entry points
+//=============================================================================
+
+/// Build the deck's authored output contract once per export.
+pub(crate) fn projection(
+    netlist: &rspice_core::Netlist,
+) -> Result<SignalProjection, rspice_core::SimulationError> {
+    SignalProjection::from_netlist(netlist)
+}
+
+/// One real-valued analysis result offered for authored output projection.
 ///
-/// An empty selection (or one containing `all`) keeps every signal. Matching
-/// runs against the display name (`V(out)` / `I(v1)`), which follows raw-file
-/// conventions.
-pub(crate) fn apply_save_set(signals: Vec<ScalarSignal>, saves: &SaveSet) -> Vec<ScalarSignal> {
-    if saves.keeps_everything() {
-        return signals;
-    }
-    with_differential_voltage_signals(signals, saves)
-        .into_iter()
-        .filter(|signal| signal_is_selected(signal, saves))
-        .collect()
+/// `lookup` carries resolvable-but-not-exported spellings (operating-point
+/// observables, hierarchy aliases, `device:param`) so an authored
+/// `.SAVE @D1[Id]` resolves without adding a column to an unrestricted export.
+/// `ordered` carries the columns the core `.PRINT` resolver already produced
+/// for the families that own one.
+pub(crate) struct ScalarProjectionRequest<'a> {
+    pub(crate) kind: AnalysisResultKind,
+    pub(crate) instance: &'a str,
+    pub(crate) axis: &'a [Value],
+    pub(crate) signals: &'a [ScalarSignal],
+    pub(crate) lookup: HashMap<String, &'a [Value]>,
+    pub(crate) ordered: Option<Vec<ProjectedSignal>>,
 }
 
-fn authored_save_symbol(signal: &SaveSignal) -> Option<String> {
-    match signal {
-        SaveSignal::All => None,
-        SaveSignal::Voltage(node) => Some(format!("V({node})")),
-        SaveSignal::VoltageDiff(positive, negative) => Some(format!("V({positive},{negative})")),
-        SaveSignal::Current(device) => Some(format!("I({device})")),
-        SaveSignal::DeviceParam { device, param } => Some(format!("@{device}[{param}]")),
-        SaveSignal::Raw(raw) => Some(raw.clone()),
-    }
-}
-
-fn single_save_set(signal: &SaveSignal) -> SaveSet {
-    SaveSet {
-        signals: vec![signal.clone()],
-    }
-}
-
-/// Apply scalar output selection and prove that every independently authored
-/// request resolved to at least one data column.
-pub(crate) fn apply_save_set_checked(
-    signals: Vec<ScalarSignal>,
-    saves: &SaveSet,
-    analysis: &str,
+/// Project a real-valued analysis result onto the deck's output contract.
+pub(crate) fn project_scalar(
+    netlist: &rspice_core::Netlist,
+    projection: &SignalProjection,
+    request: ScalarProjectionRequest<'_>,
+    abort: &dyn rspice_core::AbortSignal,
 ) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
-    if saves.keeps_everything()
-        && saves
-            .signals
-            .iter()
-            .all(|signal| matches!(signal, SaveSignal::All))
-    {
-        return Ok(signals);
-    }
-
-    let expanded = with_differential_voltage_signals(signals, saves);
-    for saved in &saves.signals {
-        let Some(authored) = authored_save_symbol(saved) else {
-            continue;
-        };
-        let selection = single_save_set(saved);
-        if !expanded
-            .iter()
-            .any(|signal| signal_is_selected(signal, &selection))
-        {
-            return Err(rspice_core::SimulationError::requested_signal_unavailable(
-                authored, analysis, None,
-            ));
-        }
-    }
-    Ok(expanded
-        .into_iter()
-        .filter(|signal| signal_is_selected(signal, saves))
-        .collect())
+    let ScalarProjectionRequest {
+        kind,
+        instance,
+        axis,
+        signals,
+        lookup,
+        ordered,
+    } = request;
+    let source_signals = signals
+        .iter()
+        .map(|signal| {
+            ProjectionSourceSignal::new(
+                &signal.display_name,
+                &signal.raw_name,
+                signal.kind,
+                ProjectionValues::Real(std::borrow::Cow::Borrowed(signal.values.as_slice())),
+            )
+            .map_err(|error| schema_error(instance, error))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let source = ProjectionSource::new(kind, instance)
+        .with_axis(axis)
+        .with_signals(source_signals)
+        .with_lookup(lookup)
+        .with_ordered_print_columns(ordered);
+    let projected = projection.project(&netlist.params, &source, abort)?;
+    scalar_signals(instance, projected)
 }
 
-fn signal_is_selected(signal: &ScalarSignal, saves: &SaveSet) -> bool {
-    saves.selects(&signal.display_name)
-        || (signal.kind == SignalKind::Digital && saves.selects_raw_name(&signal.raw_name))
+/// Project a complex-valued analysis result onto the deck's output contract.
+pub(crate) fn project_complex(
+    netlist: &rspice_core::Netlist,
+    projection: &SignalProjection,
+    kind: AnalysisResultKind,
+    instance: &str,
+    axis: &[Value],
+    signals: &[ComplexSignal],
+    abort: &dyn rspice_core::AbortSignal,
+) -> Result<Vec<ComplexSignal>, rspice_core::SimulationError> {
+    let source_signals = signals
+        .iter()
+        .map(|signal| {
+            ProjectionSourceSignal::new(
+                &signal.display_name,
+                &signal.raw_name,
+                signal.kind,
+                ProjectionValues::Complex {
+                    real: std::borrow::Cow::Borrowed(signal.real.as_slice()),
+                    imag: std::borrow::Cow::Borrowed(signal.imag.as_slice()),
+                },
+            )
+            .map_err(|error| schema_error(instance, error))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let source = ProjectionSource::new(kind, instance)
+        .with_axis(axis)
+        .with_signals(source_signals);
+    let projected = projection.project(&netlist.params, &source, abort)?;
+    complex_signals(instance, projected)
 }
 
-/// Restrict complex (AC) signals to a netlist's output selection.
-pub(crate) fn apply_save_set_complex(
-    signals: Vec<ComplexSignal>,
-    saves: &SaveSet,
-) -> Vec<ComplexSignal> {
-    if saves.keeps_everything() {
-        return signals;
+fn schema_error(
+    instance: &str,
+    error: rspice_core::execution::SignalSchemaError,
+) -> rspice_core::SimulationError {
+    rspice_core::SimulationError::Circuit(format!(
+        "{instance} result schema cannot be described: {error}"
+    ))
+}
+
+/// A projected column whose validity mask has a gap cannot be flattened into
+/// a dense table column, so it fails before an artifact is written rather
+/// than being padded with a plausible number.
+fn ensure_dense(
+    instance: &str,
+    signal: &ProjectedSignal,
+) -> Result<(), rspice_core::SimulationError> {
+    if signal.validity().iter().all(|valid| *valid) {
+        return Ok(());
     }
-    with_differential_complex_signals(signals, saves)
+    Err(rspice_core::SimulationError::requested_signal_unavailable(
+        signal.descriptor().display_name(),
+        instance,
+        Some("one or more samples are absent".to_string()),
+    ))
+}
+
+fn scalar_signals(
+    instance: &str,
+    projected: ProjectedSignals,
+) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
+    projected
+        .into_signals()
         .into_iter()
-        .filter(|signal| complex_signal_is_selected(signal, saves))
+        .map(|signal| {
+            ensure_dense(instance, &signal)?;
+            let display_name = signal.descriptor().display_name().to_string();
+            let kind = signal.descriptor().kind();
+            let values = signal.real().map(<[Value]>::to_vec).ok_or_else(|| {
+                rspice_core::SimulationError::Circuit(format!(
+                    "{instance} projected signal '{display_name}' is complex in a real result"
+                ))
+            })?;
+            Ok(ScalarSignal {
+                raw_name: probe_registry_name(&display_name).to_string(),
+                display_name,
+                kind,
+                values,
+            })
+        })
         .collect()
 }
 
-/// Restrict a complex result while refusing device probes the result did not
-/// materialize.
-///
-/// AC-family result types currently carry node voltages and branch currents.
-/// Callers must use this checked entry point so an authored
-/// `.SAVE @device[param]` cannot turn into a successful frequency-only file.
-/// The presence check deliberately accepts a future complex device-observable
-/// signal with the exact qualified display name, so extending a core result
-/// registry will automatically enable projection rather than require another
-/// frontend special case.
-pub(crate) fn apply_save_set_complex_checked(
-    signals: Vec<ComplexSignal>,
-    saves: &SaveSet,
-    analysis: &str,
+fn complex_signals(
+    instance: &str,
+    projected: ProjectedSignals,
 ) -> Result<Vec<ComplexSignal>, rspice_core::SimulationError> {
-    if saves.keeps_everything()
-        && saves
-            .signals
-            .iter()
-            .all(|signal| matches!(signal, SaveSignal::All))
-    {
-        return Ok(signals);
-    }
-
-    let expanded = with_differential_complex_signals(signals, saves);
-    for saved in &saves.signals {
-        let Some(authored) = authored_save_symbol(saved) else {
-            continue;
-        };
-        let selection = single_save_set(saved);
-        if !expanded
-            .iter()
-            .any(|signal| complex_signal_is_selected(signal, &selection))
-        {
-            return Err(rspice_core::SimulationError::requested_signal_unavailable(
-                authored, analysis, None,
-            ));
-        }
-    }
-    Ok(expanded
+    projected
+        .into_signals()
         .into_iter()
-        .filter(|signal| complex_signal_is_selected(signal, saves))
-        .collect())
+        .map(|signal| {
+            ensure_dense(instance, &signal)?;
+            let display_name = signal.descriptor().display_name().to_string();
+            let kind = signal.descriptor().kind();
+            let (real, imag) = signal.complex().ok_or_else(|| {
+                rspice_core::SimulationError::Circuit(format!(
+                    "{instance} projected signal '{display_name}' is real in a complex result"
+                ))
+            })?;
+            Ok(ComplexSignal {
+                raw_name: probe_registry_name(&display_name).to_string(),
+                display_name,
+                kind,
+                real: real.to_vec(),
+                imag: imag.to_vec(),
+            })
+        })
+        .collect()
 }
 
-fn complex_signal_is_selected(signal: &ComplexSignal, saves: &SaveSet) -> bool {
-    if saves.selects(&signal.display_name) {
-        return true;
-    }
-
-    saves.signals.iter().any(|saved| {
-        let SaveSignal::Raw(authored) = saved else {
-            return false;
-        };
-        let compact = authored
-            .chars()
-            .filter(|character| !character.is_whitespace())
-            .collect::<String>();
-        let Some((operator, argument)) = compact
-            .split_once('(')
-            .and_then(|(operator, rest)| rest.strip_suffix(')').map(|arg| (operator, arg)))
-        else {
-            return false;
-        };
-        let operator = operator.to_ascii_uppercase();
-        let compatible_kind = match signal.kind {
-            SignalKind::Voltage => {
-                matches!(operator.as_str(), "V" | "VR" | "VI" | "VM" | "VP" | "VDB")
-            }
-            SignalKind::Current => {
-                matches!(operator.as_str(), "I" | "IR" | "II" | "IM" | "IP" | "IDB")
-            }
-            SignalKind::Digital | SignalKind::Scalar => false,
-        };
-        compatible_kind && argument.eq_ignore_ascii_case(&signal.raw_name)
-    })
-}
+//=============================================================================
+// Result inventories
+//=============================================================================
 
 fn voltage_signal(raw_name: String, values: Vec<Value>) -> ScalarSignal {
     ScalarSignal {
@@ -408,161 +333,6 @@ fn digital_value_numeric(value: DigitalValue) -> Value {
         Some(true) => 1.0,
         None => 0.5,
     }
-}
-
-fn is_ground_node(name: &str) -> bool {
-    // Parsed selections and CLI overrides are normalized through the
-    // netlist's GroundPolicy before any export path reaches this module.
-    name.trim() == "0"
-}
-
-fn requested_voltage_diffs(saves: &SaveSet) -> impl Iterator<Item = (&str, &str)> {
-    saves.signals.iter().filter_map(|signal| match signal {
-        SaveSignal::VoltageDiff(a, b) => Some((a.as_str(), b.as_str())),
-        _ => None,
-    })
-}
-
-fn scalar_voltage_values(
-    signals: &[ScalarSignal],
-    node: &str,
-    sample_count: usize,
-) -> Option<Vec<Value>> {
-    if is_ground_node(node) {
-        return Some(vec![0.0; sample_count]);
-    }
-
-    let target = voltage_raw_name(node, 0);
-    signals
-        .iter()
-        .find(|signal| {
-            signal.kind == SignalKind::Voltage && signal.raw_name.eq_ignore_ascii_case(&target)
-        })
-        .map(|signal| signal.values.clone())
-}
-
-fn complex_voltage_values(
-    signals: &[ComplexSignal],
-    node: &str,
-    sample_count: usize,
-) -> Option<(Vec<Value>, Vec<Value>)> {
-    if is_ground_node(node) {
-        return Some((vec![0.0; sample_count], vec![0.0; sample_count]));
-    }
-
-    let target = voltage_raw_name(node, 0);
-    signals
-        .iter()
-        .find(|signal| {
-            signal.kind == SignalKind::Voltage && signal.raw_name.eq_ignore_ascii_case(&target)
-        })
-        .map(|signal| (signal.real.clone(), signal.imag.clone()))
-}
-
-fn with_differential_voltage_signals(
-    mut signals: Vec<ScalarSignal>,
-    saves: &SaveSet,
-) -> Vec<ScalarSignal> {
-    let sample_count = signals
-        .iter()
-        .find(|signal| signal.kind == SignalKind::Voltage)
-        .map_or(0, |signal| signal.values.len());
-
-    for (positive, negative) in requested_voltage_diffs(saves) {
-        let raw_name = format!(
-            "{},{}",
-            voltage_raw_name(positive, 0),
-            voltage_raw_name(negative, 0)
-        );
-        let display_name = format!("V({raw_name})");
-        if signals
-            .iter()
-            .any(|signal| signal.display_name.eq_ignore_ascii_case(&display_name))
-        {
-            continue;
-        }
-
-        let Some(pos_values) = scalar_voltage_values(&signals, positive, sample_count) else {
-            continue;
-        };
-        let Some(neg_values) = scalar_voltage_values(&signals, negative, sample_count) else {
-            continue;
-        };
-        if pos_values.len() != neg_values.len() {
-            continue;
-        }
-
-        let values = pos_values
-            .into_iter()
-            .zip(neg_values)
-            .map(|(pos, neg)| pos - neg)
-            .collect();
-        signals.push(ScalarSignal {
-            display_name,
-            raw_name,
-            kind: SignalKind::Voltage,
-            values,
-        });
-    }
-
-    signals
-}
-
-fn with_differential_complex_signals(
-    mut signals: Vec<ComplexSignal>,
-    saves: &SaveSet,
-) -> Vec<ComplexSignal> {
-    let sample_count = signals
-        .iter()
-        .find(|signal| signal.kind == SignalKind::Voltage)
-        .map_or(0, |signal| signal.real.len());
-
-    for (positive, negative) in requested_voltage_diffs(saves) {
-        let raw_name = format!(
-            "{},{}",
-            voltage_raw_name(positive, 0),
-            voltage_raw_name(negative, 0)
-        );
-        let display_name = format!("V({raw_name})");
-        if signals
-            .iter()
-            .any(|signal| signal.display_name.eq_ignore_ascii_case(&display_name))
-        {
-            continue;
-        }
-
-        let Some((pos_real, pos_imag)) = complex_voltage_values(&signals, positive, sample_count)
-        else {
-            continue;
-        };
-        let Some((neg_real, neg_imag)) = complex_voltage_values(&signals, negative, sample_count)
-        else {
-            continue;
-        };
-        if pos_real.len() != neg_real.len() || pos_imag.len() != neg_imag.len() {
-            continue;
-        }
-
-        let real = pos_real
-            .into_iter()
-            .zip(neg_real)
-            .map(|(pos, neg)| pos - neg)
-            .collect();
-        let imag = pos_imag
-            .into_iter()
-            .zip(neg_imag)
-            .map(|(pos, neg)| pos - neg)
-            .collect();
-        signals.push(ComplexSignal {
-            display_name,
-            raw_name,
-            kind: SignalKind::Voltage,
-            real,
-            imag,
-        });
-    }
-
-    signals
 }
 
 pub(crate) fn transient_voltage_signals(result: &TransientResult) -> Vec<ScalarSignal> {
@@ -668,122 +438,24 @@ pub(crate) fn dc_operating_point_signals(result: &SimulationResult) -> Vec<Scala
     signals
 }
 
-fn device_param_signal(request: &DeviceParamRequest, values: Vec<Value>) -> ScalarSignal {
-    ScalarSignal {
-        display_name: request.authored_symbol.clone(),
-        raw_name: request.authored_symbol.clone(),
-        kind: SignalKind::Scalar,
-        values,
-    }
+//=============================================================================
+// Cross-coordinate schema validation
+//=============================================================================
+
+/// The typed identity of one inventory column, used to prove that later
+/// coordinates carry exactly the schema the first coordinate established.
+fn scalar_identity(signal: &ScalarSignal) -> Result<String, rspice_core::SimulationError> {
+    Ok(scalar_descriptor(signal)
+        .map_err(|error| schema_error("DC", error))?
+        .canonical_name()
+        .to_string())
 }
 
-fn dc_device_param_value(result: &SimulationResult, request: &DeviceParamRequest) -> Option<Value> {
-    [
-        request.authored_symbol.clone(),
-        format!("{}:{}", request.device, request.param),
-        format!("N({}:{})", request.device, request.param),
-    ]
-    .into_iter()
-    .find_map(|candidate| result.try_dc_observable_named(&candidate))
-}
-
-fn dc_operating_point_device_param_signals(
-    result: &SimulationResult,
-    saves: &SaveSet,
-) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
-    requested_device_params(saves)
-        .into_iter()
-        .map(|request| {
-            let value = dc_device_param_value(result, &request).ok_or_else(|| {
-                requested_signal_unavailable(&request, "DC OP", Some("operating point".to_string()))
-            })?;
-            Ok(device_param_signal(&request, vec![value]))
-        })
-        .collect()
-}
-
-fn dc_sweep_device_param_signals(
-    results: &[(Value, SimulationResult)],
-    saves: &SaveSet,
-) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
-    requested_device_params(saves)
-        .into_iter()
-        .map(|request| {
-            let mut values = Vec::with_capacity(results.len());
-            if results.is_empty() {
-                return Err(requested_signal_unavailable(
-                    &request,
-                    "DC",
-                    Some("empty sweep result".to_string()),
-                ));
-            }
-            for (point_index, (scale, result)) in results.iter().enumerate() {
-                let coordinate = format!(
-                    "sweep point {} ({scale:.16e})",
-                    point_index.saturating_add(1)
-                );
-                let value = dc_device_param_value(result, &request).ok_or_else(|| {
-                    requested_signal_unavailable(&request, "DC", Some(coordinate))
-                })?;
-                values.push(value);
-            }
-            Ok(device_param_signal(&request, values))
-        })
-        .collect()
-}
-
-fn transient_device_param_signals(
-    result: &TransientResult,
-    saves: &SaveSet,
-) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
-    requested_device_params(saves)
-        .into_iter()
-        .map(|request| {
-            let values = result
-                .try_device_op_waveform_named(&request.device, &request.param)
-                .ok_or_else(|| requested_signal_unavailable(&request, "TRAN", None))?;
-            if values.len() != result.time.len() {
-                return Err(rspice_core::SimulationError::Circuit(format!(
-                    "TRAN result schema is malformed for requested signal '{}': {} values for {} time points",
-                    request.authored_symbol,
-                    values.len(),
-                    result.time.len()
-                )));
-            }
-            Ok(device_param_signal(&request, values.to_vec()))
-        })
-        .collect()
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct SignalIdentity {
-    kind: SignalKind,
-    canonical_raw_name: String,
-}
-
-impl SignalIdentity {
-    fn from_scalar(signal: &ScalarSignal) -> Self {
-        Self {
-            kind: signal.kind,
-            canonical_raw_name: signal.raw_name.to_ascii_lowercase(),
-        }
-    }
-
-    fn from_complex(signal: &ComplexSignal) -> Self {
-        Self {
-            kind: signal.kind,
-            canonical_raw_name: signal.raw_name.to_ascii_lowercase(),
-        }
-    }
-
-    fn display_name(&self) -> String {
-        match self.kind {
-            SignalKind::Voltage => format!("V({})", self.canonical_raw_name),
-            SignalKind::Current => format!("I({})", self.canonical_raw_name),
-            SignalKind::Digital => format!("D({})", self.canonical_raw_name),
-            SignalKind::Scalar => self.canonical_raw_name.clone(),
-        }
-    }
+fn complex_identity(signal: &ComplexSignal) -> Result<String, rspice_core::SimulationError> {
+    Ok(complex_descriptor(signal)
+        .map_err(|error| schema_error("AC", error))?
+        .canonical_name()
+        .to_string())
 }
 
 fn validate_dc_point_shape(
@@ -805,14 +477,14 @@ fn validate_dc_point_shape(
         )));
     }
     for (index, name) in result.node_names.iter().enumerate() {
-        if canonical_name_is_empty(name, 'V') {
+        if canonical_name_is_empty(name) {
             return Err(rspice_core::SimulationError::Circuit(format!(
                 "DC result schema has an empty node name at index {index} at {point}"
             )));
         }
     }
     for (index, name) in result.branch_names.iter().enumerate() {
-        if canonical_name_is_empty(name, 'I') {
+        if canonical_name_is_empty(name) {
             return Err(rspice_core::SimulationError::Circuit(format!(
                 "DC result schema has an empty branch name at index {index} at {point}"
             )));
@@ -821,27 +493,14 @@ fn validate_dc_point_shape(
     Ok(())
 }
 
-fn canonical_name_is_empty(name: &str, prefix: char) -> bool {
-    let trimmed = name.trim();
-    unwrap_signal_name(trimmed, prefix)
-        .unwrap_or(trimmed)
-        .trim()
-        .is_empty()
+fn canonical_name_is_empty(name: &str) -> bool {
+    rspice_core::execution::probe_names_nothing(name)
 }
 
 pub(crate) fn checked_dc_operating_point_signals(
     result: &SimulationResult,
 ) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
     dc_point_signals(result, "operating point")
-}
-
-pub(crate) fn dc_operating_point_export_signals(
-    result: &SimulationResult,
-    saves: &SaveSet,
-) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
-    let mut signals = checked_dc_operating_point_signals(result)?;
-    signals.extend(dc_operating_point_device_param_signals(result, saves)?);
-    apply_save_set_checked(signals, saves, "DC OP")
 }
 
 fn dc_point_signals(
@@ -855,15 +514,14 @@ fn dc_point_signals(
 fn scalar_point_index(
     signals: Vec<ScalarSignal>,
     point: &str,
-) -> Result<std::collections::BTreeMap<SignalIdentity, ScalarSignal>, rspice_core::SimulationError>
-{
-    let mut indexed = std::collections::BTreeMap::new();
+) -> Result<BTreeMap<String, ScalarSignal>, rspice_core::SimulationError> {
+    let mut indexed = BTreeMap::new();
     for signal in signals {
-        let identity = SignalIdentity::from_scalar(&signal);
-        if indexed.insert(identity.clone(), signal).is_some() {
+        let identity = scalar_identity(&signal)?;
+        let display = signal.display_name.clone();
+        if indexed.insert(identity, signal).is_some() {
             return Err(rspice_core::SimulationError::Circuit(format!(
-                "DC result schema contains duplicate signal '{}' at {point}",
-                identity.display_name()
+                "DC result schema contains duplicate signal '{display}' at {point}"
             )));
         }
     }
@@ -871,18 +529,18 @@ fn scalar_point_index(
 }
 
 fn schema_difference(
-    expected: impl Iterator<Item = SignalIdentity>,
-    actual: impl Iterator<Item = SignalIdentity>,
+    expected: &BTreeMap<String, String>,
+    actual: &BTreeMap<String, String>,
 ) -> (Vec<String>, Vec<String>) {
-    let expected = expected.collect::<std::collections::BTreeSet<_>>();
-    let actual = actual.collect::<std::collections::BTreeSet<_>>();
     let missing = expected
-        .difference(&actual)
-        .map(SignalIdentity::display_name)
+        .iter()
+        .filter(|(identity, _)| !actual.contains_key(*identity))
+        .map(|(_, display)| display.clone())
         .collect();
     let unexpected = actual
-        .difference(&expected)
-        .map(SignalIdentity::display_name)
+        .iter()
+        .filter(|(identity, _)| !expected.contains_key(*identity))
+        .map(|(_, display)| display.clone())
         .collect();
     (missing, unexpected)
 }
@@ -898,8 +556,17 @@ pub(crate) fn dc_sweep_signals(
     let first_signals = dc_point_signals(first_result, &first_point)?;
     let expected_identities = first_signals
         .iter()
-        .map(SignalIdentity::from_scalar)
-        .collect::<Vec<_>>();
+        .map(scalar_identity)
+        .collect::<Result<Vec<_>, _>>()?;
+    let expected_display = expected_identities
+        .iter()
+        .cloned()
+        .zip(
+            first_signals
+                .iter()
+                .map(|signal| signal.display_name.clone()),
+        )
+        .collect::<BTreeMap<_, _>>();
     let mut aggregated = first_signals
         .into_iter()
         .map(|mut signal| {
@@ -911,8 +578,11 @@ pub(crate) fn dc_sweep_signals(
     for (point_index, (scale, result)) in results.iter().enumerate() {
         let point = format!("sweep point {} ({scale:.16e})", point_index + 1);
         let mut actual = scalar_point_index(dc_point_signals(result, &point)?, &point)?;
-        let (missing, unexpected) =
-            schema_difference(expected_identities.iter().cloned(), actual.keys().cloned());
+        let actual_display = actual
+            .iter()
+            .map(|(identity, signal)| (identity.clone(), signal.display_name.clone()))
+            .collect::<BTreeMap<_, _>>();
+        let (missing, unexpected) = schema_difference(&expected_display, &actual_display);
         if !missing.is_empty() || !unexpected.is_empty() {
             return Err(rspice_core::SimulationError::Circuit(format!(
                 "DC result schema changes at {point}: missing [{}]; unexpected [{}]",
@@ -924,20 +594,17 @@ pub(crate) fn dc_sweep_signals(
         for (signal, identity) in aggregated.iter_mut().zip(&expected_identities) {
             let point_signal = actual.remove(identity).ok_or_else(|| {
                 rspice_core::SimulationError::Circuit(format!(
-                    "DC result schema lost signal '{}' while aggregating {point}",
-                    identity.display_name()
+                    "DC result schema lost signal '{identity}' while aggregating {point}"
                 ))
             })?;
             let value = point_signal.values.first().copied().ok_or_else(|| {
                 rspice_core::SimulationError::Circuit(format!(
-                    "DC result signal '{}' has no scalar value at {point}",
-                    identity.display_name()
+                    "DC result signal '{identity}' has no scalar value at {point}"
                 ))
             })?;
             if point_signal.values.len() != 1 {
                 return Err(rspice_core::SimulationError::Circuit(format!(
-                    "DC result signal '{}' has {} values at {point}; expected one",
-                    identity.display_name(),
+                    "DC result signal '{identity}' has {} values at {point}; expected one",
                     point_signal.values.len()
                 )));
             }
@@ -955,93 +622,6 @@ pub(crate) fn dc_sweep_voltage_signals(
         .into_iter()
         .filter(|signal| signal.kind == SignalKind::Voltage)
         .collect())
-}
-
-fn authored_print_requests(
-    netlist: &rspice_core::Netlist,
-    analysis: rspice_core::netlist::OutputAnalysisKind,
-) -> Vec<&rspice_core::netlist::OutputRequest> {
-    netlist
-        .output_requests
-        .iter()
-        .filter(|request| {
-            request.directive == rspice_core::netlist::OutputDirectiveKind::Print
-                && request.analysis.is_none_or(|kind| kind == analysis)
-        })
-        .collect()
-}
-
-fn projected_output_signals(
-    projected: Vec<(String, &'static str, Vec<Value>)>,
-) -> Vec<ScalarSignal> {
-    projected
-        .into_iter()
-        .map(|(name, physical_type, values)| ScalarSignal {
-            display_name: name.clone(),
-            raw_name: name,
-            kind: match physical_type {
-                "voltage" => SignalKind::Voltage,
-                "current" => SignalKind::Current,
-                "parameter" => SignalKind::Scalar,
-                unexpected => {
-                    unreachable!("core returned unsupported physical output type '{unexpected}'")
-                }
-            },
-            values,
-        })
-        .collect()
-}
-
-pub(crate) fn dc_export_signals(
-    netlist: &rspice_core::Netlist,
-    results: &[(Value, SimulationResult)],
-    limits: rspice_core::ResourceLimits,
-    abort: &dyn rspice_core::AbortSignal,
-) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
-    let requests = authored_print_requests(netlist, rspice_core::netlist::OutputAnalysisKind::Dc);
-    if requests.is_empty()
-        || requests
-            .iter()
-            .flat_map(|request| &request.operands)
-            .any(|operand| {
-                matches!(
-                    rspice_core::netlist::parse_save_probe(operand),
-                    Some(rspice_core::netlist::SaveSignal::All)
-                )
-            })
-    {
-        let mut signals = dc_sweep_signals(results)?;
-        signals.extend(dc_sweep_device_param_signals(results, &netlist.saves)?);
-        return apply_save_set_checked(signals, &netlist.saves, "DC");
-    }
-    rspice_core::analysis::evaluate_dc_output_requests_with_abort(netlist, results, limits, abort)
-        .map(projected_output_signals)
-}
-
-pub(crate) fn transient_export_signals(
-    netlist: &rspice_core::Netlist,
-    result: &TransientResult,
-    limits: rspice_core::ResourceLimits,
-    abort: &dyn rspice_core::AbortSignal,
-) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
-    let requests = authored_print_requests(netlist, rspice_core::netlist::OutputAnalysisKind::Tran);
-    if requests.is_empty()
-        || requests
-            .iter()
-            .flat_map(|request| &request.operands)
-            .any(|operand| {
-                matches!(
-                    rspice_core::netlist::parse_save_probe(operand),
-                    Some(rspice_core::netlist::SaveSignal::All)
-                )
-            })
-    {
-        let mut signals = transient_signals(result);
-        signals.extend(transient_device_param_signals(result, &netlist.saves)?);
-        return apply_save_set_checked(signals, &netlist.saves, "TRAN");
-    }
-    rspice_core::analysis::evaluate_tran_output_requests_with_abort(netlist, result, limits, abort)
-        .map(projected_output_signals)
 }
 
 fn ac_point_signals(
@@ -1063,14 +643,14 @@ fn ac_point_signals(
         )));
     }
     for (index, name) in result.node_names.iter().enumerate() {
-        if canonical_name_is_empty(name, 'V') {
+        if canonical_name_is_empty(name) {
             return Err(rspice_core::SimulationError::Circuit(format!(
                 "AC result schema has an empty node name at index {index} at {point}"
             )));
         }
     }
     for (index, name) in result.branch_names.iter().enumerate() {
-        if canonical_name_is_empty(name, 'I') {
+        if canonical_name_is_empty(name) {
             return Err(rspice_core::SimulationError::Circuit(format!(
                 "AC result schema has an empty branch name at index {index} at {point}"
             )));
@@ -1104,15 +684,14 @@ fn ac_point_signals(
 fn complex_point_index(
     signals: Vec<ComplexSignal>,
     point: &str,
-) -> Result<std::collections::BTreeMap<SignalIdentity, ComplexSignal>, rspice_core::SimulationError>
-{
-    let mut indexed = std::collections::BTreeMap::new();
+) -> Result<BTreeMap<String, ComplexSignal>, rspice_core::SimulationError> {
+    let mut indexed = BTreeMap::new();
     for signal in signals {
-        let identity = SignalIdentity::from_complex(&signal);
-        if indexed.insert(identity.clone(), signal).is_some() {
+        let identity = complex_identity(&signal)?;
+        let display = signal.display_name.clone();
+        if indexed.insert(identity, signal).is_some() {
             return Err(rspice_core::SimulationError::Circuit(format!(
-                "AC result schema contains duplicate signal '{}' at {point}",
-                identity.display_name()
+                "AC result schema contains duplicate signal '{display}' at {point}"
             )));
         }
     }
@@ -1129,8 +708,17 @@ pub(crate) fn ac_signals(
     let first_signals = ac_point_signals(first_result, &first_point)?;
     let expected_identities = first_signals
         .iter()
-        .map(SignalIdentity::from_complex)
-        .collect::<Vec<_>>();
+        .map(complex_identity)
+        .collect::<Result<Vec<_>, _>>()?;
+    let expected_display = expected_identities
+        .iter()
+        .cloned()
+        .zip(
+            first_signals
+                .iter()
+                .map(|signal| signal.display_name.clone()),
+        )
+        .collect::<BTreeMap<_, _>>();
     let mut aggregated = first_signals
         .into_iter()
         .map(|mut signal| {
@@ -1147,8 +735,11 @@ pub(crate) fn ac_signals(
             result.frequency
         );
         let mut actual = complex_point_index(ac_point_signals(result, &point)?, &point)?;
-        let (missing, unexpected) =
-            schema_difference(expected_identities.iter().cloned(), actual.keys().cloned());
+        let actual_display = actual
+            .iter()
+            .map(|(identity, signal)| (identity.clone(), signal.display_name.clone()))
+            .collect::<BTreeMap<_, _>>();
+        let (missing, unexpected) = schema_difference(&expected_display, &actual_display);
         if !missing.is_empty() || !unexpected.is_empty() {
             return Err(rspice_core::SimulationError::Circuit(format!(
                 "AC result schema changes at {point}: missing [{}]; unexpected [{}]",
@@ -1160,14 +751,12 @@ pub(crate) fn ac_signals(
         for (signal, identity) in aggregated.iter_mut().zip(&expected_identities) {
             let point_signal = actual.remove(identity).ok_or_else(|| {
                 rspice_core::SimulationError::Circuit(format!(
-                    "AC result schema lost signal '{}' while aggregating {point}",
-                    identity.display_name()
+                    "AC result schema lost signal '{identity}' while aggregating {point}"
                 ))
             })?;
             if point_signal.real.len() != 1 || point_signal.imag.len() != 1 {
                 return Err(rspice_core::SimulationError::Circuit(format!(
-                    "AC result signal '{}' is not scalar at {point}",
-                    identity.display_name()
+                    "AC result signal '{identity}' is not scalar at {point}"
                 )));
             }
             signal.real.push(point_signal.real[0]);
@@ -1178,10 +767,131 @@ pub(crate) fn ac_signals(
     Ok(aggregated)
 }
 
+//=============================================================================
+// Per-family export projection
+//=============================================================================
+
+pub(crate) fn dc_operating_point_export_signals(
+    netlist: &rspice_core::Netlist,
+    result: &SimulationResult,
+    abort: &dyn rspice_core::AbortSignal,
+) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
+    let projection = projection(netlist)?;
+    let signals = checked_dc_operating_point_signals(result)?;
+    let observables = rspice_core::execution::operating_point_observable_series(result);
+    let lookup = rspice_core::execution::observable_lookup(&observables);
+    project_scalar(
+        netlist,
+        &projection,
+        ScalarProjectionRequest {
+            kind: AnalysisResultKind::OperatingPoint,
+            instance: "DC OP",
+            axis: &[0.0],
+            signals: &signals,
+            lookup,
+            ordered: None,
+        },
+        abort,
+    )
+}
+
+pub(crate) fn dc_export_signals(
+    netlist: &rspice_core::Netlist,
+    results: &[(Value, SimulationResult)],
+    limits: rspice_core::ResourceLimits,
+    abort: &dyn rspice_core::AbortSignal,
+) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
+    let projection = projection(netlist)?;
+    let ordered = projection.ordered_dc_columns(netlist, results, limits, abort)?;
+    let signals = dc_sweep_signals(results)?;
+    let observables = rspice_core::execution::dc_sweep_observable_series(results);
+    let lookup = rspice_core::execution::observable_lookup(&observables);
+    let axis = results.iter().map(|(scale, _)| *scale).collect::<Vec<_>>();
+    project_scalar(
+        netlist,
+        &projection,
+        ScalarProjectionRequest {
+            kind: AnalysisResultKind::DcSweep,
+            instance: "DC",
+            axis: &axis,
+            signals: &signals,
+            lookup,
+            ordered,
+        },
+        abort,
+    )
+}
+
+pub(crate) fn transient_export_signals(
+    netlist: &rspice_core::Netlist,
+    result: &TransientResult,
+    limits: rspice_core::ResourceLimits,
+    abort: &dyn rspice_core::AbortSignal,
+) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
+    let projection = projection(netlist)?;
+    let ordered = projection.ordered_transient_columns(netlist, result, limits, abort)?;
+    let signals = transient_signals(result);
+    let lookup = rspice_core::analysis::measure_signals::transient_signal_map(result);
+    project_scalar(
+        netlist,
+        &projection,
+        ScalarProjectionRequest {
+            kind: AnalysisResultKind::Transient,
+            instance: "TRAN",
+            axis: &result.time,
+            signals: &signals,
+            lookup,
+            ordered,
+        },
+        abort,
+    )
+}
+
+/// Project one already-materialized scalar inventory (PSS waveforms, a `.STEP`
+/// table) onto the authored output contract.
+pub(crate) fn scalar_export_signals(
+    netlist: &rspice_core::Netlist,
+    kind: AnalysisResultKind,
+    instance: &str,
+    axis: &[Value],
+    signals: &[ScalarSignal],
+    abort: &dyn rspice_core::AbortSignal,
+) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
+    let projection = projection(netlist)?;
+    project_scalar(
+        netlist,
+        &projection,
+        ScalarProjectionRequest {
+            kind,
+            instance,
+            axis,
+            signals,
+            lookup: HashMap::new(),
+            ordered: None,
+        },
+        abort,
+    )
+}
+
+/// Project one already-materialized complex inventory (AC, distortion, HB)
+/// onto the authored output contract.
+pub(crate) fn complex_export_signals(
+    netlist: &rspice_core::Netlist,
+    kind: AnalysisResultKind,
+    instance: &str,
+    axis: &[Value],
+    signals: &[ComplexSignal],
+    abort: &dyn rspice_core::AbortSignal,
+) -> Result<Vec<ComplexSignal>, rspice_core::SimulationError> {
+    let projection = projection(netlist)?;
+    project_complex(netlist, &projection, kind, instance, axis, signals, abort)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use rspice_core::Complex64;
+    use rspice_core::NoAbort;
 
     fn dc_result(nodes: &[(&str, Value)], branches: &[(&str, Value)]) -> SimulationResult {
         let mut result = SimulationResult::new(nodes.len(), branches.len());
@@ -1233,37 +943,31 @@ mod tests {
         (&signal.real, &signal.imag)
     }
 
-    fn device_save(device: &str, param: &str) -> SaveSet {
-        SaveSet {
-            signals: vec![SaveSignal::DeviceParam {
-                device: device.to_string(),
-                param: param.to_string(),
-            }],
-        }
+    fn netlist_with_saves(saves: &str) -> rspice_core::Netlist {
+        rspice_core::Netlist::parse(&format!(
+            "device projection test\nV1 out 0 1\nR1 out 0 1k\n.DC V1 0 1 1\n{saves}.END\n"
+        ))
+        .expect("test netlist parses")
     }
 
     #[test]
     fn dc_device_save_materializes_authored_qualified_name() {
         let mut result = dc_result(&[("out", 1.0)], &[]);
         result.dc_observables.push(("D1:ID".to_string(), 2.5e-3));
-        let saves = device_save("D1", "Id");
+        let netlist = netlist_with_saves(".SAVE @D1[Id]\n");
 
-        let op =
-            dc_operating_point_export_signals(&result, &saves).expect("DC observable is available");
+        let op = dc_operating_point_export_signals(&netlist, &result, &NoAbort)
+            .expect("DC observable is available");
         assert_eq!(op.len(), 1);
         assert_eq!(op[0].display_name, "@D1[Id]");
         assert_eq!(op[0].values, [2.5e-3]);
+        assert_eq!(op[0].kind, SignalKind::DeviceObservable);
 
-        let mut netlist = rspice_core::Netlist::parse(
-            "device projection test\nV1 out 0 1\nR1 out 0 1k\n.DC V1 0 1 1\n.END\n",
-        )
-        .expect("test netlist parses");
-        netlist.saves = saves;
         let sweep = dc_export_signals(
             &netlist,
             &[(0.0, result.clone()), (1.0, result)],
             rspice_core::ResourceLimits::default(),
-            &rspice_core::NoAbort,
+            &NoAbort,
         )
         .expect("DC sweep observable is available");
         assert_eq!(sweep.len(), 1);
@@ -1272,9 +976,17 @@ mod tests {
     }
 
     #[test]
-    fn checked_complex_save_returns_typed_authored_symbol_error() {
-        let error = apply_save_set_complex_checked(Vec::new(), &device_save("Mdriver", "Id"), "AC")
-            .expect_err("AC result has no device-observable registry");
+    fn a_missing_complex_save_is_a_typed_authored_symbol_error() {
+        let netlist = netlist_with_saves(".SAVE @Mdriver[Id]\n");
+        let error = complex_export_signals(
+            &netlist,
+            AnalysisResultKind::Ac,
+            "AC",
+            &[1.0],
+            &[],
+            &NoAbort,
+        )
+        .expect_err("AC result has no device-observable registry");
         assert_eq!(
             error.descriptor().code,
             rspice_core::SimulationErrorCode::RequestedSignalUnavailable
@@ -1285,11 +997,16 @@ mod tests {
         assert_eq!(detail.signal, "@Mdriver[Id]");
         assert_eq!(detail.analysis, "AC");
 
-        let missing_voltage = SaveSet {
-            signals: vec![SaveSignal::Voltage("MissingNode".to_string())],
-        };
-        let error = apply_save_set_complex_checked(Vec::new(), &missing_voltage, "AC")
-            .expect_err("missing AC voltage cannot become a frequency-only result");
+        let netlist = netlist_with_saves(".SAVE V(MissingNode)\n");
+        let error = complex_export_signals(
+            &netlist,
+            AnalysisResultKind::Ac,
+            "AC",
+            &[1.0],
+            &[],
+            &NoAbort,
+        )
+        .expect_err("missing AC voltage cannot become a frequency-only result");
         let rspice_core::SimulationError::RequestedSignalUnavailable(detail) = error else {
             panic!("missing typed unavailable-voltage error");
         };
@@ -1297,21 +1014,31 @@ mod tests {
     }
 
     #[test]
-    fn checked_scalar_save_validates_each_request_and_supports_wildcards() {
+    fn a_scalar_save_validates_each_request_and_supports_wildcards() {
         let signals = vec![voltage_signal("out".to_string(), vec![1.0])];
-        let wildcard = SaveSet {
-            signals: vec![SaveSignal::Voltage("o*".to_string())],
-        };
-        let projected = apply_save_set_checked(signals.clone(), &wildcard, "DC OP")
-            .expect("wildcard resolves one voltage");
+        let wildcard = netlist_with_saves(".SAVE V(o*)\n");
+        let projected = scalar_export_signals(
+            &wildcard,
+            AnalysisResultKind::OperatingPoint,
+            "DC OP",
+            &[0.0],
+            &signals,
+            &NoAbort,
+        )
+        .expect("wildcard resolves one voltage");
         assert_eq!(projected.len(), 1);
         assert_eq!(projected[0].display_name, "V(out)");
 
-        let missing = SaveSet {
-            signals: vec![SaveSignal::Current("AuthoredCase".to_string())],
-        };
-        let error = apply_save_set_checked(signals, &missing, "DC OP")
-            .expect_err("missing current must not produce an empty result");
+        let missing = netlist_with_saves(".SAVE I(AuthoredCase)\n");
+        let error = scalar_export_signals(
+            &missing,
+            AnalysisResultKind::OperatingPoint,
+            "DC OP",
+            &[0.0],
+            &signals,
+            &NoAbort,
+        )
+        .expect_err("missing current must not produce an empty result");
         let rspice_core::SimulationError::RequestedSignalUnavailable(detail) = error else {
             panic!("missing typed unavailable-current error");
         };
@@ -1356,7 +1083,7 @@ mod tests {
         let error = dc_sweep_signals(&missing_branch)
             .expect_err("missing branch must not become a zero current");
         let message = error.to_string();
-        assert!(message.contains("missing [I(v1)]"), "{message}");
+        assert!(message.contains("missing [I(V1)]"), "{message}");
     }
 
     #[test]
@@ -1457,7 +1184,7 @@ mod tests {
         missing_branch.currents.clear();
         let error = ac_signals(&[first.clone(), missing_branch])
             .expect_err("missing AC current must not become a zero");
-        assert!(error.to_string().contains("missing [I(v1)]"));
+        assert!(error.to_string().contains("missing [I(V1)]"));
 
         let mut unnamed = first;
         unnamed.node_names[0] = "V( )".to_string();

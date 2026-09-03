@@ -46,9 +46,12 @@ pub(super) fn run_dc_op(ctx: &RunContext<'_>) -> Result<(), CliError> {
         Ok((result, op_report)) => {
             let operating_point_signals = checked_dc_operating_point_signals(&result)
                 .map_err(|error| map_output_projection_error(ctx, error, "DC OP"))?;
-            let exported_operating_point_signals =
-                dc_operating_point_export_signals(&result, &ctx.netlist.saves)
-                    .map_err(|error| map_output_projection_error(ctx, error, "DC OP"))?;
+            let exported_operating_point_signals = dc_operating_point_export_signals(
+                ctx.netlist,
+                &result,
+                &crate::abort::ProcessAbort,
+            )
+            .map_err(|error| map_output_projection_error(ctx, error, "DC OP"))?;
             super::shared::ensure_finite_series(
                 ctx.args.allow_nonfinite,
                 "DC OP",
@@ -213,7 +216,7 @@ pub(super) fn write_dc_op_output(
         for signal in signals {
             operating_point.add_typed_signal(
                 signal.display_name.clone(),
-                signal.kind.raw_variable_type(),
+                signal.raw_variable_type(),
                 signal.values.clone(),
             );
         }
@@ -309,7 +312,7 @@ pub(super) fn write_dc_op_output(
                         "\t{}\t{}\t{}",
                         index,
                         signal.display_name,
-                        signal.kind.raw_variable_type()
+                        signal.raw_variable_type()
                     )
                     .map_err(|e| CliError::OutputError {
                         path: path.to_path_buf(),
@@ -439,7 +442,7 @@ pub(super) fn run_dc_sweep(
                         for signal in &signals {
                             dc_sweep.add_typed_signal(
                                 signal.display_name.clone(),
-                                signal.kind.raw_variable_type(),
+                                signal.raw_variable_type(),
                                 signal.values.clone(),
                             );
                         }
@@ -485,7 +488,7 @@ pub(super) fn run_dc_sweep(
 fn describe_compression_error(report: &rspice_core::engine::TransientCompressionReport) -> String {
     let Some(worst) = report.worst_observed.as_ref() else {
         return format!(
-            "Worst compression error: none — all {} accepted samples were retained exactly",
+            "Worst compression error: none â€” all {} accepted samples were retained exactly",
             report.input_points
         );
     };
@@ -493,7 +496,7 @@ fn describe_compression_error(report: &rspice_core::engine::TransientCompression
         .relative_error
         .map_or_else(|| "n/a".to_string(), |relative| format!("{:.3e}", relative));
     format!(
-        "Worst compression error: {} {} at t={:.6e}s — absolute {:.3e}, relative {}, \
+        "Worst compression error: {} {} at t={:.6e}s â€” absolute {:.3e}, relative {}, \
          tolerance {:.3e} ({:.1}% used)",
         worst.signal.kind.as_str(),
         worst.signal.canonical_name,
@@ -755,7 +758,7 @@ pub(super) fn run_transient(
             Ok(compressed) => {
                 if !ctx.quiet {
                     println!(
-                        "✓ Transient complete (compressed): {} points (compression ratio: {:.1}x)",
+                        "âœ“ Transient complete (compressed): {} points (compression ratio: {:.1}x)",
                         compressed.time.len(),
                         compressed.compression_ratio
                     );
@@ -823,7 +826,7 @@ pub(super) fn run_transient(
 
             if !ctx.quiet && !ctx.compress {
                 println!(
-                    "✓ Transient complete: {} time points computed",
+                    "âœ“ Transient complete: {} time points computed",
                     result.time.len()
                 );
             }
@@ -895,7 +898,7 @@ pub(super) fn run_transient(
                         for signal in &signals {
                             transient.add_typed_signal(
                                 signal.display_name.clone(),
-                                signal.kind.raw_variable_type(),
+                                signal.raw_variable_type(),
                                 signal.values.clone(),
                             );
                         }
@@ -3467,20 +3470,28 @@ pub(super) fn run_fourier(
     }
 
     if !ctx.quiet {
-        println!("\n┌────────────────────────────────────────────────────────────────┐");
-        println!("│                    FOURIER ANALYSIS RESULTS                    │");
-        println!("├────────────────────────────────────────────────────────────────┤");
+        println!(
+            "\nâ”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”"
+        );
+        println!("â”‚                    FOURIER ANALYSIS RESULTS                    â”‚");
+        println!(
+            "â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤"
+        );
 
         for (output, physical_type, result) in &analyzed {
-            println!("│ Output: {:43} ({physical_type:8}) │", output);
-            println!("│ DC component = {:<47.6e} │", result.dc_component);
-            println!("├────────────────────────────────────────────────────────────────┤");
-            println!("│  Harmonic    Frequency (Hz)    Magnitude    Phase (deg)        │");
-            println!("├────────────────────────────────────────────────────────────────┤");
+            println!("â”‚ Output: {:43} ({physical_type:8}) â”‚", output);
+            println!("â”‚ DC component = {:<47.6e} â”‚", result.dc_component);
+            println!(
+                "â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤"
+            );
+            println!("â”‚  Harmonic    Frequency (Hz)    Magnitude    Phase (deg)        â”‚");
+            println!(
+                "â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤"
+            );
 
             for harmonic in result.harmonics.iter().filter(|h| h.harmonic_number > 0) {
                 println!(
-                    "│  {:3}        {:12.4e}      {:10.6}   {:10.2}          │",
+                    "â”‚  {:3}        {:12.4e}      {:10.6}   {:10.2}          â”‚",
                     harmonic.harmonic_number,
                     harmonic.frequency,
                     harmonic.magnitude,
@@ -3488,13 +3499,17 @@ pub(super) fn run_fourier(
                 );
             }
 
-            println!("├────────────────────────────────────────────────────────────────┤");
+            println!(
+                "â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤"
+            );
             if let Some(thd) = result.thd {
-                println!("│  THD:            {thd:10.4} %                                  │");
+                println!("â”‚  THD:            {thd:10.4} %                                  â”‚");
             } else {
-                println!("│  THD:             undefined                                  │");
+                println!("â”‚  THD:             undefined                                  â”‚");
             }
-            println!("└────────────────────────────────────────────────────────────────┘");
+            println!(
+                "â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜"
+            );
         }
     }
 
@@ -3632,7 +3647,7 @@ pub(super) fn run_temp(ctx: &RunContext<'_>, temperatures: &[f64]) -> Result<(),
     if !ctx.quiet {
         println!("Running temperature sweep: {} points", temperatures.len());
         if ctx.verbose {
-            println!("  Temperatures: {:?} °C", temperatures);
+            println!("  Temperatures: {:?} Â°C", temperatures);
         }
     }
 
@@ -3645,7 +3660,7 @@ pub(super) fn run_temp(ctx: &RunContext<'_>, temperatures: &[f64]) -> Result<(),
 
         if !ctx.quiet {
             println!(
-                "\n[{}/{}] Temperature: {:.1} °C ({:.1} K)",
+                "\n[{}/{}] Temperature: {:.1} Â°C ({:.1} K)",
                 i + 1,
                 temperatures.len(),
                 temp_c,
@@ -3675,7 +3690,7 @@ pub(super) fn run_temp(ctx: &RunContext<'_>, temperatures: &[f64]) -> Result<(),
             }
             Err(e) => {
                 if !ctx.quiet {
-                    eprintln!("  DC OP failed at {:.1} °C: {}", temp_c, e);
+                    eprintln!("  DC OP failed at {:.1} Â°C: {}", temp_c, e);
                 }
             }
         }
@@ -3690,20 +3705,26 @@ pub(super) fn run_temp(ctx: &RunContext<'_>, temperatures: &[f64]) -> Result<(),
     }
 
     if !ctx.quiet {
-        println!("\n┌─────────────────────────────────────┐");
-        println!("│     Temperature Sweep Summary       │");
-        println!("├─────────────────────────────────────┤");
         println!(
-            "│  Points:  {:3}/{:3} converged         │",
+            "\nâ”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”"
+        );
+        println!("â”‚     Temperature Sweep Summary       â”‚");
+        println!(
+            "â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤"
+        );
+        println!(
+            "â”‚  Points:  {:3}/{:3} converged         â”‚",
             results.len(),
             temperatures.len()
         );
         println!(
-            "│  Range:   {:6.1} °C to {:6.1} °C    │",
+            "â”‚  Range:   {:6.1} Â°C to {:6.1} Â°C    â”‚",
             temperatures.first().unwrap_or(&0.0),
             temperatures.last().unwrap_or(&0.0)
         );
-        println!("└─────────────────────────────────────┘");
+        println!(
+            "â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜"
+        );
     }
 
     if let Some(ref output_path) = ctx.output_path_for("temp") {

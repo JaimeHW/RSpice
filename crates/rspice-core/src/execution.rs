@@ -34,7 +34,9 @@ pub use plan::{
 };
 pub use projection::{
     ProjectedSignal, ProjectedSignals, ProjectionSource, ProjectionSourceSignal, ProjectionValues,
-    SignalProjection, projection_analysis_kind, signal_descriptor,
+    SignalProjection, dc_sweep_observable_series, observable_lookup,
+    operating_point_observable_series, probe_names_nothing, probe_registry_name,
+    projection_analysis_kind, raw_variable_type, signal_descriptor,
 };
 pub use result_document::{
     ANALYSIS_RESULT_DOCUMENT_SCHEMA, ANALYSIS_RESULT_DOCUMENT_VERSION, AnalysisResultDocument,
