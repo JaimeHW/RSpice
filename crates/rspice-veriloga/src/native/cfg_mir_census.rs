@@ -71,18 +71,35 @@
 //! `#[ignore]`d: this is release-qualification work. Run it with
 //! `--release --features native -- --ignored --nocapture`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use super::census_models::{CensusModel, shipped_census_models_matching};
 use super::cfg_census::{OperatingPoint, deviation};
+use super::cfg_error_lane::{ErrorBounded, lift_inputs};
+use crate::canonical_ir::cfg_lower::CfgModel;
+use crate::canonical_ir::{ValueId, differentiate, evaluate_cfg, prune_cfg_to_outputs};
+use crate::jit::cfg_lanes::scalarize_lanes;
 use crate::jit::cfg_plan_builder::{
-    CfgNoiseScope, CfgPlanEntry, CfgPlanRefusal, build_model_plan_from_canonical_cfg,
+    CfgNoiseScope, CfgPlanEntry, CfgPlanRefusal, ShippedColumnLanes,
+    build_model_plan_from_canonical_cfg, derivative_seeds,
 };
 use crate::jit::plan_builder::build_model_plan_with_canonical_ir;
 use crate::jit::plan_program::PlanProgram;
 use crate::native::aarch64::image::MAX_A64_FUNCTION_BYTES;
 use crate::native::abi::EvalContext;
 use crate::native::model::NativeModel;
+use crate::rust_backend::canonical::stored_charges;
+
+/// The three operating points, drawn once and used by both passes.
+///
+/// The error lane and the two compiled plans have to stand at the *same* bias
+/// or the bound measures a different computation from the one it is a floor
+/// under. `OperatingPoint::new` is a pure function of these two numbers and the
+/// module's shape, so two constructions from the same pair are the same point;
+/// naming the pairs once is what makes that checkable rather than coincidental.
+/// They are also the points `cfg_census` draws, so a deviation reported here
+/// and one reported there are readings at one bias.
+const CENSUS_POINTS: [(u64, u8); 3] = [(0x0005_EED1, 0), (0x00C0_FFEE, 2), (0x0000_BEEF, 0)];
 
 /// How many units in the last place one operation of reassociation is allowed
 /// to move an entry.
@@ -138,6 +155,61 @@ const REASSOCIATION_BUDGET: f64 = 1.0;
 /// the two chain rules rather than a number to raise.
 const DERIVATIVE_AGREEMENT: f64 = 1.0e-9;
 
+/// How many times the cone's own rounding bound two chain rules may differ by.
+///
+/// # Why nine figures is not always askable
+///
+/// [`DERIVATIVE_AGREEMENT`] is a figure about *significance*, and it says
+/// nothing about whether the arithmetic can reach it. A cone that forms a
+/// factor at `3e7` and lands it at `5e-9` has a condition number near `5e7`;
+/// one unit round-off amplified by that is `5.5e-9`, so no `f64` evaluation of
+/// that cone — neither route's, nor a third one — carries nine figures, and two
+/// correct evaluations of it differ in the eighth. `l_utsoi_102`'s
+/// `jacobians[36][6]` is exactly that entry, and W-F10c established that
+/// neither route is wrong there: the complex-step oracle sits *outside* both,
+/// collinear with them, `7.4e-9` from one and `1.3e-8` from the other.
+///
+/// Holding such an entry to `1e-9` fails a correct computation for being
+/// evaluated in floating point. Widening the constant to admit it would be a
+/// tolerance fitted to that run — the thing this census forbids. What is
+/// derived instead is the entry's *own* floor, measured from its own
+/// arithmetic: see [`super::cfg_error_lane`], which walks the CFG cone once per
+/// operating point carrying a first-order forward rounding bound `E` alongside
+/// each value.
+///
+/// # The constant, and where it comes from
+///
+/// The criterion becomes
+///
+/// > `|mir − cfg| ≤ max(DERIVATIVE_AGREEMENT · |entry|, K · E)`
+///
+/// and `K` is four, as two factors of two:
+///
+/// 1. **The difference of two evaluations is at most the sum of their errors.**
+///    `|mir − cfg| ≤ |mir − exact| + |cfg − exact| = E_mir + E_cfg ≤ 2 ·
+///    max(E_mir, E_cfg)`. `E_cfg` is what the lane measures, and it is the CFG
+///    route's own bound exactly: [`super::cfg_census`] pins the block program
+///    bit-identical to the interpreter on all forty-three shipped modules with
+///    an empty allowlist, so the interpreted cone *is* the compiled one.
+///    `E_mir` is not measured — there is no error lane over a postfix stream —
+///    but it is not free either: both routes evaluate the same real quantity,
+///    so they share its condition number, and the condition number is what
+///    dominates a bound whenever this floor binds at all. Where it does not
+///    dominate, both bounds are a few ulp and the floor is far under
+///    [`DERIVATIVE_AGREEMENT`], which decides instead.
+/// 2. **The per-operation charge is one unit round-off.** That is exact for the
+///    correctly-rounded operations, and it is the nominal charge for the
+///    library transcendentals, whose worst-case error is about one unit in the
+///    last place — twice `u`. Charging the difference here rather than inside
+///    every operation keeps the lane's rule per op the textbook one.
+///
+/// Neither factor is read off a measurement, and the floor is not a constant:
+/// it is `K` times a number the entry's own cone produces at the bias it is
+/// evaluated at. A well-conditioned entry gets a floor of tens of ulp — orders
+/// under `DERIVATIVE_AGREEMENT`, so nothing changes for it — and a wrong
+/// derivative is orders *over* any rounding bound, so it still fails.
+const AGREEMENT_ERROR_FACTOR: f64 = 4.0;
+
 /// One entry's comparison.
 struct Comparison {
     entry: CfgPlanEntry,
@@ -146,6 +218,15 @@ struct Comparison {
     cfg: f64,
     operations: usize,
     deviation: f64,
+    /// The CFG cone's own first-order rounding bound at this point, and the
+    /// value the interpreter reached carrying it.
+    ///
+    /// `None` where no bound could be taken: an entry the CFG route found
+    /// structurally absent, a model whose CFG this census could not rebuild, or
+    /// a point the interpreter refused. Absent means the floor does not apply,
+    /// which leaves the entry held to the stricter criterion rather than the
+    /// looser one.
+    conditioning: Option<ErrorBounded>,
 }
 
 impl Comparison {
@@ -158,19 +239,64 @@ impl Comparison {
         )
     }
 
+    /// The scale a relative deviation is taken against — the same one
+    /// [`deviation`] uses, so a bound expressed here is comparable with it.
+    fn magnitude(&self) -> f64 {
+        self.mir.abs().max(self.cfg.abs())
+    }
+
+    /// `K · E`, as a share of the entry — the floor the arithmetic itself puts
+    /// under the agreement criterion. See [`AGREEMENT_ERROR_FACTOR`].
+    ///
+    /// Zero where no bound was taken, and zero where the bound is not finite. A
+    /// non-finite `E` is a cone that left the reals, and an infinite floor
+    /// would admit every reading; refusing it there leaves the entry held to
+    /// [`DERIVATIVE_AGREEMENT`], which is the stricter answer.
+    fn conditioning_floor(&self) -> f64 {
+        let Some(bound) = self.conditioning else {
+            return 0.0;
+        };
+        let magnitude = self.magnitude();
+        if !bound.error.is_finite() || magnitude == 0.0 {
+            return 0.0;
+        }
+        AGREEMENT_ERROR_FACTOR * bound.error / magnitude
+    }
+
     fn bound(&self) -> f64 {
         let reassociation = REASSOCIATION_BUDGET * self.operations as f64 * f64::EPSILON;
         if self.is_derivative() {
-            reassociation.max(DERIVATIVE_AGREEMENT)
+            reassociation
+                .max(DERIVATIVE_AGREEMENT)
+                .max(self.conditioning_floor())
         } else {
             reassociation
         }
     }
 
+    /// Which of the three the bound came out of, which is the reading a per-
+    /// module line has to carry: an entry decided by the floor is one whose own
+    /// arithmetic cannot reach nine figures.
+    fn criterion(&self) -> &'static str {
+        if !self.is_derivative() {
+            return "reassociation";
+        }
+        let reassociation = REASSOCIATION_BUDGET * self.operations as f64 * f64::EPSILON;
+        if self.conditioning_floor() > reassociation.max(DERIVATIVE_AGREEMENT) {
+            "conditioning-floor"
+        } else {
+            "derivative-agreement"
+        }
+    }
+
     fn describe(&self) -> String {
+        let (error, relative) = match self.conditioning {
+            Some(bound) => (bound.error, bound.relative()),
+            None => (f64::NAN, f64::NAN),
+        };
         format!(
             "{} point={} mir={:.17e} cfg={:.17e} operations={} deviation={:.3e} bound={:.3e} \
-             criterion={}",
+             criterion={} error={error:.3e} error_relative={relative:.3e} floor={:.3e}",
             self.entry,
             self.point,
             self.mir,
@@ -178,11 +304,8 @@ impl Comparison {
             self.operations,
             self.deviation,
             self.bound(),
-            if self.is_derivative() {
-                "derivative-agreement"
-            } else {
-                "reassociation"
-            }
+            self.criterion(),
+            self.conditioning_floor(),
         )
     }
 }
@@ -220,6 +343,18 @@ struct Tally {
     /// kind anywhere in the model at that operating point: measured and
     /// printed, not asserted. See [`MATRIX_SIGNIFICANCE`].
     insignificant: usize,
+    /// Derivative comparisons whose bound came from the cone's own rounding
+    /// floor rather than from [`DERIVATIVE_AGREEMENT`]. See
+    /// [`AGREEMENT_ERROR_FACTOR`].
+    floor_decided: usize,
+    /// Derivative comparisons that carry a finite rounding bound at all.
+    conditioned: usize,
+    /// Derivative comparisons whose cone's bound left the reals, so no floor
+    /// applies and the stricter criterion stands.
+    conditioning_not_finite: usize,
+    /// Models whose CFG this census could not rebuild for the error lane, so
+    /// every derivative comparison in them is held to the stricter criterion.
+    models_without_error_lane: usize,
 }
 
 /// What a noise magnitude the CFG route took at the *exit block*, under a
@@ -522,12 +657,203 @@ impl Storage {
     }
 }
 
+/// Every derivative entry's rounding bound, one map per operating point.
+type ConditioningBounds = Vec<HashMap<CfgPlanEntry, ErrorBounded>>;
+
+/// Walk the CFG cone once per operating point carrying the error lane, and read
+/// off each Jacobian and reactive-Jacobian entry's bound.
+///
+/// # One pass, not one per entry
+///
+/// The outputs are pruned to their *union* and interpreted once. A compact
+/// model's Jacobian entries share nearly all of their cone with each other and
+/// with the residual, so a pass per entry would re-walk the same body hundreds
+/// of times to read one extra value each; the union pass reads them all from
+/// one snapshot. Pruning is what keeps even that honest — the walk covers the
+/// values these outputs actually depend on and nothing else.
+///
+/// # Rebuilt rather than borrowed
+///
+/// The plan builder makes the same function on its way to machine code but
+/// keeps no map from a plan entry back to the CFG value it lowered, and it is
+/// another lane's file. So the four steps are repeated here — executable
+/// lowering, stored charges, differentiate, scalarize — from the same artifact
+/// by the same deterministic passes, which is what makes the entry-to-value map
+/// the same one. The result is dropped before either plan is compiled, so the
+/// peak working set is the larger of the two passes rather than their sum:
+/// `asmhemt` has taken this pipeline past twenty gigabytes on its own.
+///
+/// `None` where the CFG could not be rebuilt at all, which leaves every
+/// derivative comparison in the module held to [`DERIVATIVE_AGREEMENT`].
+fn entry_conditioning(shipped: &CensusModel) -> Option<ConditioningBounds> {
+    let model = &shipped.model;
+    let artifact = &shipped.canonical_ir;
+
+    let mut cfg = CfgModel::from_hir_for_executable_backend(&artifact.hir, &artifact.mir).ok()?;
+    if model.stamp_programs.len() != cfg.residuals.len() {
+        return None;
+    }
+    // Charges first, for the reason the plan builder gives: the extraction
+    // *builds* the values a scaled or summed charge needs, so it has to run
+    // before anything is differentiated.
+    let charges = stored_charges(&mut cfg.function, &cfg.residuals);
+    let (seeds, correction_lane) = derivative_seeds(&cfg, &artifact.mir);
+    let mut differentiated = differentiate(&cfg.function, &seeds).ok()?;
+    // Every read-out before anything else: taking one appends an instruction.
+    let jacobian_rows: Vec<Vec<Option<ValueId>>> = cfg
+        .residuals
+        .iter()
+        .map(|residual| differentiated.derivative_row(*residual))
+        .collect();
+    let reactive_rows: Vec<Vec<Option<ValueId>>> = charges
+        .iter()
+        .map(|charge| match charge {
+            Some(charge) => differentiated.derivative_row(*charge),
+            None => Vec::new(),
+        })
+        .collect();
+    let scalarized = scalarize_lanes(&differentiated.function).ok()?;
+    let column_lanes = ShippedColumnLanes::build(model, &artifact.mir).ok()?;
+
+    let lane_of = |axis: &_| -> Option<usize> {
+        let lane = column_lanes.lane(axis)?;
+        (lane < seeds.len() && Some(lane) != correction_lane).then_some(lane)
+    };
+    let mut entries: Vec<(CfgPlanEntry, ValueId)> = Vec::new();
+    for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
+        for (entry_index, jacobian) in stamp.jacobian_programs.iter().enumerate() {
+            let Some(lane) = lane_of(&jacobian.col_axis) else {
+                continue;
+            };
+            let Some(value) = jacobian_rows[stamp_index].get(lane).copied().flatten() else {
+                continue;
+            };
+            if let Some(scalar) = scalarized.scalar(value) {
+                entries.push((CfgPlanEntry::Jacobian(stamp_index, entry_index), scalar));
+            }
+        }
+        for (entry_index, reactive) in stamp.reactive_jacobians.iter().enumerate() {
+            let Some(lane) = lane_of(&reactive.col_axis) else {
+                continue;
+            };
+            let Some(value) = reactive_rows[stamp_index].get(lane).copied().flatten() else {
+                continue;
+            };
+            if let Some(scalar) = scalarized.scalar(value) {
+                entries.push((
+                    CfgPlanEntry::ReactiveJacobian(stamp_index, entry_index),
+                    scalar,
+                ));
+            }
+        }
+    }
+    if entries.is_empty() {
+        return Some(vec![HashMap::new(); CENSUS_POINTS.len()]);
+    }
+
+    let outputs: Vec<ValueId> = entries.iter().map(|(_, value)| *value).collect();
+    let (pruned, mapped) = prune_cfg_to_outputs(&scalarized.function, &outputs);
+
+    let parameter_defaults: Vec<Option<f64>> = artifact
+        .mir
+        .parameters
+        .iter()
+        .map(|parameter| parameter.default)
+        .collect();
+    let branch_unknowns =
+        crate::jit::plan_builder::canonical_branch_unknown_runtime_map(model, &artifact.mir).ok()?;
+
+    let mut bounds = Vec::with_capacity(CENSUS_POINTS.len());
+    for (seed, analysis) in CENSUS_POINTS {
+        // The state array is sized zero: this walk is the interpreter's static
+        // evaluation, where `ddt` and `idt` answer zero and no slot is read.
+        // Everything the two routes *do* share — the parameters, the potentials,
+        // the branch flows — is drawn from the same seed in the same order, so
+        // this is the same bias the compiled plans stand at.
+        let mut point = OperatingPoint::new(
+            seed,
+            analysis,
+            &parameter_defaults,
+            model.num_terminals,
+            model.internal_nodes,
+            &branch_unknowns,
+            0,
+            0,
+        )
+        .with_initial_step();
+        point.set_event_state_slots(cfg.event_state_candidates.len());
+        let real =
+            point.interpreter_inputs(artifact.mir.nodes.len(), artifact.mir.branches.len());
+        let mut found = HashMap::new();
+        if let Ok(snapshot) = evaluate_cfg(&pruned, &lift_inputs(&real)) {
+            for ((entry, _), output) in entries.iter().zip(&mapped) {
+                if let Some(value) = snapshot.value(*output) {
+                    found.insert(*entry, value);
+                }
+            }
+        }
+        bounds.push(found);
+    }
+    Some(bounds)
+}
+
+/// The distribution of `E / |value|` over one model's derivative cones.
+///
+/// The tightness reading, and the one that decides whether the floor is a
+/// derived bound or slack in disguise: a well-conditioned entry has to come out
+/// at tens of units in the last place, not orders above.
+#[derive(Default)]
+struct ConditioningSpread {
+    ratios: Vec<f64>,
+}
+
+impl ConditioningSpread {
+    fn push(&mut self, bound: ErrorBounded) {
+        let relative = bound.relative();
+        if relative.is_finite() {
+            self.ratios.push(relative);
+        }
+    }
+
+    fn describe(&mut self) -> String {
+        if self.ratios.is_empty() {
+            return "conditioning[none]".to_string();
+        }
+        self.ratios.sort_unstable_by(f64::total_cmp);
+        let ulp = |ratio: f64| ratio / f64::EPSILON;
+        format!(
+            "conditioning[n={} min={:.3e} median={:.3e} max={:.3e} min_ulp={:.1} \
+             median_ulp={:.1} max_ulp={:.1}]",
+            self.ratios.len(),
+            self.ratios[0],
+            self.ratios[self.ratios.len() / 2],
+            self.ratios[self.ratios.len() - 1],
+            ulp(self.ratios[0]),
+            ulp(self.ratios[self.ratios.len() / 2]),
+            ulp(self.ratios[self.ratios.len() - 1]),
+        )
+    }
+}
+
 /// Compile both plans for one module and compare every entry they share.
 #[allow(clippy::too_many_lines)]
 fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
     let module = &shipped.name;
     let model = &shipped.model;
     let artifact = &shipped.canonical_ir;
+
+    // The error lane first, and released before either plan is compiled: both
+    // passes build the same differentiated body, and holding two of them is
+    // what puts this census into paging on the largest modules.
+    let conditioning = entry_conditioning(shipped);
+    if conditioning.is_none() {
+        tally.models_without_error_lane += 1;
+        println!(
+            "cfg-mir model={module} error_lane=unavailable; every derivative entry is held to \
+             the unconditioned criterion"
+        );
+    }
+    let conditioning = conditioning.unwrap_or_else(|| vec![HashMap::new(); CENSUS_POINTS.len()]);
 
     // `Cfg`, not the `Postfix` scope production takes: the whole point of this
     // census is to measure the noise slice the default plan declines to use, so
@@ -592,25 +918,22 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
         crate::jit::plan_builder::canonical_branch_unknown_runtime_map(model, &artifact.mir)
             .unwrap_or_else(|error| panic!("{module}: branch unknown map: {error}"));
     let mut storage = Storage::for_model(model);
-    // The same three points the CFG censuses draw, so a deviation reported here
-    // and a deviation reported there are readings at one bias.
-    let mut points: Vec<OperatingPoint> =
-        [(0x0005_EED1_u64, 0_u8), (0x00C0_FFEE, 2), (0x0000_BEEF, 0)]
-            .into_iter()
-            .map(|(seed, analysis)| {
-                OperatingPoint::new(
-                    seed,
-                    analysis,
-                    &parameter_defaults,
-                    model.num_terminals,
-                    model.internal_nodes,
-                    &branch_unknowns,
-                    state_len,
-                    0,
-                )
-                .with_initial_step()
-            })
-            .collect();
+    let mut points: Vec<OperatingPoint> = CENSUS_POINTS
+        .into_iter()
+        .map(|(seed, analysis)| {
+            OperatingPoint::new(
+                seed,
+                analysis,
+                &parameter_defaults,
+                model.num_terminals,
+                model.internal_nodes,
+                &branch_unknowns,
+                state_len,
+                0,
+            )
+            .with_initial_step()
+        })
+        .collect();
 
     let positions = entry_positions(model);
     tally.entries += positions.len();
@@ -618,7 +941,14 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
     let mut worst_ratio = 0.0_f64;
     let mut exact = 0_usize;
     let mut compared = 0_usize;
-    let mut over: Option<Comparison> = None;
+    // Every one of them, not the first. A module can be over the bound at
+    // several entries and at several points, and reporting one made the totals
+    // and the message disagree: `over_bound=4` under a single named entry.
+    let mut over: Vec<String> = Vec::new();
+    let mut floor_decided_here = 0_usize;
+    let mut floor_worst: Option<Comparison> = None;
+    let mut floor_worst_ratio = 0.0_f64;
+    let mut spread = ConditioningSpread::default();
     let mut nonzero_structural: Option<Comparison> = None;
     let mut guarded_noise_worst = 0.0_f64;
     let mut guarded_noise_case: Option<Comparison> = None;
@@ -669,9 +999,23 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
                 cfg,
                 operations,
                 deviation: deviation(mir, cfg).unwrap_or(0.0),
+                conditioning: conditioning
+                    .get(index)
+                    .and_then(|point| point.get(&entry))
+                    .copied(),
             };
             if comparison.deviation == 0.0 {
                 exact += 1;
+            }
+            if comparison.is_derivative() {
+                match comparison.conditioning {
+                    Some(bound) if bound.error.is_finite() => {
+                        tally.conditioned += 1;
+                        spread.push(bound);
+                    }
+                    Some(_) => tally.conditioning_not_finite += 1,
+                    None => {}
+                }
             }
             if guarded_noise.contains(&entry) {
                 tally.guarded_noise_entries += 1;
@@ -718,9 +1062,7 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
             let bound = comparison.bound();
             if comparison.deviation > bound {
                 tally.over_bound += 1;
-                if over.is_none() {
-                    over = Some(comparison);
-                }
+                over.push(comparison.describe());
                 continue;
             }
             let ratio = if bound > 0.0 {
@@ -728,6 +1070,19 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
             } else {
                 0.0
             };
+            // The entries the floor decided are the census's own finding, so
+            // they are counted and the tightest of them is named: an entry
+            // whose deviation fills its floor is one where the two chain rules
+            // are as far apart as the arithmetic allows.
+            if comparison.criterion() == "conditioning-floor" {
+                tally.floor_decided += 1;
+                floor_decided_here += 1;
+                if ratio >= floor_worst_ratio {
+                    floor_worst_ratio = ratio;
+                    floor_worst = Some(comparison);
+                    continue;
+                }
+            }
             if ratio >= worst_ratio {
                 worst_ratio = ratio;
                 worst = Some(comparison);
@@ -764,10 +1119,23 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
             .as_ref()
             .map(|worst| format!(" worst[{}]", worst.describe()))
             .unwrap_or_default(),
-        over.as_ref()
-            .map(|over| format!(" OVER_BOUND[{}]", over.describe()))
+        if over.is_empty() {
+            String::new()
+        } else {
+            format!(" OVER_BOUND={}", over.len())
+        },
+    );
+    println!(
+        "cfg-mir model={module} floor_decided={floor_decided_here} {}{}",
+        spread.describe(),
+        floor_worst
+            .as_ref()
+            .map(|case| format!(" floor_worst[{}]", case.describe()))
             .unwrap_or_default(),
     );
+    for case in &over {
+        println!("cfg-mir model={module} OVER_BOUND[{case}]");
+    }
     if let Some(case) = insignificant_case.as_ref() {
         println!(
             "cfg-mir model={module} below_significance={insignificant_here} \
@@ -804,11 +1172,11 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
             nonzero.describe()
         ));
     }
-    if let Some(over) = over {
+    if !over.is_empty() {
         return Some(format!(
-            "{module}: {} is outside the reassociation bound: {}",
-            over.entry,
-            over.describe()
+            "{module}: {} comparison(s) outside the bound:\n  {}",
+            over.len(),
+            over.join("\n  ")
         ));
     }
     None
@@ -869,7 +1237,8 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
          runtime_errors={} structural_zeros={} over_bound={} nonzero_structural_zeros={} \
          structural_zeros_not_evaluable={} \
          guarded_noise_entries={} guarded_noise_agreed={} guarded_noise_third_value={} \
-         below_significance={}",
+         below_significance={} conditioned={} floor_decided={} conditioning_not_finite={} \
+         models_without_error_lane={}",
         tally.models,
         tally.built,
         tally.refused,
@@ -885,6 +1254,10 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
         tally.guarded_noise_agreed,
         tally.guarded_noise_third_value,
         tally.insignificant,
+        tally.conditioned,
+        tally.floor_decided,
+        tally.conditioning_not_finite,
+        tally.models_without_error_lane,
     );
     if filter.is_none() {
         assert_eq!(tally.models, 43, "the shipped census is 43 modules");
@@ -1038,6 +1411,7 @@ fn the_reassociation_bound_is_a_rounding_budget() {
         cfg: 1.0,
         operations,
         deviation: 0.0,
+        conditioning: None,
     };
     let small = sized(10);
     let large = sized(20_000);
@@ -1057,6 +1431,171 @@ fn the_reassociation_bound_is_a_rounding_budget() {
     assert!(derivative.is_derivative());
     assert_eq!(derivative.bound(), DERIVATIVE_AGREEMENT);
     assert!(!large.is_derivative());
+}
+
+/// A `max` whose losing arm's derivative is eighteen orders above the winner's.
+///
+/// At `V(p,n) = v0` the second arm is exactly zero and the first is `ga * v0`,
+/// so `max` takes the first: `d/dV(p)` is `ga`. The *other* arm's derivative is
+/// `gb`, which is what makes this the shape a mis-differentiated `max` fails
+/// on. It is the shape a compact model's floor guard has — `max(x, xmin)` with
+/// a steep `x` — rather than an invented one.
+const MAX_AGAINST_A_STEEP_LOSER: &str = r#"
+module cfg_masked_max(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real ga = 1.0e-9;
+  parameter real gb = 1.0e9;
+  parameter real v0 = 0.5;
+  analog begin
+    I(p, n) <+ max(ga * V(p, n), gb * (V(p, n) - v0));
+  end
+endmodule
+"#;
+
+/// The derivative rule this estate carried before `31be31f82`.
+///
+/// Algebraically `da` when `takes_left` is one, and zero in `f64` whenever
+/// `|db|` is large enough that `fl(da - db) == -db`. Reproduced literally so the
+/// fixture below tests the criterion against a defect that was real rather than
+/// against a number chosen to fail.
+fn blended_max_derivative(da: f64, db: f64, takes_left: f64) -> f64 {
+    db + (da - db) * takes_left
+}
+
+/// The conditioning floor must not admit a wrong derivative.
+///
+/// # Why this is the test that keeps the floor honest
+///
+/// [`AGREEMENT_ERROR_FACTOR`] widens the agreement criterion for an entry whose
+/// own arithmetic cannot deliver nine figures. A floor that widened everywhere
+/// would be a fitted tolerance wearing a derivation, so the thing to
+/// demonstrate is that it stays narrow exactly where it must: at a *selection*.
+///
+/// A mask is `0.0` or `1.0` and carries no error, `x * 1` and `x + 0` are
+/// exact, so the error lane's bound on `da*c + db*(1-c)` is a couple of units
+/// in the last place of `da` — it does not see `db` at all. The pre-`31be31f82`
+/// blend `db + (da - db)*c` returns exactly zero here, which is not a rounding
+/// distance from `da` under any bound: the criterion rejects it by nine orders
+/// against [`DERIVATIVE_AGREEMENT`] and by fifteen against the floor.
+#[test]
+fn the_criterion_rejects_a_mis_differentiated_max() {
+    use crate::canonical_ir::{AdSeed, CfgEvalInputs};
+
+    const GA: f64 = 1.0e-9;
+    const GB: f64 = 1.0e9;
+    const V0: f64 = 0.5;
+
+    let compiler = crate::VerilogACompiler::new(crate::CompilerOptions::default());
+    let artifact = compiler
+        .compile_canonical_ir(MAX_AGAINST_A_STEEP_LOSER)
+        .expect("compile canonical IR");
+
+    let mut cfg = CfgModel::from_hir_for_executable_backend(&artifact.hir, &artifact.mir)
+        .expect("lower the CFG");
+    let _ = stored_charges(&mut cfg.function, &cfg.residuals);
+    let (seeds, correction_lane) = derivative_seeds(&cfg, &artifact.mir);
+    let mut differentiated = differentiate(&cfg.function, &seeds).expect("differentiate");
+    let row = differentiated.derivative_row(cfg.residuals[0]);
+    let scalarized = scalarize_lanes(&differentiated.function).expect("scalarize");
+
+    let lane = seeds
+        .iter()
+        .position(|seed| matches!(seed, AdSeed::NodePotential(node) if usize::from(*node) == 0))
+        .expect("a lane for the p terminal");
+    assert_ne!(Some(lane), correction_lane);
+    let output = row[lane].expect("d(residual)/d(V(p)) exists");
+    let scalar = scalarized.scalar(output).expect("a scalar lane");
+    let (pruned, mapped) = prune_cfg_to_outputs(&scalarized.function, &[scalar]);
+
+    let mut node_potentials = vec![V0, 0.0];
+    node_potentials.resize(artifact.mir.nodes.len(), 0.0);
+    let parameters: Vec<f64> = artifact
+        .mir
+        .parameters
+        .iter()
+        .map(|parameter| parameter.default.unwrap_or(0.0))
+        .collect();
+    let inputs = CfgEvalInputs::<f64> {
+        parameter_given: vec![true; parameters.len()],
+        parameters,
+        port_connected: vec![true; 2],
+        node_potentials,
+        branch_flows: vec![0.0; artifact.mir.branches.len()],
+        temperature: 300.15,
+        thermal_voltage: 1.380_649e-23 / 1.602_176_634e-19 * 300.15,
+        multiplicity: 1.0,
+        ..Default::default()
+    };
+
+    let snapshot =
+        evaluate_cfg(&pruned, &lift_inputs(&inputs)).expect("the error lane evaluates the cone");
+    let bound = snapshot.value(mapped[0]).expect("the entry has a value");
+
+    // The interpreter takes the winning arm, so the derivative is `ga`.
+    assert!(
+        (bound.value / GA - 1.0).abs() < 1.0e-12,
+        "the fixture has to select the shallow arm: {:e}",
+        bound.value
+    );
+    // And the bound on it is a handful of ulp: a mask is exact, so the losing
+    // arm's eighteen-orders-larger derivative contributes nothing.
+    assert!(
+        bound.relative() < 100.0 * f64::EPSILON,
+        "a selection's floor must stay at ulp scale: {:e}",
+        bound.relative()
+    );
+
+    // The defect, in the arithmetic it was written in.
+    let defect = blended_max_derivative(GA, GB, 1.0);
+    assert_eq!(
+        defect, 0.0,
+        "the blend has to actually lose the winner's derivative, or this proves nothing"
+    );
+
+    let comparison = Comparison {
+        entry: CfgPlanEntry::Jacobian(0, 0),
+        point: 0,
+        mir: defect,
+        cfg: bound.value,
+        operations: pruned.values.len(),
+        deviation: deviation(defect, bound.value).unwrap_or(0.0),
+        conditioning: Some(bound),
+    };
+    println!("cfg-mir masked-max fixture: {}", comparison.describe());
+    assert!(
+        comparison.deviation > comparison.bound(),
+        "the criterion has to reject a zeroed derivative: {}",
+        comparison.describe()
+    );
+    assert_eq!(
+        comparison.criterion(),
+        "derivative-agreement",
+        "the floor must not be what decides this entry: {}",
+        comparison.describe()
+    );
+    assert!(
+        comparison.conditioning_floor() < 1.0e-12,
+        "the floor here is rounding, not slack: {:e}",
+        comparison.conditioning_floor()
+    );
+    // Fifteen orders outside the floor, nine outside the borrowed criterion.
+    assert!(
+        comparison.deviation / comparison.conditioning_floor() > 1.0e12,
+        "{:e}",
+        comparison.deviation / comparison.conditioning_floor()
+    );
+
+    // The same fixture with the correct rule agrees with itself, so what the
+    // assertions above reject is the defect and not the fixture.
+    let correct = bound.value;
+    let agreeing = Comparison {
+        mir: correct,
+        cfg: correct,
+        deviation: deviation(correct, correct).unwrap_or(0.0),
+        ..comparison
+    };
+    assert!(agreeing.deviation <= agreeing.bound());
 }
 
 /// The significance scale is the whole matrix, and `bjt505_va` is why.
@@ -1084,6 +1623,7 @@ fn an_entry_far_below_its_matrix_is_measured_rather_than_asserted() {
         cfg,
         operations: 1202,
         deviation,
+        conditioning: None,
     };
 
     let tiny = sized(CfgPlanEntry::Jacobian(21, 2), TINY_MIR, TINY_CFG, 3.234e-5);
