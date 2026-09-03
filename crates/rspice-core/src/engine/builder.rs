@@ -10,6 +10,7 @@ use crate::circuit::{ResistorValues, SolutionDependentCapacitorSpec};
 use crate::device::DistributedRlgc;
 use crate::device::controlled::VoltageControlledNodes;
 use crate::device::passive::CoupledWinding;
+use crate::xspice::CodeModelVectorParams;
 
 /// A model parameter the deck left as text: its name and the unresolved
 /// expression or string literal that follows it.
@@ -3711,10 +3712,12 @@ fn add_generated_xspice_auto_bridge_instance(
         resolved_model.code_model.clone(),
         connections,
         &resolved_model.numeric_params,
-        &resolved_model.string_params,
-        &resolved_model.string_vector_params,
-        &resolved_model.real_vector_params,
-        &resolved_model.integer_vector_params,
+        CodeModelVectorParams {
+            string_params: &resolved_model.string_params,
+            string_vector_params: &resolved_model.string_vector_params,
+            real_vector_params: &resolved_model.real_vector_params,
+            integer_vector_params: &resolved_model.integer_vector_params,
+        },
     )
     .map_err(|e| {
         SimulationError::Circuit(format!(
@@ -4217,10 +4220,12 @@ fn add_planned_xspice_auto_bridge(
         code_model,
         connections,
         &numeric_params,
-        &[],
-        &[],
-        &[],
-        &[],
+        CodeModelVectorParams {
+            string_params: &[],
+            string_vector_params: &[],
+            real_vector_params: &[],
+            integer_vector_params: &[],
+        },
     )
     .map_err(|e| {
         SimulationError::Circuit(format!(
@@ -8266,10 +8271,12 @@ impl Engine {
                         resolved_model.code_model.clone(),
                         connections,
                         &numeric_params,
-                        &resolved_model.string_params,
-                        &resolved_model.string_vector_params,
-                        &resolved_model.real_vector_params,
-                        &resolved_model.integer_vector_params,
+                        CodeModelVectorParams {
+                            string_params: &resolved_model.string_params,
+                            string_vector_params: &resolved_model.string_vector_params,
+                            real_vector_params: &resolved_model.real_vector_params,
+                            integer_vector_params: &resolved_model.integer_vector_params,
+                        },
                     )
                     .map_err(|e| {
                         SimulationError::Circuit(format!(

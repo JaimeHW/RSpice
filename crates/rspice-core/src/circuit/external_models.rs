@@ -8,7 +8,7 @@
 //! propagates the device's own breakpoint requests back to the integrator.
 
 use super::*;
-use crate::xspice::{EventInputKind, XspiceInstanceCheckpoint};
+use crate::xspice::{EventInputKind, XspiceEventInputs, XspiceInstanceCheckpoint};
 #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -631,11 +631,13 @@ impl CircuitData {
                     instance.debug_assert_event_inputs_quiet(
                         solution,
                         num_nodes,
-                        &event_values.digital_values,
-                        &event_values.digital_event_times,
-                        event_loads,
-                        &event_values.real_values,
-                        &event_values.real_event_times,
+                        XspiceEventInputs {
+                            digital_values: &event_values.digital_values,
+                            digital_event_times: &event_values.digital_event_times,
+                            event_total_loads: event_loads,
+                            real_values: &event_values.real_values,
+                            real_event_times: &event_values.real_event_times,
+                        },
                         &current_source_values,
                         &analog_transitions,
                         analysis,
@@ -654,11 +656,13 @@ impl CircuitData {
                 if let Err(e) = instance.update_inputs_with_analog_transitions(
                     solution,
                     num_nodes,
-                    &event_values.digital_values,
-                    &event_values.digital_event_times,
-                    event_loads,
-                    &event_values.real_values,
-                    &event_values.real_event_times,
+                    XspiceEventInputs {
+                        digital_values: &event_values.digital_values,
+                        digital_event_times: &event_values.digital_event_times,
+                        event_total_loads: event_loads,
+                        real_values: &event_values.real_values,
+                        real_event_times: &event_values.real_event_times,
+                    },
                     &current_source_values,
                     &analog_transitions,
                 ) {

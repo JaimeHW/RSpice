@@ -510,17 +510,29 @@ fn d_ram_previous_data_changed(
         .any(|idx| d_ram_state(ctx, scratch_state, data_start + idx) != data_codes[idx])
 }
 
-fn d_ram_evaluate_with_state(
-    ctx: &mut CmContext,
-    shape: DMemoryShape,
+/// One RAM access as the model sees it: whether it is a write, whether the
+/// device is selected, and which cell the address decoded to.
+#[derive(Clone, Copy)]
+struct DMemoryAccess {
     write_en: i64,
     select: i64,
     address_index: Option<usize>,
+}
+
+fn d_ram_evaluate_with_state(
+    ctx: &mut CmContext,
+    shape: DMemoryShape,
+    access: DMemoryAccess,
     inputs: &DMemoryInputCodes,
     ic: i64,
     read_delay: Value,
     mut scratch_state: Option<&mut [i64]>,
 ) -> CmResult<()> {
+    let DMemoryAccess {
+        write_en,
+        select,
+        address_index,
+    } = access;
     if ctx.time == 0.0 || d_ram_state(ctx, scratch_state.as_deref(), D_RAM_INITIALIZED) == 0 {
         d_ram_fill_memory_state(ctx, &mut scratch_state, shape, ic);
 
@@ -681,9 +693,11 @@ impl CodeModel for DigitalRam {
                     d_ram_evaluate_with_state(
                         ctx,
                         shape,
-                        write_en,
-                        select,
-                        address_index,
+                        DMemoryAccess {
+                            write_en,
+                            select,
+                            address_index,
+                        },
                         &inputs,
                         ic,
                         read_delay,
@@ -705,9 +719,11 @@ impl CodeModel for DigitalRam {
                 d_ram_evaluate_with_state(
                     ctx,
                     shape,
-                    write_en,
-                    select,
-                    address_index,
+                    DMemoryAccess {
+                        write_en,
+                        select,
+                        address_index,
+                    },
                     &inputs,
                     ic,
                     read_delay,

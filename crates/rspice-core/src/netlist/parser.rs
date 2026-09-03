@@ -447,9 +447,11 @@ fn parse_netlist_impl(
         &original_lines,
         source_schedule.as_ref(),
         body_start,
-        preprocess.replace_ground == Some(true),
-        allow_non_semicolon_comments,
-        xyce_syntax,
+        RootPreprocessingPolicy {
+            replace_ground: preprocess.replace_ground == Some(true),
+            allow_non_semicolon_comments,
+            xyce_syntax,
+        },
         abort,
     )?;
     let parse_input = transformed_input.as_str();
@@ -988,16 +990,29 @@ fn root_physical_origin(
         })
 }
 
+/// The dialect switches root preprocessing honours: whether `0` aliases are
+/// rewritten to ground, whether a bare `#`/`*` mid-line starts a comment, and
+/// whether Xyce syntax extensions are recognised.
+#[derive(Clone, Copy)]
+struct RootPreprocessingPolicy {
+    replace_ground: bool,
+    allow_non_semicolon_comments: bool,
+    xyce_syntax: bool,
+}
+
 fn apply_root_preprocessing(
     input: &str,
     lines: &[&str],
     source_schedule: Option<&SourceEventSchedule>,
     body_start: usize,
-    replace_ground: bool,
-    allow_non_semicolon_comments: bool,
-    xyce_syntax: bool,
+    policy: RootPreprocessingPolicy,
     abort: &dyn AbortSignal,
 ) -> Result<String, ParseWithAbortError> {
+    let RootPreprocessingPolicy {
+        replace_ground,
+        allow_non_semicolon_comments,
+        xyce_syntax,
+    } = policy;
     let root_path = source_schedule
         .and_then(|schedule| schedule.origin(0))
         .and_then(|origin| origin.path.as_deref());
@@ -1217,7 +1232,10 @@ fn replace_ground_fields_with_abort(
 
 #[cfg(test)]
 mod replaceground_lexical_tests {
-    use super::{NetlistParseOptions, apply_root_preprocessing, replace_ground_fields};
+    use super::{
+        NetlistParseOptions, RootPreprocessingPolicy, apply_root_preprocessing,
+        replace_ground_fields,
+    };
     use crate::abort_signal::NoAbort;
     use crate::config::ExpressionDialect;
     use crate::netlist::{Netlist, ParseError, ParseWithAbortError, SaveSignal};
@@ -1268,9 +1286,19 @@ mod replaceground_lexical_tests {
                 "protected directive\n.PREPROCESS REPLACEGROUND TRUE\n{directive}\n+ GND GROUND\n"
             );
             let lines = source.lines().collect::<Vec<_>>();
-            let transformed =
-                apply_root_preprocessing(&source, &lines, None, 1, true, true, true, &NoAbort)
-                    .expect("NoAbort cannot cancel preprocessing");
+            let transformed = apply_root_preprocessing(
+                &source,
+                &lines,
+                None,
+                1,
+                RootPreprocessingPolicy {
+                    replace_ground: true,
+                    allow_non_semicolon_comments: true,
+                    xyce_syntax: true,
+                },
+                &NoAbort,
+            )
+            .expect("NoAbort cannot cancel preprocessing");
             assert!(
                 transformed.contains("+ GND GROUND"),
                 "directive continuation changed for {directive}: {transformed}"

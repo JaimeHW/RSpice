@@ -21,6 +21,7 @@
     clippy::unwrap_used
 )]
 
+use super::flattener::SubcircuitInstanceNames;
 use super::{
     AnalysisCommand, Element, ElementKind, FftAnalysis, FftOutput, Flattener, FlattenerConfig,
     MeasureStatement, Netlist, NetlistSourceLocation, ParseError, ParseWithAbortError,
@@ -2063,9 +2064,11 @@ fn collect_interface_node_aliases_impl_with_limits(
                     .collect::<Vec<_>>();
                 super::flattener::validate_subcircuit_port_bindings(
                     definition,
-                    subckt_name,
-                    &element.name,
-                    &instance,
+                    SubcircuitInstanceNames {
+                        invoked_subcircuit_name: subckt_name,
+                        instance_name: &element.name,
+                        qualified_instance_name: &instance,
+                    },
                     element.nodes.len(),
                     &mapped_ports,
                     self.globals,

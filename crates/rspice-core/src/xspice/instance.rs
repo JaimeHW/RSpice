@@ -11,6 +11,30 @@ use super::{
     ParamSpec, ParamType, PortSpec, PortType, XspiceCheckpointSupport, XspiceEventScheduler,
 };
 use crate::{Complex64, Value};
+
+/// The non-scalar instance parameters a code model can be given. Each list is
+/// keyed by parameter name, and passing five of them positionally made a
+/// swapped pair a runtime type error inside the model instead of a compile
+/// error here.
+#[derive(Clone, Copy)]
+pub struct CodeModelVectorParams<'a> {
+    pub string_params: &'a [(String, String)],
+    pub string_vector_params: &'a [(String, Vec<String>)],
+    pub real_vector_params: &'a [(String, Vec<Value>)],
+    pub integer_vector_params: &'a [(String, Vec<i64>)],
+}
+
+/// The event-driven inputs one XSPICE instance reads for a step: the digital
+/// and real port values, the times they last changed, and the total load each
+/// event node presents.
+#[derive(Clone, Copy)]
+pub struct XspiceEventInputs<'a> {
+    pub digital_values: &'a HashMap<usize, DigitalValue>,
+    pub digital_event_times: &'a HashMap<usize, Value>,
+    pub event_total_loads: &'a HashMap<usize, Value>,
+    pub real_values: &'a HashMap<usize, Value>,
+    pub real_event_times: &'a HashMap<usize, Value>,
+}
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -937,10 +961,12 @@ impl XspiceInstance {
             model,
             connections,
             params,
-            string_params,
-            &[],
-            real_vector_params,
-            integer_vector_params,
+            CodeModelVectorParams {
+                string_params,
+                string_vector_params: &[],
+                real_vector_params,
+                integer_vector_params,
+            },
         )
     }
 
@@ -950,11 +976,14 @@ impl XspiceInstance {
         model: Arc<dyn CodeModel>,
         connections: Vec<PortConnection>,
         params: &[(String, Value)],
-        string_params: &[(String, String)],
-        string_vector_params: &[(String, Vec<String>)],
-        real_vector_params: &[(String, Vec<Value>)],
-        integer_vector_params: &[(String, Vec<i64>)],
+        vectors: CodeModelVectorParams<'_>,
     ) -> CmResult<Self> {
+        let CodeModelVectorParams {
+            string_params,
+            string_vector_params,
+            real_vector_params,
+            integer_vector_params,
+        } = vectors;
         let name = name.into();
         let ports = model.ports().to_vec();
         let port_count = ports.len();
@@ -1540,21 +1569,26 @@ impl XspiceInstance {
         &mut self,
         solution: &[Value],
         num_nodes: usize,
-        digital_values: &HashMap<usize, DigitalValue>,
-        digital_event_times: &HashMap<usize, Value>,
-        event_total_loads: &HashMap<usize, Value>,
-        real_values: &HashMap<usize, Value>,
-        real_event_times: &HashMap<usize, Value>,
+        events: XspiceEventInputs<'_>,
         current_source_values: &[Value],
     ) -> CmResult<()> {
-        self.update_inputs_with_analog_transitions(
-            solution,
-            num_nodes,
+        let XspiceEventInputs {
             digital_values,
             digital_event_times,
             event_total_loads,
             real_values,
             real_event_times,
+        } = events;
+        self.update_inputs_with_analog_transitions(
+            solution,
+            num_nodes,
+            XspiceEventInputs {
+                digital_values,
+                digital_event_times,
+                event_total_loads,
+                real_values,
+                real_event_times,
+            },
             current_source_values,
             &HashMap::new(),
         )
@@ -1566,14 +1600,17 @@ impl XspiceInstance {
         &mut self,
         solution: &[Value],
         num_nodes: usize,
-        digital_values: &HashMap<usize, DigitalValue>,
-        digital_event_times: &HashMap<usize, Value>,
-        event_total_loads: &HashMap<usize, Value>,
-        real_values: &HashMap<usize, Value>,
-        real_event_times: &HashMap<usize, Value>,
+        events: XspiceEventInputs<'_>,
         current_source_values: &[Value],
         analog_transitions: &HashMap<(usize, usize), AnalogTransition>,
     ) -> CmResult<()> {
+        let XspiceEventInputs {
+            digital_values,
+            digital_event_times,
+            event_total_loads,
+            real_values,
+            real_event_times,
+        } = events;
         if self.solution_num_nodes != num_nodes {
             self.port_context_solution_num_nodes = None;
             self.solution_num_nodes = num_nodes;
@@ -1935,15 +1972,18 @@ impl XspiceInstance {
         &self,
         solution: &[Value],
         num_nodes: usize,
-        digital_values: &HashMap<usize, DigitalValue>,
-        digital_event_times: &HashMap<usize, Value>,
-        event_total_loads: &HashMap<usize, Value>,
-        real_values: &HashMap<usize, Value>,
-        real_event_times: &HashMap<usize, Value>,
+        events: XspiceEventInputs<'_>,
         current_source_values: &[Value],
         analog_transitions: &HashMap<(usize, usize), AnalogTransition>,
         analysis: AnalysisType,
     ) {
+        let XspiceEventInputs {
+            digital_values,
+            digital_event_times,
+            event_total_loads,
+            real_values,
+            real_event_times,
+        } = events;
         if !self.should_track_event_input_signature(analysis) {
             return;
         }
@@ -1962,11 +2002,13 @@ impl XspiceInstance {
             .update_inputs_with_analog_transitions(
                 solution,
                 num_nodes,
-                digital_values,
-                digital_event_times,
-                event_total_loads,
-                real_values,
-                real_event_times,
+                XspiceEventInputs {
+                    digital_values,
+                    digital_event_times,
+                    event_total_loads,
+                    real_values,
+                    real_event_times,
+                },
                 current_source_values,
                 analog_transitions,
             )
@@ -3487,11 +3529,13 @@ mod tests {
             .update_inputs(
                 &[],
                 0,
-                &HashMap::new(),
-                &HashMap::new(),
-                &event_total_loads,
-                &HashMap::new(),
-                &HashMap::new(),
+                XspiceEventInputs {
+                    digital_values: &HashMap::new(),
+                    digital_event_times: &HashMap::new(),
+                    event_total_loads: &event_total_loads,
+                    real_values: &HashMap::new(),
+                    real_event_times: &HashMap::new(),
+                },
                 &[],
             )
             .expect("update inputs");
@@ -3512,13 +3556,15 @@ mod tests {
             ])),
             vec![PortConnection::Analog(1)],
             &[],
-            &[("pole".to_string(), "<1k -2meg>".to_string())],
-            &[(
-                "zeros".to_string(),
-                vec!["<3 4>".to_string(), "<5, -6>".to_string()],
-            )],
-            &[],
-            &[],
+            CodeModelVectorParams {
+                string_params: &[("pole".to_string(), "<1k -2meg>".to_string())],
+                string_vector_params: &[(
+                    "zeros".to_string(),
+                    vec!["<3 4>".to_string(), "<5, -6>".to_string()],
+                )],
+                real_vector_params: &[],
+                integer_vector_params: &[],
+            },
         )
         .expect("complex parameters should be parsed from string channels");
 
@@ -3950,11 +3996,13 @@ mod tests {
             .update_inputs(
                 &[0.0, 0.0, 0.0, 0.0],
                 4,
-                &HashMap::new(),
-                &HashMap::new(),
-                &HashMap::new(),
-                &HashMap::new(),
-                &HashMap::new(),
+                XspiceEventInputs {
+                    digital_values: &HashMap::new(),
+                    digital_event_times: &HashMap::new(),
+                    event_total_loads: &HashMap::new(),
+                    real_values: &HashMap::new(),
+                    real_event_times: &HashMap::new(),
+                },
                 &[],
             )
             .expect("update inputs");
@@ -4076,11 +4124,13 @@ mod tests {
             .update_inputs(
                 &[],
                 0,
-                &digital_values,
-                &HashMap::new(),
-                &HashMap::new(),
-                &HashMap::new(),
-                &HashMap::new(),
+                XspiceEventInputs {
+                    digital_values: &digital_values,
+                    digital_event_times: &HashMap::new(),
+                    event_total_loads: &HashMap::new(),
+                    real_values: &HashMap::new(),
+                    real_event_times: &HashMap::new(),
+                },
                 &[],
             )
             .expect("update inputs");
@@ -4126,11 +4176,13 @@ mod tests {
             .update_inputs(
                 &[1.0, 2.0],
                 2,
-                &digital_values,
-                &digital_event_times,
-                &HashMap::new(),
-                &real_values,
-                &HashMap::new(),
+                XspiceEventInputs {
+                    digital_values: &digital_values,
+                    digital_event_times: &digital_event_times,
+                    event_total_loads: &HashMap::new(),
+                    real_values: &real_values,
+                    real_event_times: &HashMap::new(),
+                },
                 &[],
             )
             .expect("update inputs");
@@ -4162,11 +4214,13 @@ mod tests {
             .update_inputs(
                 &[3.0, 4.0],
                 2,
-                &digital_values,
-                &digital_event_times,
-                &HashMap::new(),
-                &real_values,
-                &HashMap::new(),
+                XspiceEventInputs {
+                    digital_values: &digital_values,
+                    digital_event_times: &digital_event_times,
+                    event_total_loads: &HashMap::new(),
+                    real_values: &real_values,
+                    real_event_times: &HashMap::new(),
+                },
                 &[],
             )
             .expect("update inputs");
@@ -4307,11 +4361,13 @@ mod tests {
             .update_inputs(
                 &[0.0; 8],
                 5,
-                &HashMap::new(),
-                &HashMap::new(),
-                &HashMap::new(),
-                &HashMap::new(),
-                &HashMap::new(),
+                XspiceEventInputs {
+                    digital_values: &HashMap::new(),
+                    digital_event_times: &HashMap::new(),
+                    event_total_loads: &HashMap::new(),
+                    real_values: &HashMap::new(),
+                    real_event_times: &HashMap::new(),
+                },
                 &[],
             )
             .expect("update inputs");
@@ -4335,11 +4391,13 @@ mod tests {
             .update_inputs(
                 &[0.0; 10],
                 7,
-                &HashMap::new(),
-                &HashMap::new(),
-                &HashMap::new(),
-                &HashMap::new(),
-                &HashMap::new(),
+                XspiceEventInputs {
+                    digital_values: &HashMap::new(),
+                    digital_event_times: &HashMap::new(),
+                    event_total_loads: &HashMap::new(),
+                    real_values: &HashMap::new(),
+                    real_event_times: &HashMap::new(),
+                },
                 &[],
             )
             .expect("update inputs");
@@ -4382,11 +4440,13 @@ mod tests {
             .update_inputs(
                 &[0.0; 8],
                 5,
-                &HashMap::new(),
-                &HashMap::new(),
-                &HashMap::new(),
-                &HashMap::new(),
-                &HashMap::new(),
+                XspiceEventInputs {
+                    digital_values: &HashMap::new(),
+                    digital_event_times: &HashMap::new(),
+                    event_total_loads: &HashMap::new(),
+                    real_values: &HashMap::new(),
+                    real_event_times: &HashMap::new(),
+                },
                 &[],
             )
             .expect("update inputs");
@@ -4508,11 +4568,13 @@ mod tests {
                 .update_inputs(
                     &[0.0],
                     1,
-                    &HashMap::new(),
-                    &HashMap::new(),
-                    &HashMap::new(),
-                    &HashMap::new(),
-                    &HashMap::new(),
+                    XspiceEventInputs {
+                        digital_values: &HashMap::new(),
+                        digital_event_times: &HashMap::new(),
+                        event_total_loads: &HashMap::new(),
+                        real_values: &HashMap::new(),
+                        real_event_times: &HashMap::new(),
+                    },
                     &[],
                 )
                 .expect("update inputs");

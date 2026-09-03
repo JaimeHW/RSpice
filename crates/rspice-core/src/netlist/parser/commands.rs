@@ -1,5 +1,6 @@
 //! Dot-command parsing for analyses, options, measurements, params, and functions.
 
+use super::scoping::ModelDefinitionDeferrals;
 use crate::config::DampingStrategy;
 use crate::netlist::lexer::Token;
 use crate::netlist::{XspiceAutoBridgeParamName, XspiceAutoBridgeTemplate, XyceHbTimeDomainMode};
@@ -241,8 +242,10 @@ pub(super) fn parse_command(
                 params,
                 models,
                 false,
-                model_bare_ident_deferrals,
-                pending_xyce_diode_model_warnings,
+                ModelDefinitionDeferrals {
+                    bare_ident_deferrals: model_bare_ident_deferrals,
+                    pending_xyce_diode_model_warnings,
+                },
             )?;
             models.push(model);
         }
@@ -496,9 +499,11 @@ pub(super) fn parse_command(
                 logical_line,
                 saves,
                 false,
-                params,
-                None,
-                None,
+                SaveCommandContext {
+                    params,
+                    diagnostics: None,
+                    origin: None,
+                },
             )?;
             output_requests.push(request);
         }
@@ -516,9 +521,11 @@ pub(super) fn parse_command(
                 logical_line,
                 saves,
                 true,
-                params,
-                Some(diagnostics),
-                Some(origin),
+                SaveCommandContext {
+                    params,
+                    diagnostics: Some(diagnostics),
+                    origin: Some(origin),
+                },
             )?;
             output_requests.push(
                 OutputRequest::from_ordered_operands(
@@ -1046,16 +1053,27 @@ pub(super) struct ParsedSaveCommand {
     operands: Vec<OutputOperand>,
 }
 
+/// What a `.SAVE` line is parsed against: the parameter scope in force, the
+/// diagnostic sink, and the source location the line came from.
+pub(super) struct SaveCommandContext<'a, 'b> {
+    pub params: &'a ParamContext,
+    pub diagnostics: Option<&'a mut Vec<ParseDiagnostic>>,
+    pub origin: Option<&'b NetlistSourceLocation>,
+}
+
 pub(super) fn parse_save_command(
     stream: &mut TokenStream,
     line_num: usize,
     logical_line: &str,
     saves: &mut super::SaveSet,
     skip_analysis_type: bool,
-    params: &ParamContext,
-    mut diagnostics: Option<&mut Vec<ParseDiagnostic>>,
-    origin: Option<&NetlistSourceLocation>,
+    context: SaveCommandContext<'_, '_>,
 ) -> Result<ParsedSaveCommand, ParseError> {
+    let SaveCommandContext {
+        params,
+        mut diagnostics,
+        origin,
+    } = context;
     use super::SaveSignal;
 
     let mut first_token = true;

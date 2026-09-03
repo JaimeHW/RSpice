@@ -114,12 +114,16 @@ pub(super) fn parse_resistor(
                     parse_passive_tc_assignment(
                         stream,
                         line_num,
-                        params,
-                        "resistor",
-                        defer_simple_param_refs,
+                        PassiveAssignmentContext {
+                            params,
+                            element_label: "resistor",
+                            defer_simple_param_refs,
+                        },
                         first,
-                        &mut instance_params,
-                        &mut deferred_params,
+                        ElementParamSink {
+                            instance_params: &mut instance_params,
+                            deferred_params: &mut deferred_params,
+                        },
                         &mut tc_vector_given,
                     )?;
                     continue;
@@ -158,8 +162,10 @@ pub(super) fn parse_resistor(
                             }
                             if matches!(name_upper.as_str(), "TC1" | "TC2") {
                                 upsert_passive_scalar_tc(
-                                    &mut instance_params,
-                                    &mut deferred_params,
+                                    ElementParamSink {
+                                        instance_params: &mut instance_params,
+                                        deferred_params: &mut deferred_params,
+                                    },
                                     &tc_vector_given,
                                     &name_upper,
                                     DeferrableValue::Resolved(param_value),
@@ -186,8 +192,10 @@ pub(super) fn parse_resistor(
                                 });
                             } else if matches!(name_upper.as_str(), "TC1" | "TC2") {
                                 upsert_passive_scalar_tc(
-                                    &mut instance_params,
-                                    &mut deferred_params,
+                                    ElementParamSink {
+                                        instance_params: &mut instance_params,
+                                        deferred_params: &mut deferred_params,
+                                    },
                                     &tc_vector_given,
                                     &name_upper,
                                     DeferrableValue::Deferred(expr),
@@ -326,6 +334,32 @@ fn consume_passive_unit_word(stream: &mut TokenStream, allowed_units: &[&str]) {
 /// optional bare model name, and named `PARAM=value` assignments. `IC` and
 /// `MODEL` are extracted specially; every other assignment is preserved as
 /// an instance parameter for build-time resolution (M/SCALE/TC1/TC2/W/L...).
+/// Where an element parser accumulates the parameters it reads: the ones with
+/// a resolved value now, and the ones whose expression is deferred until the
+/// parameter scope is complete. The two vectors are written in lockstep, so
+/// they travel together.
+struct ElementParamSink<'a> {
+    instance_params: &'a mut Vec<(String, Value)>,
+    deferred_params: &'a mut Vec<(String, String)>,
+}
+
+/// The scope one passive element's trailing assignments are read against.
+#[derive(Clone, Copy)]
+struct PassiveAssignmentContext<'a> {
+    params: &'a ParamContext,
+    element_label: &'a str,
+    defer_simple_param_refs: bool,
+}
+
+/// The three model names a PSpice `U` compound gate names: the terminal model,
+/// the output model, and the constant field the format requires but ignores.
+#[derive(Clone, Copy)]
+struct PspiceUGateModels<'a> {
+    term_model: &'a str,
+    output_model: &'a str,
+    ignored_constant: &'a str,
+}
+
 struct PassiveTail {
     value: Option<Value>,
     value_expr: Option<String>,
@@ -338,12 +372,11 @@ struct PassiveTail {
 /// Store one passive instance parameter. Resolved and deferred forms share a
 /// single namespace so replacing an assignment cannot leave stale state in
 /// the other representation.
-fn upsert_passive_instance_param(
-    instance_params: &mut Vec<(String, Value)>,
-    deferred_params: &mut Vec<(String, String)>,
-    name: &str,
-    value: DeferrableValue,
-) {
+fn upsert_passive_instance_param(sink: ElementParamSink<'_>, name: &str, value: DeferrableValue) {
+    let ElementParamSink {
+        instance_params,
+        deferred_params,
+    } = sink;
     instance_params.retain(|(existing, _)| !existing.eq_ignore_ascii_case(name));
     deferred_params.retain(|(existing, _)| !existing.eq_ignore_ascii_case(name));
     match value {
@@ -379,15 +412,25 @@ fn passive_tc_assignment_ended(stream: &TokenStream) -> bool {
 }
 
 fn upsert_passive_scalar_tc(
-    instance_params: &mut Vec<(String, Value)>,
-    deferred_params: &mut Vec<(String, String)>,
+    sink: ElementParamSink<'_>,
     vector_given: &[bool; 2],
     name: &str,
     value: DeferrableValue,
 ) {
+    let ElementParamSink {
+        instance_params,
+        deferred_params,
+    } = sink;
     let index = usize::from(name.eq_ignore_ascii_case("TC2"));
     if !vector_given[index] {
-        upsert_passive_instance_param(instance_params, deferred_params, name, value);
+        upsert_passive_instance_param(
+            ElementParamSink {
+                instance_params,
+                deferred_params,
+            },
+            name,
+            value,
+        );
     }
 }
 
@@ -405,14 +448,20 @@ fn upsert_passive_scalar_tc(
 fn parse_passive_tc_assignment(
     stream: &mut TokenStream,
     line_num: usize,
-    params: &ParamContext,
-    element_label: &str,
-    defer_simple_param_refs: bool,
+    context: PassiveAssignmentContext<'_>,
     first: DeferrableValue,
-    instance_params: &mut Vec<(String, Value)>,
-    deferred_params: &mut Vec<(String, String)>,
+    sink: ElementParamSink<'_>,
     vector_given: &mut [bool; 2],
 ) -> Result<(), ParseError> {
+    let ElementParamSink {
+        instance_params,
+        deferred_params,
+    } = sink;
+    let PassiveAssignmentContext {
+        params,
+        element_label,
+        defer_simple_param_refs,
+    } = context;
     let second = if !stream.consume(&TokenKind::Comma) {
         if passive_tc_assignment_ended(stream) {
             None
@@ -449,10 +498,24 @@ fn parse_passive_tc_assignment(
         Some(second)
     };
 
-    upsert_passive_instance_param(instance_params, deferred_params, "TC1", first);
+    upsert_passive_instance_param(
+        ElementParamSink {
+            instance_params,
+            deferred_params,
+        },
+        "TC1",
+        first,
+    );
     vector_given[0] = true;
     if let Some(second) = second {
-        upsert_passive_instance_param(instance_params, deferred_params, "TC2", second);
+        upsert_passive_instance_param(
+            ElementParamSink {
+                instance_params,
+                deferred_params,
+            },
+            "TC2",
+            second,
+        );
         vector_given[1] = true;
     }
     Ok(())
@@ -650,12 +713,16 @@ fn parse_passive_tail(
                     parse_passive_tc_assignment(
                         stream,
                         line_num,
-                        params,
-                        element_label,
-                        defer_simple_param_refs,
+                        PassiveAssignmentContext {
+                            params,
+                            element_label,
+                            defer_simple_param_refs,
+                        },
                         first,
-                        &mut tail.instance_params,
-                        &mut tail.deferred_params,
+                        ElementParamSink {
+                            instance_params: &mut tail.instance_params,
+                            deferred_params: &mut tail.deferred_params,
+                        },
                         &mut tc_vector_given,
                     )?;
                     continue;
@@ -697,8 +764,10 @@ fn parse_passive_tail(
                             }
                             if matches!(name_upper.as_str(), "TC1" | "TC2") {
                                 upsert_passive_scalar_tc(
-                                    &mut tail.instance_params,
-                                    &mut tail.deferred_params,
+                                    ElementParamSink {
+                                        instance_params: &mut tail.instance_params,
+                                        deferred_params: &mut tail.deferred_params,
+                                    },
                                     &tc_vector_given,
                                     &name_upper,
                                     DeferrableValue::Resolved(param_value),
@@ -725,8 +794,10 @@ fn parse_passive_tail(
                             }
                             if matches!(name_upper.as_str(), "TC1" | "TC2") {
                                 upsert_passive_scalar_tc(
-                                    &mut tail.instance_params,
-                                    &mut tail.deferred_params,
+                                    ElementParamSink {
+                                        instance_params: &mut tail.instance_params,
+                                        deferred_params: &mut tail.deferred_params,
+                                    },
                                     &tc_vector_given,
                                     &name_upper,
                                     DeferrableValue::Deferred(expr),
@@ -1179,9 +1250,11 @@ pub(super) fn parse_pspice_u_device(
             &name,
             &fields,
             pspice_u_count_pair(&fields[1]),
-            "d_and",
-            "d_or",
-            "$D_HI",
+            PspiceUGateModels {
+                term_model: "d_and",
+                output_model: "d_or",
+                ignored_constant: "$D_HI",
+            },
             line_num,
             elements,
             params,
@@ -1190,9 +1263,11 @@ pub(super) fn parse_pspice_u_device(
             &name,
             &fields,
             pspice_u_count_pair(&fields[1]),
-            "d_and",
-            "d_nor",
-            "$D_HI",
+            PspiceUGateModels {
+                term_model: "d_and",
+                output_model: "d_nor",
+                ignored_constant: "$D_HI",
+            },
             line_num,
             elements,
             params,
@@ -1291,9 +1366,11 @@ pub(super) fn parse_pspice_u_device(
             &name,
             &fields,
             pspice_u_count_pair(&fields[1]),
-            "d_or",
-            "d_and",
-            "$D_LO",
+            PspiceUGateModels {
+                term_model: "d_or",
+                output_model: "d_and",
+                ignored_constant: "$D_LO",
+            },
             line_num,
             elements,
             params,
@@ -1302,9 +1379,11 @@ pub(super) fn parse_pspice_u_device(
             &name,
             &fields,
             pspice_u_count_pair(&fields[1]),
-            "d_or",
-            "d_nand",
-            "$D_LO",
+            PspiceUGateModels {
+                term_model: "d_or",
+                output_model: "d_nand",
+                ignored_constant: "$D_LO",
+            },
             line_num,
             elements,
             params,
@@ -3154,13 +3233,16 @@ fn parse_pspice_u_compound_gate(
     name: &str,
     fields: &[String],
     shape: Option<(usize, usize)>,
-    term_model: &str,
-    output_model: &str,
-    ignored_constant: &str,
+    models: PspiceUGateModels<'_>,
     line_num: usize,
     elements: &mut Vec<Element>,
     params: &ParamContext,
 ) -> Result<(), ParseError> {
+    let PspiceUGateModels {
+        term_model,
+        output_model,
+        ignored_constant,
+    } = models;
     let Some((input_count, term_count)) = shape else {
         return Err(ParseError::Syntax {
             line: line_num,
@@ -4324,8 +4406,10 @@ pub(super) fn parse_bjt(
                             defer_simple_param_refs,
                             BJT_IC_VECTOR,
                             "BJT",
-                            &mut instance_params,
-                            &mut deferred_params,
+                            ElementParamSink {
+                                instance_params: &mut instance_params,
+                                deferred_params: &mut deferred_params,
+                            },
                         )?;
                         continue;
                     }
@@ -4540,8 +4624,10 @@ pub(super) fn parse_mosfet(
                             defer_simple_param_refs,
                             MOSFET_IC_VECTOR,
                             "MOSFET",
-                            &mut instance_params,
-                            &mut deferred_params,
+                            ElementParamSink {
+                                instance_params: &mut instance_params,
+                                deferred_params: &mut deferred_params,
+                            },
                         )?;
                         continue;
                     }
@@ -4639,9 +4725,12 @@ fn parse_ic_vector(
     defer_simple_param_refs: bool,
     labels: &[&str],
     element_label: &str,
-    instance_params: &mut Vec<(String, Value)>,
-    deferred_params: &mut Vec<(String, String)>,
+    sink: ElementParamSink<'_>,
 ) -> Result<(), ParseError> {
+    let ElementParamSink {
+        instance_params,
+        deferred_params,
+    } = sink;
     for (idx, label) in labels.iter().enumerate() {
         let value = take_ic_vector_value(
             stream,
@@ -4852,8 +4941,10 @@ pub(super) fn parse_fet_instance_params(
                             defer_simple_param_refs,
                             FET_IC_VECTOR,
                             element_label,
-                            &mut instance_params,
-                            &mut deferred_params,
+                            ElementParamSink {
+                                instance_params: &mut instance_params,
+                                deferred_params: &mut deferred_params,
+                            },
                         )?;
                         continue;
                     }

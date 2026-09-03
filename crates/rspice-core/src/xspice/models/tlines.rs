@@ -827,19 +827,65 @@ fn msline_analyse_dispersion(
     }
 }
 
-fn analyse_microstrip_loss(
+/// The physical microstrip a loss analysis is run on: strip width and
+/// thickness, substrate permittivity, conductor resistivity and surface
+/// roughness, and the substrate loss tangent.
+#[derive(Clone, Copy)]
+struct MicrostripLossGeometry {
     w: Value,
     t: Value,
     er: Value,
     rho: Value,
     roughness: Value,
     tan_delta: Value,
+}
+
+/// The quasi-static solution the same analysis starts from.
+#[derive(Clone, Copy)]
+struct MicrostripQuasiStatic {
     zl_eff1: Value,
     zl_eff2: Value,
     er_eff: Value,
+}
+
+/// The physical coupled microstrip a dispersion analysis is run on.
+#[derive(Clone, Copy)]
+struct CoupledMicrostripGeometry {
+    w: Value,
+    h: Value,
+    s: Value,
+    t: Value,
+    er: Value,
+}
+
+/// Which of the published closed-form models the end-effect calculation uses
+/// for the substrate, for dispersion, and for the open end itself.
+#[derive(Clone, Copy)]
+struct MicrostripModelSelection {
+    substrate_model: i64,
+    dispersion_model: i64,
+    open_model: i64,
+}
+
+fn analyse_microstrip_loss(
+    geometry: MicrostripLossGeometry,
+    quasi_static: MicrostripQuasiStatic,
     frequency: Value,
     model: i64,
 ) -> (Value, Value) {
+    let MicrostripLossGeometry {
+        w,
+        t,
+        er,
+        rho,
+        roughness,
+        tan_delta,
+    } = geometry;
+    let MicrostripQuasiStatic {
+        zl_eff1,
+        zl_eff2,
+        er_eff,
+    } = quasi_static;
     let mut conductor_loss = 0.0;
     let mut dielectric_loss = 0.0;
 
@@ -896,15 +942,19 @@ fn microstrip_propagation_uncached(
         dispersion_model,
     );
     let (conductor_loss, dielectric_loss) = analyse_microstrip_loss(
-        w,
-        t,
-        er,
-        rho,
-        roughness,
-        tan_delta,
-        quasi.zl_eff,
-        quasi.zl_eff,
-        quasi.er_eff,
+        MicrostripLossGeometry {
+            w,
+            t,
+            er,
+            rho,
+            roughness,
+            tan_delta,
+        },
+        MicrostripQuasiStatic {
+            zl_eff1: quasi.zl_eff,
+            zl_eff2: quasi.zl_eff,
+            er_eff: quasi.er_eff,
+        },
         frequency,
         HAMMERSTAD,
     );
@@ -957,13 +1007,10 @@ fn microstrip_propagation(
 }
 
 fn cpmsline_analyse_quasi_static(
-    w: Value,
-    h: Value,
-    s: Value,
-    t: Value,
-    er: Value,
+    geometry: CoupledMicrostripGeometry,
     model: i64,
 ) -> CoupledMicrostripAnalysis {
+    let CoupledMicrostripGeometry { w, h, s, t, er } = geometry;
     let u = w / h;
     let g = s / h;
     let mut ze = 55.7;
@@ -1074,15 +1121,12 @@ fn cpmsline_analyse_quasi_static(
 // rounded FRAC_2_PI; replacing it would change the fitted model.
 #[allow(clippy::approx_constant)]
 fn cpmsline_analyse_dispersion(
-    w: Value,
-    h: Value,
-    s: Value,
-    t: Value,
-    er: Value,
+    geometry: CoupledMicrostripGeometry,
     quasi: CoupledMicrostripAnalysis,
     frequency: Value,
     model: i64,
 ) -> CoupledMicrostripAnalysis {
+    let CoupledMicrostripGeometry { w, h, s, t, er } = geometry;
     let mut ze_freq = quasi.ze;
     let mut zo_freq = quasi.zo;
     let mut er_even_freq = quasi.er_even;
@@ -1240,32 +1284,47 @@ fn coupled_microstrip_propagation_uncached(
     let roughness = nonnegative_param(ctx, "d", 0.15e-6)?;
     let (substrate_model, dispersion_model) = coupled_microstrip_selector_params(ctx)?;
 
-    let quasi = cpmsline_analyse_quasi_static(w, h, s, t, er, substrate_model);
-    let dispersion =
-        cpmsline_analyse_dispersion(w, h, s, t, er, quasi, frequency, dispersion_model);
+    let quasi = cpmsline_analyse_quasi_static(
+        CoupledMicrostripGeometry { w, h, s, t, er },
+        substrate_model,
+    );
+    let dispersion = cpmsline_analyse_dispersion(
+        CoupledMicrostripGeometry { w, h, s, t, er },
+        quasi,
+        frequency,
+        dispersion_model,
+    );
     let (conductor_even, dielectric_even) = analyse_microstrip_loss(
-        w,
-        t,
-        er,
-        rho,
-        roughness,
-        tan_delta,
-        quasi.ze,
-        quasi.zo,
-        quasi.er_even,
+        MicrostripLossGeometry {
+            w,
+            t,
+            er,
+            rho,
+            roughness,
+            tan_delta,
+        },
+        MicrostripQuasiStatic {
+            zl_eff1: quasi.ze,
+            zl_eff2: quasi.zo,
+            er_eff: quasi.er_even,
+        },
         frequency,
         HAMMERSTAD,
     );
     let (conductor_odd, dielectric_odd) = analyse_microstrip_loss(
-        w,
-        t,
-        er,
-        rho,
-        roughness,
-        tan_delta,
-        quasi.zo,
-        quasi.ze,
-        quasi.er_odd,
+        MicrostripLossGeometry {
+            w,
+            t,
+            er,
+            rho,
+            roughness,
+            tan_delta,
+        },
+        MicrostripQuasiStatic {
+            zl_eff1: quasi.zo,
+            zl_eff2: quasi.ze,
+            er_eff: quasi.er_odd,
+        },
         frequency,
         HAMMERSTAD,
     );
@@ -1326,10 +1385,13 @@ fn calc_cend(
     h: Value,
     t: Value,
     er: Value,
-    substrate_model: i64,
-    dispersion_model: i64,
-    open_model: i64,
+    models: MicrostripModelSelection,
 ) -> Value {
+    let MicrostripModelSelection {
+        substrate_model,
+        dispersion_model,
+        open_model,
+    } = models;
     let quasi = msline_analyse_quasi_static(w, h, t, er, substrate_model);
     let dispersion = msline_analyse_dispersion(
         quasi.w_eff,
@@ -1405,9 +1467,11 @@ fn msopen_admittance(ctx: &CmContext, frequency: Value) -> CmResult<Complex64> {
             h,
             t,
             er,
-            substrate_model,
-            dispersion_model,
-            open_model,
+            MicrostripModelSelection {
+                substrate_model,
+                dispersion_model,
+                open_model,
+            },
         );
         Ok(Complex64::new(0.0, omega * c_end))
     }

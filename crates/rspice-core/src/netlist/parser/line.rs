@@ -1,5 +1,6 @@
 //! Top-level line normalization and dispatch.
 
+use super::scoping::ModelDefinitionDeferrals;
 use super::*;
 
 /// Strip inline comments using the selected SPICE dialect's comment rules.
@@ -298,8 +299,10 @@ pub(super) fn process_line(
                 &frame.local_params,
                 models,
                 true,
-                model_bare_ident_deferrals,
-                pending_xyce_diode_model_warnings,
+                ModelDefinitionDeferrals {
+                    bare_ident_deferrals: model_bare_ident_deferrals,
+                    pending_xyce_diode_model_warnings,
+                },
             )?;
             let local_name = model.name.clone();
             let qualified_name = qualify_local_model_name(&frame.qualified_name, &local_name);
