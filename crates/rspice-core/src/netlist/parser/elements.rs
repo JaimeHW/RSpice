@@ -8594,18 +8594,19 @@ fn skip_subckt_optional_defaults(
     }
 }
 
+/// Parameters after resolution, split by what each one resolved to: numeric
+/// values, string literals, and the assignments that stayed symbolic.
+type ResolvedParams = (
+    Vec<(String, Value)>,
+    Vec<(String, String)>,
+    Vec<(String, String)>,
+);
+
 fn resolve_subckt_default_params(
     assignments: Vec<(String, String)>,
     params_ctx: &ParamContext,
     line_num: usize,
-) -> Result<
-    (
-        Vec<(String, Value)>,
-        Vec<(String, String)>,
-        Vec<(String, String)>,
-    ),
-    ParseError,
-> {
+) -> Result<ResolvedParams, ParseError> {
     let mut eval_ctx = params_ctx.isolated_random_clone();
     let mut params = Vec::new();
     let mut expr_params = Vec::new();

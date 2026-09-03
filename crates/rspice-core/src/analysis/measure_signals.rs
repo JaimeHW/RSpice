@@ -1539,6 +1539,11 @@ fn evaluate_tran_output_columns_with_abort(
     )
 }
 
+/// One evaluated output column as a frontend receives it: the request's
+/// authored name, its physical type (`voltage`, `current` or `parameter`), and
+/// the value at each point of the analysis axis.
+pub type FrontendOutputColumn = (String, &'static str, Vec<Value>);
+
 /// Evaluate ordered real `.PRINT TRAN` columns for frontend export.
 ///
 /// Each tuple is `(authored_name, physical_type, values)`, where
@@ -1548,7 +1553,7 @@ pub fn evaluate_tran_output_requests_with_abort(
     result: &TransientResult,
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
-) -> Result<Vec<(String, &'static str, Vec<Value>)>, SimulationError> {
+) -> Result<Vec<FrontendOutputColumn>, SimulationError> {
     evaluate_tran_output_columns_with_abort(netlist, result, limits, abort)
         .map(frontend_output_columns)
         .map_err(frontend_output_error)
@@ -1566,7 +1571,7 @@ pub fn evaluate_tran_four_output_requests_with_abort(
     four_index: usize,
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
-) -> Result<Vec<(String, &'static str, Vec<Value>)>, SimulationError> {
+) -> Result<Vec<FrontendOutputColumn>, SimulationError> {
     let request = netlist
         .output_requests
         .iter()
@@ -1793,7 +1798,7 @@ pub fn evaluate_dc_output_requests_with_abort(
     sweep: &[(Value, SimulationResult)],
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
-) -> Result<Vec<(String, &'static str, Vec<Value>)>, SimulationError> {
+) -> Result<Vec<FrontendOutputColumn>, SimulationError> {
     evaluate_dc_output_columns_with_abort(netlist, sweep, limits, abort)
         .map(frontend_output_columns)
         .map_err(frontend_output_error)
@@ -1807,7 +1812,7 @@ pub(crate) fn evaluate_dc_output_requests(
     evaluate_dc_output_columns_with_abort(netlist, sweep, ResourceLimits::default(), &NoAbort)
 }
 
-fn frontend_output_columns(columns: Vec<OutputColumn>) -> Vec<(String, &'static str, Vec<Value>)> {
+fn frontend_output_columns(columns: Vec<OutputColumn>) -> Vec<FrontendOutputColumn> {
     columns
         .into_iter()
         .map(|column| {

@@ -753,7 +753,7 @@ impl SignalProjection {
 
 /// Convert the core resolver's frontend column tuples into typed columns.
 fn frontend_columns(
-    columns: Vec<(String, &'static str, Vec<Value>)>,
+    columns: Vec<crate::analysis::measure_signals::FrontendOutputColumn>,
 ) -> Result<Vec<ProjectedSignal>, SimulationError> {
     columns
         .into_iter()

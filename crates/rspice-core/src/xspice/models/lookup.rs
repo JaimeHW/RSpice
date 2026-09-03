@@ -711,10 +711,11 @@ mod tests {
         ctx
     }
 
-    fn port_summary(
-        model: &dyn CodeModel,
-    ) -> Vec<(
-        &str,
+    /// One row of a port declaration as these tests compare it: name,
+    /// direction, default type, the types it accepts, whether it is a vector,
+    /// whether a null connection is allowed, and the vector length bounds.
+    type PortShape<'a> = (
+        &'a str,
         PortDirection,
         PortType,
         Vec<PortType>,
@@ -722,7 +723,9 @@ mod tests {
         bool,
         Option<usize>,
         Option<usize>,
-    )> {
+    );
+
+    fn port_summary(model: &dyn CodeModel) -> Vec<PortShape<'_>> {
         model
             .ports()
             .iter()
@@ -741,17 +744,19 @@ mod tests {
             .collect()
     }
 
-    fn param_summary(
-        model: &dyn CodeModel,
-    ) -> Vec<(
-        &str,
+    /// One row of a parameter declaration: name, type, default, whether it
+    /// is a vector, its length bounds, and any enumerated legal values.
+    type ParamShape<'a> = (
+        &'a str,
         ParamType,
         Value,
         bool,
         Option<usize>,
         Option<usize>,
         Option<Vec<Value>>,
-    )> {
+    );
+
+    fn param_summary(model: &dyn CodeModel) -> Vec<ParamShape<'_>> {
         model
             .parameters()
             .iter()
@@ -788,15 +793,7 @@ mod tests {
         ]
     }
 
-    fn lookup_param_summary() -> Vec<(
-        &'static str,
-        ParamType,
-        Value,
-        bool,
-        Option<usize>,
-        Option<usize>,
-        Option<Vec<Value>>,
-    )> {
+    fn lookup_param_summary() -> Vec<ParamShape<'static>> {
         vec![
             (
                 "x_array",

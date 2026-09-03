@@ -144,10 +144,19 @@ fn digit_string_from_real_vector(
     Ok(output)
 }
 
+/// A named real-vector parameter as the netlist supplied it.
+type RealVectorParam = (String, Vec<f64>);
+/// A named integer-vector parameter after coercion.
+type IntegerVectorParam = (String, Vec<i64>);
+/// A named string-vector parameter as the netlist supplied it.
+type StringVectorParam = (String, Vec<String>);
+/// A named scalar string parameter, after a vector was folded into one.
+type ScalarStringParam = (String, String);
+
 fn split_real_vectors_for_scalar_strings(
     code_model: &dyn crate::xspice::CodeModel,
-    vectors: &[(String, Vec<f64>)],
-) -> Result<(Vec<(String, Vec<f64>)>, Vec<(String, String)>), SimulationError> {
+    vectors: &[RealVectorParam],
+) -> Result<(Vec<RealVectorParam>, Vec<ScalarStringParam>), SimulationError> {
     let mut real_vectors = Vec::new();
     let mut string_params = Vec::new();
 
@@ -167,8 +176,8 @@ fn split_real_vectors_for_scalar_strings(
 
 fn split_string_vectors_for_scalar_strings(
     code_model: &dyn crate::xspice::CodeModel,
-    vectors: &[(String, Vec<String>)],
-) -> (Vec<(String, Vec<String>)>, Vec<(String, String)>) {
+    vectors: &[StringVectorParam],
+) -> (Vec<StringVectorParam>, Vec<ScalarStringParam>) {
     let mut string_vectors = Vec::new();
     let mut string_params = Vec::new();
 
@@ -546,8 +555,8 @@ fn resolve_instance_string_vector_expression_params(
 
 fn resolve_vector_params(
     code_model: &dyn crate::xspice::CodeModel,
-    vectors: &[(String, Vec<f64>)],
-) -> Result<(Vec<(String, Vec<f64>)>, Vec<(String, Vec<i64>)>), SimulationError> {
+    vectors: &[RealVectorParam],
+) -> Result<(Vec<RealVectorParam>, Vec<IntegerVectorParam>), SimulationError> {
     let param_specs: Vec<&crate::xspice::ParamSpec> = code_model.parameters().iter().collect();
     let mut real_vectors = Vec::new();
     let mut integer_vectors = Vec::new();

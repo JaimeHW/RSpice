@@ -4,6 +4,10 @@
 use super::state::MosfetCompanionBiasSource;
 use super::*;
 
+/// The three Meyer capacitances of one MOSFET on a candidate step:
+/// gate-source, gate-drain, gate-bulk.
+type MeyerCapacitanceTriple = (Value, Value, Value);
+
 #[cfg(feature = "parallel")]
 const CAPACITOR_TRUNCATION_ITEMS_PER_WORKER: usize = 1_024;
 #[cfg(feature = "parallel")]
@@ -1321,7 +1325,7 @@ impl Engine {
         current_abstol: Value,
         charge_abstol: Value,
         trtol: Value,
-        caps_cache: Option<(&mut Vec<(Value, Value, Value)>, bool)>,
+        caps_cache: Option<(&mut Vec<MeyerCapacitanceTriple>, bool)>,
     ) -> Option<Value> {
         if history.accepted_dt_prev <= 0.0 || !history.accepted_dt_prev.is_finite() {
             return None;

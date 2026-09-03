@@ -495,8 +495,12 @@ fn pss_norm(vector: &[Value]) -> Value {
 /// The product is fallible because every J*v evaluates two complete period
 /// maps.  A non-converged outcome is `None`, which is a correctness-preserving
 /// request for the caller to rebuild and directly solve the dense Jacobian.
+/// One Jacobian-vector product for the shooting Newton system. Fallible
+/// because evaluating it runs two complete period maps.
+type PssMatVec<'a> = dyn FnMut(&[Value]) -> Result<Vec<Value>, SimulationError> + 'a;
+
 fn pss_gmres(
-    matvec: &mut dyn FnMut(&[Value]) -> Result<Vec<Value>, SimulationError>,
+    matvec: &mut PssMatVec<'_>,
     preconditioner: &PssDenseLu,
     rhs: &[Value],
     restart: usize,

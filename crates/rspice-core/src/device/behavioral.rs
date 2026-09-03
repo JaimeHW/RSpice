@@ -1875,10 +1875,16 @@ fn eval_pwl_function_with_derivative(
     eval_piecewise_function_with_derivative(args, context, eval_pwl_points_with_derivative)
 }
 
+/// Interpolate a breakpoint table and report the value and its slope.
+///
+/// Takes the point to interpolate at, that point's derivative with respect to
+/// the differentiation variable, and the `(x, y)` breakpoints.
+type PiecewiseDerivativeEvaluator = fn(Value, Value, &[(Value, Value)]) -> Option<(Value, Value)>;
+
 fn eval_piecewise_function_with_derivative(
     args: &[Expr],
     context: &BehavioralDerivativeContext<'_>,
-    evaluator: fn(Value, Value, &[(Value, Value)]) -> Option<(Value, Value)>,
+    evaluator: PiecewiseDerivativeEvaluator,
 ) -> Option<(Value, Value)> {
     if args.len() < 3 {
         return None;

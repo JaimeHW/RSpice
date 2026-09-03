@@ -4898,19 +4898,26 @@ fn measure_file_option_ahead(stream: &TokenStream) -> bool {
     )
 }
 
+/// The `FROM`/`TO`/`TD` window a `.MEASURE` statement may restrict itself to.
+type MeasureWindow = (
+    Option<crate::Value>,
+    Option<crate::Value>,
+    Option<crate::Value>,
+);
+
+/// A measure window plus which occurrence of the event the statement selects.
+type MeasureWindowWithOccurrence = (
+    Option<crate::Value>,
+    Option<crate::Value>,
+    Option<crate::Value>,
+    crate::netlist::measure::EventOccurrence,
+);
+
 fn parse_measure_when_event_options(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
-) -> Result<
-    (
-        Option<crate::Value>,
-        Option<crate::Value>,
-        Option<crate::Value>,
-        crate::netlist::measure::EventOccurrence,
-    ),
-    ParseError,
-> {
+) -> Result<MeasureWindowWithOccurrence, ParseError> {
     let mut from = None;
     let mut to = None;
     let mut td = None;
@@ -5492,14 +5499,7 @@ fn parse_measure_equation_options(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
-) -> Result<
-    (
-        Option<crate::Value>,
-        Option<crate::Value>,
-        Option<crate::Value>,
-    ),
-    ParseError,
-> {
+) -> Result<MeasureWindow, ParseError> {
     let mut from = None;
     let mut to = None;
     let mut td = None;

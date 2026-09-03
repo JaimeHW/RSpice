@@ -905,9 +905,14 @@ fn hash_external_dependencies(hasher: &mut blake3::Hasher, netlist: &Netlist) {
     }
 }
 
+/// One device's initial-condition projection: the flattened instance name,
+/// the terminal role the condition applies to, and the bit pattern of each
+/// authored value, or `None` where the deck authored nothing.
+type DeviceInitialConditionColumn = (String, &'static str, Vec<Option<u64>>);
+
 fn effective_device_initial_condition_projection(
     netlist: &Netlist,
-) -> Option<Vec<(String, &'static str, Vec<Option<u64>>)>> {
+) -> Option<Vec<DeviceInitialConditionColumn>> {
     let mut isolated = netlist.clone();
     isolated.params = netlist.params.checkpoint_isolated_clone();
     let flattened = flatten_netlist_with_models(&isolated).ok()?;
@@ -4143,20 +4148,18 @@ fn read_runtime_blockers(
     read_canonical_nonempty_line_vector(lines, "accepted_integration_runtime_blockers", budget)
 }
 
-fn parse_runtime_policy(
-    lines: &mut CheckpointLines<'_>,
-) -> Result<
-    (
-        u8,
-        usize,
-        usize,
-        Option<Value>,
-        usize,
-        bool,
-        Option<XyceDampedAcceptedBoundaryCheckpoint>,
-    ),
-    String,
-> {
+/// The accepted-integration policy line of a checkpoint, decoded.
+struct RuntimePolicyRecord {
+    lte_warmup_skips: u8,
+    force_accept_cooldown: usize,
+    livelock_streak: usize,
+    livelock_last_restart_time: Option<Value>,
+    accepted_interval_count: usize,
+    damped_first_solver_call: bool,
+    damped_status: Option<XyceDampedAcceptedBoundaryCheckpoint>,
+}
+
+fn parse_runtime_policy(lines: &mut CheckpointLines<'_>) -> Result<RuntimePolicyRecord, String> {
     let line = lines
         .next()
         .ok_or_else(|| "missing accepted integration policy line".to_string())?;
@@ -4227,7 +4230,7 @@ fn parse_runtime_policy(
             "accepted integration policy line has extra field '{extra}'"
         ));
     }
-    Ok((
+    Ok(RuntimePolicyRecord {
         lte_warmup_skips,
         force_accept_cooldown,
         livelock_streak,
@@ -4235,7 +4238,7 @@ fn parse_runtime_policy(
         accepted_interval_count,
         damped_first_solver_call,
         damped_status,
-    ))
+    })
 }
 
 fn next_runtime_field<'a>(
@@ -4318,7 +4321,7 @@ fn read_accepted_integration_runtime(
         ));
     }
     let resume_blockers = read_runtime_blockers(lines, budget)?;
-    let (
+    let RuntimePolicyRecord {
         lte_warmup_skips,
         force_accept_cooldown,
         livelock_streak,
@@ -4326,7 +4329,7 @@ fn read_accepted_integration_runtime(
         accepted_interval_count,
         damped_first_solver_call,
         damped_status,
-    ) = parse_runtime_policy(lines)?;
+    } = parse_runtime_policy(lines)?;
     if kind == "restart-normalized" {
         let runtime = RestartNormalizedIntegrationRuntimeCheckpoint {
             version,

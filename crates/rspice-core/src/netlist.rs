@@ -3447,10 +3447,11 @@ mod tests {
         passive_test_state(&netlist.elements, name).0
     }
 
-    fn passive_test_state<'a>(
-        elements: &'a [Element],
-        name: &str,
-    ) -> (Value, &'a [(String, Value)], &'a [(String, String)]) {
+    /// A passive element's authored state: its scalar value, its numeric
+    /// instance parameters, and its string instance parameters.
+    type PassiveState<'a> = (Value, &'a [(String, Value)], &'a [(String, String)]);
+
+    fn passive_test_state<'a>(elements: &'a [Element], name: &str) -> PassiveState<'a> {
         let element = elements
             .iter()
             .find(|element| element.name.eq_ignore_ascii_case(name))

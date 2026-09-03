@@ -1,5 +1,9 @@
 use super::data::{FrequencyDataOverridePlan, materialize_frequency_data_row_with_abort};
 use super::{Engine, SimulationError};
+
+/// A probed noise-source set: one source per contribution, and the absolute
+/// temperature each was evaluated at where the model reports one.
+type ProbedNoiseSources = (Vec<NoiseSource>, Vec<Option<Value>>);
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::noise::{
     Bsim3FlickerNoise, Bsim4FlickerNoise, CorrelatedNoisePair, NoiseContribution, NoisePort,
@@ -2153,7 +2157,7 @@ impl Engine {
         base_sources: &[NoiseSource],
         base_absolute_temperatures: &[Option<Value>],
         dialect: crate::engine::SpiceDialect,
-    ) -> Result<Option<(Vec<NoiseSource>, Vec<Option<Value>>)>, SimulationError> {
+    ) -> Result<Option<ProbedNoiseSources>, SimulationError> {
         if !Self::has_veriloga_noise_devices(circuit) {
             return Ok(None);
         }

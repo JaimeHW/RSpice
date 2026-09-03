@@ -1154,7 +1154,16 @@ impl AnalysisResultDocument {
             None,
         )?;
 
-        let totals: [(&str, &str, SignalUnit, fn(&NoiseResult) -> Value); 3] = [
+        /// A total-noise channel: its signal name, its display label, the
+        /// unit it is reported in, and how to read it off one noise point.
+        type NoiseTotalChannel = (
+            &'static str,
+            &'static str,
+            SignalUnit,
+            fn(&NoiseResult) -> Value,
+        );
+
+        let totals: [NoiseTotalChannel; 3] = [
             (
                 "onoise_spectrum",
                 "ONOISE",
@@ -2853,7 +2862,15 @@ impl AnalysisResultDocument {
             },
         )?];
 
-        let optional: [(&str, &str, fn(&PhaseNoisePoint) -> Option<Value>); 3] = [
+        /// An optional phase-noise channel: its signal name, its display
+        /// label, and how to read it off one point when the run produced it.
+        type OptionalPhaseNoiseChannel = (
+            &'static str,
+            &'static str,
+            fn(&PhaseNoisePoint) -> Option<Value>,
+        );
+
+        let optional: [OptionalPhaseNoiseChannel; 3] = [
             ("am_noise", "AM noise", |point| point.am_noise),
             ("upper_sideband_noise", "Upper sideband", |point| {
                 point.upper_sideband

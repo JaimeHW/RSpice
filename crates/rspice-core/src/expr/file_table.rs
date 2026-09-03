@@ -775,6 +775,10 @@ mod tests {
     use crate::expr::{Context, Vm, compile, parse_expression_strict};
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    /// The closed form an inline lookup expression must reproduce, evaluated
+    /// at the expression's input.
+    type InlineLookupOracle = fn(Value) -> Value;
+
     #[test]
     fn file_table_resolution_enforces_runtime_data_limits() {
         let dir = unique_temp_dir("file-table-resource-limits");
@@ -1022,7 +1026,7 @@ mod tests {
 
     #[test]
     fn constant_inline_lookups_sort_xy_pairs_and_use_the_explicit_input() {
-        let cases: [(&str, fn(Value) -> Value); 3] = [
+        let cases: [(&str, InlineLookupOracle); 3] = [
             ("table(v(a),1,3,0.5,2,0,1)", |x: Value| 1.0 + 2.0 * x),
             ("akima(v(a),1,4,0.5,2.25,0,1)", |x: Value| (1.0 + x).powi(2)),
             ("spline(v(a),1,4,0.5,2.25,0,1)", |x: Value| {
@@ -1060,7 +1064,7 @@ mod tests {
 
     #[test]
     fn inline_lookup_points_accept_dialect_invariant_constant_expressions() {
-        let cases: [(&str, fn(Value) -> Value); 2] = [
+        let cases: [(&str, InlineLookupOracle); 2] = [
             ("table(v(a),1,3,-(1),-1,1-1,1)", |x: Value| 1.0 + 2.0 * x),
             ("akima(v(a),1,4,-(1),0,2-2,1)", |x: Value| (1.0 + x).powi(2)),
         ];

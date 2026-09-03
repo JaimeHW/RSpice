@@ -621,10 +621,11 @@ mod tests {
         .expect("set multi-input values");
     }
 
-    fn port_summary(
-        model: &dyn CodeModel,
-    ) -> Vec<(
-        &str,
+    /// One row of a port declaration as these tests compare it: name,
+    /// direction, default type, the types it accepts, whether it is a vector,
+    /// whether a null connection is allowed, and the vector length bounds.
+    type PortShape<'a> = (
+        &'a str,
         PortDirection,
         PortType,
         Vec<PortType>,
@@ -632,7 +633,9 @@ mod tests {
         bool,
         Option<usize>,
         Option<usize>,
-    )> {
+    );
+
+    fn port_summary(model: &dyn CodeModel) -> Vec<PortShape<'_>> {
         model
             .ports()
             .iter()
@@ -651,18 +654,21 @@ mod tests {
             .collect()
     }
 
-    fn param_summary(
-        model: &dyn CodeModel,
-    ) -> Vec<(
-        &str,
+    /// One row of a parameter declaration: name, type, default value, the
+    /// default expression if the model carries one, whether it is a vector,
+    /// its length bounds, and any enumerated legal values.
+    type ParamShape<'a> = (
+        &'a str,
         ParamType,
         Value,
-        Option<&str>,
+        Option<&'a str>,
         bool,
         Option<usize>,
         Option<usize>,
         Option<Vec<Value>>,
-    )> {
+    );
+
+    fn param_summary(model: &dyn CodeModel) -> Vec<ParamShape<'_>> {
         model
             .parameters()
             .iter()

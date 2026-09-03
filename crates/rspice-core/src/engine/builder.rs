@@ -5,6 +5,10 @@
 
 use super::{Engine, JfetLevel2Model, SimulationError, SpiceDialect, extract_dc_value_with_limits};
 use crate::abort_signal::{AbortSignal, NoAbort};
+
+/// A model parameter the deck left as text: its name and the unresolved
+/// expression or string literal that follows it.
+type NamedTextParam = (String, String);
 use crate::device::{Diode, DiodeLevel, JfetChannelModel, MosBodyJunctionModel};
 use crate::netlist::expr::prepare_behavioral_expression;
 use crate::netlist::{
@@ -6023,8 +6027,8 @@ impl Engine {
                     // parameters, so no route has to assume a deck card.
                     let (native_model_key, native_expr_params, native_string_params): (
                         String,
-                        &[(String, String)],
-                        &[(String, String)],
+                        &[NamedTextParam],
+                        &[NamedTextParam],
                     ) = match model_def {
                         Some(device_model) => (
                             device_model.name.clone(),

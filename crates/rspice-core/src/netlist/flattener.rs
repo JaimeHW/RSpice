@@ -3567,20 +3567,21 @@ fn resolve_deferred_param_expressions(
     Ok(())
 }
 
+/// Parameters after resolution, split by what each one resolved to: numeric
+/// values, string literals, and the assignments that stayed symbolic.
+type ResolvedParams = (
+    Vec<(String, Value)>,
+    Vec<(String, String)>,
+    Vec<(String, String)>,
+);
+
 fn resolve_subcircuit_instance_params(
     subckt: &SubcircuitDef,
     caller_scope: &ParamContext,
     instance_params: &[(String, ParametricValue)],
     random: &RandomState,
     abort: &dyn AbortSignal,
-) -> Result<
-    (
-        Vec<(String, Value)>,
-        Vec<(String, String)>,
-        Vec<(String, String)>,
-    ),
-    ParseWithAbortError,
-> {
+) -> Result<ResolvedParams, ParseWithAbortError> {
     ensure_parse_not_aborted(abort)?;
     let mut instance_scope = caller_scope.clone();
     instance_scope.adopt_random(random);
