@@ -2686,6 +2686,14 @@ pub enum StartupDirectiveDisposition {
     Applied,
     PartiallyApplied,
     Ignored(StartupDiagnosticCode),
+    /// The assignment named a real node, but a later card assigned every one
+    /// of the same concrete targets and owns them instead.
+    ///
+    /// This is a resolution, not a defect: both reference simulators write a
+    /// single-ended startup assignment into a per-node map, so the last card
+    /// naming a node wins and neither reports a diagnostic. The entry is kept
+    /// with full provenance and contributes nothing to execution.
+    Superseded,
 }
 
 /// One ordered `V(node)=value` assignment retained for diagnostics.
