@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 use rspice_core::abort_signal::ImmediateAbort;
-use rspice_core::execution::result_document::{ScalarValue, SeriesValues};
+use rspice_core::execution::result_document::{ResultPayload, ScalarValue, SeriesValues};
 use rspice_core::execution::{
     ANALYSIS_RESULT_DOCUMENT_SCHEMA, ANALYSIS_RESULT_DOCUMENT_VERSION, AnalysisResultDocument,
     AnalysisResultKind, MappingStatus, ResultSignal, SignalUnit, analysis_result_capability,
@@ -309,8 +309,21 @@ enum FamilyExpectation {
         parent_artifact: &'static str,
         deck: &'static str,
     },
-    /// The family is refused by name, and the refusal explains why.
-    Refused { request_kind: &'static str },
+    /// The family's result is a second shared document published beside
+    /// another card's, so it is fully mapped -- but its own wire kind is
+    /// refused, because the canonical plan mints no analysis slot for it and
+    /// there is nothing in a deck for such a request to select.
+    Child {
+        request_kind: &'static str,
+        parent_request_kind: &'static str,
+        artifact: &'static str,
+        /// Identity the child document itself declares.
+        analysis_tag: &'static str,
+        /// Identity of the parent card the child is listed under in the axis
+        /// execution record.
+        parent_analysis_tag: &'static str,
+        deck: &'static str,
+    },
 }
 
 const DIVIDER: &str = "resistive divider\n\
@@ -452,11 +465,25 @@ fn family_expectation(kind: AnalysisResultKind) -> FamilyExpectation {
             deck: "rf periodic noise\nV1 in 0 SIN(0 1 1G)\nR1 in out 1k\nC1 out 0 1p\n\
                    .pss fund=1g\n.pnoise dec 2 1k 10k out=v(out)\n.end\n",
         },
-        AnalysisResultKind::PortNoise => FamilyExpectation::Refused {
+        AnalysisResultKind::PortNoise => FamilyExpectation::Child {
             request_kind: "port_noise",
+            parent_request_kind: "s_parameters",
+            artifact: "sp-001.port-noise.result.json",
+            analysis_tag: "sp-001",
+            parent_analysis_tag: "sp-001",
+            deck: "two-port pad with port noise\n\
+                   V1 p1 0 AC 1 portnum=1 z0=50\nV2 p2 0 AC 0 portnum=2 z0=50\n\
+                   RA p1 mid 25\nRB mid 0 50\nRC mid p2 25\n\
+                   .sp lin 2 1meg 2meg donoise\n.end\n",
         },
-        AnalysisResultKind::Fourier => FamilyExpectation::Refused {
+        AnalysisResultKind::Fourier => FamilyExpectation::Child {
             request_kind: "fourier",
+            parent_request_kind: "transient",
+            artifact: "tran-001.four-001.result.json",
+            analysis_tag: "four-001",
+            parent_analysis_tag: "tran-001",
+            deck: "attached transient Fourier\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\n\
+                   .tran 1u 4m\n.four 1k v(out)\n.end\n",
         },
         AnalysisResultKind::Fft => FamilyExpectation::Attached {
             request_kind: "fft",
@@ -561,28 +588,49 @@ fn every_result_family_matches_its_engine_adapter_capability_declaration() {
                 let document = typed_fft_result(&job, &response, parent_artifact);
                 assert!(!document.results.is_empty());
             }
-            FamilyExpectation::Refused { request_kind } => {
+            FamilyExpectation::Child {
+                request_kind,
+                parent_request_kind,
+                artifact,
+                analysis_tag,
+                deck,
+                parent_analysis_tag: _,
+            } => {
                 assert_eq!(
                     declared_status(declared.scalar),
-                    DeclaredStatus::Unsupported,
-                    "{kind:?} is refused but the registry declares {:?}",
+                    DeclaredStatus::Mapped,
+                    "{kind:?} publishes a shared document but the registry declares {:?}",
                     declared.scalar
                 );
-                let job = Job::new(&format!("refused-{}", kind.tag()));
-                let response = job.execute(&format!("{DIVIDER}.op\n.end\n"), request_kind);
+                // The document is published, but only by running the card that
+                // produces it: a request for the child family alone names no
+                // planned analysis, and saying so is more useful than reporting
+                // a deck with no matching directive.
+                let refusal_job = Job::new(&format!("child-refusal-{}", kind.tag()));
+                let refusal = refusal_job.execute(&format!("{DIVIDER}.op\n.end\n"), request_kind);
+                assert_eq!(refusal["status"], "failed", "{kind:?}: {refusal}");
+                assert_eq!(refusal["failure_code"], "analysis.unsupported_kind");
+                assert!(refusal_job.results_are_empty());
+
+                let job = Job::new(&format!("child-{}", kind.tag()));
+                let response = job.execute(deck, parent_request_kind);
                 assert_eq!(
-                    response["status"], "failed",
-                    "{kind:?} must be refused: {response}"
+                    response["status"], "succeeded",
+                    "{kind:?} parent deck failed: {response}"
                 );
-                assert_eq!(response["failure_code"], "analysis.unsupported_kind");
-                let detail = response["failure_detail"]
-                    .as_str()
-                    .expect("a refusal explains itself");
+                let document = typed_result(&job, &response, artifact);
+                assert_eq!(
+                    document.result_kind(),
+                    kind,
+                    "{kind:?} published a {:?} document",
+                    document.result_kind()
+                );
+                assert_eq!(document.analysis().tag(), analysis_tag);
+                assert_eq!(document.schema(), ANALYSIS_RESULT_DOCUMENT_SCHEMA);
                 assert!(
-                    detail.len() > 40,
-                    "{kind:?} refusal must name the missing contract: {detail}"
+                    document.topology_fingerprint().is_some(),
+                    "{kind:?} published no topology identity"
                 );
-                assert!(job.results_are_empty());
             }
         }
     }
@@ -594,14 +642,22 @@ fn every_result_family_matches_its_engine_adapter_capability_declaration() {
 #[test]
 fn every_runnable_family_executes_at_every_step_and_temperature_coordinate() {
     for kind in AnalysisResultKind::ALL {
-        let FamilyExpectation::Runs {
-            request_kind,
-            analysis_tag,
-            deck,
-            ..
-        } = family_expectation(kind)
-        else {
-            continue;
+        // A second result document rides its parent card's execution, so it is
+        // checked under the parent's own request and analysis identity.
+        let (request_kind, analysis_tag, deck) = match family_expectation(kind) {
+            FamilyExpectation::Runs {
+                request_kind,
+                analysis_tag,
+                deck,
+                ..
+            } => (request_kind, analysis_tag, deck),
+            FamilyExpectation::Child {
+                parent_request_kind,
+                parent_analysis_tag,
+                deck,
+                ..
+            } => (parent_request_kind, parent_analysis_tag, deck),
+            FamilyExpectation::Attached { .. } => continue,
         };
         for (label, axis_card, axis_kind) in [
             (
@@ -1487,38 +1543,77 @@ fn an_unparseable_deck_is_a_bounded_failure() {
     assert_eq!(response["failure_code"], "netlist.parse_error");
 }
 
+/// One transient publishes one document per authored `.FOUR` operand beside
+/// its own, each under the identity the canonical plan minted for that
+/// operand, and all of them in the one artifact transaction.
 #[test]
-fn an_unmapped_authored_card_fails_the_whole_request_without_writing_results() {
-    // Leaving a card this build cannot publish unexecuted would drop authored
-    // intent from the response, so the request is refused instead.
-    for (cards, card, analysis_id) in [
-        (".sp dec 2 1k 10k 1\n", ".SP", "sp-001"),
-        (".four 1g v(out)\n", ".FOUR", "four-001"),
+fn every_planned_fourier_operand_publishes_beside_its_parent_transient() {
+    let job = Job::new("fourier-operands");
+    let deck = "two-operand Fourier\n\
+                V1 in 0 SIN(0 1 1k)\n\
+                R1 in mid 1k\n\
+                R2 mid 0 1k\n\
+                .tran 2u 4m\n\
+                .four 1k v(in,mid) i(v1)\n\
+                .end\n";
+    let response = job.execute(deck, "transient");
+    assert_eq!(response["status"], "succeeded", "{response}");
+
+    let transient = typed_result(&job, &response, "tran-001.result.json");
+    assert_eq!(transient.analysis().tag(), "tran-001");
+    for (artifact, tag, output) in [
+        ("tran-001.four-001.result.json", "four-001", "V(IN,MID)"),
+        ("tran-001.four-002.result.json", "four-002", "I(V1)"),
     ] {
-        let job = Job::new("unmapped-card");
-        let deck = format!("{RF}.tran 10p 1n\n{cards}.end\n");
-        let response = job.execute(&deck, "transient");
-        assert_eq!(response["status"], "failed", "{response}");
-        assert_eq!(response["failure_code"], "analysis.unsupported_kind");
-        let detail = response["failure_detail"]
-            .as_str()
-            .expect("a refusal explains itself");
-        assert!(
-            detail.contains(card),
-            "refusal must name the card: {detail}"
+        let document = typed_result(&job, &response, artifact);
+        assert_eq!(document.result_kind(), AnalysisResultKind::Fourier);
+        assert_eq!(document.analysis().tag(), tag);
+        assert_eq!(
+            document.parent_analysis().map(|parent| parent.tag()),
+            Some("tran-001".to_owned()),
+            "a Fourier spectrum must name the transient it post-processed"
         );
-        if !analysis_id.is_empty() {
-            assert!(
-                detail.contains(analysis_id),
-                "refusal must name the analysis instance: {detail}"
-            );
-        }
-        assert!(response.get("result_artifacts").is_none());
-        assert!(
-            job.results_are_empty(),
-            "a refused request must write no results"
-        );
+        let ResultPayload::Fourier(payload) = document.payload() else {
+            panic!("{tag} published a {:?} payload", document.result_kind());
+        };
+        assert_eq!(payload.output, output);
     }
+}
+
+/// `.SP DONOISE` publishes the port-noise sweep beside the scattering one,
+/// under the card's own identity, with the provenance the covariance alone
+/// cannot carry.
+#[test]
+fn sp_donoise_publishes_the_port_noise_document_beside_the_scattering_one() {
+    let job = Job::new("sp-donoise");
+    let deck = "two-port pad with port noise\n\
+                V1 p1 0 AC 1 portnum=1 z0=50\n\
+                V2 p2 0 AC 0 portnum=2 z0=50\n\
+                RA p1 mid 25\nRB mid 0 50\nRC mid p2 25\n\
+                .sp lin 2 1meg 2meg donoise\n.end\n";
+    let response = job.execute(deck, "s_parameters");
+    assert_eq!(response["status"], "succeeded", "{response}");
+
+    let scattering = typed_result(&job, &response, "sp-001.result.json");
+    assert_eq!(scattering.result_kind(), AnalysisResultKind::SParameters);
+
+    let noise = typed_result(&job, &response, "sp-001.port-noise.result.json");
+    assert_eq!(noise.result_kind(), AnalysisResultKind::PortNoise);
+    assert_eq!(
+        noise.analysis().tag(),
+        "sp-001",
+        "port noise is the .SP card's second result and shares its identity"
+    );
+    let ResultPayload::PortNoise(payload) = noise.payload() else {
+        panic!("port noise published a {:?} payload", noise.result_kind());
+    };
+    assert_eq!(payload.port_count, 2);
+    assert!(payload.reference_temperature_kelvin > 0.0);
+    assert_eq!(
+        payload.two_port.len(),
+        noise.point_count(),
+        "a two-port network publishes its noise figures at every frequency"
+    );
 }
 
 /// A table-driven `.AC DATA=` card is the same AC family with the frequency
@@ -1724,8 +1819,12 @@ fn every_family_reports_the_same_cancellation_label() {
                 parent_request_kind,
                 deck,
                 ..
+            }
+            | FamilyExpectation::Child {
+                parent_request_kind,
+                deck,
+                ..
             } => (parent_request_kind, deck),
-            FamilyExpectation::Refused { .. } => continue,
         };
         let job = Job::new(&format!("cancel-{}", kind.tag()));
         // A budget that is already spent at the first abort poll makes the
@@ -1771,8 +1870,12 @@ fn every_family_reports_a_caller_stop_as_a_cancellation() {
                 parent_request_kind,
                 deck,
                 ..
+            }
+            | FamilyExpectation::Child {
+                parent_request_kind,
+                deck,
+                ..
             } => (parent_request_kind, deck),
-            FamilyExpectation::Refused { .. } => continue,
         };
         let execution = execute_with_abort(
             &json!({"kind": request_kind}),

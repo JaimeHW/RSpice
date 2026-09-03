@@ -1,13 +1,13 @@
 //! Lossless, versioned transient `.FFT` result contract.
 //!
 //! This is the one typed artifact the adapter still owns. Every other family
-//! publishes `rspice_core::execution::AnalysisResultDocument`; the FFT family
-//! cannot yet, because the shared `fft` result document must be named by an
-//! `AnalysisInstanceId` and `DeckPlan` mints none for a `.FFT` post-process
-//! (`AnalysisInstanceId` also has no public constructor). Until core assigns
-//! post-process identities, deleting this bundle would drop every authored
-//! `.FFT` spectrum from the response, so it stays and names its parent
-//! transient by that transient's canonical analysis tag.
+//! publishes `rspice_core::execution::AnalysisResultDocument`, including the
+//! second documents a card produces beside its own. This bundle already
+//! carries instance and coordinate identity plus the complete transform
+//! contract — window, coherent gain, metric bin bounds, FFTOUT metrics — and
+//! it publishes atomically with its parent transient, so it has not been
+//! migrated onto the shared `fft` document. The registry's engine-adapter cell
+//! for the FFT family records exactly that, and is the authority on it.
 
 use std::collections::HashSet;
 

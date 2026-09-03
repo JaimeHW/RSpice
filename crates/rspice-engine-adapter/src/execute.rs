@@ -3,7 +3,7 @@
 //!
 //! # Result contract
 //!
-//! Every analysis this executor runs publishes exactly one
+//! Every analysis this executor runs publishes at least one
 //! [`rspice_core::execution::AnalysisResultDocument`]. The document names the
 //! canonical analysis identity the planner assigned, the shared-deck
 //! coordinate it was produced at, the elaborated topology fingerprint, and the
@@ -11,11 +11,20 @@
 //! its own for those families: the artifact content type is derived from the
 //! core document's schema identifier and version.
 //!
+//! A card whose result is more than one document publishes them all, staged in
+//! the same artifact transaction: `.SP DONOISE` publishes the port-noise sweep
+//! beside the scattering one, and a transient publishes one Fourier document
+//! per authored `.FOUR` operand beside its own. A child artifact's file name is
+//! the parent's stem plus its own namespace component — its analysis tag when
+//! it has an identity of its own (`tran-001.four-001.result.json`), and its
+//! result family when it shares the parent's identity, as port noise does
+//! (`sp-001.port-noise.result.json`).
+//!
 //! Two adapter-owned documents remain, and neither is a result projection:
 //! [`crate::axis_execution_document`] is the STEP/TEMP orchestration record
 //! and references the typed documents by path, schema, and family, and
-//! [`crate::fft_result_document`] carries transient `.FFT` spectra until core
-//! assigns post-process analysis identities (see that module).
+//! [`crate::fft_result_document`] carries transient `.FFT` spectra in the
+//! adapter's own schema (see that module).
 //!
 //! # Protocol compatibility
 //!
@@ -23,8 +32,8 @@
 //! consumer must expect:
 //!
 //! * every analysis family the planner recognizes, not only OP/DC/AC/TRAN/
-//!   NOISE, with `.SP`, `.PNOISE`, and `.FOUR` refused by name rather than
-//!   silently skipped;
+//!   NOISE, with a family this build cannot project refused by name rather
+//!   than silently skipped;
 //! * `analysis.kind` `mixed_signal` removed — a mixed-signal deck is a
 //!   transient and is requested as `transient`;
 //! * one typed JSON artifact per analysis instead of a CSV plus an
@@ -415,11 +424,13 @@ fn execute_planned_netlist(
             "The requested analysis family has no orchestration record in this build.",
         );
     };
+    let Some(per_directive) = artifacts_per_directive(netlist, &plan, kind) else {
+        return resource_failure(DirectiveFailure::ResultArtifactLimit);
+    };
     if let Err(failure) = preflight_planned_artifact_count(
         materializer.len(),
         matching_directive_count,
-        kind,
-        !netlist.fft_analyses.is_empty(),
+        per_directive,
     ) {
         return resource_failure(failure);
     }
@@ -496,6 +507,7 @@ fn execute_planned_netlist(
             let outcome = match execute_analysis(
                 engine,
                 &coordinate_netlist,
+                &plan,
                 analysis,
                 &analyses,
                 &coordinate,
@@ -638,6 +650,7 @@ struct AnalysisOutcome {
 fn execute_analysis(
     engine: &Engine,
     netlist: &Netlist,
+    plan: &DeckPlan,
     analysis: &MaterializedAnalysis,
     peers: &[MaterializedAnalysis],
     coordinate: &RunCoordinate,
@@ -649,22 +662,28 @@ fn execute_analysis(
     let projection = run_directive(
         engine,
         netlist,
+        plan,
         analysis,
         peers,
         coordinate.stable_id(),
         abort,
     )?;
-    let mut builder = projection
-        .builder
-        .topology_fingerprint(topology)
-        .namespaces(ResultNamespaces {
-            output: analysis.output_namespace().components().join("/"),
-            checkpoint: analysis.checkpoint_namespace().components().join("/"),
-        });
-    if has_axes {
-        builder = builder.coordinate(ResultCoordinate::from_run_coordinate(coordinate));
-    }
-    let document = builder
+    let namespaces = ResultNamespaces {
+        output: analysis.output_namespace().components().join("/"),
+        checkpoint: analysis.checkpoint_namespace().components().join("/"),
+    };
+    let coordinate_identity = has_axes.then(|| ResultCoordinate::from_run_coordinate(coordinate));
+    let identify = |builder: rspice_core::execution::AnalysisResultDocumentBuilder| {
+        let mut builder = builder
+            .topology_fingerprint(topology)
+            .namespaces(namespaces.clone());
+        if let Some(coordinate) = coordinate_identity.clone() {
+            builder = builder.coordinate(coordinate);
+        }
+        builder
+    };
+
+    let document = identify(projection.builder)
         .build_with_abort(abort)
         .map_err(crate::failure::map_result_document_error)?;
     let schema_signature = ResultSchemaSignature::from_document(&document);
@@ -678,6 +697,25 @@ fn execute_analysis(
         byte_limit,
     )?;
     let mut artifacts = vec![artifact];
+
+    // A card's second results — port noise beside `.SP`, one Fourier spectrum
+    // per authored `.FOUR` operand beside its transient — are complete shared
+    // documents with their own identities. They are staged in this analysis's
+    // own artifact list, so the whole set is published in one transaction or
+    // not at all, and each takes the parent's artifact stem plus its own
+    // namespace component so no two can collide.
+    for child in projection.children {
+        let document = identify(child.builder)
+            .build_with_abort(abort)
+            .map_err(crate::failure::map_result_document_error)?;
+        let remaining = remaining_bytes(&artifacts, byte_limit)?;
+        artifacts.push(encode_result_artifact(
+            format!("{file_stem}.{}.result.json", child.namespace),
+            &document,
+            abort,
+            remaining,
+        )?);
+    }
 
     // Transient `.FFT` spectra keep their adapter-owned bundle until core
     // assigns post-process analysis identities; see `fft_result_document`.
@@ -693,7 +731,7 @@ fn execute_analysis(
             content,
         });
     }
-    // Each artifact was individually bounded; this proves the pair together
+    // Each artifact was individually bounded; this proves the set together
     // still fits the budget this analysis was given.
     let _remaining = remaining_bytes(&artifacts, byte_limit)?;
 
@@ -851,17 +889,54 @@ fn validate_adapter_axes(plan: &DeckPlan) -> Result<(), String> {
     Ok(())
 }
 
+/// How many result artifacts one directive of `kind` publishes.
+///
+/// A directive publishes its own document plus every second document the card
+/// produces: the transient's `.FFT` bundle and one Fourier document per
+/// planned `.FOUR` operand bound to it, and the `.SP` card's port-noise
+/// document when it authored `DONOISE`. Counting them here is what lets the
+/// artifact-count limit be checked before a single solve.
+fn artifacts_per_directive(
+    netlist: &Netlist,
+    plan: &DeckPlan,
+    kind: PlannedAnalysisKind,
+) -> Option<usize> {
+    use rspice_core::execution::PostProcessSource;
+    use rspice_core::netlist::AnalysisCommand;
+
+    let mut count = 1usize;
+    if kind == PlannedAnalysisKind::Tran {
+        if !netlist.fft_analyses.is_empty() {
+            count = count.checked_add(1)?;
+        }
+        // The plan binds each operand to one transient, so the worst case for
+        // any single transient is every planned operand of the deck.
+        let operands = plan
+            .post_process_analyses()
+            .iter()
+            .filter(|post| matches!(post.source(), PostProcessSource::FourierOperand { .. }))
+            .count();
+        count = count.checked_add(operands)?;
+    }
+    if kind == PlannedAnalysisKind::Sp
+        && netlist
+            .analyses
+            .iter()
+            .any(|command| matches!(command, AnalysisCommand::Sp { do_noise: true, .. }))
+    {
+        count = count.checked_add(1)?;
+    }
+    Some(count)
+}
+
 fn preflight_planned_artifact_count(
     coordinate_count: usize,
     directive_count: usize,
-    kind: PlannedAnalysisKind,
-    has_fft: bool,
+    per_directive: usize,
 ) -> Result<(), DirectiveFailure> {
-    let artifacts_per_directive =
-        1usize + usize::from(has_fft && kind == PlannedAnalysisKind::Tran);
     let count = coordinate_count
         .checked_mul(directive_count)
-        .and_then(|count| count.checked_mul(artifacts_per_directive))
+        .and_then(|count| count.checked_mul(per_directive))
         .ok_or(DirectiveFailure::ResultArtifactLimit)?;
     validate_artifact_budget(count, std::iter::empty())
 }

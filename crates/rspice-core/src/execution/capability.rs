@@ -210,11 +210,6 @@ impl AnalysisResultCapability {
 
 const CLI_AXIS_UNAVAILABLE: &str = "CLI has no authored deck-axis route for this analysis family";
 const PY_PNOISE_DRIVEN_AXIS_ONLY: &str = "deck-axis .PNOISE executes around a driven carrier only; an autonomous PSS carrier's      oscillator phase noise has no run-report field";
-/// The adapter stages one shared result document per authored card. Port noise
-/// is the `.SP` card's second result and `.FOUR` is the transient's, so core
-/// naming and projection are no longer what is missing: the executor has no
-/// slot to publish a second document beside its parent.
-const ADAPTER_SECOND_DOCUMENT: &str = "the protocol-4 executor publishes one shared result document per authored card, and this      family is a second result produced beside another card's; core names and projects it, but      the adapter has no slot for it and refuses the deck rather than dropping it";
 
 /// The CLI publishes the shared typed result document for this family, under
 /// its canonical analysis identity, for a scalar deck and for every coordinate
@@ -324,7 +319,7 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
         cli: cli_mapped_axes(),
         python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
-        engine_adapter: SurfaceCapability::unsupported(ADAPTER_SECOND_DOCUMENT),
+        engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Distortion,
@@ -366,7 +361,7 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
         cli: cli_mapped_axes(),
         python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
-        engine_adapter: SurfaceCapability::unsupported(ADAPTER_SECOND_DOCUMENT),
+        engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Fft,
