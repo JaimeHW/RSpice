@@ -28,9 +28,16 @@
 //! form for the entries it could lower and the postfix form for the rest would
 //! be a third thing neither census measured, and its evidence would say nothing
 //! about either route. So a construct the CFG route will not lower, a shipped
-//! Jacobian column the derivative pass numbers differently, or a noise source
-//! whose two routes are not the same quantity all refuse the whole module by
-//! name — see [`CfgPlanRefusal`] for the list.
+//! Jacobian column the derivative pass numbers differently, or a shipped noise
+//! source with no CFG process all refuse the whole module by name — see
+//! [`CfgPlanRefusal`] for the list.
+//!
+//! What is *not* a refusal is a difference the two routes are entitled to:
+//! grouped noise, where the shipped PSD program and the CFG process hold
+//! different quantities on purpose. That is recorded on the report
+//! ([`CfgPlanReport::grouped_noise`]) for the census to classify, because
+//! refusing it would refuse thirty-four of the forty-three shipped modules and
+//! take every entry they *do* agree on down with them.
 //!
 //! # The one place a program is built rather than lowered
 //!
@@ -104,12 +111,6 @@ pub(crate) enum CfgPlanRefusal {
     ChargeMissing,
     /// A shipped noise source has no CFG process with its id.
     NoiseUnpaired,
-    /// The module carries grouped noise, where the shipped PSD program and the
-    /// CFG process's `psd` value are deliberately not the same quantity:
-    /// grouped complex injections carry the routing amplitude that the raw
-    /// syntactic process does not fold in. Comparing them would compare two
-    /// different numbers.
-    GroupedNoise,
     /// A block program addresses a state slot the module's
     /// [`StateSlotMapping`] never allocated.
     SlotUnclaimed,
@@ -129,7 +130,6 @@ impl CfgPlanRefusal {
             Self::LaneUnmapped => "lane-unmapped",
             Self::ChargeMissing => "charge-missing",
             Self::NoiseUnpaired => "noise-unpaired",
-            Self::GroupedNoise => "grouped-noise",
             Self::SlotUnclaimed => "slot-unclaimed",
         }
     }
@@ -176,6 +176,18 @@ pub(crate) struct CfgPlanReport {
     pub(crate) jacobians: usize,
     pub(crate) reactive_jacobians: usize,
     pub(crate) noise_values: usize,
+    /// Whether this module's noise reaches the runtime as a grouped complex
+    /// injection.
+    ///
+    /// It changes what the shipped `psd_program` *is*. Under the flat schema it
+    /// is the syntactic noise power, which is also what the CFG process's `psd`
+    /// value holds; under the grouped schema the routing amplitude is folded
+    /// into the injection instead, and the two are no longer the same quantity.
+    /// Recorded rather than refused, because refusing here would refuse almost
+    /// the whole shipped corpus — measured: thirty-four of the forty-three
+    /// modules carry schema 1 — and the entries that *are* the same quantity on
+    /// those modules would go unmeasured with them.
+    pub(crate) grouped_noise: bool,
     /// Shipped Jacobian and reactive-Jacobian entries the CFG route's liveness
     /// found no value for, given the constant zero its analysis implies. Keyed
     /// so the census can name each one it checks.
@@ -303,15 +315,6 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
             ),
         ));
     }
-    if model.noise_process_schema >= 1 && !model.noise_sources.is_empty() {
-        return Err(refuse(
-            CfgPlanRefusal::GroupedNoise,
-            format!(
-                "noise process schema {} folds routing amplitude into the grouped injection",
-                model.noise_process_schema
-            ),
-        ));
-    }
 
     // Charges first: the extraction *builds* the values a scaled or summed
     // charge needs (`k * ddt(q)` stores `k * q`, which exists nowhere until it
@@ -372,7 +375,10 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     );
     let slots = StateSlotMapping::build(model, &artifact.hir, &artifact.mir);
 
-    let mut report = CfgPlanReport::default();
+    let mut report = CfgPlanReport {
+        grouped_noise: model.noise_process_schema >= 1 && !model.noise_sources.is_empty(),
+        ..CfgPlanReport::default()
+    };
     let node_count = artifact.mir.nodes.len();
 
     // One lowering closure, so every entry reaches the block model by the same

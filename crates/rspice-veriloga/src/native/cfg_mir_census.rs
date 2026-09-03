@@ -180,6 +180,34 @@ struct Tally {
     structural_zeros: usize,
     over_bound: usize,
     nonzero_structural_zeros: usize,
+    /// Noise entries of grouped-noise modules: measured and printed, not
+    /// asserted. See [`is_grouped_noise_entry`].
+    grouped_noise_entries: usize,
+    grouped_noise_exact: usize,
+}
+
+/// Whether this entry is one the two routes are entitled to disagree about.
+///
+/// `CompiledModel::noise_process_schema >= 1` means the module's noise reaches
+/// the runtime as a grouped complex injection, and that changes what the
+/// shipped `psd_program` holds: the routing amplitude is carried by the
+/// injection rather than folded into the power. The CFG route's
+/// `CfgNoiseProcess::psd` is the raw syntactic power — the CFG lowering's own
+/// documentation says the amplitude is not folded into it. The two are
+/// therefore not two computations of one number, and asserting that they agree
+/// would assert something false.
+///
+/// Such an entry is still executed and still reported, with the count that
+/// agree exactly, because that is the measurement W-F3c needs to decide what
+/// the CFG route's noise entries have to become before the flip. Thirty-four of
+/// the forty-three shipped modules are in this class, which is also why the
+/// plan builder records the schema instead of refusing on it.
+fn is_grouped_noise_entry(entry: CfgPlanEntry, grouped: bool) -> bool {
+    grouped
+        && matches!(
+            entry,
+            CfgPlanEntry::NoisePsd(_) | CfgPlanEntry::NoiseExponent(_)
+        )
 }
 
 /// Every entry position the two plans both carry, in plan order.
@@ -378,6 +406,8 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
     let mut compared = 0_usize;
     let mut over: Option<Comparison> = None;
     let mut nonzero_structural: Option<Comparison> = None;
+    let mut grouped_noise_worst = 0.0_f64;
+    let mut grouped_noise_case: Option<Comparison> = None;
 
     for (index, point) in points.iter_mut().enumerate() {
         let mut context = point.context();
@@ -413,6 +443,17 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
             };
             if comparison.deviation == 0.0 {
                 exact += 1;
+            }
+            if is_grouped_noise_entry(entry, cfg_plan.report.grouped_noise) {
+                tally.grouped_noise_entries += 1;
+                if comparison.deviation == 0.0 {
+                    tally.grouped_noise_exact += 1;
+                }
+                if comparison.deviation > grouped_noise_worst {
+                    grouped_noise_worst = comparison.deviation;
+                    grouped_noise_case = Some(comparison);
+                }
+                continue;
             }
             if structural_zeros.contains(&entry) {
                 tally.structural_zeros += 1;
@@ -473,6 +514,16 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
             .map(|over| format!(" OVER_BOUND[{}]", over.describe()))
             .unwrap_or_default(),
     );
+    if cfg_plan.report.grouped_noise {
+        println!(
+            "cfg-mir model={module} grouped_noise=1 noise_entries={} max_deviation={grouped_noise_worst:.3e}{}",
+            model.noise_sources.len(),
+            grouped_noise_case
+                .as_ref()
+                .map(|case| format!(" case[{}]", case.describe()))
+                .unwrap_or_default(),
+        );
+    }
 
     if let Some(nonzero) = nonzero_structural {
         return Some(format!(
@@ -544,7 +595,8 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
     );
     println!(
         "cfg-mir models={} built={} refused={} entries={} comparisons={} exact={} \
-         runtime_errors={} structural_zeros={} over_bound={} nonzero_structural_zeros={}",
+         runtime_errors={} structural_zeros={} over_bound={} nonzero_structural_zeros={} \
+         grouped_noise_entries={} grouped_noise_exact={}",
         tally.models,
         tally.built,
         tally.refused,
@@ -555,6 +607,8 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
         tally.structural_zeros,
         tally.over_bound,
         tally.nonzero_structural_zeros,
+        tally.grouped_noise_entries,
+        tally.grouped_noise_exact,
     );
     if filter.is_none() {
         assert_eq!(tally.models, 43, "the shipped census is 43 modules");
@@ -587,7 +641,6 @@ fn every_refusal_class_has_a_name() {
         CfgPlanRefusal::LaneUnmapped,
         CfgPlanRefusal::ChargeMissing,
         CfgPlanRefusal::NoiseUnpaired,
-        CfgPlanRefusal::GroupedNoise,
         CfgPlanRefusal::SlotUnclaimed,
     ] {
         assert!(!class.name().is_empty());
