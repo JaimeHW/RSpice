@@ -356,9 +356,9 @@ impl Engine {
         // ------------------------------------------------------------------
         let fd_step = 1e-8;
         let mut phi: Vec<Vec<Vec<Value>>> = vec![vec![vec![0.0; n_state]; n_state]; n_grid];
-        for k in 0..n_grid {
-            for i in 0..n_state {
-                phi[k][i][i] = 0.0; // filled below
+        for step in phi.iter_mut().take(n_grid) {
+            for (i, row) in step.iter_mut().enumerate().take(n_state) {
+                row[i] = 0.0; // filled below
             }
         }
         for j in 0..n_state {
@@ -403,9 +403,14 @@ impl Engine {
                 abort,
             )?;
 
-            for k in 0..n_grid {
-                for i in 0..n_state {
-                    phi[k][i][j] = (tr_plus.states[k][i] - tr_minus.states[k][i]) / (2.0 * h);
+            for (k, step) in phi.iter_mut().enumerate().take(n_grid) {
+                for ((row, &plus), &minus) in step
+                    .iter_mut()
+                    .zip(&tr_plus.states[k])
+                    .zip(&tr_minus.states[k])
+                    .take(n_state)
+                {
+                    row[j] = (plus - minus) / (2.0 * h);
                 }
             }
         }
@@ -461,7 +466,7 @@ impl Engine {
         // renormalized against the local tangent (exact in exact arithmetic;
         // numerically this absorbs grid-level drift).
         let mut v1: Vec<Vec<Value>> = Vec::with_capacity(n_grid);
-        for k in 0..n_grid {
+        for (k, step) in phi.iter().enumerate().take(n_grid) {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
@@ -469,9 +474,9 @@ impl Engine {
                 v1_0.clone()
             } else {
                 let mut phit = vec![vec![0.0; n_state]; n_state];
-                for r in 0..n_state {
-                    for cidx in 0..n_state {
-                        phit[r][cidx] = phi[k][cidx][r];
+                for (r, transposed) in phit.iter_mut().enumerate().take(n_state) {
+                    for (entry, source) in transposed.iter_mut().zip(step).take(n_state) {
+                        *entry = source[r];
                     }
                 }
                 // pss_solve_linear_system solves A x = -b, so negate.
@@ -507,7 +512,7 @@ impl Engine {
         let mut colored_integrals: HashMap<PssNoiseKey, Vec<Value>> = HashMap::new();
         let mut previous_colored: HashMap<PssNoiseKey, Vec<Value>> = HashMap::new();
         let mut found_noise_source = false;
-        for k in 0..n_grid {
+        for (k, v1_k) in v1.iter().enumerate().take(n_grid) {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
@@ -552,13 +557,13 @@ impl Engine {
                     let nn = cap.nn.row;
                     let dv = if np == 0 { 0.0 } else { delta[np - 1] }
                         - if nn == 0 { 0.0 } else { delta[nn - 1] };
-                    value += v1[k][alpha] * dv / dt_freeze;
+                    value += v1_k[alpha] * dv / dt_freeze;
                 }
                 for l_idx in 0..circuit.inductors.names.len() {
                     let branch = circuit.inductors.branch_indices[l_idx];
                     if branch > 0 {
                         let branch_index = circuit.num_nodes() + branch - 1;
-                        value += v1[k][n_caps + l_idx] * delta[branch_index] / dt_freeze;
+                        value += v1_k[n_caps + l_idx] * delta[branch_index] / dt_freeze;
                     }
                 }
                 Ok(value)

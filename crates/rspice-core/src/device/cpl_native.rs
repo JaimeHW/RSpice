@@ -1436,8 +1436,8 @@ impl NativeCplSetup {
         let mut h2c = vec![zero_matrix(dim); dim];
         let mut h3c = vec![zero_matrix(dim); dim];
 
-        for mode in 0..dim {
-            taul_ps[mode] = self.tau[mode].mul_f64(1.0e12).to_f64();
+        for (picoseconds, tau) in taul_ps.iter_mut().zip(&self.tau).take(dim) {
+            *picoseconds = tau.mul_f64(1.0e12).to_f64();
         }
 
         for row in 0..dim {
@@ -1854,9 +1854,9 @@ impl NativeCplSetup {
         // symmetric) off-diagonals break near-degenerate pivot ties differently
         // than ngspice, permuting the modes.
         let mut zyf = vec![vec![0.0f64; self.dim]; self.dim];
-        for row in 0..self.dim {
-            for col in 0..self.dim {
-                zyf[row][col] = self.zy[row][col].to_f64();
+        for (shadow_row, dd_row) in zyf.iter_mut().zip(&self.zy).take(self.dim) {
+            for (shadow, dd) in shadow_row.iter_mut().zip(dd_row).take(self.dim) {
+                *shadow = dd.to_f64();
             }
         }
 
@@ -1925,40 +1925,40 @@ impl NativeCplSetup {
 
         let mut t = vec![Dd::ZERO; self.dim];
         t[(p + 1)..self.dim].copy_from_slice(&self.zy[p][(p + 1)..self.dim]);
-        for col in 0..p {
-            t[col] = self.zy[col][p];
+        for (scratch, row) in t.iter_mut().zip(&self.zy).take(p) {
+            *scratch = row[p];
         }
 
-        for col in p + 1..self.dim {
+        for (col, &scratch) in t.iter().enumerate().take(self.dim).skip(p + 1) {
             if col == q {
                 continue;
             }
             if col > q {
-                self.zy[p][col] = t[col].mul(co).sub(self.zy[q][col].mul(si));
+                self.zy[p][col] = scratch.mul(co).sub(self.zy[q][col].mul(si));
             } else {
-                self.zy[p][col] = t[col].mul(co).sub(self.zy[col][q].mul(si));
+                self.zy[p][col] = scratch.mul(co).sub(self.zy[col][q].mul(si));
             }
         }
 
-        for col in q + 1..self.dim {
+        for (col, &scratch) in t.iter().enumerate().take(self.dim).skip(q + 1) {
             if col == p {
                 continue;
             }
-            self.zy[q][col] = t[col].mul(si).add(self.zy[q][col].mul(co));
+            self.zy[q][col] = scratch.mul(si).add(self.zy[q][col].mul(co));
         }
 
-        for col in 0..p {
+        for (col, &scratch) in t.iter().enumerate().take(p) {
             if col == q {
                 continue;
             }
-            self.zy[col][p] = t[col].mul(co).sub(self.zy[col][q].mul(si));
+            self.zy[col][p] = scratch.mul(co).sub(self.zy[col][q].mul(si));
         }
 
-        for col in 0..q {
+        for (col, &scratch) in t.iter().enumerate().take(q) {
             if col == p {
                 continue;
             }
-            self.zy[col][q] = t[col].mul(si).add(self.zy[col][q].mul(co));
+            self.zy[col][q] = scratch.mul(si).add(self.zy[col][q].mul(co));
         }
 
         let z_pp = self.zy[p][p];
@@ -1998,8 +1998,8 @@ impl NativeCplSetup {
 fn best_offdiag(zyf: &[Vec<f64>], row: usize, dim: usize) -> (usize, f64) {
     let mut mode = row + 1;
     let mut max_value = zyf[row][mode].abs();
-    for col in mode + 1..dim {
-        let v = zyf[row][col].abs();
+    for (col, entry) in zyf[row].iter().enumerate().take(dim).skip(mode + 1) {
+        let v = entry.abs();
         if ((v * 1.0e7) as i32) > ((1.0e7 * max_value) as i32) {
             max_value = v;
             mode = col;
@@ -2295,9 +2295,10 @@ fn poly_matrix(
     dim: usize,
     deg: usize,
 ) -> Result<(), NativeCplError> {
-    for row in 0..dim {
-        for col in 0..dim {
-            matrix[row][col] = match_coefficients(deg, frequency, &matrix[row][col])?;
+    for row in matrix.iter_mut().take(dim) {
+        for cell in row.iter_mut().take(dim) {
+            let matched = match_coefficients(deg, frequency, cell)?;
+            *cell = matched;
         }
     }
     Ok(())
@@ -2423,13 +2424,13 @@ fn matrix_p_mult(
 
 fn mult_p(p1: &[Dd], p2: &[Dd], d1: usize, d2: usize, d3: usize) -> Vec<Dd> {
     let mut p3 = vec![Dd::ZERO; d3 + 1];
-    for i in 0..=d1 {
+    for (i, &left) in p1.iter().enumerate().take(d1 + 1) {
         let mut j = i;
-        for k in 0..=d2 {
+        for &right in p2.iter().take(d2 + 1) {
             if j > d3 {
                 break;
             }
-            p3[j] = p3[j].add(p1[i].mul(p2[k]));
+            p3[j] = p3[j].add(left.mul(right));
             j += 1;
         }
     }
@@ -2445,9 +2446,7 @@ fn invert_ngspice(left: &DdMatrix) -> Result<DdMatrix, NativeCplError> {
         for col in 0..dims {
             a[row][col] = left[row][col];
         }
-        for col in dims..2 * dims {
-            a[row][col] = Dd::ZERO;
-        }
+        a[row][dims..2 * dims].fill(Dd::ZERO);
         a[row][row + dims] = Dd::from_f64(1.0);
     }
 
@@ -2468,10 +2467,10 @@ fn gaussian_elimination2(a: &mut [Vec<Dd>], dims: usize, kind: i32) -> Result<()
     for i in 0..dims {
         let mut imax = i;
         let mut max = a[i][i].abs();
-        for row in i + 1..dim {
-            if a[row][i].abs().gt(max) {
+        for (row, entries) in a.iter().enumerate().take(dim).skip(i + 1) {
+            if entries[i].abs().gt(max) {
                 imax = row;
-                max = a[row][i].abs();
+                max = entries[i].abs();
             }
         }
         if max.hi < EPSILON {
@@ -2479,17 +2478,16 @@ fn gaussian_elimination2(a: &mut [Vec<Dd>], dims: usize, kind: i32) -> Result<()
         }
 
         if imax != i {
-            for col in i..=dim {
-                let value = a[i][col];
-                a[i][col] = a[imax][col];
-                a[imax][col] = value;
-            }
+            // `imax > i` whenever the swap runs, so the pivot row is in
+            // `above` and the row it trades with heads `below`.
+            let (above, below) = a.split_at_mut(imax);
+            above[i][i..=dim].swap_with_slice(&mut below[0][i..=dim]);
         }
 
         let factor = Dd::from_f64(1.0).div(a[i][i]);
         a[i][i] = Dd::from_f64(1.0);
-        for col in i + 1..=dim {
-            a[i][col] = a[i][col].mul(factor);
+        for value in &mut a[i][i + 1..=dim] {
+            *value = value.mul(factor);
         }
 
         for row in 0..dims {
@@ -2498,8 +2496,17 @@ fn gaussian_elimination2(a: &mut [Vec<Dd>], dims: usize, kind: i32) -> Result<()
             }
             let factor = a[row][i];
             a[row][i] = Dd::ZERO;
-            for col in i + 1..=dim {
-                a[row][col] = a[row][col].sub(factor.mul(a[i][col]));
+            let (first, second) = a.split_at_mut(row.max(i));
+            let (target_row, pivot_row) = if row < i {
+                (&mut first[row], &second[0])
+            } else {
+                (&mut second[0], &first[i])
+            };
+            for (target, pivot) in target_row[i + 1..=dim]
+                .iter_mut()
+                .zip(&pivot_row[i + 1..=dim])
+            {
+                *target = target.sub(factor.mul(*pivot));
             }
         }
     }
@@ -2575,10 +2582,10 @@ fn gaussian_elimination_at(at: &mut [[Dd; 4]; 4], dims: usize) -> Result<(), Nat
     for i in 0..dim {
         let mut imax = i;
         let mut max = at[i][i].abs();
-        for row in i + 1..dim {
-            if at[row][i].abs().gt(max) {
+        for (row, entries) in at.iter().enumerate().take(dim).skip(i + 1) {
+            if entries[i].abs().gt(max) {
                 imax = row;
-                max = at[row][i].abs();
+                max = entries[i].abs();
             }
         }
         if max.hi < EPSI_MULT {
@@ -2586,17 +2593,15 @@ fn gaussian_elimination_at(at: &mut [[Dd; 4]; 4], dims: usize) -> Result<(), Nat
         }
 
         if imax != i {
-            for col in i..=dim {
-                let value = at[i][col];
-                at[i][col] = at[imax][col];
-                at[imax][col] = value;
-            }
+            // `imax > i` whenever the swap runs.
+            let (above, below) = at.split_at_mut(imax);
+            above[i][i..=dim].swap_with_slice(&mut below[0][i..=dim]);
         }
 
         let factor = Dd::from_f64(1.0).div(at[i][i]);
         at[i][i] = Dd::from_f64(1.0);
-        for col in i + 1..=dim {
-            at[i][col] = at[i][col].mul(factor);
+        for value in &mut at[i][i + 1..=dim] {
+            *value = value.mul(factor);
         }
 
         for row in 0..dim {
@@ -2605,8 +2610,17 @@ fn gaussian_elimination_at(at: &mut [[Dd; 4]; 4], dims: usize) -> Result<(), Nat
             }
             let factor = at[row][i];
             at[row][i] = Dd::ZERO;
-            for col in i + 1..=dim {
-                at[row][col] = at[row][col].sub(factor.mul(at[i][col]));
+            let (first, second) = at.split_at_mut(row.max(i));
+            let (target_row, pivot_row) = if row < i {
+                (&mut first[row], &second[0])
+            } else {
+                (&mut second[0], &first[i])
+            };
+            for (target, pivot) in target_row[i + 1..=dim]
+                .iter_mut()
+                .zip(&pivot_row[i + 1..=dim])
+            {
+                *target = target.sub(factor.mul(*pivot));
             }
         }
     }
@@ -2742,6 +2756,9 @@ mod tests {
         assert_eq!(upper.len(), dim * (dim + 1) / 2);
         let mut matrix = zero_matrix(dim);
         let mut index = 0usize;
+        // Each entry is written at `[row][col]` and at its transpose, which
+        // are in different rows, so there is no single row to iterate over.
+        #[allow(clippy::needless_range_loop)]
         for row in 0..dim {
             for col in row..dim {
                 matrix[row][col] = upper[index];
@@ -3224,23 +3241,21 @@ mod tests {
         for i in 0..3 {
             let mut imax = i;
             let mut max = at[i][i].abs();
-            for row in i + 1..3 {
-                if at[row][i].abs() > max {
+            for (row, entries) in at.iter().enumerate().take(3).skip(i + 1) {
+                if entries[i].abs() > max {
                     imax = row;
-                    max = at[row][i].abs();
+                    max = entries[i].abs();
                 }
             }
             if imax != i {
-                for col in i..=3 {
-                    let value = at[i][col];
-                    at[i][col] = at[imax][col];
-                    at[imax][col] = value;
-                }
+                // `imax > i` whenever the swap runs.
+                let (above, below) = at.split_at_mut(imax);
+                above[i][i..=3].swap_with_slice(&mut below[0][i..=3]);
             }
             let factor = 1.0 / at[i][i];
             at[i][i] = 1.0;
-            for col in i + 1..=3 {
-                at[i][col] *= factor;
+            for value in &mut at[i][i + 1..=3] {
+                *value *= factor;
             }
             for row in 0..3 {
                 if i == row {
@@ -3248,8 +3263,14 @@ mod tests {
                 }
                 let factor = at[row][i];
                 at[row][i] = 0.0;
-                for col in i + 1..=3 {
-                    at[row][col] -= factor * at[i][col];
+                let (first, second) = at.split_at_mut(row.max(i));
+                let (target_row, pivot_row) = if row < i {
+                    (&mut first[row], &second[0])
+                } else {
+                    (&mut second[0], &first[i])
+                };
+                for (target, pivot) in target_row[i + 1..=3].iter_mut().zip(&pivot_row[i + 1..=3]) {
+                    *target -= factor * pivot;
                 }
             }
         }

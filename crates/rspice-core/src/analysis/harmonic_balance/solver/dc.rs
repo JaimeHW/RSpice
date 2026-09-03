@@ -428,10 +428,10 @@ impl HbSolver {
         }
 
         // Subtract GMIN: gmin * V_dc (diagonal)
-        for node in 0..n {
+        for (node, &voltage) in v_dc.iter().enumerate().take(n) {
             if node < state.residual.len() && !state.residual[node].is_empty() {
-                state.residual[node][0] -= Complex64::new(gmin * v_dc[node], 0.0);
-                state.residual_scale[node][0] += gmin * v_dc[node].abs();
+                state.residual[node][0] -= Complex64::new(gmin * voltage, 0.0);
+                state.residual_scale[node][0] += gmin * voltage.abs();
             }
         }
 
@@ -580,8 +580,8 @@ impl HbSolver {
         }
 
         // GMIN contribution: -gmin on diagonal
-        for i in 0..n {
-            jacobian[i][i] -= gmin;
+        for (i, row) in jacobian.iter_mut().enumerate().take(n) {
+            row[i] -= gmin;
         }
 
         // Nonlinear device Jacobians
@@ -1235,7 +1235,7 @@ impl HbSolver {
         let mut node_voltage = vec![f64::NAN; n];
         node_voltage[reference_node] = 0.0;
 
-        for node in 0..n {
+        for (node, estimate) in node_voltage.iter_mut().enumerate().take(n) {
             let source_current = self
                 .source_spectra
                 .get(node)
@@ -1264,22 +1264,22 @@ impl HbSolver {
                 let norton_v = source_current / self_conductance;
                 if norton_v > 0.5 {
                     // Only use for supplies > 0.5V to avoid overriding near-ground estimates
-                    node_voltage[node] = norton_v;
+                    *estimate = norton_v;
                 }
             } else if source_current > 0.0 {
                 // Positive current: estimate based on diode chain
                 let diode_count = self.count_diodes_from_node(node, reference_node);
-                node_voltage[node] = (diode_count as f64 * 0.6).max(0.1);
+                *estimate = (diode_count as f64 * 0.6).max(0.1);
             } else if source_current < 0.0 {
                 // Negative current: reverse bias
-                node_voltage[node] = -0.1;
+                *estimate = -0.1;
             }
         }
 
         // Second pass: BFS from known nodes to propagate through diode chain
         let mut queue = std::collections::VecDeque::new();
-        for node in 0..n {
-            if !node_voltage[node].is_nan() {
+        for (node, estimate) in node_voltage.iter().enumerate().take(n) {
+            if !estimate.is_nan() {
                 queue.push_back(node);
             }
         }
@@ -1304,12 +1304,12 @@ impl HbSolver {
         }
 
         // Apply voltages to state, using small default for any unvisited nodes
-        for node in 0..n {
+        for (node, &estimate) in node_voltage.iter().enumerate().take(n) {
             if node < state.x.len() && !state.x[node].is_empty() {
-                let v = if node_voltage[node].is_nan() {
+                let v = if estimate.is_nan() {
                     0.1 // Default for unconnected nodes
                 } else {
-                    node_voltage[node]
+                    estimate
                 };
                 state.x[node][0] = Complex64::new(v, 0.0);
             }

@@ -798,8 +798,8 @@ fn gaussian_elimination(a: &mut [[Value; 4]; 3], eps: Value) -> Option<()> {
 
         let f = 1.0 / a[i][i];
         a[i][i] = 1.0;
-        for j in i + 1..=3 {
-            a[i][j] *= f;
+        for value in &mut a[i][i + 1..=3] {
+            *value *= f;
         }
 
         for j in 0..3 {
@@ -808,8 +808,14 @@ fn gaussian_elimination(a: &mut [[Value; 4]; 3], eps: Value) -> Option<()> {
             }
             let f = a[j][i];
             a[j][i] = 0.0;
-            for k in i + 1..=3 {
-                a[j][k] -= f * a[i][k];
+            let (first, second) = a.split_at_mut(j.max(i));
+            let (target_row, pivot_row) = if j < i {
+                (&mut first[j], &second[0])
+            } else {
+                (&mut second[0], &first[i])
+            };
+            for (target, &pivot) in target_row[i + 1..=3].iter_mut().zip(&pivot_row[i + 1..=3]) {
+                *target -= f * pivot;
             }
         }
     }
@@ -990,8 +996,7 @@ mod tests {
 
         let mut scaled_slope_i = (v1 - prev.v_i) / h;
         let mut scaled_slope_o = (v2 - prev.v_o) / h;
-        for i in 0..3 {
-            let term = original[i];
+        for (i, &term) in original.iter().enumerate() {
             let e = txl.h1e[i];
             let t = term.c / term.x;
             scaled_slope_i *= t;

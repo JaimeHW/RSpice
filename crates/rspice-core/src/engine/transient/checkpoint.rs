@@ -7863,13 +7863,14 @@ impl TransientCheckpoint {
             let columns = read_value_section(lines, "generic_switch_stores", 4, budget)?;
             let count = columns.first().map_or(0, Vec::len);
             let mut stores = allocate_checkpoint_capacity(count, "generic_switch_stores", budget)?;
-            for index in 0..count {
-                stores.push([
-                    columns[0][index],
-                    columns[1][index],
-                    columns[2][index],
-                    columns[3][index],
-                ]);
+            for (((&first, &second), &third), &fourth) in columns[0]
+                .iter()
+                .zip(&columns[1])
+                .zip(&columns[2])
+                .zip(&columns[3])
+                .take(count)
+            {
+                stores.push([first, second, third, fourth]);
             }
             stores
         } else {

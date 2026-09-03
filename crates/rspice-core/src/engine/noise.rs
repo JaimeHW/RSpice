@@ -3670,6 +3670,9 @@ impl Engine {
 
             // Make the mathematical Hermitian invariant exact in the public
             // result and remove only impossible signed zero on its diagonal.
+            // Hermitian symmetrization writes `[row][column]` and its
+            // transpose together, which are in different rows.
+            #[allow(clippy::needless_range_loop)]
             for row in 0..num_ports {
                 covariance[row][row] = Complex64::new(covariance[row][row].re.max(0.0), 0.0);
                 for column in (row + 1)..num_ports {

@@ -444,19 +444,25 @@ impl MultiWindingTransformer {
         // coeff_g — they differ for Gear2); the voltage history applies for
         // Trapezoidal only. Dual of CompanionCoefficients::inductor_veq.
         let mut v_eq = vec![0.0; n];
-        for i in 0..n {
-            for j in 0..n {
-                v_eq[i] +=
-                    coeff.coeff_v_n * self.inductance_matrix[i][j] * self.currents_prev[j] / dt;
+        for ((equivalent, inductances), &previous_voltage) in v_eq
+            .iter_mut()
+            .zip(&self.inductance_matrix)
+            .zip(&self.voltages_prev)
+            .take(n)
+        {
+            for ((&inductance, &current), &current_prev_prev) in inductances
+                .iter()
+                .zip(&self.currents_prev)
+                .zip(&self.currents_prev_prev)
+                .take(n)
+            {
+                *equivalent += coeff.coeff_v_n * inductance * current / dt;
                 if coeff.needs_two_history {
-                    v_eq[i] += coeff.coeff_v_n_minus_1
-                        * self.inductance_matrix[i][j]
-                        * self.currents_prev_prev[j]
-                        / dt;
+                    *equivalent += coeff.coeff_v_n_minus_1 * inductance * current_prev_prev / dt;
                 }
             }
             if coeff.coeff_i_n != 0.0 {
-                v_eq[i] += coeff.coeff_i_n * self.voltages_prev[i];
+                *equivalent += coeff.coeff_i_n * previous_voltage;
             }
         }
 
@@ -481,9 +487,9 @@ impl MultiWindingTransformer {
             matrix.stamp(branch_i, pos_i, 1.0);
             matrix.stamp(branch_i, neg_i, -1.0);
 
-            for j in 0..n {
-                let branch_j = self.branches[j].expect("Branch index must be set");
-                matrix.stamp(branch_i, branch_j, -r_matrix[i][j]);
+            for (&resistance, branch) in r_matrix[i].iter().zip(&self.branches).take(n) {
+                let branch_j = branch.expect("Branch index must be set");
+                matrix.stamp(branch_i, branch_j, -resistance);
             }
 
             matrix.stamp(pos_i, branch_i, 1.0);

@@ -1123,12 +1123,12 @@ impl DeckPlan {
                 .checked_add(1)
                 .ok_or(DeckPlanError::CoordinateCountOverflow)?;
 
-            for axis_index in 0..indices.len() {
-                indices[axis_index] += 1;
-                if indices[axis_index] < self.axes[axis_index].values.len() {
+            for (index, axis) in indices.iter_mut().zip(&self.axes) {
+                *index += 1;
+                if *index < axis.values.len() {
                     break;
                 }
-                indices[axis_index] = 0;
+                *index = 0;
             }
         }
         Ok(coordinates)

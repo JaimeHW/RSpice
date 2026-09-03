@@ -161,9 +161,9 @@ impl PoleZeroAnalyzer {
             // Partial pivoting
             let mut max_row = k;
             let mut max_val = aug[k][k].abs();
-            for i in (k + 1)..n {
-                if aug[i][k].abs() > max_val {
-                    max_val = aug[i][k].abs();
+            for (i, entries) in aug.iter().enumerate().take(n).skip(k + 1) {
+                if entries[k].abs() > max_val {
+                    max_val = entries[k].abs();
                     max_row = i;
                 }
             }
@@ -178,10 +178,17 @@ impl PoleZeroAnalyzer {
 
             let pivot = aug[k][k];
             for i in (k + 1)..n {
-                let factor = aug[i][k] / pivot;
-                aug[i][k] = 0.0;
-                for j in (k + 1)..=n {
-                    aug[i][j] -= factor * aug[k][j];
+                // `i > k`, so the pivot row stays in `above`.
+                let (above, below) = aug.split_at_mut(i);
+                let pivot_row = &above[k];
+                let target_row = &mut below[0];
+                let factor = target_row[k] / pivot;
+                target_row[k] = 0.0;
+                for (target, &value) in target_row[(k + 1)..=n]
+                    .iter_mut()
+                    .zip(&pivot_row[(k + 1)..=n])
+                {
+                    *target -= factor * value;
                 }
             }
         }

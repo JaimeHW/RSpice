@@ -1396,9 +1396,12 @@ impl HbSolver {
 
         if !self.nonlinear_devices.is_empty() {
             let mut node_voltages = vec![0.0; n];
+            // `t` walks the time axis, which is a column of the per-node
+            // waveform table, so there is no one slice to iterate over.
+            #[allow(clippy::needless_range_loop)]
             for t in 0..n_time {
-                for node in 0..n {
-                    node_voltages[node] = v_time[node][t];
+                for (voltage, waveform) in node_voltages.iter_mut().zip(&v_time).take(n) {
+                    *voltage = waveform[t];
                 }
                 for (device_index, device) in self.nonlinear_devices.iter().enumerate() {
                     for ((i, j), g) in device.jacobian(&node_voltages) {
@@ -1530,9 +1533,12 @@ impl HbSolver {
 
         let mut c_time: BTreeMap<(usize, usize), Vec<Value>> = BTreeMap::new();
         let mut node_voltages = vec![0.0; n];
+        // `t` walks the time axis, which is a column of the per-node waveform
+        // table, so there is no one slice to iterate over.
+        #[allow(clippy::needless_range_loop)]
         for t in 0..n_time {
-            for node in 0..n {
-                node_voltages[node] = v_time[node][t];
+            for (voltage, waveform) in node_voltages.iter_mut().zip(&v_time).take(n) {
+                *voltage = waveform[t];
             }
             for (device_index, device) in self.nonlinear_devices.iter().enumerate() {
                 for ((i, j), c) in device.charge_jacobian(&node_voltages) {
@@ -2018,9 +2024,12 @@ impl HbSolver {
                     vec![super::devices::ScaledNonnegative::ZERO; n_time],
                 ));
             }
+            // `t` walks the time axis, which is a column of the per-node
+            // waveform table, so there is no one slice to iterate over.
+            #[allow(clippy::needless_range_loop)]
             for t in 0..n_time {
-                for node in 0..n {
-                    node_voltages[node] = v_time[node][t];
+                for (voltage, waveform) in node_voltages.iter_mut().zip(&v_time).take(n) {
+                    *voltage = waveform[t];
                 }
                 let values = device
                     .noise_intensities(&node_voltages, source_temperature, q_e, k_b)

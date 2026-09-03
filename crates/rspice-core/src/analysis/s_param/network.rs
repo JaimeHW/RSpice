@@ -647,11 +647,11 @@ mod tests {
             vec![Complex64::new(-1.0, 0.75), Complex64::new(3.0, 0.0)],
         ];
         let inv = invert_complex_matrix(&m).expect("invertible");
-        for row in 0..2 {
+        for (row, m_row) in m.iter().enumerate() {
             for column in 0..2 {
                 let mut acc = Complex64::new(0.0, 0.0);
-                for inner in 0..2 {
-                    acc += m[row][inner] * inv[inner][column];
+                for (coefficient, inv_row) in m_row.iter().zip(&inv) {
+                    acc += coefficient * inv_row[column];
                 }
                 let expected = if row == column { 1.0 } else { 0.0 };
                 assert!((acc - Complex64::new(expected, 0.0)).norm() < 1e-12);

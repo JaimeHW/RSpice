@@ -983,11 +983,21 @@ impl Engine {
             bjt.node_substrate,
         ];
         let mut source = -cq;
-        for col in 0..BJT_INTERNAL_STATE_DIM {
-            source += ag0 * branch.d_internal[col] * internal[col];
+        for (derivative, voltage) in branch
+            .d_internal
+            .iter()
+            .zip(internal)
+            .take(BJT_INTERNAL_STATE_DIM)
+        {
+            source += ag0 * derivative * voltage;
         }
-        for col in 0..BJT_EXTERNAL_STATE_DIM {
-            source += ag0 * branch.d_external[col] * external[col];
+        for (derivative, voltage) in branch
+            .d_external
+            .iter()
+            .zip(external)
+            .take(BJT_EXTERNAL_STATE_DIM)
+        {
+            source += ag0 * derivative * voltage;
         }
 
         let mut stamp_row = |row: crate::NodeId, sign: Value| {
@@ -1000,10 +1010,15 @@ impl Engine {
                     stamper.stamp(row, bjt.vbic_internal_node(col), sign * g);
                 }
             }
-            for col in 0..BJT_EXTERNAL_STATE_DIM {
-                let g = ag0 * branch.d_external[col];
+            for (derivative, node) in branch
+                .d_external
+                .iter()
+                .zip(external_nodes)
+                .take(BJT_EXTERNAL_STATE_DIM)
+            {
+                let g = ag0 * derivative;
                 if g != 0.0 {
-                    stamper.stamp(row, external_nodes[col], sign * g);
+                    stamper.stamp(row, node, sign * g);
                 }
             }
             stamper.stamp_rhs(row, sign * source);

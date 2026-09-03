@@ -1429,8 +1429,8 @@ impl HbSolver {
 
         // Convert nonlinear currents to frequency domain and ADD to residual
         // Device returns stamped contribution (current INTO node, already with correct sign)
-        for node in 0..self.num_nodes {
-            let i_spectrum = self.fft.to_frequency_domain(&i_time[node]);
+        for (node, i_waveform) in i_time.iter().enumerate().take(self.num_nodes) {
+            let i_spectrum = self.fft.to_frequency_domain(i_waveform);
             for (k, &i_k) in i_spectrum.iter().enumerate() {
                 if k <= self.num_harmonics && node < state.residual.len() {
                     state.residual[node][k] += i_k;
@@ -1464,8 +1464,8 @@ impl HbSolver {
                 }
             }
 
-            for node in 0..self.num_nodes {
-                let q_spectrum = self.fft.to_frequency_domain(&q_time[node]);
+            for (node, q_waveform) in q_time.iter().enumerate().take(self.num_nodes) {
+                let q_spectrum = self.fft.to_frequency_domain(q_waveform);
                 for (k, &q_k) in q_spectrum.iter().enumerate() {
                     if k <= self.num_harmonics && node < state.residual.len() {
                         let omega_k = (k as f64) * omega0;
@@ -1668,16 +1668,16 @@ impl HbSolver {
 
         // Convert each conductance waveform to frequency domain (Toeplitz row)
         // Then build the proper convolution Jacobian
-        for i in 0..n {
-            for j in 0..n {
+        for (i, g_row) in g_time.iter().enumerate().take(n) {
+            for (j, g_waveform) in g_row.iter().enumerate().take(n) {
                 // Check if there's any significant conductance
-                let max_g: Value = g_time[i][j].iter().fold(0.0, |a, &b| a.max(b.abs()));
+                let max_g: Value = g_waveform.iter().fold(0.0, |a, &b| a.max(b.abs()));
                 if max_g < 1e-30 {
                     continue;
                 }
 
                 // FFT the conductance waveform to get G[k] spectrum
-                let g_spectrum = self.fft.to_frequency_domain(&g_time[i][j]);
+                let g_spectrum = self.fft.to_frequency_domain(g_waveform);
 
                 // Build Toeplitz block for this (i,j) node pair
                 // J[i*h+k][j*h+l] = G[k-l] (with periodic extension for negative indices)
@@ -1736,14 +1736,14 @@ impl HbSolver {
                 }
             }
 
-            for i in 0..n {
-                for j in 0..n {
-                    let max_c: Value = c_time[i][j].iter().fold(0.0, |a, &b| a.max(b.abs()));
+            for (i, c_row) in c_time.iter().enumerate().take(n) {
+                for (j, c_waveform) in c_row.iter().enumerate().take(n) {
+                    let max_c: Value = c_waveform.iter().fold(0.0, |a, &b| a.max(b.abs()));
                     if max_c < 1e-30 {
                         continue;
                     }
 
-                    let c_spectrum = self.fft.to_frequency_domain(&c_time[i][j]);
+                    let c_spectrum = self.fft.to_frequency_domain(c_waveform);
 
                     for k in 0..h {
                         let omega_k = (k as f64) * omega0;
@@ -2096,15 +2096,15 @@ impl HbSolver {
                         );
                     }
                     let mut node_voltages = vec![vec![Complex64::new(0.0, 0.0); h]; n];
-                    for node in 0..n {
-                        for k in 0..h {
+                    for (node, harmonics) in node_voltages.iter_mut().enumerate().take(n) {
+                        for (k, phasor) in harmonics.iter_mut().enumerate().take(h) {
                             let re = outcome.solution[re_idx(node, k)].re;
                             let im = if k > 0 {
                                 outcome.solution[im_idx(node, k)].re
                             } else {
                                 0.0
                             };
-                            node_voltages[node][k] = Complex64::new(re, im);
+                            *phasor = Complex64::new(re, im);
                         }
                     }
                     let mut branch_currents = vec![vec![Complex64::new(0.0, 0.0); h]; branch_count];

@@ -1772,8 +1772,15 @@ impl Engine {
             for row in pivot + 1..order {
                 let factor = matrix[row][pivot] / matrix[pivot][pivot];
                 matrix[row][pivot] = 0.0;
-                for column in pivot + 1..order {
-                    matrix[row][column] -= factor * matrix[pivot][column];
+                // `row > pivot` here, so the pivot row stays in `above`.
+                let (above, below) = matrix.split_at_mut(row);
+                let pivot_row = &above[pivot];
+                let target_row = &mut below[0];
+                for (target, &value) in target_row[pivot + 1..order]
+                    .iter_mut()
+                    .zip(&pivot_row[pivot + 1..order])
+                {
+                    *target -= factor * value;
                 }
                 rhs[row] -= factor * rhs[pivot];
             }

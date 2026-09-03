@@ -842,8 +842,12 @@ impl Engine {
             // bias (ngspice VBICtrunc CKTterr over the charge states).
             let (branches, _, _) = bjt.vbic_mna_charge_state_at_solution(candidate_solution);
 
-            for branch_idx in 0..BJT_VBIC_TRUNCATION_BRANCH_COUNT {
-                let q_curr = branches[branch_idx].charge;
+            for (branch_idx, branch) in branches
+                .iter()
+                .enumerate()
+                .take(BJT_VBIC_TRUNCATION_BRANCH_COUNT)
+            {
+                let q_curr = branch.charge;
                 let q_prev = history.charge_q_prev[idx][branch_idx];
                 let q_prev_prev = history.charge_q_prev_prev[idx][branch_idx];
                 let q_prev_prev_prev = history.charge_q_prev_prev_prev[idx][branch_idx];
@@ -2073,21 +2077,15 @@ impl Engine {
 
         for (idx, dev) in circuit.ekv26s.devices.iter().enumerate() {
             let q_curr = dev.dynamic_charge_vector_at_solution(candidate_solution);
-            for row in 0..EKV26_DYNAMIC_CHARGE_COUNT {
+            for (row, &charge) in q_curr.iter().enumerate().take(EKV26_DYNAMIC_CHARGE_COUNT) {
                 let q_prev = history.q_prev[idx][row];
                 let q_prev_prev = history.q_prev_prev[idx][row];
                 let q_prev_prev_prev = history.q_prev_prev_prev[idx][row];
                 let cq_prev = history.cq_prev[idx][row];
-                let cq_curr = Self::jfet_companion_ccap(
-                    &coeff,
-                    dt,
-                    q_curr[row],
-                    q_prev,
-                    q_prev_prev,
-                    cq_prev,
-                );
+                let cq_curr =
+                    Self::jfet_companion_ccap(&coeff, dt, charge, q_prev, q_prev_prev, cq_prev);
                 let Some(branch_limit) = truncation.limit(
-                    q_curr[row],
+                    charge,
                     q_prev,
                     q_prev_prev,
                     q_prev_prev_prev,
@@ -2933,8 +2931,8 @@ impl Engine {
         for pivot in 0..dim {
             let mut best = pivot;
             let mut best_abs = lu[pivot][pivot].abs();
-            for row in (pivot + 1)..dim {
-                let value = lu[row][pivot].abs();
+            for (row, entries) in lu.iter().enumerate().take(dim).skip(pivot + 1) {
+                let value = entries[pivot].abs();
                 if value > best_abs {
                     best = row;
                     best_abs = value;
@@ -2952,8 +2950,15 @@ impl Engine {
             for row in (pivot + 1)..dim {
                 lu[row][pivot] /= pivot_value;
                 let factor = lu[row][pivot];
-                for col in (pivot + 1)..dim {
-                    lu[row][col] -= factor * lu[pivot][col];
+                // `row > pivot`, so the pivot row stays in `above`.
+                let (above, below) = lu.split_at_mut(row);
+                let pivot_row = &above[pivot];
+                let target_row = &mut below[0];
+                for (target, &value) in target_row[(pivot + 1)..dim]
+                    .iter_mut()
+                    .zip(&pivot_row[(pivot + 1)..dim])
+                {
+                    *target -= factor * value;
                 }
             }
         }

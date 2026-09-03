@@ -134,8 +134,8 @@ impl LuFactors {
         // Forward substitution: L y = P b (unit diagonal).
         for i in 1..n {
             let mut sum = x[i];
-            for j in 0..i {
-                sum -= self.lu[i * n + j] * x[j];
+            for (j, &solved) in x.iter().enumerate().take(i) {
+                sum -= self.lu[i * n + j] * solved;
             }
             x[i] = sum;
         }
@@ -143,8 +143,8 @@ impl LuFactors {
         // Back substitution: U x = y.
         for i in (0..n).rev() {
             let mut sum = x[i];
-            for j in (i + 1)..n {
-                sum -= self.lu[i * n + j] * x[j];
+            for (j, &solved) in x.iter().enumerate().take(n).skip(i + 1) {
+                sum -= self.lu[i * n + j] * solved;
             }
             x[i] = sum / self.lu[i * n + i];
         }
@@ -559,10 +559,13 @@ mod tests {
             aug.swap(col, max_row);
             let pivot = aug[col][col];
             for row in (col + 1)..n {
-                let factor = aug[row][col] / pivot;
-                for k in col..=n {
-                    let v = aug[col][k];
-                    aug[row][k] -= factor * v;
+                // `row > col`, so the pivot row stays in `above`.
+                let (above, below) = aug.split_at_mut(row);
+                let pivot_row = &above[col];
+                let target_row = &mut below[0];
+                let factor = target_row[col] / pivot;
+                for (target, &value) in target_row[col..=n].iter_mut().zip(&pivot_row[col..=n]) {
+                    *target -= factor * value;
                 }
             }
         }
@@ -708,10 +711,10 @@ mod tests {
         // Make the true operator wildly different from its diagonal blocks.
         let size = n * h;
         let mut rng = Lcg(101);
-        for i in 0..size {
-            for j in 0..size {
+        for (i, row) in a.iter_mut().enumerate().take(size) {
+            for (j, entry) in row.iter_mut().enumerate().take(size) {
                 if i != j {
-                    a[i][j] += rng.next_c() * 25.0;
+                    *entry += rng.next_c() * 25.0;
                 }
             }
         }

@@ -875,16 +875,26 @@ impl Engine {
                         if denom.abs() <= 0.0 {
                             continue;
                         }
-                        for row in 0..BJT_INTERNAL_STATE_DIM {
-                            jacobian[row][col] = (plus_state.3[row] - minus_state.3[row]) / denom;
+                        for ((derivatives, &plus), &minus) in jacobian
+                            .iter_mut()
+                            .zip(&plus_state.3)
+                            .zip(&minus_state.3)
+                            .take(BJT_INTERNAL_STATE_DIM)
+                        {
+                            derivatives[col] = (plus - minus) / denom;
                         }
                     } else {
                         let denom = plus_internal[col] - current_internal[col];
                         if denom.abs() <= 0.0 {
                             continue;
                         }
-                        for row in 0..BJT_INTERNAL_STATE_DIM {
-                            jacobian[row][col] = (plus_state.3[row] - current_state.3[row]) / denom;
+                        for ((derivatives, &plus), &base) in jacobian
+                            .iter_mut()
+                            .zip(&plus_state.3)
+                            .zip(&current_state.3)
+                            .take(BJT_INTERNAL_STATE_DIM)
+                        {
+                            derivatives[col] = (plus - base) / denom;
                         }
                     }
                 }
@@ -970,8 +980,8 @@ impl Engine {
                 for row in 0..BJT_INTERNAL_STATE_DIM {
                     for col in 0..BJT_INTERNAL_STATE_DIM {
                         let mut value = 0.0;
-                        for inner in 0..BJT_INTERNAL_STATE_DIM {
-                            value += jacobian[inner][row] * jacobian[inner][col];
+                        for derivatives in jacobian.iter().take(BJT_INTERNAL_STATE_DIM) {
+                            value += derivatives[row] * derivatives[col];
                         }
                         normal_matrix[row][col] = value;
                     }
@@ -985,8 +995,12 @@ impl Engine {
                 for lambda_scale in [1e-10, 1e-8, 1e-6, 1e-4, 1e-2, 1.0, 1e2] {
                     let mut damped_normal = normal_matrix;
                     let lambda = lm_diag_scale * lambda_scale;
-                    for idx in 0..BJT_INTERNAL_STATE_DIM {
-                        damped_normal[idx][idx] += lambda;
+                    for (idx, row) in damped_normal
+                        .iter_mut()
+                        .enumerate()
+                        .take(BJT_INTERNAL_STATE_DIM)
+                    {
+                        row[idx] += lambda;
                     }
                     let Some((lu_internal, pivots_internal)) =
                         Self::lu_decompose_small_dense_real(&damped_normal, BJT_INTERNAL_STATE_DIM)

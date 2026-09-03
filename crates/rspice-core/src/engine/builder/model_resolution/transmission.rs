@@ -699,6 +699,9 @@ fn symmetric_matrix_from_upper_triangle(
 
     let mut matrix = vec![vec![0.0; dimension]; dimension];
     let mut idx = 0usize;
+    // Every entry is written at `[row][col]` and at its transpose, which are
+    // in different rows, so there is no one row to iterate over.
+    #[allow(clippy::needless_range_loop)]
     for row in 0..dimension {
         for col in row..dimension {
             let mut value = values[idx];

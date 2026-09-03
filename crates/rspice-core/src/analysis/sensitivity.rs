@@ -461,9 +461,9 @@ impl SensitivityAnalyzer {
         let mut work = 0usize;
 
         for row in 0..n {
-            for col in 0..n {
+            for (col, entry) in aug[row][..n].iter_mut().enumerate() {
                 poll_sensitivity_work(abort, &mut work)?;
-                aug[row][col] = self.g_matrix[col][row];
+                *entry = self.g_matrix[col][row];
             }
             aug[row][n] = e[row];
         }
@@ -472,10 +472,10 @@ impl SensitivityAnalyzer {
             poll_sensitivity_work(abort, &mut work)?;
             let mut max_row = k;
             let mut max_val = aug[k][k].abs();
-            for i in (k + 1)..n {
+            for (i, entries) in aug.iter().enumerate().take(n).skip(k + 1) {
                 poll_sensitivity_work(abort, &mut work)?;
-                if aug[i][k].abs() > max_val {
-                    max_val = aug[i][k].abs();
+                if entries[k].abs() > max_val {
+                    max_val = entries[k].abs();
                     max_row = i;
                 }
             }
@@ -491,11 +491,18 @@ impl SensitivityAnalyzer {
             let pivot = aug[k][k];
             for i in (k + 1)..n {
                 poll_sensitivity_work(abort, &mut work)?;
-                let factor = aug[i][k] / pivot;
-                aug[i][k] = 0.0;
-                for j in (k + 1)..=n {
+                // `i > k`, so the pivot row stays in `above`.
+                let (above, below) = aug.split_at_mut(i);
+                let pivot_row = &above[k];
+                let target_row = &mut below[0];
+                let factor = target_row[k] / pivot;
+                target_row[k] = 0.0;
+                for (target, &value) in target_row[(k + 1)..=n]
+                    .iter_mut()
+                    .zip(&pivot_row[(k + 1)..=n])
+                {
                     poll_sensitivity_work(abort, &mut work)?;
-                    aug[i][j] -= factor * aug[k][j];
+                    *target -= factor * value;
                 }
             }
         }
@@ -503,9 +510,9 @@ impl SensitivityAnalyzer {
         for i in (0..n).rev() {
             poll_sensitivity_work(abort, &mut work)?;
             let mut sum = aug[i][n];
-            for j in (i + 1)..n {
+            for (j, &coefficient) in aug[i].iter().enumerate().take(n).skip(i + 1) {
                 poll_sensitivity_work(abort, &mut work)?;
-                sum -= aug[i][j] * self.adjoint[j];
+                sum -= coefficient * self.adjoint[j];
             }
             self.adjoint[i] = sum / aug[i][i];
         }
@@ -632,9 +639,16 @@ impl SensitivityAnalyzer {
             }
 
             // Combine: λ = λ_output - λ_ref
-            for i in 0..self.system_size {
+            let system_size = self.system_size;
+            for (i, (adjoint, &output)) in self
+                .adjoint
+                .iter_mut()
+                .zip(&adj_output)
+                .take(system_size)
+                .enumerate()
+            {
                 poll_sensitivity_index(abort, i)?;
-                self.adjoint[i] = adj_output[i] - self.adjoint[i];
+                *adjoint = output - *adjoint;
             }
         }
 

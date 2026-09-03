@@ -241,11 +241,19 @@ impl BjtChargeBranch {
             let Some(row) = row else {
                 continue;
             };
-            for col in 0..BJT_INTERNAL_STATE_DIM {
-                c_ii[row][col] += sign * self.d_internal[col];
+            for (entry, derivative) in c_ii[row]
+                .iter_mut()
+                .zip(&self.d_internal)
+                .take(BJT_INTERNAL_STATE_DIM)
+            {
+                *entry += sign * derivative;
             }
-            for col in 0..EXTERNAL_DIM {
-                c_ie[row][col] += sign * self.d_external[col];
+            for (entry, derivative) in c_ie[row]
+                .iter_mut()
+                .zip(&self.d_external)
+                .take(EXTERNAL_DIM)
+            {
+                *entry += sign * derivative;
             }
         }
 
@@ -253,11 +261,19 @@ impl BjtChargeBranch {
             let Some(row) = row else {
                 continue;
             };
-            for col in 0..BJT_INTERNAL_STATE_DIM {
-                c_ei[row][col] += sign * self.d_internal[col];
+            for (entry, derivative) in c_ei[row]
+                .iter_mut()
+                .zip(&self.d_internal)
+                .take(BJT_INTERNAL_STATE_DIM)
+            {
+                *entry += sign * derivative;
             }
-            for col in 0..EXTERNAL_DIM {
-                c_ee[row][col] += sign * self.d_external[col];
+            for (entry, derivative) in c_ee[row]
+                .iter_mut()
+                .zip(&self.d_external)
+                .take(EXTERNAL_DIM)
+            {
+                *entry += sign * derivative;
             }
         }
     }
@@ -349,11 +365,19 @@ impl BjtCurrentBranch {
             let Some(row) = row else {
                 continue;
             };
-            for col in 0..BJT_INTERNAL_STATE_DIM {
-                g_ii[row][col] += sign * self.d_internal[col];
+            for (entry, derivative) in g_ii[row]
+                .iter_mut()
+                .zip(&self.d_internal)
+                .take(BJT_INTERNAL_STATE_DIM)
+            {
+                *entry += sign * derivative;
             }
-            for col in 0..BJT_EXTERNAL_STATE_DIM {
-                g_ie[row][col] += sign * self.d_external[col];
+            for (entry, derivative) in g_ie[row]
+                .iter_mut()
+                .zip(&self.d_external)
+                .take(BJT_EXTERNAL_STATE_DIM)
+            {
+                *entry += sign * derivative;
             }
         }
 
@@ -361,11 +385,19 @@ impl BjtCurrentBranch {
             let Some(row) = row else {
                 continue;
             };
-            for col in 0..BJT_INTERNAL_STATE_DIM {
-                g_ei[row][col] += sign * self.d_internal[col];
+            for (entry, derivative) in g_ei[row]
+                .iter_mut()
+                .zip(&self.d_internal)
+                .take(BJT_INTERNAL_STATE_DIM)
+            {
+                *entry += sign * derivative;
             }
-            for col in 0..BJT_EXTERNAL_STATE_DIM {
-                g_ee[row][col] += sign * self.d_external[col];
+            for (entry, derivative) in g_ee[row]
+                .iter_mut()
+                .zip(&self.d_external)
+                .take(BJT_EXTERNAL_STATE_DIM)
+            {
+                *entry += sign * derivative;
             }
         }
     }
@@ -2178,13 +2210,23 @@ impl Bjt {
             current: current_branch.current * voltage,
             ..Default::default()
         };
-        for idx in 0..INTERNAL_DIM {
-            power.d_internal[idx] = current_branch.d_internal[idx] * voltage
-                + current_branch.current * d_voltage_internal[idx];
+        for ((slot, &d_current), &d_voltage) in power
+            .d_internal
+            .iter_mut()
+            .zip(&current_branch.d_internal)
+            .zip(&d_voltage_internal)
+            .take(INTERNAL_DIM)
+        {
+            *slot = d_current * voltage + current_branch.current * d_voltage;
         }
-        for idx in 0..EXTERNAL_DIM {
-            power.d_external[idx] = current_branch.d_external[idx] * voltage
-                + current_branch.current * d_voltage_external[idx];
+        for ((slot, &d_current), &d_voltage) in power
+            .d_external
+            .iter_mut()
+            .zip(&current_branch.d_external)
+            .zip(&d_voltage_external)
+            .take(EXTERNAL_DIM)
+        {
+            *slot = d_current * voltage + current_branch.current * d_voltage;
         }
         power
     }

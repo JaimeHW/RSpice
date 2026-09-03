@@ -890,9 +890,9 @@ impl Engine {
         let (lu_internal, pivots_internal) =
             Self::lu_decompose_small_dense_real(&linearization.g_ii, BJT_INTERNAL_STATE_DIM)?;
         let mut rhs_internal = linearization.z_i;
-        for row in 0..BJT_INTERNAL_STATE_DIM {
-            for col in 0..BJT_EXTERNAL_STATE_DIM {
-                rhs_internal[row] -= linearization.g_ie[row][col] * external_voltages[col];
+        for (rhs, coupling) in rhs_internal.iter_mut().zip(&linearization.g_ie) {
+            for (conductance, voltage) in coupling.iter().zip(external_voltages) {
+                *rhs -= conductance * voltage;
             }
         }
         Self::lu_solve_small_dense_real(
@@ -911,17 +911,24 @@ impl Engine {
     ) -> Option<[Value; BJT_INTERNAL_STATE_DIM]> {
         let mut g_static = [[0.0; BJT_STATIC_CORE_STATE_DIM]; BJT_STATIC_CORE_STATE_DIM];
         let mut rhs_static = [0.0; BJT_STATIC_CORE_STATE_DIM];
-        for row in 0..BJT_STATIC_CORE_STATE_DIM {
-            rhs_static[row] = linearization.z_i[row];
-            for col in 0..BJT_EXTERNAL_STATE_DIM {
-                rhs_static[row] -= linearization.g_ie[row][col] * external_voltages[col];
+        for (row, ((rhs, g_static_row), &charge)) in rhs_static
+            .iter_mut()
+            .zip(g_static.iter_mut())
+            .zip(&linearization.z_i)
+            .enumerate()
+        {
+            *rhs = charge;
+            for (conductance, voltage) in linearization.g_ie[row].iter().zip(external_voltages) {
+                *rhs -= conductance * voltage;
             }
-            for col in BJT_STATIC_CORE_STATE_DIM..BJT_INTERNAL_STATE_DIM {
-                rhs_static[row] -= linearization.g_ii[row][col] * internal_voltages[col];
+            for (conductance, voltage) in linearization.g_ii[row]
+                [BJT_STATIC_CORE_STATE_DIM..BJT_INTERNAL_STATE_DIM]
+                .iter()
+                .zip(&internal_voltages[BJT_STATIC_CORE_STATE_DIM..BJT_INTERNAL_STATE_DIM])
+            {
+                *rhs -= conductance * voltage;
             }
-            for col in 0..BJT_STATIC_CORE_STATE_DIM {
-                g_static[row][col] = linearization.g_ii[row][col];
-            }
+            g_static_row.copy_from_slice(&linearization.g_ii[row][..BJT_STATIC_CORE_STATE_DIM]);
         }
         let (lu_static, pivots_static) =
             Self::lu_decompose_small_dense_real(&g_static, BJT_STATIC_CORE_STATE_DIM)?;
@@ -943,13 +950,18 @@ impl Engine {
         internal_voltages: &[Value; BJT_INTERNAL_STATE_DIM],
     ) -> [Value; BJT_INTERNAL_STATE_DIM] {
         let mut residual = [0.0; BJT_INTERNAL_STATE_DIM];
-        for row in 0..BJT_INTERNAL_STATE_DIM {
-            residual[row] = -linearization.z_i[row];
-            for col in 0..BJT_INTERNAL_STATE_DIM {
-                residual[row] += linearization.g_ii[row][col] * internal_voltages[col];
+        for (((entry, &charge), internal_row), external_row) in residual
+            .iter_mut()
+            .zip(&linearization.z_i)
+            .zip(&linearization.g_ii)
+            .zip(&linearization.g_ie)
+        {
+            *entry = -charge;
+            for (conductance, voltage) in internal_row.iter().zip(internal_voltages) {
+                *entry += conductance * voltage;
             }
-            for col in 0..BJT_EXTERNAL_STATE_DIM {
-                residual[row] += linearization.g_ie[row][col] * external_voltages[col];
+            for (conductance, voltage) in external_row.iter().zip(external_voltages) {
+                *entry += conductance * voltage;
             }
         }
         residual
@@ -1089,8 +1101,8 @@ impl Engine {
         let mut y_total = [[0.0; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM];
         for col in 0..BJT_EXTERNAL_STATE_DIM {
             let mut rhs_internal = [0.0; BJT_INTERNAL_STATE_DIM];
-            for row in 0..BJT_INTERNAL_STATE_DIM {
-                rhs_internal[row] = -linearization.g_ie[row][col];
+            for (rhs, coupling) in rhs_internal.iter_mut().zip(&linearization.g_ie) {
+                *rhs = -coupling[col];
             }
             let solution = Self::lu_solve_small_dense_real(
                 &lu_internal,
@@ -1098,12 +1110,16 @@ impl Engine {
                 &rhs_internal,
                 BJT_INTERNAL_STATE_DIM,
             )?;
-            for row in 0..BJT_EXTERNAL_STATE_DIM {
-                let mut value = linearization.g_ee[row][col];
-                for internal_idx in 0..BJT_INTERNAL_STATE_DIM {
-                    value += linearization.g_ei[row][internal_idx] * solution[internal_idx];
+            for ((total_row, external_row), internal_row) in y_total
+                .iter_mut()
+                .zip(&linearization.g_ee)
+                .zip(&linearization.g_ei)
+            {
+                let mut value = external_row[col];
+                for (conductance, unknown) in internal_row.iter().zip(&solution) {
+                    value += conductance * unknown;
                 }
-                y_total[row][col] = value;
+                total_row[col] = value;
             }
         }
 
@@ -1114,11 +1130,14 @@ impl Engine {
             BJT_INTERNAL_STATE_DIM,
         )?;
         let mut reduced_i_eq = [0.0; BJT_EXTERNAL_STATE_DIM];
-        for row in 0..BJT_EXTERNAL_STATE_DIM {
-            reduced_i_eq[row] = linearization.z_e[row];
-            for internal_idx in 0..BJT_INTERNAL_STATE_DIM {
-                reduced_i_eq[row] -=
-                    linearization.g_ei[row][internal_idx] * z_solution[internal_idx];
+        for ((entry, &charge), internal_row) in reduced_i_eq
+            .iter_mut()
+            .zip(&linearization.z_e)
+            .zip(&linearization.g_ei)
+        {
+            *entry = charge;
+            for (conductance, unknown) in internal_row.iter().zip(&z_solution) {
+                *entry -= conductance * unknown;
             }
         }
 

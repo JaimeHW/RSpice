@@ -711,9 +711,13 @@ fn ekv3_rf_eval(
         let hi = ekv3_rf_terminal_currents(spec, plus, temperature_kelvin);
         let lo = ekv3_rf_terminal_currents(spec, minus, temperature_kelvin);
         channel_derivatives[col] = (hi.channel_id - lo.channel_id) / (2.0 * step);
-        for row in 0..NODE_COUNT {
-            terminal_derivatives[row][col] =
-                (hi.terminal_currents[row] - lo.terminal_currents[row]) / (2.0 * step);
+        for ((derivatives, &high), &low) in terminal_derivatives
+            .iter_mut()
+            .zip(&hi.terminal_currents)
+            .zip(&lo.terminal_currents)
+            .take(NODE_COUNT)
+        {
+            derivatives[col] = (high - low) / (2.0 * step);
         }
     }
     Ekv3Eval {

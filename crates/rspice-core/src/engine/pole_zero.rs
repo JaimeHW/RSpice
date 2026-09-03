@@ -464,11 +464,14 @@ impl Engine {
                                 c_matrix.add(row_idx, col_idx, sign * c);
                             }
                         }
-                        for col in 0..BJT_EXTERNAL_STATE_DIM {
-                            let c = branch.d_external[col];
+                        for (&c, node) in branch
+                            .d_external
+                            .iter()
+                            .zip(external_nodes)
+                            .take(BJT_EXTERNAL_STATE_DIM)
+                        {
                             if c != 0.0
-                                && let Some(col_idx) =
-                                    Self::optional_system_index(external_nodes[col])
+                                && let Some(col_idx) = Self::optional_system_index(node)
                             {
                                 c_matrix.add(row_idx, col_idx, sign * c);
                             }
@@ -547,10 +550,15 @@ impl Engine {
                     c_matrix.add(row_idx, col_idx, -c_ee[ext_row][ext_col]);
                 }
 
-                for int_col in 0..BJT_INTERNAL_STATE_DIM {
+                for (int_col, (&conductance, &capacitance)) in snapshot.reduction.g_ei[ext_row]
+                    .iter()
+                    .zip(&c_ei[ext_row])
+                    .take(BJT_INTERNAL_STATE_DIM)
+                    .enumerate()
+                {
                     let col_idx = internal_start + int_col;
-                    g_matrix.add(row_idx, col_idx, snapshot.reduction.g_ei[ext_row][int_col]);
-                    c_matrix.add(row_idx, col_idx, -c_ei[ext_row][int_col]);
+                    g_matrix.add(row_idx, col_idx, conductance);
+                    c_matrix.add(row_idx, col_idx, -capacitance);
                 }
             }
 
@@ -565,10 +573,15 @@ impl Engine {
                     c_matrix.add(row_idx, col_idx, -c_ie[int_row][ext_col]);
                 }
 
-                for int_col in 0..BJT_INTERNAL_STATE_DIM {
+                for (int_col, (&conductance, &capacitance)) in snapshot.reduction.g_ii[int_row]
+                    .iter()
+                    .zip(&c_ii[int_row])
+                    .take(BJT_INTERNAL_STATE_DIM)
+                    .enumerate()
+                {
                     let col_idx = internal_start + int_col;
-                    g_matrix.add(row_idx, col_idx, snapshot.reduction.g_ii[int_row][int_col]);
-                    c_matrix.add(row_idx, col_idx, -c_ii[int_row][int_col]);
+                    g_matrix.add(row_idx, col_idx, conductance);
+                    c_matrix.add(row_idx, col_idx, -capacitance);
                 }
             }
         }
