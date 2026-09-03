@@ -866,6 +866,7 @@ jobs:
             package: rspice-core
             features: --no-default-features
             target: ""
+            targets: --all-targets
           # The browser shard. `wasm` and `veriloga-wasm-jit` are mutually
           # exclusive with the `veriloga-native` that rspice-cli turns on, so
           # the union can never contain them.
@@ -873,6 +874,7 @@ jobs:
             package: rspice-core
             features: --no-default-features --features wasm,veriloga,veriloga-wasm-jit
             target: wasm32-unknown-unknown
+            targets: ""
           # rspice-veriloga's tooling depends on this crate with
           # default-features = false to reuse the generated-model oracle
           # without the ngspice and Xyce runners. Nothing else builds it that
@@ -881,12 +883,18 @@ jobs:
             package: rspice-conformance
             features: --no-default-features
             target: ""
+            # The integration targets name the ngspice, Xyce, gf180mcu and
+            # execution suites by path, and those modules are exactly what
+            # `--no-default-features` removes; the library is the whole of
+            # what this configuration ships.
+            targets: --lib
           # The single-threaded factorization path. rspice-core's default
           # `faer-parallel` turns this crate's threads on for every other lane.
           - label: matrix, single-threaded faer
             package: rspice-matrix
             features: --no-default-features
             target: ""
+            targets: --all-targets
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain
@@ -896,10 +904,13 @@ jobs:
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           key: feature-shard-${{ matrix.package }}-${{ matrix.target }}
-      # `--all-targets` is dropped for the wasm32 shard on purpose: its test
-      # and bench targets are host binaries and do not link for that target.
+      # Each row says which cargo targets it can lint: `--all-targets` where
+      # the test and bench binaries build in that configuration, nothing for
+      # the wasm32 shard (its test targets are host binaries), and `--lib`
+      # where the integration targets name modules the shard removes.
       - name: Clippy shard
         run: >-
           cargo clippy --locked -p ${{ matrix.package }} ${{ matrix.features }}
-          ${{ matrix.target && format('--target {0}', matrix.target) || '--all-targets' }}
+          ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
+          ${{ matrix.targets }}
           --message-format short -- -D warnings

@@ -456,6 +456,11 @@ fn capture_predecessor(destination: &Path) -> io::Result<Predecessor> {
 /// predecessor's data blocks. Filesystems that do not implement links (FAT
 /// and exFAT volumes are the common case for an exported result directory)
 /// get a synchronized copy instead, which produces the same bytes.
+// `std::fs::File` carries no `Drop` impl on wasm32-unknown-unknown, where the
+// filesystem is unimplemented, so releasing the reservation reads as a
+// no-op drop there; on every target that writes files it is what frees the
+// name for the link below.
+#[allow(clippy::drop_non_drop)]
 fn snapshot_predecessor(destination: &Path) -> io::Result<PathBuf> {
     // The reservation proves the name is unused; the name itself carries this
     // process id and a process-local serial, so releasing it for the link
