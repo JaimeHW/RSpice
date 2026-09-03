@@ -77,7 +77,7 @@
 //!                        "regions": [] or [string|null] one per point,
 //!                        "parameters": [ { "name", "unit": <unit|null>,
 //!                                          "values": [f64|null] } ] } ]
-//!   "payload":       { "family": <result kind tag>, ... }  see `payload`
+//!   "payload":       { "family": <result kind tag>, ... }  see below
 //! }
 //! ```
 //!
@@ -88,6 +88,63 @@
 //! A run-axis value is `{"kind":"numeric","value":f64}`,
 //! `{"kind":"data_row","bindings":[{"name","value"}]}`, or
 //! `{"kind":"alter_variant","label","materialization_digest":<64 hex>}`.
+//!
+//! # Payload
+//!
+//! `payload.family` repeats `resultKind`, and decoding rejects a document
+//! whose two disagree. The remaining fields are family-specific:
+//!
+//! ```text
+//! op          observables[]                      name, unit|null, value|null
+//! dc          sweepVariable, observables[]        one value per sweep point
+//! ac          (no further fields)
+//! tran        stepSizes[], storeTraces[],
+//!             digitalTraces[], realTraces[],
+//!             fftChildren[], compression|null     analysis + outputName per child
+//! noise       contributionCatalog[],
+//!             mechanismsUnavailable[],
+//!             contributions[]                     identity, mechanismKind, and
+//!                                                 output/input/percentage series
+//! sp          referenceImpedance, ports[],
+//!             angularFrequencies[]                ports: number, +node, -node, z0
+//! port-noise  portCount
+//! distortion  f2OverF1|null, products[]           product tag, order, frequencies[]
+//! tf          output, input
+//! stb         success, warnings[], nyquist[]      frequency, real, imaginary
+//! sensitivity output, entries[]                   vectorName, element, elementKind,
+//!                                                 parameter, nominalValue,
+//!                                                 absolute, normalized
+//! pole-zero   input, output, poles[], zeros[],
+//!             poleEvidence, zeroEvidence,
+//!             dcGain|null, highFrequencyGain|null
+//! fourier     output
+//! fft         source, outputName, physicalType,
+//!             startTime, stopTime, sampleInterval,
+//!             sampleCount, accurateSampling,
+//!             coefficientFormat, compatibilityMode,
+//!             window, windowName, alpha,
+//!             coherentGain, frequencyResolution,
+//!             fundamentalBin, minimumMetricBin,
+//!             maximumMetricBin, metrics|null      metrics carry the ranked,
+//!                                                 deliberately ragged harmonics
+//! monte-carlo statistics[]                        name, samples[], mean|null,
+//!                                                 standardDeviation|null,
+//!                                                 minimum|null, maximum|null,
+//!                                                 histogram[], binEdges[]
+//! pss         floquetMultipliers[], floquetEvidence,
+//!             floquetOrbitKind,
+//!             trivialFloquetMultiplierIndex|null
+//! pac         fundamentalFrequency, sidebandMinimum,
+//!             sidebandMaximum, inputSource|null,
+//!             outputNode|null, iterations, residual,
+//!             sidebands[], conversionMatrix|null
+//! pnoise      outputNode, jitterBandwidth|null,
+//!             contributors[]                      each keeps its own offset grid
+//! hb          tones[], reactiveSpectra[],
+//!             continuationLimitations[]
+//! envelope    continuation, carrier, transient     transient is the tran payload
+//!                                                  of the continued run
+//! ```
 //!
 //! # Missingness
 //!
