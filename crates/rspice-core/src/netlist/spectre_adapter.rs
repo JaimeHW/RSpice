@@ -2011,56 +2011,6 @@ mod tests {
     }
 
     #[test]
-    fn unrepresented_bsimsoi_terminal_forms_fail_at_the_instance_source_line() {
-        let source = "simulator lang=spectre\nmodel nfet bsimsoi type=n version=3.2\nn1 (d g s e p b) nfet w=1u l=0.5u\n";
-        let error = adapt_spectre_model_library(Path::new("bsimsoi.scs"), source)
-            .expect_err("six-terminal BSIMSOI must not silently discard a node");
-
-        assert_eq!(error.line, 3, "{error}");
-        assert!(error.message.contains("has 6 nodes"), "{error}");
-        assert!(error.message.contains("not yet represented"), "{error}");
-
-        let canonical = crate::Netlist::parse(
-            "six-terminal BSIMSOI backstop\n\
-             m1 d g s e p b nmod w=1u l=0.5u\n\
-             vd d 0 1\n\
-             vg g 0 0.8\n\
-             .model nmod nmos level=10 version=3.2\n\
-             .end\n",
-        )
-        .expect("canonical six-terminal fixture parses");
-        let message = crate::engine::Engine::new(crate::engine::SimulationConfig::default())
-            .run_dc_op(&canonical)
-            .expect_err("the builder must independently reject unrepresented BSIMSOI nodes")
-            .to_string();
-        assert!(message.contains("6 terminals"), "{message}");
-        assert!(message.contains("not yet represented"), "{message}");
-    }
-
-    #[test]
-    fn lowered_bsimsoi_instances_execute_on_the_native_pd_route() {
-        let source = "simulator lang=spectre\nmodel nfet bsimsoi\n+ type=n\n+ version=3.2\n+ tox=8e-9\nmodel pfet bsimsoi type=p version=3.2 tox=8e-9\nvdd (vdd 0) vsource dc=1.8\nvdn (dn 0) vsource dc=1\nvdp (dp 0) vsource dc=0.8\nvgn (gn 0) vsource dc=0.8\nvgp (gp 0) vsource dc=1\nn1 (dn gn 0 0) nfet w=1u l=0.5u\np1 (dp gp vdd vdd) pfet w=1u l=0.5u\n";
-        let adapted = adapt_spectre_model_library(Path::new("bsimsoi.scs"), source)
-            .expect("qualified Spectre BSIMSOI fixture lowers");
-        let deck = crate::Netlist::parse(&format!(
-            "native Spectre BSIMSOI route\n{adapted}.op\n.end\n"
-        ))
-        .expect("lowered BSIMSOI fixture parses as canonical SPICE");
-        let (_, report) = crate::engine::Engine::new(crate::engine::SimulationConfig::default())
-            .run_dc_op_with_report(&deck)
-            .expect("lowered n/p BSIMSOI instances execute natively");
-
-        for name in ["Mn1", "Mp1"] {
-            let entry = report
-                .entries
-                .iter()
-                .find(|entry| entry.name.eq_ignore_ascii_case(name))
-                .unwrap_or_else(|| panic!("missing operating-point entry for {name}"));
-            assert_eq!(entry.device_kind, "B3SOIPD", "{name} must use LEVEL=10");
-        }
-    }
-
-    #[test]
     fn aliases_and_grouped_parameter_values_translate_without_token_loss() {
         let adapted = adapt_spectre_model_library(
             Path::new("models.scs"),

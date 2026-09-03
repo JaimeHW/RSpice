@@ -19,6 +19,8 @@ pub(crate) mod expr;
 #[path = "../native/model_plan.rs"]
 pub(crate) mod model_plan;
 pub(crate) mod plan_builder;
+#[path = "../native/plan_program.rs"]
+pub(crate) mod plan_program;
 #[path = "../native/ssa.rs"]
 pub(crate) mod ssa;
 #[path = "../native/value_cache.rs"]

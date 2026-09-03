@@ -85,7 +85,7 @@ fn validate_candidate(
 
     ensure_parse_not_aborted(abort)?;
     match flatten_netlist_with_models_with_abort(netlist, abort) {
-        Ok(flattened) => {
+        Ok(mut flattened) => {
             ensure_parse_not_aborted(abort)?;
             merge_qualified_expansions(netlist, &flattened.scoped_startup_directives, abort)?;
             validate_xyce_mode_conflict(netlist)?;
@@ -95,6 +95,7 @@ fn validate_candidate(
                 abort,
             )?;
             filter_unknown_entries(netlist, &namespace, abort)?;
+            supersede_redefined_targets(netlist, &mut flattened.scoped_startup_directives, abort)?;
             validate_constraint_consistency(
                 netlist,
                 &flattened.scoped_startup_directives,
@@ -618,7 +619,7 @@ fn append_applied_entries(
     node_sets: &mut Vec<NodeSet>,
 ) {
     for entry in &record.entries {
-        if matches!(entry.disposition, StartupDirectiveDisposition::Ignored(_)) {
+        if !matches!(entry.disposition, StartupDirectiveDisposition::Applied) {
             continue;
         }
         match record.kind {
@@ -645,6 +646,181 @@ fn canonical_symbol(symbol: &str) -> String {
 fn sort_dedup_case_insensitive(values: &mut Vec<String>) {
     values.sort_unstable_by_key(|value| value.to_ascii_uppercase());
     values.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+}
+
+/// Identity of one authored `V(node)=value` assignment, stable across the
+/// top-level record and every per-instance elaboration flattening produced
+/// from it. A card's physical location plus the assignment's index within it
+/// is exactly what both collections preserve.
+type StartupEntryKey = (
+    StartupDirectiveKind,
+    Option<std::path::PathBuf>,
+    usize,
+    usize,
+);
+
+fn startup_entry_key(record: &StartupDirectiveRecord, entry_index: usize) -> StartupEntryKey {
+    (
+        record.kind,
+        record.origin.path.clone(),
+        record.origin.line,
+        entry_index,
+    )
+}
+
+/// The concrete nodes one entry pins against ground, or `None` when the entry
+/// is a genuine difference constraint and therefore not a per-node assignment.
+///
+/// Ground may be authored as either terminal, so `V(a)`, `V(a,0)` and
+/// `V(0,a)` all assign the single node `a`. `V(0,0)` assigns nothing.
+fn single_ended_targets(entry: &super::StartupDirectiveEntry) -> Option<Vec<String>> {
+    let mut targets = Vec::with_capacity(entry.qualified_nodes.len());
+    for (node, reference) in entry
+        .qualified_nodes
+        .iter()
+        .zip(entry.qualified_references.iter())
+    {
+        let positive = canonical_symbol(node);
+        let negative = reference
+            .as_ref()
+            .map_or_else(|| "0".to_string(), |node| canonical_symbol(node));
+        match (positive == "0", negative == "0") {
+            (false, true) => targets.push(positive),
+            (true, false) => targets.push(negative),
+            _ => return None,
+        }
+    }
+    (!targets.is_empty()).then_some(targets)
+}
+
+/// Give a startup target that several cards assign to its last writer.
+///
+/// Both reference simulators store a single-ended `.IC`/`.NODESET`
+/// assignment in a per-node map — Xyce 7.10 writes `op_data[lid] = value` in
+/// `N_IO_InitialConditions.C` and ngspice 46 writes `node->ic = value` in
+/// `CKTsetNodPm` — so the last card naming a node owns it and neither
+/// simulator reports a diagnostic. Both reference dialects therefore define
+/// the resolution, and RSpice applies it in every dialect rather than turning
+/// a redefinition into a typed conflict.
+///
+/// The earlier assignment becomes [`StartupDirectiveDisposition::Superseded`]:
+/// it keeps its provenance but never reaches the executable vectors. Removing
+/// it is what makes the value correct as well as the diagnostic — the engine's
+/// constraint reduction keeps the first edge it walks, so leaving both in
+/// place would silently elect the *first* card.
+///
+/// Only complete redefinition is resolved. An entry is superseded when later
+/// entries own every concrete target it names; a partially overwritten entry
+/// still contradicts, and a differential `V(positive,negative)` constraint is
+/// not a per-node assignment in either reference simulator — Xyce rejects the
+/// syntax outright — so both keep the typed conflict error below.
+fn supersede_redefined_targets(
+    netlist: &mut Netlist,
+    scoped: &mut [StartupDirectiveRecord],
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
+    // Top-level cards are read before subcircuit cards, matching both the
+    // order `validate_constraint_consistency` walks and the reference
+    // simulators, which resolve a subcircuit's assignments after the
+    // top-level netlist has been read.
+    let top_level = netlist
+        .startup_directives
+        .iter()
+        .filter(|record| matches!(record.scope, StartupDirectiveScope::TopLevel));
+    let mut order: Vec<StartupEntryKey> = Vec::new();
+    let mut targets_by_key: std::collections::HashMap<StartupEntryKey, BTreeSet<String>> =
+        std::collections::HashMap::new();
+    let mut owner: std::collections::HashMap<(StartupDirectiveKind, String), StartupEntryKey> =
+        std::collections::HashMap::new();
+
+    for (record_index, record) in top_level.chain(scoped.iter()).enumerate() {
+        poll_parse_abort(abort, record_index)?;
+        if matches!(record.disposition, StartupDirectiveDisposition::Ignored(_)) {
+            continue;
+        }
+        for (entry_index, entry) in record.entries.iter().enumerate() {
+            if !matches!(entry.disposition, StartupDirectiveDisposition::Applied) {
+                continue;
+            }
+            let Some(targets) = single_ended_targets(entry) else {
+                continue;
+            };
+            let key = startup_entry_key(record, entry_index);
+            let known = targets_by_key.entry(key.clone()).or_insert_with(|| {
+                order.push(key.clone());
+                BTreeSet::new()
+            });
+            for target in targets {
+                known.insert(target.clone());
+                owner.insert((record.kind, target), key.clone());
+            }
+        }
+    }
+
+    let superseded = order
+        .into_iter()
+        .filter(|key| {
+            targets_by_key.get(key).is_some_and(|targets| {
+                targets.iter().all(|target| {
+                    owner
+                        .get(&(key.0, target.clone()))
+                        .is_some_and(|current| current != key)
+                })
+            })
+        })
+        .collect::<HashSet<_>>();
+    if superseded.is_empty() {
+        return Ok(());
+    }
+
+    for record in netlist
+        .startup_directives
+        .iter_mut()
+        .chain(scoped.iter_mut())
+    {
+        if matches!(record.disposition, StartupDirectiveDisposition::Ignored(_)) {
+            continue;
+        }
+        let kind = record.kind;
+        let path = record.origin.path.clone();
+        let line = record.origin.line;
+        let mut changed = false;
+        for (entry_index, entry) in record.entries.iter_mut().enumerate() {
+            if matches!(entry.disposition, StartupDirectiveDisposition::Applied)
+                && superseded.contains(&(kind, path.clone(), line, entry_index))
+            {
+                entry.disposition = StartupDirectiveDisposition::Superseded;
+                changed = true;
+            }
+        }
+        if changed {
+            record.disposition = resolved_record_disposition(record);
+        }
+    }
+    Ok(())
+}
+
+/// Recompute a card's disposition once supersession has settled its entries.
+fn resolved_record_disposition(record: &StartupDirectiveRecord) -> StartupDirectiveDisposition {
+    let mut applied = 0usize;
+    let mut superseded = 0usize;
+    let mut ignored = None;
+    for entry in &record.entries {
+        match entry.disposition {
+            StartupDirectiveDisposition::Ignored(code) => {
+                ignored.get_or_insert(code);
+            }
+            StartupDirectiveDisposition::Superseded => superseded += 1,
+            StartupDirectiveDisposition::Applied
+            | StartupDirectiveDisposition::PartiallyApplied => applied += 1,
+        }
+    }
+    match (applied, superseded, ignored) {
+        (0, _, Some(code)) => StartupDirectiveDisposition::Ignored(code),
+        (0, _, None) => StartupDirectiveDisposition::Superseded,
+        (_, 0, None) => StartupDirectiveDisposition::Applied,
+        _ => StartupDirectiveDisposition::PartiallyApplied,
+    }
 }
 
 #[derive(Clone)]
@@ -680,7 +856,7 @@ fn validate_constraint_consistency(
             }
             for entry in &record.entries {
                 if !entry.voltage.is_finite()
-                    || matches!(entry.disposition, StartupDirectiveDisposition::Ignored(_))
+                    || !matches!(entry.disposition, StartupDirectiveDisposition::Applied)
                 {
                     continue;
                 }
@@ -1154,6 +1330,115 @@ mod tests {
                 .all(|diagnostic| diagnostic.code != StartupDiagnosticCode::ScopedGlobalNode)
         );
         assert_eq!(netlist.subcircuits[0].initial_conditions[0].voltage, 0.75);
+    }
+
+    #[test]
+    fn a_later_card_owns_a_node_an_earlier_card_already_assigned() {
+        // Both reference simulators write a single-ended startup assignment
+        // into a per-node map — Xyce 7.10 `op_data[lid] = value`, ngspice 46
+        // `node->ic = value` — and neither reports a diagnostic, so every
+        // dialect resolves a redefinition the same way.
+        for parse in [
+            parse_xyce as fn(&str) -> Result<Netlist, ParseError>,
+            Netlist::parse as fn(&str) -> Result<Netlist, ParseError>,
+        ] {
+            let netlist = parse(
+                "redefined startup node\n\
+                 V1 1 0 1\n\
+                 R1 1 2 1k\n\
+                 R2 2 0 1k\n\
+                 .IC V(2)=0.25\n\
+                 .IC V(0,2)=-0.75\n\
+                 .OP\n\
+                 .END\n",
+            )
+            .expect("a redefined startup node is not a conflict");
+            assert_eq!(netlist.initial_conditions.len(), 1);
+            // `V(0,2)=-0.75` is the same assignment as `V(2)=0.75`, kept in
+            // the spelling the surviving card authored.
+            assert_eq!(
+                netlist.initial_conditions[0].voltage.to_bits(),
+                (-0.75f64).to_bits()
+            );
+            assert_eq!(netlist.initial_conditions[0].node, "0");
+            assert_eq!(
+                netlist.initial_conditions[0].reference.as_deref(),
+                Some("2")
+            );
+            assert_eq!(
+                netlist.startup_directives[0].entries[0].disposition,
+                StartupDirectiveDisposition::Superseded
+            );
+            assert_eq!(
+                netlist.startup_directives[0].disposition,
+                StartupDirectiveDisposition::Superseded
+            );
+            assert_eq!(
+                netlist.startup_directives[1].disposition,
+                StartupDirectiveDisposition::Applied
+            );
+            assert!(
+                netlist.startup_diagnostics().is_empty(),
+                "a redefinition is a resolution, not a diagnostic"
+            );
+        }
+    }
+
+    #[test]
+    fn a_subcircuit_card_supersedes_an_earlier_card_on_the_same_local_node() {
+        let netlist = parse_xyce(
+            "scoped redefined startup node\n\
+             V1 in 0 1\n\
+             X1 in out CELL params: vmid=0.5\n\
+             X2 in mid2 CELL params: vmid=0.25\n\
+             R3 out 0 10\n\
+             R4 mid2 0 10\n\
+             .SUBCKT CELL a b params: vmid=5.0\n\
+             R1 a mid 10\n\
+             C1 mid b 1u\n\
+             .IC V(mid)=0.0\n\
+             .IC V(mid)={vmid}\n\
+             .ENDS\n\
+             .OP\n\
+             .END\n",
+        )
+        .expect("a redefined subcircuit startup node is not a conflict");
+        assert_eq!(netlist.subcircuits[0].initial_conditions.len(), 1);
+        assert_eq!(
+            netlist.subcircuits[0].initial_conditions[0]
+                .voltage_expr
+                .as_deref(),
+            Some("vmid"),
+            "the surviving card is the last one, expression intact"
+        );
+        assert_eq!(
+            netlist.startup_directives[0].disposition,
+            StartupDirectiveDisposition::Superseded
+        );
+        assert_eq!(
+            netlist.startup_directives[1].disposition,
+            StartupDirectiveDisposition::Applied
+        );
+        assert!(netlist.startup_diagnostics().is_empty());
+    }
+
+    #[test]
+    fn a_difference_constraint_is_never_superseded_by_repetition() {
+        let error = parse_xyce(
+            "contradictory difference constraints\n\
+             R1 a 0 1k\n\
+             R2 b 0 1k\n\
+             .IC V(a,b)=1\n\
+             .IC V(a,b)=2\n\
+             .OP\n\
+             .END\n",
+        )
+        .expect_err("no reference dialect defines a difference-constraint resolution");
+        let ParseError::StartupConstraintConflict(conflict) = error else {
+            panic!("expected the typed startup conflict, got {error}");
+        };
+        assert_eq!(conflict.established.line, 4);
+        assert_eq!(conflict.conflicting.line, 5);
     }
 
     #[test]

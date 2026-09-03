@@ -8,6 +8,7 @@
 use super::calling_convention::HOST_ABI;
 use super::encoder::{A64Encoder, BranchPatch, Condition, DReg, LiteralPatch, XReg};
 use super::verifier::{verify_exact_function, verify_exact_function_at};
+use crate::jit::plan_program::PlanProgram;
 use crate::native::abi::NativeRuntimeStatus;
 use crate::native::abi::{
     INTEGER_CAST_DESCRIPTOR, integer_binary_const_descriptor, integer_binary_descriptor,
@@ -400,7 +401,7 @@ pub(crate) fn compile_loop_dispatch_function(
 pub(crate) fn compile_fused_evaluation_kernel(
     kernel_image_offset: usize,
     assignment: CodeOffset,
-    stamp_values: &[NativeProgram],
+    stamp_values: &[PlanProgram],
     published_current_pairs: &[Option<(usize, usize)>],
 ) -> JitResult<Vec<u8>> {
     compile_fused_kernel(
@@ -416,8 +417,8 @@ pub(crate) fn compile_fused_evaluation_kernel(
 pub(crate) fn compile_fused_stamp_kernel(
     kernel_image_offset: usize,
     assignment: CodeOffset,
-    stamp_values: &[NativeProgram],
-    jacobians: &[Vec<NativeProgram>],
+    stamp_values: &[PlanProgram],
+    jacobians: &[Vec<PlanProgram>],
     published_current_pairs: &[Option<(usize, usize)>],
 ) -> JitResult<Vec<u8>> {
     compile_fused_kernel(
@@ -516,8 +517,8 @@ fn compile_fused_driver(
 fn compile_fused_kernel(
     kernel_image_offset: usize,
     assignment: CodeOffset,
-    stamp_values: &[NativeProgram],
-    jacobians: Option<&[Vec<NativeProgram>]>,
+    stamp_values: &[PlanProgram],
+    jacobians: Option<&[Vec<PlanProgram>]>,
     published_current_pairs: &[Option<(usize, usize)>],
     kernel_name: &str,
 ) -> JitResult<Vec<u8>> {
@@ -530,9 +531,13 @@ fn compile_fused_kernel(
         });
     }
 
+    // The kernel inlines its entries rather than calling them, so it needs each
+    // one in block form. A postfix entry is lifted exactly as it always was; a
+    // block entry is already there, and `emit_program` emits real branches for
+    // it.
     let value_ssa = stamp_values
         .iter()
-        .map(Program::lower)
+        .map(|program| program.borrow().lower_to_ssa())
         .collect::<JitResult<Vec<_>>>()?;
     let jacobian_ssa = jacobians
         .map(|entries| {
@@ -541,7 +546,7 @@ fn compile_fused_kernel(
                 .map(|stamp| {
                     stamp
                         .iter()
-                        .map(Program::lower)
+                        .map(|program| program.borrow().lower_to_ssa())
                         .collect::<JitResult<Vec<_>>>()
                 })
                 .collect::<JitResult<Vec<_>>>()

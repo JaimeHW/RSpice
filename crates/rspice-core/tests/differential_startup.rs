@@ -181,6 +181,58 @@ fn consistent_duplicate_and_reversed_constraints_are_equivalent() {
 }
 
 #[test]
+fn a_redefined_node_starts_at_the_last_card_that_named_it() {
+    // Xyce 7.10 keeps `.IC` in a per-node map (`op_data[lid] = value`) and
+    // ngspice 46 does the same (`node->ic = value`), so the last card owns
+    // the node. Dropping the earlier card at parse time is what makes the
+    // executed value match: the engine's constraint reduction keeps the
+    // first edge it walks, so retaining both would elect 0.25.
+    let netlist = Netlist::parse(
+        "redefined initial condition\n\
+         C1 a 0 1u\n\
+         R1 a 0 1meg\n\
+         .IC V(a)=0.25\n\
+         .IC V(a)=0.75\n\
+         .TRAN 1u 1u UIC\n\
+         .END\n",
+    )
+    .expect("a redefined startup node is not a conflict");
+    let result = Engine::new(SimulationConfig::default())
+        .run_tran(&netlist, 1e-6, 1e-6)
+        .expect("redefined UIC transient solves");
+    assert_eq!(waveform_at_zero(&result, "a").to_bits(), 0.75f64.to_bits());
+}
+
+#[test]
+fn a_redefined_subcircuit_node_takes_the_last_card_at_every_instance() {
+    let netlist = Netlist::parse(
+        "scoped redefined initial condition\n\
+         X1 0 CELL params: vmid=0.75\n\
+         X2 0 CELL params: vmid=0.25\n\
+         .SUBCKT CELL b params: vmid=5.0\n\
+         C1 mid b 1u\n\
+         R1 mid b 1meg\n\
+         .IC V(mid)=0.0\n\
+         .IC V(mid)={vmid}\n\
+         .ENDS\n\
+         .TRAN 1u 1u UIC\n\
+         .END\n",
+    )
+    .expect("a redefined scoped startup node is not a conflict");
+    let result = Engine::new(SimulationConfig::default())
+        .run_tran(&netlist, 1e-6, 1e-6)
+        .expect("redefined scoped UIC transient solves");
+    assert_eq!(
+        waveform_at_zero(&result, "X1.MID").to_bits(),
+        0.75f64.to_bits()
+    );
+    assert_eq!(
+        waveform_at_zero(&result, "X2.MID").to_bits(),
+        0.25f64.to_bits()
+    );
+}
+
+#[test]
 fn inconsistent_duplicate_constraint_reports_both_source_lines() {
     let error = Netlist::parse(
         "duplicate conflict\n\

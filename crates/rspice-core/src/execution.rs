@@ -6,6 +6,7 @@
 
 pub mod bounded_io;
 mod capability;
+mod fingerprint;
 mod materialized;
 mod plan;
 pub mod result_document;
@@ -20,6 +21,7 @@ pub use capability::{
     analysis_result_capability, analysis_result_kind, render_non_ui_capability_matrix,
     signal_capability,
 };
+pub use fingerprint::{topology_fingerprint, topology_fingerprint_with_abort};
 pub use materialized::{
     ArtifactNamespace, DeckPlanMaterializer, MaterializedAnalysis, MaterializedRun,
     MaterializedRunError,

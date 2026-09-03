@@ -8,21 +8,32 @@
 
 use super::assignment::NativeAssignment;
 use super::current_dependencies::JitCurrentDependencies;
-use super::expr::NativeProgram;
+use super::plan_program::PlanProgram;
 use super::{JitError, JitResult};
 use crate::codegen::CompiledModel;
 
+/// The complete set of typed programs and dependency metadata one model
+/// compiles to.
+///
+/// Every value entry is a [`PlanProgram`]: canonical lowering has two routes to
+/// an expression and the plan carries whichever form the route produced, so a
+/// backend dispatches on the form rather than the plan pretending there is only
+/// one. Every shipped model's entries are still the postfix form.
+///
+/// The assignment passes are deliberately not part of that yet: they carry
+/// `NativeProgram` directly, and moving them is the flip's (W-F3) job together
+/// with the constructor that produces block entries in the first place.
 #[derive(Debug)]
 pub(crate) struct NativeModelPlan {
     pub(crate) assignments: Vec<NativeAssignment>,
     pub(crate) post_assignments: Vec<NativeAssignment>,
-    pub(crate) parameter_defaults: Vec<Option<NativeProgram>>,
-    pub(crate) static_conditions: Vec<Option<NativeProgram>>,
-    pub(crate) stamp_values: Vec<NativeProgram>,
-    pub(crate) jacobians: Vec<Vec<NativeProgram>>,
-    pub(crate) reactive_jacobians: Vec<Vec<NativeProgram>>,
-    pub(crate) noise_psd: Vec<NativeProgram>,
-    pub(crate) noise_exponents: Vec<Option<NativeProgram>>,
+    pub(crate) parameter_defaults: Vec<Option<PlanProgram>>,
+    pub(crate) static_conditions: Vec<Option<PlanProgram>>,
+    pub(crate) stamp_values: Vec<PlanProgram>,
+    pub(crate) jacobians: Vec<Vec<PlanProgram>>,
+    pub(crate) reactive_jacobians: Vec<Vec<PlanProgram>>,
+    pub(crate) noise_psd: Vec<PlanProgram>,
+    pub(crate) noise_exponents: Vec<Option<PlanProgram>>,
     pub(crate) published_current_pairs: Vec<Option<(usize, usize)>>,
     pub(crate) current_dependencies: JitCurrentDependencies,
 }

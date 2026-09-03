@@ -49,7 +49,9 @@ pub(super) fn compile_model_plan(
         .map(|(index, program)| {
             program
                 .as_ref()
-                .map(|program| image.append_value(program, &format!("parameter default {index}")))
+                .map(|program| {
+                    image.append_value(program.borrow(), &format!("parameter default {index}"))
+                })
                 .transpose()
         })
         .collect::<JitResult<Vec<_>>>()?;
@@ -60,7 +62,9 @@ pub(super) fn compile_model_plan(
         .map(|(index, program)| {
             program
                 .as_ref()
-                .map(|program| image.append_value(program, &format!("static condition {index}")))
+                .map(|program| {
+                    image.append_value(program.borrow(), &format!("static condition {index}"))
+                })
                 .transpose()
         })
         .collect::<JitResult<Vec<_>>>()?;
@@ -68,7 +72,9 @@ pub(super) fn compile_model_plan(
         .stamp_values
         .iter()
         .enumerate()
-        .map(|(index, program)| image.append_value(program, &format!("stamp value {index}")))
+        .map(|(index, program)| {
+            image.append_value(program.borrow(), &format!("stamp value {index}"))
+        })
         .collect::<JitResult<Vec<_>>>()?;
     let jacobians = plan
         .jacobians
@@ -79,7 +85,7 @@ pub(super) fn compile_model_plan(
                 .iter()
                 .enumerate()
                 .map(|(entry, program)| {
-                    image.append_value(program, &format!("Jacobian {stamp}.{entry}"))
+                    image.append_value(program.borrow(), &format!("Jacobian {stamp}.{entry}"))
                 })
                 .collect::<JitResult<Vec<_>>>()
         })
@@ -93,7 +99,10 @@ pub(super) fn compile_model_plan(
                 .iter()
                 .enumerate()
                 .map(|(entry, program)| {
-                    image.append_value(program, &format!("reactive Jacobian {stamp}.{entry}"))
+                    image.append_value(
+                        program.borrow(),
+                        &format!("reactive Jacobian {stamp}.{entry}"),
+                    )
                 })
                 .collect::<JitResult<Vec<_>>>()
         })
@@ -102,7 +111,7 @@ pub(super) fn compile_model_plan(
         .noise_psd
         .iter()
         .enumerate()
-        .map(|(index, program)| image.append_value(program, &format!("noise PSD {index}")))
+        .map(|(index, program)| image.append_value(program.borrow(), &format!("noise PSD {index}")))
         .collect::<JitResult<Vec<_>>>()?;
     let noise_exponents = plan
         .noise_exponents
@@ -111,7 +120,9 @@ pub(super) fn compile_model_plan(
         .map(|(index, program)| {
             program
                 .as_ref()
-                .map(|program| image.append_value(program, &format!("noise exponent {index}")))
+                .map(|program| {
+                    image.append_value(program.borrow(), &format!("noise exponent {index}"))
+                })
                 .transpose()
         })
         .collect::<JitResult<Vec<_>>>()?;

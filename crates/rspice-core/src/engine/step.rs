@@ -163,35 +163,38 @@ impl StepPlan<'_> {
         })
     }
 
-    /// Compare the exact zero-based value index selected from every dimension
-    /// with one canonical deck-plan coordinate.
+    /// Compare the exact zero-based value index this plan selects from every
+    /// dimension with the indices a caller selected for the same run.
     ///
     /// This crate-private identity bridge lets the shared deck materializer
-    /// prove that its semantic [`RunCoordinate`](crate::execution::RunCoordinate)
-    /// and the legacy reparse machinery selected the same Cartesian member.
-    /// Unlike `step_values`, DATA row indices never pass through `f64`. The
-    /// comparison allocates nothing and observes cancellation per dimension.
+    /// prove that its semantic run coordinate and the legacy reparse machinery
+    /// selected the same Cartesian member. The coordinate itself is a planning
+    /// type that sits above this layer, so the caller passes the per-dimension
+    /// indices it read out of one rather than handing the plan a coordinate to
+    /// reach into. Unlike `step_values`, DATA row indices never pass through
+    /// `f64`. The comparison allocates nothing and observes cancellation per
+    /// dimension.
     pub(crate) fn coordinate_indices_match(
         &self,
         run_index: usize,
-        coordinate: &crate::execution::RunCoordinate,
+        value_indices: impl ExactSizeIterator<Item = usize>,
         abort: &dyn AbortSignal,
     ) -> Result<Option<bool>, SimulationError> {
         if run_index >= self.total_runs {
             return Ok(None);
         }
-        if coordinate.assignments().len() != self.dimensions.len() {
+        if value_indices.len() != self.dimensions.len() {
             return Ok(Some(false));
         }
 
         let mut quotient = run_index;
-        for (dimension, assignment) in self.dimensions.iter().zip(coordinate.assignments()) {
+        for (dimension, value_index) in self.dimensions.iter().zip(value_indices) {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
             let index = quotient % dimension.len();
             quotient /= dimension.len();
-            if index != assignment.value_index() {
+            if index != value_index {
                 return Ok(Some(false));
             }
         }

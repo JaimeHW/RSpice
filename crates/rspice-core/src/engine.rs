@@ -68,7 +68,6 @@ mod source_values;
 mod stamping;
 mod stb;
 mod step;
-mod topology;
 mod transfer;
 mod transient;
 pub mod waveform;

@@ -21,12 +21,12 @@ pub(super) use super::ssa as ir;
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 use super::assignment::MAX_ASSIGNMENT_CHUNK_OPERATIONS;
 use super::assignment::{NativeAssignment, chunk_ranges as assignment_chunk_ranges};
-use super::expr::NativeProgram;
 use super::model::{
     CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, NativeEntryStarts, NativeModel,
     NativeRequiredStorage,
 };
 use super::model_plan::NativeModelPlan;
+use super::plan_program::PlanProgramRef;
 use super::runtime::ExecutableMemory;
 #[cfg(all(windows, target_arch = "x86_64"))]
 use super::runtime::WindowsX64RuntimeFunction;
@@ -216,7 +216,7 @@ fn compile_model_plan(model: &CompiledModel, plan: &NativeModelPlan) -> JitResul
                         &mut entry_starts,
                         &mut windows_unwind_functions,
                         &mut value_entries,
-                        program,
+                        program.borrow(),
                     )
                 })
                 .transpose()?,
@@ -234,7 +234,7 @@ fn compile_model_plan(model: &CompiledModel, plan: &NativeModelPlan) -> JitResul
                         &mut entry_starts,
                         &mut windows_unwind_functions,
                         &mut value_entries,
-                        program,
+                        program.borrow(),
                     )
                 })
                 .transpose()?,
@@ -248,7 +248,7 @@ fn compile_model_plan(model: &CompiledModel, plan: &NativeModelPlan) -> JitResul
             &mut entry_starts,
             &mut windows_unwind_functions,
             &mut value_entries,
-            program,
+            program.borrow(),
         )?);
     }
 
@@ -261,7 +261,7 @@ fn compile_model_plan(model: &CompiledModel, plan: &NativeModelPlan) -> JitResul
                 &mut entry_starts,
                 &mut windows_unwind_functions,
                 &mut value_entries,
-                program,
+                program.borrow(),
             )?);
         }
         jacobians.push(entries);
@@ -276,7 +276,7 @@ fn compile_model_plan(model: &CompiledModel, plan: &NativeModelPlan) -> JitResul
                 &mut entry_starts,
                 &mut windows_unwind_functions,
                 &mut value_entries,
-                program,
+                program.borrow(),
             )?);
         }
         reactive_jacobians.push(entries);
@@ -289,7 +289,7 @@ fn compile_model_plan(model: &CompiledModel, plan: &NativeModelPlan) -> JitResul
             &mut entry_starts,
             &mut windows_unwind_functions,
             &mut value_entries,
-            program,
+            program.borrow(),
         )?);
     }
 
@@ -304,7 +304,7 @@ fn compile_model_plan(model: &CompiledModel, plan: &NativeModelPlan) -> JitResul
                         &mut entry_starts,
                         &mut windows_unwind_functions,
                         &mut value_entries,
-                        program,
+                        program.borrow(),
                     )
                 })
                 .transpose()?,
@@ -1087,17 +1087,28 @@ fn append_assignment_pass(
     Ok(assignment)
 }
 
+/// Publish one plan entry into the image, reusing an identical body if one is
+/// already there.
+///
+/// Both forms reach the same emitter: a postfix entry is lifted into SSA the
+/// way it always was, and a block entry is already in that form. The dispatch
+/// decides which program is compiled, never how.
 fn append_value_entry(
     image: &mut Vec<u8>,
     entry_starts: &mut Vec<CodeOffset>,
     windows_unwind_functions: &mut Vec<PendingWindowsX64UnwindFunction>,
     value_entries: &mut ValueEntryCache<CodeOffset>,
-    program: &NativeProgram,
+    program: PlanProgramRef<'_>,
 ) -> JitResult<CodeOffset> {
     if let Some(offset) = value_entries.lookup(program) {
         return Ok(offset);
     }
-    let artifact = codegen::compile_value_function_artifact(program)?;
+    let artifact = match program {
+        PlanProgramRef::Postfix(program) => codegen::compile_value_function_artifact(program)?,
+        PlanProgramRef::Blocks(program) => {
+            codegen::compile_value_function_artifact_from_ssa(program.ssa())?
+        }
+    };
     let offset = align_image_for_entry(image, entry_starts);
     append_compiled_function_at_offset(image, offset, windows_unwind_functions, artifact)?;
     value_entries.insert(program, offset);
@@ -1150,6 +1161,7 @@ fn align_image_for_entry(image: &mut Vec<u8>, entry_starts: &mut Vec<CodeOffset>
 
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
+    use super::PlanProgramRef;
     use super::{
         MAX_ASSIGNMENT_CHUNK_OPERATIONS, NativeModel, append_assignment_pass,
         assignment_chunk_ranges, canonical_branch_unknown_runtime_map,
@@ -1168,6 +1180,7 @@ mod tests {
         StampIndex, StampProgram,
     };
     use crate::device::VerilogADevice;
+    use crate::jit::plan_program::{BlockProgram, PlanProgram};
     use crate::native::EvalContext;
     use crate::native::expr::{
         CanonicalDerivativeAxis, EntryKind, NativeLoweringLimits, NativeOp, NativeProgram,
@@ -1239,7 +1252,7 @@ mod tests {
             &mut entry_starts,
             &mut windows_unwind_functions,
             &mut value_entries,
-            &program,
+            PlanProgramRef::Postfix(&program),
         )
         .expect("append aligned value entry");
 
@@ -1263,6 +1276,79 @@ mod tests {
         let vars = [2.0];
 
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 1.0_f64.to_bits());
+    }
+
+    /// The x64 backend publishes a block-form plan entry, and it runs.
+    ///
+    /// The dispatch decides which program is compiled, not how: the block arm
+    /// reaches the same emitter, allocator and artifact verifier the postfix
+    /// arm does, and the entry it publishes evaluates the branch it describes.
+    #[test]
+    fn append_value_entry_publishes_a_block_form_entry() {
+        let source = NativeProgram::from_bytecode(
+            "block-form-entry",
+            EntryKind::StampValue,
+            &BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushVariable(0),
+                    Instruction::PushConst(11.0),
+                    Instruction::PushConst(22.0),
+                    Instruction::IfElse,
+                ],
+            },
+            NativeLoweringLimits::new(0, 0, 0, 1, 0),
+        )
+        .expect("variable ifelse lowers to native program");
+        let branched = crate::jit::ssa::Program::lower(&source)
+            .expect("lift the postfix")
+            .with_branching_conditionals()
+            .expect("split the conditional");
+        assert!(
+            !branched.is_single_block(),
+            "the entry has to actually branch or this proves nothing about blocks"
+        );
+        let entry = PlanProgram::Blocks(BlockProgram::adopt_unrooted(branched));
+
+        let mut image = vec![0xC3];
+        let mut entry_starts = Vec::new();
+        let mut windows_unwind_functions = Vec::new();
+        let mut value_entries = super::ValueEntryCache::default();
+        let offset = super::append_value_entry(
+            &mut image,
+            &mut entry_starts,
+            &mut windows_unwind_functions,
+            &mut value_entries,
+            entry.borrow(),
+        )
+        .expect("append a block-form value entry");
+
+        // The same entry a second time is the cached body, not a second one.
+        let image_len = image.len();
+        assert_eq!(
+            super::append_value_entry(
+                &mut image,
+                &mut entry_starts,
+                &mut windows_unwind_functions,
+                &mut value_entries,
+                entry.borrow(),
+            )
+            .expect("look the block-form entry back up"),
+            offset
+        );
+        assert_eq!(image.len(), image_len, "a cache hit emits no second body");
+
+        let memory = ExecutableMemory::allocate(&image).expect("allocate block-form image");
+        let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(memory.ptr_at(offset.as_usize()).expect("entry point")) };
+        let ctx = eval_context(&[], &[]);
+        assert_eq!(
+            function(&ctx, [1.0_f64].as_ptr()).to_bits(),
+            11.0_f64.to_bits()
+        );
+        assert_eq!(
+            function(&ctx, [0.0_f64].as_ptr()).to_bits(),
+            22.0_f64.to_bits()
+        );
     }
 
     #[test]

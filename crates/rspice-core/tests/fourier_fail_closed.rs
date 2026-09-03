@@ -6,7 +6,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use rspice_core::Netlist;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::analysis::fourier::{FourierAnalysis, FourierConfig, FourierError, FourierResult};
-use rspice_core::netlist::ParseError;
+use rspice_core::netlist::OutputSymbolKind::{Device, Node};
+use rspice_core::netlist::{ParseError, validate_output_symbols};
 
 fn analyzer(fundamental: f64, harmonics: usize) -> FourierAnalysis {
     FourierAnalysis::new(FourierConfig::new(fundamental).with_harmonics(harmonics))
@@ -119,6 +120,54 @@ fn four_directive_rejects_invalid_fundamentals_at_the_authored_line() {
             "invalid `.FOUR {authored}` lost its line-aware diagnostic: {error}"
         );
     }
+}
+
+#[test]
+fn unresolved_four_symbols_are_reported_in_authored_operand_order() {
+    // Xyce builds one operator per `.FOUR` operand in sequence and reports
+    // each failure as it reaches it, so its diagnostic order is the authored
+    // order. `P` and `W` are operators RSpice does not classify as probes;
+    // that must not push them behind the operands it does classify.
+    let deck = "ill-formed .FOUR outputs\n\
+                VS 1 0 SIN(0 1.0 1KHZ 0 0)\n\
+                R1 1 0 100\n\
+                .TRAN 0 1ms\n\
+                .FOUR 1KHZ I(BogoDevice1) P(BogoDevice2) W(BogoDevice3) V(2) N(3)\n\
+                .END\n";
+    let netlist = Netlist::parse(deck).expect("the deck itself is well formed");
+    let error = validate_output_symbols(&netlist)
+        .expect_err("every `.FOUR` operand names a symbol the circuit does not define");
+    let ParseError::OutputSymbolValidation(error) = error else {
+        panic!("expected the typed output-symbol validation failure, got {error}");
+    };
+    let reported = error
+        .unresolved
+        .iter()
+        .map(|symbol| {
+            (
+                symbol.operator.to_ascii_uppercase(),
+                symbol.symbol.clone(),
+                symbol.kind,
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        reported,
+        vec![
+            ("I".to_string(), "BogoDevice1".to_string(), Device),
+            ("P".to_string(), "BogoDevice2".to_string(), Device),
+            ("W".to_string(), "BogoDevice3".to_string(), Device),
+            ("V".to_string(), "2".to_string(), Node),
+            ("N".to_string(), "3".to_string(), Node),
+        ]
+    );
+    assert!(
+        error
+            .unresolved
+            .iter()
+            .all(|symbol| symbol.origin.line == 5),
+        "every unresolved `.FOUR` symbol keeps its authored card line"
+    );
 }
 
 #[test]
